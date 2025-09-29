@@ -6,15 +6,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # System packages many Rails gems need during native builds
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config \
+            libsqlite3-dev libpq-dev
+
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
           bundler-cache: true
+
       - name: Bundle install
         run: bundle install --jobs 4 --retry 3
+
       - name: Print Ruby/Rails versions
         run: |
           ruby -v
           bundle exec rails -v || true
-      - name: List available rake tasks (optional)
+
+      - name: List rake tasks (optional)
         run: bundle exec rake -T || true
