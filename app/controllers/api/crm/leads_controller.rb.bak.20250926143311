@@ -1,0 +1,66 @@
+module Api
+  module Crm
+    class LeadsController < ApplicationController
+      before_action :set_lead, only: [:update, :destroy, :notes]
+
+      def index
+        render json: Lead.includes(:source).order(created_at: :desc).map { |l| lead_json(l) }
+      end
+
+      def create
+        l = Lead.new(lead_params)
+        l.source_id = params[:sourceId] if params.key?(:sourceId)
+        l.save!
+        render json: lead_json(l), status: :created
+      end
+
+      def update
+        attrs = lead_params
+        attrs[:source_id] = params[:sourceId] if params.key?(:sourceId)
+        @lead.update!(attrs)
+        render json: lead_json(@lead)
+      end
+
+      def destroy
+        @lead.destroy!
+        head :no_content
+      end
+
+      def notes
+        @lead.update!(notes: params[:notes].to_s)
+        render json: lead_json(@lead)
+      end
+
+      private
+
+      def set_lead
+        @lead = Lead.find(params[:id])
+      end
+
+      def lead_params
+        p = params.permit(:firstName, :lastName, :email, :phone, :notes)
+        {
+          first_name: p[:firstName],
+          last_name:  p[:lastName],
+          email:      p[:email],
+          phone:      p[:phone],
+          notes:      p[:notes]
+        }.compact
+      end
+
+      def lead_json(l)
+        {
+          id: l.id,
+          firstName: l.first_name,
+          lastName:  l.last_name,
+          email: l.email,
+          phone: l.phone,
+          notes: l.notes,
+          sourceId: l.source_id,
+          createdAt: l.created_at,
+          updatedAt: l.updated_at
+        }
+      end
+    end
+  end
+end

@@ -1,0 +1,22 @@
+module Api
+  module Crm
+    module Nurture
+      class EnrollmentsController < ApplicationController
+        protect_from_forgery with: :null_session
+
+        # GET /api/crm/nurture/enrollments
+        def index
+          render json: []
+        end
+
+        # POST /api/crm/nurture/enrollments/bulk
+        # Body: { "enrollments": [ … ] }
+        def bulk
+          payload = params.to_unsafe_h
+          list = payload['enrollments'] || payload['items'] || []
+          render json: list
+        end
+      end
+    end
+  end
+end

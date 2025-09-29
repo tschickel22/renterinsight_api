@@ -1,0 +1,76 @@
+module Api
+  module Crm
+    class LeadsController < ApplicationController
+      before_action :set_lead, only: [:update, :destroy, :notes]
+
+      def index
+        render json: Lead.includes(:source).order(created_at: :desc).map { |l| lead_json(l) }
+      end
+
+      def create
+        l = Lead.new(lead_params)
+        l.save!
+        render json: lead_json(l), status: :created
+      end
+
+      def update
+        @lead.update!(lead_params)
+        render json: lead_json(@lead)
+      end
+
+      def destroy
+        @lead.destroy!
+        head :no_content
+      end
+
+      def notes
+        @lead.update!(notes: params[:notes].to_s)
+        render json: lead_json(@lead)
+      end
+
+      private
+
+      def set_lead
+        @lead = Lead.find(params[:id])
+      end
+
+      # Accept root-level or nested (:lead) AND camelCase or snake_case.
+      # Normalize to snake_case keys used by AR.
+      def lead_params
+        allowed = [
+          :firstName, :lastName, :email, :phone, :notes, :sourceId,     # camel
+          :first_name, :last_name, :source_id                           # snake
+        ]
+
+        raw = if params[:lead].is_a?(ActionController::Parameters)
+                params.require(:lead).permit(*allowed)
+              else
+                params.permit(*allowed)
+              end
+
+        {
+          first_name: raw[:first_name] || raw[:firstName],
+          last_name:  raw[:last_name]  || raw[:lastName],
+          email:      raw[:email],
+          phone:      raw[:phone],
+          notes:      raw[:notes],
+          source_id:  raw[:source_id]  || raw[:sourceId]
+        }.compact
+      end
+
+      def lead_json(l)
+        {
+          id:        l.id,
+          firstName: l.first_name,
+          lastName:  l.last_name,
+          email:     l.email,
+          phone:     l.phone,
+          notes:     l.notes,
+          sourceId:  l.source_id,
+          createdAt: l.created_at,
+          updatedAt: l.updated_at
+        }
+      end
+    end
+  end
+end

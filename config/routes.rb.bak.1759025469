@@ -1,0 +1,16 @@
+Rails.application.routes.draw do
+  namespace :api do
+    namespace :crm do
+      resources :sources, only: [:index]
+      resources :leads,   only: [:index]
+      namespace :nurture do
+        resources :sequences,   only: [:index] do
+          collection { post :bulk }
+        end
+        resources :enrollments, only: [:index] do
+          collection { post :bulk }
+        end
+      end
+    end
+  end
+end

@@ -1,0 +1,15 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  name: MyString
+  source_type: MyString
+  tracking_code: MyString
+  is_active: false
+  conversion_rate: 9.99
+
+two:
+  name: MyString
+  source_type: MyString
+  tracking_code: MyString
+  is_active: false
+  conversion_rate: 9.99

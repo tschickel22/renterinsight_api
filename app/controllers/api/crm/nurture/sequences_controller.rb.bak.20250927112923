@@ -1,0 +1,10 @@
+module Api
+  module Crm
+    module Nurture
+      class SequencesController < ApplicationController
+        def index; render json: []; end
+        def bulk;  render json: []; end
+      end
+    end
+  end
+end
