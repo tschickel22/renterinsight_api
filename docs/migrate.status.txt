@@ -1,0 +1,29 @@
+
+database: storage/development.sqlite3
+
+ Status   Migration ID    Migration Name
+--------------------------------------------------
+   up     20250924000000  Create companies
+   up     20250926163302  Create sources
+   up     20250926190508  Create lead tasks
+   up     20250926202825  Create leads
+   up     20250927112923  Create nurture tables
+   up     20250927192755  Create intake forms
+   up     20250927192758  Create intake submissions
+
+Usage:
+  rails COMMAND [options]
+
+You must specify a command:
+
+  new          Create a new Rails application. "rails new my_app" creates a
+               new application called MyApp in "./my_app"
+  plugin new   Create a new Rails railtie or engine
+
+All commands can be run with -h (or --help) for more information.
+
+Inside a Rails application directory, some common commands are:
+
+  console      Start the Rails console
+  server       Start the Rails server
+  test         Run tests except system tests
