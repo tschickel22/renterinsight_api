@@ -5,14 +5,12 @@ Rails.application.routes.draw do
     namespace :crm do
       # Sources
       resources :sources, only: [:index, :create, :update, :destroy] do
-
+        get :stats, on: :collection
         get :stats, on: :member
       end
 
       # Leads
-      resources :leads, only: [:index, :create, :update, :destroy] do
-          member { post :notes }
-        end
+      resources :leads, only: [:index, :create, :update, :destroy]
 
       # Nurture
       namespace :nurture do

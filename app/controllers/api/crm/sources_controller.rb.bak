@@ -24,15 +24,10 @@ module Api
         render json: source_json(@source)
       end
 
-        def destroy
-          if Lead.where(source_id: @source.id).exists?
-            render json: { error: 'Source has leads and cannot be deleted. Reassign or delete those leads, or mark this source Inactive.' },
-                   status: :unprocessable_entity
-          else
-            @source.destroy!
-            head :no_content
-          end
-        end
+      def destroy
+        @source.destroy!
+        head :no_content
+      end
 
       def stats
         leads_count = Lead.where(source_id: @source.id).count
