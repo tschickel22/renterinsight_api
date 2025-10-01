@@ -1,0 +1,51 @@
+class Api::Crm::Nurture::SequencesController < ApplicationController
+  # GET /api/crm/nurture/sequences
+  def index
+    sequences = NurtureSequence.order(:id).includes(:nurture_steps)
+    render json: sequences.as_json(
+      only: [:id, :name, :description, :is_active, :created_at, :updated_at],
+      include: {
+        nurture_steps: {
+          only: [:id, :step_type, :position, :wait_days, :subject, :body, :template_id, :created_at, :updated_at]
+        }
+      }
+    )
+  end
+ # POST /api/crm/nurture/sequences
+  # Accepts either top-level JSON or nested under { "sequence": { ... } }
+  def create
+    seq = nil
+    ActiveRecord::Base.transaction do
+      attrs = sequence_params.slice(:name, :description, :is_active)
+      seq   = NurtureSequence.create!(attrs)
+      Array(sequence_params[:steps]).each do |st|
+        seq.nurture_steps.create!(step_attrs(st))
+      end
+    end
+
+    render json: seq.as_json(
+      only: [:id, :name, :description, :is_active, :created_at, :updated_at],
+      include: { nurture_steps: { only: [:id, :step_type, :position, :wait_days, :subject, :body, :template_id] } }
+    ), status: :created
+  end
+ private
+
+  # Permit either top-level or { sequence: ... }
+  def sequence_params
+    if params[:sequence].is_a?(ActionController::Parameters)
+      params.require(:sequence).permit(
+        :name, :description, :is_active,
+        steps: [:step_type, :position, :wait_days, :subject, :body, :template_id]
+      )
+    else
+      params.permit(
+        :name, :description, :is_active,
+        steps: [:step_type, :position, :wait_days, :subject, :body, :template_id]
+      )
+    end
+  end
+
+  def step_attrs(st)
+    st.slice(:step_type, :position, :wait_days, :subject, :body, :template_id).to_h
+  end
+end

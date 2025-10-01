@@ -1,0 +1,76 @@
+module Api
+  module Crm
+    module Nurture
+      class SequencesController < ApplicationController
+        protect_from_forgery with: :null_session
+
+        # GET /api/crm/nurture/sequences
+        def index
+          render json: NurtureSequence.includes(:steps).order(:id).as_json(include: { steps: {} })
+        end
+
+        # POST /api/crm/nurture/sequences
+        def create
+          seq = NurtureSequence.new(sequence_params)
+          if seq.save
+            render json: seq.as_json(include: :steps), status: :created
+          else
+            render json: { errors: seq.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
+
+        # PATCH/PUT /api/crm/nurture/sequences/:id
+        def update
+          seq = NurtureSequence.find(params[:id])
+          if seq.update(sequence_params)
+            render json: seq.as_json(include: :steps)
+          else
+            render json: { errors: seq.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
+
+        # DELETE /api/crm/nurture/sequences/:id
+        def destroy
+          NurtureSequence.find(params[:id]).destroy
+          head :no_content
+        end
+
+        # POST /api/crm/nurture/sequences/bulk
+        # Accepts [{id?, name, is_active, steps:[{id?, position, step_type, subject, body, wait_hours}]}]
+        def bulk
+          payload = params.require(:_json)
+          upserted = payload.map do |s|
+            seq = s[:id] ? NurtureSequence.find(s[:id]) : NurtureSequence.new
+            seq.assign_attributes(name: s[:name], is_active: s[:is_active].nil? ? true : s[:is_active], company_id: s[:company_id] || 1)
+            seq.save!
+            if s[:steps].is_a?(Array)
+              # simple sync: delete missing, upsert provided
+              keep_ids = []
+              s[:steps].each do |step|
+                st = step[:id] ? seq.steps.find(step[:id]) : seq.steps.build
+                st.assign_attributes(position: step[:position] || 1,
+                                     step_type: step[:step_type] || "email",
+                                     subject: step[:subject],
+                                     body: step[:body],
+                                     wait_hours: step[:wait_hours] || 0)
+                st.save!
+                keep_ids << st.id
+              end
+              seq.steps.where.not(id: keep_ids).destroy_all
+            end
+            seq.as_json(include: :steps)
+          end
+          render json: upserted
+        rescue => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        private
+
+        def sequence_params
+          params.require(:sequence).permit(:name, :is_active, :company_id)
+        end
+      end
+    end
+  end
+end

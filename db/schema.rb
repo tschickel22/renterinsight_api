@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_27_192758) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_29_231507) do
   create_table "companies", force: :cascade do |t|
     t.string "name"
     t.datetime "created_at", null: false
@@ -73,6 +73,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_192758) do
     t.boolean "is_active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.text "description"
   end
 
   create_table "nurture_steps", force: :cascade do |t|
@@ -84,8 +85,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_192758) do
     t.integer "position", default: 1, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "template_id"
     t.index ["nurture_sequence_id", "position"], name: "index_nurture_steps_on_nurture_sequence_id_and_position"
     t.index ["nurture_sequence_id"], name: "index_nurture_steps_on_nurture_sequence_id"
+    t.index ["template_id"], name: "index_nurture_steps_on_template_id"
   end
 
   create_table "sources", force: :cascade do |t|
@@ -98,9 +101,21 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_192758) do
     t.datetime "updated_at", null: false
   end
 
+  create_table "templates", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "template_type", null: false
+    t.string "subject"
+    t.text "body"
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["template_type", "name"], name: "index_templates_on_template_type_and_name"
+  end
+
   add_foreign_key "lead_tasks", "leads"
   add_foreign_key "leads", "sources"
   add_foreign_key "nurture_enrollments", "leads"
   add_foreign_key "nurture_enrollments", "nurture_sequences"
   add_foreign_key "nurture_steps", "nurture_sequences"
+  add_foreign_key "nurture_steps", "templates"
 end
