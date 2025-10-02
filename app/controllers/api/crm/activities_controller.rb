@@ -7,7 +7,7 @@ module Api
 
       # GET /api/crm/leads/:lead_id/activities
       def index
-        activities = @lead.activities.order(created_at: :desc)
+        activities = Activity.where(lead_id: @lead.id).order(created_at: :desc)
         render json: activities.map { |a| activity_json(a) }
       end
 
@@ -25,7 +25,8 @@ module Api
           return render json: { errors: ["Activity type can't be blank"] }, status: :unprocessable_entity
         end
 
-        activity = @lead.activities.build(attrs)
+        # Build without relying on lead.activities association
+        activity = Activity.new({ lead_id: @lead.id }.merge(attrs))
 
         if activity.save
           render json: activity_json(activity), status: :created
@@ -50,14 +51,14 @@ module Api
                 raw['kind'] || raw[:kind]
 
         {
-          activity_type: normalize(atype),
+          activity_type:  normalize(atype),
           description:    fetch_any(raw, :description, :Description),
           outcome:        fetch_any(raw, :outcome, :Outcome),
           duration:       fetch_any(raw, :duration, :Duration),
           scheduled_date: fetch_any(raw, :scheduled_date, :scheduledDate),
           completed_date: fetch_any(raw, :completed_date, :completedDate),
           metadata:       raw['metadata'].is_a?(Hash) ? raw['metadata'] : {}
-          # intentionally not setting user_id to avoid FK to users
+          # no user_id assignment; avoids users FK
         }.compact
       end
 
