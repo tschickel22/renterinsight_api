@@ -1,7 +1,7 @@
 module Api
   module Crm
     class ActivitiesController < ApplicationController
-      before_action :set_lead, only: [:index, :create]
+      skip_before_action :verify_authenticity_token, raise: false
 
       # GET /api/crm/leads/:lead_id/activities
       def index
