@@ -25,11 +25,11 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
-      def activity_params
-        p = params.require(:activity).permit(
-          :type, :description, :outcome, :duration, 
-          :scheduled_date, :completed_date, :user_id, metadata: {}
-        )
+def activity_params
+  p = params.require(:activity).permit(
+    :type, :description, :outcome, :duration, 
+    :scheduled_date, :completed_date, :user_id, :userId, :leadId, metadata: {}
+  )
         
         {
           activity_type: p[:type],
