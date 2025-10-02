@@ -14,14 +14,19 @@ module Api
       # POST /api/crm/leads/:lead_id/activities
       #
       # Accepts either:
-      #   { "activity": { "type": "call", "description": "Intro call" } }
+      #   { "activity": { "type": "call", "description": "..." } }
       # or
-      #   { "type": "call", "description": "Intro call" }
+      #   { "type": "call", "description": "..." }
       def create
-        attrs = activity_params_from(params)
+        attrs = build_attrs_from_params
+
+        if attrs[:activity_type].blank?
+          return render json: { errors: ["Activity type can't be blank"] }, status: :unprocessable_entity
+        end
+
         activity = @lead.activities.build(attrs)
 
-        # Only set user_id if a users table exists AND a value was provided
+        # Only set user_id if a users table exists AND something was provided
         if ActiveRecord::Base.connection.data_source_exists?('users')
           uid = params.dig(:activity, :user_id) ||
                 params.dig(:activity, :userId) ||
@@ -45,13 +50,14 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
-      # Build attributes for Activity from either nested or root params.
-      def activity_params_from(p)
+      # Pull attributes robustly from nested or root payloads.
+      def build_attrs_from_params
+        # Prefer the nested object if present; otherwise use root.
         raw =
-          if p[:activity].is_a?(ActionController::Parameters)
-            p.require(:activity)
+          if params[:activity].is_a?(ActionController::Parameters)
+            params.require(:activity)
           else
-            p
+            params
           end
 
         permitted = raw.permit(
@@ -61,14 +67,23 @@ module Api
           metadata: {}
         )
 
+        # Be defensive about how we read "type"
+        # (supports symbol/string keys and nested/root forms)
+        extracted_type =
+          params.dig(:activity, :type) ||
+          params.dig('activity', 'type') ||
+          permitted[:type] ||
+          params[:type] ||
+          params['type']
+
         {
-          activity_type: permitted[:type] || p[:type],
-          description: permitted[:description],
-          outcome: permitted[:outcome],
-          duration: permitted[:duration],
-          scheduled_date: permitted[:scheduled_date],
-          completed_date: permitted[:completed_date],
-          metadata: permitted[:metadata] || {}
+          activity_type: extracted_type,
+          description:   permitted[:description] || params[:description],
+          outcome:       permitted[:outcome]     || params[:outcome],
+          duration:      permitted[:duration]    || params[:duration],
+          scheduled_date: permitted[:scheduled_date] || params[:scheduled_date],
+          completed_date: permitted[:completed_date] || params[:completed_date],
+          metadata:      permitted[:metadata] || {}
         }.compact
       end
 
