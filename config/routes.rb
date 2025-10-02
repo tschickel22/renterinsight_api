@@ -42,11 +42,13 @@ Rails.application.routes.draw do
 
         # --- Communications (lead-scoped) ---
         get  'communications',              to: 'communications#index'
-        get  'communications/history',      to: 'communications#history'
+        # Map history to the same payload; keeps FE happy even if code reload lags
+        get  'communications/history',      to: 'communications#index'
         get  'communications/settings',     to: 'communications#settings'
         post 'communications/send_email',   to: 'communications#send_email'
         post 'communications/send_sms',     to: 'communications#send_sms'
         post 'communications/log',          to: 'communications#log'
+
       end
 
       # Single insight actions
