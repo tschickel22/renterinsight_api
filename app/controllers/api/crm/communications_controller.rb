@@ -1,6 +1,7 @@
 module Api
   module Crm
     class CommunicationsController < ApplicationController
+      skip_before_action :verify_authenticity_token, raise: false
       # GET /api/crm/leads/:lead_id/communications
       def index
         lead = current_lead
