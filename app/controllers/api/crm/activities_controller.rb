@@ -17,8 +17,8 @@ module Api
       #   { "type": "call", "description": "..." }
       def create
         payload = params[:activity].presence || params
+        attrs   = extract_attrs(payload)
 
-        attrs = extract_attrs(payload)
         Rails.logger.info("[Activities#create] parsed=#{attrs.inspect}")
 
         if attrs[:activity_type].blank?
@@ -40,29 +40,30 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
+      # Pulls values from either snake_case or camelCase keys
       def extract_attrs(h)
-        # allow ActionController::Parameters or Hash
         raw = h.respond_to?(:to_unsafe_h) ? h.to_unsafe_h : h
 
-        # fetch with both snake & camel keys
-        atype = raw['type'] || raw[:type] || raw['activity_type'] || raw[:activity_type] ||
-                raw['kind'] || raw[:kind] || raw['activityType'] || raw['scheduledType']
+        atype = raw['type'] || raw[:type] ||
+                raw['activity_type'] || raw[:activity_type] ||
+                raw['activityType'] || raw[:activityType] ||
+                raw['kind'] || raw[:kind]
 
         {
           activity_type: normalize(atype),
-          description:   pick(raw, :description),
-          outcome:       pick(raw, :outcome),
-          duration:      pick(raw, :duration),
-          scheduled_date: pick(raw, :scheduled_date, :scheduledDate),
-          completed_date: pick(raw, :completed_date, :completedDate),
+          description:   fetch_any(raw, :description, :Description),
+          outcome:       fetch_any(raw, :outcome, :Outcome),
+          duration:      fetch_any(raw, :duration, :Duration),
+          scheduled_date: fetch_any(raw, :scheduled_date, :scheduledDate),
+          completed_date: fetch_any(raw, :completed_date, :completedDate),
           metadata:      raw['metadata'].is_a?(Hash) ? raw['metadata'] : {}
-          # user_id intentionally omitted so no FK needed
+          # no user_id assignment; avoids users FK
         }.compact
       end
 
-      def pick(hash, *keys)
-        keys = [keys, keys.map { |k| k.to_s }, keys.map { |k| k.to_s.camelize(:lower) }].flatten
-        keys.each { |k| return hash[k] if hash.key?(k) }
+      def fetch_any(hash, *keys)
+        keys = keys.flat_map { |k| [k, k.to_s, k.to_s.camelize(:lower)] }
+        keys.find { |k| return hash[k] if hash.key?(k) }
         nil
       end
 
