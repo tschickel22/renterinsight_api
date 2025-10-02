@@ -1,9 +1,17 @@
 module Api
   module Crm
     class ActivitiesController < ApplicationController
-      # Allow JSON POSTs without CSRF token
+      # This is an API endpoint; don’t enforce CSRF tokens
       skip_before_action :verify_authenticity_token, raise: false
       before_action :set_lead
+
+      rescue_from ActiveRecord::RecordNotFound do
+        render json: { error: 'not_found' }, status: :not_found
+      end
+
+      rescue_from ActionController::ParameterMissing do |e|
+        render json: { error: 'bad_request', message: e.message }, status: :unprocessable_entity
+      end
 
       # GET /api/crm/leads/:lead_id/activities
       def index
@@ -12,19 +20,31 @@ module Api
       end
 
       # POST /api/crm/leads/:lead_id/activities
+      # Accepts either:
+      #   { "activity": { "type":"call", "description":"..." } }
+      # or
+      #   { "type":"call", "description":"..." }
       def create
-        attrs = activity_params
-        activity = @lead.activities.build(attrs)
+        p = extract_payload
 
-        # Only set a user if you actually have one
-        if respond_to?(:current_user) && current_user&.id.present?
-          activity.user_id = current_user.id
+        attrs = {
+          activity_type:  p[:type],
+          description:    p[:description],
+          outcome:        p[:outcome],
+          duration:       p[:duration],
+          scheduled_date: p[:scheduled_date],
+          completed_date: p[:completed_date],
+          metadata:       p[:metadata] || {}
+        }.compact
+
+        activity = @lead.activities.new(attrs)
+        activity.user_id = (params[:user_id] || params[:userId]).presence || 1
+
+        if activity.save
+          render json: activity_json(activity), status: :created
+        else
+          render json: { errors: activity.errors.full_messages }, status: :unprocessable_entity
         end
-
-        activity.save!
-        render json: activity_json(activity), status: :created
-      rescue ActiveRecord::RecordInvalid => e
-        render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
       end
 
       private
@@ -33,60 +53,35 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id] || params[:leadId])
       end
 
-      # Tolerant strong params: nested or root, camelCase or snake_case, multiple aliases
-      def activity_params
-        permitted_nested = params[:activity].is_a?(ActionController::Parameters) ?
+      # Strong params that tolerate nested or root payloads (no 500s)
+      def extract_payload
+        if params[:activity].present?
           params.require(:activity).permit(
-            :type, :activityType, :activity_type, :kind,
-            :description, :outcome, :duration,
-            :scheduled_date, :scheduledDate,
-            :completed_date, :completedDate,
-            :user_id, :userId, :leadId,
-            metadata: {}
-          ) : {}
-
-        permitted_root = params.permit(
-          :type, :activityType, :activity_type, :kind,
-          :description, :outcome, :duration,
-          :scheduled_date, :scheduledDate,
-          :completed_date, :completedDate,
-          :user_id, :userId, :leadId,
-          metadata: {}
-        )
-
-        raw = permitted_nested.to_h.merge(permitted_root.to_h)
-
-        activity_type =
-          raw['type'] ||
-          raw['activityType'] ||
-          raw['activity_type'] ||
-          raw['kind']
-
-        {
-          activity_type:  activity_type,
-          description:    raw['description'],
-          outcome:        raw['outcome'],
-          duration:       raw['duration'],
-          scheduled_date: raw['scheduled_date'] || raw['scheduledDate'],
-          completed_date: raw['completed_date'] || raw['completedDate'],
-          metadata:       raw['metadata'] || {}
-        }.compact
+            :type, :description, :outcome, :duration,
+            :scheduled_date, :completed_date, metadata: {}
+          )
+        else
+          params.permit(
+            :type, :description, :outcome, :duration,
+            :scheduled_date, :completed_date, metadata: {}
+          )
+        end
       end
 
       def activity_json(activity)
         {
-          id:             activity.id,
-          leadId:         activity.lead_id,
-          type:           activity.activity_type,
-          description:    activity.description,
-          outcome:        activity.outcome,
-          duration:       activity.duration,
-          scheduledDate:  activity.scheduled_date,
-          completedDate:  activity.completed_date,
-          userId:         activity.user_id,
-          metadata:       activity.metadata,
-          createdAt:      activity.created_at,
-          updatedAt:      activity.updated_at
+          id:            activity.id,
+          leadId:        activity.lead_id,
+          type:          activity.activity_type,
+          description:   activity.description,
+          outcome:       activity.outcome,
+          duration:      activity.duration,
+          scheduledDate: activity.scheduled_date,
+          completedDate: activity.completed_date,
+          userId:        activity.user_id,
+          metadata:      activity.metadata,
+          createdAt:     activity.created_at,
+          updatedAt:     activity.updated_at
         }.compact
       end
     end
