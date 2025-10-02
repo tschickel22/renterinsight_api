@@ -16,7 +16,6 @@ module Api
       end
 
       # GET /api/crm/leads/:lead_id/communications/settings
-      # Minimal stub so FE doesn’t break; expand when you wire real settings
       def settings
         render json: { platform: {}, company: {}, effective: {} }
       end
@@ -37,7 +36,6 @@ module Api
           metadata:   { provider: 'test', template_id: params[:template_id], to: params[:to] }.compact
         )
 
-        # keep the simple ok/payload shape your FE already saw
         render json: { ok: true, id: log.id, provider: 'test' }, status: :created
       rescue => e
         render json: { ok: false, error: e.message }, status: :unprocessable_entity
@@ -64,7 +62,6 @@ module Api
       end
 
       # POST /api/crm/leads/:lead_id/communications/log
-      # (routes.rb maps to #log)
       def log
         lead        = current_lead
         content_val = pick_content(params)
@@ -94,7 +91,6 @@ module Api
         Lead.find(params[:lead_id] || params[:id] || params[:leadId])
       end
 
-      # Prefer explicit “content”; fall back to body/html (what your FE/scripts used)
       def pick_content(p)
         p[:content] || p[:body] || p[:html] || ''
       end
