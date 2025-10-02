@@ -1,4 +1,3 @@
-# app/controllers/api/crm/activities_controller.rb
 # frozen_string_literal: true
 module Api
   module Crm
@@ -15,29 +14,12 @@ module Api
       # POST /api/crm/leads/:lead_id/activities
       # Accepts either:
       #   { "activity": { "type": "call", "description": "..." } }
-      # or
       #   { "type": "call", "description": "..." }
       def create
         payload = params[:activity].presence || params
 
-        atype = first_present(
-          payload[:type],
-          payload[:activity_type],
-          payload[:kind],
-          dig_camel(payload, :type),
-          dig_camel(payload, :activity_type),
-          dig_camel(payload, :kind)
-        )
-
-        attrs = {
-          activity_type: normalize_type(atype),
-          description:   first_present(payload[:description], dig_camel(payload, :description)),
-          outcome:       first_present(payload[:outcome],     dig_camel(payload, :outcome)),
-          duration:      first_present(payload[:duration],    dig_camel(payload, :duration)),
-          scheduled_date:first_present(payload[:scheduled_date], dig_camel(payload, :scheduled_date)),
-          completed_date:first_present(payload[:completed_date], dig_camel(payload, :completed_date)),
-          metadata:      payload[:metadata].is_a?(Hash) ? payload[:metadata] : {}
-        }.compact
+        attrs = extract_attrs(payload)
+        Rails.logger.info("[Activities#create] parsed=#{attrs.inspect}")
 
         if attrs[:activity_type].blank?
           return render json: { errors: ["Activity type can't be blank"] }, status: :unprocessable_entity
@@ -58,20 +40,34 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
-      def first_present(*vals)
-        vals.find { |v| v.present? }
+      def extract_attrs(h)
+        # allow ActionController::Parameters or Hash
+        raw = h.respond_to?(:to_unsafe_h) ? h.to_unsafe_h : h
+
+        # fetch with both snake & camel keys
+        atype = raw['type'] || raw[:type] || raw['activity_type'] || raw[:activity_type] ||
+                raw['kind'] || raw[:kind] || raw['activityType'] || raw['scheduledType']
+
+        {
+          activity_type: normalize(atype),
+          description:   pick(raw, :description),
+          outcome:       pick(raw, :outcome),
+          duration:      pick(raw, :duration),
+          scheduled_date: pick(raw, :scheduled_date, :scheduledDate),
+          completed_date: pick(raw, :completed_date, :completedDate),
+          metadata:      raw['metadata'].is_a?(Hash) ? raw['metadata'] : {}
+          # user_id intentionally omitted so no FK needed
+        }.compact
       end
 
-      def dig_camel(h, key)
-        # Allow camelCase like scheduledDate, completedDate, activityType
-        return nil unless h.respond_to?(:to_unsafe_h) || h.is_a?(Hash)
-        hash = h.respond_to?(:to_unsafe_h) ? h.to_unsafe_h : h
-        hash[key.to_s.camelize(:lower)]
+      def pick(hash, *keys)
+        keys = [keys, keys.map { |k| k.to_s }, keys.map { |k| k.to_s.camelize(:lower) }].flatten
+        keys.each { |k| return hash[k] if hash.key?(k) }
+        nil
       end
 
-      def normalize_type(val)
-        return nil if val.blank?
-        val.to_s.strip.downcase
+      def normalize(v)
+        v.is_a?(String) ? v.strip.downcase : v
       end
 
       def activity_json(a)
