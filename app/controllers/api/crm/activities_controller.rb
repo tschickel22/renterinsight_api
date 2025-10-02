@@ -51,13 +51,13 @@ module Api
 
         {
           activity_type: normalize(atype),
-          description:   fetch_any(raw, :description, :Description),
-          outcome:       fetch_any(raw, :outcome, :Outcome),
-          duration:      fetch_any(raw, :duration, :Duration),
+          description:    fetch_any(raw, :description, :Description),
+          outcome:        fetch_any(raw, :outcome, :Outcome),
+          duration:       fetch_any(raw, :duration, :Duration),
           scheduled_date: fetch_any(raw, :scheduled_date, :scheduledDate),
           completed_date: fetch_any(raw, :completed_date, :completedDate),
-          metadata:      raw['metadata'].is_a?(Hash) ? raw['metadata'] : {}
-          # no user_id assignment; avoids users FK
+          metadata:       raw['metadata'].is_a?(Hash) ? raw['metadata'] : {}
+          # intentionally not setting user_id to avoid FK to users
         }.compact
       end
 
