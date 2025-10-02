@@ -1,8 +1,7 @@
-# app/controllers/api/crm/activities_controller.rb
 module Api
   module Crm
     class ActivitiesController < ApplicationController
-      # Allow JSON POSTs from SPA/cURL without CSRF token
+      # Allow JSON POSTs without CSRF token
       skip_before_action :verify_authenticity_token, raise: false
       before_action :set_lead
 
@@ -13,15 +12,11 @@ module Api
       end
 
       # POST /api/crm/leads/:lead_id/activities
-      # Accepts either:
-      #  { "activity": { "type":"call", "description":"..." , ... } }
-      # or
-      #  { "type":"call", "description":"...", ... }
       def create
-        attrs     = activity_params
-        activity  = @lead.activities.build(attrs)
+        attrs = activity_params
+        activity = @lead.activities.build(attrs)
 
-        # Only set a user if we actually have one
+        # Only set a user if you actually have one
         if respond_to?(:current_user) && current_user&.id.present?
           activity.user_id = current_user.id
         end
@@ -30,8 +25,6 @@ module Api
         render json: activity_json(activity), status: :created
       rescue ActiveRecord::RecordInvalid => e
         render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
-      rescue => e
-        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       private
@@ -40,35 +33,43 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id] || params[:leadId])
       end
 
-      # Strong params that tolerate both nested and root payloads, with camelCase support.
+      # Tolerant strong params: nested or root, camelCase or snake_case, multiple aliases
       def activity_params
-        raw =
-          if params[:activity].is_a?(ActionController::Parameters)
-            params.require(:activity).permit(
-              :type, :description, :outcome, :duration,
-              :scheduled_date, :scheduledDate,
-              :completed_date, :completedDate,
-              :user_id, :userId, :leadId,
-              metadata: {}
-            ).to_h
-          else
-            params.permit(
-              :type, :description, :outcome, :duration,
-              :scheduled_date, :scheduledDate,
-              :completed_date, :completedDate,
-              :user_id, :userId, :leadId,
-              metadata: {}
-            ).to_h
-          end
+        permitted_nested = params[:activity].is_a?(ActionController::Parameters) ?
+          params.require(:activity).permit(
+            :type, :activityType, :activity_type, :kind,
+            :description, :outcome, :duration,
+            :scheduled_date, :scheduledDate,
+            :completed_date, :completedDate,
+            :user_id, :userId, :leadId,
+            metadata: {}
+          ) : {}
+
+        permitted_root = params.permit(
+          :type, :activityType, :activity_type, :kind,
+          :description, :outcome, :duration,
+          :scheduled_date, :scheduledDate,
+          :completed_date, :completedDate,
+          :user_id, :userId, :leadId,
+          metadata: {}
+        )
+
+        raw = permitted_nested.to_h.merge(permitted_root.to_h)
+
+        activity_type =
+          raw['type'] ||
+          raw['activityType'] ||
+          raw['activity_type'] ||
+          raw['kind']
 
         {
-          activity_type: raw['type'],
-          description:   raw['description'],
-          outcome:       raw['outcome'],
-          duration:      raw['duration'],
+          activity_type:  activity_type,
+          description:    raw['description'],
+          outcome:        raw['outcome'],
+          duration:       raw['duration'],
           scheduled_date: raw['scheduled_date'] || raw['scheduledDate'],
           completed_date: raw['completed_date'] || raw['completedDate'],
-          metadata:      raw['metadata'] || {}
+          metadata:       raw['metadata'] || {}
         }.compact
       end
 
