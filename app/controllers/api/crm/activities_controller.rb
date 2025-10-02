@@ -1,4 +1,4 @@
-# app/controllers/api/crm/activities_controller.rb
+# frozen_string_literal: true
 module Api
   module Crm
     class ActivitiesController < ApplicationController
@@ -17,11 +17,7 @@ module Api
       # or
       #   { "type": "call", "description": "..." }
       def create
-        attrs = build_attrs_from_params
-
-        # DEBUG: log what we're seeing to help diagnose
-        Rails.logger.info("[Activities#create] raw_params=#{params.to_unsafe_h}")
-        Rails.logger.info("[Activities#create] extracted_attrs=#{attrs.inspect}")
+        attrs = extract_attrs
 
         if attrs[:activity_type].blank?
           return render json: { errors: ["Activity type can't be blank"] }, status: :unprocessable_entity
@@ -29,24 +25,11 @@ module Api
 
         activity = @lead.activities.build(attrs)
 
-        # Only set user_id if a users table exists AND a value was provided
-        if ActiveRecord::Base.connection.data_source_exists?('users')
-          uid = fetch_first_present(
-            params.dig(:activity, :user_id),
-            params.dig(:activity, :userId),
-            params[:user_id],
-            params[:userId]
-          )
-          activity.user_id = uid if uid.present?
-        end
-
         if activity.save
           render json: activity_json(activity), status: :created
         else
           render json: { errors: activity.errors.full_messages }, status: :unprocessable_entity
         end
-      rescue ActionController::ParameterMissing => e
-        render json: { errors: [e.message] }, status: :unprocessable_entity
       end
 
       private
@@ -55,82 +38,62 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
-      # Pull attributes robustly from nested or root payloads
-      # and tolerate different key spellings.
-      def build_attrs_from_params
+      # Pull attributes from nested or root; tolerate different key spellings.
+      def extract_attrs
         nested = params[:activity].is_a?(ActionController::Parameters) ? params.require(:activity) : nil
-        root   = params
 
-        # Permit common fields on whichever layer is present
         permitted_nested = nested&.permit(
           :type, :activity_type, :kind, :description, :outcome, :duration,
-          :scheduled_date, :completed_date, :user_id, :userId, :leadId,
-          metadata: {}
+          :scheduled_date, :completed_date, metadata: {}
         )
-        permitted_root = root.permit(
+        permitted_root = params.permit(
           :type, :activity_type, :kind, :description, :outcome, :duration,
-          :scheduled_date, :completed_date, :user_id, :userId, :leadId,
-          metadata: {}
+          :scheduled_date, :completed_date, metadata: {}
         )
 
-        extracted_type = normalize_type(
-          fetch_first_present(
-            # nested keys (preferred)
-            permitted_nested&.[](:type),
-            permitted_nested&.[](:activity_type),
-            permitted_nested&.[](:kind),
-
-            # raw nested (string keys just in case)
-            nested&.[]('type'),
-            nested&.[]('activity_type'),
-            nested&.[]('kind'),
-
-            # root keys
-            permitted_root[:type],
-            permitted_root[:activity_type],
-            permitted_root[:kind],
-            root[:type],
-            root[:activity_type],
-            root[:kind]
-          )
+        atype = first_present(
+          permitted_nested&.[](:type),
+          permitted_nested&.[](:activity_type),
+          permitted_nested&.[](:kind),
+          permitted_root[:type],
+          permitted_root[:activity_type],
+          permitted_root[:kind]
         )
 
         {
-          activity_type: extracted_type,
-          description:   fetch_first_present(permitted_nested&.[](:description), permitted_root[:description], root[:description]),
-          outcome:       fetch_first_present(permitted_nested&.[](:outcome), permitted_root[:outcome], root[:outcome]),
-          duration:      fetch_first_present(permitted_nested&.[](:duration), permitted_root[:duration], root[:duration]),
-          scheduled_date: fetch_first_present(permitted_nested&.[](:scheduled_date), permitted_root[:scheduled_date], root[:scheduled_date]),
-          completed_date: fetch_first_present(permitted_nested&.[](:completed_date), permitted_root[:completed_date], root[:completed_date]),
-          metadata:      fetch_first_present(permitted_nested&.[](:metadata), permitted_root[:metadata]) || {}
+          activity_type: normalize_type(atype),
+          description:   first_present(permitted_nested&.[](:description), permitted_root[:description]),
+          outcome:       first_present(permitted_nested&.[](:outcome),     permitted_root[:outcome]),
+          duration:      first_present(permitted_nested&.[](:duration),    permitted_root[:duration]),
+          scheduled_date:first_present(permitted_nested&.[](:scheduled_date), permitted_root[:scheduled_date]),
+          completed_date:first_present(permitted_nested&.[](:completed_date), permitted_root[:completed_date]),
+          metadata:      first_present(permitted_nested&.[](:metadata), permitted_root[:metadata]) || {}
         }.compact
       end
 
-      # Helper: first non-nil / non-empty value
-      def fetch_first_present(*vals)
+      def first_present(*vals)
         vals.find { |v| v.present? }
       end
 
-      # Normalize type to a lowercase string (model can do inclusion)
       def normalize_type(val)
-        return nil if val.nil?
-        val.is_a?(String) ? val.strip.downcase : val.to_s.downcase
+        return nil if val.blank?
+        val.to_s.strip.downcase
       end
 
-      def activity_json(activity)
+      def activity_json(a)
         {
-          id:            activity.id,
-          leadId:        activity.lead_id,
-          type:          activity.activity_type,
-          description:   activity.description,
-          outcome:       activity.outcome,
-          duration:      activity.duration,
-          scheduledDate: activity.scheduled_date,
-          completedDate: activity.completed_date,
-          userId:        activity.user_id,
-          metadata:      activity.metadata,
-          createdAt:     activity.created_at,
-          updatedAt:     activity.updated_at
+          id:            a.id,
+          leadId:        a.lead_id,
+          type:          a.activity_type,
+          description:   a.description,
+          outcome:       a.outcome,
+          duration:      a.duration,
+          scheduledDate: a.scheduled_date,
+          completedDate: a.completed_date,
+          userId:        a.user_id,
+          metadata:      a.metadata,
+          createdAt:     a.created_at,
+          updatedAt:     a.updated_at
         }.compact
       end
     end
