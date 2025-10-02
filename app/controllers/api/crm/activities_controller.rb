@@ -1,3 +1,4 @@
+# app/controllers/api/crm/activities_controller.rb
 # frozen_string_literal: true
 module Api
   module Crm
@@ -17,7 +18,26 @@ module Api
       # or
       #   { "type": "call", "description": "..." }
       def create
-        attrs = extract_attrs
+        payload = params[:activity].presence || params
+
+        atype = first_present(
+          payload[:type],
+          payload[:activity_type],
+          payload[:kind],
+          dig_camel(payload, :type),
+          dig_camel(payload, :activity_type),
+          dig_camel(payload, :kind)
+        )
+
+        attrs = {
+          activity_type: normalize_type(atype),
+          description:   first_present(payload[:description], dig_camel(payload, :description)),
+          outcome:       first_present(payload[:outcome],     dig_camel(payload, :outcome)),
+          duration:      first_present(payload[:duration],    dig_camel(payload, :duration)),
+          scheduled_date:first_present(payload[:scheduled_date], dig_camel(payload, :scheduled_date)),
+          completed_date:first_present(payload[:completed_date], dig_camel(payload, :completed_date)),
+          metadata:      payload[:metadata].is_a?(Hash) ? payload[:metadata] : {}
+        }.compact
 
         if attrs[:activity_type].blank?
           return render json: { errors: ["Activity type can't be blank"] }, status: :unprocessable_entity
@@ -38,41 +58,15 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
-      # Pull attributes from nested or root; tolerate different key spellings.
-      def extract_attrs
-        nested = params[:activity].is_a?(ActionController::Parameters) ? params.require(:activity) : nil
-
-        permitted_nested = nested&.permit(
-          :type, :activity_type, :kind, :description, :outcome, :duration,
-          :scheduled_date, :completed_date, metadata: {}
-        )
-        permitted_root = params.permit(
-          :type, :activity_type, :kind, :description, :outcome, :duration,
-          :scheduled_date, :completed_date, metadata: {}
-        )
-
-        atype = first_present(
-          permitted_nested&.[](:type),
-          permitted_nested&.[](:activity_type),
-          permitted_nested&.[](:kind),
-          permitted_root[:type],
-          permitted_root[:activity_type],
-          permitted_root[:kind]
-        )
-
-        {
-          activity_type: normalize_type(atype),
-          description:   first_present(permitted_nested&.[](:description), permitted_root[:description]),
-          outcome:       first_present(permitted_nested&.[](:outcome),     permitted_root[:outcome]),
-          duration:      first_present(permitted_nested&.[](:duration),    permitted_root[:duration]),
-          scheduled_date:first_present(permitted_nested&.[](:scheduled_date), permitted_root[:scheduled_date]),
-          completed_date:first_present(permitted_nested&.[](:completed_date), permitted_root[:completed_date]),
-          metadata:      first_present(permitted_nested&.[](:metadata), permitted_root[:metadata]) || {}
-        }.compact
-      end
-
       def first_present(*vals)
         vals.find { |v| v.present? }
+      end
+
+      def dig_camel(h, key)
+        # Allow camelCase like scheduledDate, completedDate, activityType
+        return nil unless h.respond_to?(:to_unsafe_h) || h.is_a?(Hash)
+        hash = h.respond_to?(:to_unsafe_h) ? h.to_unsafe_h : h
+        hash[key.to_s.camelize(:lower)]
       end
 
       def normalize_type(val)
