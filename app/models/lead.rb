@@ -3,6 +3,6 @@
 class Lead < ApplicationRecord
   belongs_to :source, optional: true
 
-  # Add the association so controllers can call @lead.activities
+  # Add this association so Lead has .activities
   has_many :activities, dependent: :destroy
 end
