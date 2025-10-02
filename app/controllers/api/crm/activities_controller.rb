@@ -10,8 +10,7 @@ module Api
 
       def create
         activity = @lead.activities.build(activity_params)
-        activity.user_id = current_user&.id || 1 # Fallback to id 1 for testing
-        
+        activity.user_id = 1 # Temporary hardcoded user        
         if activity.save
           render json: activity_json(activity), status: :created
         else
