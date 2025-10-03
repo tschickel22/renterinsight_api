@@ -16,8 +16,23 @@ module Api
       #   { "activity": { "type": "call", "description": "..." } }
       #   { "type": "call", "description": "..." }
       def create
-        payload = params[:activity].presence || params
-        attrs   = extract_attrs(payload)
+        payload =
+          if params[:activity].present?
+            params[:activity]
+          else
+            # Build a safe root-level params object so root payloads work
+            ActionController::Parameters.new(
+              type:            params[:type],
+              description:     params[:description],
+              outcome:         params[:outcome],
+              duration:        params[:duration],
+              scheduled_date:  params[:scheduled_date],
+              completed_date:  params[:completed_date],
+              metadata:        params[:metadata]
+            )
+          end
+
+        attrs = extract_attrs(payload)
 
         Rails.logger.info("[Activities#create] parsed=#{attrs.inspect}")
 
@@ -26,6 +41,7 @@ module Api
         end
 
         # Build without relying on lead.activities association
+        # and without setting user_id (avoids users FK requirement)
         activity = Activity.new({ lead_id: @lead.id }.merge(attrs))
 
         if activity.save
@@ -39,6 +55,8 @@ module Api
 
       def set_lead
         @lead = Lead.find(params[:lead_id] || params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { errors: ["Lead not found"] }, status: :not_found
       end
 
       # Pulls values from either snake_case or camelCase keys
@@ -58,13 +76,13 @@ module Api
           scheduled_date: fetch_any(raw, :scheduled_date, :scheduledDate),
           completed_date: fetch_any(raw, :completed_date, :completedDate),
           metadata:       raw['metadata'].is_a?(Hash) ? raw['metadata'] : {}
-          # no user_id assignment; avoids users FK
+          # intentionally not setting :user_id
         }.compact
       end
 
       def fetch_any(hash, *keys)
         keys = keys.flat_map { |k| [k, k.to_s, k.to_s.camelize(:lower)] }
-        keys.find { |k| return hash[k] if hash.key?(k) }
+        keys.each { |k| return hash[k] if hash.key?(k) }
         nil
       end
 
