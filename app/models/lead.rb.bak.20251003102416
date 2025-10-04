@@ -1,0 +1,16 @@
+# frozen_string_literal: true
+
+class Lead < ApplicationRecord
+  belongs_to :source, optional: true
+
+  # Add this association so Lead has .activities
+  has_many :activities, dependent: :destroy
+end
+
+  # === CRM associations (added by fix_crm_wiring) ===
+  has_many :reminders, dependent: :destroy
+  has_many :ai_insights, dependent: :destroy
+  has_many :communication_logs, dependent: :destroy
+
+  has_many :tag_assignments, as: :entity, dependent: :destroy
+  has_many :tags, through: :tag_assignments

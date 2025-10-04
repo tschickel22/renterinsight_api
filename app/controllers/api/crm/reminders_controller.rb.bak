@@ -11,8 +11,8 @@ module Api
 
       def create
         reminder = @lead.reminders.build(reminder_params)
-        reminder.user_id = current_user&.id || 1
-
+        reminder.user_id = current_user&.id || 1 # Fallback for testing
+        
         if reminder.save
           render json: reminder_json(reminder), status: :created
         else
@@ -21,7 +21,7 @@ module Api
       end
 
       def complete
-        @reminder.update!(is_completed: true, completed_at: Time.current)
+        @reminder.complete!
         render json: reminder_json(@reminder)
       end
 
@@ -41,39 +41,35 @@ module Api
       end
 
       def reminder_params
-        p = params.require(:reminder).permit(:type, :title, :description, :due_date, :priority, :user_id)
+  p = params.require(:reminder).permit(
+    :type, :reminder_type, :title, :description, :due_date, :priority, :user_id
+  )
 
-        parsed_due =
-          if p[:due_date].present?
-            begin
-              Time.zone.parse(p[:due_date].to_s)
-            rescue
-              nil
-            end
-          end
-
-        {
-          reminder_type: p[:type],
-          title:         p[:title],
-          description:   p[:description],
-          due_date:      parsed_due || (Time.current + 1.day),
-          priority:      p[:priority].presence || 'medium'
-        }.compact
-      end
+  # normalize and coerce
+  rt = p[:reminder_type].presence || p[:type].presence
+  {
+    reminder_type: (rt || "follow_up"),
+    title: p[:title],
+    description: p[:description],
+    due_date: p[:due_date],
+    priority: p[:priority].presence || "medium",
+    user_id: p[:user_id]
+  }.compact
+end
 
       def reminder_json(reminder)
         {
-          id:          reminder.id,
-          leadId:      reminder.lead_id,
-          userId:      reminder.user_id,
-          type:        reminder.reminder_type,
-          title:       reminder.title,
+          id: reminder.id,
+          leadId: reminder.lead_id,
+          userId: reminder.user_id,
+          type: reminder.reminder_type,
+          title: reminder.title,
           description: reminder.description,
-          dueDate:     reminder.due_date,
+          dueDate: reminder.due_date,
           isCompleted: reminder.is_completed,
-          priority:    reminder.priority,
-          createdAt:   reminder.created_at,
-          updatedAt:   reminder.updated_at
+          priority: reminder.priority,
+          createdAt: reminder.created_at,
+          updatedAt: reminder.updated_at
         }.compact
       end
     end

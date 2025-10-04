@@ -1,14 +1,24 @@
 # frozen_string_literal: true
 
 Rails.application.routes.draw do
+  # Healthcheck (optional)
+  get "/up", to: proc { [200, {"Content-Type" => "application/json"}, [{ok: true}.to_json]] }
+
   namespace :api do
     namespace :crm do
       resources :leads, only: [:index, :show, :create, :update] do
+        # Activities (kept minimal; expand as needed)
         resources :activities, only: [:index, :create]
+
+        # AI insights
         resources :ai_insights, only: [:index]
+
+        # Reminders / Tasks
         resources :reminders, only: [:index, :create, :destroy] do
           member { post :complete }
         end
+
+        # Communications (email/sms + manual log)
         resources :communications, only: [:index] do
           collection do
             post :send_email
@@ -16,18 +26,21 @@ Rails.application.routes.draw do
             post :create_log
           end
         end
+
+        # Lead scoring
         member do
           get  :score
           post :score, action: :recalculate_score
           post :convert
         end
-        # Lead-scoped tags (FE uses these)
+
+        # Lead-scoped tags (what FE calls)
         get    'tags',         to: 'tags#entity_tags_for_lead'
         post   'tags',         to: 'tags#assign_to_lead'
         delete 'tags/:tag_id', to: 'tags#remove_from_lead'
       end
 
-      # Tag catalog + generic helpers
+      # Tag catalog + generic assignment helpers
       resources :tags, only: [:index, :create, :update, :destroy] do
         collection do
           post :assign
@@ -36,7 +49,7 @@ Rails.application.routes.draw do
       end
       delete 'tags/assignments/:id', to: 'tags#remove_assignment'
 
-      # Sources needed by Overview
+      # Sources (your working example)
       resources :sources, only: [:index, :create, :update]
     end
   end

@@ -1,9 +1,7 @@
 # frozen_string_literal: true
+# frozen_string_literal: true
 
 class Lead < ApplicationRecord
-  belongs_to :converted_account, class_name: "Account", optional: true
-  belongs_to :source, class_name: "Source", optional: true
-
   # Core CRM associations
   has_many :activities,           dependent: :destroy
   has_many :reminders,            dependent: :destroy

@@ -6,35 +6,29 @@ module Api
 
       # POST /api/crm/leads/:lead_id/convert
       def convert
-        # Idempotent: if already converted, return existing account id
-        if @lead.respond_to?(:converted_account_id) && @lead.converted_account_id.present?
-          render json: { success: true, leadId: @lead.id, accountId: @lead.converted_account_id }, status: :ok
-          return
-        end
-
         account_name =
           (@lead.respond_to?(:name) && @lead.name.present?) ? @lead.name :
           [@lead.try(:first_name), @lead.try(:last_name)].compact.join(' ').presence ||
           "Lead #{@lead.id}"
 
-        cols = Account.column_names
-        attrs = {}
-        attrs[:name]     = account_name      if cols.include?('name')
-        attrs[:email]    = @lead.try(:email) if cols.include?('email')
-        attrs[:phone]    = @lead.try(:phone) if cols.include?('phone')
-        attrs[:lead_id]  = @lead.id          if cols.include?('lead_id')
-        attrs[:metadata] = {}                if cols.include?('metadata')
+        account = Account.create!(
+          name:     account_name,
+          email:    @lead.try(:email),
+          phone:    @lead.try(:phone),
+          lead_id:  @lead.id,
+          metadata: {}
+        )
 
-        account = Account.create!(attrs)
-
+        # mark lead converted (no user_id used anywhere)
         updates = { converted_account_id: account.id }
         updates[:status] = 'converted' if @lead.respond_to?(:status)
         @lead.update!(updates)
 
+        # log a status-change activity
         Activity.create!(
           lead_id:       @lead.id,
           activity_type: 'status_change',
-          description:   "Converted to account ##{account.id} (#{account.try(:name) || account.id})",
+          description:   "Converted to account ##{account.id} (#{account.name})",
           metadata:      {}
         )
 
