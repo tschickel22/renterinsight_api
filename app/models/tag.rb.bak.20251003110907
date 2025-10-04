@@ -1,3 +1,0 @@
-class Tag < ApplicationRecord; belongs_to :company; end
-
-scope :active, -> { where(is_active: [true, nil]) }
