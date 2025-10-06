@@ -1,42 +1,25 @@
-# app/controllers/api/crm/activities_controller.rb
 # frozen_string_literal: true
-
 module Api
   module Crm
     class ActivitiesController < ApplicationController
       before_action :set_lead
-      skip_before_action :verify_authenticity_token, raise: false
 
       # GET /api/crm/leads/:lead_id/activities
       def index
         activities = @lead.activities.order(created_at: :desc)
-        render json: activities, each_serializer: ActivitySerializer, status: :ok
+        render json: activities.map { |a| activity_json(a) }, status: :ok
       end
 
       # POST /api/crm/leads/:lead_id/activities
-      # Accepts either:
-      # - { activity: { activity_type|type|kind|category, description, ... } }
-      # - { activity_type|type|kind|category, description, ... }
       def create
-        raw   = fetch_payload # symbolized, filtered
-        atype = normalize_activity_type(raw)
-
-        attrs = {
-          activity_type:  atype,
-          description:    coalesce(raw[:description], raw[:notes]),
-          outcome:        raw[:outcome],
-          duration:       raw[:duration],
-          scheduled_date: parse_time(coalesce(raw[:scheduled_date], raw[:scheduledDate], raw[:due_date], raw[:dueDate])),
-          occurred_at:    parse_time(coalesce(raw[:performed_at], raw[:performedAt], raw[:occurred_at], raw[:occurredAt])),
-          priority:       raw[:priority],
-          user_id:        normalize_user_id(raw[:user_id]) || current_user&.id || 1,
-          metadata:       raw[:metadata].is_a?(Hash) ? raw[:metadata] : {}
-        }.compact
-
+        attrs = normalize_activity_params
         activity = @lead.activities.new(attrs)
 
+        # Default the user when FE passes placeholder/current-user
+        activity.user_id ||= (current_user&.id || 1)
+
         if activity.save
-          render json: activity, serializer: ActivitySerializer, status: :created
+          render json: activity_json(activity), status: :created
         else
           render json: { errors: activity.errors.full_messages }, status: :unprocessable_entity
         end
@@ -48,51 +31,73 @@ module Api
         @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
-      # -------- payload handling --------
+      # Strong params (nested form)
+      def activity_params_nested
+        params.require(:activity).permit(
+          :activity_type, :type, :title, :subject,
+          :description, :notes, :outcome, :duration,
+          :scheduled_date, :scheduledDate,
+          :performed_at, :performedAt,
+          :occurred_at, :occurredAt,
+          :due_date, :dueDate,
+          :priority, :user_id,
+          metadata: {}
+        )
+      end
 
-      # Build a safe, symbolized hash from either nested or root JSON.
-      # NOTE: we never pass :type to the model to avoid STI.
-      def fetch_payload
-        if params[:activity].present?
-          permitted = params.require(:activity).permit(
-            :activity_type, :type, :kind, :category,
-            :title, :subject,
-            :description, :notes, :outcome,
-            :duration,
+      # Handle both nested and root shapes safely
+      def normalize_activity_params
+        raw = if params[:activity].present?
+          activity_params_nested.to_h
+        else
+          # root-level payload; permit everything then slice what we need
+          ActionController::Parameters.new(params.to_unsafe_h).permit(
+            :activity_type, :type, :title, :subject,
+            :description, :notes, :outcome, :duration,
             :scheduled_date, :scheduledDate,
             :performed_at, :performedAt,
             :occurred_at, :occurredAt,
             :due_date, :dueDate,
             :priority, :user_id,
             metadata: {}
-          )
-          permitted.to_h.deep_symbolize_keys
-        else
-          permitted = ActionController::Parameters
-                        .new(params.to_unsafe_h)
-                        .permit(
-                          :activity_type, :type, :kind, :category,
-                          :title, :subject,
-                          :description, :notes, :outcome,
-                          :duration,
-                          :scheduled_date, :scheduledDate,
-                          :performed_at, :performedAt,
-                          :occurred_at, :occurredAt,
-                          :due_date, :dueDate,
-                          :priority, :user_id,
-                          metadata: {}
-                        )
-          permitted.to_h.deep_symbolize_keys
+          ).to_h
         end
-      end
 
-      def coalesce(*vals)
-        vals.find { |v| v.present? }
+        atype =
+          raw[:activity_type].presence ||
+          raw[:type].presence
+
+        desc =
+          raw[:description].presence ||
+          raw[:notes].presence
+
+        occurred =
+          parse_time(raw[:performed_at]) ||
+          parse_time(raw[:performedAt]) ||
+          parse_time(raw[:occurred_at]) ||
+          parse_time(raw[:occurredAt])
+
+        scheduled =
+          parse_time(raw[:scheduled_date]) ||
+          parse_time(raw[:scheduledDate]) ||
+          parse_time(raw[:due_date]) ||
+          parse_time(raw[:dueDate])
+
+        {
+          activity_type: atype,
+          description:   desc,
+          outcome:       raw[:outcome],
+          duration:      raw[:duration],
+          scheduled_date: scheduled,
+          occurred_at:    occurred,
+          priority:      raw[:priority],
+          user_id:       normalize_user_id(raw[:user_id]),
+          metadata:      (raw[:metadata].presence || {})
+        }.compact
       end
 
       def parse_time(v)
-        return nil if v.blank?
-        Time.zone.parse(v.to_s)
+        Time.zone.parse(v.to_s) if v.present?
       rescue
         nil
       end
@@ -100,50 +105,26 @@ module Api
       def normalize_user_id(v)
         s = v.to_s
         return nil if s.blank? || s == 'current-user'
-        s =~ /\A\d+\z/ ? s.to_i : nil
+        (s =~ /^\d+$/) ? s.to_i : nil
       end
 
-      # -------- type normalization --------
-      #
-      # Your model allows (from your runner output):
-      # call, email, meeting, note, status_change, form_submission,
-      # website_visit, sms, nurture_email, ai_suggestion
-      #
-      # We’ll:
-      # 1) read from activity_type|type|kind|category,
-      # 2) downcase & alias common variants,
-      # 3) if still invalid/blank → fallback to the first allowed option.
-      #
-      def normalize_activity_type(raw)
-        incoming = coalesce(raw[:activity_type], raw[:type], raw[:kind], raw[:category]).to_s.strip.downcase
-
-        # simple alias map for common UI synonyms
-        aliases = {
-          'notes' => 'note',
-          'phone' => 'call',
-          'text'  => 'sms',
-          'im'    => 'sms',
-          'ai'    => 'ai_suggestion',
-          'nurture' => 'nurture_email'
-        }
-        incoming = aliases[incoming] || incoming
-
-        allowed = allowed_activity_types
-        return incoming if allowed.include?(incoming)
-
-        # Final fallback prevents 422s when FE sends odd values
-        allowed.first || 'note'
-      end
-
-      def allowed_activity_types
-        @allowed_activity_types ||= begin
-          if Activity.respond_to?(:defined_enums) && Activity.defined_enums['activity_type']
-            Activity.defined_enums['activity_type'].keys
-          else
-            inc = Activity.validators_on(:activity_type).map { |v| v.options[:in] }.compact.flatten.uniq
-            inc.presence || %w[call email meeting note status_change form_submission website_visit sms nurture_email ai_suggestion]
-          end
-        end
+      # Consistent JSON serialization
+      def activity_json(activity)
+        {
+          id: activity.id,
+          leadId: activity.lead_id,
+          userId: activity.user_id,
+          type: activity.activity_type,
+          description: activity.description,
+          outcome: activity.outcome,
+          duration: activity.duration,
+          scheduledDate: activity.scheduled_date&.iso8601,
+          occurredAt: activity.occurred_at&.iso8601,
+          priority: activity.priority,
+          metadata: activity.metadata || {},
+          createdAt: activity.created_at&.iso8601,
+          updatedAt: activity.updated_at&.iso8601
+        }.compact
       end
     end
   end
