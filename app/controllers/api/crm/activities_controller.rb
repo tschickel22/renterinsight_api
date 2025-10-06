@@ -33,12 +33,12 @@ module Api
         raw = if params[:activity].present?
           params.require(:activity).permit(
             :activity_type, :type, :description, :outcome, :duration,
-            :scheduled_date, :user_id, metadata: {}
+            :scheduled_date, :completed_date, :user_id, metadata: {}
           ).to_h
         else
           params.permit(
             :activity_type, :type, :description, :outcome, :duration,
-            :scheduled_date, :user_id, metadata: {}
+            :scheduled_date, :completed_date, :user_id, metadata: {}
           ).to_h
         end
 
@@ -50,6 +50,7 @@ module Api
           outcome: raw[:outcome],
           duration: raw[:duration],
           scheduled_date: raw[:scheduled_date],
+          completed_date: raw[:completed_date],
           user_id: raw[:user_id],
           metadata: (raw[:metadata].presence || {})
         }.compact
@@ -65,6 +66,7 @@ module Api
           outcome: activity.outcome,
           duration: activity.duration,
           scheduledDate: activity.scheduled_date&.iso8601,
+          completedDate: activity.completed_date&.iso8601,
           metadata: activity.metadata || {},
           createdAt: activity.created_at&.iso8601,
           updatedAt: activity.updated_at&.iso8601
