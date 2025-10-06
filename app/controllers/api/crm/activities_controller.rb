@@ -11,11 +11,8 @@ module Api
       end
 
       # POST /api/crm/leads/:lead_id/activities
-      # Accepts either payload style:
-      # 1) { "activity": { "type": "...", "description": "...", "metadata": {...} } }
-      # 2) { "type": "...", "description": "...", "metadata": {...} }
       def create
-        attrs = activity_params.presence || root_activity_params
+        attrs = activity_params
         @activity = @lead.activities.new(attrs)
 
         if @activity.save
@@ -31,16 +28,16 @@ module Api
         @lead = Lead.find(params[:lead_id])
       end
 
-      # Nested payload: { activity: { ... } }
       def activity_params
-        params.require(:activity).permit(:type, :description, metadata: {})
-      rescue ActionController::ParameterMissing
-        nil
-      end
-
-      # Root payload: { type, description, metadata }
-      def root_activity_params
-        params.permit(:type, :description, metadata: {})
+        params.require(:activity).permit(
+          :activity_type,
+          :description,
+          :outcome,
+          :duration,
+          :scheduled_date,
+          :user_id,
+          metadata: {}
+        )
       end
     end
   end
