@@ -1,0 +1,83 @@
+# frozen_string_literal: true
+
+module Api
+  module Crm
+    class ActivitiesController < ApplicationController
+      before_action :set_lead
+
+      # GET /api/crm/leads/:lead_id/activities
+      def index
+        activities = Activity.where(lead_id: @lead.id).order(created_at: :desc)
+        render json: activities.map { |a| activity_json(a) }
+      end
+
+      # POST /api/crm/leads/:lead_id/activities
+      # Accepts either:
+      #   { "activity": { "type": "call", "description": "..." } }
+      #   { "type": "call", "description": "..." }
+      def create
+        # Strong-params for both shapes
+        root   = params.permit(:type, :description, :outcome, :duration, :scheduled_date, :completed_date, metadata: {})
+        nested = params[:activity].is_a?(ActionController::Parameters) ?
+                   params.require(:activity).permit(:type, :description, :outcome, :duration, :scheduled_date, :completed_date, metadata: {}) :
+                   {}
+
+        # Merge then normalize to indifferent-access so :key and "key" both work
+        payload = root.to_h.merge(nested.to_h).with_indifferent_access
+
+        # If both present, prefer the one that actually contains :type
+        payload[:type] = nested[:type] if nested.is_a?(ActionController::Parameters) && nested[:type].present?
+
+        attrs = extract_attrs(payload)
+
+        Rails.logger.info("[Activities#create] parsed=#{attrs.inspect}")
+
+        if attrs[:activity_type].blank?
+          return render json: { errors: ["Activity type can't be blank"] }, status: :unprocessable_entity
+        end
+
+        # Build explicitly (do not rely on @lead.activities / do not set user_id)
+        activity = Activity.new({ lead_id: @lead.id }.merge(attrs))
+
+        if activity.save
+          render json: activity_json(activity), status: :created
+        else
+          render json: { errors: activity.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      private
+
+      def set_lead
+        @lead = Lead.find(params[:lead_id] || params[:id])
+      end
+
+      # Map :type => :activity_type, coerce metadata to a Hash, whitelist fields
+      def extract_attrs(h) # h is indifferent-access
+        out = {}
+        type = h[:type] || h[:activity_type]
+        out[:activity_type]  = type.to_s if type.present?
+        out[:description]    = h[:description].to_s if h.key?(:description)
+        out[:outcome]        = h[:outcome] if h.key?(:outcome)
+        out[:duration]       = h[:duration] if h.key?(:duration)
+        out[:scheduled_date] = h[:scheduled_date] if h.key?(:scheduled_date)
+        out[:completed_date] = h[:completed_date] if h.key?(:completed_date)
+        md = h[:metadata]
+        out[:metadata]       = md.is_a?(Hash) ? md : {}
+        out
+      end
+
+      def activity_json(a)
+        {
+          id:          a.id,
+          leadId:      a.lead_id,
+          type:        a.activity_type,
+          description: a.description,
+          metadata:    a.metadata || {},
+          createdAt:   a.created_at&.iso8601,
+          updatedAt:   a.updated_at&.iso8601
+        }
+      end
+    end
+  end
+end

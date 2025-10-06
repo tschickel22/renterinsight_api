@@ -3,36 +3,41 @@
 Rails.application.routes.draw do
   namespace :api do
     namespace :crm do
-      # Sources
-      resources :sources, only: [:index, :create, :update, :destroy] do
-
-        get :stats, on: :member
+      resources :leads, only: [:index, :show, :create, :update] do
+        resources :activities, only: [:index, :create]
+        resources :ai_insights, only: [:index]
+        resources :reminders, only: [:index, :create, :destroy] do
+          member { post :complete }
+        end
+        resources :communications, only: [:index] do
+          collection do
+            post :send_email
+            post :send_sms
+            post :create_log
+          end
+        end
+        member do
+          get  :score
+          post :score, action: :recalculate_score
+          post :convert
+        end
+        # Lead-scoped tags (FE uses these)
+        get    'tags',         to: 'tags#entity_tags_for_lead'
+        post   'tags',         to: 'tags#assign_to_lead'
+        delete 'tags/:tag_id', to: 'tags#remove_from_lead'
       end
 
-      # Leads
-      resources :leads, only: [:index, :create, :update, :destroy] do
-          member { post :notes }
-        end
-
-      # Nurture
-      namespace :nurture do
-        # Sequences (CRUD + bulk)
-        resources :sequences, only: [:index, :create, :update, :destroy] do
-          collection { post :bulk }
-          # Steps (keep if you use the nested StepsController)
-          resources :steps, only: [:index, :create, :update, :destroy]
-        end
-
-        # Enrollments (index + bulk)
-        resources :enrollments, only: [:index] do
-          collection { post :bulk }
-        end
-
-        # Templates (index + bulk)
-        resources :templates, only: [:index] do
-          collection { post :bulk }
+      # Tag catalog + generic helpers
+      resources :tags, only: [:index, :create, :update, :destroy] do
+        collection do
+          post :assign
+          get  'entity/:entity_type/:entity_id', to: 'tags#entity_tags'
         end
       end
+      delete 'tags/assignments/:id', to: 'tags#remove_assignment'
+
+      # Sources needed by Overview
+      resources :sources, only: [:index, :create, :update]
     end
   end
 end
