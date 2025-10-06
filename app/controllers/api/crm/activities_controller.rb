@@ -7,87 +7,94 @@ module Api
       # GET /api/crm/leads/:lead_id/activities
       def index
         activities = @lead.activities.order(created_at: :desc)
-        render json: activities, each_serializer: ActivitySerializer
+        render json: activities, each_serializer: ActivitySerializer, status: :ok
       end
 
       # POST /api/crm/leads/:lead_id/activities
-      # Accepts flexible input; maps camelCase/snake_case and common aliases
-      # to your DB columns without changing response shape.
+      # Accepts nested {activity:{...}} OR root payload {type,description,metadata}
+      # Permits flexible aliases and persists reliably.
       def create
         attrs = normalize_activity_params
-        @activity = @lead.activities.new(attrs)
+        activity = @lead.activities.new(attrs)
 
-        # Default user if FE sends placeholder
-        if @activity.user_id.blank? || @activity.user_id.to_s == 'current-user'
-          @activity.user_id = current_user&.id || 1
-        end
+        # Default the user when FE passes placeholder/current-user
+        activity.user_id ||= (current_user&.id || 1)
 
-        if @activity.save
-          render json: @activity, serializer: ActivitySerializer, status: :created
+        if activity.save
+          render json: activity, serializer: ActivitySerializer, status: :created
         else
-          render json: { errors: @activity.errors.full_messages }, status: :unprocessable_entity
+          render json: { errors: activity.errors.full_messages }, status: :unprocessable_entity
         end
       end
 
       private
 
       def set_lead
-        @lead = Lead.find(params[:lead_id])
+        @lead = Lead.find(params[:lead_id] || params[:id])
       end
 
-      # Keep your strong params but allow typical FE variations.
-      def activity_params
+      # Strong params (nested form)
+      def activity_params_nested
         params.require(:activity).permit(
           :activity_type, :type, :title, :subject,
-          :description, :notes, :outcome,
-          :duration,
+          :description, :notes, :outcome, :duration,
           :scheduled_date, :scheduledDate,
           :performed_at, :performedAt,
           :occurred_at, :occurredAt,
           :due_date, :dueDate,
-          :priority,
-          :user_id,
+          :priority, :user_id,
           metadata: {}
         )
       end
 
-      # Map flexible input to the exact DB columns your model expects.
+      # Handle both nested and root shapes safely
       def normalize_activity_params
-        p = activity_params
+        raw = if params[:activity].present?
+          activity_params_nested.to_h
+        else
+          # root-level payload; permit everything then slice what we need
+          ActionController::Parameters.new(params.to_unsafe_h).permit(
+            :activity_type, :type, :title, :subject,
+            :description, :notes, :outcome, :duration,
+            :scheduled_date, :scheduledDate,
+            :performed_at, :performedAt,
+            :occurred_at, :occurredAt,
+            :due_date, :dueDate,
+            :priority, :user_id,
+            metadata: {}
+          ).to_h
+        end
 
-        # Activity type: prefer activity_type, then type (string), then subject/title as fallback
         atype =
-          p[:activity_type].presence ||
-          p[:type].presence ||
-          nil
+          raw[:activity_type].presence ||
+          raw[:type].presence
 
-        # When FE sends separate subject/title/notes, keep description primary
         desc =
-          p[:description].presence ||
-          p[:notes].presence
+          raw[:description].presence ||
+          raw[:notes].presence
 
-        # Choose a single timestamp field (keep your column names):
         occurred =
-          parse_time(p[:performed_at]) ||
-          parse_time(p[:performedAt]) ||
-          parse_time(p[:occurred_at]) ||
-          parse_time(p[:occurredAt])
+          parse_time(raw[:performed_at]) ||
+          parse_time(raw[:performedAt]) ||
+          parse_time(raw[:occurred_at]) ||
+          parse_time(raw[:occurredAt])
 
         scheduled =
-          parse_time(p[:scheduled_date]) ||
-          parse_time(p[:scheduledDate]) ||
-          parse_time(p[:due_date]) ||
-          parse_time(p[:dueDate])
+          parse_time(raw[:scheduled_date]) ||
+          parse_time(raw[:scheduledDate]) ||
+          parse_time(raw[:due_date]) ||
+          parse_time(raw[:dueDate])
 
         {
           activity_type: atype,
           description:   desc,
-          outcome:       p[:outcome],
-          duration:      p[:duration],
-          scheduled_date: scheduled,     # keep your column
-          occurred_at:    occurred,      # if your model has it; harmless if ignored by strong-attrs
-          user_id:       normalize_user_id(p[:user_id]),
-          metadata:      p[:metadata].presence || {}
+          outcome:       raw[:outcome],
+          duration:      raw[:duration],
+          scheduled_date: scheduled,
+          occurred_at:    occurred,
+          priority:      raw[:priority],
+          user_id:       normalize_user_id(raw[:user_id]),
+          metadata:      (raw[:metadata].presence || {})
         }.compact
       end
 
@@ -100,7 +107,7 @@ module Api
       def normalize_user_id(v)
         s = v.to_s
         return nil if s.blank? || s == 'current-user'
-        s =~ /^\d+$/ ? s.to_i : nil
+        (s =~ /^\d+$/) ? s.to_i : nil
       end
     end
   end
