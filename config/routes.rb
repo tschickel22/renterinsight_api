@@ -1,55 +1,13 @@
 # frozen_string_literal: true
 Rails.application.routes.draw do
+  # Health check
+  get 'up', to: 'rails/health#show', as: :rails_health_check
+
+  # Root
+  root to: proc { [200, {}, ['Renter Insight API']] }
+
   namespace :api, defaults: { format: :json } do
     namespace :crm do
-      # ==================== LEADS ====================
-      resources :leads, only: %i[index show create update destroy] do
-        member do
-          post :notes
-          post :convert, to: 'lead_conversions#convert'
-          get  :score, to: 'lead_scores#show'
-          post 'score/calculate', to: 'lead_scores#calculate'
-        end
-
-        # Activities
-        resources :activities, only: %i[index create]
-
-        # AI Insights
-        resources :ai_insights, only: %i[index] do
-          collection { post :generate }
-        end
-        # Alternative hyphenated route for AI Insights
-        get  'ai-insights', to: 'ai_insights#index'
-        post 'ai-insights/generate', to: 'ai_insights#generate'
-
-        # Communications
-        resources :communications, only: %i[index create] do
-          collection do
-            post :send_email
-            post :send_sms
-          end
-        end
-        # Alternative routes for communications
-        post 'communications/email', to: 'communications#send_email'
-        post 'communications/sms', to: 'communications#send_sms'
-
-        # Reminders
-        resources :reminders, only: %i[index create destroy] do
-          member do
-            post :complete
-            patch :complete
-          end
-        end
-
-        # Lead Tasks
-        resources :tasks, only: %i[create update destroy], controller: 'lead_tasks'
-
-        # Lead-scoped tags
-        get    'tags', to: 'tags#entity_tags_for_lead'
-        post   'tags', to: 'tags#assign_to_lead'
-        delete 'tags/:tag_id', to: 'tags#remove_from_lead'
-      end
-
       # ==================== SOURCES ====================
       resources :sources, only: %i[index create update destroy] do
         member { get :stats }
@@ -72,20 +30,74 @@ Rails.application.routes.draw do
 
       # ==================== REMINDERS (Non-Lead-Scoped) ====================
       resources :reminders, only: [] do
-        member { patch :complete }
+        member do
+          post :complete
+          patch :complete
+        end
       end
 
       # ==================== LEAD SCORES ====================
       resources :lead_scores, only: [] do
-        member do
-          get :show
-          post :calculate
+        collection do
+          get ':lead_id', to: 'lead_scores#show'
+          post ':lead_id/calculate', to: 'lead_scores#calculate'
         end
       end
 
-      # ==================== LEAD CONVERSIONS ====================
-      resources :lead_conversions, only: [] do
-        member { post :convert }
+      # ==================== LEADS ====================
+      resources :leads, only: %i[index show create update destroy] do
+        # Member routes (actions on specific lead)
+        member do
+          # Notes
+          post :notes
+          
+          # Conversion
+          post :convert, to: 'lead_conversions#convert'
+          
+          # Scoring
+          get :score, to: 'lead_scores#show'
+          post 'score/calculate', to: 'lead_scores#calculate'
+        end
+
+        # Nested resources
+        
+        # Activities
+        resources :activities, only: %i[index create]
+
+        # Communications
+        resources :communications, only: %i[index create] do
+          collection do
+            post :send_email
+            post :send_sms
+          end
+        end
+        # Alternative communication routes
+        post 'communications/email', to: 'communications#send_email'
+        post 'communications/sms', to: 'communications#send_sms'
+
+        # AI Insights
+        resources :ai_insights, only: %i[index] do
+          collection { post :generate }
+        end
+        # Alternative hyphenated routes for AI Insights
+        get 'ai-insights', to: 'ai_insights#index'
+        post 'ai-insights/generate', to: 'ai_insights#generate'
+
+        # Reminders
+        resources :reminders, only: %i[index create destroy] do
+          member do
+            post :complete
+            patch :complete
+          end
+        end
+
+        # Tasks
+        resources :tasks, only: %i[create update destroy], controller: 'lead_tasks'
+
+        # Tags (lead-scoped)
+        get 'tags', to: 'tags#entity_tags_for_lead'
+        post 'tags', to: 'tags#assign_to_lead'
+        delete 'tags/:tag_id', to: 'tags#remove_from_lead'
       end
 
       # ==================== NURTURE ====================
@@ -95,11 +107,11 @@ Rails.application.routes.draw do
           resources :steps, only: %i[index create update destroy]
         end
 
-        resources :enrollments, only: %i[index] do
+        resources :enrollments, only: %i[index create update destroy] do
           collection { post :bulk }
         end
 
-        resources :templates, only: %i[index] do
+        resources :templates, only: %i[index create update destroy] do
           collection { post :bulk }
         end
       end
@@ -110,7 +122,7 @@ Rails.application.routes.draw do
           collection { post :bulk }
         end
 
-        resources :submissions, only: %i[index create] do
+        resources :submissions, only: %i[index create destroy] do
           collection { post :bulk }
         end
       end
@@ -126,10 +138,4 @@ Rails.application.routes.draw do
       resource :settings, only: %i[show update]
     end
   end
-
-  # ==================== HEALTH CHECK ====================
-  get 'up', to: 'rails/health#show', as: :rails_health_check
-
-  # ==================== ROOT ====================
-  root to: proc { [200, {}, ['Renter Insight API']] }
 end
