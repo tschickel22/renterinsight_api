@@ -1,20 +1,39 @@
 # frozen_string_literal: true
-
 module Api
   module Crm
     class RemindersController < ApplicationController
       before_action :set_lead, only: [:index, :create]
       before_action :set_reminder, only: [:complete, :destroy]
 
+      # GET /api/crm/leads/:lead_id/reminders
       def index
         reminders = @lead.reminders.order(due_date: :asc)
-        render json: reminders.map { |r| reminder_json(r) }
+        render json: reminders.map { |r| reminder_json(r) }, status: :ok
       end
 
+      # POST /api/crm/leads/:lead_id/reminders
+      # Accepts flexible shapes: type/reminder_type, due_date/dueDate, etc.
       def create
-        reminder = @lead.reminders.build(reminder_params)
-        # Keep your existing default; accept FE placeholder gracefully
-        reminder.user_id = normalize_user_id(params.dig(:reminder, :user_id)) || current_user&.id || 1
+        raw = params[:reminder].presence || params.permit!.to_h
+        permitted = ActionController::Parameters.new(raw).permit(
+          :type, :reminder_type, :title, :description, :due_date, :dueDate, :priority, :user_id,
+          :lead_id, :is_completed, :isCompleted, :completed_at
+        )
+
+        rtype = permitted[:reminder_type].presence || permitted[:type].presence
+        due =
+          parse_time(permitted[:due_date]) ||
+          parse_time(permitted[:dueDate])
+
+        reminder = @lead.reminders.build(
+          reminder_type: rtype,
+          title:         permitted[:title],
+          description:   permitted[:description],
+          due_date:      due || (Time.current + 1.day),
+          priority:      (permitted[:priority].presence || 'medium'),
+          is_completed:  truthy?(permitted[:is_completed]) || truthy?(permitted[:isCompleted]),
+          user_id:       normalize_user_id(permitted[:user_id]) || current_user&.id || 1
+        )
 
         if reminder.save
           render json: reminder_json(reminder), status: :created
@@ -23,11 +42,13 @@ module Api
         end
       end
 
+      # PATCH /api/crm/reminders/:id/complete
       def complete
         @reminder.update!(is_completed: true, completed_at: Time.current)
-        render json: reminder_json(@reminder)
+        render json: reminder_json(@reminder), status: :ok
       end
 
+      # DELETE /api/crm/leads/:lead_id/reminders/:id
       def destroy
         @reminder.destroy!
         head :no_content
@@ -43,39 +64,6 @@ module Api
         @reminder = Reminder.find(params[:id])
       end
 
-      # ---- Key change: accept both :type and :reminder_type from FE ----
-      # Also accept camelCase aliases safely, parse due_date, and keep your
-      # JSON/DB shape (reminder_type column).
-      def reminder_params
-        raw = params.require(:reminder).permit(
-          :type, :reminder_type, :title, :description, :due_date, :priority, :user_id,
-          :lead_id, :is_completed, :completed_at,
-          # camelCase fallbacks if FE ever sends them
-          :reminderType, :dueDate, :isCompleted
-        )
-
-        # prefer explicit reminder_type, then type, then camelCase
-        rtype = raw[:reminder_type].presence || raw[:type].presence || raw[:reminderType].presence
-
-        parsed_due =
-          if raw[:due_date].present?
-            safe_parse_time(raw[:due_date])
-          elsif raw[:dueDate].present?
-            safe_parse_time(raw[:dueDate])
-          else
-            nil
-          end
-
-        {
-          reminder_type: rtype,                                             # <— NOT NULL on DB
-          title:         raw[:title],
-          description:   raw[:description],
-          due_date:      parsed_due || (Time.current + 1.day),
-          priority:      raw[:priority].presence || 'medium',
-          is_completed:  truthy?(raw[:is_completed]) || truthy?(raw[:isCompleted])
-        }.compact
-      end
-
       def reminder_json(reminder)
         {
           id:          reminder.id,
@@ -89,11 +77,11 @@ module Api
           priority:    reminder.priority,
           createdAt:   reminder.created_at,
           updatedAt:   reminder.updated_at
-        }.compact
+        }
       end
 
-      def safe_parse_time(v)
-        Time.zone.parse(v.to_s)
+      def parse_time(v)
+        Time.zone.parse(v.to_s) if v.present?
       rescue
         nil
       end
@@ -105,7 +93,7 @@ module Api
       def normalize_user_id(v)
         s = v.to_s
         return nil if s.blank? || s == 'current-user'
-        s =~ /^\d+$/ ? s.to_i : nil
+        (s =~ /^\d+$/) ? s.to_i : nil
       end
     end
   end
