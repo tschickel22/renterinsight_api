@@ -1,10 +1,11 @@
+# frozen_string_literal: true
 class Api::Crm::Nurture::TemplatesController < ApplicationController
   # GET /api/crm/nurture/templates
   def index
     templates = Template.order(:id)
     render json: templates.as_json(
-      only: [:id, :name, :template_type, :subject, :body, :is_active, :created_at, :updated_at]
-    )
+      only: %i[id name template_type subject body is_active created_at updated_at]
+    ), status: :ok
   end
 
   # POST /api/crm/nurture/templates/bulk
@@ -22,24 +23,30 @@ class Api::Crm::Nurture::TemplatesController < ApplicationController
       end
       Template.where(id: deletes).delete_all if deletes.present?
     end
+
     head :no_content
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: 'validation_failed', messages: e.record&.errors&.full_messages || [e.message] },
+           status: :unprocessable_entity
+  rescue => e
+    render json: { error: 'server_error', message: e.message }, status: :internal_server_error
   end
 
   private
 
   def bulk_params
     # tolerate either root params or a (possibly empty) :template wrapper
-    if params.key?(:template) && params[:template].present?
-      params.require(:template).permit(
-        { delete: [] },
-        upsert: [:id, :name, :template_type, :channel, :subject, :body, :is_active]
-      )
-    else
-      params.permit(
-        { delete: [] },
-        upsert: [:id, :name, :template_type, :channel, :subject, :body, :is_active]
-      )
-    end
+    root =
+      if params.key?(:template) && params[:template].present?
+        params.require(:template)
+      else
+        params
+      end
+
+    root.permit(
+      { delete: [] },
+      upsert: %i[id name template_type channel subject body is_active]
+    )
   end
 
   def normalize_template_attrs(h)
