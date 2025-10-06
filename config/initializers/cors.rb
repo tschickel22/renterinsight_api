@@ -6,9 +6,9 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     origins %r{\Ahttp://localhost:\d+\z}, %r{\Ahttp://127\.0\.0\.1:\d+\z}
 
     resource '/api/*',
-      headers: :any,
-      methods: [:get, :post, :patch, :put, :delete, :options],
-      credentials: true,
-      expose: ['Content-Type']
+             headers: :any,
+             methods: %i[get post patch put delete options head],
+             credentials: true,
+             expose: ['Content-Type']
   end
 end
