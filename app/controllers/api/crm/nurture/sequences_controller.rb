@@ -1,48 +1,65 @@
+# frozen_string_literal: true
 class Api::Crm::Nurture::SequencesController < ApplicationController
+  # GET /api/crm/nurture/sequences
   def index
     sequences = NurtureSequence.order(:id).includes(:nurture_steps)
     render json: sequences.as_json(
-      only: [:id, :name, :description, :is_active, :created_at, :updated_at],
-      include: { nurture_steps: { only: [:id, :step_type, :position, :wait_days, :subject, :body, :template_id, :created_at, :updated_at] } }
-    )
+      only: %i[id name description is_active created_at updated_at],
+      include: {
+        nurture_steps: {
+          only: %i[id step_type position wait_days subject body template_id created_at updated_at]
+        }
+      }
+    ), status: :ok
   end
 
+  # POST /api/crm/nurture/sequences
   def create
     seq = nil
     ActiveRecord::Base.transaction do
-      seq = NurtureSequence.create!(create_params.slice(:name, :description, :is_active))
-      Array(create_params[:steps]).each { |st| seq.nurture_steps.create!(step_attrs(st)) }
+      attrs = create_params
+      seq = NurtureSequence.create!(attrs.slice(:name, :description, :is_active))
+      Array(attrs[:steps]).each { |st| seq.nurture_steps.create!(step_attrs(st)) }
     end
+
     render json: seq.as_json(
-      only: [:id, :name, :description, :is_active, :created_at, :updated_at],
-      include: { nurture_steps: { only: [:id, :step_type, :position, :wait_days, :subject, :body, :template_id] } }
+      only: %i[id name description is_active created_at updated_at],
+      include: { nurture_steps: { only: %i[id step_type position wait_days subject body template_id] } }
     ), status: :created
   end
 
+  # PATCH/PUT /api/crm/nurture/sequences/:id
   def update
     seq = NurtureSequence.find(params[:id])
+
     ActiveRecord::Base.transaction do
-      seq.update!(create_params.slice(:name, :description, :is_active))
-      if create_params.key?(:steps)
+      attrs = update_params
+      seq.update!(attrs.slice(:name, :description, :is_active))
+      if attrs.key?(:steps)
+        # replace steps to keep ordering & deletions simple
         seq.nurture_steps.delete_all
-        Array(create_params[:steps]).each { |st| seq.nurture_steps.create!(step_attrs(st)) }
+        Array(attrs[:steps]).each { |st| seq.nurture_steps.create!(step_attrs(st)) }
       end
     end
+
     render json: seq.as_json(
-      only: [:id, :name, :description, :is_active, :created_at, :updated_at],
-      include: { nurture_steps: { only: [:id, :step_type, :position, :wait_days, :subject, :body, :template_id] } }
-    )
+      only: %i[id name description is_active created_at updated_at],
+      include: { nurture_steps: { only: %i[id step_type position wait_days subject body template_id] } }
+    ), status: :ok
   end
 
+  # DELETE /api/crm/nurture/sequences/:id
   def destroy
     seq = NurtureSequence.find_by(id: params[:id])
     return head :not_found unless seq
-    # use destroy to honor dependent: :destroy hooks and FKs
+
+    # use destroy to honor dependent hooks
     seq.destroy!
     head :no_content
   end
 
-  # { upsert:[{id?, name, description?, is_active, steps:[...]}], delete:[ids] }
+  # POST /api/crm/nurture/sequences/bulk
+  # Body: { upsert:[{id?, name, description?, is_active, steps:[...]}], delete:[ids] }
   def bulk
     payload = bulk_params
     upsert  = Array(payload[:upsert]).map { |h| h.to_h.symbolize_keys }
@@ -61,25 +78,32 @@ class Api::Crm::Nurture::SequencesController < ApplicationController
       end
       NurtureSequence.where(id: deletes).destroy_all if deletes.present?
     end
+
     head :no_content
   end
 
   private
 
+  # Accept root or nested (:sequence) payloads
+  def base_params
+    params[:sequence].is_a?(ActionController::Parameters) ? params.require(:sequence) : params
+  end
+
   def create_params
-    base = params[:sequence].is_a?(ActionController::Parameters) ? params.require(:sequence) : params
-    base.permit(:name, :description, :is_active,
-      steps: [:step_type, :position, :wait_days, :subject, :body, :template_id])
+    base_params.permit(
+      :name, :description, :is_active,
+      steps: %i[step_type position wait_days subject body template_id]
+    )
   end
   alias update_params create_params
 
   def bulk_params
-    base = params[:sequence].is_a?(ActionController::Parameters) ? params.require(:sequence) : params
+    base = base_params
     base.permit(
       { delete: [] },
       upsert: [
         :id, :name, :description, :is_active,
-        { steps: [:step_type, :position, :wait_days, :subject, :body, :template_id] }
+        { steps: %i[step_type position wait_days subject body template_id] }
       ]
     )
   end
