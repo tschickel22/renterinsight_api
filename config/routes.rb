@@ -1,11 +1,12 @@
 # frozen_string_literal: true
+
 Rails.application.routes.draw do
-  namespace :api do
+  namespace :api, defaults: { format: :json } do
     namespace :crm do
-      resources :leads, only: [:index, :show, :create, :update] do
-        resources :activities,  only: [:index, :create]
-        resources :ai_insights, only: [:index]
-        resources :reminders,   only: [:index, :create, :destroy] do
+      resources :leads, only: %i[index show create update] do
+        resources :activities,  only: %i[index create]
+        resources :ai_insights, only: %i[index]
+        resources :reminders,   only: %i[index create destroy] do
           member { post :complete }
         end
 
@@ -16,7 +17,7 @@ Rails.application.routes.draw do
       end
 
       # Tag catalog + helpers
-      resources :tags, only: [:index, :create, :update, :destroy] do
+      resources :tags, only: %i[index create update destroy] do
         collection do
           post :assign
           get  'entity/:entity_type/:entity_id', to: 'tags#entity_tags'
@@ -29,21 +30,21 @@ Rails.application.routes.draw do
         member { patch :complete }
       end
 
-      # ---------- Nurture namespace (to match FE calls) ----------
+      # -------- Nurture namespace (to match FE calls) --------
       namespace :nurture do
-        resources :sequences, only: [:index] do
-          collection { post :bulk } # /api/crm/nurture/sequences/bulk
+        resources :sequences, only: %i[index create update destroy] do
+          collection { post :bulk }   # POST /api/crm/nurture/sequences/bulk
         end
 
-        resources :enrollments, only: [:index] do
-          collection { post :bulk } # /api/crm/nurture/enrollments/bulk
+        resources :enrollments, only: %i[index] do
+          collection { post :bulk }   # POST /api/crm/nurture/enrollments/bulk
         end
 
-        resources :templates, only: [:index] do
-          collection { post :bulk } # /api/crm/nurture/templates/bulk
+        resources :templates, only: %i[index] do
+          collection { post :bulk }   # POST /api/crm/nurture/templates/bulk
         end
       end
-      # -----------------------------------------------------------
+      # -------------------------------------------------------
     end
   end
 end
