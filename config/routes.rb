@@ -1,5 +1,4 @@
 # frozen_string_literal: true
-
 Rails.application.routes.draw do
   namespace :api do
     namespace :crm do
@@ -26,7 +25,7 @@ Rails.application.routes.draw do
         post   'tags',         to: 'tags#assign_to_lead'
         delete 'tags/:tag_id', to: 'tags#remove_from_lead'
       end
-
+      
       # Tag catalog + generic helpers
       resources :tags, only: [:index, :create, :update, :destroy] do
         collection do
@@ -35,9 +34,20 @@ Rails.application.routes.draw do
         end
       end
       delete 'tags/assignments/:id', to: 'tags#remove_assignment'
-
-      # Sources needed by Overview
-      resources :sources, only: [:index, :create, :update]
+      
+      # Reminders with complete action (for non-lead-scoped completion)
+      resources :reminders, only: [] do
+        member do
+          patch :complete
+        end
+      end
+      
+      # Sources with stats endpoint
+      resources :sources, only: [:index, :create, :update, :destroy] do
+        member do
+          get :stats
+        end
+      end
     end
   end
 end
