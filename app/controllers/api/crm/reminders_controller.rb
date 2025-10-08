@@ -81,14 +81,23 @@ module Api
                 params.respond_to?(:to_unsafe_h) ? params.to_unsafe_h : params.to_h
               end
 
+        # Use fetch with default to handle false values properly
+        is_completed_val = raw.key?('is_completed') ? raw['is_completed'] : 
+                          raw.key?(:is_completed) ? raw[:is_completed] :
+                          raw.key?('isCompleted') ? raw['isCompleted'] :
+                          raw.key?(:isCompleted) ? raw[:isCompleted] : nil
+
         mapped = {
-          reminder_type: raw['reminder_type'] || raw[:reminder_type] || raw['type'] || raw[:type] || 'follow_up',
+          reminder_type: raw['reminder_type'] || raw[:reminder_type] || raw['type'] || raw[:type],
           title:         raw['title'] || raw[:title],
           description:   raw['description'] || raw[:description],
           due_date:      parse_time(raw['due_date'] || raw[:due_date] || raw['dueDate'] || raw[:dueDate]),
-          priority:      raw['priority'] || raw[:priority] || 'medium',
-          is_completed:  raw['is_completed'] || raw[:is_completed] || raw['isCompleted'] || raw[:isCompleted],
-        }.compact
+          priority:      raw['priority'] || raw[:priority],
+          is_completed:  is_completed_val,
+        }.compact_blank
+
+        # Re-add is_completed if it was explicitly set to false
+        mapped[:is_completed] = is_completed_val if is_completed_val == false
 
         ActionController::Parameters.new(mapped).permit!
       end

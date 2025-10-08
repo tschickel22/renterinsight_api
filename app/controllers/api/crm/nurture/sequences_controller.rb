@@ -1,114 +1,82 @@
 # frozen_string_literal: true
-class Api::Crm::Nurture::SequencesController < ApplicationController
-  # GET /api/crm/nurture/sequences
-  def index
-    sequences = NurtureSequence.order(:id).includes(:nurture_steps)
-    render json: sequences.as_json(
-      only: %i[id name description is_active created_at updated_at],
-      include: {
-        nurture_steps: {
-          only: %i[id step_type position wait_days subject body template_id created_at updated_at]
-        }
-      }
-    ), status: :ok
-  end
 
-  # POST /api/crm/nurture/sequences
-  def create
-    seq = nil
-    ActiveRecord::Base.transaction do
-      attrs = create_params
-      seq = NurtureSequence.create!(attrs.slice(:name, :description, :is_active))
-      Array(attrs[:steps]).each { |st| seq.nurture_steps.create!(step_attrs(st)) }
-    end
+module Api
+  module Crm
+    module Nurture
+      class SequencesController < ApplicationController
+        def index
+          sequences = NurtureSequence.all.order(created_at: :desc)
+          render json: sequences.map { |s| sequence_json(s) }, status: :ok
+        end
 
-    render json: seq.as_json(
-      only: %i[id name description is_active created_at updated_at],
-      include: { nurture_steps: { only: %i[id step_type position wait_days subject body template_id] } }
-    ), status: :created
-  end
+        def create
+          sequence = NurtureSequence.new(sequence_params)
+          if sequence.save
+            render json: sequence_json(sequence), status: :created
+          else
+            render json: { errors: sequence.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
 
-  # PATCH/PUT /api/crm/nurture/sequences/:id
-  def update
-    seq = NurtureSequence.find(params[:id])
+        def update
+          sequence = NurtureSequence.find(params[:id])
+          if sequence.update(sequence_params)
+            render json: sequence_json(sequence), status: :ok
+          else
+            render json: { errors: sequence.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
 
-    ActiveRecord::Base.transaction do
-      attrs = update_params
-      seq.update!(attrs.slice(:name, :description, :is_active))
-      if attrs.key?(:steps)
-        # replace steps to keep ordering & deletions simple
-        seq.nurture_steps.delete_all
-        Array(attrs[:steps]).each { |st| seq.nurture_steps.create!(step_attrs(st)) }
-      end
-    end
+        def destroy
+          sequence = NurtureSequence.find(params[:id])
+          sequence.destroy!
+          head :no_content
+        end
 
-    render json: seq.as_json(
-      only: %i[id name description is_active created_at updated_at],
-      include: { nurture_steps: { only: %i[id step_type position wait_days subject body template_id] } }
-    ), status: :ok
-  end
+        def bulk
+          sequences = params[:_json] || params[:sequences] || []
+          result = sequences.map do |seq_data|
+            if seq_data[:id]
+              sequence = NurtureSequence.find(seq_data[:id])
+              sequence.update!(seq_data.except(:id, :steps))
+            else
+              sequence = NurtureSequence.create!(seq_data.except(:steps))
+            end
+            sequence_json(sequence)
+          end
+          render json: result, status: :ok
+        end
 
-  # DELETE /api/crm/nurture/sequences/:id
-  def destroy
-    seq = NurtureSequence.find_by(id: params[:id])
-    return head :not_found unless seq
+        private
 
-    # use destroy to honor dependent hooks
-    seq.destroy!
-    head :no_content
-  end
+        def sequence_params
+          params.require(:sequence).permit(:name, :description, :is_active)
+        end
 
-  # POST /api/crm/nurture/sequences/bulk
-  # Body: { upsert:[{id?, name, description?, is_active, steps:[...]}], delete:[ids] }
-  def bulk
-    payload = bulk_params
-    upsert  = Array(payload[:upsert]).map { |h| h.to_h.symbolize_keys }
-    deletes = Array(payload[:delete])
+        def sequence_json(sequence)
+          {
+            id: sequence.id,
+            name: sequence.name,
+            description: sequence.description,
+            isActive: sequence.is_active,
+            steps: sequence.nurture_steps.order(:position).map { |s| step_json(s) },
+            createdAt: sequence.created_at&.iso8601,
+            updatedAt: sequence.updated_at&.iso8601
+          }
+        end
 
-    ActiveRecord::Base.transaction do
-      upsert.each do |s|
-        seq = s[:id].present? ? NurtureSequence.find_by(id: s[:id]) : NurtureSequence.new
-        seq.assign_attributes(s.slice(:name, :description, :is_active))
-        seq.save!
-
-        if s.key?(:steps)
-          seq.nurture_steps.delete_all
-          Array(s[:steps]).each { |st| seq.nurture_steps.create!(step_attrs(st.symbolize_keys)) }
+        def step_json(step)
+          {
+            id: step.id,
+            type: step.step_type,
+            subject: step.subject,
+            body: step.body,
+            waitDays: step.wait_days,
+            position: step.position,
+            templateId: step.template_id
+          }
         end
       end
-      NurtureSequence.where(id: deletes).destroy_all if deletes.present?
     end
-
-    head :no_content
-  end
-
-  private
-
-  # Accept root or nested (:sequence) payloads
-  def base_params
-    params[:sequence].is_a?(ActionController::Parameters) ? params.require(:sequence) : params
-  end
-
-  def create_params
-    base_params.permit(
-      :name, :description, :is_active,
-      steps: %i[step_type position wait_days subject body template_id]
-    )
-  end
-  alias update_params create_params
-
-  def bulk_params
-    base = base_params
-    base.permit(
-      { delete: [] },
-      upsert: [
-        :id, :name, :description, :is_active,
-        { steps: %i[step_type position wait_days subject body template_id] }
-      ]
-    )
-  end
-
-  def step_attrs(st)
-    st.slice(:step_type, :position, :wait_days, :subject, :body, :template_id).to_h
   end
 end

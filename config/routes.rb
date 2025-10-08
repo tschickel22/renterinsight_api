@@ -62,7 +62,7 @@ Rails.application.routes.draw do
         # Nested resources
         
         # Activities
-        resources :activities, only: %i[index create]
+        resources :activities, only: %i[index create update destroy]
 
         # Communications
         resources :communications, only: %i[index create] do
