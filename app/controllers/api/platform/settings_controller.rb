@@ -1,4 +1,3 @@
-cat > app/controllers/api/platform/settings_controller.rb << 'EOF'
 # frozen_string_literal: true
 
 module Api
@@ -16,8 +15,6 @@ module Api
       end
 
       def update
-        # For now, just acknowledge the update
-        # Can persist to a PlatformSetting model later
         render json: {
           communications: params[:communications] || default_communications_settings,
           message: 'Settings updated successfully'
@@ -43,4 +40,3 @@ module Api
     end
   end
 end
-EOF

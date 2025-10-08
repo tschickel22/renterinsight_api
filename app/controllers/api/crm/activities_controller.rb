@@ -14,8 +14,6 @@ module Api
       def create
         attrs = normalize_activity_params
         activity = @lead.activities.new(attrs)
-
-        # Default the user when FE passes placeholder/current-user
         activity.user_id ||= (current_user&.id || 1)
 
         if activity.save
@@ -28,87 +26,36 @@ module Api
       private
 
       def set_lead
-        @lead = Lead.find(params[:lead_id] || params[:id])
+        @lead = Lead.find(params[:lead_id])
       end
 
-      # Strong params (nested form)
-      def activity_params_nested
-        params.require(:activity).permit(
-          :activity_type, :type, :title, :subject,
-          :description, :notes, :outcome, :duration,
-          :scheduled_date, :scheduledDate,
-          :performed_at, :performedAt,
-          :occurred_at, :occurredAt,
-          :due_date, :dueDate,
-          :priority, :user_id,
-          metadata: {}
-        )
-      end
-
-      # Handle both nested and root shapes safely
       def normalize_activity_params
         raw = if params[:activity].present?
-          activity_params_nested.to_h
+          params.require(:activity).permit(
+            :activity_type, :type, :description, :outcome, :duration,
+            :scheduled_date, :completed_date, :user_id, metadata: {}
+          ).to_h
         else
-          # root-level payload; permit everything then slice what we need
-          ActionController::Parameters.new(params.to_unsafe_h).permit(
-            :activity_type, :type, :title, :subject,
-            :description, :notes, :outcome, :duration,
-            :scheduled_date, :scheduledDate,
-            :performed_at, :performedAt,
-            :occurred_at, :occurredAt,
-            :due_date, :dueDate,
-            :priority, :user_id,
-            metadata: {}
+          params.permit(
+            :activity_type, :type, :description, :outcome, :duration,
+            :scheduled_date, :completed_date, :user_id, metadata: {}
           ).to_h
         end
 
-        atype =
-          raw[:activity_type].presence ||
-          raw[:type].presence
-
-        desc =
-          raw[:description].presence ||
-          raw[:notes].presence
-
-        occurred =
-          parse_time(raw[:performed_at]) ||
-          parse_time(raw[:performedAt]) ||
-          parse_time(raw[:occurred_at]) ||
-          parse_time(raw[:occurredAt])
-
-        scheduled =
-          parse_time(raw[:scheduled_date]) ||
-          parse_time(raw[:scheduledDate]) ||
-          parse_time(raw[:due_date]) ||
-          parse_time(raw[:dueDate])
+        atype = raw[:activity_type].presence || raw[:type].presence
 
         {
           activity_type: atype,
-          description:   desc,
-          outcome:       raw[:outcome],
-          duration:      raw[:duration],
-          scheduled_date: scheduled,
-          occurred_at:    occurred,
-          priority:      raw[:priority],
-          user_id:       normalize_user_id(raw[:user_id]),
-          metadata:      (raw[:metadata].presence || {})
+          description: raw[:description],
+          outcome: raw[:outcome],
+          duration: raw[:duration],
+          scheduled_date: raw[:scheduled_date],
+          completed_date: raw[:completed_date],
+          user_id: raw[:user_id],
+          metadata: (raw[:metadata].presence || {})
         }.compact
       end
 
-      def parse_time(v)
-        Time.zone.parse(v.to_s) if v.present?
-      rescue
-        nil
-      end
-
-      def normalize_user_id(v)
-        s = v.to_s
-        return nil if s.blank? || s == 'current-user'
-        (s =~ /^\d+$/) ? s.to_i : nil
-      end
-
-      # Consistent JSON serialization
       def activity_json(activity)
         {
           id: activity.id,
@@ -119,8 +66,7 @@ module Api
           outcome: activity.outcome,
           duration: activity.duration,
           scheduledDate: activity.scheduled_date&.iso8601,
-          occurredAt: activity.occurred_at&.iso8601,
-          priority: activity.priority,
+          completedDate: activity.completed_date&.iso8601,
           metadata: activity.metadata || {},
           createdAt: activity.created_at&.iso8601,
           updatedAt: activity.updated_at&.iso8601

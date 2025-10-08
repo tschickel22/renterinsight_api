@@ -4,8 +4,9 @@ module Api
   module Crm
     class RemindersController < ApplicationController
       
-before_action :set_lead, only: [:index, :create, :update]
-      before_action :set_reminder, only: [:complete, :destroy]
+before_action :set_lead, only: [:index, :create, :update, :update, :update]
+      
+before_action :set_reminder, only: [:complete, :destroy, :update, :update, :update]
 
       def index
         reminders = @lead.reminders.order(due_date: :asc)
@@ -38,6 +39,18 @@ before_action :set_lead, only: [:index, :create, :update]
         @reminder.update!(is_completed: true, completed_at: Time.current)
         render json: reminder_json(@reminder), status: :ok
       end
+
+  def update
+    data = extract_reminder_params
+    if @reminder.update(data)
+      render json: reminder_json(@reminder), status: :ok
+    else
+      render json: { error: "Failed to update reminder", errors: @reminder.errors.full_messages }, status: :unprocessable_entity
+    end
+  rescue => e
+    Rails.logger.error "[RemindersController#update] Exception: #{e.message}"
+    render json: { error: "Server error updating reminder", message: e.message }, status: :internal_server_error
+  end
 
       def destroy
         @reminder.destroy!
