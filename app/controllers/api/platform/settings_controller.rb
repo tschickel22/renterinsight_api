@@ -15,6 +15,7 @@ module Api
       end
 
       def update
+        # Platform settings are read-only for now, but accept the request
         render json: {
           communications: params[:communications] || default_communications_settings,
           message: 'Settings updated successfully'
@@ -31,10 +32,19 @@ module Api
 
       def default_communications_settings
         {
-          emailEnabled: true,
-          smsEnabled: true,
-          defaultSender: 'noreply@renterinsight.com',
-          replyTo: 'support@renterinsight.com'
+          email: {
+            provider: 'smtp',
+            fromEmail: 'platform@renterinsight.com',
+            fromName: 'RenterInsight Platform',
+            smtpHost: 'smtp.example.com',
+            smtpPort: 587,
+            isEnabled: true
+          },
+          sms: {
+            provider: 'twilio',
+            fromNumber: '+1234567890',
+            isEnabled: false
+          }
         }
       end
     end

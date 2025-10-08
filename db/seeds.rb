@@ -9,3 +9,10 @@
 #   end
 
 Company.find_or_create_by!(name:'Demo Company')
+
+# Create default user for activities and reminders
+User.find_or_create_by!(email: 'system@example.com') do |user|
+  user.name = 'System User'
+end
+
+puts "Seeded: #{Company.count} companies, #{User.count} users"

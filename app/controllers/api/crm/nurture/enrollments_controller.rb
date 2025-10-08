@@ -1,89 +1,79 @@
 # frozen_string_literal: true
-class Api::Crm::Nurture::EnrollmentsController < ApplicationController
-  # JSON SPA calls won't send CSRF tokens (support API+HTML stacks)
-  skip_before_action :verify_authenticity_token, raise: false
 
-  # GET /api/crm/nurture/enrollments
-  # Supports ?lead_id[]=1&lead_id[]=2 or ?lead_id=1
-  def index
-    scope = NurtureEnrollment.order(:id)
-    lead_ids = params[:lead_id]
-    lead_ids = [lead_ids] if lead_ids.is_a?(String)
-    scope = scope.where(lead_id: lead_ids) if lead_ids.present?
-
-    render json: scope.as_json(
-      only: %i[id lead_id nurture_sequence_id status current_step_index created_at updated_at]
-    ), status: :ok
-  rescue => e
-    render json: { error: 'server_error', message: e.message }, status: :internal_server_error
-  end
-
-  # POST /api/crm/nurture/enrollments/bulk
-  # Body: { upsert:[{ id?, lead_id?, nurture_sequence_id?, status?, current_step_index? }], delete:[ids] }
-  # Also accepts same under { enrollment: { ... } }
-  def bulk
-    payload = bulk_params
-    upserts = Array(payload[:upsert])
-    deletes = Array(payload[:delete])
-
-    ActiveRecord::Base.transaction do
-      upserts.each do |attrs|
-        attrs = attrs.to_h.symbolize_keys
-
-        # Normalize legacy FE value
-        attrs[:status] = 'running' if attrs[:status] == 'active'
-
-        rec =
-          if attrs[:id].present?
-            NurtureEnrollment.find_by(id: attrs[:id])
-          elsif attrs[:lead_id].present? && attrs[:nurture_sequence_id].present?
-            NurtureEnrollment
-              .where(lead_id: attrs[:lead_id], nurture_sequence_id: attrs[:nurture_sequence_id])
-              .where.not(status: 'completed')
-              .order(:id)
-              .first
-          end
-
-        if rec
-          rec.update!(
-            status: attrs[:status] || rec.status,
-            current_step_index: attrs.key?(:current_step_index) ? attrs[:current_step_index] : rec.current_step_index
-          )
-        else
-          NurtureEnrollment.create!(
-            lead_id:             attrs.fetch(:lead_id),
-            nurture_sequence_id: attrs.fetch(:nurture_sequence_id),
-            status:              attrs[:status] || 'running',
-            current_step_index:  attrs[:current_step_index] || 0
-          )
+module Api
+  module Crm
+    module Nurture
+      class EnrollmentsController < ApplicationController
+        def index
+          enrollments = NurtureEnrollment.includes(:lead, :nurture_sequence).order(created_at: :desc)
+          render json: enrollments.map { |e| enrollment_json(e) }, status: :ok
         end
-      end
 
-      Array(deletes).each do |id|
-        if (rec = NurtureEnrollment.find_by(id: id))
-          rec.destroy!
+        def create
+          enrollment = NurtureEnrollment.new(enrollment_params)
+          if enrollment.save
+            render json: enrollment_json(enrollment), status: :created
+          else
+            render json: { errors: enrollment.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
+
+        def update
+          enrollment = NurtureEnrollment.find(params[:id])
+          if enrollment.update(enrollment_params)
+            render json: enrollment_json(enrollment), status: :ok
+          else
+            render json: { errors: enrollment.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
+
+        def destroy
+          enrollment = NurtureEnrollment.find(params[:id])
+          enrollment.destroy!
+          head :no_content
+        end
+
+        def bulk
+          enrollments = params[:_json] || params[:enrollments] || []
+          result = enrollments.map do |enr_data|
+            if enr_data[:id]
+              enrollment = NurtureEnrollment.find(enr_data[:id])
+              enrollment.update!(enrollment_params_from_hash(enr_data))
+            else
+              enrollment = NurtureEnrollment.create!(enrollment_params_from_hash(enr_data))
+            end
+            enrollment_json(enrollment)
+          end
+          render json: result, status: :ok
+        end
+
+        private
+
+        def enrollment_params
+          params.require(:enrollment).permit(:lead_id, :nurture_sequence_id, :status, :current_step_index)
+        end
+
+        def enrollment_params_from_hash(hash)
+          {
+            lead_id: hash[:leadId] || hash[:lead_id],
+            nurture_sequence_id: hash[:sequenceId] || hash[:nurture_sequence_id],
+            status: hash[:status],
+            current_step_index: hash[:currentStepIndex] || hash[:current_step_index]
+          }.compact
+        end
+
+        def enrollment_json(enrollment)
+          {
+            id: enrollment.id,
+            leadId: enrollment.lead_id,
+            sequenceId: enrollment.nurture_sequence_id,
+            status: enrollment.status,
+            currentStepIndex: enrollment.current_step_index,
+            createdAt: enrollment.created_at&.iso8601,
+            updatedAt: enrollment.updated_at&.iso8601
+          }
         end
       end
     end
-
-    head :no_content
-  rescue ActiveRecord::RecordInvalid => e
-    render json: { error: 'validation_failed', messages: e.record&.errors&.full_messages || [e.message] },
-           status: :unprocessable_entity
-  rescue => e
-    render json: { error: 'server_error', message: e.message }, status: :internal_server_error
-  end
-
-  private
-
-  def bulk_params
-    root = params[:enrollment].presence || params
-    permitted_upserts =
-      Array(root[:upsert]).map do |h|
-        (h.is_a?(ActionController::Parameters) ? h : ActionController::Parameters.new(h))
-          .permit(:id, :lead_id, :nurture_sequence_id, :status, :current_step_index)
-      end
-    permitted_deletes = Array(root[:delete])
-    { upsert: permitted_upserts, delete: permitted_deletes }
   end
 end
