@@ -2,13 +2,17 @@
 
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
   allow do
-    # Allow common local dev origins (Vite/Netlify/React dev servers)
-    origins %r{\Ahttp://localhost:\d+\z}, %r{\Ahttp://127\.0\.0\.1:\d+\z}
+    origins %r{\Ahttp://localhost:\d+\z}, 
+            %r{\Ahttp://127\.0\.0\.1:\d+\z},
+            'http://localhost:5173',
+            'http://localhost:3000',
+            'http://127.0.0.1:5173',
+            'http://127.0.0.1:3000'
 
-    resource '/api/*',
+    resource '*',
              headers: :any,
-             methods: %i[get post patch put delete options head],
+             methods: [:get, :post, :put, :patch, :delete, :options, :head],
              credentials: true,
-             expose: ['Content-Type']
+             expose: ['Content-Type', 'Authorization']
   end
 end

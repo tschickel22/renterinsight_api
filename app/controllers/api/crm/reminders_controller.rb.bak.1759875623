@@ -3,8 +3,7 @@
 module Api
   module Crm
     class RemindersController < ApplicationController
-      
-before_action :set_lead, only: [:index, :create, :update]
+      before_action :set_lead, only: [:index, :create]
       before_action :set_reminder, only: [:complete, :destroy]
 
       def index
