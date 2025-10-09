@@ -20,4 +20,21 @@ class Company < ApplicationRecord
     setting.value = value.to_json
     setting.save!
   end
+  
+  def notifications_settings
+    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'notifications')
+    setting ? JSON.parse(setting.value) : nil
+  rescue JSON::ParserError
+    nil
+  end
+  
+  def notifications_settings=(value)
+    setting = Setting.find_or_initialize_by(
+      scope_type: 'Company',
+      scope_id: id,
+      key: 'notifications'
+    )
+    setting.value = value.to_json
+    setting.save!
+  end
 end

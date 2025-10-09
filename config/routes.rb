@@ -6,6 +6,9 @@ Rails.application.routes.draw do
   # Root
   root to: proc { [200, {}, ['Renter Insight API']] }
 
+  # Mount ActionCable for WebSocket notifications
+  mount ActionCable.server => '/cable'
+
   namespace :api, defaults: { format: :json } do
     namespace :crm do
       # ==================== SOURCES ====================
@@ -43,6 +46,11 @@ Rails.application.routes.draw do
           post ':lead_id/calculate', to: 'lead_scores#calculate'
         end
       end
+
+      # ==================== COMMUNICATIONS (Non-Lead-Scoped) ====================
+      # These routes accept lead_id in the request body
+      post 'communications/email', to: 'communications#email'
+      post 'communications/sms', to: 'communications#sms'
 
       # ==================== LEADS ====================
       resources :leads, only: %i[index show create update destroy] do
@@ -84,7 +92,7 @@ Rails.application.routes.draw do
         post 'ai-insights/generate', to: 'ai_insights#generate'
 
         # Reminders
-        resources :reminders, only: %i[index create  update destroy] do
+        resources :reminders, only: %i[index create update destroy] do
           member do
             post :complete
             patch :complete
@@ -93,6 +101,14 @@ Rails.application.routes.draw do
 
         # Tasks
         resources :tasks, only: %i[create update destroy], controller: 'lead_tasks'
+        
+        # Lead Activities (unified activities)
+        resources :lead_activities, only: %i[index show create update destroy] do
+          member do
+            post :complete
+            post :cancel
+          end
+        end
 
         # Tags (lead-scoped)
         get 'tags', to: 'tags#entity_tags_for_lead'

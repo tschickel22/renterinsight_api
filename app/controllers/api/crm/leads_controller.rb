@@ -1,10 +1,14 @@
 module Api
   module Crm
     class LeadsController < ApplicationController
-      before_action :set_lead, only: [:update, :destroy, :notes]
+      before_action :set_lead, only: [:show, :update, :destroy, :notes]
 
       def index
         render json: Lead.includes(:source).order(created_at: :desc).map { |l| lead_json(l) }
+      end
+
+      def show
+        render json: lead_json(@lead)
       end
 
       def create

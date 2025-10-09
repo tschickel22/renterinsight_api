@@ -34,17 +34,35 @@ module Api
         end
 
         def bulk
-          templates = params[:_json] || params[:templates] || []
-          result = templates.map do |tpl_data|
-            if tpl_data[:id]
-              template = Template.find(tpl_data[:id])
-              template.update!(template_params_from_hash(tpl_data))
-            else
-              template = Template.create!(template_params_from_hash(tpl_data))
+          upsert_templates = params[:upsert] || []
+          delete_ids = params[:delete] || []
+          
+          ActiveRecord::Base.transaction do
+            # Delete templates
+            if delete_ids.any?
+              Template.where(id: delete_ids).destroy_all
             end
-            template_json(template)
+            
+            # Upsert templates
+            upsert_templates.each do |tpl_data|
+              if tpl_data[:id].present?
+                # Update existing
+                template = Template.find(tpl_data[:id])
+                template.update!(template_params_from_hash(tpl_data))
+              else
+                # Create new
+                Template.create!(template_params_from_hash(tpl_data))
+              end
+            end
           end
-          render json: result, status: :ok
+          
+          # Return all templates
+          templates = Template.where(template_type: %w[email sms]).order(created_at: :desc)
+          render json: templates.map { |t| template_json(t) }, status: :ok
+        rescue StandardError => e
+          Rails.logger.error("Template bulk error: #{e.message}")
+          Rails.logger.error(e.backtrace.join("\n"))
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
@@ -54,12 +72,14 @@ module Api
         end
 
         def template_params_from_hash(hash)
+          # template_type should be 'email' or 'sms' from the hash
+          # type is a different field for categorization (welcome, follow_up, etc)
           {
             name: hash[:name],
-            template_type: hash[:type] || hash[:template_type],
+            template_type: hash[:template_type],
             subject: hash[:subject],
             body: hash[:body],
-            is_active: hash[:isActive] || hash[:is_active]
+            is_active: hash[:is_active].nil? ? true : hash[:is_active]
           }.compact
         end
 
@@ -67,10 +87,12 @@ module Api
           {
             id: template.id,
             name: template.name,
+            template_type: template.template_type,
             type: template.template_type,
             subject: template.subject,
             body: template.body,
             isActive: template.is_active,
+            is_active: template.is_active,
             createdAt: template.created_at&.iso8601,
             updatedAt: template.updated_at&.iso8601
           }

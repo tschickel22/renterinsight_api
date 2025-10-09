@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lead Activities API Tester</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 0; }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #2563eb; }
+        button.delete { background: #ef4444; }
+        button.delete:hover { background: #dc2626; }
+        pre {
+            background: #f1f5f9;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        .response {
+            margin-top: 20px;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+    </style>
+</head>
+<body>
+    <h1>Lead Activities API Tester</h1>
+    
+    <div class="container">
+        <h2>Configuration</h2>
+        <div class="form-group">
+            <label>API Base URL:</label>
+            <input type="text" id="baseUrl" value="http://localhost:3001/api/crm/leads">
+        </div>
+        <div class="form-group">
+            <label>Lead ID:</label>
+            <input type="number" id="leadId" value="1">
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>1. List Activities</h2>
+        <button onclick="listActivities()">GET /lead_activities</button>
+        <div id="listResponse" class="response"></div>
+    </div>
+
+    <div class="container">
+        <h2>2. Create Task</h2>
+        <div class="form-group">
+            <label>Subject:</label>
+            <input type="text" id="taskSubject" value="Test Task">
+        </div>
+        <div class="form-group">
+            <label>Description:</label>
+            <textarea id="taskDescription">This is a test task created via API tester</textarea>
+        </div>
+        <div class="form-group">
+            <label>Priority:</label>
+            <select id="taskPriority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+            </select>
+        </div>
+        <button onclick="createTask()">Create Task</button>
+        <div id="createTaskResponse" class="response"></div>
+    </div>
+
+    <div class="container">
+        <h2>3. Create Meeting</h2>
+        <div class="form-group">
+            <label>Subject:</label>
+            <input type="text" id="meetingSubject" value="Client Meeting">
+        </div>
+        <div class="form-group">
+            <label>Start Time:</label>
+            <input type="datetime-local" id="meetingStart">
+        </div>
+        <div class="form-group">
+            <label>End Time:</label>
+            <input type="datetime-local" id="meetingEnd">
+        </div>
+        <button onclick="createMeeting()">Create Meeting</button>
+        <div id="createMeetingResponse" class="response"></div>
+    </div>
+
+    <div class="container">
+        <h2>4. Complete Activity</h2>
+        <div class="form-group">
+            <label>Activity ID:</label>
+            <input type="number" id="completeId" value="">
+        </div>
+        <button onclick="completeActivity()">Complete Activity</button>
+        <div id="completeResponse" class="response"></div>
+    </div>
+
+    <div class="container">
+        <h2>5. Delete Activity</h2>
+        <div class="form-group">
+            <label>Activity ID:</label>
+            <input type="number" id="deleteId" value="">
+        </div>
+        <button class="delete" onclick="deleteActivity()">Delete Activity</button>
+        <div id="deleteResponse" class="response"></div>
+    </div>
+
+    <script>
+        // Set default datetime values
+        const now = new Date();
+        const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        document.getElementById('meetingStart').value = tomorrow.toISOString().slice(0, 16);
+        const endTime = new Date(tomorrow.getTime() + 60 * 60 * 1000);
+        document.getElementById('meetingEnd').value = endTime.toISOString().slice(0, 16);
+
+        function getApiUrl(path = '') {
+            const baseUrl = document.getElementById('baseUrl').value;
+            const leadId = document.getElementById('leadId').value;
+            return `${baseUrl}/${leadId}/lead_activities${path}`;
+        }
+
+        function displayResponse(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `
+                <div class="${isError ? 'error' : 'success'}">
+                    <strong>${isError ? 'Error' : 'Success'}!</strong>
+                </div>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+        }
+
+        async function listActivities() {
+            try {
+                const response = await fetch(getApiUrl());
+                const data = await response.json();
+                displayResponse('listResponse', data, !response.ok);
+            } catch (error) {
+                displayResponse('listResponse', { error: error.message }, true);
+            }
+        }
+
+        async function createTask() {
+            try {
+                const response = await fetch(getApiUrl(), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        activityType: 'task',
+                        subject: document.getElementById('taskSubject').value,
+                        description: document.getElementById('taskDescription').value,
+                        priority: document.getElementById('taskPriority').value,
+                        status: 'pending',
+                        dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+                    })
+                });
+                const data = await response.json();
+                displayResponse('createTaskResponse', data, !response.ok);
+                if (response.ok) {
+                    listActivities(); // Refresh list
+                }
+            } catch (error) {
+                displayResponse('createTaskResponse', { error: error.message }, true);
+            }
+        }
+
+        async function createMeeting() {
+            try {
+                const response = await fetch(getApiUrl(), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        activityType: 'meeting',
+                        subject: document.getElementById('meetingSubject').value,
+                        priority: 'high',
+                        status: 'pending',
+                        startTime: new Date(document.getElementById('meetingStart').value).toISOString(),
+                        endTime: new Date(document.getElementById('meetingEnd').value).toISOString(),
+                        meetingLocation: 'Conference Room A'
+                    })
+                });
+                const data = await response.json();
+                displayResponse('createMeetingResponse', data, !response.ok);
+                if (response.ok) {
+                    listActivities(); // Refresh list
+                }
+            } catch (error) {
+                displayResponse('createMeetingResponse', { error: error.message }, true);
+            }
+        }
+
+        async function completeActivity() {
+            const id = document.getElementById('completeId').value;
+            if (!id) {
+                displayResponse('completeResponse', { error: 'Please enter an activity ID' }, true);
+                return;
+            }
+            try {
+                const response = await fetch(getApiUrl(`/${id}/complete`), {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                displayResponse('completeResponse', data, !response.ok);
+                if (response.ok) {
+                    listActivities(); // Refresh list
+                }
+            } catch (error) {
+                displayResponse('completeResponse', { error: error.message }, true);
+            }
+        }
+
+        async function deleteActivity() {
+            const id = document.getElementById('deleteId').value;
+            if (!id) {
+                displayResponse('deleteResponse', { error: 'Please enter an activity ID' }, true);
+                return;
+            }
+            if (!confirm('Are you sure you want to delete this activity?')) {
+                return;
+            }
+            try {
+                const response = await fetch(getApiUrl(`/${id}`), {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    displayResponse('deleteResponse', { message: 'Activity deleted successfully' }, false);
+                    listActivities(); // Refresh list
+                } else {
+                    const data = await response.json();
+                    displayResponse('deleteResponse', data, true);
+                }
+            } catch (error) {
+                displayResponse('deleteResponse', { error: error.message }, true);
+            }
+        }
+
+        // Load activities on page load
+        window.addEventListener('load', listActivities);
+    </script>
+</body>
+</html>
