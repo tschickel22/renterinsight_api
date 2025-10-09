@@ -1,0 +1,12 @@
+OPEN YOUR WSL TERMINAL AND PASTE THIS COMMAND:
+
+cd /home/tschi/src/renterinsight_api && bundle exec rails db:migrate && echo "SUCCESS - Migration complete! Now restart your Rails server."
+
+
+THAT'S IT!
+
+After running that command:
+1. Stop your Rails server (press Ctrl+C)
+2. Start it again: bundle exec rails s -p 3001
+3. Refresh your browser
+4. Try creating an activity again

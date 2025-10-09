@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_03_114822) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_09_000001) do
   create_table "accounts", force: :cascade do |t|
     t.integer "company_id"
     t.string "name", null: false
@@ -77,6 +77,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_03_114822) do
     t.index ["comm_type"], name: "index_communication_logs_on_comm_type"
     t.index ["lead_id", "sent_at"], name: "index_communication_logs_on_lead_id_and_sent_at"
     t.index ["lead_id"], name: "index_communication_logs_on_lead_id"
+    t.index ["sent_at"], name: "index_communication_logs_on_sent_at"
     t.index ["status"], name: "index_communication_logs_on_status"
   end
 
@@ -116,6 +117,46 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_03_114822) do
     t.string "status"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+  end
+
+  create_table "lead_activities", force: :cascade do |t|
+    t.integer "lead_id", null: false
+    t.integer "user_id", null: false
+    t.integer "assigned_to_id"
+    t.string "activity_type", null: false
+    t.string "subject", null: false
+    t.text "description"
+    t.string "status", default: "pending"
+    t.string "priority", default: "medium"
+    t.datetime "due_date"
+    t.datetime "start_time"
+    t.datetime "end_time"
+    t.integer "duration_minutes"
+    t.datetime "completed_at"
+    t.string "call_direction"
+    t.string "call_outcome"
+    t.string "phone_number"
+    t.string "meeting_location"
+    t.string "meeting_link"
+    t.text "meeting_attendees"
+    t.text "reminder_method"
+    t.datetime "reminder_time"
+    t.boolean "reminder_sent", default: false
+    t.integer "estimated_hours"
+    t.integer "actual_hours"
+    t.integer "related_activity_id"
+    t.json "metadata", default: {}
+    t.text "outcome_notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assigned_to_id", "status"], name: "index_lead_activities_on_assigned_to_id_and_status"
+    t.index ["assigned_to_id"], name: "index_lead_activities_on_assigned_to_id"
+    t.index ["due_date"], name: "index_lead_activities_on_due_date"
+    t.index ["lead_id", "activity_type"], name: "index_lead_activities_on_lead_id_and_activity_type"
+    t.index ["lead_id"], name: "index_lead_activities_on_lead_id"
+    t.index ["related_activity_id"], name: "index_lead_activities_on_related_activity_id"
+    t.index ["start_time"], name: "index_lead_activities_on_start_time"
+    t.index ["user_id"], name: "index_lead_activities_on_user_id"
   end
 
   create_table "lead_scores", force: :cascade do |t|
@@ -200,6 +241,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_03_114822) do
     t.string "priority", default: "medium"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "completed_at"
+    t.index ["due_date"], name: "index_reminders_on_due_date"
     t.index ["lead_id", "is_completed"], name: "index_reminders_on_lead_id_and_is_completed"
     t.index ["lead_id"], name: "index_reminders_on_lead_id"
     t.index ["priority"], name: "index_reminders_on_priority"
@@ -282,6 +325,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_03_114822) do
   add_foreign_key "communication_logs", "leads"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "leads"
+  add_foreign_key "lead_activities", "lead_activities", column: "related_activity_id"
+  add_foreign_key "lead_activities", "leads"
+  add_foreign_key "lead_activities", "users"
+  add_foreign_key "lead_activities", "users", column: "assigned_to_id"
   add_foreign_key "lead_scores", "leads"
   add_foreign_key "lead_tasks", "leads"
   add_foreign_key "leads", "accounts", column: "converted_account_id"

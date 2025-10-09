@@ -5,12 +5,14 @@ module Api
     class SettingsController < ApplicationController
       def show
         render json: {
-          communications: default_communications_settings
+          communications: default_communications_settings,
+          notifications: default_notifications_settings
         }, status: :ok
       rescue => e
         Rails.logger.error "[PlatformSettings#show] Error: #{e.message}"
         render json: {
-          communications: default_communications_settings
+          communications: default_communications_settings,
+          notifications: default_notifications_settings
         }, status: :ok
       end
 
@@ -18,6 +20,7 @@ module Api
         # Platform settings are read-only for now, but accept the request
         render json: {
           communications: params[:communications] || default_communications_settings,
+          notifications: params[:notifications] || default_notifications_settings,
           message: 'Settings updated successfully'
         }, status: :ok
       rescue => e
@@ -44,6 +47,29 @@ module Api
             provider: 'twilio',
             fromNumber: '+1234567890',
             isEnabled: false
+          }
+        }
+      end
+      
+      def default_notifications_settings
+        {
+          email: {
+            isEnabled: true,
+            sendReminders: true,
+            sendActivityUpdates: true,
+            dailyDigest: false
+          },
+          sms: {
+            isEnabled: false,
+            sendReminders: true,
+            sendUrgentOnly: true
+          },
+          popup: {
+            isEnabled: true,
+            showReminders: true,
+            showActivityUpdates: true,
+            autoClose: true,
+            autoCloseDelay: 5000
           }
         }
       end

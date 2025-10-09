@@ -1,0 +1,34 @@
+Hi <%= @user.name %>,
+
+<%= activity_type_label %>
+
+Subject: <%= @activity.subject %>
+<% if @activity.description.present? %>
+Description: <%= @activity.description %>
+<% end %>
+Priority: <%= @activity.priority.titleize %>
+<% if @activity.due_date.present? %>
+Due Date: <%= @activity.due_date.strftime("%B %d, %Y at %I:%M %p") %>
+<% end %>
+
+<% if @activity.activity_type == 'meeting' && @activity.start_time.present? %>
+Meeting Time: <%= @activity.start_time.strftime("%B %d, %Y at %I:%M %p") %>
+<% if @activity.meeting_location.present? %>
+Location: <%= @activity.meeting_location %>
+<% end %>
+<% if @activity.meeting_link.present% %>
+Meeting Link: <%= @activity.meeting_link %>
+<% end %>
+<% end %>
+
+<% if @activity.activity_type == 'call' && @activity.phone_number.present? %>
+Phone Number: <%= @activity.phone_number %>
+<% end %>
+
+Related to: <%= @lead.first_name %> <%= @lead.last_name %>
+
+View in CRM: http://localhost:3000/crm/leads/<%= @lead.id %>?tab=activities
+
+---
+This is an automated notification from your CRM system.
+RenterInsight CRM

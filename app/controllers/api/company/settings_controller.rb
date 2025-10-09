@@ -8,13 +8,15 @@ module Api
         
         render json: {
           communications: company&.communications_settings || default_communications_settings,
+          notifications: company&.notifications_settings || default_notifications_settings,
           companyId: company&.id
         }, status: :ok
       rescue => e
         Rails.logger.error "[CompanySettings#show] Error: #{e.message}"
         # Return safe defaults instead of crashing
         render json: {
-          communications: default_communications_settings
+          communications: default_communications_settings,
+          notifications: default_notifications_settings
         }, status: :ok
       end
 
@@ -22,15 +24,25 @@ module Api
         company = find_or_create_company
         
         if company
-          # Only update if we have a valid company
-          settings = params[:communications] || company.communications_settings || {}
+          # Update communications settings if provided
+          if params[:communications]
+            settings = params[:communications]
+            if company.respond_to?(:communications_settings=)
+              company.communications_settings = settings
+            end
+          end
           
-          if company.respond_to?(:communications_settings=)
-            company.update!(communications_settings: settings)
+          # Update notifications settings if provided
+          if params[:notifications]
+            settings = params[:notifications]
+            if company.respond_to?(:notifications_settings=)
+              company.notifications_settings = settings
+            end
           end
           
           render json: {
-            communications: settings,
+            communications: company.communications_settings || default_communications_settings,
+            notifications: company.notifications_settings || default_notifications_settings,
             companyId: company.id,
             message: 'Settings updated successfully'
           }, status: :ok
@@ -38,6 +50,7 @@ module Api
           # No company, but return success with the settings they sent
           render json: {
             communications: params[:communications] || default_communications_settings,
+            notifications: params[:notifications] || default_notifications_settings,
             message: 'Settings saved (no company record yet)'
           }, status: :ok
         end
@@ -80,6 +93,29 @@ module Api
             provider: 'twilio',
             fromNumber: '+1234567890',
             isEnabled: false
+          }
+        }
+      end
+      
+      def default_notifications_settings
+        {
+          email: {
+            isEnabled: true,
+            sendReminders: true,
+            sendActivityUpdates: true,
+            dailyDigest: false
+          },
+          sms: {
+            isEnabled: false,
+            sendReminders: true,
+            sendUrgentOnly: true
+          },
+          popup: {
+            isEnabled: true,
+            showReminders: true,
+            showActivityUpdates: true,
+            autoClose: true,
+            autoCloseDelay: 5000
           }
         }
       end

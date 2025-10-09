@@ -7,6 +7,7 @@ class Lead < ApplicationRecord
   # Core CRM associations
   has_many :activities,           dependent: :destroy
   has_many :reminders,            dependent: :destroy
+  has_many :lead_activities,      dependent: :destroy
   has_many :ai_insights,          dependent: :destroy
   has_many :communication_logs,   dependent: :destroy
 
