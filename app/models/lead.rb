@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Lead < ApplicationRecord
+  belongs_to :company
   belongs_to :converted_account, class_name: "Account", optional: true
   belongs_to :source, class_name: "Source", optional: true
 

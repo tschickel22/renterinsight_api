@@ -40,7 +40,7 @@ module Api
 
       # Merge root + nested (:lead), accept camel & snake, normalize to snake.
       def lead_params
-        allowed = [:first_name, :last_name, :email, :phone, :notes, :source_id,
+        allowed = [:first_name, :last_name, :email, :phone, :notes, :source_id, :status, :company_id,
                    :firstName, :lastName, :sourceId]
 
         root = params.permit(*allowed, lead: {})
@@ -54,6 +54,8 @@ module Api
           email:      raw['email'],
           phone:      raw['phone'],
           notes:      raw['notes'],
+          status:     raw['status'],
+          company_id: raw['company_id'],
           source_id:  (raw['source_id']  || raw['sourceId']).presence&.to_i
         }.compact
       end
@@ -66,6 +68,7 @@ module Api
           email:     l.email,
           phone:     l.phone,
           notes:     l.notes,
+          status:    l.status,
           sourceId:  l.source_id,
           source:    (l.source ? { id: l.source.id, name: l.source.name } : nil),
           createdAt: l.created_at,

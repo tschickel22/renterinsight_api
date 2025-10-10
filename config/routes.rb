@@ -6,6 +6,20 @@ Rails.application.routes.draw do
   # Root
   root to: proc { [200, {}, ['Renter Insight API']] }
 
+  # ==================== PUBLIC INTAKE FORMS ====================
+  scope path: 'f', module: 'public', as: 'public' do
+    get ':public_id', to: 'forms#show', as: :form
+    post ':public_id/submit', to: 'forms#submit', as: :form_submit
+  end
+  
+  # API endpoints for public forms (for frontend)
+  namespace :api do
+    scope path: 'f' do
+      get ':public_id', to: '/public/forms#show'
+      post ':public_id/submit', to: '/public/forms#submit'
+    end
+  end
+
   # Mount ActionCable for WebSocket notifications
   mount ActionCable.server => '/cable'
 
@@ -134,11 +148,11 @@ Rails.application.routes.draw do
 
       # ==================== INTAKE ====================
       namespace :intake do
-        resources :forms, only: %i[index create update destroy] do
+        resources :forms do
           collection { post :bulk }
         end
 
-        resources :submissions, only: %i[index create destroy] do
+        resources :submissions, only: %i[index create] do
           collection { post :bulk }
         end
       end

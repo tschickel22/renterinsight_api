@@ -6,6 +6,8 @@ class UserNotificationsChannel < ApplicationCable::Channel
     
     if user_id
       stream_from "user_notifications_#{user_id}"
+      # Also subscribe to lead notifications for this user
+      stream_from "lead_notifications_#{user_id}"
       Rails.logger.info "[UserNotificationsChannel] User #{user_id} subscribed to notifications"
     else
       reject
