@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_09_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_09_145255) do
   create_table "accounts", force: :cascade do |t|
     t.integer "company_id"
     t.string "name", null: false
@@ -109,6 +109,16 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_09_000001) do
     t.boolean "is_active"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "public_id"
+    t.bigint "company_id"
+    t.text "thank_you_message"
+    t.string "redirect_url"
+    t.string "submit_button_text", default: "Submit"
+    t.integer "submission_count", default: 0
+    t.bigint "source_id"
+    t.index ["company_id"], name: "index_intake_forms_on_company_id"
+    t.index ["public_id"], name: "index_intake_forms_on_public_id", unique: true
+    t.index ["source_id"], name: "index_intake_forms_on_source_id"
   end
 
   create_table "intake_submissions", force: :cascade do |t|
@@ -117,6 +127,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_09_000001) do
     t.string "status"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "ip_address"
+    t.text "user_agent"
+    t.string "referrer"
+    t.datetime "submitted_at"
+    t.boolean "lead_created", default: false
+    t.bigint "lead_id"
+    t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
   end
 
   create_table "lead_activities", force: :cascade do |t|
@@ -325,6 +342,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_09_000001) do
   add_foreign_key "communication_logs", "leads"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "leads"
+  add_foreign_key "intake_forms", "companies"
+  add_foreign_key "intake_forms", "sources"
+  add_foreign_key "intake_submissions", "leads"
   add_foreign_key "lead_activities", "lead_activities", column: "related_activity_id"
   add_foreign_key "lead_activities", "leads"
   add_foreign_key "lead_activities", "users"
