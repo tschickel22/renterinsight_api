@@ -10,7 +10,24 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_09_145255) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
+  create_table "account_activities", force: :cascade do |t|
+    t.integer "account_id", null: false
+    t.integer "user_id"
+    t.string "activity_type", null: false
+    t.text "description", null: false
+    t.string "outcome"
+    t.integer "duration"
+    t.datetime "scheduled_date"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_account_activities_on_account_id"
+    t.index ["activity_type"], name: "index_account_activities_on_activity_type"
+    t.index ["created_at"], name: "index_account_activities_on_created_at"
+    t.index ["outcome"], name: "index_account_activities_on_outcome"
+    t.index ["user_id"], name: "index_account_activities_on_user_id"
+  end
+
   create_table "accounts", force: :cascade do |t|
     t.integer "company_id"
     t.string "name", null: false
@@ -19,8 +36,43 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_09_145255) do
     t.string "phone"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "account_type"
+    t.string "website"
+    t.string "industry"
+    t.string "rating"
+    t.string "ownership"
+    t.decimal "annual_revenue", precision: 15, scale: 2
+    t.integer "employee_count"
+    t.text "description"
+    t.text "notes"
+    t.string "billing_street"
+    t.string "billing_city"
+    t.string "billing_state"
+    t.string "billing_postal_code"
+    t.string "billing_country"
+    t.string "shipping_street"
+    t.string "shipping_city"
+    t.string "shipping_state"
+    t.string "shipping_postal_code"
+    t.string "shipping_country"
+    t.bigint "parent_account_id"
+    t.bigint "source_id"
+    t.bigint "owner_id"
+    t.string "account_number"
+    t.datetime "converted_date"
+    t.datetime "last_activity_date"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.index ["account_number"], name: "index_accounts_on_account_number", unique: true
+    t.index ["account_type"], name: "index_accounts_on_account_type"
     t.index ["company_id"], name: "index_accounts_on_company_id"
+    t.index ["is_deleted"], name: "index_accounts_on_is_deleted"
     t.index ["name"], name: "index_accounts_on_name"
+    t.index ["owner_id"], name: "index_accounts_on_owner_id"
+    t.index ["parent_account_id"], name: "index_accounts_on_parent_account_id"
+    t.index ["rating"], name: "index_accounts_on_rating"
+    t.index ["source_id"], name: "index_accounts_on_source_id"
+    t.index ["status"], name: "index_accounts_on_status"
   end
 
   create_table "activities", force: :cascade do |t|
@@ -207,8 +259,25 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_09_145255) do
     t.datetime "updated_at", null: false
     t.string "status"
     t.integer "converted_account_id"
+    t.bigint "company_id"
+    t.boolean "is_converted", default: false
+    t.datetime "converted_at"
+    t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["source_id"], name: "index_leads_on_source_id"
+  end
+
+  create_table "notes", force: :cascade do |t|
+    t.text "content", null: false
+    t.string "entity_type", null: false
+    t.string "entity_id", null: false
+    t.integer "user_id"
+    t.string "created_by_name"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_at"], name: "index_notes_on_created_at"
+    t.index ["entity_type", "entity_id"], name: "index_notes_on_entity_type_and_entity_id"
+    t.index ["user_id"], name: "index_notes_on_user_id"
   end
 
   create_table "nurture_enrollments", force: :cascade do |t|
@@ -335,7 +404,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_09_145255) do
     t.datetime "updated_at", null: false
   end
 
+  add_foreign_key "account_activities", "accounts"
+  add_foreign_key "account_activities", "users"
+  add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
+  add_foreign_key "accounts", "sources"
+  add_foreign_key "accounts", "users", column: "owner_id"
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
   add_foreign_key "ai_insights", "leads"
@@ -352,7 +426,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_09_145255) do
   add_foreign_key "lead_scores", "leads"
   add_foreign_key "lead_tasks", "leads"
   add_foreign_key "leads", "accounts", column: "converted_account_id"
+  add_foreign_key "leads", "companies"
   add_foreign_key "leads", "sources"
+  add_foreign_key "notes", "users"
   add_foreign_key "nurture_enrollments", "leads"
   add_foreign_key "nurture_enrollments", "nurture_sequences"
   add_foreign_key "nurture_steps", "nurture_sequences"

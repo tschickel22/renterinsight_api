@@ -3,9 +3,8 @@ Rails.application.config.to_prepare do
     controller = Api::Crm::LeadsController
     mod = Api::Crm::LeadsShowAndScore
     controller.include(mod) unless controller < mod
-  rescue NameError
-    # If controller isn’t autoloaded yet, force it and retry
-    require Rails.root.join('app/controllers/api/crm/leads_controller.rb')
-    retry
+  rescue NameError => e
+    # If controller or models aren't autoloaded yet, skip inclusion
+    Rails.logger.info "Skipping LeadsController concern inclusion: #{e.message}"
   end
 end
