@@ -18,6 +18,39 @@ Rails.application.routes.draw do
       get ':public_id', to: '/public/forms#show'
       post ':public_id/submit', to: '/public/forms#submit'
     end
+    
+    # ==================== V1 API ====================
+    namespace :v1 do
+      # ==================== NOTES ====================
+      resources :notes, only: [:index, :create, :update, :destroy]
+      
+      # ==================== ACCOUNTS ====================
+      resources :accounts do
+        member do
+          post :convert_to_customer
+          post :tags, to: 'accounts#add_tags'
+          delete 'tags/:tag_name', to: 'accounts#remove_tag'
+          get :deals
+        end
+        
+        collection do
+          get :stats
+          get :industries
+          get :export
+          post :convert_lead
+          post :bulk_update
+        end
+        
+        # Nested resources for accounts
+        resources :activities, controller: 'account_activities'
+        resources :messages, controller: 'account_messages', only: [:index, :create]
+        
+        member do
+          get :insights
+          get :score
+        end
+      end
+    end
   end
 
   # Mount ActionCable for WebSocket notifications
@@ -74,7 +107,7 @@ Rails.application.routes.draw do
           post :notes
           
           # Conversion
-          post :convert, to: 'lead_conversions#convert'
+          post :convert
           
           # Scoring
           get :score, to: 'lead_scores#show'
