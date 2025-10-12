@@ -24,6 +24,9 @@ Rails.application.routes.draw do
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
+      # Account activity reminders (for marking as sent)
+      post 'account_activities/:id/mark_reminder_sent', to: 'account_activities#mark_reminder_sent'
+      
       # ==================== ACCOUNTS ====================
       resources :accounts do
         member do
@@ -42,7 +45,15 @@ Rails.application.routes.draw do
         end
         
         # Nested resources for accounts
-        resources :activities, controller: 'account_activities'
+        resources :activities, controller: 'account_activities' do
+          member do
+            post :complete
+            post :cancel
+          end
+          collection do
+            get :reminders
+          end
+        end
         resources :messages, controller: 'account_messages', only: [:index, :create]
         
         member do

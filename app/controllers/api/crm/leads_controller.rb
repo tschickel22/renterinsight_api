@@ -95,6 +95,62 @@ module Api
           
           Rails.logger.info "Account created with ID: #{account.id}"
           
+          # Migrate lead activities to account activities
+          begin
+            if defined?(LeadActivity) && defined?(AccountActivity)
+              Rails.logger.info "Starting migration of #{@lead.lead_activities.count} activities"
+              
+              @lead.lead_activities.each do |lead_activity|
+                account_activity = AccountActivity.new(
+                  account_id: account.id,
+                  user_id: lead_activity.user_id,
+                  assigned_to_id: lead_activity.assigned_to_id,
+                  activity_type: lead_activity.activity_type,
+                  subject: lead_activity.subject,
+                  description: lead_activity.description,
+                  status: lead_activity.status,
+                  priority: lead_activity.priority,
+                  due_date: lead_activity.due_date,
+                  start_time: lead_activity.start_time,
+                  end_time: lead_activity.end_time,
+                  duration_minutes: lead_activity.duration_minutes,
+                  completed_at: lead_activity.completed_at,
+                  call_direction: lead_activity.call_direction,
+                  call_outcome: lead_activity.call_outcome,
+                  phone_number: lead_activity.phone_number,
+                  meeting_location: lead_activity.meeting_location,
+                  meeting_link: lead_activity.meeting_link,
+                  meeting_attendees: lead_activity.meeting_attendees,
+                  reminder_method: lead_activity.reminder_method,
+                  reminder_time: lead_activity.reminder_time,
+                  reminder_sent: lead_activity.reminder_sent,
+                  estimated_hours: lead_activity.estimated_hours,
+                  actual_hours: lead_activity.actual_hours,
+                  outcome_notes: lead_activity.outcome_notes,
+                  metadata: lead_activity.metadata,
+                  created_at: lead_activity.created_at,
+                  updated_at: lead_activity.updated_at
+                )
+                
+                # For older "Activity" tab fields if they exist
+                account_activity.outcome = lead_activity.outcome if lead_activity.respond_to?(:outcome)
+                account_activity.duration = lead_activity.duration if lead_activity.respond_to?(:duration)
+                account_activity.scheduled_date = lead_activity.scheduled_date if lead_activity.respond_to?(:scheduled_date)
+                
+                if account_activity.save
+                  Rails.logger.info "Migrated activity #{lead_activity.id} to account activity #{account_activity.id}"
+                else
+                  Rails.logger.warn "Failed to migrate activity #{lead_activity.id}: #{account_activity.errors.full_messages.join(', ')}"
+                end
+              end
+              
+              Rails.logger.info "Activity migration completed"
+            end
+          rescue => e
+            Rails.logger.error "Error during activity migration: #{e.message}"
+            # Continue with conversion even if activity migration fails
+          end
+          
           # Mark lead as converted
           @lead.is_converted = true
           @lead.converted_at = Time.current
