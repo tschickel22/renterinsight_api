@@ -15,6 +15,8 @@ class Account < ApplicationRecord
   has_many :sub_accounts, class_name: 'Account', foreign_key: :parent_account_id, dependent: :nullify
   has_many :leads, foreign_key: :converted_account_id, dependent: :nullify
   has_many :contacts, dependent: :destroy
+  has_many :communication_logs, dependent: :destroy
+  has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
   
   # Only define deals association if Deal model exists
   if defined?(Deal)

@@ -11,6 +11,7 @@ class Lead < ApplicationRecord
   has_many :lead_activities,      dependent: :destroy
   has_many :ai_insights,          dependent: :destroy
   has_many :communication_logs,   dependent: :destroy
+  has_many :nurture_enrollments,  dependent: :destroy
 
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments

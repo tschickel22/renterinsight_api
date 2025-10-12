@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_12_045305) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -21,10 +21,39 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
     t.datetime "scheduled_date"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "assigned_to_id"
+    t.bigint "related_activity_id"
+    t.string "subject"
+    t.string "status"
+    t.string "priority"
+    t.datetime "due_date"
+    t.datetime "start_time"
+    t.datetime "end_time"
+    t.integer "duration_minutes"
+    t.datetime "completed_at"
+    t.string "call_direction"
+    t.string "call_outcome"
+    t.string "phone_number"
+    t.string "meeting_location"
+    t.string "meeting_link"
+    t.text "meeting_attendees"
+    t.text "reminder_method"
+    t.datetime "reminder_time"
+    t.boolean "reminder_sent", default: false
+    t.float "estimated_hours"
+    t.float "actual_hours"
+    t.text "outcome_notes"
+    t.json "metadata"
     t.index ["account_id"], name: "index_account_activities_on_account_id"
     t.index ["activity_type"], name: "index_account_activities_on_activity_type"
+    t.index ["assigned_to_id"], name: "index_account_activities_on_assigned_to_id"
+    t.index ["completed_at"], name: "index_account_activities_on_completed_at"
     t.index ["created_at"], name: "index_account_activities_on_created_at"
+    t.index ["due_date"], name: "index_account_activities_on_due_date"
     t.index ["outcome"], name: "index_account_activities_on_outcome"
+    t.index ["priority"], name: "index_account_activities_on_priority"
+    t.index ["related_activity_id"], name: "index_account_activities_on_related_activity_id"
+    t.index ["status"], name: "index_account_activities_on_status"
     t.index ["user_id"], name: "index_account_activities_on_user_id"
   end
 
@@ -113,7 +142,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
   end
 
   create_table "communication_logs", force: :cascade do |t|
-    t.integer "lead_id", null: false
+    t.integer "lead_id"
     t.string "comm_type", null: false
     t.string "direction", null: false
     t.string "subject"
@@ -126,6 +155,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
     t.json "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "account_id"
+    t.index ["account_id"], name: "index_communication_logs_on_account_id"
     t.index ["comm_type"], name: "index_communication_logs_on_comm_type"
     t.index ["lead_id", "sent_at"], name: "index_communication_logs_on_lead_id_and_sent_at"
     t.index ["lead_id"], name: "index_communication_logs_on_lead_id"
@@ -137,6 +168,23 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
     t.string "name"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+  end
+
+  create_table "contacts", force: :cascade do |t|
+    t.integer "account_id", null: false
+    t.integer "company_id"
+    t.string "first_name", null: false
+    t.string "last_name"
+    t.string "email"
+    t.string "phone"
+    t.string "title"
+    t.string "department"
+    t.boolean "is_primary", default: false
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_contacts_on_account_id"
+    t.index ["company_id"], name: "index_contacts_on_company_id"
   end
 
   create_table "deals", force: :cascade do |t|
@@ -281,12 +329,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
   end
 
   create_table "nurture_enrollments", force: :cascade do |t|
-    t.integer "lead_id", null: false
+    t.integer "lead_id"
     t.integer "nurture_sequence_id", null: false
     t.string "status", default: "idle", null: false
     t.integer "current_step_index"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "enrollable_type"
+    t.integer "enrollable_id"
+    t.index ["enrollable_type", "enrollable_id"], name: "index_nurture_enrollments_on_enrollable_type_and_enrollable_id"
     t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "status IN ('running','paused')"
     t.index ["lead_id", "nurture_sequence_id"], name: "index_nurture_enrollments_on_lead_id_and_nurture_sequence_id"
     t.index ["lead_id"], name: "index_nurture_enrollments_on_lead_id"
@@ -404,8 +455,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
     t.datetime "updated_at", null: false
   end
 
+  add_foreign_key "account_activities", "account_activities", column: "related_activity_id"
   add_foreign_key "account_activities", "accounts"
   add_foreign_key "account_activities", "users"
+  add_foreign_key "account_activities", "users", column: "assigned_to_id"
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "sources"
@@ -413,6 +466,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_10_225922) do
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
   add_foreign_key "ai_insights", "leads"
+  add_foreign_key "communication_logs", "accounts", on_delete: :cascade
   add_foreign_key "communication_logs", "leads"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "leads"
