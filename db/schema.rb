@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_12_045305) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_12_054500) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -171,7 +171,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_12_045305) do
   end
 
   create_table "contacts", force: :cascade do |t|
-    t.integer "account_id", null: false
+    t.integer "account_id"
     t.integer "company_id"
     t.string "first_name", null: false
     t.string "last_name"
