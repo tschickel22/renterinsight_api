@@ -232,12 +232,18 @@ Rails.application.routes.draw do
 
     # ==================== COMPANY SETTINGS ====================
     namespace :company do
-      resource :settings, only: %i[show update]
+      resource :settings, only: %i[show update] do
+        post :test_email, on: :collection
+        post :test_sms, on: :collection
+      end
     end
 
     # ==================== PLATFORM SETTINGS ====================
     namespace :platform do
-      resource :settings, only: %i[show update]
+      resource :settings, only: %i[show update] do
+        post :test_email, on: :collection
+        post :test_sms, on: :collection
+      end
     end
   end
 end
