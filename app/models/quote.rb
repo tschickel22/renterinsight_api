@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Quote < ApplicationRecord
+  include Communicable
   # Quote Statuses
   STATUSES = %w[draft sent viewed accepted rejected expired].freeze
   
