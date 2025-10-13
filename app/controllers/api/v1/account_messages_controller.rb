@@ -6,9 +6,12 @@ module Api
 
       # GET /api/v1/accounts/:account_id/messages
       def index
-        # Get communication logs for this account
-        logs = CommunicationLog.for_account(@account.id).recent
-        render json: { messages: logs.map { |log| message_json(log) } }, status: :ok
+        # Get communications for this account using Phase 2 Communication model
+        communications = Communication.where(communicable: @account)
+                                     .order(created_at: :desc)
+                                     .limit(100)
+        
+        render json: { messages: communications.map { |comm| message_json(comm) } }, status: :ok
       end
 
       # POST /api/v1/accounts/:account_id/messages
@@ -48,22 +51,25 @@ module Api
         # Extract email parameters
         email_params = extract_email_params
 
-        log = CommunicationLog.create!(
-          account:    @account,
-          comm_type:  'email',
-          direction:  'outbound',
-          subject:    email_params[:subject],
-          content:    email_params[:content],
-          status:     'sent',
-          sent_at:    Time.current,
-          metadata:   build_email_metadata(email_params, email_config)
+        # Create Communication using Phase 2 model
+        communication = Communication.create!(
+          communicable: @account,
+          direction: 'outbound',
+          channel: 'email',
+          status: 'sent',
+          subject: email_params[:subject],
+          body: email_params[:content],
+          from_address: email_config[:fromEmail] || 'noreply@renterinsight.com',
+          to_address: email_params[:to],
+          sent_at: Time.current,
+          metadata: build_email_metadata(email_params, email_config)
         )
 
         render json: { 
           ok: true, 
-          id: log.id, 
+          id: communication.id, 
           provider: email_config[:provider] || 'smtp',
-          message: message_json(log)
+          message: message_json(communication)
         }, status: :created
       rescue => e
         Rails.logger.error("[AccountMessagesController#send_email] Error: #{e.message}")
@@ -89,21 +95,24 @@ module Api
         # Extract SMS parameters
         sms_params = extract_sms_params
 
-        log = CommunicationLog.create!(
-          account:    @account,
-          comm_type:  'sms',
-          direction:  'outbound',
-          content:    sms_params[:content],
-          status:     'sent',
-          sent_at:    Time.current,
-          metadata:   build_sms_metadata(sms_params, sms_config)
+        # Create Communication using Phase 2 model
+        communication = Communication.create!(
+          communicable: @account,
+          direction: 'outbound',
+          channel: 'sms',
+          status: 'sent',
+          body: sms_params[:content],
+          from_address: sms_config[:fromNumber] || '+1234567890',
+          to_address: sms_params[:to],
+          sent_at: Time.current,
+          metadata: build_sms_metadata(sms_params, sms_config)
         )
 
         render json: { 
           ok: true, 
-          id: log.id, 
+          id: communication.id, 
           provider: sms_config[:provider] || 'twilio',
-          message: message_json(log)
+          message: message_json(communication)
         }, status: :created
       rescue => e
         Rails.logger.error("[AccountMessagesController#send_sms] Error: #{e.message}")
@@ -265,23 +274,23 @@ module Api
         }.compact
       end
 
-      # Consistent JSON serialization
-      def message_json(log)
+      # Consistent JSON serialization for Phase 2 Communication model
+      def message_json(communication)
         {
-          id: log.id,
-          accountId: log.account_id,
-          type: log.comm_type,
-          direction: log.direction,
-          subject: log.subject,
-          content: log.content,
-          body: log.content, # alias for compatibility
-          message: log.content, # alias for SMS
-          status: log.status,
-          sentAt: log.sent_at&.iso8601,
-          deliveredAt: log.delivered_at&.iso8601,
-          metadata: log.metadata || {},
-          createdAt: log.created_at&.iso8601,
-          updatedAt: log.updated_at&.iso8601
+          id: communication.id,
+          accountId: communication.communicable_id,
+          type: communication.channel, # 'email' or 'sms'
+          direction: communication.direction,
+          subject: communication.subject,
+          content: communication.body,
+          body: communication.body, # alias for compatibility
+          message: communication.body, # alias for SMS
+          status: communication.status,
+          sentAt: communication.sent_at&.iso8601,
+          deliveredAt: communication.delivered_at&.iso8601,
+          metadata: communication.metadata || {},
+          createdAt: communication.created_at&.iso8601,
+          updatedAt: communication.updated_at&.iso8601
         }.compact
       end
     end

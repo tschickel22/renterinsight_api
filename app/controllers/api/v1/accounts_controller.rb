@@ -3,7 +3,7 @@
 module Api
   module V1
     class AccountsController < ApplicationController
-      before_action :set_account, only: %i[show update destroy convert_to_customer add_tags remove_tag activities deals]
+      before_action :set_account, only: %i[show update destroy convert_to_customer add_tags remove_tag activities deals insights score]
 
       # GET /api/v1/accounts
       def index
@@ -287,6 +287,92 @@ module Api
         render json: { updated_count: accounts.count }
       end
 
+      # GET /api/v1/accounts/:id/insights
+      def insights
+        # Get communications for this account
+        communications = Communication.where(communicable: @account)
+                                     .order(created_at: :desc)
+                                     .limit(50)
+        
+        # Get recent activities - Account has 'activities' association, not 'account_activities'
+        activities = @account.activities
+                             .order(created_at: :desc)
+                             .limit(20)
+        
+        # Get communication stats
+        total_communications = communications.count
+        email_count = communications.where(channel: 'email').count
+        sms_count = communications.where(channel: 'sms').count
+        
+        # Get recent notes
+        notes = Note.where(entity_type: 'account', entity_id: @account.id)
+                   .order(created_at: :desc)
+                   .limit(10)
+        
+        # Calculate engagement score
+        engagement_score = calculate_engagement_score(@account, communications)
+        
+        render json: {
+          account_id: @account.id,
+          account_name: @account.name,
+          engagement_score: engagement_score,
+          communication_stats: {
+            total: total_communications,
+            email: email_count,
+            sms: sms_count,
+            last_contact: communications.first&.created_at
+          },
+          recent_communications: communications.limit(10).map { |c| 
+            {
+              id: c.id,
+              channel: c.channel,
+              direction: c.direction,
+              status: c.status,
+              subject: c.subject,
+              body: c.body&.truncate(100),
+              created_at: c.created_at
+            }
+          },
+          recent_activities: activities.map { |a|
+            {
+              id: a.id,
+              activity_type: a.activity_type,
+              title: a.title,
+              status: a.status,
+              due_date: a.due_date,
+              created_at: a.created_at
+            }
+          },
+          recent_notes: notes.map { |n|
+            {
+              id: n.id,
+              content: n.content&.truncate(200),
+              created_at: n.created_at
+            }
+          },
+          insights: generate_insights(@account, communications, activities)
+        }
+      end
+
+      # GET /api/v1/accounts/:id/score
+      def score
+        score_data = {
+          account_id: @account.id,
+          account_name: @account.name,
+          activity_score: @account.activity_score || 0,
+          engagement_level: determine_engagement_level(@account),
+          scores: {
+            communication: calculate_communication_score(@account),
+            activity: calculate_activity_score(@account),
+            recency: calculate_recency_score(@account),
+            value: calculate_value_score(@account)
+          },
+          recommendations: generate_recommendations(@account)
+        }
+        
+        render json: score_data
+      end
+
       private
 
       def set_account
@@ -313,6 +399,163 @@ module Api
         # This should be implemented based on your authentication/authorization system
         # For now, return the first user or nil
         ::User.first
+      end
+
+      # Helper methods for insights and scoring
+      
+      def calculate_engagement_score(account, communications)
+        # Simple engagement score based on communication frequency and recency
+        recent_comms = communications.where('created_at > ?', 30.days.ago).count
+        recency_score = communications.any? ? [(30 - (Time.current - communications.first.created_at) / 1.day).to_i, 0].max : 0
+        
+        score = (recent_comms * 5) + recency_score
+        [score, 100].min # Cap at 100
+      end
+      
+      def generate_insights(account, communications, activities)
+        insights = []
+        
+        # Communication insights
+        if communications.empty?
+          insights << {
+            type: 'warning',
+            title: 'No Communication History',
+            message: 'No communications found with this account. Consider reaching out.'
+          }
+        elsif communications.where('created_at > ?', 30.days.ago).empty?
+          insights << {
+            type: 'warning',
+            title: 'Inactive Account',
+            message: 'No communication in the last 30 days. Account may need attention.'
+          }
+        else
+          recent = communications.where('created_at > ?', 7.days.ago).count
+          if recent > 5
+            insights << {
+              type: 'success',
+              title: 'Highly Active',
+              message: "#{recent} communications in the last 7 days. Great engagement!"
+            }
+          end
+        end
+        
+        # Activity insights
+        pending_activities = activities.where(status: 'pending').count
+        if pending_activities > 0
+          insights << {
+            type: 'info',
+            title: 'Pending Activities',
+            message: "#{pending_activities} pending #{pending_activities == 1 ? 'activity' : 'activities'} require attention."
+          }
+        end
+        
+        # Overdue activities
+        overdue = activities.where('due_date < ? AND status = ?', Time.current, 'pending').count
+        if overdue > 0
+          insights << {
+            type: 'error',
+            title: 'Overdue Activities',
+            message: "#{overdue} #{overdue == 1 ? 'activity is' : 'activities are'} overdue."
+          }
+        end
+        
+        insights
+      end
+      
+      def determine_engagement_level(account)
+        score = account.activity_score || 0
+        
+        if score > 75
+          'high'
+        elsif score > 40
+          'medium'
+        else
+          'low'
+        end
+      end
+      
+      def calculate_communication_score(account)
+        comms = Communication.where(communicable: account)
+        recent = comms.where('created_at > ?', 30.days.ago).count
+        
+        [recent * 10, 100].min
+      end
+      
+      def calculate_activity_score(account)
+        activities = account.activities.where('created_at > ?', 30.days.ago)
+        completed = activities.where(status: 'completed').count
+        
+        [completed * 15, 100].min
+      end
+      
+      def calculate_recency_score(account)
+        last_comm = Communication.where(communicable: account).order(created_at: :desc).first
+        return 0 unless last_comm
+        
+        days_ago = (Time.current - last_comm.created_at) / 1.day
+        
+        if days_ago < 7
+          100
+        elsif days_ago < 14
+          75
+        elsif days_ago < 30
+          50
+        else
+          25
+        end
+      end
+      
+      def calculate_value_score(account)
+        # Base value on account type and rating
+        type_score = case account.account_type
+        when 'customer' then 100
+        when 'prospect' then 60
+        else 30
+        end
+        
+        rating_multiplier = case account.rating
+        when 'hot' then 1.0
+        when 'warm' then 0.8
+        when 'cold' then 0.5
+        else 0.6
+        end
+        
+        (type_score * rating_multiplier).to_i
+      end
+      
+      def generate_recommendations(account)
+        recommendations = []
+        
+        # Check last communication
+        last_comm = Communication.where(communicable: account).order(created_at: :desc).first
+        if !last_comm || last_comm.created_at < 30.days.ago
+          recommendations << {
+            priority: 'high',
+            action: 'reach_out',
+            message: 'Consider reaching out to maintain relationship'
+          }
+        end
+        
+        # Check for pending activities
+        pending = account.activities.where(status: 'pending').count
+        if pending > 3
+          recommendations << {
+            priority: 'medium',
+            action: 'complete_activities',
+            message: "Complete #{pending} pending activities"
+          }
+        end
+        
+        # Check account type and rating
+        if account.account_type == 'prospect' && account.rating == 'hot'
+          recommendations << {
+            priority: 'high',
+            action: 'convert',
+            message: 'Hot prospect - consider converting to customer'
+          }
+        end
+        
+        recommendations
       end
     end
   end

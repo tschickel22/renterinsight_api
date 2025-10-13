@@ -43,8 +43,12 @@ class Communication < ApplicationRecord
   # Polymorphic association - can belong to Lead, Account, Quote, etc.
   belongs_to :communicable, polymorphic: true
   belongs_to :communication_thread, optional: true
+  belongs_to :template, class_name: 'CommunicationTemplate', foreign_key: 'template_id', optional: true
   
   has_many :communication_events, dependent: :destroy
+  
+  # ActiveStorage attachments
+  has_many_attached :attachments
   
   # Validations
   validates :direction, presence: true, inclusion: { in: %w[outbound inbound] }
@@ -66,6 +70,9 @@ class Communication < ApplicationRecord
   scope :pending, -> { where(status: 'pending') }
   scope :recent, -> { order(created_at: :desc) }
   scope :by_thread, ->(thread_id) { where(communication_thread_id: thread_id) }
+  scope :scheduled, -> { where(scheduled_status: 'scheduled') }
+  scope :ready_to_send, -> { where(scheduled_status: 'scheduled').where('scheduled_for <= ?', Time.current) }
+  scope :upcoming, -> { where(scheduled_status: 'scheduled').where('scheduled_for > ?', Time.current).order(:scheduled_for) }
   
   # Thread management
   before_create :assign_to_thread
@@ -139,6 +146,36 @@ class Communication < ApplicationRecord
   
   def clicked?
     communication_events.where(event_type: 'clicked').exists?
+  end
+  
+  # Scheduling methods
+  def scheduled?
+    scheduled_status == 'scheduled'
+  end
+  
+  def schedule_for(send_at)
+    SchedulingService.schedule(self, send_at: send_at)
+  end
+  
+  def cancel_scheduled
+    SchedulingService.cancel(self)
+  end
+  
+  def reschedule_to(new_time)
+    SchedulingService.reschedule(self, new_time: new_time)
+  end
+  
+  # Attachment helpers
+  def has_attachments?
+    attachments.attached?
+  end
+  
+  def attachment_count
+    attachments.count
+  end
+  
+  def attach_files(file_list)
+    AttachmentService.attach_multiple_to_communication(self, file_list)
   end
   
   private

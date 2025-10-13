@@ -1,0 +1,107 @@
+================================================================================
+                    PHASE 2 BUG FIXES - COMMAND REFERENCE
+================================================================================
+
+COPY AND PASTE THESE COMMANDS INTO YOUR WSL TERMINAL:
+
+# Navigate to project
+cd /home/tschi/src/renterinsight_api
+
+# Make scripts executable
+chmod +x RUN_PHASE2_TESTS.sh quick_test_fixes.sh test_phase2_fixes.sh
+
+# Run the fixed tests (quick verification)
+./quick_test_fixes.sh
+
+# OR run the full Phase 2 test suite
+./RUN_PHASE2_TESTS.sh
+
+# OR run tests manually
+bundle exec rspec --format documentation \
+  spec/services/communication_analytics_spec.rb:219 \
+  spec/jobs/process_webhook_job_spec.rb:18 \
+  spec/jobs/process_webhook_job_spec.rb:25 \
+  spec/jobs/process_webhook_job_spec.rb:58 \
+  spec/jobs/process_webhook_job_spec.rb:93
+
+# Run full Phase 2 suite with progress bar
+bundle exec rspec --format progress \
+  spec/models/communication_template_spec.rb \
+  spec/services/template_rendering_service_spec.rb \
+  spec/services/attachment_service_spec.rb \
+  spec/services/communication_analytics_spec.rb \
+  spec/jobs/
+
+================================================================================
+                              WHAT WAS FIXED
+================================================================================
+
+1. ✅ CommunicationAnalytics.scheduled_stats 
+   - Fixed query to only count future scheduled items within 24h
+
+2. ✅ ProcessWebhookJob Twilio delivery webhook
+   - Removed duplicate status update
+
+3. ✅ ProcessWebhookJob Twilio failure webhook  
+   - Removed duplicate status update, proper error handling
+
+4. ✅ ProcessWebhookJob AWS SES delivery notification
+   - Removed duplicate status update
+
+5. ✅ ProcessWebhookJob SMTP delivery event
+   - Removed duplicate status update
+
+================================================================================
+                            FILES MODIFIED
+================================================================================
+
+app/services/communication_analytics.rb      - Fixed scheduled_for query
+app/jobs/process_webhook_job.rb              - Removed duplicate updates
+spec/jobs/process_webhook_job_spec.rb        - Updated test expectations
+
+================================================================================
+                         DOCUMENTATION CREATED
+================================================================================
+
+PHASE_2_FIXES_SUMMARY.md     - Quick overview of fixes
+PHASE_2_BUG_FIXES.md         - Detailed technical documentation  
+PHASE_2_VISUAL_GUIDE.md      - Visual diagrams and explanations
+RUN_PHASE2_TESTS.sh          - Test runner script
+quick_test_fixes.sh          - Quick test script
+test_phase2_fixes.sh         - Detailed test script
+
+================================================================================
+                            EXPECTED RESULTS
+================================================================================
+
+Before fixes: 84 examples, 5 failures
+After fixes:  84 examples, 0 failures ✅
+
+All Phase 2 communications module tests should now pass!
+
+================================================================================
+                         ARCHITECTURE INSIGHT
+================================================================================
+
+The key architectural pattern revealed by these fixes:
+
+  Webhook → Create Event → Callback Updates Status
+  
+Events are the source of truth. Status follows events.
+This ensures:
+  • Single database write per status change
+  • Complete audit trail
+  • Synchronized events and status
+  • Simpler webhook processors
+
+================================================================================
+                              QUICK START
+================================================================================
+
+Just run this:
+
+cd /home/tschi/src/renterinsight_api && chmod +x RUN_PHASE2_TESTS.sh && ./RUN_PHASE2_TESTS.sh
+
+That's it! All tests should pass. 🎉
+
+================================================================================

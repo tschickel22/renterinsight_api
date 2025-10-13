@@ -30,11 +30,16 @@ class CommunicationService
     to:,
     from: nil,
     subject: nil,
-    body:,
+    body: nil,
     category: 'transactional',
     provider: nil,
     portal_visible: false,
     metadata: {},
+    template: nil,
+    template_context: {},
+    attachments: [],
+    scheduled_for: nil,
+    send_async: false,
     **options
   )
     new.send_communication(
@@ -49,6 +54,11 @@ class CommunicationService
       provider: provider,
       portal_visible: portal_visible,
       metadata: metadata,
+      template: template,
+      template_context: template_context,
+      attachments: attachments,
+      scheduled_for: scheduled_for,
+      send_async: send_async,
       **options
     )
   end
@@ -93,11 +103,16 @@ class CommunicationService
     to:,
     from: nil,
     subject: nil,
-    body:,
+    body: nil,
     category: 'transactional',
     provider: nil,
     portal_visible: false,
     metadata: {},
+    template: nil,
+    template_context: {},
+    attachments: [],
+    scheduled_for: nil,
+    send_async: false,
     **options
   )
     # Check communication preferences (opt-in/out)
@@ -108,6 +123,24 @@ class CommunicationService
     )
       raise OptOutError, "Recipient has opted out of #{channel} communications"
     end
+    
+    # Render template if provided
+    if template
+      template_obj = template.is_a?(CommunicationTemplate) ? template : CommunicationTemplate.find(template)
+      
+      # Build context from communicable
+      context = TemplateRenderingService.build_context_from_record(communicable)
+      context.merge!(template_context) if template_context.present?
+      
+      # Render template
+      rendered = template_obj.render(context)
+      subject ||= rendered[:subject]
+      body ||= rendered[:body]
+    end
+    
+    # Validate required fields
+    raise Error, "Body is required" if body.blank?
+    raise Error, "Subject is required for email" if channel == 'email' && subject.blank?
     
     # Set default provider if not specified
     provider ||= default_provider_for(channel)
@@ -127,10 +160,39 @@ class CommunicationService
       bcc_addresses: options[:bcc],
       reply_to: options[:reply_to],
       portal_visible: portal_visible,
-      metadata: metadata.merge(category: category)
+      metadata: metadata.merge(category: category),
+      template: template.is_a?(CommunicationTemplate) ? template : (template ? CommunicationTemplate.find(template) : nil),
+      scheduled_for: scheduled_for,
+      scheduled_status: scheduled_for.present? ? 'scheduled' : 'immediate'
     )
     
-    # Send via appropriate provider
+    # Attach files if provided
+    if attachments.present?
+      result = AttachmentService.attach_multiple_to_communication(@communication, attachments)
+      unless result[:success]
+        Rails.logger.error("Failed to attach files: #{result[:failed].inspect}")
+      end
+    end
+    
+    # Handle scheduling
+    if scheduled_for.present?
+      # Schedule for future delivery
+      result = SchedulingService.schedule(@communication, send_at: scheduled_for)
+      if result[:success]
+        Rails.logger.info("Scheduled communication #{@communication.id} for #{scheduled_for}")
+      else
+        Rails.logger.error("Failed to schedule communication: #{result[:error]}")
+      end
+      return { success: true, communication: @communication, scheduled: true }
+    end
+    
+    # Handle async sending
+    if send_async
+      SendCommunicationJob.perform_later(@communication.id)
+      return { success: true, communication: @communication, async: true }
+    end
+    
+    # Send via appropriate provider (synchronous)
     begin
       result = send_via_provider(
         provider: provider,
@@ -145,10 +207,35 @@ class CommunicationService
       # Track send event
       @communication.track_event('sent', result)
       
-      @communication
+      { success: true, communication: @communication, provider: provider, external_id: result[:external_id] }
     rescue => e
       @communication.mark_as_failed!(e.message)
-      raise ProviderError, "Failed to send #{channel}: #{e.message}"
+      { success: false, communication: @communication, error: e.message }
+    end
+  end
+  
+  # Send an existing communication (used by background jobs)
+  def self.send_communication(communication, options = {})
+    return { success: false, error: "Communication already sent" } if communication.sent? || communication.delivered?
+    
+    begin
+      result = new(communication).send_via_provider(
+        provider: communication.provider,
+        channel: communication.channel,
+        communication: communication,
+        options: options
+      )
+      
+      # Update communication with external ID
+      communication.update!(external_id: result[:external_id]) if result[:external_id]
+      
+      # Track send event
+      communication.track_event('sent', result)
+      
+      { success: true, communication: communication, provider: communication.provider }
+    rescue => e
+      communication.mark_as_failed!(e.message)
+      { success: false, communication: communication, error: e.message }
     end
   end
   
