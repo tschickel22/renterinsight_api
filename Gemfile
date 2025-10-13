@@ -47,3 +47,20 @@ group :development, :test do
 end
 
 gem "rack-cors", "~> 3.0"
+gem 'liquid'
+gem 'sidekiq'
+
+group :test do
+  gem 'rspec-rails'
+end
+
+group :development, :test do
+  gem 'factory_bot_rails'
+end
+
+group :test do
+  gem 'shoulda-matchers'
+end
+
+# Time-series grouping for analytics
+gem 'groupdate'

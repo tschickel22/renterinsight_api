@@ -7,8 +7,8 @@ module Api
 
       # GET /api/crm/leads/:lead_id/communications
       def index
-        logs = CommunicationLog.for_lead(@lead.id).recent
-        render json: logs.map { |log| comm_log_json(log) }, status: :ok
+        communications = Communication.where(communicable_type: 'Lead', communicable_id: @lead.id).order(created_at: :desc)
+        render json: communications.map { |comm| comm_log_json(comm) }, status: :ok
       end
 
       # POST /api/crm/communications/email (non-nested route, lead_id in body)
@@ -39,14 +39,16 @@ module Api
         # Support multiple parameter formats
         email_params = extract_email_params
 
-        log = CommunicationLog.create!(
-          lead:       @lead,
-          comm_type:  'email',
+        log = Communication.create!(
+          communicable: @lead,
+          channel:    'email',
           direction:  'outbound',
           subject:    email_params[:subject],
-          content:    email_params[:content],
+          body:       email_params[:content],
           status:     'sent',
           sent_at:    Time.current,
+          to_address: email_params[:to],
+          from_address: email_config[:fromEmail],
           metadata:   build_email_metadata(email_params, email_config)
         )
 
@@ -85,13 +87,15 @@ module Api
         # Support multiple parameter formats
         sms_params = extract_sms_params
 
-        log = CommunicationLog.create!(
-          lead:       @lead,
-          comm_type:  'sms',
+        log = Communication.create!(
+          communicable: @lead,
+          channel:    'sms',
           direction:  'outbound',
-          content:    sms_params[:content],
+          body:       sms_params[:content],
           status:     'sent',
           sent_at:    Time.current,
+          to_address: sms_params[:to],
+          from_address: sms_config[:fromNumber],
           metadata:   build_sms_metadata(sms_params, sms_config)
         )
 
@@ -114,7 +118,7 @@ module Api
 
       # POST /api/crm/leads/:lead_id/communications (generic log creation)
       def create
-        log = CommunicationLog.create!(log_params)
+        log = Communication.create!(log_params)
         render json: comm_log_json(log), status: :created
       rescue => e
         Rails.logger.error("[CommunicationsController#create] Error: #{e.message}")
@@ -311,16 +315,17 @@ module Api
       # Strong parameters for generic log creation
       def log_params
         {
-          lead_id:      params[:lead_id] || @lead&.id,
-          comm_type:    params[:type] || params[:comm_type] || params[:commType],
+          communicable: @lead,
+          channel:      params[:type] || params[:comm_type] || params[:commType] || 'email',
           direction:    params[:direction] || 'outbound',
           subject:      params[:subject],
-          content:      params[:content] || params[:body] || params[:message],
+          body:         params[:content] || params[:body] || params[:message],
           status:       params[:status].presence || 'sent',
           sent_at:      parse_time(params[:sent_at] || params[:sentAt]) || Time.current,
           delivered_at: parse_time(params[:delivered_at] || params[:deliveredAt]),
           opened_at:    parse_time(params[:opened_at] || params[:openedAt]),
-          clicked_at:   parse_time(params[:clicked_at] || params[:clickedAt]),
+          to_address:   params[:to] || @lead&.email,
+          from_address: params[:from],
           metadata:     extract_metadata
         }.compact
       end
@@ -335,23 +340,22 @@ module Api
       end
 
       # Consistent JSON serialization for communication logs
-      def comm_log_json(log)
+      def comm_log_json(comm)
         {
-          id:          log.id,
-          leadId:      log.lead_id,
-          type:        log.comm_type,
-          commType:    log.comm_type,
-          direction:   log.direction,
-          subject:     log.subject,
-          content:     log.content,
-          status:      log.status,
-          sentAt:      log.sent_at&.iso8601,
-          deliveredAt: log.delivered_at&.iso8601,
-          openedAt:    log.opened_at&.iso8601,
-          clickedAt:   log.clicked_at&.iso8601,
-          metadata:    log.metadata || {},
-          createdAt:   log.created_at&.iso8601,
-          updatedAt:   log.updated_at&.iso8601
+          id:          comm.id,
+          leadId:      comm.communicable_id,
+          type:        comm.channel,
+          commType:    comm.channel,
+          direction:   comm.direction,
+          subject:     comm.subject,
+          content:     comm.body,
+          status:      comm.status,
+          sentAt:      comm.sent_at&.iso8601,
+          deliveredAt: comm.delivered_at&.iso8601,
+          openedAt:    comm.opened_at&.iso8601,
+          metadata:    comm.metadata || {},
+          createdAt:   comm.created_at&.iso8601,
+          updatedAt:   comm.updated_at&.iso8601
         }.compact
       end
 

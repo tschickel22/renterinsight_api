@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Lead < ApplicationRecord
+  include Communicable
   belongs_to :company
   belongs_to :converted_account, class_name: "Account", optional: true
   belongs_to :source, class_name: "Source", optional: true
@@ -10,7 +11,6 @@ class Lead < ApplicationRecord
   has_many :reminders,            dependent: :destroy
   has_many :lead_activities,      dependent: :destroy
   has_many :ai_insights,          dependent: :destroy
-  has_many :communication_logs,   dependent: :destroy
   has_many :nurture_enrollments,  dependent: :destroy
 
   has_many :tag_assignments, as: :entity, dependent: :destroy

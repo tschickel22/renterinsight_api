@@ -1,0 +1,7 @@
+:queues:
+  - critical
+  - communications
+  - scheduled_communications
+  - webhooks
+  - default
+:concurrency: 5

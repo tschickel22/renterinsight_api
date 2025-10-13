@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_12_120000) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_13_200003) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -104,6 +104,36 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_12_120000) do
     t.index ["status"], name: "index_accounts_on_status"
   end
 
+  create_table "active_storage_attachments", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "record_type", null: false
+    t.integer "record_id", null: false
+    t.integer "blob_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["blob_id"], name: "index_active_storage_attachments_on_blob_id"
+    t.index ["record_type", "record_id", "name", "blob_id"], name: "index_active_storage_attachments_uniqueness", unique: true
+  end
+
+  create_table "active_storage_blobs", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "filename", null: false
+    t.string "content_type"
+    t.text "metadata"
+    t.string "service_name", null: false
+    t.bigint "byte_size", null: false
+    t.string "checksum"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_active_storage_blobs_on_key", unique: true
+  end
+
+  create_table "active_storage_variant_records", force: :cascade do |t|
+    t.integer "blob_id", null: false
+    t.string "variation_digest", null: false
+    t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
+  end
+
   create_table "activities", force: :cascade do |t|
     t.integer "lead_id", null: false
     t.integer "user_id"
@@ -141,27 +171,117 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_12_120000) do
     t.index ["lead_id"], name: "index_ai_insights_on_lead_id"
   end
 
-  create_table "communication_logs", force: :cascade do |t|
-    t.integer "lead_id"
-    t.string "comm_type", null: false
-    t.string "direction", null: false
-    t.string "subject"
-    t.text "content", null: false
-    t.string "status", null: false
-    t.datetime "sent_at"
-    t.datetime "delivered_at"
-    t.datetime "opened_at"
-    t.datetime "clicked_at"
-    t.json "metadata", default: {}
+  create_table "communication_events", force: :cascade do |t|
+    t.integer "communication_id", null: false
+    t.string "event_type", null: false
+    t.datetime "occurred_at", null: false
+    t.string "ip_address"
+    t.string "user_agent"
+    t.text "details"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.integer "account_id"
-    t.index ["account_id"], name: "index_communication_logs_on_account_id"
-    t.index ["comm_type"], name: "index_communication_logs_on_comm_type"
-    t.index ["lead_id", "sent_at"], name: "index_communication_logs_on_lead_id_and_sent_at"
-    t.index ["lead_id"], name: "index_communication_logs_on_lead_id"
-    t.index ["sent_at"], name: "index_communication_logs_on_sent_at"
-    t.index ["status"], name: "index_communication_logs_on_status"
+    t.index ["communication_id", "event_type"], name: "idx_events_on_communication_and_type"
+    t.index ["communication_id"], name: "index_communication_events_on_communication_id"
+    t.index ["event_type"], name: "index_communication_events_on_event_type"
+    t.index ["occurred_at"], name: "index_communication_events_on_occurred_at"
+  end
+
+  create_table "communication_preferences", force: :cascade do |t|
+    t.string "recipient_type", null: false
+    t.integer "recipient_id", null: false
+    t.string "channel", null: false
+    t.string "category"
+    t.boolean "opted_in", default: true, null: false
+    t.datetime "opted_in_at"
+    t.datetime "opted_out_at"
+    t.string "unsubscribe_token"
+    t.text "opted_out_reason"
+    t.string "ip_address"
+    t.string "user_agent"
+    t.text "compliance_metadata"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_communication_preferences_on_category"
+    t.index ["channel"], name: "index_communication_preferences_on_channel"
+    t.index ["opted_in"], name: "index_communication_preferences_on_opted_in"
+    t.index ["recipient_type", "recipient_id", "channel", "category"], name: "idx_prefs_on_recipient_channel_category", unique: true
+    t.index ["recipient_type", "recipient_id"], name: "index_communication_preferences_on_recipient"
+    t.index ["unsubscribe_token"], name: "index_communication_preferences_on_unsubscribe_token", unique: true
+  end
+
+  create_table "communication_templates", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "channel", null: false
+    t.text "subject_template"
+    t.text "body_template", null: false
+    t.string "category"
+    t.json "variables", default: "{}"
+    t.boolean "active", default: true
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_communication_templates_on_active"
+    t.index ["category"], name: "index_communication_templates_on_category"
+    t.index ["channel"], name: "index_communication_templates_on_channel"
+    t.index ["name"], name: "index_communication_templates_on_name"
+  end
+
+  create_table "communication_threads", force: :cascade do |t|
+    t.string "subject"
+    t.string "channel"
+    t.string "status", default: "active", null: false
+    t.datetime "last_message_at"
+    t.text "metadata"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "participant_type"
+    t.bigint "participant_id"
+    t.index ["channel"], name: "index_communication_threads_on_channel"
+    t.index ["last_message_at"], name: "index_communication_threads_on_last_message_at"
+    t.index ["participant_type", "participant_id"], name: "index_comm_threads_on_participant"
+    t.index ["status"], name: "index_communication_threads_on_status"
+  end
+
+  create_table "communications", force: :cascade do |t|
+    t.string "communicable_type", null: false
+    t.integer "communicable_id", null: false
+    t.integer "communication_thread_id"
+    t.string "direction", null: false
+    t.string "channel", null: false
+    t.string "provider"
+    t.string "status", default: "pending", null: false
+    t.string "subject"
+    t.text "body"
+    t.string "from_address"
+    t.string "to_address"
+    t.text "cc_addresses"
+    t.text "bcc_addresses"
+    t.string "reply_to"
+    t.boolean "portal_visible", default: false
+    t.datetime "sent_at"
+    t.datetime "delivered_at"
+    t.datetime "failed_at"
+    t.text "error_message"
+    t.text "metadata"
+    t.string "external_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.integer "template_id"
+    t.datetime "scheduled_for"
+    t.string "scheduled_status", default: "immediate"
+    t.string "scheduled_job_id"
+    t.index ["channel"], name: "index_communications_on_channel"
+    t.index ["communicable_type", "communicable_id"], name: "index_communications_on_communicable"
+    t.index ["communication_thread_id"], name: "index_communications_on_communication_thread_id"
+    t.index ["created_at"], name: "index_communications_on_created_at"
+    t.index ["direction"], name: "index_communications_on_direction"
+    t.index ["external_id"], name: "index_communications_on_external_id"
+    t.index ["portal_visible"], name: "index_communications_on_portal_visible"
+    t.index ["scheduled_for"], name: "index_communications_on_scheduled_for"
+    t.index ["scheduled_status", "scheduled_for"], name: "index_communications_on_scheduled_status_and_scheduled_for"
+    t.index ["scheduled_status"], name: "index_communications_on_scheduled_status"
+    t.index ["status"], name: "index_communications_on_status"
+    t.index ["template_id"], name: "index_communications_on_template_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -496,11 +616,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_12_120000) do
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "sources"
   add_foreign_key "accounts", "users", column: "owner_id"
+  add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
   add_foreign_key "ai_insights", "leads"
-  add_foreign_key "communication_logs", "accounts", on_delete: :cascade
-  add_foreign_key "communication_logs", "leads"
+  add_foreign_key "communication_events", "communications"
+  add_foreign_key "communications", "communication_templates", column: "template_id"
+  add_foreign_key "communications", "communication_threads"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "leads"
   add_foreign_key "intake_forms", "companies"

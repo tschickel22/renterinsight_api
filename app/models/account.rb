@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 class Account < ApplicationRecord
+  include Communicable
   # Account Types
   ACCOUNT_TYPES = %w[customer prospect vendor partner competitor converted_lead].freeze
   STATUSES = %w[active inactive pending archived].freeze
