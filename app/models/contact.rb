@@ -7,6 +7,7 @@ class Contact < ApplicationRecord
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
   has_many :note_records, class_name: 'Note', as: :entity, dependent: :destroy
+  has_many :quotes, dependent: :destroy
 
   # Validations
   validates :first_name, presence: true

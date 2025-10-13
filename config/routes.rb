@@ -24,6 +24,20 @@ Rails.application.routes.draw do
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
+      # ==================== QUOTES ====================
+      resources :quotes do
+        member do
+          post :send, to: 'quotes#send_quote'
+          post :accept
+          post :reject
+        end
+        
+        collection do
+          get :stats
+          get :export
+        end
+      end
+      
       # Account activity reminders (for marking as sent)
       post 'account_activities/:id/mark_reminder_sent', to: 'account_activities#mark_reminder_sent'
       

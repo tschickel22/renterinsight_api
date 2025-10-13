@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_12_054500) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_12_120000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -367,6 +367,39 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_12_054500) do
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
   end
 
+  create_table "quotes", force: :cascade do |t|
+    t.integer "account_id"
+    t.integer "contact_id"
+    t.string "customer_id"
+    t.string "vehicle_id"
+    t.string "quote_number", null: false
+    t.string "status", default: "draft", null: false
+    t.decimal "subtotal", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "tax", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "total", precision: 15, scale: 2, default: "0.0", null: false
+    t.json "items", default: []
+    t.date "valid_until"
+    t.datetime "sent_at"
+    t.datetime "viewed_at"
+    t.datetime "accepted_at"
+    t.datetime "rejected_at"
+    t.text "notes"
+    t.json "custom_fields", default: {}
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_quotes_on_account_id"
+    t.index ["contact_id"], name: "index_quotes_on_contact_id"
+    t.index ["created_at"], name: "index_quotes_on_created_at"
+    t.index ["customer_id"], name: "index_quotes_on_customer_id"
+    t.index ["is_deleted"], name: "index_quotes_on_is_deleted"
+    t.index ["quote_number"], name: "index_quotes_on_quote_number", unique: true
+    t.index ["status"], name: "index_quotes_on_status"
+    t.index ["valid_until"], name: "index_quotes_on_valid_until"
+    t.index ["vehicle_id"], name: "index_quotes_on_vehicle_id"
+  end
+
   create_table "reminders", force: :cascade do |t|
     t.integer "lead_id", null: false
     t.integer "user_id", null: false
@@ -487,6 +520,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_12_054500) do
   add_foreign_key "nurture_enrollments", "nurture_sequences"
   add_foreign_key "nurture_steps", "nurture_sequences"
   add_foreign_key "nurture_steps", "templates"
+  add_foreign_key "quotes", "accounts"
+  add_foreign_key "quotes", "contacts"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
   add_foreign_key "tag_assignments", "tags"
