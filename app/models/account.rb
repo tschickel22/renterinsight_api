@@ -26,6 +26,7 @@ class Account < ApplicationRecord
   has_many :tag_assignments, as: :entity, class_name: 'TagAssignment', dependent: :destroy
   has_many :tags, through: :tag_assignments
   has_many :activities, class_name: 'AccountActivity', dependent: :destroy
+  has_many :quotes, dependent: :destroy
   
   # Validations
   validates :name, presence: true, uniqueness: { scope: :company_id }
