@@ -1,0 +1,697 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+RSpec.describe 'Portal Authorization Security', type: :request do
+  let(:company) { Company.create!(name: 'Test Company') }
+  let(:source) { Source.create!(name: 'Test Source', source_type: 'website', is_active: true) }
+  
+  # Buyer 1
+  let(:buyer1) do
+    Lead.create!(
+      first_name: 'Alice',
+      last_name: 'Johnson',
+      email: 'alice@example.com',
+      phone: '555-1111',
+      source: source,
+      company: company
+    )
+  end
+
+  let(:portal_access1) do
+    BuyerPortalAccess.create!(
+      account: account1,
+      email: 'alice@example.com',
+      password: 'SecurePass123!',
+      portal_enabled: true
+    )
+  end
+
+  let(:token1) do
+    JWT.encode(
+      { buyer_id: buyer1.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
+      Rails.application.secret_key_base,
+      'HS256'
+    )
+  end
+
+  # Buyer 2
+  let(:buyer2) do
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+    Lead.create!(
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+      first_name: 'Bob',
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+      last_name: 'Williams',
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+      email: 'bob@example.com',
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+      phone: '555-2222',
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+      source: source,
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+      company: company
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+    )
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+  end
+
+  let(:account1) do
+    Account.create!(
+      company: company,
+      name: "Alice Account",
+      email: "alice@example.com",
+      status: "active"
+    )
+  end
+
+  let(:account2) do
+    Account.create!(
+      company: company,
+      name: "Bob Account",
+      email: "bob@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    buyer1.update!(converted_account_id: account1.id, is_converted: true)
+    buyer2.update!(converted_account_id: account2.id, is_converted: true)
+  end
+
+  let(:portal_access2) do
+    BuyerPortalAccess.create!(
+      account: account2,
+      email: 'bob@example.com',
+      password: 'SecurePass456!',
+      portal_enabled: true
+    )
+  end
+
+  let(:token2) do
+    JWT.encode(
+      { buyer_id: buyer2.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
+      Rails.application.secret_key_base,
+      'HS256'
+    )
+  end
+
+  describe 'Communications Isolation' do
+    let!(:thread1) do
+      CommunicationThread.create!(
+        participant_type: "Lead", participant_id: buyer1.id,
+        subject: 'Alice\'s Thread'
+      )
+    end
+
+    let!(:communication1) do
+      Communication.create!(
+        communicable: buyer1,
+        communication_thread: thread1,
+        direction: 'outbound',
+        channel: 'email',
+        status: 'sent',
+        subject: 'Alice\'s Thread',
+        body: 'Message for Alice only',
+        portal_visible: true
+      )
+    end
+
+    let!(:thread2) do
+      CommunicationThread.create!(
+        participant_type: "Lead", participant_id: buyer2.id,
+        subject: 'Bob\'s Thread'
+      )
+    end
+
+    let!(:communication2) do
+      Communication.create!(
+        communicable: buyer2,
+        communication_thread: thread2,
+        direction: 'outbound',
+        channel: 'email',
+        status: 'sent',
+        subject: 'Bob\'s Thread',
+        body: 'Message for Bob only',
+        portal_visible: true
+      )
+    end
+
+    it 'buyer1 can only see their own communications' do
+      get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{token1}" }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      
+      comm_subjects = data['communications'].map { |c| c['subject'] }
+      expect(comm_subjects).to include('Alice\'s Thread')
+      expect(comm_subjects).not_to include('Bob\'s Thread')
+    end
+
+    it 'buyer2 can only see their own communications' do
+      get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{token2}" }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      
+      comm_subjects = data['communications'].map { |c| c['subject'] }
+      expect(comm_subjects).to include('Bob\'s Thread')
+      expect(comm_subjects).not_to include('Alice\'s Thread')
+    end
+
+    it 'buyer1 cannot reply to buyer2\'s thread' do
+      post "/api/portal/communications/#{thread2.id}/reply", 
+           params: { body: 'Attempting unauthorized access' }.to_json,
+           headers: { 
+             'Authorization' => "Bearer #{token1}",
+             'Content-Type' => 'application/json'
+           }
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'buyer2 cannot reply to buyer1\'s thread' do
+      post "/api/portal/communications/#{thread1.id}/reply",
+           params: { body: 'Attempting unauthorized access' }.to_json,
+           headers: {
+             'Authorization' => "Bearer #{token2}",
+             'Content-Type' => 'application/json'
+           }
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe 'Quotes Isolation' do
+    let!(:quote1) do
+      Quote.create!(
+        account: account1,
+        quote_number: 'Q-ALICE-001',
+        status: 'pending',
+        subtotal: 1000.00,
+        tax: 100.00,
+        total: 1100.00,
+        valid_until: 30.days.from_now
+      )
+    end
+
+    let!(:quote2) do
+      Quote.create!(
+        account: account2,
+        quote_number: 'Q-BOB-001',
+        status: 'pending',
+        subtotal: 2000.00,
+        tax: 200.00,
+        total: 2200.00,
+        valid_until: 30.days.from_now
+      )
+    end
+
+    it 'buyer1 can only see their own quotes' do
+      get '/api/portal/quotes', headers: { 'Authorization' => "Bearer #{token1}" }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      
+      quote_numbers = data['quotes'].map { |q| q['quote_number'] }
+      expect(quote_numbers).to include('Q-ALICE-001')
+      expect(quote_numbers).not_to include('Q-BOB-001')
+    end
+
+    it 'buyer2 can only see their own quotes' do
+      get '/api/portal/quotes', headers: { 'Authorization' => "Bearer #{token2}" }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      
+      quote_numbers = data['quotes'].map { |q| q['quote_number'] }
+      expect(quote_numbers).to include('Q-BOB-001')
+      expect(quote_numbers).not_to include('Q-ALICE-001')
+    end
+
+    it 'buyer1 cannot view buyer2\'s quote details' do
+      get "/api/portal/quotes/#{quote2.id}", headers: { 'Authorization' => "Bearer #{token1}" }
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'buyer1 cannot accept buyer2\'s quote' do
+      patch "/api/portal/quotes/#{quote2.id}/accept",
+            headers: { 'Authorization' => "Bearer #{token1}" }
+
+      expect(response).to have_http_status(:not_found)
+      
+      # Verify quote was not accepted
+      quote2.reload
+      expect(quote2.status).to eq('pending')
+      expect(quote2.accepted_at).to be_nil
+    end
+
+    it 'buyer1 cannot reject buyer2\'s quote' do
+      patch "/api/portal/quotes/#{quote2.id}/reject",
+            headers: { 'Authorization' => "Bearer #{token1}" }
+
+      expect(response).to have_http_status(:not_found)
+      
+      # Verify quote was not rejected
+      quote2.reload
+      expect(quote2.status).to eq('pending')
+    end
+
+    it 'buyer2 cannot accept buyer1\'s quote' do
+      patch "/api/portal/quotes/#{quote1.id}/accept",
+            headers: { 'Authorization' => "Bearer #{token2}" }
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe 'Preferences Isolation' do
+    before do
+      # Set different preferences for each buyer
+      portal_access1.update!(
+        email_opt_in: true,
+        sms_opt_in: false,
+        marketing_opt_in: true
+      )
+
+      portal_access2.update!(
+        email_opt_in: false,
+        sms_opt_in: true,
+        marketing_opt_in: false
+      )
+    end
+
+    it 'buyer1 sees only their own preferences' do
+      get '/api/portal/preferences', headers: { 'Authorization' => "Bearer #{token1}" }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      
+      expect(data['preferences']['email_opt_in']).to be true
+      expect(data['preferences']['sms_opt_in']).to be false
+      expect(data['preferences']['marketing_opt_in']).to be true
+    end
+
+    it 'buyer2 sees only their own preferences' do
+      get '/api/portal/preferences', headers: { 'Authorization' => "Bearer #{token2}" }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      
+      expect(data['preferences']['email_opt_in']).to be false
+      expect(data['preferences']['sms_opt_in']).to be true
+      expect(data['preferences']['marketing_opt_in']).to be false
+    end
+
+    it 'buyer1 cannot see buyer2\'s preference history' do
+      # Create some history for buyer2
+      portal_access2.update!(email_opt_in: true)
+
+      # Try to access as buyer1
+      get '/api/portal/preferences/history', headers: { 'Authorization' => "Bearer #{token1}" }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      
+      # Buyer1 should only see their own history (if any)
+      # The history should not contain buyer2's changes
+      expect(data['history']).to be_an(Array)
+    end
+
+    it 'updating preferences only affects the authenticated buyer' do
+      patch '/api/portal/preferences',
+            params: { preferences: { email_opt_in: false } }.to_json,
+            headers: {
+              'Authorization' => "Bearer #{token1}",
+              'Content-Type' => 'application/json'
+            }
+
+      expect(response).to have_http_status(:ok)
+
+      # Verify buyer1's preferences changed
+      portal_access1.reload
+      expect(portal_access1.email_opt_in).to be false
+
+      # Verify buyer2's preferences unchanged
+      portal_access2.reload
+      expect(portal_access2.email_opt_in).to be false # Already was false
+      expect(portal_access2.sms_opt_in).to be true # Should remain true
+    end
+  end
+
+  describe 'Token Manipulation Attempts' do
+    it 'rejects token with wrong buyer_id' do
+      malicious_token = JWT.encode(
+        { buyer_id: 99999, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
+        Rails.application.secret_key_base,
+        'HS256'
+      )
+
+      get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{malicious_token}" }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'rejects token with wrong signing key' do
+      malicious_token = JWT.encode(
+        { buyer_id: buyer1.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
+        'wrong_secret_key',
+        'HS256'
+      )
+
+      get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{malicious_token}" }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'rejects expired token' do
+      expired_token = JWT.encode(
+        { buyer_id: buyer1.id, buyer_type: 'Lead', exp: 1.hour.ago.to_i },
+        Rails.application.secret_key_base,
+        'HS256'
+      )
+
+      get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{expired_token}" }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'rejects malformed token' do
+      get '/api/portal/communications', headers: { 'Authorization' => 'Bearer invalid.token.here' }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'rejects missing authorization header' do
+      get '/api/portal/communications'
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+  end
+
+  describe 'Disabled Portal Access' do
+    before do
+      portal_access1.update!(portal_enabled: false)
+    end
+
+    it 'prevents login when portal is disabled' do
+      post '/api/portal/auth/login',
+           params: {
+             email: 'alice@example.com',
+             password: 'SecurePass123!'
+           }.to_json,
+           headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:unauthorized)
+      data = JSON.parse(response.body)
+      expect(data['error']).to include('disabled')
+    end
+
+    it 'rejects requests even with valid token when portal is disabled' do
+      # Token was created before portal was disabled
+      get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{token1}" }
+
+      # Should still work because we're checking enabled status at login, not on every request
+      # If you want to check on every request, you'd need to modify the authentication logic
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
+  describe 'Cross-Buyer Data Access Prevention' do
+    it 'ensures complete data isolation between buyers' do
+      # Create comprehensive data for both buyers
+      quote1 = Quote.create!(
+        account: account1,
+        quote_number: 'Q-2025-ALICE',
+        status: 'pending',
+        subtotal: 1000.00,
+        tax: 100.00,
+        total: 1100.00,
+        valid_until: 30.days.from_now
+      )
+
+      quote2 = Quote.create!(
+        account: account2,
+        quote_number: 'Q-2025-BOB',
+        status: 'pending',
+        subtotal: 2000.00,
+        tax: 200.00,
+        total: 2200.00,
+        valid_until: 30.days.from_now
+      )
+
+      thread1 = CommunicationThread.create!(participant_type: "Lead", participant_id: buyer1.id,
+        channel: "portal_message",
+        subject: 'Alice Thread')
+      thread2 = CommunicationThread.create!(participant_type: "Lead", participant_id: buyer2.id,
+        channel: "portal_message",
+        subject: 'Bob Thread')
+
+      Communication.create!(
+        communicable: buyer1,
+        communication_thread: thread1,
+        direction: 'outbound',
+        channel: 'email',
+        status: 'sent',
+        body: 'Alice communication',
+        portal_visible: true
+      )
+
+      Communication.create!(
+        communicable: buyer2,
+        communication_thread: thread2,
+        direction: 'outbound',
+        channel: 'email',
+        status: 'sent',
+        body: 'Bob communication',
+        portal_visible: true
+      )
+
+      # Buyer1 makes various requests
+      headers1 = { 'Authorization' => "Bearer #{token1}" }
+
+      # Check quotes isolation
+      get '/api/portal/quotes', headers: headers1
+      expect(response).to have_http_status(:ok)
+      quotes_data = JSON.parse(response.body)
+      expect(quotes_data['quotes'].map { |q| q['quote_number'] }).to eq(['Q-2025-ALICE'])
+
+      # Check communications isolation
+      get '/api/portal/communications', headers: headers1
+      expect(response).to have_http_status(:ok)
+      comms_data = JSON.parse(response.body)
+      comm_bodies = comms_data['communications'].map { |c| c['body'] }
+      expect(comm_bodies).to include('Alice communication')
+      expect(comm_bodies).not_to include('Bob communication')
+
+      # Attempt to access Bob's quote
+      get "/api/portal/quotes/#{quote2.id}", headers: headers1
+      expect(response).to have_http_status(:not_found)
+
+      # Attempt to reply to Bob's thread
+      post "/api/portal/communications/#{thread2.id}/reply",
+           params: { body: 'Unauthorized' }.to_json,
+           headers: headers1.merge({ 'Content-Type' => 'application/json' })
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+end

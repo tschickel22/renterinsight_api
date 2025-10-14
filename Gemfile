@@ -64,3 +64,7 @@ end
 
 # Time-series grouping for analytics
 gem 'groupdate'
+
+# Phase 4A - Portal Authentication
+gem 'bcrypt', '~> 3.1.7'
+gem 'jwt'

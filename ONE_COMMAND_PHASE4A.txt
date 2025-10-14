@@ -1,0 +1,26 @@
+# ============================================
+# PHASE 4A: ONE-COMMAND TEST
+# ============================================
+# Just copy and paste this entire command:
+
+cd /home/tschi/src/renterinsight_api && bundle install && RAILS_ENV=test bundle exec rails db:migrate && bundle exec rspec spec/lib/json_web_token_spec.rb spec/models/buyer_portal_access_spec.rb spec/controllers/api/portal/auth_controller_spec.rb --format documentation
+
+# ============================================
+# If the above works, then run the API tests:
+# ============================================
+
+# 1. Start Rails server in another terminal:
+cd /home/tschi/src/renterinsight_api && bundle exec rails server
+
+# 2. Create test buyer (in original terminal):
+cd /home/tschi/src/renterinsight_api && bundle exec rails runner "lead = Lead.create!(first_name: 'Test', last_name: 'Buyer', email: 'testbuyer@example.com', phone: '555-1234'); BuyerPortalAccess.create!(buyer: lead, email: 'testbuyer@example.com', password: 'Password123!', password_confirmation: 'Password123!', portal_enabled: true); puts '✅ Test buyer created: testbuyer@example.com / Password123!'"
+
+# 3. Test login:
+curl -X POST http://localhost:3000/api/portal/auth/login -H "Content-Type: application/json" -d '{"email": "testbuyer@example.com", "password": "Password123!"}' | jq '.'
+
+# ============================================
+# Expected Results:
+# ============================================
+# ✅ All RSpec tests should pass (green)
+# ✅ Login should return a JWT token
+# ✅ Profile endpoint should work with token

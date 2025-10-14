@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Buyer Reply in Portal</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f4f4f4;
+    }
+    .email-container {
+      background-color: #ffffff;
+      border-radius: 8px;
+      padding: 40px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 3px solid #3B82F6;
+      padding-bottom: 20px;
+    }
+    .header h1 {
+      color: #3B82F6;
+      margin: 0;
+      font-size: 28px;
+    }
+    .content {
+      margin-bottom: 30px;
+    }
+    .content p {
+      margin-bottom: 15px;
+    }
+    .alert-box {
+      background-color: #EFF6FF;
+      border-left: 4px solid #3B82F6;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .alert-box h2 {
+      color: #1E40AF;
+      margin: 0 0 10px 0;
+      font-size: 20px;
+    }
+    .buyer-details {
+      background-color: #F9FAFB;
+      border-radius: 6px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .buyer-details table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .buyer-details td {
+      padding: 8px 0;
+      border-bottom: 1px solid #E5E7EB;
+    }
+    .buyer-details td:first-child {
+      font-weight: 600;
+      color: #4B5563;
+      width: 35%;
+    }
+    .buyer-details tr:last-child td {
+      border-bottom: none;
+    }
+    .message-preview {
+      background-color: #F3F4F6;
+      border-left: 3px solid #6B7280;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 4px;
+      font-style: italic;
+    }
+    .message-preview p {
+      margin: 0;
+      color: #374151;
+    }
+    .button {
+      display: inline-block;
+      background-color: #3B82F6;
+      color: #ffffff !important;
+      padding: 14px 28px;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      text-align: center;
+      margin: 20px 0;
+    }
+    .button:hover {
+      background-color: #2563EB;
+    }
+    .priority-note {
+      background-color: #FEF3C7;
+      border: 1px solid #F59E0B;
+      border-radius: 6px;
+      padding: 15px;
+      margin: 20px 0;
+      text-align: center;
+    }
+    .priority-note strong {
+      color: #92400E;
+      font-size: 16px;
+    }
+    .footer {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #E5E7EB;
+      font-size: 14px;
+      color: #6B7280;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <div class="header">
+      <h1>💬 New Portal Reply</h1>
+    </div>
+    
+    <div class="content">
+      <div class="alert-box">
+        <h2>Action Required: Buyer Awaiting Response</h2>
+        <p style="margin: 0;">A buyer has sent a new message through the portal and is expecting a reply.</p>
+      </div>
+      
+      <p><strong>Buyer Information:</strong></p>
+      <div class="buyer-details">
+        <table>
+          <tr>
+            <td>Name:</td>
+            <td><strong><%= @buyer.respond_to?(:full_name) ? @buyer.full_name : 'Unknown' %></strong></td>
+          </tr>
+          <tr>
+            <td>Email:</td>
+            <td><%= @buyer.respond_to?(:email) ? @buyer.email : 'N/A' %></td>
+          </tr>
+          <% if @buyer.respond_to?(:phone) && @buyer.phone.present? %>
+          <tr>
+            <td>Phone:</td>
+            <td><%= @buyer.phone %></td>
+          </tr>
+          <% end %>
+          <tr>
+            <td>Thread ID:</td>
+            <td>#<%= @communication.communication_thread_id %></td>
+          </tr>
+          <tr>
+            <td>Received:</td>
+            <td><%= @communication.created_at.strftime('%B %d, %Y at %I:%M %p') %></td>
+          </tr>
+        </table>
+      </div>
+      
+      <p><strong>Message Preview:</strong></p>
+      <div class="message-preview">
+        <p><%= @communication.body.truncate(300) %></p>
+      </div>
+      
+      <% if @communication.body.length > 300 %>
+      <p style="font-size: 14px; color: #6B7280;">
+        <em>Message truncated. View full message in admin panel.</em>
+      </p>
+      <% end %>
+      
+      <div class="priority-note">
+        <strong>⏱️ Response Time Goal: Within 2 Hours</strong>
+      </div>
+      
+      <div style="text-align: center;">
+        <a href="<%= @thread_url %>" class="button">View & Reply in Admin</a>
+      </div>
+      
+      <p><strong>Best Practices:</strong></p>
+      <ul style="font-size: 14px; color: #4B5563;">
+        <li>Acknowledge receipt within 1 hour if detailed response will take longer</li>
+        <li>Address all questions and concerns in the message</li>
+        <li>Maintain professional and friendly tone</li>
+        <li>Include next steps or action items</li>
+        <li>Set clear expectations for any follow-up needed</li>
+      </ul>
+      
+      <p style="font-size: 14px; color: #6B7280; margin-top: 30px;">
+        <em>This is an automated notification from the <%= @company_name %> Buyer Portal system.</em>
+      </p>
+    </div>
+    
+    <div class="footer">
+      <p>Internal notification - not sent to buyer</p>
+      <p>&copy; <%= Time.current.year %> <%= @company_name %>. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>

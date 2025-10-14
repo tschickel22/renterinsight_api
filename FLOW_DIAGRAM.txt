@@ -1,0 +1,271 @@
+```
+╔═══════════════════════════════════════════════════════════════╗
+║                  PHASE 4D - TEST FLOW DIAGRAM                 ║
+╚═══════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────┐
+│  START: Choose Your Testing Method                          │
+└────────────┬─────────────┬───────────────┬──────────────────┘
+             │             │               │
+             │             │               │
+    ┌────────▼───────┐ ┌──▼──────────┐ ┌─▼─────────────┐
+    │   Automated    │ │    Quick    │ │   Manual      │
+    │  Complete Test │ │    Test     │ │  Interactive  │
+    └────────┬───────┘ └──┬──────────┘ └─┬─────────────┘
+             │             │               │
+             │             │               │
+    ┌────────▼───────────────────────┐    │
+    │  phase4d_complete_test.sh      │    │
+    │  • Run all RSpec tests         │    │
+    │  • Create test data            │    │
+    │  • Generate JWT token          │    │
+    │  • Show curl commands          │    │
+    │  Runtime: 30 seconds           │    │
+    └────────┬───────────────────────┘    │
+             │                             │
+             │             ┌───────────────┤
+             │             │               │
+    ┌────────▼─────────────▼───┐   ┌──────▼──────────────┐
+    │  test_phase4d.sh         │   │ phase4d_manual_     │
+    │  • RSpec only            │   │   test.sh           │
+    │  • Quick verification    │   │ • Server must run   │
+    │  Runtime: 10 seconds     │   │ • Interactive       │
+    └────────┬─────────────────┘   │ • 7 test scenarios  │
+             │                     │ Runtime: 5 minutes  │
+             │                     └──────┬──────────────┘
+             │                            │
+    ┌────────▼────────────────────────────▼──────────────┐
+    │           TEST RESULTS & OUTPUT                     │
+    ├─────────────────────────────────────────────────────┤
+    │  ✅ Model Specs (35 tests)                          │
+    │  ✅ Controller Specs (32 tests)                     │
+    │  ✅ JWT Token Generated                             │
+    │  ✅ Test Data Created                               │
+    │  ✅ Curl Commands Ready                             │
+    └─────────────────────────────────────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    API ENDPOINT FLOW                          ║
+╚═══════════════════════════════════════════════════════════════╝
+
+  USER REQUEST                 RAILS API                DATABASE
+       │                           │                         │
+       │  JWT Token               │                         │
+       ├──────────────────────────>│                         │
+       │                           │                         │
+       │                           │  Authenticate           │
+       │                           │  (JWT Middleware)       │
+       │                           │                         │
+       │                     ┌─────▼──────┐                  │
+       │                     │ Authorized? │                 │
+       │                     └─────┬──────┘                  │
+       │                           │                         │
+       │                     YES   │   NO                    │
+       │                     ┌─────┴──────┐                  │
+       │                     │            │                  │
+       │               ┌─────▼────┐  ┌───▼────┐              │
+       │               │ Process  │  │ Return │              │
+       │               │ Request  │  │  401   │              │
+       │               └─────┬────┘  └───┬────┘              │
+       │                     │           │                   │
+       │                     │        Return                 │
+       │                     │       <─────────────────────  │
+       │                     │                               │
+       │                     │ Query/Update                  │
+       │                     ├──────────────────────────────>│
+       │                     │                               │
+       │                     │  buyer_portal_accesses        │
+       │                     │  • email_opt_in               │
+       │                     │  • sms_opt_in                 │
+       │                     │  • marketing_opt_in           │
+       │                     │  • portal_enabled             │
+       │                     │  • preference_history (JSON)  │
+       │                     │                               │
+       │                     │<──────────────────────────────│
+       │                     │  Data Retrieved               │
+       │                     │                               │
+       │              ┌──────▼───────┐                       │
+       │              │ Track Change │                       │
+       │              │  (if update) │                       │
+       │              └──────┬───────┘                       │
+       │                     │                               │
+       │                     │ Save History                  │
+       │                     ├──────────────────────────────>│
+       │                     │                               │
+       │              ┌──────▼───────┐                       │
+       │              │ Format JSON  │                       │
+       │              │  Response    │                       │
+       │              └──────┬───────┘                       │
+       │                     │                               │
+       │<────────────────────┤                               │
+       │    JSON Response    │                               │
+
+╔═══════════════════════════════════════════════════════════════╗
+║                 PREFERENCE TRACKING FLOW                      ║
+╚═══════════════════════════════════════════════════════════════╝
+
+  PATCH /api/portal/preferences
+  Body: {"preferences": {"email_opt_in": false}}
+       │
+       ▼
+  ┌────────────────────┐
+  │  Controller        │
+  │  receives params   │
+  └────────┬───────────┘
+           │
+           ▼
+  ┌────────────────────┐
+  │  Validate params   │
+  │  • Only booleans   │
+  │  • No portal_      │
+  │    enabled         │
+  └────────┬───────────┘
+           │
+           ▼
+  ┌────────────────────┐
+  │  Model.update!     │
+  └────────┬───────────┘
+           │
+           ▼
+  ┌────────────────────────────────┐
+  │  before_update callback        │
+  │  • Check what changed          │
+  │  • Create history entry        │
+  │  • Append to preference_       │
+  │    history array               │
+  └────────┬───────────────────────┘
+           │
+           ▼
+  ┌────────────────────────────────┐
+  │  History Entry Created:        │
+  │  {                             │
+  │    timestamp: "2025-10-14...", │
+  │    changes: {                  │
+  │      email_opt_in: {           │
+  │        from: true,             │
+  │        to: false               │
+  │      }                         │
+  │    }                           │
+  │  }                             │
+  └────────┬───────────────────────┘
+           │
+           ▼
+  ┌────────────────────┐
+  │  Save to database  │
+  └────────┬───────────┘
+           │
+           ▼
+  ┌────────────────────┐
+  │  Return updated    │
+  │  preferences to    │
+  │  user              │
+  └────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    SECURITY LAYERS                            ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Request → Layer 1: JWT Authentication
+          ├─ Valid Token? ──→ YES → Continue
+          └─ Invalid? ──────→ NO → 401 Unauthorized
+                             
+       → Layer 2: Parameter Validation
+          ├─ Boolean values? → YES → Continue
+          └─ Invalid type? ──→ NO → 422 Unprocessable
+                             
+       → Layer 3: Security Rules
+          ├─ portal_enabled? → NO → Continue
+          └─ Trying disable? → YES → 403 Forbidden
+                             
+       → Layer 4: Database Constraints
+          ├─ Valid data? ────→ YES → Save
+          └─ Constraint fail → NO → 500 Error
+
+╔═══════════════════════════════════════════════════════════════╗
+║                   FILE STRUCTURE                              ║
+╚═══════════════════════════════════════════════════════════════╝
+
+renterinsight_api/
+│
+├── app/
+│   ├── models/
+│   │   └── buyer_portal_access.rb ────────────┐
+│   │       • serialize :preference_history    │
+│   │       • before_update :track_changes     │ CORE
+│   │       • Validations                      │ LOGIC
+│   │       • Helper methods                   │
+│   │                                           │
+│   └── controllers/                            │
+│       └── api/portal/                         │
+│           └── preferences_controller.rb ──────┘
+│               • show (GET)
+│               • update (PATCH)
+│               • history (GET)
+│
+├── spec/
+│   ├── models/
+│   │   └── buyer_portal_access_preferences_spec.rb (35 tests)
+│   └── controllers/
+│       └── api/portal/
+│           └── preferences_controller_spec.rb (32 tests)
+│
+├── config/
+│   └── routes.rb
+│       namespace :api do
+│         namespace :portal do
+│           resource :preferences (3 routes)
+│
+├── TEST SCRIPTS ──────────────────────────┐
+│   ├── phase4d_complete_test.sh          │
+│   ├── phase4d_complete_test.bat         │ YOU ARE
+│   ├── test_phase4d.sh                   │ HERE!
+│   ├── phase4d_manual_test.sh            │
+│   └── create_test_preferences.rb        │
+│                                          │
+└── DOCUMENTATION ─────────────────────────┘
+    ├── START_HERE.md ← READ THIS FIRST!
+    ├── PHASE4D_TEST_GUIDE.md
+    ├── PHASE4D_QUICK_REFERENCE.md
+    ├── PHASE4D_COMPLETE_README.md
+    └── PHASE4D_VERIFICATION_CHECKLIST.md
+
+╔═══════════════════════════════════════════════════════════════╗
+║                    QUICK COMMANDS                             ║
+╚═══════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────┐
+│  RUN COMPLETE TEST SUITE (Recommended)                      │
+├─────────────────────────────────────────────────────────────┤
+│  $ cd /home/tschi/src/renterinsight_api                     │
+│  $ chmod +x *.sh                                            │
+│  $ ./phase4d_complete_test.sh                               │
+│                                                             │
+│  ✅ Runs 67 tests                                           │
+│  ✅ Creates test data                                       │
+│  ✅ Shows curl commands                                     │
+│  ⏱  Runtime: 30 seconds                                     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  QUICK VERIFICATION                                         │
+├─────────────────────────────────────────────────────────────┤
+│  $ ./test_phase4d.sh                                        │
+│                                                             │
+│  ✅ RSpec tests only                                        │
+│  ⏱  Runtime: 10 seconds                                     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  MANUAL/INTERACTIVE TESTING                                 │
+├─────────────────────────────────────────────────────────────┤
+│  Terminal 1:                                                │
+│  $ rails s -p 3001                                          │
+│                                                             │
+│  Terminal 2:                                                │
+│  $ ./phase4d_manual_test.sh                                 │
+│                                                             │
+│  ✅ 7 interactive scenarios                                 │
+│  ✅ Shows requests/responses                                │
+│  ⏱  Runtime: 5 minutes                                      │
+└─────────────────────────────────────────────────────────────┘
+```

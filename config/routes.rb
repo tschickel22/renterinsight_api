@@ -246,4 +246,55 @@ Rails.application.routes.draw do
       end
     end
   end
+  # Phase 4A & 4B - Portal
+  namespace :api do
+    namespace :portal do
+      # Phase 4A - Authentication
+      post 'auth/login', to: 'auth#login'
+      post 'auth/request_magic_link', to: 'auth#request_magic_link'
+      post 'auth/magic-link', to: 'auth#request_magic_link'
+      get 'auth/verify_magic_link', to: 'auth#verify_magic_link'
+      post 'auth/request_reset', to: 'auth#request_reset'
+      post 'auth/forgot-password', to: 'auth#forgot_password'
+      post 'auth/reset-password', to: 'auth#reset_password'
+      patch 'auth/reset_password', to: 'auth#reset_password'
+      get 'auth/profile', to: 'auth#profile'
+      
+      # Phase 4B - Quote Management
+      resources :quotes, only: [:index, :show] do
+        member do
+          patch :accept
+          patch :reject
+        end
+      end
+      
+      # Phase 4C - Communications
+      resources :communications, only: [:index, :show, :create] do
+        member do
+          patch :mark_as_read
+        end
+      end
+      get 'communications/threads', to: 'communications#threads'
+      post 'communications/:thread_id/reply', to: 'communications#create'
+      
+      # Phase 4E - Document Management
+      resources :documents, only: [:index, :show, :create, :destroy] do
+        member do
+          get :download
+        end
+      end
+
+      # Phase 4D - Communication Preferences
+      get 'preferences', to: 'preferences#show'
+      patch 'preferences', to: 'preferences#update'
+      get 'preferences/history', to: 'preferences#history'
+    end
+    
+    # Admin Impersonation (Testing Only)
+    namespace :admin do
+      post 'impersonate', to: 'impersonation#create'
+      get 'impersonate/buyers', to: 'impersonation#buyers'
+    end
+  end
+
 end
