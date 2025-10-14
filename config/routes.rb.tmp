@@ -1,0 +1,7 @@
+
+      # Phase 4E - Document Management
+      resources :documents, only: [:index, :show, :create, :destroy] do
+        member do
+          get :download
+        end
+      end

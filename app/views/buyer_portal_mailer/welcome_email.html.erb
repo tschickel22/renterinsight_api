@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to <%= @company_name %> Buyer Portal</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f4f4f4;
+    }
+    .email-container {
+      background-color: #ffffff;
+      border-radius: 8px;
+      padding: 40px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 3px solid #4F46E5;
+      padding-bottom: 20px;
+    }
+    .header h1 {
+      color: #4F46E5;
+      margin: 0;
+      font-size: 28px;
+    }
+    .content {
+      margin-bottom: 30px;
+    }
+    .content p {
+      margin-bottom: 15px;
+    }
+    .features {
+      background-color: #F9FAFB;
+      border-left: 4px solid #4F46E5;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .features h3 {
+      color: #4F46E5;
+      margin-top: 0;
+    }
+    .features ul {
+      margin: 10px 0;
+      padding-left: 20px;
+    }
+    .features li {
+      margin-bottom: 8px;
+    }
+    .button {
+      display: inline-block;
+      background-color: #4F46E5;
+      color: #ffffff !important;
+      padding: 14px 28px;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      text-align: center;
+      margin: 20px 0;
+    }
+    .button:hover {
+      background-color: #4338CA;
+    }
+    .credentials {
+      background-color: #FEF3C7;
+      border: 1px solid #F59E0B;
+      border-radius: 6px;
+      padding: 15px;
+      margin: 20px 0;
+    }
+    .credentials strong {
+      color: #92400E;
+    }
+    .footer {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #E5E7EB;
+      font-size: 14px;
+      color: #6B7280;
+      text-align: center;
+    }
+    .footer a {
+      color: #4F46E5;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <div class="header">
+      <h1>Welcome to <%= @company_name %>!</h1>
+    </div>
+    
+    <div class="content">
+      <p>Hi <%= @buyer.respond_to?(:first_name) ? @buyer.first_name : 'there' %>,</p>
+      
+      <p>We're excited to welcome you to the <%= @company_name %> Buyer Portal! Your account has been created and you now have access to a streamlined way to manage your quotes, communications, and preferences.</p>
+      
+      <div class="features">
+        <h3>What You Can Do:</h3>
+        <ul>
+          <li><strong>View & Accept Quotes</strong> - Review pricing and accept quotes instantly</li>
+          <li><strong>Track Communications</strong> - See all messages in one organized place</li>
+          <li><strong>Manage Preferences</strong> - Control how and when we contact you</li>
+          <li><strong>Reply Directly</strong> - Respond to messages right from the portal</li>
+        </ul>
+      </div>
+      
+      <% if @buyer_access.password_digest.present? %>
+        <div class="credentials">
+          <p><strong>Your Login Email:</strong> <%= @buyer_access.email %></p>
+          <p><strong>Password:</strong> The one you created during setup</p>
+        </div>
+      <% else %>
+        <p>Your account is set up for passwordless login. You'll receive a magic link via email whenever you need to sign in.</p>
+      <% end %>
+      
+      <div style="text-align: center;">
+        <a href="<%= @portal_url %>" class="button">Access Your Portal</a>
+      </div>
+      
+      <p>If you have any questions or need assistance, don't hesitate to reach out. We're here to help!</p>
+      
+      <p>Best regards,<br>
+      The <%= @company_name %> Team</p>
+    </div>
+    
+    <div class="footer">
+      <p>This email was sent to <%= @buyer_access.email %></p>
+      <p><a href="<%= @portal_url %>/preferences">Update your communication preferences</a></p>
+      <p>&copy; <%= Time.current.year %> <%= @company_name %>. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>

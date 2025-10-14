@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_13_200003) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_14_192200) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -171,6 +171,31 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_13_200003) do
     t.index ["lead_id"], name: "index_ai_insights_on_lead_id"
   end
 
+  create_table "buyer_portal_accesses", force: :cascade do |t|
+    t.string "buyer_type", null: false
+    t.integer "buyer_id", null: false
+    t.string "email", null: false
+    t.string "password_digest"
+    t.string "reset_token"
+    t.datetime "reset_token_expires_at"
+    t.string "login_token"
+    t.datetime "login_token_expires_at"
+    t.datetime "last_login_at"
+    t.integer "login_count", default: 0
+    t.string "last_login_ip"
+    t.boolean "portal_enabled", default: true
+    t.boolean "email_opt_in", default: true
+    t.boolean "sms_opt_in", default: true
+    t.boolean "marketing_opt_in", default: false
+    t.text "preference_history"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["buyer_type", "buyer_id"], name: "index_buyer_portal_accesses_on_buyer"
+    t.index ["email"], name: "index_buyer_portal_accesses_on_email", unique: true
+    t.index ["login_token"], name: "index_buyer_portal_accesses_on_login_token"
+    t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
+  end
+
   create_table "communication_events", force: :cascade do |t|
     t.integer "communication_id", null: false
     t.string "event_type", null: false
@@ -270,6 +295,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_13_200003) do
     t.datetime "scheduled_for"
     t.string "scheduled_status", default: "immediate"
     t.string "scheduled_job_id"
+    t.datetime "read_at"
+    t.datetime "received_at"
     t.index ["channel"], name: "index_communications_on_channel"
     t.index ["communicable_type", "communicable_id"], name: "index_communications_on_communicable"
     t.index ["communication_thread_id"], name: "index_communications_on_communication_thread_id"
@@ -487,6 +514,23 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_13_200003) do
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
   end
 
+  create_table "portal_documents", force: :cascade do |t|
+    t.string "owner_type", null: false
+    t.bigint "owner_id", null: false
+    t.string "category"
+    t.text "description"
+    t.string "related_to_type"
+    t.bigint "related_to_id"
+    t.string "uploaded_by", default: "buyer"
+    t.datetime "uploaded_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_portal_documents_on_category"
+    t.index ["owner_type", "owner_id"], name: "index_portal_documents_on_owner"
+    t.index ["related_to_type", "related_to_id"], name: "index_portal_documents_on_related_to"
+    t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
+  end
+
   create_table "quotes", force: :cascade do |t|
     t.integer "account_id"
     t.integer "contact_id"
@@ -608,10 +652,6 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_13_200003) do
     t.datetime "updated_at", null: false
   end
 
-  add_foreign_key "account_activities", "account_activities", column: "related_activity_id"
-  add_foreign_key "account_activities", "accounts"
-  add_foreign_key "account_activities", "users"
-  add_foreign_key "account_activities", "users", column: "assigned_to_id"
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "sources"

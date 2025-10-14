@@ -1,0 +1,1 @@
+cd ~/src/renterinsight_api && bin/rails runner create_test_documents.rb

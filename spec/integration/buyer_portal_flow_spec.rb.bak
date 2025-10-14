@@ -1,0 +1,451 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+RSpec.describe 'Buyer Portal Integration Flow', type: :request do
+  let(:company) { Company.create!(name: 'Test Company') }
+  let(:source) { Source.create!(name: 'Test Source', source_type: 'website', is_active: true) }
+  let(:lead) do
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+    Lead.create!(
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+      first_name: 'Jane',
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+      last_name: 'Smith',
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+      email: 'jane@example.com',
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+      phone: '555-9876',
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+      source: source,
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+      company: company
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+    )
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+  end
+
+  let(:account) do
+    Account.create!(
+      company: company,
+      name: "Jane Smith Account",
+      email: "jane@example.com",
+      status: "active"
+    )
+  end
+
+  before do
+    lead.update!(converted_account_id: account.id, is_converted: true)
+  end
+
+  let(:portal_access) do
+    BuyerPortalAccess.create!(
+      account: account,
+      email: 'jane@example.com',
+      password: 'SecurePass123!',
+      portal_enabled: true,
+      email_opt_in: true,
+      sms_opt_in: false
+    )
+  end
+
+  let(:valid_token) do
+    JWT.encode(
+      { buyer_id: lead.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
+      Rails.application.secret_key_base,
+      'HS256'
+    )
+  end
+
+  let(:auth_headers) do
+    { 'Authorization' => "Bearer #{valid_token}", 'Content-Type' => 'application/json' }
+  end
+
+  describe 'Complete Portal Flow' do
+    it 'completes full buyer journey: login → view communications → reply → view quotes → accept → update preferences' do
+      # Step 1: Login
+      post '/api/portal/auth/login', params: {
+        email: 'jane@example.com',
+        password: 'SecurePass123!'
+      }.to_json, headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:ok)
+      login_data = JSON.parse(response.body)
+      expect(login_data['token']).to be_present
+      token = login_data['token']
+
+      # Use the real token from login
+      headers = { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' }
+
+      # Step 2: View Communications
+      thread = CommunicationThread.create!(
+        participant_type: "Lead", participant_id: lead.id,
+        subject: 'Welcome to our service'
+      )
+      
+      Communication.create!(
+        communicable: lead,
+        communication_thread: thread,
+        direction: 'outbound',
+        channel: 'email',
+        status: 'sent',
+        subject: 'Welcome to our service',
+        body: 'Thank you for your interest!',
+        portal_visible: true
+      )
+
+      get '/api/portal/communications', headers: headers
+
+      expect(response).to have_http_status(:ok)
+      comms_data = JSON.parse(response.body)
+      expect(comms_data['communications']).to be_an(Array)
+      expect(comms_data['communications'].length).to be > 0
+
+      # Step 3: Reply to Communication
+      post "/api/portal/communications/#{thread.id}/reply", params: {
+        body: 'Thank you! I have a question about pricing.'
+      }.to_json, headers: headers
+
+      expect(response).to have_http_status(:created)
+      reply_data = JSON.parse(response.body)
+      expect(reply_data['communication']['body']).to eq('Thank you! I have a question about pricing.')
+
+      # Step 4: View Quotes
+      quote = Quote.create!(
+        account: account,
+        quote_number: 'Q-2025-TEST-001',
+        status: 'pending',
+        subtotal: 1500.00,
+        tax: 150.00,
+        total: 1650.00,
+        valid_until: 30.days.from_now
+      )
+
+      get '/api/portal/quotes', headers: headers
+
+      expect(response).to have_http_status(:ok)
+      quotes_data = JSON.parse(response.body)
+      expect(quotes_data['quotes']).to be_an(Array)
+      expect(quotes_data['quotes'].first['quote_number']).to eq('Q-2025-TEST-001')
+
+      # Step 5: Accept Quote
+      patch "/api/portal/quotes/#{quote.id}/accept", headers: headers
+
+      expect(response).to have_http_status(:ok)
+      accept_data = JSON.parse(response.body)
+      expect(accept_data['quote']['status']).to eq('accepted')
+      expect(accept_data['message']).to include('accepted')
+
+      # Verify quote was actually accepted
+      quote.reload
+      expect(quote.status).to eq('accepted')
+      expect(quote.accepted_at).to be_present
+
+      # Step 6: Update Preferences
+      patch '/api/portal/preferences', params: {
+        preferences: {
+          email_opt_in: false,
+          sms_opt_in: true,
+          marketing_opt_in: true
+        }
+      }.to_json, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      prefs_data = JSON.parse(response.body)
+      expect(prefs_data['preferences']['email_opt_in']).to be false
+      expect(prefs_data['preferences']['sms_opt_in']).to be true
+      expect(prefs_data['preferences']['marketing_opt_in']).to be true
+
+      # Verify preferences were saved
+      portal_access.reload
+      expect(portal_access.email_opt_in).to be false
+      expect(portal_access.sms_opt_in).to be true
+      expect(portal_access.marketing_opt_in).to be true
+
+      # Step 7: View Preference History
+      get '/api/portal/preferences/history', headers: headers
+
+      expect(response).to have_http_status(:ok)
+      history_data = JSON.parse(response.body)
+      expect(history_data['history']).to be_an(Array)
+      expect(history_data['history'].length).to be >= 1
+    end
+  end
+
+  describe 'Authentication Flow' do
+    it 'handles magic link login flow' do
+      # Generate magic link
+      portal_access.generate_login_token
+      portal_access.save!
+
+      # Attempt login with magic link
+      post '/api/portal/auth/magic-link', params: {
+        token: portal_access.login_token
+      }.to_json, headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:ok)
+      data = JSON.parse(response.body)
+      expect(data['token']).to be_present
+
+      # Token should be consumed
+      portal_access.reload
+      expect(portal_access.login_token).to be_nil
+    end
+
+    it 'handles password reset flow' do
+      # Request password reset
+      post '/api/portal/auth/forgot-password', params: {
+        email: 'jane@example.com'
+      }.to_json, headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:ok)
+
+      portal_access.reload
+      expect(portal_access.reset_token).to be_present
+
+      # Reset password with token
+      post '/api/portal/auth/reset-password', params: {
+        token: portal_access.reset_token,
+        password: 'NewSecurePass456!',
+        password_confirmation: 'NewSecurePass456!'
+      }.to_json, headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:ok)
+
+      # Verify new password works
+      post '/api/portal/auth/login', params: {
+        email: 'jane@example.com',
+        password: 'NewSecurePass456!'
+      }.to_json, headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
+  describe 'Error Handling' do
+    it 'returns 401 for invalid credentials' do
+      post '/api/portal/auth/login', params: {
+        email: 'jane@example.com',
+        password: 'WrongPassword'
+      }.to_json, headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'returns 401 for expired token' do
+      expired_token = JWT.encode(
+        { buyer_id: lead.id, buyer_type: 'Lead', exp: 1.hour.ago.to_i },
+        Rails.application.secret_key_base,
+        'HS256'
+      )
+
+      headers = { 'Authorization' => "Bearer #{expired_token}" }
+
+      get '/api/portal/communications', headers: headers
+
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it 'returns 404 for non-existent quote' do
+      get '/api/portal/quotes/999999', headers: auth_headers
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it 'prevents accepting already accepted quote' do
+      quote = Quote.create!(
+        account: account,
+        quote_number: 'Q-2025-TEST-002',
+        status: 'accepted',
+        accepted_at: 1.day.ago,
+        subtotal: 1000.00,
+        tax: 100.00,
+        total: 1100.00,
+        valid_until: 30.days.from_now
+      )
+
+      patch "/api/portal/quotes/#{quote.id}/accept", headers: auth_headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      data = JSON.parse(response.body)
+      expect(data['error']).to include('already')
+    end
+
+    it 'prevents accepting expired quote' do
+      quote = Quote.create!(
+        account: account,
+        quote_number: 'Q-2025-TEST-003',
+        status: 'pending',
+        subtotal: 1000.00,
+        tax: 100.00,
+        total: 1100.00,
+        valid_until: 1.day.ago
+      )
+
+      patch "/api/portal/quotes/#{quote.id}/accept", headers: auth_headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      data = JSON.parse(response.body)
+      expect(data['error']).to include('expired')
+    end
+  end
+
+  describe 'Communication Threading' do
+    it 'maintains thread continuity across replies' do
+      thread = CommunicationThread.create!(
+        participant_type: "Lead", participant_id: lead.id,
+        subject: 'Service Inquiry'
+      )
+
+      # Initial message from company
+      Communication.create!(
+        communicable: lead,
+        communication_thread: thread,
+        direction: 'outbound',
+        channel: 'email',
+        status: 'sent',
+        subject: 'Service Inquiry',
+        body: 'How can we help you?',
+        portal_visible: true
+      )
+
+      # Buyer replies
+      post "/api/portal/communications/#{thread.id}/reply", params: {
+        body: 'First reply from buyer'
+      }.to_json, headers: auth_headers
+
+      expect(response).to have_http_status(:created)
+
+      # Company replies
+      Communication.create!(
+        communicable: lead,
+        communication_thread: thread,
+        direction: 'outbound',
+        channel: 'portal',
+        status: 'sent',
+        body: 'Company response',
+        portal_visible: true
+      )
+
+      # Buyer replies again
+      post "/api/portal/communications/#{thread.id}/reply", params: {
+        body: 'Second reply from buyer'
+      }.to_json, headers: auth_headers
+
+      expect(response).to have_http_status(:created)
+
+      # Verify all messages are in same thread
+      thread.reload
+      expect(thread.communications.count).to eq(4) # initial + 2 buyer replies + company response
+      expect(thread.communications.where(direction: 'inbound').count).to eq(2)
+    end
+  end
+end
