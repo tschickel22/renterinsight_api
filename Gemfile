@@ -68,3 +68,6 @@ gem 'groupdate'
 # Phase 4A - Portal Authentication
 gem 'bcrypt', '~> 3.1.7'
 gem 'jwt'
+
+# SMS/Twilio for password reset
+gem 'twilio-ruby', '~> 7.3'
