@@ -540,7 +540,15 @@ module Api
         host = config[:smtpHost] || config['smtpHost']
         port = (config[:smtpPort] || config['smtpPort'] || 587).to_i
         username = config[:smtpUsername] || config['smtpUsername']
-        password = decrypt_if_needed(config[:smtpPassword] || config['smtpPassword'])
+        raw_password = config[:smtpPassword] || config['smtpPassword']
+        
+        Rails.logger.info "[send_email_via_smtp] Raw password value: #{raw_password.inspect[0..60]}"
+        password = decrypt_if_needed(raw_password)
+        Rails.logger.info "[send_email_via_smtp] Decrypted password length: #{password&.length || 'nil'}"
+        Rails.logger.info "[send_email_via_smtp] Password starts with 'encrypted:': #{password.to_s.start_with?('encrypted:')}"
+        Rails.logger.info "[send_email_via_smtp] First 4 chars of password: #{password.to_s[0..3] if password}..."
+        Rails.logger.info "[send_email_via_smtp] Last 4 chars of password: ...#{password.to_s[-4..-1] if password}"
+        
         from_email = config[:fromEmail] || config['fromEmail']
         from_name = config[:fromName] || config['fromName']
         
@@ -903,13 +911,31 @@ module Api
       
       # Decrypt if value is encrypted
       def decrypt_if_needed(value)
+        Rails.logger.info "[decrypt_if_needed] Input value: #{value.inspect[0..100]}"
+        
         return value unless value.present?
-        return value unless value.to_s.start_with?('encrypted:')
+        
+        unless value.to_s.start_with?('encrypted:')
+          Rails.logger.info "[decrypt_if_needed] Value is not encrypted, returning as-is"
+          return value
+        end
         
         encrypted_value = value.to_s.sub('encrypted:', '')
-        decrypt(encrypted_value)
+        Rails.logger.info "[decrypt_if_needed] Attempting to decrypt: #{encrypted_value[0..50]}..."
+        
+        decrypted = decrypt(encrypted_value)
+        
+        Rails.logger.info "[decrypt_if_needed] Decryption result: #{decrypted ? "(#{decrypted.length} chars)" : '(nil)'}"
+        
+        if decrypted.present?
+          return decrypted
+        else
+          Rails.logger.warn "[decrypt_if_needed] Decryption returned nil, returning original encrypted value"
+          return value
+        end
       rescue => e
         Rails.logger.error("[decrypt_if_needed] Error: #{e.message}")
+        Rails.logger.error(e.backtrace.first(3).join("\n"))
         value
       end
       

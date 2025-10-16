@@ -105,6 +105,12 @@ GEM
     factory_bot_rails (6.5.1)
       factory_bot (~> 6.5)
       railties (>= 6.1.0)
+    faraday (2.14.0)
+      faraday-net_http (>= 2.0, < 3.5)
+      json
+      logger
+    faraday-net_http (3.4.1)
+      net-http (>= 0.5.0)
     fugit (1.11.2)
       et-orbi (~> 1, >= 1.2.11)
       raabro (~> 1.4)
@@ -151,6 +157,8 @@ GEM
     mini_mime (1.1.5)
     minitest (5.25.5)
     msgpack (1.8.0)
+    net-http (0.6.0)
+      uri
     net-imap (0.5.10)
       date
       net-protocol
@@ -345,6 +353,10 @@ GEM
     thruster (0.1.15-x86_64-linux)
     timeout (0.4.3)
     tsort (0.2.0)
+    twilio-ruby (7.8.4)
+      faraday (>= 0.9, < 3.0)
+      jwt (>= 1.5, < 4.0)
+      nokogiri (>= 1.6, < 2.0)
     tzinfo (2.0.6)
       concurrent-ruby (~> 1.0)
     unicode-display_width (3.2.0)
@@ -392,6 +404,7 @@ DEPENDENCIES
   solid_queue
   sqlite3 (>= 2.1)
   thruster
+  twilio-ruby (~> 7.3)
   tzinfo-data
 
 BUNDLED WITH

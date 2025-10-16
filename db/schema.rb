@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_14_192200) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_16_004842) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -514,6 +514,25 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_14_192200) do
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
   end
 
+  create_table "password_reset_tokens", force: :cascade do |t|
+    t.string "token_digest", null: false
+    t.string "identifier", null: false
+    t.string "user_type", null: false
+    t.integer "user_id"
+    t.string "delivery_method", null: false
+    t.datetime "expires_at", null: false
+    t.boolean "used", default: false
+    t.string "ip_address"
+    t.string "user_agent"
+    t.integer "attempts", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["expires_at"], name: "index_password_reset_tokens_on_expires_at"
+    t.index ["identifier", "created_at"], name: "index_password_reset_tokens_on_identifier_and_created_at"
+    t.index ["token_digest"], name: "index_password_reset_tokens_on_token_digest", unique: true
+    t.index ["user_id", "user_type"], name: "index_password_reset_tokens_on_user_id_and_user_type"
+  end
+
   create_table "portal_documents", force: :cascade do |t|
     t.string "owner_type", null: false
     t.bigint "owner_id", null: false
@@ -650,6 +669,18 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_14_192200) do
     t.string "name"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "password_digest"
+    t.string "role", default: "staff"
+    t.string "first_name"
+    t.string "last_name"
+    t.string "status", default: "active"
+    t.datetime "last_sign_in_at"
+    t.json "permissions", default: []
+    t.string "phone"
+    t.string "magic_link_token"
+    t.datetime "magic_link_expires_at"
+    t.index ["magic_link_token"], name: "index_users_on_magic_link_token", unique: true
+    t.index ["phone"], name: "index_users_on_phone"
   end
 
   add_foreign_key "accounts", "accounts", column: "parent_account_id"

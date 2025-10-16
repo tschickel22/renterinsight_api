@@ -246,6 +246,26 @@ Rails.application.routes.draw do
       end
     end
   end
+  # Phase 5A - Unified Login Authentication
+  namespace :api do
+    namespace :auth do
+      post 'login', to: 'login#create'
+      post 'logout', to: 'login#destroy'
+      post 'refresh', to: 'login#refresh'
+      get 'verify', to: 'login#verify'
+      get 'me', to: 'login#me'
+      
+      # Password Reset
+      post 'request_password_reset', to: 'password_reset#request_reset'
+      post 'verify_reset_token', to: 'password_reset#verify_token'
+      post 'reset_password', to: 'password_reset#reset_password'
+      
+      # Magic Link
+      post 'request_magic_link', to: 'magic_link#request_magic_link'
+      get 'verify_magic_link', to: 'magic_link#verify_magic_link'
+    end
+  end
+
   # Phase 4A & 4B - Portal
   namespace :api do
     namespace :portal do
