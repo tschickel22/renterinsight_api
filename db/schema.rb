@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_16_004842) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_16_130000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -544,6 +544,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_16_004842) do
     t.datetime "uploaded_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "document_name"
+    t.text "notes"
+    t.text "admin_notes"
     t.index ["category"], name: "index_portal_documents_on_category"
     t.index ["owner_type", "owner_id"], name: "index_portal_documents_on_owner"
     t.index ["related_to_type", "related_to_id"], name: "index_portal_documents_on_related_to"
