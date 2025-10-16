@@ -9,10 +9,10 @@ class PortalDocument < ApplicationRecord
   belongs_to :related_to, polymorphic: true, optional: true
   
   # Validations
-  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account] }
+  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account BuyerPortalAccess] }
   validates :owner_id, presence: true
   validates :category, inclusion: { 
-    in: %w[insurance registration invoice receipt other], 
+    in: %w[insurance registration invoice receipt other contract warranty manual photo], 
     allow_nil: true 
   }
   # Note: File presence is validated in acceptable_file callback

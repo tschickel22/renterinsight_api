@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../../../../lib/document_presenter'
+
 module Api
   module Portal
     class DocumentsController < ApplicationController
@@ -51,7 +53,7 @@ module Api
       # POST /api/portal/documents
       def create
         document = PortalDocument.new(document_params)
-        document.owner = current_portal_buyer.buyer
+        document.owner = current_portal_buyer  # Changed from current_portal_buyer.buyer to current_portal_buyer
         document.uploaded_by = 'buyer'
         
         if document.save
@@ -105,19 +107,19 @@ module Api
       end
       
       def authorize_document!
-        buyer = current_portal_buyer.buyer
-        
-        unless @document.owner == buyer
+        # Changed to check against BuyerPortalAccess instead of underlying buyer
+        unless @document.owner == current_portal_buyer
           render json: { ok: false, error: 'Unauthorized' }, status: :forbidden
         end
       end
       
       def buyer_documents
-        PortalDocument.by_owner(current_portal_buyer.buyer)
+        # Changed to query by BuyerPortalAccess instead of underlying buyer
+        PortalDocument.by_owner(current_portal_buyer)
       end
       
       def document_params
-        params.permit(:file, :category, :description, :related_to_type, :related_to_id)
+        params.permit(:file, :category, :description, :related_to_type, :related_to_id, :document_name, :notes, :admin_notes)
       end
     end
   end

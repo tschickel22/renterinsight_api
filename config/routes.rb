@@ -312,6 +312,17 @@ Rails.application.routes.draw do
     
     # Admin Impersonation (Testing Only)
     namespace :admin do
+      # Phase 5B - Admin Documents Management
+      resources :documents, only: [:index, :show, :create, :update, :destroy] do
+        member do
+          get :download
+        end
+      end
+      
+      # Admin Buyers List (for dropdown)
+      resources :buyers, only: [:index]
+      
+      # Impersonation routes (must be last to avoid conflicts)
       post 'impersonate', to: 'impersonation#create'
       get 'impersonate/buyers', to: 'impersonation#buyers'
     end
