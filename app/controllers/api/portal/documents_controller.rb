@@ -53,7 +53,7 @@ module Api
       # POST /api/portal/documents
       def create
         document = PortalDocument.new(document_params)
-        document.owner = current_portal_buyer  # Changed from current_portal_buyer.buyer to current_portal_buyer
+        document.owner = current_portal_buyer  # Use BuyerPortalAccess as owner
         document.uploaded_by = 'buyer'
         
         if document.save
@@ -107,14 +107,12 @@ module Api
       end
       
       def authorize_document!
-        # Changed to check against BuyerPortalAccess instead of underlying buyer
         unless @document.owner == current_portal_buyer
           render json: { ok: false, error: 'Unauthorized' }, status: :forbidden
         end
       end
       
       def buyer_documents
-        # Changed to query by BuyerPortalAccess instead of underlying buyer
         PortalDocument.by_owner(current_portal_buyer)
       end
       

@@ -116,46 +116,59 @@ class Quote < ApplicationRecord
   
   # JSON serialization
   def as_json(options = {})
-    super(options).tap do |json|
-      # Convert IDs to strings for frontend compatibility
-      json['id'] = id.to_s
-      json['accountId'] = account_id&.to_s
-      json['contactId'] = contact_id&.to_s
-      json['customerId'] = customer_id
-      json['vehicleId'] = vehicle_id
+    # Build JSON manually to avoid JSONB serialization issues
+    json = {
+      'id' => id.to_s,
+      'quote_number' => quote_number,
+      'accountId' => account_id&.to_s,
+      'contactId' => contact_id&.to_s,
+      'customerId' => customer_id,
+      'vehicleId' => vehicle_id,
+      'status' => status,
+      'subtotal' => subtotal,
+      'tax' => tax,
+      'total' => total,
+      'notes' => notes,
+      'sent_at' => sent_at,
+      'viewed_at' => viewed_at,
+      'accepted_at' => accepted_at,
+      'rejected_at' => rejected_at,
       
-      # Add account and contact names directly to the quote JSON
-      json['accountName'] = account&.name
-      json['contactName'] = contact ? "#{contact.first_name} #{contact.last_name}".strip : nil
+      # Handle items - they're already hashes from JSONB
+      'items' => items || [],
+      'lineItems' => items || [],
+      
+      # Add account and contact names
+      'accountName' => account&.name,
+      'contactName' => contact ? "#{contact.first_name} #{contact.last_name}".strip : nil,
       
       # Format dates
-      json['validUntil'] = valid_until
-      json['createdAt'] = created_at
-      json['updatedAt'] = updated_at
-      
-      # Include related data if requested
-      if options[:include_account] && account
-        json['account'] = {
-          id: account.id.to_s,
-          name: account.name,
-          email: account.email,
-          phone: account.phone
-        }
-      end
-      
-      if options[:include_contact] && contact
-        json['contact'] = {
-          id: contact.id.to_s,
-          firstName: contact.first_name,
-          lastName: contact.last_name,
-          email: contact.email,
-          phone: contact.phone
-        }
-      end
-      
-      # Remove Rails internal fields
-      json.except('is_deleted', 'deleted_at')
+      'validUntil' => valid_until,
+      'createdAt' => created_at,
+      'updatedAt' => updated_at
+    }
+    
+    # Include related data if requested
+    if options[:include_account] && account
+      json['account'] = {
+        id: account.id.to_s,
+        name: account.name,
+        email: account.email,
+        phone: account.phone
+      }
     end
+    
+    if options[:include_contact] && contact
+      json['contact'] = {
+        id: contact.id.to_s,
+        firstName: contact.first_name,
+        lastName: contact.last_name,
+        email: contact.email,
+        phone: contact.phone
+      }
+    end
+    
+    json
   end
   
   private
