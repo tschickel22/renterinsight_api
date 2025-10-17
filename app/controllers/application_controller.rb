@@ -30,8 +30,18 @@ class ApplicationController < ActionController::API
     
     token = header.split(' ').last
     decoded = JsonWebToken.decode(token)
+    return nil unless decoded
     
-    @current_portal_buyer = BuyerPortalAccess.find_by(id: decoded[:buyer_portal_access_id]) if decoded
+    # Support both unified auth (user_id) and portal auth (buyer_portal_access_id)
+    if decoded[:buyer_portal_access_id]
+      # Old portal auth token
+      @current_portal_buyer = BuyerPortalAccess.find_by(id: decoded[:buyer_portal_access_id])
+    elsif decoded[:user_id] && decoded[:email]
+      # Unified auth token - find BuyerPortalAccess by email
+      @current_portal_buyer = BuyerPortalAccess.find_by(email: decoded[:email])
+    end
+    
+    @current_portal_buyer
   rescue
     nil
   end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_16_130000) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_16_224217) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -686,6 +686,39 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_16_130000) do
     t.index ["phone"], name: "index_users_on_phone"
   end
 
+  create_table "vehicles", force: :cascade do |t|
+    t.integer "company_id"
+    t.string "stock_number"
+    t.string "vin"
+    t.integer "year"
+    t.string "make"
+    t.string "model"
+    t.string "trim"
+    t.string "color"
+    t.string "condition", default: "new"
+    t.string "status", default: "available"
+    t.decimal "price", precision: 15, scale: 2
+    t.decimal "cost", precision: 15, scale: 2
+    t.integer "mileage"
+    t.text "description"
+    t.text "notes"
+    t.json "features", default: []
+    t.string "location"
+    t.datetime "date_in_stock"
+    t.datetime "date_sold"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_vehicles_on_company_id"
+    t.index ["condition"], name: "index_vehicles_on_condition"
+    t.index ["is_deleted"], name: "index_vehicles_on_is_deleted"
+    t.index ["status"], name: "index_vehicles_on_status"
+    t.index ["stock_number"], name: "index_vehicles_on_stock_number", unique: true
+    t.index ["vin"], name: "index_vehicles_on_vin", unique: true
+    t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
+  end
+
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "sources"
@@ -722,4 +755,5 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_16_130000) do
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
   add_foreign_key "tag_assignments", "tags"
+  add_foreign_key "vehicles", "companies"
 end

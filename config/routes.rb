@@ -24,6 +24,13 @@ Rails.application.routes.draw do
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
+      # ==================== VEHICLES/INVENTORY ====================
+      resources :vehicles do
+        collection do
+          get :stats
+        end
+      end
+      
       # ==================== QUOTES ====================
       resources :quotes do
         member do
