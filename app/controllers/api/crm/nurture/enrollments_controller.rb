@@ -10,7 +10,7 @@ module Api
           entity_type = params[:entity_type]
           entity_id = params[:entity_id]
           
-          enrollments = NurtureEnrollment.includes(:lead, :nurture_sequence, :enrollable)
+          enrollments = NurtureEnrollment.all
           
           # Filter by entity_type
           if entity_type.present?
@@ -21,7 +21,7 @@ module Api
             enrollments = enrollments.for_lead(lead_ids)
           end
           
-          enrollments = enrollments.order(created_at: :desc)
+          enrollments = enrollments.includes(:nurture_sequence).order(created_at: :desc)
           
           render json: enrollments.map { |e| enrollment_json(e) }, status: :ok
         rescue => e
@@ -201,7 +201,18 @@ module Api
         end
 
         def enrollment_json(enrollment)
-          entity = enrollment.entity
+          begin
+            entity = enrollment.entity rescue nil
+            entity_name = if entity
+              entity.respond_to?(:name) ? entity.name : entity.try(:first_name)
+            else
+              nil
+            end
+          rescue => e
+            Rails.logger.error "Error loading entity for enrollment #{enrollment.id}: #{e.message}"
+            entity = nil
+            entity_name = nil
+          end
           
           {
             id: enrollment.id,
@@ -214,8 +225,8 @@ module Api
             lead_id: enrollment.lead_id,
             leadId: enrollment.lead_id,
             # Entity details
-            entity_name: entity&.name || entity&.first_name,
-            entityName: entity&.name || entity&.first_name,
+            entity_name: entity_name,
+            entityName: entity_name,
             # Sequence info
             nurture_sequence_id: enrollment.nurture_sequence_id,
             nurtureSequenceId: enrollment.nurture_sequence_id,

@@ -251,6 +251,20 @@ Rails.application.routes.draw do
         post :test_email, on: :collection
         post :test_sms, on: :collection
       end
+      
+      # ==================== PLATFORM COMMUNICATIONS ====================
+      # Unified communications API for all entity types
+      get 'communications/:entity_type/:entity_id/history', to: 'communications#history'
+      post 'communications/email', to: 'communications#email'
+      post 'communications/sms', to: 'communications#sms'
+      
+      # Communication templates
+      get 'communications/templates', to: 'communications#index_templates'
+      post 'communications/templates', to: 'communications#create_template'
+      get 'communications/templates/:id', to: 'communications#show_template'
+      patch 'communications/templates/:id', to: 'communications#update_template'
+      put 'communications/templates/:id', to: 'communications#update_template'
+      delete 'communications/templates/:id', to: 'communications#destroy_template'
     end
   end
   # Phase 5A - Unified Login Authentication
