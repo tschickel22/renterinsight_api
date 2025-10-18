@@ -3,7 +3,7 @@
 module Api
   module V1
     class ContactsController < ApplicationController
-      before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag]
+      before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes]
       before_action :set_account, only: [:index]
 
       # GET /api/v1/contacts
@@ -166,6 +166,113 @@ module Api
         else
           render json: { error: 'Tag not found' }, status: :not_found
         end
+      end
+
+      # PATCH /api/v1/contacts/:id/opt_in_email
+      def opt_in_email
+        @contact.opt_in_email!
+        render json: {
+          message: 'Contact opted in to email communications',
+          contact: contact_json(@contact, detailed: true)
+        }
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # PATCH /api/v1/contacts/:id/opt_out_email
+      def opt_out_email
+        @contact.opt_out_email!(params[:reason])
+        render json: {
+          message: 'Contact opted out of email communications',
+          contact: contact_json(@contact, detailed: true)
+        }
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # PATCH /api/v1/contacts/:id/opt_in_sms
+      def opt_in_sms
+        @contact.opt_in_sms!
+        render json: {
+          message: 'Contact opted in to SMS communications',
+          contact: contact_json(@contact, detailed: true)
+        }
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # PATCH /api/v1/contacts/:id/opt_out_sms
+      def opt_out_sms
+        @contact.opt_out_sms!(params[:reason])
+        render json: {
+          message: 'Contact opted out of SMS communications',
+          contact: contact_json(@contact, detailed: true)
+        }
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # GET /api/v1/contacts/:id/deals
+      def deals
+        if @contact.account.nil?
+          render json: {
+            success: true,
+            deals: []
+          }
+          return
+        end
+
+        @deals = @contact.account.deals.order(created_at: :desc)
+        
+        render json: {
+          success: true,
+          deals: @deals.map { |deal| {
+            id: deal.id,
+            accountId: deal.account_id,
+            leadId: deal.lead_id,
+            title: deal.title,
+            stage: deal.stage,
+            amount: deal.amount_cents / 100.0,
+            expectedCloseOn: deal.expected_close_on,
+            createdAt: deal.created_at,
+            updatedAt: deal.updated_at
+          }}
+        }
+      rescue => e
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
+      # GET /api/v1/contacts/:id/quotes
+      def quotes
+        @quotes = Quote.where(contact_id: @contact.id)
+                       .or(Quote.where(account_id: @contact.account_id))
+                       .where(is_deleted: false)
+                       .order(created_at: :desc)
+        
+        render json: {
+          success: true,
+          quotes: @quotes.map { |quote| {
+            id: quote.id,
+            accountId: quote.account_id,
+            contactId: quote.contact_id,
+            quoteNumber: quote.quote_number,
+            status: quote.status,
+            subtotal: quote.subtotal,
+            tax: quote.tax,
+            total: quote.total,
+            items: quote.items,
+            validUntil: quote.valid_until,
+            sentAt: quote.sent_at,
+            viewedAt: quote.viewed_at,
+            acceptedAt: quote.accepted_at,
+            rejectedAt: quote.rejected_at,
+            notes: quote.notes,
+            createdAt: quote.created_at,
+            updatedAt: quote.updated_at
+          }}
+        }
+      rescue => e
+        render json: { error: e.message }, status: :internal_server_error
       end
 
       private

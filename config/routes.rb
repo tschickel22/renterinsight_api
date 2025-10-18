@@ -53,12 +53,42 @@ Rails.application.routes.draw do
         member do
           post :tags, to: 'contacts#add_tags'
           delete 'tags/:tag_name', to: 'contacts#remove_tag'
+          patch :opt_in_email, to: 'contacts#opt_in_email'
+          patch :opt_out_email, to: 'contacts#opt_out_email'
+          patch :opt_in_sms, to: 'contacts#opt_in_sms'
+          patch :opt_out_sms, to: 'contacts#opt_out_sms'
+          get :deals
+          get :quotes
         end
         
         collection do
           get :stats
           post :bulk_create
         end
+        
+        # Contact Communications
+        resources :communications, controller: 'contact_communications', only: [:index] do
+          collection do
+            post :email
+            post :sms
+            post :log
+          end
+        end
+        
+        # Contact Activities
+        resources :activities, controller: 'contact_activities' do
+          member do
+            post :complete
+            post :cancel
+          end
+        end
+        
+        # Contact Nurture
+        get 'nurture', to: 'contact_nurture#index'
+        post 'nurture/enroll', to: 'contact_nurture#enroll'
+        post 'nurture/:enrollment_id/pause', to: 'contact_nurture#pause'
+        post 'nurture/:enrollment_id/resume', to: 'contact_nurture#resume'
+        post 'nurture/:enrollment_id/unenroll', to: 'contact_nurture#unenroll'
       end
       
       # ==================== ACCOUNTS ====================
@@ -90,6 +120,15 @@ Rails.application.routes.draw do
           end
         end
         resources :messages, controller: 'account_messages', only: [:index, :create]
+        
+        # Account Communications
+        resources :communications, controller: 'account_communications', only: [:index] do
+          collection do
+            post :email
+            post :sms
+            post :log
+          end
+        end
         
         member do
           get :insights
