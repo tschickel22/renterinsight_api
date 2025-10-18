@@ -8,6 +8,8 @@ class Contact < ApplicationRecord
   has_many :tags, through: :tag_assignments
   has_many :note_records, class_name: 'Note', as: :entity, dependent: :destroy
   has_many :quotes, dependent: :destroy
+  has_many :communications, as: :communicable, dependent: :destroy
+  has_many :contact_activities, dependent: :destroy
 
   # Validations
   validates :first_name, presence: true
@@ -42,9 +44,42 @@ class Contact < ApplicationRecord
 
   def contact_methods
     methods = []
-    methods << 'email' if email.present?
-    methods << 'phone' if phone.present?
+    methods << 'email' if email.present? && !opt_out_email?
+    methods << 'phone' if phone.present? && !opt_out_sms?
     methods
+  end
+
+  # Opt-out methods
+  def opt_out_email?
+    opt_out_email == true
+  end
+
+  def opt_out_sms?
+    opt_out_sms == true
+  end
+
+  def can_email?
+    email.present? && !opt_out_email?
+  end
+
+  def can_sms?
+    phone.present? && !opt_out_sms?
+  end
+
+  def opt_in_email!
+    update(opt_out_email: false, opt_out_email_at: nil)
+  end
+
+  def opt_in_sms!
+    update(opt_out_sms: false, opt_out_sms_at: nil)
+  end
+
+  def opt_out_email!(reason = nil)
+    update(opt_out_email: true, opt_out_email_at: Time.current)
+  end
+
+  def opt_out_sms!(reason = nil)
+    update(opt_out_sms: true, opt_out_sms_at: Time.current)
   end
 
   # Search functionality

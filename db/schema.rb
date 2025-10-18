@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_16_224217) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_18_000001) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -317,6 +317,49 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_16_224217) do
     t.datetime "updated_at", null: false
   end
 
+  create_table "contact_activities", force: :cascade do |t|
+    t.integer "contact_id", null: false
+    t.integer "account_id"
+    t.integer "user_id", null: false
+    t.integer "assigned_to_id"
+    t.string "activity_type", null: false
+    t.string "subject", null: false
+    t.text "description"
+    t.string "status", default: "pending"
+    t.string "priority", default: "medium"
+    t.datetime "due_date"
+    t.datetime "start_time"
+    t.datetime "end_time"
+    t.integer "duration_minutes"
+    t.datetime "completed_at"
+    t.string "call_direction"
+    t.string "call_outcome"
+    t.string "phone_number"
+    t.string "meeting_location"
+    t.string "meeting_link"
+    t.text "meeting_attendees"
+    t.text "reminder_method"
+    t.datetime "reminder_time"
+    t.boolean "reminder_sent", default: false
+    t.integer "estimated_hours"
+    t.integer "actual_hours"
+    t.integer "related_activity_id"
+    t.json "metadata", default: {}
+    t.text "outcome_notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "activity_type"], name: "index_contact_activities_on_account_id_and_activity_type"
+    t.index ["account_id"], name: "index_contact_activities_on_account_id"
+    t.index ["assigned_to_id", "status"], name: "index_contact_activities_on_assigned_to_id_and_status"
+    t.index ["assigned_to_id"], name: "index_contact_activities_on_assigned_to_id"
+    t.index ["contact_id", "activity_type"], name: "index_contact_activities_on_contact_id_and_activity_type"
+    t.index ["contact_id"], name: "index_contact_activities_on_contact_id"
+    t.index ["due_date"], name: "index_contact_activities_on_due_date"
+    t.index ["related_activity_id"], name: "index_contact_activities_on_related_activity_id"
+    t.index ["start_time"], name: "index_contact_activities_on_start_time"
+    t.index ["user_id"], name: "index_contact_activities_on_user_id"
+  end
+
   create_table "contacts", force: :cascade do |t|
     t.integer "account_id"
     t.integer "company_id"
@@ -330,8 +373,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_16_224217) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "opt_out_email", default: false, null: false
+    t.datetime "opt_out_email_at"
+    t.boolean "opt_out_sms", default: false, null: false
+    t.datetime "opt_out_sms_at"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
+    t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
+    t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
   end
 
   create_table "deals", force: :cascade do |t|
@@ -731,6 +780,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_16_224217) do
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
+  add_foreign_key "contact_activities", "accounts"
+  add_foreign_key "contact_activities", "contact_activities", column: "related_activity_id"
+  add_foreign_key "contact_activities", "contacts"
+  add_foreign_key "contact_activities", "users"
+  add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "leads"
   add_foreign_key "intake_forms", "companies"
