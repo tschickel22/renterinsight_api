@@ -380,6 +380,10 @@ module Api
           department: contact.department,
           isPrimary: contact.is_primary,
           notes: contact.notes,
+          optOutEmail: contact.opt_out_email,
+          optOutEmailAt: contact.opt_out_email_at,
+          optOutSms: contact.opt_out_sms,
+          optOutSmsAt: contact.opt_out_sms_at,
           createdAt: contact.created_at,
           updatedAt: contact.updated_at
         }
