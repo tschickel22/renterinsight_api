@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_18_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_18_200000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -624,6 +624,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_18_000001) do
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "resend_count", default: 0, null: false
+    t.datetime "last_sent_at"
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["contact_id"], name: "index_quotes_on_contact_id"
     t.index ["created_at"], name: "index_quotes_on_created_at"

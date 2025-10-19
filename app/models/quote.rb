@@ -46,11 +46,16 @@ class Quote < ApplicationRecord
   
   # Status transitions
   def send!
-    return false unless draft?
+    # Allow sending for draft quotes or resending for sent/viewed quotes
+    return false unless %w[draft sent viewed].include?(status)
+    
+    is_resend = !draft? && sent_at.present?
     
     update!(
       status: 'sent',
-      sent_at: Time.current
+      sent_at: is_resend ? sent_at : Time.current,  # Keep original sent_at
+      last_sent_at: Time.current,  # Always update last_sent_at
+      resend_count: is_resend ? (resend_count + 1) : 0  # Increment on resend
     )
   end
   
@@ -130,6 +135,8 @@ class Quote < ApplicationRecord
       'total' => total,
       'notes' => notes,
       'sent_at' => sent_at,
+      'last_sent_at' => last_sent_at,
+      'resend_count' => resend_count || 0,
       'viewed_at' => viewed_at,
       'accepted_at' => accepted_at,
       'rejected_at' => rejected_at,
