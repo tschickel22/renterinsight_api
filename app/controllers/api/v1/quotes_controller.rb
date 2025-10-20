@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
+require 'csv'
+
 module Api
   module V1
     class QuotesController < ApplicationController
-      before_action :set_quote, only: %i[show update destroy send_quote]
+      before_action :set_quote, only: %i[show update destroy send_quote pdf]
 
       # GET /api/v1/quotes
       def index
@@ -238,6 +240,20 @@ module Api
         else
           render json: { error: 'Cannot reject quote in current status' }, status: :unprocessable_entity
         end
+      end
+
+      # GET /api/v1/quotes/:id/pdf
+      def pdf
+        pdf_content = QuotePdfGenerator.new(@quote).generate
+        
+        send_data pdf_content,
+          filename: "#{@quote.quote_number}.pdf",
+          type: 'application/pdf',
+          disposition: 'inline' # Opens in browser instead of downloading
+      rescue => e
+        Rails.logger.error "Error generating PDF: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: { error: 'Failed to generate PDF', message: e.message }, status: :internal_server_error
       end
 
       # GET /api/v1/quotes/export
