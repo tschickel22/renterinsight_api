@@ -3,7 +3,7 @@
 module Api
   module Platform
     class CommunicationsController < ApplicationController
-      before_action :set_entity, only: [:history]
+      before_action :set_entity, only: [:history, :stats, :destroy]
 
       # GET /api/platform/communications/:entity_type/:entity_id/history
       def history
@@ -12,6 +12,67 @@ module Api
           .order(created_at: :desc)
         
         render json: communications.map { |comm| comm_log_json(comm) }, status: :ok
+      end
+
+      # GET /api/platform/communications/:entity_type/:entity_id/stats
+      def stats
+        begin
+          # Get all communications for this entity
+          comms = Communication.where(
+            communicable_type: @entity_type,
+            communicable_id: @entity_id
+          )
+          
+          # Get email communications
+          email_comms = comms.where(channel: 'email')
+          email_sent = email_comms.where(direction: 'outbound').count
+          
+          # Calculate email stats
+          email_opened = email_comms.where(direction: 'outbound').where.not(read_at: nil).count
+          email_clicked = email_comms.where(direction: 'outbound')
+            .where("metadata->>'clicked' = 'true'").count
+          
+          open_rate = email_sent > 0 ? (email_opened.to_f / email_sent * 100).round(1) : 0
+          click_rate = email_sent > 0 ? (email_clicked.to_f / email_sent * 100).round(1) : 0
+          
+          # Get SMS communications
+          sms_comms = comms.where(channel: 'sms')
+          sms_sent = sms_comms.where(direction: 'outbound').count
+          sms_delivered = sms_comms.where(direction: 'outbound', status: 'delivered').count
+          delivery_rate = sms_sent > 0 ? (sms_delivered.to_f / sms_sent * 100).round(1) : 0
+          
+          # Calculate response rate (inbound messages / outbound messages)
+          outbound_count = comms.where(direction: 'outbound').count
+          inbound_count = comms.where(direction: 'inbound').count
+          response_rate = outbound_count > 0 ? (inbound_count.to_f / outbound_count * 100).round(1) : 0
+          
+          # Last contact date
+          last_comm = comms.order(created_at: :desc).first
+          last_contact_at = last_comm&.created_at
+          
+          render json: {
+            total: comms.count,
+            email: {
+              count: email_sent,
+              openRate: open_rate,
+              clickRate: click_rate,
+              opened: email_opened,
+              clicked: email_clicked
+            },
+            sms: {
+              count: sms_sent,
+              deliveryRate: delivery_rate,
+              delivered: sms_delivered
+            },
+            lastContactAt: last_contact_at&.iso8601,
+            responseRate: response_rate,
+            outboundCount: outbound_count,
+            inboundCount: inbound_count
+          }, status: :ok
+        rescue => e
+          Rails.logger.error("[Platform::CommunicationsController#stats] Error: #{e.message}")
+          render json: { error: e.message }, status: :internal_server_error
+        end
       end
 
       # POST /api/platform/communications/email
@@ -34,6 +95,26 @@ module Api
         else
           render json: result, status: :unprocessable_entity
         end
+      end
+
+      # DELETE /api/platform/communications/:entity_type/:entity_id/messages/:id
+      def destroy
+        communication = Communication.find_by(
+          id: params[:id],
+          communicable_type: @entity_type,
+          communicable_id: @entity_id
+        )
+
+        unless communication
+          render json: { error: 'Communication not found' }, status: :not_found
+          return
+        end
+
+        communication.destroy!
+        render json: { success: true, message: 'Communication deleted successfully' }, status: :ok
+      rescue => e
+        Rails.logger.error("[Platform::CommunicationsController#destroy] Error: #{e.message}")
+        render json: { error: e.message }, status: :internal_server_error
       end
 
       private
@@ -78,13 +159,30 @@ module Api
         # Extract parameters
         email_params = extract_email_params
         
+        # Create communication BEFORE sending (so we have ID for tracking pixel)
+        communication = create_pending_communication(email_params, email_config) if params[:entity_id]
+        
+        # Add tracking pixel to email body
+        enhanced_body = email_params[:content]
+        if communication
+          enhanced_body = add_tracking_pixel(email_params[:content], communication.id)
+          # Update the communication record with the HTML version
+          communication.update!(body: enhanced_body)
+        end
+        
         # Configure ActionMailer like password reset does
         configure_action_mailer_smtp(email_config)
         
-        # Send email via ActionMailer
-        send_result = send_email_via_action_mailer(email_params, email_config)
+        # Send email via ActionMailer with enhanced body
+        send_result = send_email_via_action_mailer(
+          email_params.merge(content: enhanced_body), 
+          email_config
+        )
         
         unless send_result[:success]
+          # Mark communication as failed if it was created
+          communication&.mark_as_failed!(send_result[:error] || 'Failed to send email')
+          
           return {
             ok: false,
             success: false,
@@ -92,39 +190,22 @@ module Api
           }
         end
 
-        # Create communication log if entity is provided
-        entity_type = params[:entity_type]
-        entity_id = params[:entity_id]
-        
-        if entity_type.present? && entity_id.present?
-          entity = entity_type.constantize.find_by(id: entity_id)
+        # Update communication with sent status and message ID
+        if communication
+          communication.update!(
+            status: 'sent',
+            sent_at: Time.current,
+            external_id: send_result[:message_id]
+          )
+          CommunicationEvent.track_send(communication, details: { message_id: send_result[:message_id] })
           
-          if entity
-            log = Communication.create!(
-              communicable: entity,
-              channel: 'email',
-              direction: 'outbound',
-              subject: email_params[:subject],
-              body: email_params[:content],
-              status: 'sent',
-              sent_at: Time.current,
-              to_address: email_params[:to],
-              from_address: email_config['fromEmail'] || email_config[:fromEmail],
-              metadata: {
-                message_id: send_result[:message_id],
-                provider: email_config['provider'] || email_config[:provider] || 'smtp',
-                template_id: email_params[:template_id]
-              }.compact
-            )
-
-            return { 
-              ok: true, 
-              success: true,
-              id: log.id,
-              messageId: send_result[:message_id],
-              provider: email_config['provider'] || email_config[:provider] || 'smtp'
-            }
-          end
+          return { 
+            ok: true, 
+            success: true,
+            id: communication.id,
+            messageId: send_result[:message_id],
+            provider: email_config['provider'] || email_config[:provider] || 'smtp'
+          }
         end
 
         # Test email without entity
@@ -138,6 +219,7 @@ module Api
       rescue => e
         Rails.logger.error("[Platform::CommunicationsController#email] Error: #{e.message}")
         Rails.logger.error(e.backtrace.first(5).join("\n"))
+        communication&.mark_as_failed!(e.message)
         {
           ok: false,
           success: false,
@@ -194,12 +276,17 @@ module Api
               sent_at: Time.current,
               to_address: sms_params[:to],
               from_address: sms_config['fromNumber'] || sms_config[:fromNumber],
+              external_id: send_result[:message_sid],  # ⚠️ CRITICAL: Store message_sid for webhook matching
               metadata: {
                 message_sid: send_result[:message_sid],
                 provider: sms_config['provider'] || sms_config[:provider] || 'twilio',
-                template_id: sms_params[:template_id]
+                template_id: sms_params[:template_id],
+                initial_status: send_result[:status]
               }.compact
             )
+            
+            # Track send event
+            CommunicationEvent.track_send(log, details: { message_sid: send_result[:message_sid] })
 
             return { 
               ok: true, 
@@ -307,13 +394,43 @@ module Api
       end
 
       def extract_email_params
+        # Extract attachments from FormData (params[:attachments] will be a hash with numeric keys)
+        attachments = []
+        if params[:attachments].is_a?(ActionController::Parameters)
+          params[:attachments].values.each do |file|
+            attachments << file if file.respond_to?(:read)
+          end
+        elsif params[:attachments].is_a?(Array)
+          attachments = params[:attachments].select { |f| f.respond_to?(:read) }
+        end
+        
+        # If template_id is provided, load template attachments
+        template_id = params[:template_id] || params[:templateId]
+        if template_id.present?
+          begin
+            template = Template.find(template_id)
+            if template.attachments.attached?
+              template.attachments.each do |attachment|
+                # Add template attachment as a hash with filename and content
+                attachments << {
+                  filename: attachment.filename.to_s,
+                  content: attachment.download
+                }
+              end
+            end
+          rescue ActiveRecord::RecordNotFound
+            Rails.logger.warn("[extract_email_params] Template #{template_id} not found")
+          end
+        end
+        
         {
           subject: params[:subject],
           content: params[:body] || params[:html] || params[:content],
           to: params[:to],
-          template_id: params[:template_id] || params[:templateId],
+          template_id: template_id,
           cc: params[:cc],
-          bcc: params[:bcc]
+          bcc: params[:bcc],
+          attachments: attachments
         }
       end
 
@@ -355,6 +472,7 @@ module Api
         from_name = config['fromName'] || config[:fromName] || 'RenterInsight'
         
         Rails.logger.info "[send_email_via_action_mailer] Sending to #{email_params[:to]} from #{from_email}"
+        Rails.logger.info "[send_email_via_action_mailer] Attachments count: #{email_params[:attachments]&.length || 0}"
         
         mail = CommunicationMailer.send_communication(
           to: email_params[:to],
@@ -363,7 +481,8 @@ module Api
           from_email: from_email,
           from_name: from_name,
           cc: email_params[:cc],
-          bcc: email_params[:bcc]
+          bcc: email_params[:bcc],
+          file_attachments: email_params[:attachments] || []
         )
         
         mail.deliver_now
@@ -401,18 +520,34 @@ module Api
         
         Rails.logger.info "[send_sms_via_twilio] Sending to #{to} from #{from_number}"
         
+        # Configure status callback URL for delivery tracking
+        # Skip callback URL if using localhost (Twilio rejects localhost URLs)
+        callback_url = nil
+        if request.present? && !request.host.include?('localhost')
+          callback_url = "#{request.protocol}#{request.host_with_port}/webhooks/twilio/sms/status"
+          Rails.logger.info "[send_sms_via_twilio] Callback URL: #{callback_url}"
+        else
+          Rails.logger.warn "[send_sms_via_twilio] Skipping StatusCallback (localhost or no request context)"
+        end
+        
         uri = URI.parse("https://api.twilio.com/2010-04-01/Accounts/#{account_sid}/Messages.json")
         
-        request = Net::HTTP::Post.new(uri)
-        request.basic_auth(account_sid, auth_token)
-        request.set_form_data(
+        request_obj = Net::HTTP::Post.new(uri)
+        request_obj.basic_auth(account_sid, auth_token)
+        
+        form_data = {
           'From' => from_number,
           'To' => to,
           'Body' => message
-        )
+        }
+        
+        # Only add StatusCallback if we have a valid URL
+        form_data['StatusCallback'] = callback_url if callback_url.present?
+        
+        request_obj.set_form_data(form_data)
         
         response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
-          http.request(request)
+          http.request(request_obj)
         end
         
         result = JSON.parse(response.body)
@@ -482,6 +617,188 @@ module Api
           createdAt: comm.created_at&.iso8601,
           updatedAt: comm.updated_at&.iso8601
         }.compact
+      end
+      
+      # Create communication record before sending (to get ID for tracking)
+      def create_pending_communication(email_params, config)
+        entity_type = params[:entity_type]
+        entity_id = params[:entity_id]
+        
+        return nil unless entity_type.present? && entity_id.present?
+        
+        entity = entity_type.constantize.find_by(id: entity_id)
+        return nil unless entity
+        
+        Communication.create!(
+          communicable: entity,
+          channel: 'email',
+          direction: 'outbound',
+          subject: email_params[:subject],
+          body: email_params[:content],
+          status: 'pending',
+          to_address: email_params[:to],
+          from_address: config['fromEmail'] || config[:fromEmail],
+          cc_addresses: email_params[:cc],
+          bcc_addresses: email_params[:bcc],
+          metadata: {
+            template_id: email_params[:template_id]
+          }.compact
+        )
+      end
+      
+      # Add tracking pixel to email HTML
+      def add_tracking_pixel(html_body, communication_id)
+        return html_body unless html_body.present? && communication_id.present?
+        
+        # Ensure content is HTML
+        html_body = ensure_html_format(html_body)
+        
+        # Generate tracking pixel URL
+        pixel_url = "#{request.protocol}#{request.host_with_port}/webhooks/email/#{communication_id}/pixel.gif"
+        
+        # Tracking pixel IMG tag
+        tracking_pixel = "<img src=\"#{pixel_url}\" width=\"1\" height=\"1\" alt=\"\" style=\"display:none\" />"
+        
+        # If HTML contains </body>, insert before it
+        if html_body.include?('</body>')
+          html_body.sub('</body>', "#{tracking_pixel}</body>")
+        else
+          # Otherwise append to end
+          "#{html_body}#{tracking_pixel}"
+        end
+      end
+      
+      # Ensure email body is in HTML format
+      def ensure_html_format(body)
+        return body if body.blank?
+        
+        # Already HTML - return as is
+        return body if body.include?('<html') || body.include?('<body')
+        
+        # Convert plain text to HTML
+        # Preserve line breaks and basic formatting
+        formatted_body = body.gsub("\n", "<br>")
+        
+        # Wrap in basic HTML structure
+        <<~HTML
+          <html>
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+              #{formatted_body}
+            </body>
+          </html>
+        HTML
+      end
+      
+      # ==================== TEMPLATE MANAGEMENT ====================
+      
+      # GET /api/platform/communications/templates
+      def index_templates
+        templates = Template.where(template_type: %w[email sms]).order(created_at: :desc)
+        render json: templates.map { |t| template_json(t) }, status: :ok
+      end
+      
+      # GET /api/platform/communications/templates/:id
+      def show_template
+        template = Template.find(params[:id])
+        render json: template_json(template), status: :ok
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Template not found' }, status: :not_found
+      end
+      
+      # POST /api/platform/communications/templates
+      def create_template
+        template = Template.new(template_params)
+        
+        # Handle file attachments if present
+        if params[:attachments].present?
+          params[:attachments].each do |file|
+            template.attachments.attach(file) if file.respond_to?(:read)
+          end
+        end
+        
+        if template.save
+          render json: template_json(template), status: :created
+        else
+          render json: { errors: template.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+      
+      # PATCH/PUT /api/platform/communications/templates/:id
+      def update_template
+        template = Template.find(params[:id])
+        
+        # Handle new file attachments if present
+        if params[:attachments].present?
+          params[:attachments].each do |file|
+            template.attachments.attach(file) if file.respond_to?(:read)
+          end
+        end
+        
+        if template.update(template_params)
+          render json: template_json(template), status: :ok
+        else
+          render json: { errors: template.errors.full_messages }, status: :unprocessable_entity
+        end
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Template not found' }, status: :not_found
+      end
+      
+      # DELETE /api/platform/communications/templates/:id
+      def destroy_template
+        template = Template.find(params[:id])
+        template.destroy!
+        head :no_content
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Template not found' }, status: :not_found
+      end
+      
+      # DELETE /api/platform/communications/templates/:id/attachments/:attachment_id
+      def delete_template_attachment
+        template = Template.find(params[:id])
+        attachment = template.attachments.find(params[:attachment_id])
+        attachment.purge
+        render json: template_json(template), status: :ok
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Template or attachment not found' }, status: :not_found
+      end
+      
+      def template_params
+        params.require(:template).permit(:name, :template_type, :subject, :body, :is_active)
+      end
+      
+      def template_json(template)
+        attachments_data = []
+        
+        if template.attachments.attached?
+          attachments_data = template.attachments.map do |attachment|
+            {
+              id: attachment.id,
+              filename: attachment.filename.to_s,
+              content_type: attachment.content_type,
+              byte_size: attachment.byte_size,
+              url: Rails.application.routes.url_helpers.rails_blob_path(attachment, only_path: true),
+              created_at: attachment.created_at&.iso8601
+            }
+          end
+        end
+        
+        {
+          id: template.id,
+          name: template.name,
+          template_type: template.template_type,
+          type: template.template_type,
+          subject: template.subject,
+          body: template.body,
+          isActive: template.is_active,
+          is_active: template.is_active,
+          attachments: attachments_data,
+          createdAt: template.created_at&.iso8601,
+          updatedAt: template.updated_at&.iso8601
+        }
       end
     end
   end

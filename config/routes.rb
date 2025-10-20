@@ -5,6 +5,15 @@ Rails.application.routes.draw do
 
   # Root
   root to: proc { [200, {}, ['Renter Insight API']] }
+  
+  # ==================== WEBHOOKS (NO AUTH REQUIRED) ====================
+  namespace :webhooks do
+    # Email tracking pixel (no auth required)
+    get 'email/:communication_id/pixel.gif', to: 'email_tracking#pixel', as: :email_pixel
+    
+    # Twilio SMS status callbacks (Twilio signature verification)
+    post 'twilio/sms/status', to: 'twilio#sms_status'
+  end
 
   # ==================== PUBLIC INTAKE FORMS ====================
   scope path: 'f', module: 'public', as: 'public' do
@@ -280,6 +289,7 @@ Rails.application.routes.draw do
 
         resources :templates, only: %i[index create update destroy] do
           collection { post :bulk }
+          member { delete 'attachments/:attachment_id', to: 'templates#delete_attachment' }
         end
       end
 
@@ -313,6 +323,8 @@ Rails.application.routes.draw do
       # ==================== PLATFORM COMMUNICATIONS ====================
       # Unified communications API for all entity types
       get 'communications/:entity_type/:entity_id/history', to: 'communications#history'
+      get 'communications/:entity_type/:entity_id/stats', to: 'communications#stats'
+      delete 'communications/:entity_type/:entity_id/messages/:id', to: 'communications#destroy'
       post 'communications/email', to: 'communications#email'
       post 'communications/sms', to: 'communications#sms'
       
@@ -323,6 +335,7 @@ Rails.application.routes.draw do
       patch 'communications/templates/:id', to: 'communications#update_template'
       put 'communications/templates/:id', to: 'communications#update_template'
       delete 'communications/templates/:id', to: 'communications#destroy_template'
+      delete 'communications/templates/:id/attachments/:attachment_id', to: 'communications#delete_template_attachment'
     end
   end
   # Phase 5A - Unified Login Authentication
