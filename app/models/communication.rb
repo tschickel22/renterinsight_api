@@ -84,7 +84,9 @@ class Communication < ApplicationRecord
   end
   
   def mark_as_delivered!
+    return if delivered_at.present?  # Already marked
     update!(status: 'delivered', delivered_at: Time.current)
+    track_event('delivered')
   end
   
   def mark_as_failed!(error)
@@ -97,6 +99,18 @@ class Communication < ApplicationRecord
   
   def mark_as_bounced!
     update!(status: 'bounced', failed_at: Time.current)
+  end
+  
+  # Email tracking
+  def mark_as_opened!(ip_address: nil, user_agent: nil)
+    return if read_at.present?  # Already opened
+    
+    update!(read_at: Time.current)
+    track_event('opened', ip_address: ip_address, user_agent: user_agent)
+  end
+  
+  def mark_as_clicked!(url:, ip_address: nil, user_agent: nil)
+    track_event('clicked', url: url, ip_address: ip_address, user_agent: user_agent)
   end
   
   # Channel checks

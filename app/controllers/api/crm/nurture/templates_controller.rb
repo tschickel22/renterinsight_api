@@ -11,6 +11,14 @@ module Api
 
         def create
           template = Template.new(template_params)
+          
+          # Handle file attachments if present
+          if params[:attachments].present?
+            params[:attachments].each do |file|
+              template.attachments.attach(file)
+            end
+          end
+          
           if template.save
             render json: template_json(template), status: :created
           else
@@ -20,6 +28,14 @@ module Api
 
         def update
           template = Template.find(params[:id])
+          
+          # Handle file attachments if present
+          if params[:attachments].present?
+            params[:attachments].each do |file|
+              template.attachments.attach(file)
+            end
+          end
+          
           if template.update(template_params)
             render json: template_json(template), status: :ok
           else
@@ -31,6 +47,14 @@ module Api
           template = Template.find(params[:id])
           template.destroy!
           head :no_content
+        end
+        
+        # Delete a specific attachment
+        def delete_attachment
+          template = Template.find(params[:id])
+          attachment = template.attachments.find(params[:attachment_id])
+          attachment.purge
+          render json: template_json(template), status: :ok
         end
 
         def bulk
@@ -49,9 +73,23 @@ module Api
                 # Update existing
                 template = Template.find(tpl_data[:id])
                 template.update!(template_params_from_hash(tpl_data))
+                
+                # Handle attachments if present
+                if tpl_data[:attachments].present?
+                  tpl_data[:attachments].each do |file|
+                    template.attachments.attach(file)
+                  end
+                end
               else
                 # Create new
-                Template.create!(template_params_from_hash(tpl_data))
+                template = Template.create!(template_params_from_hash(tpl_data))
+                
+                # Handle attachments if present
+                if tpl_data[:attachments].present?
+                  tpl_data[:attachments].each do |file|
+                    template.attachments.attach(file)
+                  end
+                end
               end
             end
           end
@@ -84,6 +122,21 @@ module Api
         end
 
         def template_json(template)
+          attachments_data = []
+          
+          if template.attachments.attached?
+            attachments_data = template.attachments.map do |attachment|
+              {
+                id: attachment.id,
+                filename: attachment.filename.to_s,
+                content_type: attachment.content_type,
+                byte_size: attachment.byte_size,
+                url: Rails.application.routes.url_helpers.rails_blob_path(attachment, only_path: true),
+                created_at: attachment.created_at&.iso8601
+              }
+            end
+          end
+          
           {
             id: template.id,
             name: template.name,
@@ -93,6 +146,7 @@ module Api
             body: template.body,
             isActive: template.is_active,
             is_active: template.is_active,
+            attachments: attachments_data,
             createdAt: template.created_at&.iso8601,
             updatedAt: template.updated_at&.iso8601
           }
