@@ -1,19 +1,30 @@
 # SMTP email provider using ActionMailer's built-in SMTP support
-# Configurable via environment variables or Rails config
+# Configurable via CommunicationSettingsService (Company → Platform → ENV hierarchy)
 
 module Providers
   module Email
     class SmtpProvider < BaseProvider
-      def initialize
+      def initialize(company: nil)
+        @company = company
+        
+        # Get settings from Company → Platform → ENV hierarchy
+        settings_service = company ? 
+          CommunicationSettingsService.for_company(company) : 
+          CommunicationSettingsService.platform
+        
+        email_config = settings_service.email_config
+        
         @config = {
-          address: ENV['SMTP_ADDRESS'] || Rails.application.config.action_mailer.smtp_settings[:address],
-          port: ENV['SMTP_PORT'] || Rails.application.config.action_mailer.smtp_settings[:port] || 587,
-          domain: ENV['SMTP_DOMAIN'] || Rails.application.config.action_mailer.smtp_settings[:domain],
-          user_name: ENV['SMTP_USERNAME'] || Rails.application.config.action_mailer.smtp_settings[:user_name],
-          password: ENV['SMTP_PASSWORD'] || Rails.application.config.action_mailer.smtp_settings[:password],
-          authentication: ENV['SMTP_AUTHENTICATION'] || 'plain',
+          address: email_config[:smtp_host],
+          port: email_config[:smtp_port],
+          domain: email_config[:smtp_domain],
+          user_name: email_config[:smtp_username],
+          password: email_config[:smtp_password],
+          authentication: email_config[:smtp_authentication] || 'plain',
           enable_starttls_auto: true
         }
+        
+        log_info("Initialized with #{company ? "company #{company.id}" : "platform"} settings")
       end
       
       def send_message(to:, from:, subject:, body:, cc: nil, bcc: nil, reply_to: nil, metadata: {}, **options)

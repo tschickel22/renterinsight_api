@@ -156,10 +156,54 @@ module Api
 
       # POST /api/v1/quotes/:id/send
       def send_quote
-        if @quote.send!
-          render json: @quote.as_json(include_account: true, include_contact: true)
-        else
-          render json: { error: 'Cannot send quote in current status' }, status: :unprocessable_entity
+        # Extract send parameters
+        send_params = params.permit(
+          :to_email,
+          :to_phone,
+          :custom_message,
+          :template_id,
+          :send_async,
+          :from_email,
+          :from_phone,
+          :cc,
+          :bcc,
+          delivery_methods: []
+        ).to_h
+        
+        # Default to email if no delivery methods specified
+        send_params[:delivery_methods] ||= ['email']
+        
+        # Convert to symbols for service
+        send_params_symbolized = send_params.deep_symbolize_keys
+        
+        # Use QuoteSendingService to send the quote
+        begin
+          result = QuoteSendingService.new(@quote).send(**send_params_symbolized)
+          
+          if result[:sent].any?
+            # Update quote status
+            @quote.send! if @quote.may_send?
+            
+            render json: {
+              success: true,
+              quote: @quote.as_json(include_account: true, include_contact: true),
+              sent_via: result[:sent].map { |r| { channel: r[:channel], to: r[:to] } },
+              communications: result[:sent].map { |r| r[:communication]&.id }
+            }
+          else
+            render json: {
+              success: false,
+              error: result[:errors].first || 'Failed to send quote',
+              errors: result[:errors],
+              failed: result[:failed]
+            }, status: :unprocessable_entity
+          end
+        rescue ArgumentError => e
+          render json: { success: false, error: e.message }, status: :bad_request
+        rescue => e
+          Rails.logger.error "Error sending quote: #{e.message}"
+          Rails.logger.error e.backtrace.join("\n")
+          render json: { success: false, error: e.message }, status: :internal_server_error
         end
       end
 

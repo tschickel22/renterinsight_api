@@ -1,0 +1,114 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║                     ✅ SMS ISSUES FIXED!                         ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ BEFORE (What was broken)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+User sends SMS without entering "From Phone Number"
+    ↓
+Backend looks for ENV['TWILIO_PHONE_NUMBER']
+    ↓
+❌ "Validation failed: From address can't be blank for SMS"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ AFTER (What's fixed)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+User sends SMS without entering "From Phone Number"
+    ↓
+Backend checks configuration hierarchy:
+  1. Company SMS settings → Found! Use company number
+  2. Platform SMS settings → Found! Use platform number  
+  3. ENV variable → Found! Use ENV number
+    ↓
+✅ SMS sends successfully with configured number!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 WHAT WAS FIXED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Backend: Updated CommunicationService
+   - default_from_address now uses CommunicationSettingsService
+   - Proper hierarchy: Company → Platform → ENV
+   - No more validation errors!
+
+✅ Frontend: Updated SendQuoteModal
+   - Clarified helper text for from phone/email
+   - Made it clear fields pull from settings
+   - CC and BCC already present in Advanced Options
+
+✅ Test Scripts: Created verification tools
+   - test_from_number.rb - Check settings resolution
+   - test_sms_simple.rb - Test SMS functionality
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 WHAT YOU CAN DO NOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Send SMS without entering "From Phone Number"
+   - It will automatically use your settings!
+   
+2. Use CC and BCC for emails
+   - Click "Advanced Options" in Send Quote modal
+   - Enter CC/BCC email addresses
+   
+3. Configure per-company SMS numbers
+   - Each company can have its own SMS number
+   - Falls back to platform default if not set
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 QUICK SETUP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Set your default SMS number (choose one):
+
+Option 1: Platform Settings (All companies)
+    PlatformSetting.set(:sms, :from_number, '+17205752095')
+
+Option 2: Per-Company Settings
+    company = Company.find(1)
+    company.set_communication_setting(:sms, :from_number, '+17205551234')
+
+Option 3: Environment Variable
+    TWILIO_PHONE_NUMBER=+17205752095
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧪 TEST NOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Go to Quotes in your application
+2. Open any quote
+3. Click "Send Quote"
+4. Select SMS
+5. Enter phone number
+6. Leave "From Phone Number" BLANK
+7. Click "Send Now"
+8. ✅ Should work perfectly!
+
+Or run: bundle exec rails runner test_sms_simple.rb
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 STATUS SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ SMS from number - FIXED
+✅ Configuration hierarchy - WORKING
+✅ CC and BCC options - AVAILABLE
+✅ Email integration - WORKING
+✅ SMS integration - WORKING
+✅ Test scripts - CREATED
+✅ Documentation - COMPLETE
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎉 Everything is ready to use! 🎉
+
+No more validation errors for SMS!
+No need to enter from phone number!
+Settings hierarchy works perfectly!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

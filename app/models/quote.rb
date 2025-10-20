@@ -47,7 +47,7 @@ class Quote < ApplicationRecord
   # Status transitions
   def send!
     # Allow sending for draft quotes or resending for sent/viewed quotes
-    return false unless %w[draft sent viewed].include?(status)
+    return false unless may_send?
     
     is_resend = !draft? && sent_at.present?
     
@@ -57,6 +57,10 @@ class Quote < ApplicationRecord
       last_sent_at: Time.current,  # Always update last_sent_at
       resend_count: is_resend ? (resend_count + 1) : 0  # Increment on resend
     )
+  end
+  
+  def may_send?
+    %w[draft sent viewed].include?(status)
   end
   
   def mark_viewed!
@@ -176,6 +180,15 @@ class Quote < ApplicationRecord
     end
     
     json
+  end
+  
+  # Required by Communicable concern
+  def primary_email
+    contact&.email || account&.email
+  end
+  
+  def primary_phone
+    contact&.phone || account&.phone
   end
   
   private

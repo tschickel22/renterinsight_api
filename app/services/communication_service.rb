@@ -40,6 +40,7 @@ class CommunicationService
     attachments: [],
     scheduled_for: nil,
     send_async: false,
+    skip_preference_check: false,
     **options
   )
     new.send_communication(
@@ -59,6 +60,7 @@ class CommunicationService
       attachments: attachments,
       scheduled_for: scheduled_for,
       send_async: send_async,
+      skip_preference_check: skip_preference_check,
       **options
     )
   end
@@ -113,15 +115,21 @@ class CommunicationService
     attachments: [],
     scheduled_for: nil,
     send_async: false,
+    skip_preference_check: false,
     **options
   )
     # Check communication preferences (opt-in/out)
-    unless can_send_to_recipient?(
-      recipient: communicable,
-      channel: channel,
-      category: category
-    )
-      raise OptOutError, "Recipient has opted out of #{channel} communications"
+    # For quotes, we check preferences on the contact/account, not the quote itself
+    unless skip_preference_check
+      recipient_for_check = determine_recipient_for_preference_check(communicable)
+      
+      if recipient_for_check && !can_send_to_recipient?(
+        recipient: recipient_for_check,
+        channel: channel,
+        category: category
+      )
+        raise OptOutError, "Recipient has opted out of #{channel} communications"
+      end
     end
     
     # Render template if provided
@@ -145,6 +153,9 @@ class CommunicationService
     # Set default provider if not specified
     provider ||= default_provider_for(channel)
     
+    # Get default from address if not provided
+    from ||= default_from_address(channel, communicable)
+    
     # Create communication record
     @communication = Communication.create!(
       communicable: communicable,
@@ -154,7 +165,7 @@ class CommunicationService
       status: 'pending',
       subject: subject,
       body: body,
-      from_address: from || default_from_address(channel),
+      from_address: from,
       to_address: to,
       cc_addresses: options[:cc],
       bcc_addresses: options[:bcc],
@@ -215,7 +226,8 @@ class CommunicationService
   end
   
   # Send an existing communication (used by background jobs)
-  def self.send_communication(communication, options = {})
+  # Renamed to avoid conflict with the main send_communication method above
+  def self.send_existing_communication(communication, options = {})
     return { success: false, error: "Communication already sent" } if communication.sent? || communication.delivered?
     
     begin
@@ -268,11 +280,30 @@ class CommunicationService
     )
   end
   
+  # Determine the correct recipient to check preferences for
+  # For quotes, this is the contact or account, not the quote itself
+  def determine_recipient_for_preference_check(communicable)
+    case communicable.class.name
+    when 'Quote'
+      # Check contact first, then account
+      communicable.contact || communicable.account
+    when 'Account', 'Contact'
+      # These are already the right recipient
+      communicable
+    else
+      # For other types, just use the communicable
+      communicable
+    end
+  end
+  
   private
   
   def send_via_provider(provider:, channel:, communication:, options:)
+    # Extract company from communicable for settings lookup
+    company = extract_company_from_communicable(communication.communicable)
+    
     provider_class = get_provider_class(provider, channel)
-    provider_instance = provider_class.new
+    provider_instance = provider_class.new(company: company)
     
     provider_instance.send_message(
       to: communication.to_address,
@@ -285,6 +316,22 @@ class CommunicationService
       metadata: communication.metadata,
       **options
     )
+  end
+  
+  def extract_company_from_communicable(communicable)
+    return nil unless communicable
+    
+    case communicable.class.name
+    when 'Quote'
+      communicable.account&.company || communicable.contact&.company
+    when 'Account', 'Contact'
+      communicable.company
+    when 'User'
+      communicable.company if communicable.respond_to?(:company)
+    else
+      # Try to get company if the object responds to it
+      communicable.company if communicable.respond_to?(:company)
+    end
   end
   
   def get_provider_class(provider, channel)
@@ -323,12 +370,20 @@ class CommunicationService
     end
   end
   
-  def default_from_address(channel)
+  def default_from_address(channel, communicable = nil)
+    # Get from CommunicationSettingsService based on company context for both email and SMS
+    company = extract_company_from_communicable(communicable)
+    settings_service = company ? 
+      CommunicationSettingsService.for_company(company) : 
+      CommunicationSettingsService.platform
+    
     case channel
     when 'email'
-      ENV['DEFAULT_FROM_EMAIL'] || 'noreply@platformdms.com'
+      email_config = settings_service.email_config
+      email_config[:from_email]
     when 'sms'
-      ENV['TWILIO_PHONE_NUMBER']
+      sms_config = settings_service.sms_config
+      sms_config[:from_number]
     else
       nil
     end
