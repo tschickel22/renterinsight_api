@@ -93,7 +93,7 @@ class QuoteSendingService
     subject = build_email_subject
     body = build_email_body(custom_message: custom_message, template_id: template_id)
     
-    # Send via CommunicationService
+    # Send via CommunicationService (no attachments - we include PDF link in body)
     begin
       result = CommunicationService.send_email(
         communicable: quote,
@@ -224,48 +224,88 @@ class QuoteSendingService
       end
     end
     
-    # Otherwise build default email body
-    parts = []
+    # Build HTML email body with clickable links
+    api_base_url = ENV['API_BASE_URL'] || 'http://localhost:3001'
+    pdf_url = "#{api_base_url}/api/v1/quotes/#{quote.id}/pdf"
     
-    # Custom message if provided
-    parts << custom_message if custom_message.present?
+    portal_link_html = ''
+    if ENV['BUYER_PORTAL_URL'].present?
+      portal_url = "#{ENV['BUYER_PORTAL_URL']}/quotes/#{quote.id}"
+      portal_link_html = "<p><a href=\"#{portal_url}\" style=\"color: #2563eb; text-decoration: none;\">Accept Online</a></p>"
+    end
     
-    # Quote details
-    parts << <<~TEXT
-      Hello,
-      
-      Please find your quote details below:
-      
-      Quote Number: #{quote.quote_number}
-      Total Amount: $#{format_currency(quote.total)}
-      Valid Until: #{quote.valid_until&.strftime('%B %d, %Y') || 'N/A'}
-    TEXT
-    
-    # Line items
+    # Build line items HTML
+    items_html = ''
     if quote.items.present?
-      parts << "\nQuote Items:"
+      items_html = '<h3 style="margin-top: 20px; margin-bottom: 10px; color: #374151;">Quote Items:</h3>'
+      items_html += '<ul style="list-style: none; padding: 0;">'
       quote.items.each_with_index do |item, index|
         quantity = item['quantity'] || item[:quantity]
         description = item['description'] || item[:description]
         unit_price = item['unitPrice'] || item['unit_price'] || item[:unitPrice] || item[:unit_price]
         total = quantity.to_f * unit_price.to_f
         
-        parts << "#{index + 1}. #{description} - Qty: #{quantity} @ $#{format_currency(unit_price)} = $#{format_currency(total)}"
+        items_html += "<li style=\"margin-bottom: 8px;\">#{index + 1}. #{description} - Qty: #{quantity} @ $#{format_currency(unit_price)} = <strong>$#{format_currency(total)}</strong></li>"
       end
+      items_html += '</ul>'
     end
     
-    # Notes if present
-    parts << "\nNotes:\n#{quote.notes}" if quote.notes.present?
-    
-    # Portal link if available
-    if ENV['BUYER_PORTAL_URL'].present?
-      portal_url = "#{ENV['BUYER_PORTAL_URL']}/quotes/#{quote.id}"
-      parts << "\nView and accept this quote online: #{portal_url}"
+    # Notes HTML
+    notes_html = ''
+    if quote.notes.present?
+      notes_html = "<div style=\"margin-top: 20px; padding: 15px; background-color: #f9fafb; border-left: 4px solid #d1d5db;\"><strong>Notes:</strong><br/>#{quote.notes}</div>"
     end
     
-    parts << "\nThank you for your business!"
+    # Custom message HTML
+    custom_message_html = ''
+    if custom_message.present?
+      custom_message_html = "<p style=\"margin-bottom: 20px; color: #374151;\">#{custom_message}</p>"
+    end
     
-    parts.join("\n\n")
+    # Build complete HTML email
+    <<~HTML
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+        #{custom_message_html}
+        
+        <p style="color: #374151;">Please find your quote details below:</p>
+        
+        <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Quote Number:</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold;">#{quote.quote_number}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Total Amount:</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold; color: #059669; font-size: 18px;">$#{format_currency(quote.total)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Valid Until:</td>
+              <td style="padding: 8px 0; text-align: right; font-weight: bold;">#{quote.valid_until&.strftime('%B %d, %Y') || 'N/A'}</td>
+            </tr>
+          </table>
+        </div>
+        
+        #{items_html}
+        
+        #{notes_html}
+        
+        <div style="margin: 30px 0; text-align: center;">
+          <a href="#{pdf_url}" style="display: inline-block; padding: 12px 30px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">View Quote</a>
+        </div>
+        
+        #{portal_link_html}
+        
+        <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">Thank you for your business!</p>
+      </body>
+      </html>
+    HTML
   end
   
   def build_sms_body(custom_message:, template_id:)
@@ -288,10 +328,15 @@ class QuoteSendingService
     # Quote summary
     parts << "Quote #{quote.quote_number}: $#{format_currency(quote.total)}"
     
+    # PDF link - shortened
+    api_base_url = ENV['API_BASE_URL'] || 'http://localhost:3001'
+    pdf_url = "#{api_base_url}/api/v1/quotes/#{quote.id}/pdf"
+    parts << "View Quote: #{pdf_url}"
+    
     # Portal link if available
     if ENV['BUYER_PORTAL_URL'].present?
       portal_url = "#{ENV['BUYER_PORTAL_URL']}/quotes/#{quote.id}"
-      parts << "View: #{portal_url}"
+      parts << "Accept Online: #{portal_url}"
     end
     
     parts.join("\n")

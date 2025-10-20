@@ -16,44 +16,59 @@ module Providers
         @client = initialize_client if configured?
       end
       
-      def send_message(to:, from:, subject:, body:, cc: nil, bcc: nil, reply_to: nil, metadata: {}, **options)
+      def send_message(to:, from:, subject:, body:, cc: nil, bcc: nil, reply_to: nil, metadata: {}, attachments: [], **options)
         require_config(:access_key_id, :secret_access_key, :region)
         
         log_info("Sending email to #{to} via AWS SES")
         
         begin
-          # Build destination
-          destination = { to_addresses: [to].flatten }
-          destination[:cc_addresses] = [cc].flatten if cc.present?
-          destination[:bcc_addresses] = [bcc].flatten if bcc.present?
-          
-          # Build message
-          message = {
-            subject: { data: subject, charset: 'UTF-8' },
-            body: build_body(body)
-          }
-          
-          # Send via SES
-          response = @client.send_email(
-            source: from,
-            destination: destination,
-            message: message,
-            reply_to_addresses: reply_to ? [reply_to].flatten : nil,
-            configuration_set_name: config[:configuration_set],
-            tags: build_tags(metadata)
-          )
-          
-          message_id = response.message_id
-          
-          log_info("Email sent successfully to #{to} via AWS SES, message_id: #{message_id}")
-          
-          success_result(
-            external_id: message_id,
-            details: {
-              region: config[:region],
-              configuration_set: config[:configuration_set]
+          # If attachments present, use send_raw_email with MIME encoding
+          if attachments.present?
+            send_raw_email_with_attachments(
+              to: to,
+              from: from,
+              subject: subject,
+              body: body,
+              cc: cc,
+              bcc: bcc,
+              reply_to: reply_to,
+              attachments: attachments,
+              metadata: metadata
+            )
+          else
+            # Build destination
+            destination = { to_addresses: [to].flatten }
+            destination[:cc_addresses] = [cc].flatten if cc.present?
+            destination[:bcc_addresses] = [bcc].flatten if bcc.present?
+            
+            # Build message
+            message = {
+              subject: { data: subject, charset: 'UTF-8' },
+              body: build_body(body)
             }
-          )
+            
+            # Send via SES
+            response = @client.send_email(
+              source: from,
+              destination: destination,
+              message: message,
+              reply_to_addresses: reply_to ? [reply_to].flatten : nil,
+              configuration_set_name: config[:configuration_set],
+              tags: build_tags(metadata)
+            )
+            
+            message_id = response.message_id
+            
+            log_info("Email sent successfully to #{to} via AWS SES, message_id: #{message_id}")
+            
+            success_result(
+              external_id: message_id,
+              details: {
+                region: config[:region],
+                configuration_set: config[:configuration_set]
+              }
+            )
+          end
         rescue Aws::SES::Errors::ServiceError => e
           log_error("AWS SES error sending to #{to}: #{e.message}")
           raise SendError, "AWS SES send failed: #{e.message}"
@@ -108,6 +123,64 @@ module Providers
       end
       
       private
+      
+      def send_raw_email_with_attachments(to:, from:, subject:, body:, cc:, bcc:, reply_to:, attachments:, metadata:)
+        require 'mail'
+        
+        # Create a Mail object
+        mail = Mail.new do
+          from from
+          to to
+          subject subject
+          
+          # Add optional headers
+          cc cc if cc.present?
+          bcc bcc if bcc.present?
+          reply_to reply_to if reply_to.present?
+        end
+        
+        # Determine if body is HTML or text
+        if body.include?('</html>') || body.include?('<html>')
+          mail.html_part = Mail::Part.new do
+            content_type 'text/html; charset=UTF-8'
+            body body
+          end
+        else
+          mail.text_part = Mail::Part.new do
+            content_type 'text/plain; charset=UTF-8'
+            body body
+          end
+        end
+        
+        # Add attachments
+        attachments.each do |attachment|
+          mail.attachments[attachment[:filename]] = {
+            mime_type: attachment[:content_type],
+            content: attachment[:content]
+          }
+        end
+        
+        # Send via SES raw email
+        response = @client.send_raw_email(
+          raw_message: {
+            data: mail.to_s
+          },
+          configuration_set_name: config[:configuration_set]
+        )
+        
+        message_id = response.message_id
+        
+        log_info("Email with #{attachments.size} attachment(s) sent successfully to #{to} via AWS SES, message_id: #{message_id}")
+        
+        success_result(
+          external_id: message_id,
+          details: {
+            region: config[:region],
+            configuration_set: config[:configuration_set],
+            attachments_count: attachments.size
+          }
+        )
+      end
       
       def configured?
         config[:access_key_id].present? && 
