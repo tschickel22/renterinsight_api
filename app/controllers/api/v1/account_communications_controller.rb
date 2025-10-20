@@ -45,12 +45,30 @@ module Api
           provider: settings[:email][:provider]
         )
 
-        # TODO: Actually send email via provider (SendGrid, Mailgun, etc.)
-        # For now, just mark as sent
-        communication.update!(
-          status: 'sent',
-          sent_at: Time.current
+        # Send email via EmailService
+        result = EmailService.send_email(
+          to: params[:to] || @account.email,
+          from: settings[:email][:from_email],
+          subject: params[:subject],
+          body: params[:body],
+          company: @account.company
         )
+
+        if result[:success]
+          communication.update!(
+            status: 'sent',
+            sent_at: Time.current,
+            provider_message_id: result[:message_id],
+            metadata: (communication.metadata || {}).merge(provider_response: result[:response])
+          )
+        else
+          communication.update!(
+            status: 'failed',
+            metadata: (communication.metadata || {}).merge(error: result[:error])
+          )
+          render json: { ok: false, error: result[:error] }, status: :unprocessable_entity
+          return
+        end
 
         render json: { 
           ok: true, 
@@ -89,12 +107,29 @@ module Api
           provider: settings[:sms][:provider]
         )
 
-        # TODO: Actually send SMS via provider (Twilio, Telnyx, etc.)
-        # For now, just mark as sent
-        communication.update!(
-          status: 'sent',
-          sent_at: Time.current
+        # Send SMS via SmsService
+        result = SmsService.send_sms(
+          to: params[:to] || @account.phone,
+          from: settings[:sms][:from_number],
+          body: params[:message],
+          company: @account.company
         )
+
+        if result[:success]
+          communication.update!(
+            status: 'sent',
+            sent_at: Time.current,
+            provider_message_id: result[:message_id],
+            metadata: (communication.metadata || {}).merge(provider_response: result[:response])
+          )
+        else
+          communication.update!(
+            status: 'failed',
+            metadata: (communication.metadata || {}).merge(error: result[:error])
+          )
+          render json: { ok: false, error: result[:error] }, status: :unprocessable_entity
+          return
+        end
 
         render json: { 
           ok: true, 

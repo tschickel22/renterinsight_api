@@ -18,7 +18,7 @@ class SendCommunicationJob < ApplicationJob
     end
     
     # Send the communication
-    result = CommunicationService.send_communication(communication, options)
+    result = CommunicationService.send_existing_communication(communication, options)
     
     if result[:success]
       Rails.logger.info("Successfully sent communication #{communication_id} via #{result[:provider]}")

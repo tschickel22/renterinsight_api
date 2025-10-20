@@ -1,21 +1,33 @@
 # Twilio SMS provider - wraps existing Twilio integration
 # Provides unified interface for SMS communications
+# Configurable via CommunicationSettingsService (Company → Platform → ENV hierarchy)
 
 module Providers
   module Sms
     class TwilioProvider < BaseProvider
-      def initialize
+      def initialize(company: nil)
+        @company = company
+        
+        # Get settings from Company → Platform → ENV hierarchy
+        settings_service = company ? 
+          CommunicationSettingsService.for_company(company) : 
+          CommunicationSettingsService.platform
+        
+        sms_config = settings_service.sms_config
+        
         @config = {
-          account_sid: ENV['TWILIO_ACCOUNT_SID'],
-          auth_token: ENV['TWILIO_AUTH_TOKEN'],
-          phone_number: ENV['TWILIO_PHONE_NUMBER'],
-          messaging_service_sid: ENV['TWILIO_MESSAGING_SERVICE_SID']
+          account_sid: sms_config[:twilio_account_sid],
+          auth_token: sms_config[:twilio_auth_token],
+          phone_number: sms_config[:from_number],
+          messaging_service_sid: nil # Can be added to settings if needed
         }
+        
+        log_info("Initialized with #{company ? "company #{company.id}" : "platform"} settings")
         
         @client = initialize_client if configured?
       end
       
-      def send_message(to:, from:, body:, metadata: {}, **options)
+      def send_message(to:, from: nil, body:, metadata: {}, **options)
         require_config(:account_sid, :auth_token)
         
         # Use messaging service if available, otherwise use phone number
@@ -28,7 +40,7 @@ module Providers
         begin
           # Format phone number
           to_number = format_phone_number(to)
-          from_number = format_phone_number(from || config[:phone_number])
+          from_number = from.present? ? format_phone_number(from) : format_phone_number(config[:phone_number])
           
           # Build message params
           message_params = {
@@ -48,8 +60,8 @@ module Providers
             message_params[:status_callback] = options[:status_callback_url]
           end
           
-          # Send via Twilio
-          message = @client.messages.create(message_params)
+          # Send via Twilio - use the correct API format
+          message = @client.messages.create(**message_params)
           
           log_info("SMS sent successfully to #{to} via Twilio, SID: #{message.sid}")
           
@@ -66,6 +78,7 @@ module Providers
           raise SendError, "Twilio send failed: #{e.message}"
         rescue => e
           log_error("Failed to send SMS to #{to} via Twilio: #{e.message}")
+          log_error("Backtrace: #{e.backtrace.first(5).join("\n")}")
           raise SendError, "Twilio send failed: #{e.message}"
         end
       end
@@ -150,11 +163,26 @@ module Providers
       end
       
       def format_phone_number(number)
-        # Remove all non-numeric characters
+        return nil if number.blank?
+        
+        # Remove all non-numeric characters except +
         cleaned = number.to_s.gsub(/[^0-9+]/, '')
         
-        # Add + prefix if not present
-        cleaned.start_with?('+') ? cleaned : "+#{cleaned}"
+        # Already has + prefix
+        return cleaned if cleaned.start_with?('+')
+        
+        # If it's a 10-digit number (US/Canada), add +1 country code
+        if cleaned.length == 10
+          return "+1#{cleaned}"
+        end
+        
+        # If it's 11 digits starting with 1, add + prefix
+        if cleaned.length == 11 && cleaned.start_with?('1')
+          return "+#{cleaned}"
+        end
+        
+        # For other cases, just add + prefix
+        "+#{cleaned}"
       end
     end
   end
