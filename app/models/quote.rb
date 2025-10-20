@@ -145,9 +145,9 @@ class Quote < ApplicationRecord
       'accepted_at' => accepted_at,
       'rejected_at' => rejected_at,
       
-      # Handle items - they're already hashes from JSONB
-      'items' => items || [],
-      'lineItems' => items || [],
+      # Handle items - convert keys from snake_case to camelCase for frontend
+      'items' => serialize_items(items),
+      'lineItems' => serialize_items(items),
       
       # Add account and contact names
       'accountName' => account&.name,
@@ -158,6 +158,15 @@ class Quote < ApplicationRecord
       'createdAt' => created_at,
       'updatedAt' => updated_at
     }
+    
+    # Add custom_fields to top level for easier frontend access
+    if custom_fields.is_a?(Hash)
+      custom_fields.each do |key, value|
+        # Convert snake_case keys to camelCase for frontend
+        camel_key = key.to_s.camelize(:lower)
+        json[camel_key] = value
+      end
+    end
     
     # Include related data if requested
     if options[:include_account] && account
@@ -192,6 +201,22 @@ class Quote < ApplicationRecord
   end
   
   private
+  
+  def serialize_items(items_array)
+    return [] if items_array.nil?
+    
+    items_array.map do |item|
+      next item unless item.is_a?(Hash)
+      
+      serialized_item = {}
+      item.each do |key, value|
+        # Convert snake_case to camelCase
+        camel_key = key.to_s.camelize(:lower)
+        serialized_item[camel_key] = value
+      end
+      serialized_item
+    end
+  end
   
   def generate_quote_number
     self.quote_number ||= loop do

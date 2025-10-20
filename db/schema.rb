@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_18_200000) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -315,6 +315,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_18_200000) do
     t.string "name"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "domain"
+    t.index ["domain"], name: "index_companies_on_domain", unique: true
   end
 
   create_table "contact_activities", force: :cascade do |t|
@@ -381,6 +383,23 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_18_200000) do
     t.index ["company_id"], name: "index_contacts_on_company_id"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
+  end
+
+  create_table "custom_fields", force: :cascade do |t|
+    t.integer "company_id", null: false
+    t.string "module", null: false
+    t.string "name", null: false
+    t.string "label", null: false
+    t.string "field_type", null: false
+    t.boolean "required", default: false
+    t.string "default_value"
+    t.text "options"
+    t.integer "display_order", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module", "name"], name: "index_custom_fields_on_company_module_name", unique: true
+    t.index ["company_id", "module"], name: "index_custom_fields_on_company_id_and_module"
+    t.index ["company_id"], name: "index_custom_fields_on_company_id"
   end
 
   create_table "deals", force: :cascade do |t|
@@ -787,6 +806,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_18_200000) do
   add_foreign_key "contact_activities", "contacts"
   add_foreign_key "contact_activities", "users"
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
+  add_foreign_key "custom_fields", "companies"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "leads"
   add_foreign_key "intake_forms", "companies"

@@ -37,6 +37,7 @@ Rails.application.routes.draw do
           post :send, to: 'quotes#send_quote'
           post :accept
           post :reject
+          get :pdf
         end
         
         collection do
@@ -142,6 +143,24 @@ Rails.application.routes.draw do
   mount ActionCable.server => '/cable'
 
   namespace :api, defaults: { format: :json } do
+    # ==================== SETTINGS API ====================
+    get 'settings/tenant', to: 'settings#tenant'
+    patch 'settings', to: 'settings#update'
+    patch 'settings/branding', to: 'settings#update_branding'
+    get 'settings/quotes', to: 'settings#quotes'
+    patch 'settings/quotes', to: 'settings#update_quotes'
+    
+    # Custom Fields
+    get 'settings/custom_fields', to: 'settings#custom_fields'
+    post 'settings/custom_fields', to: 'settings#create_custom_field'
+    patch 'settings/custom_fields/:id', to: 'settings#update_custom_field'
+    delete 'settings/custom_fields/:id', to: 'settings#destroy_custom_field'
+    
+    # ==================== UPLOADS API ====================
+    post 'uploads/logo', to: 'uploads#logo'
+    post 'uploads', to: 'uploads#create'
+    delete 'uploads', to: 'uploads#destroy'
+
     namespace :crm do
       # ==================== SOURCES ====================
       resources :sources, only: %i[index create update destroy] do

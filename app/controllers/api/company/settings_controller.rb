@@ -125,12 +125,12 @@ module Api
 
       def find_or_create_company
         # Try to find existing company
-        company = current_user&.company || Company.first rescue nil
+        company = current_user&.company || ::Company.first rescue nil
         
         # If no company exists, create a default one
-        if company.nil? && defined?(Company)
+        if company.nil? && defined?(::Company)
           begin
-            company = Company.create!(name: 'Demo Company')
+            company = ::Company.create!(name: 'Demo Company')
           rescue => e
             Rails.logger.warn "[CompanySettings] Could not create company: #{e.message}"
             nil
