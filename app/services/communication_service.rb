@@ -305,6 +305,18 @@ class CommunicationService
     provider_class = get_provider_class(provider, channel)
     provider_instance = provider_class.new(company: company)
     
+    # Prepare attachments if present
+    attachments_data = []
+    if communication.attachments.attached?
+      communication.attachments.each do |attachment|
+        attachments_data << {
+          filename: attachment.filename.to_s,
+          content: attachment.download,
+          content_type: attachment.content_type
+        }
+      end
+    end
+    
     provider_instance.send_message(
       to: communication.to_address,
       from: communication.from_address,
@@ -314,6 +326,7 @@ class CommunicationService
       bcc: communication.bcc_addresses,
       reply_to: communication.reply_to,
       metadata: communication.metadata,
+      attachments: attachments_data,
       **options
     )
   end
