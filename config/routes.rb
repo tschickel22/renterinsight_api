@@ -170,6 +170,7 @@ Rails.application.routes.draw do
     post 'uploads', to: 'uploads#create'
     delete 'uploads', to: 'uploads#destroy'
 
+    # ==================== CRM NAMESPACE ====================
     namespace :crm do
       # ==================== SOURCES ====================
       resources :sources, only: %i[index create update destroy] do
@@ -303,6 +304,59 @@ Rails.application.routes.draw do
           collection { post :bulk }
         end
       end
+
+      # ==================== DEALS (SALES PIPELINE) ====================
+      resources :deals, only: %i[index show create update destroy] do
+        collection do
+          get :metrics
+          get :forecast
+          get :by_stage
+        end
+        
+        member do
+          post :move_stage
+        end
+        
+        # Nested resources for deals
+        resources :stage_histories, only: %i[index show create], controller: 'deal_stage_histories'
+        
+        resources :approvals, only: %i[index show create update destroy] do
+          member do
+            post :approve
+            post :reject
+            post :cancel
+          end
+        end
+        
+        # Win/Loss Report (singular resource - one per deal)
+        resource :win_loss_report, only: %i[show create update destroy], controller: 'win_loss_reports'
+      end
+      
+      # Win/Loss Reports collection routes (not deal-scoped)
+      resources :win_loss_reports, only: %i[index] do
+        collection do
+          get :summary
+          get :trends
+        end
+      end
+      
+      # ==================== APPROVALS (Non-Deal-Scoped) ====================
+      # Root-level approval routes for listing all approvals
+      resources :approvals, only: %i[index show] do
+        member do
+          post :approve
+          post :reject
+          post :escalate
+        end
+      end
+      
+      # ==================== TERRITORIES ====================
+      resources :territories, only: %i[index show create update destroy] do
+        member do
+          get :stats
+          post :assign_user
+        end
+      end
     end
 
     # ==================== COMPANY SETTINGS ====================
@@ -338,6 +392,7 @@ Rails.application.routes.draw do
       delete 'communications/templates/:id/attachments/:attachment_id', to: 'communications#delete_template_attachment'
     end
   end
+
   # Phase 5A - Unified Login Authentication
   namespace :api do
     namespace :auth do

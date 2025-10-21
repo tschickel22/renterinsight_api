@@ -19,10 +19,7 @@ class Account < ApplicationRecord
   has_many :communication_logs, dependent: :destroy
   has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
   
-  # Only define deals association if Deal model exists
-  if defined?(Deal)
-    has_many :deals, dependent: :destroy
-  end
+  has_many :deals, dependent: :destroy
   has_many :lead_activities, through: :leads
   has_many :tag_assignments, as: :entity, class_name: 'TagAssignment', dependent: :destroy
   has_many :tags, through: :tag_assignments
@@ -48,8 +45,8 @@ class Account < ApplicationRecord
   scope :hot, -> { where(rating: 'hot') }
   scope :warm, -> { where(rating: 'warm') }
   scope :cold, -> { where(rating: 'cold') }
-  # scope :with_deals, -> { joins(:deals).distinct }
-  # scope :without_deals, -> { left_joins(:deals).where(deals: { id: nil }) }
+  scope :with_deals, -> { joins(:deals).distinct }
+  scope :without_deals, -> { left_joins(:deals).where(deals: { id: nil }) }
   scope :recently_active, -> { where('accounts.last_activity_date >= ?', 30.days.ago) }
   scope :high_value, -> { where('annual_revenue >= ?', 1_000_000) }
   scope :by_owner, ->(user_id) { where(owner_id: user_id) }
@@ -79,17 +76,11 @@ class Account < ApplicationRecord
   end
   
   def total_deal_value
-    return 0 unless defined?(::Deal)
-    deals.where(stage: 'closed_won').sum(:amount) || 0
-  rescue NameError
-    0 # Deal model not available
+    deals.where(stage: 'closed_won').sum(:value) || 0
   end
   
   def open_deals_count
-    return 0 unless defined?(::Deal)
     deals.where.not(stage: ['closed_won', 'closed_lost']).count
-  rescue NameError
-    0 # Deal model not available
   end
   
   def last_activity
