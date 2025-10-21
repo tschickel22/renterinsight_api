@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_20_000011) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_21_162515) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -486,7 +486,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_20_000011) do
 
   create_table "deals", force: :cascade do |t|
     t.string "name", null: false
-    t.integer "account_id", null: false
+    t.integer "account_id"
     t.decimal "value", precision: 12, scale: 2, default: "0.0"
     t.string "stage", default: "qualification", null: false
     t.integer "probability", default: 0
@@ -505,16 +505,25 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_20_000011) do
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "contact_id"
+    t.integer "vehicle_id"
+    t.string "customer_name"
+    t.integer "source_id"
+    t.string "assigned_to"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
+    t.index ["assigned_to"], name: "index_deals_on_assigned_to"
+    t.index ["contact_id"], name: "index_deals_on_contact_id"
     t.index ["deleted_at"], name: "index_deals_on_deleted_at"
     t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
+    t.index ["source_id"], name: "index_deals_on_source_id"
     t.index ["stage"], name: "index_deals_on_stage"
     t.index ["territory_id", "stage"], name: "index_deals_on_territory_id_and_stage"
     t.index ["territory_id"], name: "index_deals_on_territory_id"
     t.index ["user_id", "stage"], name: "index_deals_on_user_id_and_stage"
     t.index ["user_id"], name: "index_deals_on_user_id"
+    t.index ["vehicle_id"], name: "index_deals_on_vehicle_id"
     t.index ["won_at"], name: "index_deals_on_won_at"
   end
 
@@ -971,6 +980,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_20_000011) do
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
   add_foreign_key "deals", "accounts"
+  add_foreign_key "deals", "contacts"
+  add_foreign_key "deals", "sources"
   add_foreign_key "deals", "users"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"

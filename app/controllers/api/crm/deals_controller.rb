@@ -5,8 +5,19 @@ module Api
 
       # GET /api/crm/deals
       def index
-        deals = Deal.includes(:account, :territory, :user, :deal_products)
+        deals = Deal.includes(:account, :contact, :territory, :user, :deal_products)
                     .order(created_at: :desc)
+        
+        # Filter by account if provided (support both account_id and customer_id for backward compatibility)
+        if params[:account_id].present?
+          deals = deals.where(account_id: params[:account_id])
+        elsif params[:customer_id].present?
+          # customer_id can refer to either account_id or contact_id
+          deals = deals.where('account_id = ? OR contact_id = ?', params[:customer_id], params[:customer_id])
+        end
+        
+        # Filter by contact if provided
+        deals = deals.where(contact_id: params[:contact_id]) if params[:contact_id].present?
         
         # Filter by stage if provided
         deals = deals.where(stage: params[:stage]) if params[:stage].present?
@@ -27,7 +38,7 @@ module Api
           deals = deals.lost
         end
         
-        render json: deals.map { |d| deal_json(d) }
+        render json: { deals: deals.map { |d| deal_json(d) } }
       end
 
       # GET /api/crm/deals/by_stage
@@ -39,7 +50,7 @@ module Api
         end
         
         deals = Deal.where(stage: stage)
-                    .includes(:account, :territory, :user, :deal_products)
+                    .includes(:account, :contact, :territory, :user, :deal_products)
                     .order(created_at: :desc)
         
         render json: deals.map { |d| deal_json(d) }
@@ -220,10 +231,11 @@ module Api
 
       def deal_params
         params.require(:deal).permit(
-          :name, :account_id, :value, :stage, :probability,
-          :expected_close_date, :actual_close_date, :user_id,
+          :name, :account_id, :contact_id, :vehicle_id, :value, :stage, :probability,
+          :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
-          :win_reason, :loss_reason, :competitor
+          :win_reason, :loss_reason, :competitor,
+          :customer_name, :source_id
         )
       end
 
@@ -239,6 +251,10 @@ module Api
           name: deal.name,
           accountId: deal.account_id,
           accountName: deal.account&.name,
+          contactId: deal.contact_id,
+          contactName: deal.contact ? "#{deal.contact.first_name} #{deal.contact.last_name}".strip : nil,
+          vehicleId: deal.vehicle_id,
+          customerName: deal.customer_display_name,
           value: deal.value,
           stage: deal.stage,
           probability: deal.probability,
@@ -246,9 +262,12 @@ module Api
           actualCloseDate: deal.actual_close_date&.iso8601,
           userId: deal.user_id,
           userName: deal.user&.name,
+          assignedTo: deal.assigned_to,
           territoryId: deal.territory_id,
           territoryName: deal.territory&.name,
           leadSource: deal.lead_source,
+          sourceId: deal.source_id,
+          sourceName: deal.source&.name,
           description: deal.description,
           notes: deal.notes,
           wonAt: deal.won_at&.iso8601,
