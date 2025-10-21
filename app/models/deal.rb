@@ -1,7 +1,9 @@
 class Deal < ApplicationRecord
-  belongs_to :account
+  belongs_to :account, optional: true  # Changed to optional
+  belongs_to :contact, optional: true  # Added
   belongs_to :user
   belongs_to :territory, optional: true
+  belongs_to :source, optional: true
   
   has_many :deal_products, dependent: :destroy
   has_many :deal_stage_histories, dependent: :destroy
@@ -21,11 +23,20 @@ class Deal < ApplicationRecord
     message: "%{value} is not a valid stage" 
   }
   
+  # Ensure at least account or contact is present
+  validate :account_or_contact_required
+  
   # Normalize stage to lowercase before validation
   before_validation :normalize_stage
   
   def normalize_stage
     self.stage = stage&.downcase
+  end
+  
+  def account_or_contact_required
+    if account_id.blank? && contact_id.blank?
+      errors.add(:base, "Deal must have either an account or a contact")
+    end
   end
   
   # Scopes
@@ -35,6 +46,7 @@ class Deal < ApplicationRecord
   scope :by_stage, ->(stage) { where(stage: stage&.downcase) }
   scope :by_territory, ->(territory_id) { where(territory_id: territory_id) }
   scope :by_owner, ->(user_id) { where(user_id: user_id) }
+  scope :by_contact, ->(contact_id) { where(contact_id: contact_id) }
   scope :expected_to_close, ->(date) { where('expected_close_date <= ?', date) }
   scope :recently_created, -> { where('created_at >= ?', 30.days.ago) }
   scope :recently_won, -> { where('won_at >= ?', 30.days.ago) }
@@ -78,5 +90,20 @@ class Deal < ApplicationRecord
   
   def open?
     !closed?
+  end
+  
+  # Helper to get customer name from account or contact
+  def customer_display_name
+    # Prioritize manual customer_name field if set
+    return customer_name if customer_name.present?
+    
+    # Otherwise, derive from account or contact
+    if account
+      account.name
+    elsif contact
+      "#{contact.first_name} #{contact.last_name}".strip
+    else
+      'Unknown'
+    end
   end
 end
