@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_20_000011) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -169,6 +169,55 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
     t.index ["insight_type"], name: "index_ai_insights_on_insight_type"
     t.index ["lead_id", "is_read"], name: "index_ai_insights_on_lead_id_and_is_read"
     t.index ["lead_id"], name: "index_ai_insights_on_lead_id"
+  end
+
+  create_table "approval_actions", force: :cascade do |t|
+    t.integer "approval_step_id", null: false
+    t.integer "user_id", null: false
+    t.string "action_type", null: false
+    t.text "notes"
+    t.datetime "actioned_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["action_type"], name: "index_approval_actions_on_action_type"
+    t.index ["approval_step_id", "actioned_at"], name: "index_approval_actions_on_approval_step_id_and_actioned_at"
+    t.index ["approval_step_id"], name: "index_approval_actions_on_approval_step_id"
+    t.index ["user_id"], name: "index_approval_actions_on_user_id"
+  end
+
+  create_table "approval_steps", force: :cascade do |t|
+    t.integer "approval_workflow_id", null: false
+    t.integer "step_order", null: false
+    t.integer "approver_user_id"
+    t.string "status", default: "pending", null: false
+    t.string "required_action"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approval_workflow_id", "step_order"], name: "index_approval_steps_on_approval_workflow_id_and_step_order"
+    t.index ["approval_workflow_id"], name: "index_approval_steps_on_approval_workflow_id"
+    t.index ["approver_user_id"], name: "index_approval_steps_on_approver_user_id"
+    t.index ["status"], name: "index_approval_steps_on_status"
+  end
+
+  create_table "approval_workflows", force: :cascade do |t|
+    t.integer "deal_id", null: false
+    t.string "workflow_type", null: false
+    t.string "status", default: "pending", null: false
+    t.decimal "required_amount", precision: 12, scale: 2
+    t.text "reason"
+    t.text "notes"
+    t.integer "requested_by_id"
+    t.integer "approved_by_id"
+    t.datetime "approved_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approved_by_id"], name: "index_approval_workflows_on_approved_by_id"
+    t.index ["deal_id", "status"], name: "index_approval_workflows_on_deal_id_and_status"
+    t.index ["deal_id"], name: "index_approval_workflows_on_deal_id"
+    t.index ["requested_by_id"], name: "index_approval_workflows_on_requested_by_id"
+    t.index ["status"], name: "index_approval_workflows_on_status"
+    t.index ["workflow_type"], name: "index_approval_workflows_on_workflow_type"
   end
 
   create_table "buyer_portal_accesses", force: :cascade do |t|
@@ -402,19 +451,71 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
     t.index ["company_id"], name: "index_custom_fields_on_company_id"
   end
 
+  create_table "deal_products", force: :cascade do |t|
+    t.integer "deal_id", null: false
+    t.integer "product_id"
+    t.string "product_name"
+    t.string "product_sku"
+    t.integer "quantity", default: 1
+    t.decimal "unit_price", precision: 12, scale: 2, default: "0.0"
+    t.decimal "discount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "tax", precision: 12, scale: 2, default: "0.0"
+    t.decimal "total", precision: 12, scale: 2, default: "0.0"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["deal_id", "product_id"], name: "index_deal_products_on_deal_id_and_product_id"
+    t.index ["deal_id"], name: "index_deal_products_on_deal_id"
+    t.index ["product_id"], name: "index_deal_products_on_product_id"
+  end
+
+  create_table "deal_stage_histories", force: :cascade do |t|
+    t.integer "deal_id", null: false
+    t.string "stage", null: false
+    t.string "previous_stage"
+    t.integer "changed_by_id"
+    t.integer "duration"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["changed_by_id"], name: "index_deal_stage_histories_on_changed_by_id"
+    t.index ["deal_id", "created_at"], name: "index_deal_stage_histories_on_deal_id_and_created_at"
+    t.index ["deal_id"], name: "index_deal_stage_histories_on_deal_id"
+    t.index ["stage"], name: "index_deal_stage_histories_on_stage"
+  end
+
   create_table "deals", force: :cascade do |t|
+    t.string "name", null: false
     t.integer "account_id", null: false
-    t.integer "lead_id"
-    t.string "title", default: "Untitled Deal", null: false
-    t.string "stage", default: "new", null: false
-    t.integer "amount_cents", default: 0, null: false
-    t.date "expected_close_on"
+    t.decimal "value", precision: 12, scale: 2, default: "0.0"
+    t.string "stage", default: "qualification", null: false
+    t.integer "probability", default: 0
+    t.date "expected_close_date"
+    t.date "actual_close_date"
+    t.integer "user_id", null: false
+    t.integer "territory_id"
+    t.string "lead_source"
+    t.text "description"
+    t.text "notes"
+    t.datetime "won_at"
+    t.datetime "lost_at"
+    t.string "win_reason"
+    t.string "loss_reason"
+    t.string "competitor"
+    t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
-    t.index ["expected_close_on"], name: "index_deals_on_expected_close_on"
-    t.index ["lead_id"], name: "index_deals_on_lead_id"
+    t.index ["deleted_at"], name: "index_deals_on_deleted_at"
+    t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
+    t.index ["lost_at"], name: "index_deals_on_lost_at"
+    t.index ["stage"], name: "index_deals_on_stage"
+    t.index ["territory_id", "stage"], name: "index_deals_on_territory_id_and_stage"
+    t.index ["territory_id"], name: "index_deals_on_territory_id"
+    t.index ["user_id", "stage"], name: "index_deals_on_user_id_and_stage"
+    t.index ["user_id"], name: "index_deals_on_user_id"
+    t.index ["won_at"], name: "index_deals_on_won_at"
   end
 
   create_table "intake_forms", force: :cascade do |t|
@@ -737,6 +838,33 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
     t.index ["template_type", "name"], name: "index_templates_on_template_type_and_name"
   end
 
+  create_table "territories", force: :cascade do |t|
+    t.string "name", null: false
+    t.text "description"
+    t.integer "user_id"
+    t.string "region"
+    t.string "type_field"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.boolean "is_active", default: true, null: false
+    t.index ["name"], name: "index_territories_on_name", unique: true
+    t.index ["user_id"], name: "index_territories_on_user_id"
+  end
+
+  create_table "territory_rules", force: :cascade do |t|
+    t.integer "territory_id", null: false
+    t.string "field", null: false
+    t.string "operator", null: false
+    t.string "value"
+    t.integer "priority", default: 0
+    t.boolean "active", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_territory_rules_on_active"
+    t.index ["territory_id", "priority"], name: "index_territory_rules_on_territory_id_and_priority"
+    t.index ["territory_id"], name: "index_territory_rules_on_territory_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.string "email"
     t.string "name"
@@ -789,6 +917,31 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 
+  create_table "win_loss_reports", force: :cascade do |t|
+    t.integer "deal_id", null: false
+    t.string "result", null: false
+    t.string "primary_reason"
+    t.string "secondary_reason"
+    t.string "competitor"
+    t.text "competitive_advantage"
+    t.text "competitive_disadvantage"
+    t.text "customer_feedback"
+    t.text "internal_notes"
+    t.text "lessons_learned"
+    t.integer "deal_quality_score"
+    t.integer "sales_process_score"
+    t.integer "product_fit_score"
+    t.integer "user_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["competitor"], name: "index_win_loss_reports_on_competitor"
+    t.index ["deal_id", "result"], name: "index_win_loss_reports_on_deal_id_and_result"
+    t.index ["deal_id"], name: "index_win_loss_reports_on_deal_id"
+    t.index ["primary_reason"], name: "index_win_loss_reports_on_primary_reason"
+    t.index ["result"], name: "index_win_loss_reports_on_result"
+    t.index ["user_id"], name: "index_win_loss_reports_on_user_id"
+  end
+
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "sources"
@@ -798,6 +951,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
   add_foreign_key "ai_insights", "leads"
+  add_foreign_key "approval_actions", "approval_steps"
+  add_foreign_key "approval_actions", "users"
+  add_foreign_key "approval_steps", "approval_workflows"
+  add_foreign_key "approval_steps", "users", column: "approver_user_id"
+  add_foreign_key "approval_workflows", "deals"
+  add_foreign_key "approval_workflows", "users", column: "approved_by_id"
+  add_foreign_key "approval_workflows", "users", column: "requested_by_id"
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
@@ -807,8 +967,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
   add_foreign_key "contact_activities", "users"
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "custom_fields", "companies"
+  add_foreign_key "deal_products", "deals"
+  add_foreign_key "deal_stage_histories", "deals"
+  add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
   add_foreign_key "deals", "accounts"
-  add_foreign_key "deals", "leads"
+  add_foreign_key "deals", "users"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_submissions", "leads"
@@ -831,5 +994,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_000001) do
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
   add_foreign_key "tag_assignments", "tags"
+  add_foreign_key "territories", "users"
+  add_foreign_key "territory_rules", "territories"
   add_foreign_key "vehicles", "companies"
+  add_foreign_key "win_loss_reports", "deals"
+  add_foreign_key "win_loss_reports", "users"
 end
