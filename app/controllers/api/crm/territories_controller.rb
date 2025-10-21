@@ -5,7 +5,7 @@ module Api
 
       # GET /api/crm/territories
       def index
-        territories = Territory.includes(:territory_rules, :user)
+        territories = Territory.includes(:territory_rules, :user, :territory_users)
                               .order(name: :asc)
         
         render json: territories.map { |t| territory_json(t) }
@@ -52,13 +52,15 @@ module Api
       def create
         territory = Territory.new(territory_params.except(:assigned_to, :rules))
         
-        # Handle assignedTo array from frontend
-        if params[:territory][:assigned_to].present?
-          assigned_to = params[:territory][:assigned_to]
-          territory.user_id = assigned_to.is_a?(Array) ? assigned_to.first : assigned_to
-        end
-        
         if territory.save
+          # Handle assigned users via join table
+          if params[:territory][:assigned_to].present?
+            user_ids = Array(params[:territory][:assigned_to]).map(&:to_i)
+            user_ids.each do |user_id|
+              territory.territory_users.create(user_id: user_id)
+            end
+          end
+          
           # Handle rules if provided
           if params[:territory][:rules].present?
             params[:territory][:rules].each do |rule_params|
@@ -80,13 +82,19 @@ module Api
 
       # PATCH/PUT /api/crm/territories/:id
       def update
-        # Handle assignedTo array from frontend
-        if params[:territory][:assigned_to].present?
-          assigned_to = params[:territory][:assigned_to]
-          @territory.user_id = assigned_to.is_a?(Array) ? assigned_to.first : assigned_to
-        end
-        
         if @territory.update(territory_params.except(:assigned_to, :rules))
+          # Handle assigned users via join table
+          if params[:territory][:assigned_to].present?
+            # Clear existing assignments
+            @territory.territory_users.destroy_all
+            
+            # Create new assignments
+            user_ids = Array(params[:territory][:assigned_to]).map(&:to_i)
+            user_ids.each do |user_id|
+              @territory.territory_users.create(user_id: user_id)
+            end
+          end
+          
           # Handle rules update if provided
           if params[:territory][:rules].present?
             # Remove existing rules and create new ones
@@ -152,6 +160,14 @@ module Api
       end
 
       def territory_json(territory, detailed: false)
+        # Get assigned users from join table (safely handle if association doesn't exist)
+        assigned_user_ids = begin
+          territory.territory_users.pluck(:user_id).map(&:to_s)
+        rescue => e
+          Rails.logger.error("Error loading territory_users: #{e.message}")
+          []
+        end
+        
         base = {
           id: territory.id,
           name: territory.name,
@@ -160,9 +176,9 @@ module Api
           userName: territory.user&.name,
           region: territory.region,
           typeField: territory.type_field,
-          assignedTo: territory.user_id ? [territory.user_id.to_s] : [],
+          assignedTo: assigned_user_ids,
           rules: territory.territory_rules.map { |r| territory_rule_json(r) },
-          isActive: true, # Add isActive field
+          isActive: territory.is_active,
           dealsCount: territory.deals.count,
           openDealsValue: territory.deals.open.sum(:value),
           createdAt: territory.created_at&.iso8601,

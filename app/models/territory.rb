@@ -4,6 +4,10 @@ class Territory < ApplicationRecord
   has_many :territory_rules, dependent: :destroy
   has_many :deals, dependent: :nullify
   
+  # Many-to-many relationship for multiple sales reps
+  has_many :territory_users, dependent: :destroy
+  has_many :assigned_users, through: :territory_users, source: :user
+  
   validates :name, presence: true, uniqueness: true
   
   # Set default type_field if not provided
