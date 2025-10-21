@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_21_162515) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_21_180000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -874,6 +874,16 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_21_162515) do
     t.index ["territory_id"], name: "index_territory_rules_on_territory_id"
   end
 
+  create_table "territory_users", force: :cascade do |t|
+    t.integer "territory_id", null: false
+    t.integer "user_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["territory_id", "user_id"], name: "index_territory_users_on_territory_id_and_user_id", unique: true
+    t.index ["territory_id"], name: "index_territory_users_on_territory_id"
+    t.index ["user_id"], name: "index_territory_users_on_user_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.string "email"
     t.string "name"
@@ -1007,6 +1017,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_21_162515) do
   add_foreign_key "tag_assignments", "tags"
   add_foreign_key "territories", "users"
   add_foreign_key "territory_rules", "territories"
+  add_foreign_key "territory_users", "territories"
+  add_foreign_key "territory_users", "users"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"

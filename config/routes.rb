@@ -152,6 +152,9 @@ Rails.application.routes.draw do
   mount ActionCable.server => '/cable'
 
   namespace :api, defaults: { format: :json } do
+    # ==================== USERS API ====================
+    resources :users, only: %i[index show create update destroy]
+    
     # ==================== SETTINGS API ====================
     get 'settings/tenant', to: 'settings#tenant'
     patch 'settings', to: 'settings#update'
