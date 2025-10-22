@@ -35,10 +35,20 @@ Rails.application.routes.draw do
       
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
+        member do
+          get :print
+        end
+        
         collection do
           get :stats
         end
+        
+        # Vehicle image uploads
+        resources :images, controller: 'vehicle_images', only: [:create, :destroy]
       end
+      
+      # ==================== ACTIVITIES ====================
+      get 'activities/recent', to: 'activities#recent'
       
       # ==================== QUOTES ====================
       resources :quotes do
