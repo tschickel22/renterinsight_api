@@ -46,8 +46,10 @@ class Vehicle < ApplicationRecord
   scope :rvs, -> { where(listing_type: 'rv') }
   scope :manufactured_homes, -> { where(listing_type: 'manufactured_home') }
   scope :search, ->(query) do
+    # Use case-insensitive search that works with both SQLite and PostgreSQL
+    operator = connection.adapter_name.downcase.include?('sqlite') ? 'LIKE' : 'ILIKE'
     where(
-      "inventory_id ILIKE ? OR vin ILIKE ? OR serial_number ILIKE ? OR make ILIKE ? OR model ILIKE ? OR description ILIKE ?",
+      "inventory_id #{operator} ? OR vin #{operator} ? OR serial_number #{operator} ? OR make #{operator} ? OR model #{operator} ? OR description #{operator} ?",
       "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%"
     )
   end
