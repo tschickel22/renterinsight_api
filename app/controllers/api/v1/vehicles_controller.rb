@@ -4,7 +4,7 @@ module Api
   module V1
     class VehiclesController < ApplicationController
       before_action :set_company
-      before_action :set_vehicle, only: [:show, :update, :destroy, :print]
+      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone]
 
       def index
         vehicles = @company.vehicles.active
@@ -66,6 +66,50 @@ module Api
       def destroy
         @vehicle.soft_delete!
         head :no_content
+      end
+
+      # POST /api/v1/vehicles/:id/clone
+      def clone
+        new_identifier = params[:identifier]
+        
+        if new_identifier.blank?
+          return render json: { error: 'New identifier is required' }, status: :unprocessable_entity
+        end
+
+        # Duplicate the vehicle with all attributes
+        new_vehicle = @vehicle.dup
+        
+        # Set the new unique identifier
+        if @vehicle.is_rv?
+          new_vehicle.vin = new_identifier
+        elsif @vehicle.is_manufactured_home?
+          new_vehicle.serial_number = new_identifier
+        end
+        
+        # Generate a new inventory ID
+        new_vehicle.inventory_id = generate_inventory_id
+        
+        # Reset status to available for the clone
+        new_vehicle.status = 'available'
+        
+        # Clear dates that should be fresh
+        new_vehicle.date_in_stock = Date.today
+        new_vehicle.date_sold = nil
+        
+        # Clear any sale-related fields
+        new_vehicle.sale_pending = false
+        
+        # Duplicate arrays (features, images, etc.)
+        new_vehicle.features = @vehicle.features&.dup || []
+        new_vehicle.images = @vehicle.images&.dup || []
+        new_vehicle.videos = @vehicle.videos&.dup || []
+        new_vehicle.appliances = @vehicle.appliances&.dup || []
+        
+        if new_vehicle.save
+          render json: { vehicle: vehicle_json(new_vehicle, detailed: true) }, status: :created
+        else
+          render json: { errors: new_vehicle.errors.full_messages }, status: :unprocessable_entity
+        end
       end
 
       # GET /api/v1/vehicles/:id/print
@@ -537,6 +581,15 @@ module Api
       end
 
       private
+
+      def generate_inventory_id
+        # Generate a new unique inventory ID
+        prefix = @company.vehicles.last&.inventory_id&.match(/^[A-Z]+/)&.to_s || 'INV'
+        last_number = @company.vehicles.where("inventory_id LIKE ?", "#{prefix}%")
+                               .order(inventory_id: :desc)
+                               .first&.inventory_id&.match(/(\d+)$/)&.to_a&.[](1)&.to_i || 0
+        "#{prefix}#{(last_number + 1).to_s.rjust(5, '0')}"
+      end
 
       def set_company
         @company = ::Company.find_by(id: current_user.company_id)
