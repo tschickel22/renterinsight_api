@@ -1,9 +1,10 @@
 class Deal < ApplicationRecord
-  belongs_to :account, optional: true  # Changed to optional
-  belongs_to :contact, optional: true  # Added
+  belongs_to :account, optional: true
+  belongs_to :contact, optional: true
   belongs_to :user
   belongs_to :territory, optional: true
   belongs_to :source, optional: true
+  belongs_to :vehicle, optional: true  # Added vehicle relationship
   
   has_many :deal_products, dependent: :destroy
   has_many :deal_stage_histories, dependent: :destroy
@@ -47,6 +48,7 @@ class Deal < ApplicationRecord
   scope :by_territory, ->(territory_id) { where(territory_id: territory_id) }
   scope :by_owner, ->(user_id) { where(user_id: user_id) }
   scope :by_contact, ->(contact_id) { where(contact_id: contact_id) }
+  scope :by_vehicle, ->(vehicle_id) { where(vehicle_id: vehicle_id) }
   scope :expected_to_close, ->(date) { where('expected_close_date <= ?', date) }
   scope :recently_created, -> { where('created_at >= ?', 30.days.ago) }
   scope :recently_won, -> { where('won_at >= ?', 30.days.ago) }
@@ -105,5 +107,10 @@ class Deal < ApplicationRecord
     else
       'Unknown'
     end
+  end
+  
+  # Vehicle display helper
+  def vehicle_display_name
+    vehicle&.display_name
   end
 end

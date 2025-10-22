@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_21_180000) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_21_204000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -914,7 +914,6 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_21_180000) do
     t.string "color"
     t.string "condition", default: "new"
     t.string "status", default: "available"
-    t.decimal "price", precision: 15, scale: 2
     t.decimal "cost", precision: 15, scale: 2
     t.integer "mileage"
     t.text "description"
@@ -927,12 +926,124 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_21_180000) do
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "listing_type", default: "rv", null: false
+    t.string "inventory_id"
+    t.string "serial_number"
+    t.integer "bedrooms"
+    t.decimal "bathrooms", precision: 3, scale: 1
+    t.integer "length"
+    t.integer "width"
+    t.integer "square_feet"
+    t.string "location_city"
+    t.string "location_state"
+    t.string "location_zip"
+    t.decimal "rent_price", precision: 15, scale: 2
+    t.decimal "sale_price", precision: 15, scale: 2
+    t.json "images", default: []
+    t.string "body_style"
+    t.string "fuel_type"
+    t.string "transmission"
+    t.integer "sleeps"
+    t.integer "weight"
+    t.string "home_type"
+    t.string "roof_type"
+    t.string "siding_type"
+    t.decimal "lot_rent", precision: 10, scale: 2
+    t.string "community_name"
+    t.integer "width1"
+    t.integer "length1"
+    t.integer "width2"
+    t.integer "length2"
+    t.integer "width3"
+    t.integer "length3"
+    t.boolean "garage", default: false
+    t.boolean "carport", default: false
+    t.boolean "deck", default: false
+    t.boolean "patio", default: false
+    t.boolean "fireplace", default: false
+    t.boolean "central_air", default: false
+    t.string "mileage_unit"
+    t.string "exterior_color"
+    t.string "interior_color"
+    t.string "vehicle_interior_type"
+    t.string "vehicle_configuration"
+    t.string "rv_type"
+    t.string "slide_outs"
+    t.boolean "awning", default: false
+    t.boolean "generator", default: false
+    t.string "number_of_doors"
+    t.integer "seating_capacity"
+    t.decimal "msrp", precision: 15, scale: 2
+    t.string "price_currency", default: "USD"
+    t.string "seller_name"
+    t.string "seller_phone"
+    t.string "seller_address_street"
+    t.string "seller_address_city"
+    t.string "seller_address_state"
+    t.string "seller_address_zip"
+    t.string "listing_url"
+    t.json "videos", default: []
+    t.string "dwelling_type"
+    t.string "foundation_type"
+    t.string "flooring_type"
+    t.string "heating_type"
+    t.string "cooling_type"
+    t.string "water_heater_type"
+    t.json "appliances", default: []
+    t.string "master_bedroom_location"
+    t.decimal "rent_to_own_price", precision: 15, scale: 2
+    t.decimal "deposit_amount", precision: 15, scale: 2
+    t.string "location_type"
+    t.string "community_key"
+    t.string "address1"
+    t.string "address2"
+    t.string "county_name"
+    t.string "exterior_material"
+    t.string "roof_material"
+    t.string "insulation_type"
+    t.string "ceiling_type"
+    t.string "wall_type"
+    t.boolean "has_storage", default: false
+    t.boolean "thermopane", default: false
+    t.boolean "gutters", default: false
+    t.boolean "shutters", default: false
+    t.boolean "cathedral_ceiling", default: false
+    t.boolean "ceiling_fan", default: false
+    t.boolean "skylight", default: false
+    t.boolean "walkin_closet", default: false
+    t.boolean "laundry_room", default: false
+    t.boolean "pantry", default: false
+    t.boolean "sun_room", default: false
+    t.boolean "basement", default: false
+    t.boolean "garden_tub", default: false
+    t.boolean "garbage_disposal", default: false
+    t.boolean "refrigerator", default: false
+    t.boolean "microwave", default: false
+    t.boolean "oven", default: false
+    t.boolean "dishwasher", default: false
+    t.boolean "clothes_washer", default: false
+    t.boolean "clothes_dryer", default: false
+    t.decimal "utilities", precision: 10, scale: 2
+    t.text "terms"
+    t.boolean "repo", default: false
+    t.string "package_type"
+    t.boolean "sale_pending", default: false
+    t.string "photo_url"
+    t.string "virtual_tour"
+    t.string "sales_photo"
+    t.index ["body_style"], name: "index_vehicles_on_body_style"
+    t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
+    t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "serial_number IS NOT NULL"
+    t.index ["company_id", "vin"], name: "index_vehicles_on_company_id_and_vin", unique: true, where: "vin IS NOT NULL"
     t.index ["company_id"], name: "index_vehicles_on_company_id"
     t.index ["condition"], name: "index_vehicles_on_condition"
+    t.index ["dwelling_type"], name: "index_vehicles_on_dwelling_type"
+    t.index ["exterior_color"], name: "index_vehicles_on_exterior_color"
+    t.index ["home_type"], name: "index_vehicles_on_home_type"
     t.index ["is_deleted"], name: "index_vehicles_on_is_deleted"
+    t.index ["listing_type"], name: "index_vehicles_on_listing_type"
+    t.index ["rv_type"], name: "index_vehicles_on_rv_type"
     t.index ["status"], name: "index_vehicles_on_status"
-    t.index ["stock_number"], name: "index_vehicles_on_stock_number", unique: true
-    t.index ["vin"], name: "index_vehicles_on_vin", unique: true
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 

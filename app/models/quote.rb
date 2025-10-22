@@ -8,6 +8,7 @@ class Quote < ApplicationRecord
   # Associations
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
+  belongs_to :vehicle, optional: true  # Added vehicle relationship
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   
   # Validations
@@ -23,6 +24,7 @@ class Quote < ApplicationRecord
   scope :by_account, ->(account_id) { where(account_id: account_id) }
   scope :by_contact, ->(contact_id) { where(contact_id: contact_id) }
   scope :by_customer, ->(customer_id) { where(customer_id: customer_id) }
+  scope :by_vehicle, ->(vehicle_id) { where(vehicle_id: vehicle_id) }
   scope :valid, -> { where('valid_until IS NULL OR valid_until >= ?', Date.current) }
   scope :expired, -> { where('valid_until < ?', Date.current) }
   scope :search, ->(query) do
@@ -123,6 +125,11 @@ class Quote < ApplicationRecord
     draft? || sent?
   end
   
+  # Vehicle display helper
+  def vehicle_display_name
+    vehicle&.display_name
+  end
+  
   # JSON serialization
   def as_json(options = {})
     # Build JSON manually to avoid JSONB serialization issues
@@ -132,7 +139,7 @@ class Quote < ApplicationRecord
       'accountId' => account_id&.to_s,
       'contactId' => contact_id&.to_s,
       'customerId' => customer_id,
-      'vehicleId' => vehicle_id,
+      'vehicleId' => vehicle_id&.to_s,
       'status' => status,
       'subtotal' => subtotal,
       'tax' => tax,
@@ -149,9 +156,10 @@ class Quote < ApplicationRecord
       'items' => serialize_items(items),
       'lineItems' => serialize_items(items),
       
-      # Add account and contact names
+      # Add account, contact, and vehicle names
       'accountName' => account&.name,
       'contactName' => contact ? "#{contact.first_name} #{contact.last_name}".strip : nil,
+      'vehicleName' => vehicle&.display_name,
       
       # Format dates
       'validUntil' => valid_until,
@@ -185,6 +193,18 @@ class Quote < ApplicationRecord
         lastName: contact.last_name,
         email: contact.email,
         phone: contact.phone
+      }
+    end
+    
+    if options[:include_vehicle] && vehicle
+      json['vehicle'] = {
+        id: vehicle.id.to_s,
+        inventoryId: vehicle.inventory_id,
+        displayName: vehicle.display_name,
+        type: vehicle.listing_type,
+        year: vehicle.year,
+        make: vehicle.make,
+        model: vehicle.model
       }
     end
     

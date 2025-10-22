@@ -254,6 +254,8 @@ module Api
           contactId: deal.contact_id,
           contactName: deal.contact ? "#{deal.contact.first_name} #{deal.contact.last_name}".strip : nil,
           vehicleId: deal.vehicle_id,
+          vehicleName: deal.vehicle&.display_name,
+          vehicleInventoryId: deal.vehicle&.inventory_id,
           customerName: deal.customer_display_name,
           value: deal.value,
           stage: deal.stage,
