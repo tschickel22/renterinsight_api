@@ -5,6 +5,7 @@ class Company < ApplicationRecord
   has_many :intake_forms, dependent: :destroy
   has_many :custom_fields, dependent: :destroy
   has_many :vehicles, dependent: :destroy
+  has_many :land_parcels, dependent: :destroy
   
   # Use the polymorphic settings table for storing company-specific settings
   def communications_settings
