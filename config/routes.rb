@@ -48,6 +48,15 @@ Rails.application.routes.draw do
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
       end
       
+      # ==================== LAND MANAGEMENT ====================
+      resources :land_parcels, path: 'land-parcels' do
+        collection do
+          get :stats
+          get :export
+          post :bulk_delete
+        end
+      end
+      
       # ==================== ACTIVITIES ====================
       get 'activities/recent', to: 'activities#recent'
       

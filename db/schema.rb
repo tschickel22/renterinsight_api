@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_21_204000) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_22_170000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -561,6 +561,49 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_21_204000) do
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
   end
 
+  create_table "land_parcels", force: :cascade do |t|
+    t.integer "company_id", null: false
+    t.string "parcel_number", null: false
+    t.string "name"
+    t.string "address"
+    t.string "city"
+    t.string "state"
+    t.string "zip"
+    t.string "county"
+    t.decimal "latitude", precision: 10, scale: 8
+    t.decimal "longitude", precision: 11, scale: 8
+    t.decimal "acreage", precision: 10, scale: 4
+    t.string "zoning_type"
+    t.string "status", default: "available", null: false
+    t.decimal "price", precision: 15, scale: 2
+    t.decimal "price_per_acre", precision: 15, scale: 2
+    t.json "utilities", default: {}
+    t.json "features", default: []
+    t.string "owner_name"
+    t.string "owner_phone"
+    t.string "owner_email"
+    t.date "acquisition_date"
+    t.text "description"
+    t.text "notes"
+    t.json "images", default: []
+    t.json "documents", default: []
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.integer "created_by"
+    t.integer "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.decimal "cost_basis", precision: 15, scale: 2
+    t.text "cost_basis_notes"
+    t.index ["acquisition_date"], name: "index_land_parcels_on_acquisition_date"
+    t.index ["city", "state"], name: "index_land_parcels_on_city_and_state"
+    t.index ["company_id", "parcel_number"], name: "index_land_parcels_on_company_id_and_parcel_number", unique: true
+    t.index ["company_id"], name: "index_land_parcels_on_company_id"
+    t.index ["is_deleted"], name: "index_land_parcels_on_is_deleted"
+    t.index ["status"], name: "index_land_parcels_on_status"
+    t.index ["zoning_type"], name: "index_land_parcels_on_zoning_type"
+  end
+
   create_table "lead_activities", force: :cascade do |t|
     t.integer "lead_id", null: false
     t.integer "user_id", null: false
@@ -1107,6 +1150,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_21_204000) do
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_submissions", "leads"
+  add_foreign_key "land_parcels", "companies"
   add_foreign_key "lead_activities", "lead_activities", column: "related_activity_id"
   add_foreign_key "lead_activities", "leads"
   add_foreign_key "lead_activities", "users"
