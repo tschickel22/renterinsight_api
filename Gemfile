@@ -75,3 +75,6 @@ gem 'twilio-ruby', '~> 7.3'
 # PDF Generation
 gem 'prawn', '~> 2.4'
 gem 'prawn-table', '~> 0.2'
+
+# Use Postgres in production (Render)
+gem 'pg', '~> 1.5', group: :production
