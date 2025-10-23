@@ -20,7 +20,7 @@ class CustomField < ApplicationRecord
   scope :required_fields, -> { where(required: true) }
   
   # Serialize options as JSON
-  serialize :options, JSON
+  serialize :options, coder: JSON
   
   def as_json(options = {})
     super(options.merge(
