@@ -2,7 +2,7 @@
 
 module Webhooks
   class TwilioController < ApplicationController
-    skip_before_action :verify_authenticity_token
+    # API-only Rails apps don't have verify_authenticity_token, so no need to skip it
     skip_before_action :authenticate!, if: :skip_auth?
     
     # POST /webhooks/twilio/sms/status
