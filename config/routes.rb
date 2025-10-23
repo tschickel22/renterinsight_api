@@ -341,6 +341,12 @@ Rails.application.routes.draw do
         end
         
         # Nested resources for deals
+        resources :products, only: %i[index show create update destroy], controller: 'deal_products' do
+          collection do
+            post :bulk_create
+          end
+        end
+        
         resources :stage_histories, only: %i[index show create], controller: 'deal_stage_histories'
         
         resources :approvals, only: %i[index show create update destroy] do
