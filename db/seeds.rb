@@ -1,12 +1,46 @@
 # frozen_string_literal: true
 
-# Phase 5A: Authentication Test Users
+# Production & Test Users Setup
 # Run with: bin/rails db:seed
 
-puts "🔐 Creating Phase 5A Test Users..."
+puts "🔐 Creating Users..."
 
 # Clear existing test users
-User.where(email: ['admin@test.com', 'sarah.johnson@example.com', 'admin@renterinsight.com', 'client@test.com']).destroy_all
+User.where(email: [
+  'admin@test.com', 
+  'sarah.johnson@example.com', 
+  'admin@renterinsight.com', 
+  'client@test.com',
+  't+admin@renterinsight.com',
+  't+client@renterinsight.com'
+]).destroy_all
+
+# PRODUCTION ADMIN USER
+admin_prod = User.create!(
+  email: 't+admin@renterinsight.com',
+  password: 'Mindzenty1!',
+  password_confirmation: 'Mindzenty1!',
+  first_name: 'Tom',
+  last_name: 'Admin',
+  role: 'admin',
+  status: 'active'
+)
+puts "✅ Created PRODUCTION ADMIN: #{admin_prod.email}"
+
+# PRODUCTION CLIENT USER
+client_prod = User.create!(
+  email: 't+client@renterinsight.com',
+  password: 'password123',
+  password_confirmation: 'password123',
+  first_name: 'Tom',
+  last_name: 'Client',
+  role: 'client',
+  status: 'active'
+)
+puts "✅ Created PRODUCTION CLIENT: #{client_prod.email}"
+
+# TEST USERS (for development)
+if Rails.env.development? || ENV['CREATE_TEST_USERS'] == 'true'
 
 # Admin User 1
 admin1 = User.create!(
@@ -68,7 +102,9 @@ staff = User.create!(
 )
 puts "✅ Created: #{staff.email} (#{staff.role})"
 
-puts "\n🎉 Phase 5A Test Users Created!\n\n"
+puts "\n🎉 Test Users Created!\n\n"
+end
+
 puts "=" * 60
 puts "TEST CREDENTIALS"
 puts "=" * 60
@@ -88,11 +124,11 @@ puts "=" * 60
 
 # Verify passwords work
 puts "\n🔍 Verifying password authentication..."
-test_user = User.find_by(email: 'admin@test.com')
-if test_user.authenticate('password123')
-  puts "✅ Password authentication working correctly!"
+test_user = User.find_by(email: 't+admin@renterinsight.com')
+if test_user&.authenticate('Mindzenty1!')
+  puts "✅ Production admin password authentication working correctly!"
 else
-  puts "❌ Password authentication failed!"
+  puts "❌ Production admin password authentication failed!"
 end
 
 # =============================================================================
