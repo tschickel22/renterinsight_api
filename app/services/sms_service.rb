@@ -61,7 +61,7 @@ class SmsService
         provider: @provider_name,
         company_id: @company&.id,
         configured: true,
-        account_sid: config[:account_sid]&.slice(0, 10) + "..." if config[:account_sid],
+        account_sid: config[:account_sid] ? "#{config[:account_sid][0, 10]}..." : nil,
         from_number: config[:phone_number]
       }
     else
