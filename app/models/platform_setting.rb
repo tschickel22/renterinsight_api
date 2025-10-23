@@ -21,6 +21,14 @@ class PlatformSetting
       Setting.set('Platform', PLATFORM_SCOPE_ID, 'notifications', value)
     end
 
+    def lot_map
+      Setting.get('Platform', PLATFORM_SCOPE_ID, 'lot_map') || default_lot_map
+    end
+
+    def lot_map=(value)
+      Setting.set('Platform', PLATFORM_SCOPE_ID, 'lot_map', value)
+    end
+
     private
 
     def default_communications
@@ -44,6 +52,16 @@ class PlatformSetting
         email: { isEnabled: true, sendReminders: true },
         sms: { isEnabled: false, sendReminders: true },
         popup: { isEnabled: true, autoClose: true, autoCloseDelay: 5000 }
+      }
+    end
+
+    def default_lot_map
+      {
+        enabled: ENV['LOT_MAP_ENABLED'] == 'true',
+        maptiler: {
+          api_key: ENV['MAPTILER_API_KEY'],
+          default_style: ENV['MAPTILER_DEFAULT_STYLE'] || 'streets'
+        }
       }
     end
   end

@@ -57,6 +57,22 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== LOT MAP ====================
+      resources :lot_map_layouts, path: 'lot-map-layouts' do
+        member do
+          get :status_metrics
+        end
+        
+        resources :lots, controller: 'lot_map_lots', path: 'lots' do
+          member do
+            post :assign
+            post :unassign
+            post :change_status
+            get :history
+          end
+        end
+      end
+      
       # ==================== ACTIVITIES ====================
       get 'activities/recent', to: 'activities#recent'
       

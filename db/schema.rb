@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_22_170000) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_23_000000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -683,6 +683,60 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_22_170000) do
     t.index ["source_id"], name: "index_leads_on_source_id"
   end
 
+  create_table "lot_map_history_entries", force: :cascade do |t|
+    t.integer "lot_id", null: false
+    t.string "action", null: false
+    t.integer "inventory_id"
+    t.string "old_status"
+    t.string "new_status"
+    t.integer "user_id"
+    t.string "user_name"
+    t.text "details"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["action"], name: "index_lot_map_history_entries_on_action"
+    t.index ["created_at"], name: "index_lot_map_history_entries_on_created_at"
+    t.index ["inventory_id"], name: "index_lot_map_history_entries_on_inventory_id"
+    t.index ["lot_id"], name: "index_lot_map_history_entries_on_lot_id"
+    t.index ["user_id"], name: "index_lot_map_history_entries_on_user_id"
+  end
+
+  create_table "lot_map_layouts", force: :cascade do |t|
+    t.integer "company_id", null: false
+    t.string "name", null: false
+    t.string "address"
+    t.decimal "latitude", precision: 10, scale: 8
+    t.decimal "longitude", precision: 11, scale: 8
+    t.text "boundary"
+    t.integer "lot_count", default: 0
+    t.boolean "detected_from_satellite", default: false
+    t.string "industry_type", default: "both"
+    t.string "created_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_lot_map_layouts_on_company_id"
+    t.index ["created_at"], name: "index_lot_map_layouts_on_created_at"
+    t.index ["industry_type"], name: "index_lot_map_layouts_on_industry_type"
+  end
+
+  create_table "lot_map_lots", force: :cascade do |t|
+    t.integer "layout_id", null: false
+    t.string "number", null: false
+    t.text "position"
+    t.string "status", default: "empty"
+    t.integer "assigned_inventory_id"
+    t.string "assigned_inventory_info"
+    t.string "area"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assigned_inventory_id"], name: "index_lot_map_lots_on_assigned_inventory_id"
+    t.index ["created_at"], name: "index_lot_map_lots_on_created_at"
+    t.index ["layout_id"], name: "index_lot_map_lots_on_layout_id"
+    t.index ["number"], name: "index_lot_map_lots_on_number"
+    t.index ["status"], name: "index_lot_map_lots_on_status"
+  end
+
   create_table "notes", force: :cascade do |t|
     t.text "content", null: false
     t.string "entity_type", null: false
@@ -1160,6 +1214,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_22_170000) do
   add_foreign_key "leads", "accounts", column: "converted_account_id"
   add_foreign_key "leads", "companies"
   add_foreign_key "leads", "sources"
+  add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id", on_delete: :cascade
+  add_foreign_key "lot_map_layouts", "companies", on_delete: :cascade
+  add_foreign_key "lot_map_lots", "lot_map_layouts", column: "layout_id", on_delete: :cascade
   add_foreign_key "notes", "users"
   add_foreign_key "nurture_enrollments", "leads"
   add_foreign_key "nurture_enrollments", "nurture_sequences"

@@ -7,13 +7,15 @@ module Api
       def show
         render json: {
           communications: fetch_communications_settings,
-          notifications: fetch_notifications_settings
+          notifications: fetch_notifications_settings,
+          lot_map: fetch_lot_map_settings
         }, status: :ok
       rescue => e
         Rails.logger.error "[PlatformSettings#show] Error: #{e.message}"
         render json: {
           communications: default_communications_settings,
-          notifications: default_notifications_settings
+          notifications: default_notifications_settings,
+          lot_map: default_lot_map_settings
         }, status: :ok
       end
 
@@ -31,6 +33,12 @@ module Api
         if params[:notifications].present?
           save_notifications_settings(params[:notifications])
           updated_settings[:notifications] = fetch_notifications_settings
+        end
+        
+        # Update lot_map settings if provided
+        if params[:lot_map].present?
+          save_lot_map_settings(params[:lot_map])
+          updated_settings[:lot_map] = fetch_lot_map_settings
         end
         
         render json: {
@@ -120,6 +128,11 @@ module Api
         stored || default_notifications_settings
       end
 
+      def fetch_lot_map_settings
+        stored = Setting.get('Platform', 0, 'lot_map')
+        stored || default_lot_map_settings
+      end
+
       def save_communications_settings(settings)
         # Encrypt sensitive credentials before saving
         encrypted_settings = encrypt_sensitive_fields(settings, :communications)
@@ -128,6 +141,20 @@ module Api
 
       def save_notifications_settings(settings)
         Setting.set('Platform', 0, 'notifications', settings)
+      end
+
+      def save_lot_map_settings(settings)
+        # Encrypt MapTiler API key before saving
+        encrypted_settings = encrypt_lot_map_fields(settings)
+        Setting.set('Platform', 0, 'lot_map', encrypted_settings)
+      end
+
+      def encrypt_lot_map_fields(settings)
+        encrypted = settings.deep_dup
+        if encrypted.dig('maptiler', 'api_key').present?
+          encrypted['maptiler']['api_key'] = encrypt(encrypted['maptiler']['api_key'])
+        end
+        encrypted
       end
 
       def encrypt_sensitive_fields(settings, channel)
@@ -223,6 +250,16 @@ module Api
             showActivityUpdates: true,
             autoClose: true,
             autoCloseDelay: 5000
+          }
+        }
+      end
+      
+      def default_lot_map_settings
+        {
+          enabled: ENV['LOT_MAP_ENABLED'] == 'true',
+          maptiler: {
+            api_key: nil, # Never return actual API key
+            default_style: ENV['MAPTILER_DEFAULT_STYLE'] || 'streets'
           }
         }
       end
