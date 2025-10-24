@@ -36,10 +36,17 @@ module Api
       rescue => e
         Rails.logger.error "[LeadsController#create] Exception: #{e.class.name}: #{e.message}"
         Rails.logger.error e.backtrace.first(5).join("\n")
+        
+        begin
+          params_info = lead_params
+        rescue
+          params_info = 'Could not parse params'
+        end
+        
         render json: { 
           error: 'Internal server error', 
           message: e.message,
-          params_received: lead_params rescue 'Could not parse params'
+          params_received: params_info
         }, status: :internal_server_error
       end
 
