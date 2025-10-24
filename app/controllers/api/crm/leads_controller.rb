@@ -21,6 +21,7 @@ module Api
         Rails.logger.info "[LeadsController#create] Processed lead_params: #{lead_params.inspect}"
         
         l = Lead.new(lead_params)
+        l.company_id ||= current_company_id  # Auto-set company from current context
         
         if l.save
           Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
