@@ -150,23 +150,34 @@ module Api
       end
 
       # POST /api/crm/deals
+      # FIX: Improved error handling for deal creation
       def create
         deal = Deal.new(deal_params)
-        # Set user_id if not provided
-        deal.user_id ||= current_user&.id || 1
+        # FIX: Don't set user_id to 1 - just leave it nil if no current_user
+        deal.user_id ||= current_user&.id
         
         if deal.save
-          # Create initial stage history
-          deal.deal_stage_histories.create(
-            stage: deal.stage,
-            changed_by_id: current_user_id,
-            notes: 'Deal created'
-          )
+          # FIX: Safely create stage history with error handling
+          begin
+            deal.deal_stage_histories.create(
+              stage: deal.stage,
+              changed_by_id: current_user_id,
+              notes: 'Deal created'
+            )
+          rescue => e
+            # Log the error but don't fail the request
+            Rails.logger.error "Failed to create stage history: #{e.message}"
+          end
           
           render json: deal_json(deal, detailed: true), status: :created
         else
           render json: { errors: deal.errors.full_messages }, status: :unprocessable_entity
         end
+      rescue => e
+        # FIX: Catch any unexpected errors and return meaningful message
+        Rails.logger.error "Deal creation failed: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: { error: "Failed to create deal: #{e.message}" }, status: :internal_server_error
       end
 
       # PATCH/PUT /api/crm/deals/:id
@@ -176,12 +187,16 @@ module Api
         if @deal.update(deal_params)
           # Track stage change
           if old_stage != @deal.stage
-            @deal.deal_stage_histories.create(
-              stage: @deal.stage,
-              previous_stage: old_stage,
-              changed_by_id: current_user_id,
-              notes: params[:stage_change_notes]
-            )
+            begin
+              @deal.deal_stage_histories.create(
+                stage: @deal.stage,
+                previous_stage: old_stage,
+                changed_by_id: current_user_id,
+                notes: params[:stage_change_notes]
+              )
+            rescue => e
+              Rails.logger.error "Failed to create stage history: #{e.message}"
+            end
           end
           
           render json: deal_json(@deal, detailed: true)
@@ -204,12 +219,16 @@ module Api
         
         if @deal.update(stage: new_stage)
           # Create stage history
-          @deal.deal_stage_histories.create(
-            stage: new_stage,
-            previous_stage: old_stage,
-            changed_by_id: current_user_id,
-            notes: notes
-          )
+          begin
+            @deal.deal_stage_histories.create(
+              stage: new_stage,
+              previous_stage: old_stage,
+              changed_by_id: current_user_id,
+              notes: notes
+            )
+          rescue => e
+            Rails.logger.error "Failed to create stage history: #{e.message}"
+          end
           
           render json: deal_json(@deal, detailed: true)
         else
