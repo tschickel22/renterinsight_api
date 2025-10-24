@@ -14,7 +14,16 @@ module RenterinsightApi
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
-    config.autoload_lib(ignore: %w[assets tasks])
+    # FIXED: Ignore debug/diagnostic scripts so they don't auto-execute during boot
+    config.autoload_lib(ignore: %w[
+      assets 
+      tasks
+      debug_quote_preferences.rb
+      quick_fix_quote_prefs.rb
+      diagnose_quote_17.rb
+      fix_quote_17.rb
+      immediate_fix.rb
+    ])
 
     # Configuration for the application, engines, and railties goes here.
     #

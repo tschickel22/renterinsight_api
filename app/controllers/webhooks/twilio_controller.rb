@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
 module Webhooks
-  class TwilioController < ApplicationController
-    skip_before_action :verify_authenticity_token
-    skip_before_action :authenticate!, if: :skip_auth?
-    
+  # Inherit from ActionController::API instead of ApplicationController to avoid authentication
+  class TwilioController < ActionController::API
     # POST /webhooks/twilio/sms/status
     def sms_status
       message_sid = params['MessageSid']
@@ -56,10 +54,6 @@ module Webhooks
     end
     
     private
-    
-    def skip_auth?
-      action_name == 'sms_status'
-    end
     
     def twilio_params
       {

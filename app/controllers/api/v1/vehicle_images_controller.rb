@@ -12,22 +12,56 @@ module Api
         vehicle = @company.vehicles.find(params[:vehicle_id])
         image_file = params[:image]
 
+        # FIX: Validate file size (10MB limit)
+        max_size = 10.megabytes
+        if image_file.size > max_size
+          return render json: { 
+            error: "File size exceeds maximum allowed (#{max_size / 1.megabyte}MB)" 
+          }, status: :unprocessable_entity
+        end
+
         # Generate a unique filename
         ext = File.extname(image_file.original_filename)
         filename = "#{SecureRandom.uuid}#{ext}"
         
-        # Create uploads directory if it doesn't exist
-        uploads_dir = Rails.root.join('public', 'uploads', 'vehicles', vehicle.id.to_s)
-        FileUtils.mkdir_p(uploads_dir)
+        # FIX: Use company-based path instead of vehicle-based to avoid deep nesting
+        uploads_dir = Rails.root.join('public', 'uploads', @company.id.to_s, 'vehicles')
+        
+        # FIX: Better error handling for directory creation
+        begin
+          FileUtils.mkdir_p(uploads_dir)
+        rescue Errno::EACCES, Errno::EPERM => e
+          Rails.logger.error "Permission denied creating directory: #{e.message}"
+          return render json: { 
+            error: "Server configuration error: Unable to create upload directory. Please contact support." 
+          }, status: :internal_server_error
+        rescue => e
+          Rails.logger.error "Failed to create directory: #{e.message}"
+          return render json: { 
+            error: "Failed to create upload directory" 
+          }, status: :internal_server_error
+        end
 
-        # Save the file
+        # Save the file with error handling
         filepath = uploads_dir.join(filename)
-        File.open(filepath, 'wb') do |file|
-          file.write(image_file.read)
+        begin
+          File.open(filepath, 'wb') do |file|
+            file.write(image_file.read)
+          end
+        rescue Errno::EACCES, Errno::EPERM => e
+          Rails.logger.error "Permission denied writing file: #{e.message}"
+          return render json: { 
+            error: "Server configuration error: Unable to save file. Please contact support." 
+          }, status: :internal_server_error
+        rescue => e
+          Rails.logger.error "Failed to write file: #{e.message}"
+          return render json: { 
+            error: "Failed to save file to storage" 
+          }, status: :internal_server_error
         end
 
         # Generate the URL path (relative to public)
-        image_url = "/uploads/vehicles/#{vehicle.id}/#{filename}"
+        image_url = "/uploads/#{@company.id}/vehicles/#{filename}"
         
         # Return full URL for cross-origin access
         base_url = Rails.env.production? ? "https://#{request.host}" : "http://#{request.host}:#{request.port}"
@@ -48,6 +82,7 @@ module Api
         render json: { error: 'Vehicle not found' }, status: :not_found
       rescue => e
         Rails.logger.error "Image upload failed: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
         render json: { error: "Upload failed: #{e.message}" }, status: :internal_server_error
       end
 
@@ -80,11 +115,13 @@ module Api
       private
 
       def set_company
-        @company = ::Company.find_by(id: current_user.company_id)
+        # FIX: Better company validation
+        @company = ::Company.find_by(id: current_user&.company_id) if current_user
         @company ||= ::Company.first
         
         unless @company
-          render json: { error: 'Company not found' }, status: :not_found
+          render json: { error: 'No company found. Please contact support.' }, 
+                 status: :unprocessable_entity
         end
       end
     end

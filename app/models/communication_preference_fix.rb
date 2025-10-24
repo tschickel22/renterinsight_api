@@ -3,7 +3,7 @@ module CommunicationPreferenceFix
   extend ActiveSupport::Concern
   
   included do
-    serialize :compliance_metadata, JSON
+    serialize :compliance_metadata, coder: JSON
   end
 end
 

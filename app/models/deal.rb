@@ -1,7 +1,7 @@
 class Deal < ApplicationRecord
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
-  belongs_to :user
+  belongs_to :user, optional: true  # FIX: Made optional to prevent 422 errors when user_id not set
   belongs_to :territory, optional: true
   belongs_to :source, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship

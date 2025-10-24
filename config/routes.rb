@@ -422,6 +422,14 @@ Rails.application.routes.draw do
     end
   end
 
+  # One-time setup endpoint for Render free tier
+  namespace :api do
+    get 'setup', to: 'setup#create'
+    post 'setup', to: 'setup#create'
+    get 'setup/sources', to: 'setup#create_sources'
+    post 'setup/sources', to: 'setup#create_sources'
+  end
+
   # Phase 5A - Unified Login Authentication
   namespace :api do
     namespace :auth do

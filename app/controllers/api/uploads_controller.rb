@@ -29,7 +29,7 @@ module Api
       }
     rescue => e
       Rails.logger.error "Logo upload error: #{e.message}"
-      render json: { error: 'Failed to upload logo' }, status: :internal_server_error
+      render json: { error: "Failed to upload logo: #{e.message}" }, status: :internal_server_error
     end
 
     # POST /api/uploads
@@ -52,7 +52,7 @@ module Api
       }
     rescue => e
       Rails.logger.error "File upload error: #{e.message}"
-      render json: { error: 'Failed to upload file' }, status: :internal_server_error
+      render json: { error: "Failed to upload file: #{e.message}" }, status: :internal_server_error
     end
 
     # DELETE /api/uploads
@@ -70,8 +70,15 @@ module Api
 
     private
 
+    # FIX: Improved company validation with better error handling
     def set_company
-      @company = ::Company.first
+      @company = ::Company.find_by(id: current_user&.company_id) if current_user
+      @company ||= ::Company.first
+      
+      unless @company
+        render json: { error: 'No company found. Please contact support.' }, 
+               status: :unprocessable_entity
+      end
     end
 
     def valid_image?(file)
@@ -89,7 +96,17 @@ module Api
       allowed_types.include?(file.content_type)
     end
 
+    # FIX: Added comprehensive error handling and file size validation
     def upload_to_storage(file, category)
+      # Validate company exists
+      raise StandardError, 'Company not found' unless @company
+      
+      # Validate file size (10MB limit)
+      max_size = 10.megabytes
+      if file.size > max_size
+        raise StandardError, "File size exceeds maximum allowed (#{max_size / 1.megabyte}MB)"
+      end
+      
       # Generate unique filename
       extension = File.extname(file.original_filename)
       filename = "#{SecureRandom.uuid}#{extension}"
@@ -97,11 +114,22 @@ module Api
 
       # Ensure directory exists
       full_path = Rails.root.join('public', path)
-      FileUtils.mkdir_p(File.dirname(full_path))
+      
+      begin
+        FileUtils.mkdir_p(File.dirname(full_path))
+      rescue => e
+        Rails.logger.error "Failed to create directory: #{e.message}"
+        raise StandardError, "Failed to create upload directory"
+      end
 
-      # Save file
-      File.open(full_path, 'wb') do |f|
-        f.write(file.read)
+      # Save file with error handling
+      begin
+        File.open(full_path, 'wb') do |f|
+          f.write(file.read)
+        end
+      rescue => e
+        Rails.logger.error "File write failed: #{e.message}"
+        raise StandardError, "Failed to save file to storage"
       end
 
       # Return URL (adjust based on your setup)
