@@ -1,5 +1,4 @@
-'https://staging.crm.landlordinsight.com',
-            'https://renterinsight-api-staging.onrender.com',# frozen_string_literal: true
+# frozen_string_literal: true
 
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
   allow do
@@ -10,6 +9,8 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
             'http://127.0.0.1:5173',
             'http://127.0.0.1:3000',
             'https://crm.landlordinsight.com',
+            'https://staging.crm.landlordinsight.com',
+            'https://renterinsight-api-staging.onrender.com',
             'https://renterinsight-api-prod.onrender.com'
 
     resource '*',
