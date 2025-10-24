@@ -153,8 +153,8 @@ module Api
       # FIX: Improved error handling for deal creation
       def create
         deal = Deal.new(deal_params)
-        # FIX: Don't set user_id to 1 - just leave it nil if no current_user
-        deal.user_id ||= current_user&.id
+        # Don't set user_id if there's no real current_user
+        # deal.user_id ||= current_user&.id
         deal.company_id ||= current_company_id  # Auto-set company from current context
         
         if deal.save
