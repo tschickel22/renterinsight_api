@@ -405,7 +405,9 @@ module Api
       end
 
       def handle_tags(contact, tag_names)
-        return unless tag_names.is_a?(Array)
+        # CRITICAL: Must be persisted before using associations
+        return unless contact.persisted?
+        return unless tag_names.is_a?(Array) && tag_names.any?
 
         # Remove existing tags not in the new list
         current_tag_names = contact.tags.pluck(:name)
@@ -415,12 +417,18 @@ module Api
           contact.tags.delete(tag) if tag
         end
 
-        # Add new tags
+        # Add new tags (contact is saved, so associations work)
         tag_names.each do |tag_name|
           next if tag_name.blank?
-          tag = Tag.find_or_create_by(name: tag_name.strip)
+          tag = Tag.find_or_create_by!(name: tag_name.strip)
           contact.tags << tag unless contact.tags.include?(tag)
         end
+        
+        # Reload to ensure fresh association data
+        contact.reload
+      rescue => e
+        Rails.logger.error "Error in handle_tags: #{e.message}\n#{e.backtrace.join("\n")}"
+        # Don't fail the whole request, just log the error
       end
     end
   end
