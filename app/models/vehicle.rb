@@ -25,11 +25,11 @@ class Vehicle < ApplicationRecord
   end
 
   # MH-specific validations
+  # FIX: Removed strict numericality validation to allow "4+" values
   with_options if: -> { listing_type == 'manufactured_home' } do
     validates :serial_number, presence: true, uniqueness: { scope: :company_id }
     validates :bedrooms, :bathrooms, presence: true
-    validates :bedrooms, numericality: { only_integer: true, greater_than: 0 }
-    validates :bathrooms, numericality: { greater_than: 0 }
+    # Bedrooms and bathrooms are validated in normalize_bedroom_bathroom_values callback
   end
 
   # Scopes
@@ -57,6 +57,7 @@ class Vehicle < ApplicationRecord
 
   # Callbacks
   before_validation :normalize_fields
+  before_validation :normalize_bedroom_bathroom_values  # FIX: Added to handle "4+" values
   before_validation :generate_inventory_id, on: :create
 
   # Soft delete
@@ -101,6 +102,27 @@ class Vehicle < ApplicationRecord
     self.model = model&.titleize
     self.status = status&.downcase
     self.listing_type = listing_type&.downcase
+  end
+
+  # FIX: New method to handle "4+" bedroom/bathroom values
+  def normalize_bedroom_bathroom_values
+    return unless listing_type == 'manufactured_home'
+    
+    # Convert "4+" to 4 for storage
+    # This allows the form to submit "4+" but stores it as a valid number
+    if bedrooms.present?
+      bedroom_str = bedrooms.to_s.strip
+      if bedroom_str =~ /^(\d+)\+?$/
+        self.bedrooms = $1.to_i
+      end
+    end
+    
+    if bathrooms.present?
+      bathroom_str = bathrooms.to_s.strip
+      if bathroom_str =~ /^(\d+(?:\.\d+)?)\+?$/
+        self.bathrooms = $1.to_f
+      end
+    end
   end
 
   def generate_inventory_id
