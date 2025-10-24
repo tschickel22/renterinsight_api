@@ -155,6 +155,7 @@ module Api
         deal = Deal.new(deal_params)
         # FIX: Don't set user_id to 1 - just leave it nil if no current_user
         deal.user_id ||= current_user&.id
+        deal.company_id ||= current_company_id  # Auto-set company from current context
         
         if deal.save
           # FIX: Safely create stage history with error handling

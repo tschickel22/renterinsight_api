@@ -68,6 +68,7 @@ module Api
         tag_names = contact_params_with_extra[:tags] || []
         
         @contact = Contact.new(contact_params)
+        @contact.company_id ||= current_company_id  # Auto-set company from current context
 
         if @contact.save
           # Handle tags if provided

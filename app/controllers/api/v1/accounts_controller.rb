@@ -41,7 +41,7 @@ module Api
       # POST /api/v1/accounts
       def create
         @account = Account.new(account_params)
-        @account.company_id = current_company&.id
+        @account.company_id ||= current_company_id  # Auto-set company from current context
         @account.owner_id = current_user&.id
         
         # Set default values for required fields
