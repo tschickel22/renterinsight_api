@@ -1,4 +1,5 @@
-# frozen_string_literal: true
+'https://staging.crm.landlordinsight.com',
+            'https://renterinsight-api-staging.onrender.com',# frozen_string_literal: true
 
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
   allow do
