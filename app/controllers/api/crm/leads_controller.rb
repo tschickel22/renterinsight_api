@@ -17,9 +17,30 @@ module Api
       end
 
       def create
+        Rails.logger.info "[LeadsController#create] Received params: #{params.inspect}"
+        Rails.logger.info "[LeadsController#create] Processed lead_params: #{lead_params.inspect}"
+        
         l = Lead.new(lead_params)
-        l.save!
-        render json: lead_json(l), status: :created
+        
+        if l.save
+          Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
+          render json: lead_json(l), status: :created
+        else
+          Rails.logger.error "[LeadsController#create] Validation failed: #{l.errors.full_messages.join(', ')}"
+          render json: { 
+            error: 'Validation failed', 
+            details: l.errors.full_messages,
+            params_received: lead_params 
+          }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error "[LeadsController#create] Exception: #{e.class.name}: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
+        render json: { 
+          error: 'Internal server error', 
+          message: e.message,
+          params_received: lead_params rescue 'Could not parse params'
+        }, status: :internal_server_error
       end
 
       def update
