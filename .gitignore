@@ -35,3 +35,5 @@ config/credentials/*.key
 node_modules/
 storage/*
 *.bak.DELETED
+
+/config/credentials/staging.key
