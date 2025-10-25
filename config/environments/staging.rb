@@ -53,6 +53,13 @@ Rails.application.configure do
   # Only use :id for inspections in staging.
   config.active_record.attributes_for_inspect = [ :id ]
 
+  # Allow ActionCable requests from staging frontend domains
+  config.action_cable.allowed_request_origins = [
+    'https://staging.crm.landlordinsight.com',
+    'https://*.netlify.app',
+    /https:\/\/.*\.netlify\.app/
+  ]
+
   # Allow requests from staging domain and localhost for testing
   # config.hosts = [
   #   "renterinsight-api-staging.onrender.com",
