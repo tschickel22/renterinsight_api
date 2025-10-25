@@ -46,6 +46,9 @@ class AccountActivity < ApplicationRecord
   before_validation :ensure_reminder_method_array
   before_validation :set_defaults
   
+  after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
+  after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
+  
   def complete!
     update!(status: 'completed', completed_at: Time.current)
   end
@@ -87,5 +90,30 @@ class AccountActivity < ApplicationRecord
         errors.add(:reminder_method, 'must have at least one method')
       end
     end
+  end
+  
+  def schedule_reminders
+    return unless reminder_time && !reminder_sent
+    
+    delay = (reminder_time - Time.current).to_i
+    if delay > 0
+      # Schedule the ActivityReminderJob with AccountActivity type
+      ActivityReminderJob.set(wait: delay.seconds).perform_later(id, 'AccountActivity')
+      Rails.logger.info "[AccountActivity] Scheduled reminder job for activity #{id} in #{delay} seconds (at #{reminder_time})"
+    else
+      Rails.logger.warn "[AccountActivity] Reminder time #{reminder_time} is in the past for activity #{id}"
+    end
+  rescue => e
+    Rails.logger.error "[AccountActivity] Failed to schedule reminder: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+  end
+  
+  def reschedule_reminders_if_changed
+    # Reset reminder_sent flag when reminder_time changes
+    update_column(:reminder_sent, false)
+    schedule_reminders
+    Rails.logger.info "[AccountActivity] Rescheduled reminder for activity #{id}"
+  rescue => e
+    Rails.logger.error "[AccountActivity] Failed to reschedule reminder: #{e.message}"
   end
 end
