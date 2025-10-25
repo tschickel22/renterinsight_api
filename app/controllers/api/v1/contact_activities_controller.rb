@@ -3,7 +3,7 @@
 module Api
   module V1
     class ContactActivitiesController < ApplicationController
-      before_action :set_contact
+      before_action :set_contact, except: [:mark_reminder_sent]
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
       
       # GET /api/v1/contacts/:contact_id/activities
@@ -101,6 +101,32 @@ module Api
       rescue => e
         Rails.logger.error "[ContactActivitiesController#destroy] #{e.class}: #{e.message}"
         render json: { error: 'Failed to delete activity', message: e.message }, status: :internal_server_error
+      end
+
+      # GET /api/v1/contacts/:contact_id/activities/reminders
+      def reminders
+        activities = @contact.contact_activities
+                             .where(status: 'pending')
+                             .where.not(reminder_time: nil)
+                             .where(reminder_sent: [false, nil])
+                             .where('reminder_time <= ?', Time.current + 5.minutes)
+                             .includes(:user, :assigned_to, :contact)
+                             .order(reminder_time: :asc)
+        
+        render json: activities.map { |a| activity_json(a) }, status: :ok
+      rescue => e
+        Rails.logger.error "[ContactActivitiesController#reminders] #{e.class}: #{e.message}"
+        render json: { error: 'Failed to load reminders', message: e.message }, status: :internal_server_error
+      end
+
+      # POST /api/v1/contact_activities/:id/mark_reminder_sent
+      def mark_reminder_sent
+        activity = ContactActivity.find(params[:id])
+        activity.update!(reminder_sent: true)
+        render json: activity_json(activity), status: :ok
+      rescue => e
+        Rails.logger.error "[ContactActivitiesController#mark_reminder_sent] #{e.class}: #{e.message}"
+        render json: { error: 'Failed to mark reminder as sent', message: e.message }, status: :internal_server_error
       end
       
       private
