@@ -3,7 +3,7 @@
 module Api
   module Crm
     class LeadActivitiesController < ApplicationController
-      before_action :set_lead
+      before_action :set_lead, except: [:mark_reminder_sent]
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
       
       # GET /api/crm/leads/:lead_id/lead_activities
@@ -90,6 +90,34 @@ module Api
       rescue => e
         Rails.logger.error "[LeadActivitiesController#destroy] #{e.class}: #{e.message}"
         render json: { error: 'Failed to delete activity', message: e.message }, status: :internal_server_error
+      end
+
+      # GET /api/crm/leads/:lead_id/reminders/upcoming
+      # GET /api/crm/leads/:lead_id/lead_activities/reminders
+      def reminders
+        activities = @lead.lead_activities
+                          .where(status: 'pending')
+                          .where.not(reminder_time: nil)
+                          .where(reminder_sent: [false, nil])
+                          .where('reminder_time <= ?', Time.current)
+                          .includes(:user, :assigned_to)
+                          .order(reminder_time: :asc)
+        
+        render json: activities.map { |a| activity_json(a) }, status: :ok
+      rescue => e
+        Rails.logger.error "[LeadActivitiesController#reminders] #{e.class}: #{e.message}"
+        render json: { error: 'Failed to load reminders', message: e.message }, status: :internal_server_error
+      end
+
+      # POST /api/crm/leads/:lead_id/lead_activities/:id/mark_reminder_sent
+      def mark_reminder_sent
+        # Don't require lead for this action
+        activity = LeadActivity.find(params[:id])
+        activity.update!(reminder_sent: true)
+        render json: activity_json(activity), status: :ok
+      rescue => e
+        Rails.logger.error "[LeadActivitiesController#mark_reminder_sent] #{e.class}: #{e.message}"
+        render json: { error: 'Failed to mark reminder as sent', message: e.message }, status: :internal_server_error
       end
       
       private

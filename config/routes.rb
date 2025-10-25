@@ -298,7 +298,14 @@ Rails.application.routes.draw do
             post :complete
             post :cancel
           end
+          collection do
+            get :reminders
+          end
         end
+
+        # Lead reminders endpoint (for activity notifications)
+        get 'reminders/upcoming', to: 'lead_activities#reminders'
+        post 'lead_activities/:id/mark_reminder_sent', to: 'lead_activities#mark_reminder_sent'
 
         # Tags (lead-scoped)
         get 'tags', to: 'tags#entity_tags_for_lead'
