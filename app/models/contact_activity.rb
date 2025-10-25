@@ -39,7 +39,6 @@ class ContactActivity < ApplicationRecord
   scope :for_account, ->(account_id) { where(account_id: account_id) }
   
   after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
-  after_create :send_creation_notifications
   after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
   after_update :update_contact_last_activity
   before_validation :ensure_reminder_method_array
@@ -113,15 +112,6 @@ class ContactActivity < ApplicationRecord
     Rails.logger.info "[ContactActivity] Rescheduled reminder for activity #{id}"
   rescue => e
     Rails.logger.error "[ContactActivity] Failed to reschedule reminder: #{e.message}"
-  end
-  
-  def send_creation_notifications
-    # Use the polymorphic ActivityNotificationService
-    ActivityNotificationService.new(self).send_all_notifications
-    Rails.logger.info "[ContactActivity] Sent creation notifications for activity #{id}"
-  rescue => e
-    Rails.logger.error "[ContactActivity] Failed to send notifications: #{e.message}"
-    Rails.logger.error e.backtrace.join("\n")
   end
   
   def update_contact_last_activity

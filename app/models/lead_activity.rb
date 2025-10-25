@@ -37,7 +37,6 @@ class LeadActivity < ApplicationRecord
   scope :for_user, ->(user_id) { where(assigned_to_id: user_id) }
   
   after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
-  after_create :send_creation_notifications
   after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
   after_update :update_lead_last_activity
   after_save :create_activity_log
@@ -100,12 +99,6 @@ class LeadActivity < ApplicationRecord
     Rails.logger.info "[LeadActivity] Rescheduled reminder for activity #{id}"
   rescue => e
     Rails.logger.error "[LeadActivity] Failed to reschedule reminder: #{e.message}"
-  end
-  
-  def send_creation_notifications
-    ActivityNotificationService.new(self).send_all_notifications
-  rescue => e
-    Rails.logger.error "[LeadActivity] Failed to send notifications: #{e.message}"
   end
   
   def update_lead_last_activity
