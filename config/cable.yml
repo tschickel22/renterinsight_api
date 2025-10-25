@@ -4,5 +4,8 @@ development:
 test:
   adapter: test
 
+staging:
+  adapter: async
+
 production:
   adapter: async
