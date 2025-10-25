@@ -5,7 +5,9 @@
 class ActivityNotificationService
   def initialize(activity)
     @activity = activity
-    @lead = activity.lead
+    @lead = activity.respond_to?(:lead) ? activity.lead : nil
+    @contact = activity.respond_to?(:contact) ? activity.contact : nil
+    @account = activity.respond_to?(:account) ? activity.account : nil
     @assigned_user = activity.assigned_to
   end
 
@@ -36,7 +38,13 @@ class ActivityNotificationService
 
   def get_notification_settings
     # Company settings override platform settings (same pattern as communications)
-    company = @lead.converted_account&.company || Company.first
+    company = if @lead
+                @lead.converted_account&.company
+              elsif @account
+                @account.company
+              else
+                Company.first
+              end
     
     company_settings = company&.notifications_settings
     return symbolize_keys(company_settings) if company_settings.present?
@@ -123,6 +131,15 @@ class ActivityNotificationService
     all_settings = get_notification_settings
     popup_settings = all_settings.dig(:popup) || default_platform_settings[:popup]
 
+    # Build entity info based on activity type
+    entity_info = if @lead
+                    { leadName: "#{@lead.first_name} #{@lead.last_name}", leadId: @lead.id }
+                  elsif @contact
+                    { contactName: "#{@contact.first_name} #{@contact.last_name}", contactId: @contact.id }
+                  else
+                    {}
+                  end
+
     ActionCable.server.broadcast(
       "user_notifications_#{@assigned_user.id}",
       {
@@ -133,10 +150,8 @@ class ActivityNotificationService
           subject: @activity.subject,
           description: @activity.description,
           priority: @activity.priority,
-          dueDate: @activity.due_date&.iso8601,
-          leadName: "#{@lead.first_name} #{@lead.last_name}",
-          leadId: @lead.id
-        },
+          dueDate: @activity.due_date&.iso8601
+        }.merge(entity_info),
         settings: popup_settings
       }
     )
@@ -148,7 +163,13 @@ class ActivityNotificationService
   end
 
   def get_sms_settings
-    company = @lead.converted_account&.company || Company.first
+    company = if @lead
+                @lead.converted_account&.company
+              elsif @account
+                @account.company
+              else
+                Company.first
+              end
     comm_settings = company&.communications_settings
     
     if comm_settings && comm_settings[:sms]

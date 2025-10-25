@@ -95,12 +95,15 @@ class ContactActivity < ApplicationRecord
     
     delay = (reminder_time - Time.current).to_i
     if delay > 0
-      # Note: You'll need to create ActivityReminderJob if it doesn't exist
-      # ActivityReminderJob.set(wait: delay.seconds).perform_later(id)
-      Rails.logger.info "[ContactActivity] Would schedule reminder job for activity #{id} in #{delay} seconds"
+      # Schedule the ActivityReminderJob with ContactActivity type
+      ActivityReminderJob.set(wait: delay.seconds).perform_later(id, 'ContactActivity')
+      Rails.logger.info "[ContactActivity] Scheduled reminder job for activity #{id} in #{delay} seconds (at #{reminder_time})"
+    else
+      Rails.logger.warn "[ContactActivity] Reminder time #{reminder_time} is in the past for activity #{id}"
     end
   rescue => e
     Rails.logger.error "[ContactActivity] Failed to schedule reminder: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
   end
   
   def reschedule_reminders_if_changed
@@ -113,11 +116,12 @@ class ContactActivity < ApplicationRecord
   end
   
   def send_creation_notifications
-    # Note: You may want to create a ContactActivityNotificationService similar to ActivityNotificationService
-    # ContactActivityNotificationService.new(self).send_all_notifications
-    Rails.logger.info "[ContactActivity] Would send creation notifications for activity #{id}"
+    # Use the polymorphic ActivityNotificationService
+    ActivityNotificationService.new(self).send_all_notifications
+    Rails.logger.info "[ContactActivity] Sent creation notifications for activity #{id}"
   rescue => e
     Rails.logger.error "[ContactActivity] Failed to send notifications: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
   end
   
   def update_contact_last_activity
