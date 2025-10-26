@@ -38,8 +38,9 @@
 #
 
 class Communication < ApplicationRecord
-  # SQLite compatibility
-  serialize :metadata, coder: JSON
+  # SQLite compatibility - only serialize for non-PostgreSQL databases
+  serialize :metadata, coder: JSON unless ActiveRecord::Base.connection.adapter_name == 'PostgreSQL'
+  
   # Polymorphic association - can belong to Lead, Account, Quote, etc.
   belongs_to :communicable, polymorphic: true
   belongs_to :communication_thread, optional: true
