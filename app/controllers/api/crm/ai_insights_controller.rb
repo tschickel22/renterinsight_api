@@ -84,9 +84,9 @@ module Api
         end
         
         # Priority 3: Email engagement analysis
-        email_logs = CommunicationLog.where(lead_id: lead.id, comm_type: 'email')
+        email_logs = Communication.where(communicable_type: 'Lead', communicable_id: lead.id, channel: 'email')
         email_count = email_logs.count
-        email_opens = email_logs.where(status: 'opened').count
+        email_opens = email_logs.where.not(read_at: nil).count
         
         if email_count > 0 && !insight_types_used.include?('communication_style')
           if email_opens > 3

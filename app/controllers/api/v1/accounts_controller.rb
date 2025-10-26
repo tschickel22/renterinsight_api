@@ -305,7 +305,7 @@ module Api
         sms_count = communications.where(channel: 'sms').count
         
         # Get recent notes
-        notes = Note.where(entity_type: 'account', entity_id: @account.id)
+        notes = Note.where(entity_type: 'Account', entity_id: @account.id)
                    .order(created_at: :desc)
                    .limit(10)
         
