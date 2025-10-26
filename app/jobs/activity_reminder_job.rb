@@ -4,11 +4,16 @@ class ActivityReminderJob < ApplicationJob
   queue_as :default
   
   def perform(activity_id, activity_type = 'LeadActivity')
-    # Support both LeadActivity and ContactActivity
+    # Support LeadActivity, ContactActivity, and AccountActivity
     activity = case activity_type
                when 'ContactActivity'
                  ContactActivity.find_by(id: activity_id)
+               when 'AccountActivity'
+                 AccountActivity.find_by(id: activity_id)
+               when 'LeadActivity'
+                 LeadActivity.find_by(id: activity_id)
                else
+                 # Fallback to LeadActivity for backward compatibility
                  LeadActivity.find_by(id: activity_id)
                end
     

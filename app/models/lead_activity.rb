@@ -85,7 +85,8 @@ class LeadActivity < ApplicationRecord
     
     delay = (reminder_time - Time.current).to_i
     if delay > 0
-      ActivityReminderJob.set(wait: delay.seconds).perform_later(id)
+      # Pass 'LeadActivity' to ensure job can find the correct activity type
+      ActivityReminderJob.set(wait: delay.seconds).perform_later(id, 'LeadActivity')
       Rails.logger.info "[LeadActivity] Scheduled reminder job for activity #{id} in #{delay} seconds"
     end
   rescue => e
