@@ -24,8 +24,8 @@ class ActivityReminderJob < ApplicationJob
     # Use the notification service to send reminders
     ActivityNotificationService.new(activity).send_reminder_notifications
     
-    # Mark as sent
-    activity.update!(reminder_sent: true)
+    # Don't mark as sent here - let the frontend mark it when displayed
+    # This allows polling API to act as fallback if ActionCable broadcast fails
   rescue => e
     Rails.logger.error "[ActivityReminderJob] Failed to send reminders for #{activity_type} #{activity_id}: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
