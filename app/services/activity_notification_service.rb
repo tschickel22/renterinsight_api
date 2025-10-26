@@ -160,6 +160,8 @@ class ActivityNotificationService
   rescue => e
     Rails.logger.error "[ActivityNotification] Failed to send popup: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
+    # Re-raise exception so job knows notification failed and won't mark reminder_sent
+    raise
   end
 
   def get_sms_settings
