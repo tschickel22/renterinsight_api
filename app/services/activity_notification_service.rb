@@ -136,6 +136,8 @@ class ActivityNotificationService
                     { leadName: "#{@lead.first_name} #{@lead.last_name}", leadId: @lead.id }
                   elsif @contact
                     { contactName: "#{@contact.first_name} #{@contact.last_name}", contactId: @contact.id }
+                  elsif @account
+                    { accountName: @account.name, accountId: @account.id }
                   else
                     {}
                   end
