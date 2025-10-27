@@ -79,7 +79,11 @@ module Api
         # Duplicate the vehicle with all attributes
         new_vehicle = @vehicle.dup
         
-        # Set the new unique identifier
+        # CRITICAL: Clear BOTH vin and serial_number to avoid constraint violations
+        new_vehicle.vin = nil
+        new_vehicle.serial_number = nil
+        
+        # Set the new unique identifier based on type
         if @vehicle.is_rv?
           new_vehicle.vin = new_identifier
         elsif @vehicle.is_manufactured_home?
@@ -508,6 +512,63 @@ module Api
             rent: vehicles.sum(:rent_price).to_f
           }
         }
+      end
+
+      # GET /api/v1/vehicles/export
+      def export
+        vehicles = @company.vehicles.active
+        
+        # Apply same filters as index
+        vehicles = vehicles.by_type(params[:type]) if params[:type].present?
+        vehicles = vehicles.by_status(params[:status]) if params[:status].present?
+        vehicles = vehicles.by_year(params[:year]) if params[:year].present?
+        vehicles = vehicles.by_make(params[:make]) if params[:make].present?
+        vehicles = vehicles.by_model(params[:model]) if params[:model].present?
+        vehicles = vehicles.search(params[:search]) if params[:search].present?
+        
+        # Generate CSV
+        require 'csv'
+        csv_data = CSV.generate(headers: true) do |csv|
+          # Headers
+          csv << [
+            'Inventory ID',
+            'Type',
+            'Year',
+            'Make',
+            'Model',
+            'Status',
+            'Sale Price',
+            'Rent Price',
+            'VIN/Serial',
+            'City',
+            'State',
+            'Date Added'
+          ]
+          
+          # Data rows
+          vehicles.each do |vehicle|
+            csv << [
+              vehicle.inventory_id,
+              vehicle.listing_type,
+              vehicle.year,
+              vehicle.make,
+              vehicle.model,
+              vehicle.status,
+              vehicle.sale_price,
+              vehicle.rent_price,
+              vehicle.is_rv? ? vehicle.vin : vehicle.serial_number,
+              vehicle.location_city,
+              vehicle.location_state,
+              vehicle.created_at&.strftime('%Y-%m-%d')
+            ]
+          end
+        end
+        
+        # Send CSV file
+        send_data csv_data,
+          filename: "inventory-export-#{Date.today}.csv",
+          type: 'text/csv',
+          disposition: 'attachment'
       end
 
       def bulk_update

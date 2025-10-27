@@ -42,6 +42,10 @@ Rails.application.routes.draw do
         
         collection do
           get :stats
+          get :export     # Add export route
+          post :bulk_update
+          post :bulk_delete
+          post :import
         end
         
         # Vehicle image uploads
