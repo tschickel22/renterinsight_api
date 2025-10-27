@@ -10,6 +10,12 @@
 # Ignore all environment files.
 /.env*
 
+# Ignore SSL certificates (local development only)
+*.pem
+*.key
+*.crt
+*.cert
+
 # Ignore all logfiles and tempfiles.
 /log/*
 /tmp/*
