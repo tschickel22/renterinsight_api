@@ -125,7 +125,7 @@ GEM
       pp (>= 0.6.0)
       rdoc (>= 4.0.0)
       reline (>= 0.4.2)
-    json (2.15.0)
+    json (2.15.2)
     jwt (3.1.2)
       base64
     kamal (2.7.0)
@@ -370,7 +370,7 @@ GEM
     tsort (0.2.0)
     ttfunk (1.8.0)
       bigdecimal (~> 3.1)
-    twilio-ruby (7.8.4)
+    twilio-ruby (7.8.5)
       faraday (>= 0.9, < 3.0)
       jwt (>= 1.5, < 4.0)
       nokogiri (>= 1.6, < 2.0)
@@ -379,7 +379,7 @@ GEM
     unicode-display_width (3.2.0)
       unicode-emoji (~> 4.1)
     unicode-emoji (4.1.0)
-    uri (1.0.3)
+    uri (1.0.4)
     useragent (0.16.11)
     websocket-driver (0.8.0)
       base64
@@ -424,7 +424,7 @@ DEPENDENCIES
   solid_queue
   sqlite3 (>= 2.1)
   thruster
-  twilio-ruby (~> 7.3)
+  twilio-ruby (~> 7.8)
   tzinfo-data
 
 BUNDLED WITH
