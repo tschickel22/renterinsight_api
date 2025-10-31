@@ -183,7 +183,11 @@ Rails.application.routes.draw do
 
   namespace :api, defaults: { format: :json } do
     # ==================== USERS API ====================
-    resources :users, only: %i[index show create update destroy]
+    resources :users, only: %i[index show create update destroy] do
+      member do
+        post :restore
+      end
+    end
     
     # ==================== SETTINGS API ====================
     get 'settings/tenant', to: 'settings#tenant'
@@ -429,13 +433,11 @@ Rails.application.routes.draw do
       post 'communications/sms', to: 'communications#sms'
       
       # Communication templates
-      get 'communications/templates', to: 'communications#index_templates'
-      post 'communications/templates', to: 'communications#create_template'
-      get 'communications/templates/:id', to: 'communications#show_template'
-      patch 'communications/templates/:id', to: 'communications#update_template'
-      put 'communications/templates/:id', to: 'communications#update_template'
-      delete 'communications/templates/:id', to: 'communications#destroy_template'
-      delete 'communications/templates/:id/attachments/:attachment_id', to: 'communications#delete_template_attachment'
+      resources :communication_templates, path: 'communications/templates', only: [:index, :show, :create, :update, :destroy] do
+        member do
+          post :send_test, path: 'test'
+        end
+      end
     end
   end
 
@@ -464,6 +466,33 @@ Rails.application.routes.draw do
       # Magic Link
       post 'request_magic_link', to: 'magic_link#request_magic_link'
       get 'verify_magic_link', to: 'magic_link#verify_magic_link'
+      
+      # Phase 6 - Token Management
+      resource :tokens, only: [] do
+        post :refresh, on: :collection
+        post :validate, on: :collection
+        delete :logout, on: :collection
+      end
+    end
+    
+    # Phase 6 - Unified Invitation System
+    # Public invitation endpoints (no auth required)
+    namespace :public do
+      get 'invitations/verify', to: 'invitations#verify'
+      post 'invitations/accept', to: 'invitations#accept'
+    end
+    
+    # Authenticated invitation endpoints
+    resources :invitations, only: [:show, :destroy] do
+      member do
+        post :resend
+      end
+    end
+    
+    # Company-scoped invitations
+    scope path: 'companies/:company_id' do
+      get 'invitations', to: 'invitations#index'
+      post 'invitations', to: 'invitations#create'
     end
   end
 

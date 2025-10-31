@@ -9,7 +9,23 @@ class ApplicationController < ActionController::API
   private
 
   def authenticate
-    @current_company_id = (request.headers['X-Company-Id'] || 1).to_i
+    # Extract token from Authorization header
+    header = request.headers['Authorization']
+    
+    if header.present?
+      token = header.split(' ').last
+      decoded = JsonWebToken.decode(token)
+      
+      if decoded
+        # Valid JWT token found
+        @current_user_id = decoded[:user_id]
+        @current_company_id = decoded[:company_id] || request.headers['X-Company-Id']&.to_i || 1
+        return
+      end
+    end
+    
+    # No valid token - return unauthorized
+    render json: { error: 'Unauthorized - Invalid or missing token' }, status: :unauthorized
   end
 
   def current_company_id
@@ -17,10 +33,25 @@ class ApplicationController < ActionController::API
   end
 
   def current_user
-    # Temporary implementation until you add user authentication
-    # Returns a simple object with id and company association
-    @current_user ||= OpenStruct.new(id: 1, company_id: current_company_id)
+    return @current_user if defined?(@current_user)
+    
+    # Load user from JWT token
+    if @current_user_id
+      @current_user = User.find_by(id: @current_user_id)
+      
+      unless @current_user
+        Rails.logger.error("JWT token contains invalid user_id: #{@current_user_id}")
+        render json: { error: 'Unauthorized - User not found' }, status: :unauthorized
+        return nil
+      end
+      
+      return @current_user
+    end
+    
+    # No authenticated user
+    nil
   end
+  
   # Portal authentication helpers
   def current_portal_buyer
     return @current_portal_buyer if @current_portal_buyer

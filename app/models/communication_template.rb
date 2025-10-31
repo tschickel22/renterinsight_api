@@ -1,19 +1,33 @@
 # frozen_string_literal: true
 
 class CommunicationTemplate < ApplicationRecord
+  # Constants
+  TEMPLATE_TYPES = %w[
+    general
+    password_reset
+    company_user_invitation
+    portal_user_invitation
+    tenant_invitation
+  ].freeze
+  
   # Validations
   validates :name, presence: true, length: { maximum: 255 }
   validates :channel, presence: true, inclusion: { in: %w[email sms] }
   validates :body_template, presence: true
   validates :subject_template, presence: true, if: -> { channel == 'email' }
+  validates :template_type, inclusion: { in: TEMPLATE_TYPES }, allow_nil: true
   
   # Scopes
   scope :active, -> { where(active: true) }
   scope :for_channel, ->(channel) { where(channel: channel) }
   scope :by_category, ->(category) { where(category: category) }
+  scope :by_type, ->(type) { where(template_type: type) }
+  scope :platform, -> { where(scope_type: 'Platform').or(where(scope_type: nil)) }
+  scope :for_company, ->(company_id) { where(scope_type: 'Company', scope_id: company_id) }
   
   # Associations
   has_many :communications, foreign_key: :template_id, dependent: :nullify
+  belongs_to :scope, polymorphic: true, optional: true
   
   # Callbacks
   before_validation :extract_variables

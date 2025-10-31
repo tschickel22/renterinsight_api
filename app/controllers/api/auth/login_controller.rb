@@ -19,18 +19,18 @@ module Api
             return
           end
 
-          access_token = generate_access_token(user)
-          refresh_token = generate_refresh_token(user)
-
+          # Generate tokens using JsonWebToken for consistency with ApplicationController
+          tokens = JsonWebToken.generate_token_pair(user)
+          
           user.update(last_sign_in_at: Time.current)
 
-          set_refresh_token_cookie(refresh_token)
+          set_refresh_token_cookie(tokens[:refresh_token])
 
           render json: {
             success: true,
             message: 'Login successful',
-            token: access_token,
-            refreshToken: refresh_token,
+            token: tokens[:access_token],
+            refreshToken: tokens[:refresh_token],
             user: {
               id: user.id,
               email: user.email,
@@ -84,14 +84,18 @@ module Api
         end
 
         begin
-          decoded = JWT.decode(
-            refresh_token,
-            Rails.application.credentials.jwt_refresh_secret || ENV['JWT_REFRESH_SECRET'],
-            true,
-            { algorithm: 'HS256' }
-          )[0]
+          # Use JsonWebToken for consistency
+          decoded = JsonWebToken.decode(refresh_token)
+          
+          unless decoded && decoded[:type] == 'refresh'
+            render json: {
+              success: false,
+              message: 'Invalid refresh token'
+            }, status: :unauthorized
+            return
+          end
 
-          user = User.find(decoded['user_id'])
+          user = User.find(decoded[:user_id])
 
           if user.inactive? || user.suspended?
             render json: {
@@ -101,17 +105,13 @@ module Api
             return
           end
 
-          new_access_token = generate_access_token(user)
+          # Generate new access token
+          new_access_token = JsonWebToken.generate_access_token(user)
 
           render json: {
             success: true,
             token: new_access_token
           }, status: :ok
-        rescue JWT::DecodeError => e
-          render json: {
-            success: false,
-            message: 'Invalid or expired refresh token'
-          }, status: :unauthorized
         rescue ActiveRecord::RecordNotFound
           render json: {
             success: false,
@@ -167,20 +167,20 @@ module Api
         end
 
         token = header.split(' ').last
-        begin
-          decoded = JWT.decode(
-            token,
-            Rails.application.credentials.jwt_secret || ENV['JWT_SECRET'],
-            true,
-            { algorithm: 'HS256' }
-          )[0]
-
-          @current_user = User.find(decoded['user_id'])
-        rescue JWT::DecodeError => e
+        
+        # Use JsonWebToken for consistency with ApplicationController
+        decoded = JsonWebToken.decode(token)
+        
+        unless decoded
           render json: {
             success: false,
             message: 'Invalid or expired token'
           }, status: :unauthorized
+          return
+        end
+        
+        begin
+          @current_user = User.find(decoded[:user_id])
         rescue ActiveRecord::RecordNotFound
           render json: {
             success: false,
@@ -189,35 +189,8 @@ module Api
         end
       end
 
-      def generate_access_token(user)
-        payload = {
-          user_id: user.id,
-          email: user.email,
-          user_type: determine_user_type(user),
-          role: user.role,
-          exp: 24.hours.from_now.to_i
-        }
-
-        JWT.encode(
-          payload,
-          Rails.application.credentials.jwt_secret || ENV['JWT_SECRET'],
-          'HS256'
-        )
-      end
-
-      def generate_refresh_token(user)
-        payload = {
-          user_id: user.id,
-          email: user.email,
-          exp: 7.days.from_now.to_i
-        }
-
-        JWT.encode(
-          payload,
-          Rails.application.credentials.jwt_refresh_secret || ENV['JWT_REFRESH_SECRET'],
-          'HS256'
-        )
-      end
+      # Removed generate_access_token and generate_refresh_token methods
+      # Now using JsonWebToken.generate_token_pair for consistency
 
       def set_refresh_token_cookie(token)
         cookies[:refresh_token] = {
