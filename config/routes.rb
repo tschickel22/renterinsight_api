@@ -33,6 +33,13 @@ Rails.application.routes.draw do
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
+      # ==================== SERVICE TICKETS ====================
+      resources :service_tickets, path: 'service-tickets' do
+        collection do
+          get :stats
+        end
+      end
+      
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
         member do
