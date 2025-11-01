@@ -446,7 +446,11 @@ Rails.application.routes.draw do
       
       # Communication templates - Namespaced RESTful routes
       namespace :communications do
-        resources :templates, only: [:index, :show, :create, :update, :destroy]
+        resources :templates, only: [:index, :show, :create, :update, :destroy] do
+          member do
+            post :test
+          end
+        end
       end
     end
   end

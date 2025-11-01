@@ -4,7 +4,7 @@ module Api
   module Platform
     module Communications
       class TemplatesController < ApplicationController
-        before_action :set_template, only: [:show, :update, :destroy]
+        before_action :set_template, only: [:show, :update, :destroy, :test]
         
         # GET /api/platform/communications/templates
         def index
@@ -71,6 +71,67 @@ module Api
           }
         end
         
+        # POST /api/platform/communications/templates/:id/test
+        def test
+          recipient = params[:recipient]
+          company_id = params[:company_id] || @template.company_id
+          
+          unless recipient.present?
+            return render json: {
+              success: false,
+              error: 'Recipient is required'
+            }, status: :unprocessable_entity
+          end
+          
+          begin
+            # Get communication settings (platform + company override)
+            company = company_id ? ::Company.find(company_id) : nil
+            settings = get_communication_settings(company, @template.channel)
+            
+            # Generate sample context for template rendering
+            sample_context = generate_sample_context(@template.template_type)
+            
+            # Render template
+            rendered = @template.render(sample_context)
+            
+            # Send test message based on channel
+            result = if @template.channel == 'email'
+              send_test_email(
+                to: recipient,
+                subject: rendered[:subject] || @template.subject,
+                body: rendered[:body],
+                from_email: settings[:from_email],
+                from_name: settings[:from_name]
+              )
+            else # sms
+              send_test_sms(
+                to: recipient,
+                body: rendered[:body],
+                from_number: settings[:from_number]
+              )
+            end
+            
+            if result[:success]
+              render json: {
+                success: true,
+                message: "Test #{@template.channel} sent successfully to #{recipient}"
+              }
+            else
+              render json: {
+                success: false,
+                error: result[:error] || 'Failed to send test message'
+              }, status: :unprocessable_entity
+            end
+          rescue => e
+            Rails.logger.error "[TemplatesController#test] Error: #{e.message}"
+            Rails.logger.error e.backtrace.first(5).join("\n")
+            render json: {
+              success: false,
+              error: e.message
+            }, status: :internal_server_error
+          end
+        end
+        
         private
         
         def set_template
@@ -111,6 +172,113 @@ module Api
             createdAt: template.created_at,
             updatedAt: template.updated_at
           }
+        end
+        
+        # Get communication settings with platform defaults + company overrides
+        def get_communication_settings(company, channel)
+          # Start with platform settings
+          platform_comms = PlatformSetting.communications
+          
+          # Get channel-specific settings
+          channel_key = channel.to_sym
+          platform_settings = platform_comms[channel_key] || {}
+          
+          # Override with company settings if available
+          if company
+            company_comms = company.communications_settings
+            if company_comms && company_comms[channel]
+              company_settings = company_comms[channel].deep_symbolize_keys
+              platform_settings = platform_settings.deep_merge(company_settings)
+            end
+          end
+          
+          # Convert to consistent format
+          if channel == 'email'
+            {
+              from_email: platform_settings[:fromEmail] || platform_settings[:from_email],
+              from_name: platform_settings[:fromName] || platform_settings[:from_name],
+              provider: platform_settings[:provider]
+            }
+          else # sms
+            {
+              from_number: platform_settings[:fromNumber] || platform_settings[:from_number],
+              provider: platform_settings[:provider]
+            }
+          end
+        end
+        
+        # Generate sample context data based on template type
+        def generate_sample_context(template_type)
+          case template_type
+          when 'company_user_invitation'
+            {
+              user_name: 'John Doe',
+              user_email: 'john.doe@example.com',
+              company_name: 'Demo Company',
+              role_name: 'Admin',
+              login_url: 'https://app.example.com/login',
+              admin_email: 'admin@example.com',
+              admin_name: 'System Administrator',
+              setup_instructions: 'Click the link above to set your password and access your account.'
+            }
+          when 'password_reset'
+            {
+              user_name: 'John Doe',
+              reset_url: 'https://app.example.com/reset-password/token123',
+              expiry_time: '1 hour'
+            }
+          when 'quote'
+            {
+              customer_name: 'Jane Smith',
+              quote_number: 'Q-12345',
+              quote_total: '$1,234.56',
+              company_name: 'Demo Company'
+            }
+          else
+            # Generic sample data
+            {
+              name: 'John Doe',
+              company_name: 'Demo Company',
+              date: Time.current.strftime('%B %d, %Y'),
+              message: 'This is a test message'
+            }
+          end
+        end
+        
+        # Send test email using CommunicationMailer
+        def send_test_email(to:, subject:, body:, from_email:, from_name:)
+          begin
+            CommunicationMailer.send_communication(
+              to: to,
+              subject: "[TEST] #{subject}",
+              body: body,
+              from_email: from_email,
+              from_name: from_name
+            ).deliver_now
+            
+            { success: true }
+          rescue => e
+            Rails.logger.error "[TemplatesController] Email send failed: #{e.message}"
+            { success: false, error: e.message }
+          end
+        end
+        
+        # Send test SMS using Twilio provider
+        def send_test_sms(to:, body:, from_number:)
+          begin
+            # Use Twilio provider directly
+            provider = Providers::Sms::TwilioProvider.new(company: nil)
+            result = provider.send_message(
+              to: to,
+              from: from_number,
+              body: "[TEST] #{body}"
+            )
+            
+            { success: true, external_id: result[:external_id] }
+          rescue => e
+            Rails.logger.error "[TemplatesController] SMS send failed: #{e.message}"
+            { success: false, error: e.message }
+          end
         end
       end
     end

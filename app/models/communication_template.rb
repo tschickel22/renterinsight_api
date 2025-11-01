@@ -65,4 +65,7 @@ class CommunicationTemplate < ApplicationRecord
       body: content
     }
   end
+  
+  # Alias for render_with_variables
+  alias_method :render, :render_with_variables
 end
