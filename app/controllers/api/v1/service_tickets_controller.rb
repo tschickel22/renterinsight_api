@@ -78,7 +78,7 @@ module Api
       
       def set_company
         # TODO: Get company from current_user when auth is implemented
-        @company = Company.first
+        @company = ::Company.first
       end
       
       def service_ticket_params

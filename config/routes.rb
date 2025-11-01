@@ -189,6 +189,15 @@ Rails.application.routes.draw do
   mount ActionCable.server => '/cable'
 
   namespace :api, defaults: { format: :json } do
+    # ==================== COMPANIES API ====================
+    resources :companies, only: [] do
+      resources :users, controller: 'companies/users' do
+        member do
+          post :resend_invitation
+        end
+      end
+    end
+    
     # ==================== USERS API ====================
     resources :users, only: %i[index show create update destroy]
     

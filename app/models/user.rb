@@ -3,6 +3,8 @@
 class User < ApplicationRecord
   has_secure_password
   
+  # Associations
+  belongs_to :company, optional: true
   has_many :activities, dependent: :nullify
   has_many :reminders, dependent: :destroy
 
