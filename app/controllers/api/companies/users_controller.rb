@@ -10,7 +10,10 @@ module Api
       def index
         users = @company.users
         
-        render json: users.map { |user| serialize_user(user) }
+        render json: {
+          success: true,
+          users: users.map { |user| serialize_user(user) }
+        }
       end
       
       # GET /api/companies/:company_id/users/:id

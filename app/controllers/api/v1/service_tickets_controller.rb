@@ -18,12 +18,16 @@ module Api
         @service_tickets = @service_tickets.assigned_to(params[:assigned_to]) if params[:assigned_to].present?
         @service_tickets = @service_tickets.where(account_id: params[:account_id]) if params[:account_id].present?
         
-        render json: @service_tickets.map { |ticket| serialize_ticket(ticket) }
+        render json: {
+          data: @service_tickets.map { |ticket| serialize_ticket(ticket) }
+        }
       end
       
       # GET /api/v1/service-tickets/:id
       def show
-        render json: serialize_ticket(@service_ticket)
+        render json: {
+          data: serialize_ticket(@service_ticket)
+        }
       end
       
       # POST /api/v1/service-tickets
@@ -31,7 +35,7 @@ module Api
         @service_ticket = @company.service_tickets.new(service_ticket_params)
         
         if @service_ticket.save
-          render json: serialize_ticket(@service_ticket), status: :created
+          render json: { data: serialize_ticket(@service_ticket) }, status: :created
         else
           render json: { errors: @service_ticket.errors.full_messages }, status: :unprocessable_entity
         end
@@ -40,7 +44,7 @@ module Api
       # PATCH/PUT /api/v1/service-tickets/:id
       def update
         if @service_ticket.update(service_ticket_params)
-          render json: serialize_ticket(@service_ticket)
+          render json: { data: serialize_ticket(@service_ticket) }
         else
           render json: { errors: @service_ticket.errors.full_messages }, status: :unprocessable_entity
         end
@@ -56,7 +60,7 @@ module Api
       def stats
         tickets = @company.service_tickets
         
-        stats = {
+        stats_data = {
           total: tickets.count,
           open: tickets.open.count,
           in_progress: tickets.in_progress.count,
@@ -65,7 +69,7 @@ module Api
           total_revenue: tickets.sum { |t| t.total_cost }
         }
         
-        render json: stats
+        render json: { data: stats_data }
       end
       
       private
