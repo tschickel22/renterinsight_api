@@ -3,8 +3,8 @@
 module Api
   module V1
     class ServiceTicketsController < ApplicationController
-      before_action :set_service_ticket, only: [:show, :update, :destroy]
       before_action :set_company
+      before_action :set_service_ticket, only: [:show, :update, :destroy]
       
       # GET /api/v1/service-tickets
       def index

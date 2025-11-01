@@ -445,6 +445,11 @@ Rails.application.routes.draw do
       post 'communications/sms', to: 'communications#sms'
       
       # Communication templates
+      namespace :communications do
+        resources :templates, only: [:index, :show, :create, :update, :destroy]
+      end
+      
+      # Legacy template routes (deprecated, use namespaced version above)
       get 'communications/templates', to: 'communications#index_templates'
       post 'communications/templates', to: 'communications#create_template'
       get 'communications/templates/:id', to: 'communications#show_template'
