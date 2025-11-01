@@ -18,12 +18,12 @@ class CreateServiceTickets < ActiveRecord::Migration[8.0]
       t.date :scheduled_date
       t.text :notes
       
-      # Parts and Labor (JSONB for flexibility)
-      t.jsonb :parts, default: []
-      t.jsonb :labor, default: []
+      # Parts and Labor (JSON for flexibility - Rails uses jsonb in Postgres, json in SQLite)
+      t.json :parts, default: []
+      t.json :labor, default: []
       
       # Custom fields
-      t.jsonb :custom_fields, default: {}
+      t.json :custom_fields, default: {}
       
       t.timestamps
     end

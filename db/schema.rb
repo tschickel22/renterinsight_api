@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_01_000000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -294,10 +294,17 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
     t.text "description"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "template_type", default: "general"
+    t.string "scope_type"
+    t.bigint "scope_id"
+    t.boolean "is_default", default: false
     t.index ["active"], name: "index_communication_templates_on_active"
     t.index ["category"], name: "index_communication_templates_on_category"
     t.index ["channel"], name: "index_communication_templates_on_channel"
     t.index ["name"], name: "index_communication_templates_on_name"
+    t.index ["scope_type", "scope_id"], name: "index_communication_templates_on_scope_type_and_scope_id"
+    t.index ["template_type", "channel", "scope_type", "scope_id"], name: "idx_comm_templates_type_channel_scope"
+    t.index ["template_type"], name: "index_communication_templates_on_template_type"
   end
 
   create_table "communication_threads", force: :cascade do |t|
@@ -561,6 +568,43 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
   end
 
+  create_table "invitations", force: :cascade do |t|
+    t.string "invitation_type", null: false
+    t.string "token_digest", null: false
+    t.string "email", null: false
+    t.string "phone"
+    t.string "status", default: "pending", null: false
+    t.string "recipient_name"
+    t.json "recipient_data", default: {}
+    t.integer "invited_by_id", null: false
+    t.integer "company_id"
+    t.string "role"
+    t.json "permissions", default: []
+    t.string "delivery_method", null: false
+    t.datetime "sent_at"
+    t.datetime "delivered_at"
+    t.datetime "viewed_at"
+    t.datetime "accepted_at"
+    t.datetime "expires_at", null: false
+    t.integer "resend_count", default: 0
+    t.datetime "last_sent_at"
+    t.string "ip_address"
+    t.string "user_agent"
+    t.integer "attempts", default: 0
+    t.text "message"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_invitations_on_company_id_and_status"
+    t.index ["company_id"], name: "index_invitations_on_company_id"
+    t.index ["email"], name: "index_invitations_on_email"
+    t.index ["expires_at"], name: "index_invitations_on_expires_at"
+    t.index ["invitation_type", "status"], name: "index_invitations_on_invitation_type_and_status"
+    t.index ["invited_by_id"], name: "index_invitations_on_invited_by_id"
+    t.index ["status"], name: "index_invitations_on_status"
+    t.index ["token_digest"], name: "index_invitations_on_token_digest", unique: true
+  end
+
   create_table "land_parcels", force: :cascade do |t|
     t.integer "company_id", null: false
     t.string "parcel_number", null: false
@@ -595,10 +639,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
     t.datetime "updated_at", null: false
     t.decimal "cost_basis", precision: 15, scale: 2
     t.text "cost_basis_notes"
+    t.text "boundary_geojson"
+    t.decimal "boundary_area_sq_ft", precision: 12, scale: 2
+    t.boolean "has_boundary", default: false, null: false
     t.index ["acquisition_date"], name: "index_land_parcels_on_acquisition_date"
     t.index ["city", "state"], name: "index_land_parcels_on_city_and_state"
     t.index ["company_id", "parcel_number"], name: "index_land_parcels_on_company_id_and_parcel_number", unique: true
     t.index ["company_id"], name: "index_land_parcels_on_company_id"
+    t.index ["has_boundary"], name: "index_land_parcels_on_has_boundary"
     t.index ["is_deleted"], name: "index_land_parcels_on_is_deleted"
     t.index ["status"], name: "index_land_parcels_on_status"
     t.index ["zoning_type"], name: "index_land_parcels_on_zoning_type"
@@ -705,25 +753,26 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
     t.integer "company_id", null: false
     t.string "name", null: false
     t.string "address"
-    t.decimal "latitude", precision: 10, scale: 8
-    t.decimal "longitude", precision: 11, scale: 8
-    t.text "boundary"
+    t.decimal "latitude", precision: 10, scale: 6
+    t.decimal "longitude", precision: 10, scale: 6
+    t.json "boundary", default: "{}"
     t.integer "lot_count", default: 0
     t.boolean "detected_from_satellite", default: false
-    t.string "industry_type", default: "both"
+    t.string "industry_type"
     t.string "created_by"
+    t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.index ["company_id", "deleted_at"], name: "index_lot_map_layouts_on_company_id_and_deleted_at"
     t.index ["company_id"], name: "index_lot_map_layouts_on_company_id"
-    t.index ["created_at"], name: "index_lot_map_layouts_on_created_at"
     t.index ["industry_type"], name: "index_lot_map_layouts_on_industry_type"
+    t.index ["name"], name: "index_lot_map_layouts_on_name"
   end
 
   create_table "lot_map_lots", force: :cascade do |t|
     t.integer "layout_id", null: false
     t.string "number", null: false
-    t.text "position"
-    t.string "status", default: "empty"
+    t.json "position", default: "{}"
     t.integer "assigned_inventory_id"
     t.string "assigned_inventory_info"
     t.string "area"
@@ -731,10 +780,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["assigned_inventory_id"], name: "index_lot_map_lots_on_assigned_inventory_id"
-    t.index ["created_at"], name: "index_lot_map_lots_on_created_at"
+    t.index ["layout_id", "number"], name: "index_lot_map_lots_on_layout_id_and_number", unique: true
     t.index ["layout_id"], name: "index_lot_map_lots_on_layout_id"
     t.index ["number"], name: "index_lot_map_lots_on_number"
-    t.index ["status"], name: "index_lot_map_lots_on_status"
   end
 
   create_table "notes", force: :cascade do |t|
@@ -883,6 +931,39 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
     t.index ["user_id"], name: "index_reminders_on_user_id"
   end
 
+  create_table "service_tickets", force: :cascade do |t|
+    t.integer "company_id", null: false
+    t.integer "account_id"
+    t.integer "contact_id"
+    t.integer "vehicle_id"
+    t.string "customer_id"
+    t.string "customer_type"
+    t.string "title", null: false
+    t.text "description"
+    t.string "priority", default: "medium", null: false
+    t.string "status", default: "open", null: false
+    t.string "assigned_to"
+    t.date "scheduled_date"
+    t.date "completed_date"
+    t.text "parts"
+    t.text "labor"
+    t.text "notes"
+    t.text "custom_fields"
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_service_tickets_on_account_id"
+    t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
+    t.index ["company_id"], name: "index_service_tickets_on_company_id"
+    t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
+    t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
+    t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
+    t.index ["priority"], name: "index_service_tickets_on_priority"
+    t.index ["scheduled_date"], name: "index_service_tickets_on_scheduled_date"
+    t.index ["status"], name: "index_service_tickets_on_status"
+    t.index ["vehicle_id"], name: "index_service_tickets_on_vehicle_id"
+  end
+
   create_table "settings", force: :cascade do |t|
     t.string "scope_type"
     t.bigint "scope_id"
@@ -996,8 +1077,26 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
     t.string "phone"
     t.string "magic_link_token"
     t.datetime "magic_link_expires_at"
+    t.boolean "mfa_enabled", default: false
+    t.string "mfa_secret"
+    t.json "mfa_backup_codes", default: []
+    t.datetime "mfa_verified_at"
+    t.integer "invitation_id"
+    t.datetime "deleted_at"
+    t.text "deleted_reason"
+    t.boolean "phone_verified", default: false, null: false
+    t.string "mfa_sms_code"
+    t.datetime "mfa_sms_expires_at"
+    t.string "mfa_method", default: "sms"
+    t.index ["deleted_at"], name: "index_users_on_deleted_at"
+    t.index ["email", "invitation_id"], name: "index_users_on_email_and_invitation_id"
+    t.index ["invitation_id"], name: "index_users_on_invitation_id"
     t.index ["magic_link_token"], name: "index_users_on_magic_link_token", unique: true
+    t.index ["mfa_enabled"], name: "index_users_on_mfa_enabled"
+    t.index ["mfa_method"], name: "index_users_on_mfa_method"
+    t.index ["mfa_sms_expires_at"], name: "index_users_on_mfa_sms_expires_at"
     t.index ["phone"], name: "index_users_on_phone"
+    t.index ["phone_verified"], name: "index_users_on_phone_verified"
   end
 
   create_table "vehicles", force: :cascade do |t|
@@ -1204,6 +1303,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_submissions", "leads"
+  add_foreign_key "invitations", "companies"
+  add_foreign_key "invitations", "users", column: "invited_by_id"
   add_foreign_key "land_parcels", "companies"
   add_foreign_key "lead_activities", "lead_activities", column: "related_activity_id"
   add_foreign_key "lead_activities", "leads"
@@ -1214,9 +1315,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
   add_foreign_key "leads", "accounts", column: "converted_account_id"
   add_foreign_key "leads", "companies"
   add_foreign_key "leads", "sources"
-  add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id", on_delete: :cascade
-  add_foreign_key "lot_map_layouts", "companies", on_delete: :cascade
-  add_foreign_key "lot_map_lots", "lot_map_layouts", column: "layout_id", on_delete: :cascade
+  add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id"
+  add_foreign_key "lot_map_history_entries", "users"
+  add_foreign_key "lot_map_history_entries", "vehicles", column: "inventory_id"
+  add_foreign_key "lot_map_layouts", "companies"
+  add_foreign_key "lot_map_lots", "lot_map_layouts", column: "layout_id"
+  add_foreign_key "lot_map_lots", "vehicles", column: "assigned_inventory_id"
   add_foreign_key "notes", "users"
   add_foreign_key "nurture_enrollments", "leads"
   add_foreign_key "nurture_enrollments", "nurture_sequences"
@@ -1226,11 +1330,16 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_26_000001) do
   add_foreign_key "quotes", "contacts"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
+  add_foreign_key "service_tickets", "accounts"
+  add_foreign_key "service_tickets", "companies"
+  add_foreign_key "service_tickets", "contacts"
+  add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "tag_assignments", "tags"
   add_foreign_key "territories", "users"
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"
   add_foreign_key "territory_users", "users"
+  add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"
