@@ -88,6 +88,25 @@ module Api
             company = company_id ? ::Company.find(company_id) : nil
             settings = get_communication_settings(company, @template.channel)
             
+            Rails.logger.info "[TemplatesController#test] Settings: #{settings.inspect}"
+            
+            # Validate required settings
+            if @template.channel == 'email'
+              unless settings[:from_email].present? && settings[:from_name].present?
+                return render json: {
+                  success: false,
+                  error: 'Email settings are not configured. Please configure platform email settings first.'
+                }, status: :unprocessable_entity
+              end
+            else # sms
+              unless settings[:from_number].present?
+                return render json: {
+                  success: false,
+                  error: 'SMS settings are not configured. Please configure platform SMS settings first.'
+                }, status: :unprocessable_entity
+              end
+            end
+            
             # Generate sample context for template rendering
             sample_context = generate_sample_context(@template.template_type)
             
@@ -177,7 +196,7 @@ module Api
         # Get communication settings with platform defaults + company overrides
         def get_communication_settings(company, channel)
           # Start with platform settings
-          platform_comms = PlatformSetting.communications
+          platform_comms = PlatformSetting.communications || {}
           
           # Get channel-specific settings
           channel_key = channel.to_sym
@@ -192,17 +211,17 @@ module Api
             end
           end
           
-          # Convert to consistent format
+          # Convert to consistent format with defaults
           if channel == 'email'
             {
-              from_email: platform_settings[:fromEmail] || platform_settings[:from_email],
-              from_name: platform_settings[:fromName] || platform_settings[:from_name],
-              provider: platform_settings[:provider]
+              from_email: platform_settings[:fromEmail] || platform_settings[:from_email] || ENV['EMAIL_FROM'] || 'noreply@renterinsight.com',
+              from_name: platform_settings[:fromName] || platform_settings[:from_name] || ENV['EMAIL_FROM_NAME'] || 'RenterInsight',
+              provider: platform_settings[:provider] || ENV['EMAIL_PROVIDER'] || 'smtp'
             }
           else # sms
             {
-              from_number: platform_settings[:fromNumber] || platform_settings[:from_number],
-              provider: platform_settings[:provider]
+              from_number: platform_settings[:fromNumber] || platform_settings[:from_number] || ENV['SMS_FROM_NUMBER'] || ENV['TWILIO_FROM_NUMBER'],
+              provider: platform_settings[:provider] || ENV['SMS_PROVIDER'] || 'twilio'
             }
           end
         end
