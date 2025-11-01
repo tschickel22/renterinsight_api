@@ -78,3 +78,4 @@ gem 'prawn-table', '~> 0.2'
 
 # Use Postgres in production (Render)
 gem 'pg', '~> 1.5', group: :production
+gem 'rotp', '~> 6.3'

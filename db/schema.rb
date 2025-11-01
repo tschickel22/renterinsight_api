@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_31_023723) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_31_210000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -935,26 +935,28 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_31_023723) do
     t.integer "company_id", null: false
     t.integer "account_id"
     t.integer "contact_id"
-    t.bigint "customer_id"
-    t.bigint "vehicle_id"
+    t.integer "vehicle_id"
+    t.string "customer_id"
+    t.string "customer_type"
     t.string "title", null: false
     t.text "description"
     t.string "priority", default: "medium", null: false
     t.string "status", default: "open", null: false
     t.string "assigned_to"
-    t.datetime "scheduled_date"
-    t.datetime "completed_date"
-    t.json "parts", default: []
-    t.json "labor", default: []
+    t.date "scheduled_date"
+    t.date "completed_date"
+    t.text "parts"
+    t.text "labor"
     t.text "notes"
-    t.json "custom_fields", default: {}
+    t.text "custom_fields"
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
+    t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
-    t.index ["customer_id"], name: "index_service_tickets_on_customer_id"
+    t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
     t.index ["priority"], name: "index_service_tickets_on_priority"
     t.index ["scheduled_date"], name: "index_service_tickets_on_scheduled_date"
@@ -1082,12 +1084,21 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_31_023723) do
     t.integer "invitation_id"
     t.datetime "deleted_at"
     t.text "deleted_reason"
+    t.boolean "phone_verified", default: false, null: false
+    t.string "mfa_sms_code"
+    t.datetime "mfa_sms_expires_at"
+    t.string "mfa_method", default: "sms"
+    t.integer "company_id"
+    t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
     t.index ["email", "invitation_id"], name: "index_users_on_email_and_invitation_id"
     t.index ["invitation_id"], name: "index_users_on_invitation_id"
     t.index ["magic_link_token"], name: "index_users_on_magic_link_token", unique: true
     t.index ["mfa_enabled"], name: "index_users_on_mfa_enabled"
+    t.index ["mfa_method"], name: "index_users_on_mfa_method"
+    t.index ["mfa_sms_expires_at"], name: "index_users_on_mfa_sms_expires_at"
     t.index ["phone"], name: "index_users_on_phone"
+    t.index ["phone_verified"], name: "index_users_on_phone_verified"
   end
 
   create_table "vehicles", force: :cascade do |t|
@@ -1324,11 +1335,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_31_023723) do
   add_foreign_key "service_tickets", "accounts"
   add_foreign_key "service_tickets", "companies"
   add_foreign_key "service_tickets", "contacts"
+  add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "tag_assignments", "tags"
   add_foreign_key "territories", "users"
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"
   add_foreign_key "territory_users", "users"
+  add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "win_loss_reports", "deals"

@@ -19,6 +19,21 @@ module Api
             return
           end
 
+          # Check if user has MFA enabled
+          if user.mfa_enabled?
+            # Generate temporary token for MFA verification
+            temp_token = JsonWebToken.generate_mfa_temp_token(user)
+            
+            render json: {
+              success: true,
+              mfa_required: true,
+              temp_token: temp_token,
+              message: 'Please enter your authentication code'
+            }, status: :ok
+            return
+          end
+
+          # No MFA - proceed with normal login flow
           # Generate tokens using JsonWebToken for consistency with ApplicationController
           tokens = JsonWebToken.generate_token_pair(user)
           

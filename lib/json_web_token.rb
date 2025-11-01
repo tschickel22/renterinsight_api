@@ -58,6 +58,17 @@ class JsonWebToken
     }, REFRESH_EXP.from_now)
   end
   
+  # Generate a temporary token for MFA verification
+  # This token is short-lived and only valid for MFA verification
+  # @param user [User] The user to generate a token for
+  # @return [String] The encoded temporary MFA token
+  def self.generate_mfa_temp_token(user)
+    encode({
+      user_id: user.id,
+      type: 'mfa_temp'
+    }, 5.minutes.from_now) # Short 5-minute expiry
+  end
+  
   # Generate both access and refresh tokens
   # @param user [User] The user to generate tokens for
   # @return [Hash] Hash containing :access_token and :refresh_token

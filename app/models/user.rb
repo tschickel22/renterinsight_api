@@ -4,6 +4,7 @@ class User < ApplicationRecord
   has_secure_password
   
   # Associations
+  belongs_to :company, optional: true
   belongs_to :invitation, optional: true
   has_many :activities, dependent: :nullify
   has_many :reminders, dependent: :destroy
@@ -66,5 +67,10 @@ class User < ApplicationRecord
   
   def deleted?
     deleted_at.present?
+  end
+  
+  # MFA helper methods
+  def mfa_enabled?
+    mfa_enabled == true
   end
 end

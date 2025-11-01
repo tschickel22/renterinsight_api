@@ -52,6 +52,14 @@ Rails.application.routes.draw do
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
       end
       
+      # ==================== SERVICE TICKETS ====================
+      resources :service_tickets, path: 'service-tickets' do
+        collection do
+          get :stats
+          get :export
+        end
+      end
+      
       # ==================== LAND MANAGEMENT ====================
       resources :land_parcels, path: 'land-parcels' do
         collection do
@@ -62,6 +70,24 @@ Rails.application.routes.draw do
       end
       
       # ==================== ACTIVITIES ====================
+      
+      # ==================== MFA (Multi-Factor Authentication) ====================
+      scope path: 'mfa', controller: 'mfa' do
+        # Shared MFA routes
+        get 'status', action: :status
+        post 'disable', action: :disable
+        
+        # TOTP routes (keep existing)
+        post 'enroll', action: :enroll
+        post 'verify', action: :verify
+        post 'backup_codes/regenerate', action: :regenerate_backup_codes
+        
+        # SMS routes (new - parallel to TOTP)
+        post 'sms/enroll', action: :sms_enroll
+        post 'sms/verify', action: :sms_verify
+        post 'sms/resend', action: :sms_resend
+        post 'sms/disable', action: :sms_disable
+      end
       get 'activities/recent', to: 'activities#recent'
       
       # ==================== QUOTES ====================
@@ -415,6 +441,13 @@ Rails.application.routes.draw do
         post :test_email, on: :collection
         post :test_sms, on: :collection
       end
+      
+      # Company Security Settings
+      scope path: ':company_id/security' do
+        get 'settings', to: 'security_settings#show'
+        patch 'settings', to: 'security_settings#update'
+        get 'mfa_stats', to: 'security_settings#mfa_stats'
+      end
     end
 
     # ==================== PLATFORM SETTINGS ====================
@@ -473,6 +506,26 @@ Rails.application.routes.draw do
         post :validate, on: :collection
         delete :logout, on: :collection
       end
+    end
+    
+    # MFA (Multi-Factor Authentication) - Phase 3: User Enrollment
+    scope path: 'mfa' do
+      # Status
+      get 'status', to: 'mfa#status'
+      
+      # Enrollment
+      post 'enroll/start', to: 'mfa#enroll_start'
+      post 'enroll/verify', to: 'mfa#enroll_verify'
+      
+      # Backup Codes
+      get 'backup-codes', to: 'mfa#backup_codes_status'
+      post 'backup-codes/regenerate', to: 'mfa#regenerate_backup_codes'
+      
+      # Disable
+      post 'disable', to: 'mfa#disable'
+      
+      # Login Verification (Phase 4)
+      post 'verify-login', to: 'mfa#verify_login'
     end
     
     # Phase 6 - Unified Invitation System
