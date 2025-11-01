@@ -444,19 +444,10 @@ Rails.application.routes.draw do
       post 'communications/email', to: 'communications#email'
       post 'communications/sms', to: 'communications#sms'
       
-      # Communication templates
+      # Communication templates - Namespaced RESTful routes
       namespace :communications do
         resources :templates, only: [:index, :show, :create, :update, :destroy]
       end
-      
-      # Legacy template routes (deprecated, use namespaced version above)
-      get 'communications/templates', to: 'communications#index_templates'
-      post 'communications/templates', to: 'communications#create_template'
-      get 'communications/templates/:id', to: 'communications#show_template'
-      patch 'communications/templates/:id', to: 'communications#update_template'
-      put 'communications/templates/:id', to: 'communications#update_template'
-      delete 'communications/templates/:id', to: 'communications#destroy_template'
-      delete 'communications/templates/:id/attachments/:attachment_id', to: 'communications#delete_template_attachment'
     end
   end
 

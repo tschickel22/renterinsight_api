@@ -1,5 +1,8 @@
 class CreateCommunicationTemplates < ActiveRecord::Migration[8.0]
   def change
+    # Check if table already exists before creating
+    return if table_exists?(:communication_templates)
+    
     create_table :communication_templates do |t|
       t.string :name, null: false
       t.string :template_type, null: false  # 'company_user_invitation', 'password_reset', etc.
