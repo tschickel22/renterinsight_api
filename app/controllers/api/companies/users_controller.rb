@@ -10,9 +10,6 @@ module Api
       def index
         users = @company.users
         
-        # Include deleted users if requested
-        users = ::User.where(company_id: @company.id).with_deleted if params[:include_deleted] == 'true'
-        
         render json: users.map { |user| serialize_user(user) }
       end
       
