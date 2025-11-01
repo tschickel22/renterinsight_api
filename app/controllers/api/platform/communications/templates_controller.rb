@@ -195,19 +195,30 @@ module Api
         
         # Get communication settings with platform defaults + company overrides
         def get_communication_settings(company, channel)
-          # Start with platform settings
-          platform_comms = PlatformSetting.communications || {}
+          # Start with platform settings from database
+          platform_comms = PlatformSetting.communications
           
-          # Get channel-specific settings
-          channel_key = channel.to_sym
-          platform_settings = platform_comms[channel_key] || {}
+          Rails.logger.info "[TemplatesController] Platform communications: #{platform_comms.inspect}"
+          
+          # Get channel-specific settings - handle both string and symbol keys
+          platform_settings = if platform_comms
+            platform_comms[channel.to_sym] || platform_comms[channel.to_s] || {}
+          else
+            {}
+          end
+          
+          # Symbolize keys for consistent access
+          platform_settings = platform_settings.deep_symbolize_keys if platform_settings.respond_to?(:deep_symbolize_keys)
+          
+          Rails.logger.info "[TemplatesController] Platform settings for #{channel}: #{platform_settings.inspect}"
           
           # Override with company settings if available
           if company
             company_comms = company.communications_settings
-            if company_comms && company_comms[channel]
-              company_settings = company_comms[channel].deep_symbolize_keys
+            if company_comms && (company_comms[channel] || company_comms[channel.to_s])
+              company_settings = (company_comms[channel] || company_comms[channel.to_s]).deep_symbolize_keys
               platform_settings = platform_settings.deep_merge(company_settings)
+              Rails.logger.info "[TemplatesController] Merged with company settings: #{platform_settings.inspect}"
             end
           end
           
