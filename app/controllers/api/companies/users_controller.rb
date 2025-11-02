@@ -24,8 +24,11 @@ module Api
       # POST /api/companies/:company_id/users
       # POST /api/companies/:company_id/invitations (alias)
       def create
-        # Handle both user-style params (wrapped) and invitation-style params (unwrapped)
-        user_attributes = if params[:user].present?
+        # Prioritize invitation-style params (unwrapped with recipientName)
+        # over user-style params (wrapped in user: {})
+        user_attributes = if params[:recipientName].present? || params[:recipient_name].present?
+          invitation_params
+        elsif params[:user].present?
           user_params
         else
           invitation_params
