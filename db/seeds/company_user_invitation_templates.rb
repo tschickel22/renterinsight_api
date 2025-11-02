@@ -70,24 +70,7 @@ email_template.assign_attributes(
     </html>
   HTML
   is_active: true,
-  is_default: true,
-  merge_variables: {
-    recipient_name: 'Full name of the invited user',
-    first_name: 'First name of the invited user',
-    last_name: 'Last name of the invited user',
-    email: 'Email address of the invited user',
-    phone: 'Phone number of the invited user',
-    role: 'System role identifier',
-    role_name: 'Human-readable role name',
-    company_name: 'Name of the company',
-    invited_by: 'Name of the person who sent the invitation',
-    invitation_url: 'URL to accept the invitation and set password',
-    invitation_token: 'Unique invitation token',
-    invitation_expires: 'Formatted expiration date and time',
-    days_until_expiry: 'Number of days until expiration',
-    setup_instructions: 'Instructions for setting up the account',
-    login_url: 'URL to the login page'
-  }.to_json
+  is_default: true
 )
 
 if email_template.save
@@ -114,22 +97,7 @@ sms_template.assign_attributes(
     Link expires {{ days_until_expiry }} days. Questions? Contact your admin.
   SMS
   is_active: true,
-  is_default: true,
-  merge_variables: {
-    recipient_name: 'Full name of the invited user',
-    first_name: 'First name of the invited user',
-    last_name: 'Last name of the invited user',
-    email: 'Email address of the invited user',
-    phone: 'Phone number of the invited user',
-    role: 'System role identifier',
-    role_name: 'Human-readable role name',
-    company_name: 'Name of the company',
-    invited_by: 'Name of the person who sent the invitation',
-    invitation_url: 'URL to accept the invitation and set password',
-    invitation_token: 'Unique invitation token',
-    invitation_expires: 'Formatted expiration date and time',
-    days_until_expiry: 'Number of days until expiration'
-  }.to_json
+  is_default: true
 )
 
 if sms_template.save
