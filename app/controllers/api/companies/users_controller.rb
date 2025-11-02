@@ -36,6 +36,9 @@ module Api
         
         @user = @company.users.new(user_attributes)
         
+        # Set status to pending for invited users
+        @user.status = 'pending'
+        
         # Generate temporary password
         temp_password = SecureRandom.alphanumeric(12)
         @user.password = temp_password
