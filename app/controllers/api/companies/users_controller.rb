@@ -18,7 +18,10 @@ module Api
       
       # GET /api/companies/:company_id/users/:id
       def show
-        render json: serialize_user(@user)
+        render json: {
+          success: true,
+          user: serialize_user(@user)
+        }
       end
       
       # POST /api/companies/:company_id/users
@@ -144,19 +147,39 @@ module Api
       
       # PATCH/PUT /api/companies/:company_id/users/:id
       def update
+        # ✅ FIX: Always return {success: true, user: {...}} format
         if @user.update(user_params)
-          render json: serialize_user(@user)
+          render json: {
+            success: true,
+            user: serialize_user(@user),
+            message: 'User updated successfully'
+          }
         else
-          render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
+          render json: { 
+            success: false,
+            errors: @user.errors.full_messages,
+            error: @user.errors.full_messages.join(', ')
+          }, status: :unprocessable_entity
         end
       end
       
       # DELETE /api/companies/:company_id/users/:id
       def destroy
+        # ✅ FIX: Explicitly return status: :ok to prevent Rails from returning 204 No Content
+        reason = params[:reason] || 'No reason provided'
+        
         if @user.destroy
-          head :no_content
+          render json: {
+            success: true,
+            message: 'User deleted successfully',
+            reason: reason
+          }, status: :ok  # ← CRITICAL: Must explicitly set :ok, otherwise Rails returns 204 No Content
         else
-          render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
+          render json: { 
+            success: false,
+            errors: @user.errors.full_messages,
+            error: @user.errors.full_messages.join(', ')
+          }, status: :unprocessable_entity
         end
       end
       
@@ -293,13 +316,14 @@ module Api
       def set_company
         @company = ::Company.find(params[:company_id])
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Company not found' }, status: :not_found
+        render json: { success: false, error: 'Company not found' }, status: :not_found
       end
       
       def set_user
+        # All company users should have company_id
         @user = @company.users.find(params[:id])
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'User not found' }, status: :not_found
+        render json: { success: false, error: 'User not found' }, status: :not_found
       end
       
       def user_params

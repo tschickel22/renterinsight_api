@@ -41,17 +41,38 @@ module Api
       user = User.find(params[:id])
       
       if user.update(user_params)
-        render json: user_json(user)
+        render json: {
+          success: true,
+          user: user_json(user),
+          message: 'User updated successfully'
+        }
       else
-        render json: { errors: user.errors.full_messages }, status: :unprocessable_entity
+        render json: { 
+          success: false,
+          errors: user.errors.full_messages,
+          error: user.errors.full_messages.join(', ')
+        }, status: :unprocessable_entity
       end
     end
     
     # DELETE /api/users/:id
     def destroy
       user = User.find(params[:id])
-      user.destroy
-      head :no_content
+      reason = params[:reason] || 'No reason provided'
+      
+      if user.destroy
+        render json: {
+          success: true,
+          message: 'User deleted successfully',
+          reason: reason
+        }, status: :ok  # ← CRITICAL: Must explicitly set :ok, otherwise Rails returns 204 No Content
+      else
+        render json: { 
+          success: false,
+          errors: user.errors.full_messages,
+          error: user.errors.full_messages.join(', ')
+        }, status: :unprocessable_entity
+      end
     end
     
     private
