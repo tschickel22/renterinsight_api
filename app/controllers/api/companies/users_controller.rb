@@ -160,9 +160,131 @@ module Api
       
       # POST /api/companies/:company_id/users/:id/resend_invitation
       def resend_invitation
-        # TODO: Implement resend invitation email
+        # Check if user is still in pending/invited status
+        unless ['pending', 'invited', 'inactive'].include?(@user.status)
+          return render json: { 
+            success: false,
+            error: 'User has already accepted invitation' 
+          }, status: :unprocessable_entity
+        end
         
-        render json: { message: 'Invitation sent successfully' }
+        # Generate new invitation token
+        invitation_token = SecureRandom.urlsafe_base64(32)
+        invitation_expires = 7.days.from_now
+        
+        # Update user with new token and timestamps
+        @user.update!(
+          invitation_token: invitation_token,
+          invitation_sent_at: Time.current,
+          invitation_expires_at: invitation_expires
+        )
+        
+        # Build invitation acceptance URL
+        frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
+        invitation_url = "#{frontend_url}/invitations/accept?token=#{invitation_token}"
+        
+        # Prepare invitation data for template
+        template_context = {
+          recipient_name: [@user.first_name, @user.last_name].compact.join(' '),
+          first_name: @user.first_name,
+          last_name: @user.last_name,
+          email: @user.email,
+          phone: @user.phone,
+          role: @user.role,
+          role_name: @user.role.to_s.titleize,
+          company_name: @company.name,
+          invited_by: current_user ? current_user.name : 'Admin',
+          invitation_url: invitation_url,
+          invitation_token: invitation_token,
+          invitation_expires: invitation_expires.strftime('%B %d, %Y at %I:%M %p'),
+          days_until_expiry: 7,
+          setup_instructions: 'Click the link above to set your password and access your account.',
+          login_url: "#{frontend_url}/login"
+        }
+        
+        # Find appropriate templates
+        email_template = CommunicationTemplate.find_by(
+          template_type: 'company_user_invitation',
+          channel: 'email',
+          is_active: true
+        )
+        
+        sms_template = CommunicationTemplate.find_by(
+          template_type: 'company_user_invitation',
+          channel: 'sms',
+          is_active: true
+        )
+        
+        # Determine delivery method (check params or default to both)
+        delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'both'
+        
+        sent_channels = []
+        errors = []
+        
+        begin
+          # Send email invitation
+          if (delivery_method == 'email' || delivery_method == 'both') && email_template
+            CommunicationService.send_communication(
+              communicable: @user,
+              channel: 'email',
+              to: @user.email,
+              template: email_template,
+              template_context: template_context,
+              category: 'transactional',
+              portal_visible: false,
+              skip_preference_check: true
+            )
+            sent_channels << 'email'
+          end
+        rescue => e
+          Rails.logger.error "Failed to send email invitation: #{e.message}"
+          errors << "Email: #{e.message}"
+        end
+        
+        begin
+          # Send SMS invitation
+          if (delivery_method == 'sms' || delivery_method == 'both') && @user.phone.present? && sms_template
+            CommunicationService.send_communication(
+              communicable: @user,
+              channel: 'sms',
+              to: @user.phone,
+              template: sms_template,
+              template_context: template_context,
+              category: 'transactional',
+              skip_preference_check: true
+            )
+            sent_channels << 'sms'
+          end
+        rescue => e
+          Rails.logger.error "Failed to send SMS invitation: #{e.message}"
+          errors << "SMS: #{e.message}"
+        end
+        
+        # Return response based on what was sent
+        if sent_channels.any?
+          render json: { 
+            success: true,
+            message: "Invitation resent successfully via #{sent_channels.join(' and ')}",
+            user: serialize_user(@user.reload),
+            sent_via: sent_channels,
+            errors: errors.any? ? errors : nil
+          }
+        else
+          render json: { 
+            success: false,
+            error: 'Failed to send invitation',
+            details: errors
+          }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error "Error in resend_invitation: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        
+        render json: { 
+          success: false,
+          error: 'Failed to resend invitation',
+          details: e.message
+        }, status: :internal_server_error
       end
       
       private
