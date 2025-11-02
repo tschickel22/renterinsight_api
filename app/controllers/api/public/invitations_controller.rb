@@ -43,18 +43,15 @@ module Api
           }, status: :unprocessable_entity
         end
         
-        # Return user info for account setup
+        # Return user info for account setup in format frontend expects
         render json: {
           success: true,
-          user: {
-            id: user.id,
-            email: user.email,
-            first_name: user.first_name,
-            last_name: user.last_name,
-            role: user.role,
-            company_id: user.company_id,
-            company_name: user.company&.name
-          },
+          email: user.email,
+          recipientName: [user.first_name, user.last_name].compact.join(' '),
+          role: user.role,
+          companyName: user.company&.name || 'Unknown Company',
+          expiresAt: user.invitation_expires_at&.iso8601,
+          isExpired: false,
           token: token
         }
       end
@@ -63,7 +60,10 @@ module Api
       def accept
         token = params[:token]
         password = params[:password]
-        password_confirmation = params[:password_confirmation]
+        password_confirmation = params[:password_confirmation] || params[:password] # Use password if confirmation not provided
+        first_name = params[:firstName] || params[:first_name]
+        last_name = params[:lastName] || params[:last_name]
+        phone = params[:phone]
         
         unless token.present?
           return render json: { 
@@ -72,10 +72,10 @@ module Api
           }, status: :bad_request
         end
         
-        unless password.present? && password_confirmation.present?
+        unless password.present?
           return render json: { 
             success: false,
-            error: 'Password and confirmation are required' 
+            error: 'Password is required' 
           }, status: :bad_request
         end
         
@@ -112,23 +112,39 @@ module Api
         end
         
         # Update user with new password and activate account
-        if user.update(
+        update_attrs = {
           password: password,
           password_confirmation: password_confirmation,
           status: 'active',
           invitation_token: nil,
           invitation_expires_at: nil
-        )
+        }
+        
+        # Update name fields if provided
+        update_attrs[:first_name] = first_name if first_name.present?
+        update_attrs[:last_name] = last_name if last_name.present?
+        update_attrs[:phone] = phone if phone.present?
+        
+        if user.update(update_attrs)
+          # Generate JWT token for immediate login
+          token = JsonWebToken.encode(
+            user_id: user.id,
+            email: user.email,
+            company_id: user.company_id,
+            role: user.role
+          )
+          
           render json: {
             success: true,
             message: 'Account activated successfully',
+            token: token,
             user: {
               id: user.id,
               email: user.email,
-              first_name: user.first_name,
-              last_name: user.last_name,
+              firstName: user.first_name,
+              lastName: user.last_name,
               role: user.role,
-              company_id: user.company_id
+              companyId: user.company_id
             }
           }
         else
