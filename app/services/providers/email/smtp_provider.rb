@@ -60,7 +60,12 @@ module Providers
           
           log_info("✅ SMTP accepted email for delivery")
           log_info("Message-ID: #{message_id}")
-          log_info("SMTP Response: #{delivery_result[:response]}")
+          
+          # delivery_result may be nil if send_via_action_mailer only returns message_id
+          if delivery_result.present?
+            log_info("SMTP Response: #{delivery_result[:response]}")
+          end
+          
           log_info("="*80)
           log_info("⚠️  NOTE: Email accepted by SMTP does NOT guarantee delivery!")
           log_info("Gmail may silently filter to spam or reject after acceptance.")
@@ -72,7 +77,7 @@ module Providers
             details: {
               smtp_server: config[:address],
               port: config[:port],
-              smtp_response: delivery_result[:response],
+              smtp_response: delivery_result&.dig(:response),
               accepted_at: Time.current.iso8601
             }
           )
