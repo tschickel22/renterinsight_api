@@ -2,7 +2,7 @@
 
 module Api
   class InvitationsController < ApplicationController
-    skip_before_action :authenticate_user!, only: [:verify_token, :accept]
+    # Public endpoints - no authentication required for invitation acceptance
     
     # GET /api/invitations/accept?token=xxx
     # Verify token and return user info (doesn't accept yet)
