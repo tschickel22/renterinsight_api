@@ -196,6 +196,14 @@ Rails.application.routes.draw do
           post :resend_invitation
         end
       end
+      
+      # Alias invitations to users controller for frontend compatibility
+      resources :invitations, controller: 'companies/users', only: [:index, :create] do
+        member do
+          post :resend, action: :resend_invitation
+          delete '', action: :destroy
+        end
+      end
     end
     
     # ==================== USERS API ====================

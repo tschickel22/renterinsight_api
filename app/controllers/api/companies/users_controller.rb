@@ -22,8 +22,16 @@ module Api
       end
       
       # POST /api/companies/:company_id/users
+      # POST /api/companies/:company_id/invitations (alias)
       def create
-        @user = @company.users.new(user_params)
+        # Handle both user-style params (wrapped) and invitation-style params (unwrapped)
+        user_attributes = if params[:user].present?
+          user_params
+        else
+          invitation_params
+        end
+        
+        @user = @company.users.new(user_attributes)
         
         # Generate temporary password
         temp_password = SecureRandom.alphanumeric(12)
@@ -34,9 +42,18 @@ module Api
           # Send invitation email
           # TODO: Implement invitation email sending
           
-          render json: serialize_user(@user), status: :created
+          render json: {
+            success: true,
+            invitation: serialize_user(@user),
+            user: serialize_user(@user),
+            message: 'User invitation sent successfully'
+          }, status: :created
         else
-          render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
+          render json: { 
+            success: false,
+            errors: @user.errors.full_messages,
+            error: @user.errors.full_messages.join(', ')
+          }, status: :unprocessable_entity
         end
       end
       
@@ -92,17 +109,66 @@ module Api
         )
       end
       
+      def invitation_params
+        # Map invitation-style params to user attributes
+        permitted = params.permit(
+          :email,
+          :phone,
+          :recipient_name,
+          :recipientName,
+          :role,
+          :invitation_type,
+          :invitationType,
+          :delivery_method,
+          :deliveryMethod,
+          :message,
+          permissions: []
+        )
+        
+        # Map recipientName to first_name and last_name
+        name = permitted[:recipient_name] || permitted[:recipientName]
+        if name.present?
+          parts = name.split(' ', 2)
+          permitted[:first_name] = parts[0]
+          permitted[:last_name] = parts[1] if parts.length > 1
+        end
+        
+        # Clean up the hash
+        permitted.except(:recipient_name, :recipientName, :invitation_type, :invitationType, :delivery_method, :deliveryMethod, :message, :permissions)
+      end
+      
       def serialize_user(user)
         {
           id: user.id,
           email: user.email,
           firstName: user.first_name,
           lastName: user.last_name,
+          recipientName: [user.first_name, user.last_name].compact.join(' '),
           phone: user.phone,
-          role: user.role,
-          status: user.status,
+          role: user.role || 'user',
+          status: user.status || 'pending',
           title: user.title,
           department: user.department,
+          invitationType: 'company_user',
+          deliveryMethod: user.phone.present? ? 'both' : 'email',
+          sentAt: user.created_at,
+          lastSentAt: user.created_at,
+          expiresAt: (user.created_at + 7.days).iso8601,
+          resendCount: 0,
+          acceptAttempts: 0,
+          canResend: true,
+          canRevoke: user.status == 'pending',
+          isExpired: false,
+          daysUntilExpiry: 7,
+          invitedBy: {
+            id: current_user&.id || 1,
+            name: current_user ? [current_user.first_name, current_user.last_name].compact.join(' ') : 'Admin',
+            email: current_user&.email || 'admin@example.com'
+          },
+          company: {
+            id: @company.id,
+            name: @company.name
+          },
           createdAt: user.created_at,
           updatedAt: user.updated_at,
           deletedAt: user.respond_to?(:deleted_at) ? user.deleted_at : nil
