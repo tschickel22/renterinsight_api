@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_01_000000) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_02_040000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -286,24 +286,21 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_01_000000) do
   create_table "communication_templates", force: :cascade do |t|
     t.string "name", null: false
     t.string "channel", null: false
-    t.text "subject_template"
-    t.text "body_template", null: false
-    t.string "category"
+    t.text "subject"
+    t.text "body", null: false
     t.json "variables", default: "{}"
-    t.boolean "active", default: true
+    t.boolean "is_active", default: true
     t.text "description"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "template_type", default: "general"
-    t.string "scope_type"
-    t.bigint "scope_id"
     t.boolean "is_default", default: false
-    t.index ["active"], name: "index_communication_templates_on_active"
-    t.index ["category"], name: "index_communication_templates_on_category"
+    t.integer "company_id"
     t.index ["channel"], name: "index_communication_templates_on_channel"
+    t.index ["company_id"], name: "index_communication_templates_on_company_id"
+    t.index ["is_active"], name: "index_communication_templates_on_is_active"
     t.index ["name"], name: "index_communication_templates_on_name"
-    t.index ["scope_type", "scope_id"], name: "index_communication_templates_on_scope_type_and_scope_id"
-    t.index ["template_type", "channel", "scope_type", "scope_id"], name: "idx_comm_templates_type_channel_scope"
+    t.index ["template_type", "channel"], name: "idx_comm_templates_type_channel_scope"
     t.index ["template_type"], name: "index_communication_templates_on_template_type"
   end
 
@@ -1088,9 +1085,17 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_01_000000) do
     t.string "mfa_sms_code"
     t.datetime "mfa_sms_expires_at"
     t.string "mfa_method", default: "sms"
+    t.integer "company_id"
+    t.string "title"
+    t.string "department"
+    t.string "invitation_token"
+    t.datetime "invitation_sent_at"
+    t.datetime "invitation_expires_at"
+    t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
     t.index ["email", "invitation_id"], name: "index_users_on_email_and_invitation_id"
     t.index ["invitation_id"], name: "index_users_on_invitation_id"
+    t.index ["invitation_token"], name: "index_users_on_invitation_token", unique: true
     t.index ["magic_link_token"], name: "index_users_on_magic_link_token", unique: true
     t.index ["mfa_enabled"], name: "index_users_on_mfa_enabled"
     t.index ["mfa_method"], name: "index_users_on_mfa_method"
@@ -1339,6 +1344,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_01_000000) do
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"
   add_foreign_key "territory_users", "users"
+  add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "win_loss_reports", "deals"
