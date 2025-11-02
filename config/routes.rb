@@ -191,10 +191,8 @@ Rails.application.routes.draw do
   namespace :api, defaults: { format: :json } do
     # ==================== INVITATIONS ====================
   namespace :public do
-    namespace :invitations do
-      get 'verify', to: 'invitations#verify_token'
-      post 'accept', to: 'invitations#accept'
-    end
+    get 'invitations/verify', to: 'invitations#verify_token'
+    post 'invitations/accept', to: 'invitations#accept'
   end
   
   # ==================== COMPANIES API ====================
