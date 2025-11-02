@@ -42,8 +42,64 @@ module Api
         @user.password_confirmation = temp_password
         
         if @user.save
-          # Send invitation email
-          # TODO: Implement invitation email sending
+          # Send invitation based on delivery method
+          begin
+            delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'email'
+            
+            # Prepare invitation data for template
+            template_context = {
+              recipient_name: [@user.first_name, @user.last_name].compact.join(' '),
+              email: @user.email,
+              phone: @user.phone,
+              role: @user.role,
+              company_name: @company.name,
+              invited_by: current_user ? current_user.name : 'Admin'
+            }
+            
+            # Find appropriate template
+            email_template = CommunicationTemplate.find_by(
+              template_type: 'company_user_invitation',
+              channel: 'email',
+              is_active: true
+            )
+            
+            sms_template = CommunicationTemplate.find_by(
+              template_type: 'company_user_invitation',
+              channel: 'sms',
+              is_active: true
+            )
+            
+            # Send email invitation
+            if (delivery_method == 'email' || delivery_method == 'both') && email_template
+              CommunicationService.send_communication(
+                communicable: @user,
+                channel: 'email',
+                to: @user.email,
+                template: email_template,
+                template_context: template_context,
+                category: 'transactional',
+                portal_visible: false,
+                skip_preference_check: true
+              )
+            end
+            
+            # Send SMS invitation
+            if (delivery_method == 'sms' || delivery_method == 'both') && @user.phone.present? && sms_template
+              CommunicationService.send_communication(
+                communicable: @user,
+                channel: 'sms',
+                to: @user.phone,
+                template: sms_template,
+                template_context: template_context,
+                category: 'transactional',
+                skip_preference_check: true
+              )
+            end
+          rescue => e
+            Rails.logger.error "Failed to send invitation: #{e.message}"
+            Rails.logger.error e.backtrace.join("\n")
+            # Don't fail the request if communication fails
+          end
           
           render json: {
             success: true,
