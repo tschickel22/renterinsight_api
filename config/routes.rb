@@ -189,7 +189,13 @@ Rails.application.routes.draw do
   mount ActionCable.server => '/cable'
 
   namespace :api, defaults: { format: :json } do
-    # ==================== COMPANIES API ====================
+    # ==================== INVITATIONS ====================
+  namespace :invitations do
+    get 'accept', to: 'invitations#verify_token'
+    post 'accept', to: 'invitations#accept'
+  end
+  
+  # ==================== COMPANIES API ====================
     resources :companies, only: [] do
       resources :users, controller: 'companies/users' do
         member do
