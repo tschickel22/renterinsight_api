@@ -138,7 +138,7 @@ module Api
       end
       
       def serialize_user(user)
-        {
+        result = {
           id: user.id,
           email: user.email,
           firstName: user.first_name,
@@ -157,22 +157,40 @@ module Api
           resendCount: 0,
           acceptAttempts: 0,
           canResend: true,
-          canRevoke: user.status == 'pending',
+          canRevoke: (user.status || 'pending') == 'pending',
           isExpired: false,
           daysUntilExpiry: 7,
-          invitedBy: {
-            id: current_user&.id || 1,
-            name: current_user ? [current_user.first_name, current_user.last_name].compact.join(' ') : 'Admin',
-            email: current_user&.email || 'admin@example.com'
-          },
-          company: {
+          createdAt: user.created_at,
+          updatedAt: user.updated_at
+        }
+        
+        # Add invitedBy if current_user exists
+        if current_user
+          result[:invitedBy] = {
+            id: current_user.id,
+            name: [current_user.first_name, current_user.last_name].compact.join(' '),
+            email: current_user.email
+          }
+        else
+          result[:invitedBy] = {
+            id: 1,
+            name: 'Admin',
+            email: 'admin@example.com'
+          }
+        end
+        
+        # Add company if @company is set
+        if @company
+          result[:company] = {
             id: @company.id,
             name: @company.name
-          },
-          createdAt: user.created_at,
-          updatedAt: user.updated_at,
-          deletedAt: user.respond_to?(:deleted_at) ? user.deleted_at : nil
-        }
+          }
+        end
+        
+        # Add deletedAt if the model supports it
+        result[:deletedAt] = user.deleted_at if user.respond_to?(:deleted_at)
+        
+        result
       end
     end
   end
