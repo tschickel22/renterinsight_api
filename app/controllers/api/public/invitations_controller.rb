@@ -44,7 +44,7 @@ module Api
         end
         
         # Return user info for account setup in format frontend expects
-        render json: {
+        response_data = {
           success: true,
           email: user.email,
           recipientName: [user.first_name, user.last_name].compact.join(' '),
@@ -54,6 +54,10 @@ module Api
           isExpired: false,
           token: token
         }
+        
+        Rails.logger.info "[INVITATION VERIFY] Returning response: #{response_data.to_json}"
+        
+        render json: response_data
       end
       
       # POST /api/public/invitations/accept
