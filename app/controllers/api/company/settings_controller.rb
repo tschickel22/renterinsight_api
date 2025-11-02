@@ -219,13 +219,13 @@ module Api
         {
           email: {
             provider: 'smtp',
-            fromEmail: 'noreply@example.com',
-            fromName: 'Demo Company',
-            isEnabled: true
+            fromEmail: nil,
+            fromName: nil,
+            isEnabled: false
           },
           sms: {
             provider: 'twilio',
-            fromNumber: '+1234567890',
+            fromNumber: nil,
             isEnabled: false
           }
         }
