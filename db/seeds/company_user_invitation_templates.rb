@@ -6,9 +6,7 @@ puts "🌱 Seeding Company User Invitation templates..."
 # Email Template for Company User Invitation
 email_template = CommunicationTemplate.find_or_initialize_by(
   template_type: 'company_user_invitation',
-  channel: 'email',
-  scope_type: 'Platform',
-  scope_id: nil
+  channel: 'email'
 )
 
 email_template.assign_attributes(
@@ -101,9 +99,7 @@ end
 # SMS Template for Company User Invitation
 sms_template = CommunicationTemplate.find_or_initialize_by(
   template_type: 'company_user_invitation',
-  channel: 'sms',
-  scope_type: 'Platform',
-  scope_id: nil
+  channel: 'sms'
 )
 
 sms_template.assign_attributes(
