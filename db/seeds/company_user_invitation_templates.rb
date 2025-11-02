@@ -4,12 +4,13 @@
 puts "🌱 Seeding Company User Invitation templates..."
 
 # Email Template for Company User Invitation
-email_template = CommunicationTemplate.find_or_initialize_by(
+# Delete old template and create fresh one
+CommunicationTemplate.where(
   template_type: 'company_user_invitation',
   channel: 'email'
-)
+).destroy_all
 
-email_template.assign_attributes(
+email_template = CommunicationTemplate.create!(
   name: 'Company User Invitation - Email',
   description: 'Default email template for inviting new users to join your company',
   subject: 'Welcome to {{ company_name }} - Set Up Your Account',
@@ -70,22 +71,21 @@ email_template.assign_attributes(
     </html>
   HTML
   is_active: true,
-  is_default: true
+  is_default: true,
+  template_type: 'company_user_invitation',
+  channel: 'email'
 )
 
-if email_template.save
-  puts "✅ Created/updated Email template for company_user_invitation"
-else
-  puts "❌ Failed to create Email template: #{email_template.errors.full_messages.join(', ')}"
-end
+puts "✅ Created Email template for company_user_invitation"
 
 # SMS Template for Company User Invitation
-sms_template = CommunicationTemplate.find_or_initialize_by(
+# Delete old template and create fresh one
+CommunicationTemplate.where(
   template_type: 'company_user_invitation',
   channel: 'sms'
-)
+).destroy_all
 
-sms_template.assign_attributes(
+sms_template = CommunicationTemplate.create!(
   name: 'Company User Invitation - SMS',
   description: 'Default SMS template for inviting new users to join your company',
   subject: nil, # SMS doesn't have subject
@@ -97,13 +97,11 @@ sms_template.assign_attributes(
     Link expires {{ days_until_expiry }} days. Questions? Contact your admin.
   SMS
   is_active: true,
-  is_default: true
+  is_default: true,
+  template_type: 'company_user_invitation',
+  channel: 'sms'
 )
 
-if sms_template.save
-  puts "✅ Created/updated SMS template for company_user_invitation"
-else
-  puts "❌ Failed to create SMS template: #{sms_template.errors.full_messages.join(', ')}"
-end
+puts "✅ Created SMS template for company_user_invitation"
 
 puts "✨ Company User Invitation template seeding complete!"
