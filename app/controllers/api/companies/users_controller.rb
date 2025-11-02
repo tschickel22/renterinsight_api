@@ -42,6 +42,21 @@ module Api
         @user.password_confirmation = temp_password
         
         if @user.save
+          # Generate invitation token
+          invitation_token = SecureRandom.urlsafe_base64(32)
+          invitation_expires = 7.days.from_now
+          
+          # Store token in user record (you may need to add these fields to users table)
+          @user.update(
+            invitation_token: invitation_token,
+            invitation_sent_at: Time.current,
+            invitation_expires_at: invitation_expires
+          )
+          
+          # Build invitation acceptance URL
+          frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
+          invitation_url = "#{frontend_url}/invitations/accept?token=#{invitation_token}"
+          
           # Send invitation based on delivery method
           begin
             delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'email'
@@ -49,11 +64,20 @@ module Api
             # Prepare invitation data for template
             template_context = {
               recipient_name: [@user.first_name, @user.last_name].compact.join(' '),
+              first_name: @user.first_name,
+              last_name: @user.last_name,
               email: @user.email,
               phone: @user.phone,
               role: @user.role,
+              role_name: @user.role.to_s.titleize,
               company_name: @company.name,
-              invited_by: current_user ? current_user.name : 'Admin'
+              invited_by: current_user ? current_user.name : 'Admin',
+              invitation_url: invitation_url,
+              invitation_token: invitation_token,
+              invitation_expires: invitation_expires.strftime('%B %d, %Y at %I:%M %p'),
+              days_until_expiry: 7,
+              setup_instructions: 'Click the link above to set your password and access your account.',
+              login_url: "#{frontend_url}/login"
             }
             
             # Find appropriate template
