@@ -30,12 +30,21 @@ class CommunicationTemplate < ApplicationRecord
   # Available merge variables
   MERGE_VARIABLES = {
     'company_user_invitation' => %w[
-      user_name
+      recipient_name
+      first_name
+      last_name
+      email
+      phone
+      role
+      role_name
       company_name
-      login_url
+      invited_by
+      invitation_url
+      invitation_token
       invitation_expires
-      admin_name
-      admin_email
+      days_until_expiry
+      setup_instructions
+      login_url
     ],
     'password_reset' => %w[
       user_name

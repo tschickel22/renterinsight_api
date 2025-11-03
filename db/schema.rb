@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_02_040000) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_02_050000) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -1068,7 +1068,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_02_040000) do
     t.string "role", default: "staff"
     t.string "first_name"
     t.string "last_name"
-    t.string "status", default: "active"
+    t.string "status", default: "pending"
     t.datetime "last_sign_in_at"
     t.json "permissions", default: []
     t.string "phone"
