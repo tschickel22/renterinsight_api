@@ -9,7 +9,49 @@ class ApplicationController < ActionController::API
   private
 
   def authenticate
-    @current_company_id = (request.headers['X-Company-Id'] || 1).to_i
+    # Extract and verify JWT token
+    header = request.headers['Authorization']
+    
+    if header.present?
+      token = header.split(' ').last
+      
+      begin
+        decoded = JWT.decode(
+          token,
+          Rails.application.credentials.jwt_secret || ENV['JWT_SECRET'] || Rails.application.secret_key_base,
+          true,
+          { algorithm: 'HS256' }
+        )[0]
+        
+        @current_user = User.find_by(id: decoded['user_id'])
+        @current_company_id = @current_user&.company_id || decoded['company_id'] || 1
+        
+        # If user not found or token invalid, log and reject
+        unless @current_user
+          Rails.logger.warn "[ApplicationController] JWT decode error: User not found for id=#{decoded['user_id']}"
+          render json: { error: 'Unauthorized - Invalid or missing token' }, status: :unauthorized
+          return
+        end
+        
+      rescue JWT::ExpiredSignature => e
+        Rails.logger.info "[ApplicationController] JWT decode error: Signature has expired"
+        render json: { error: 'Unauthorized - Token has expired', expired: true }, status: :unauthorized
+        return
+      rescue JWT::DecodeError => e
+        Rails.logger.warn "[ApplicationController] JWT decode error: #{e.message}"
+        render json: { error: 'Unauthorized - Invalid or missing token' }, status: :unauthorized
+        return
+      end
+    else
+      # No authorization header - use fallback for development/legacy support
+      @current_company_id = (request.headers['X-Company-Id'] || 1).to_i
+      @current_user ||= User.first # Fallback for development
+      
+      unless Rails.env.development?
+        render json: { error: 'Unauthorized - Missing authorization header' }, status: :unauthorized
+        return
+      end
+    end
   end
 
   def current_company_id
@@ -17,10 +59,9 @@ class ApplicationController < ActionController::API
   end
 
   def current_user
-    # Temporary implementation until you add user authentication
-    # Returns a simple object with id and company association
-    @current_user ||= OpenStruct.new(id: 1, company_id: current_company_id)
+    @current_user ||= User.first # Fallback for development
   end
+  
   # Portal authentication helpers
   def current_portal_buyer
     return @current_portal_buyer if @current_portal_buyer

@@ -21,6 +21,17 @@ class Lead < ApplicationRecord
   scope :converted, -> { where(is_converted: true) }
   scope :not_converted, -> { where(is_converted: [false, nil]) }
 
+  # Helper method for full name
+  def full_name
+    if first_name.present? || last_name.present?
+      "#{first_name} #{last_name}".strip
+    elsif name.present?
+      name
+    else
+      email || "Lead ##{id}"
+    end
+  end
+
   # Instance methods for conversion
   def converted?
     is_converted == true
