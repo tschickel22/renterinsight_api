@@ -33,6 +33,13 @@ Rails.application.routes.draw do
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
+      # ==================== SERVICE TICKETS ====================
+      resources :service_tickets, path: 'service-tickets' do
+        collection do
+          get :stats
+        end
+      end
+      
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
         member do
@@ -218,6 +225,29 @@ Rails.application.routes.draw do
   mount ActionCable.server => '/cable'
 
   namespace :api, defaults: { format: :json } do
+    # ==================== INVITATIONS (User Invitations) ====================
+    namespace :public do
+      get 'invitations/verify', to: 'invitations#verify_token'
+      post 'invitations/accept', to: 'invitations#accept'
+    end
+    
+    # ==================== COMPANIES API ====================
+    resources :companies, only: [] do
+      resources :users, controller: 'companies/users' do
+        member do
+          post :resend_invitation
+        end
+      end
+      
+      # Alias invitations to users controller for frontend compatibility
+      resources :invitations, controller: 'companies/users', only: [:index, :create] do
+        member do
+          post :resend, action: :resend_invitation
+          delete '', action: :destroy
+        end
+      end
+    end
+    
     # ==================== USERS API ====================
     resources :users, only: %i[index show create update destroy] do
       member do
@@ -475,10 +505,12 @@ Rails.application.routes.draw do
       post 'communications/email', to: 'communications#email'
       post 'communications/sms', to: 'communications#sms'
       
-      # Communication templates
-      resources :communication_templates, path: 'communications/templates', only: [:index, :show, :create, :update, :destroy] do
-        member do
-          post :send_test, path: 'test'
+      # Communication templates - Namespaced RESTful routes
+      namespace :communications do
+        resources :templates, only: [:index, :show, :create, :update, :destroy] do
+          member do
+            post :test
+          end
         end
       end
     end
@@ -538,7 +570,7 @@ Rails.application.routes.draw do
       post 'verify-login', to: 'mfa#verify_login'
     end
     
-    # Phase 6 - Unified Invitation System
+    # Phase 6 - Unified Invitation System (User Invitations)
     # Public invitation endpoints (no auth required)
     namespace :public do
       get 'invitations/verify', to: 'invitations#verify'
@@ -559,10 +591,10 @@ Rails.application.routes.draw do
     end
   end
 
-  # Phase 4A & 4B - Portal
+  # Phase 4A & 4B - Portal (Portal User System)
   namespace :api do
     namespace :portal do
-      # Phase 4A - Authentication
+      # Phase 4A - Authentication (Portal Users)
       post 'auth/login', to: 'auth#login'
       post 'auth/request_magic_link', to: 'auth#request_magic_link'
       post 'auth/magic-link', to: 'auth#request_magic_link'

@@ -1,74 +1,81 @@
 # frozen_string_literal: true
 
+# == Schema Information
+#
+# Table name: service_tickets
+#
+#  id             :bigint           not null, primary key
+#  company_id     :bigint           not null
+#  account_id     :bigint
+#  contact_id     :bigint
+#  vehicle_id     :bigint
+#  title          :string           not null
+#  description    :text             not null
+#  status         :string           not null, default("open")
+#  priority       :string           not null, default("medium")
+#  assigned_to    :string
+#  scheduled_date :date
+#  notes          :text
+#  parts          :jsonb            default([])
+#  labor          :jsonb            default([])
+#  custom_fields  :jsonb            default({})
+#  created_at     :datetime         not null
+#  updated_at     :datetime         not null
+#
+
 class ServiceTicket < ApplicationRecord
   # Associations
   belongs_to :company
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
-  belongs_to :customer, optional: true, polymorphic: true
   belongs_to :vehicle, optional: true
-  
-  # JSON serialization for SQLite compatibility
-  serialize :parts, coder: JSON
-  serialize :labor, coder: JSON
-  serialize :custom_fields, coder: JSON
   
   # Validations
   validates :title, presence: true
-  validates :priority, presence: true, inclusion: { in: %w[low medium high urgent] }
-  validates :status, presence: true, inclusion: { in: %w[open in_progress waiting_parts completed cancelled] }
+  validates :description, presence: true
+  validates :status, presence: true, inclusion: { 
+    in: %w[open in_progress waiting_parts completed cancelled] 
+  }
+  validates :priority, presence: true, inclusion: { 
+    in: %w[low medium high urgent] 
+  }
   
   # Scopes
-  scope :active, -> { where(deleted_at: nil) }
   scope :open, -> { where(status: 'open') }
   scope :in_progress, -> { where(status: 'in_progress') }
   scope :completed, -> { where(status: 'completed') }
   scope :by_priority, ->(priority) { where(priority: priority) }
-  scope :by_status, ->(status) { where(status: status) }
-  scope :assigned_to, ->(user) { where(assigned_to: user) }
+  scope :assigned_to, ->(assignee) { where(assigned_to: assignee) }
+  scope :scheduled_between, ->(start_date, end_date) { where(scheduled_date: start_date..end_date) }
+  scope :recent, -> { order(created_at: :desc) }
   
   # Callbacks
-  before_save :set_completed_date, if: :status_changed_to_completed?
-  after_initialize :set_default_json_fields
+  before_validation :set_defaults
   
   # Instance methods
-  def soft_delete!
-    update!(deleted_at: Time.current)
+  def parts_total
+    parts.sum { |p| p['total'].to_f }
   end
   
-  def restore!
-    update!(deleted_at: nil)
-  end
-  
-  def deleted?
-    deleted_at.present?
-  end
-  
-  def total_parts_cost
-    (parts || []).sum { |part| (part['cost'].to_f || part['total'].to_f || 0) * (part['quantity'].to_i || 0) }
-  end
-  
-  def total_labor_cost
-    (labor || []).sum { |item| (item['hours'].to_f || 0) * (item['rate'].to_f || 0) }
+  def labor_total
+    labor.sum { |l| l['total'].to_f }
   end
   
   def total_cost
-    total_parts_cost + total_labor_cost
+    parts_total + labor_total
+  end
+  
+  def overdue?
+    scheduled_date && scheduled_date < Date.today && status != 'completed'
   end
   
   private
   
-  def set_default_json_fields
+  def set_defaults
+    self.status ||= 'open'
+    self.priority ||= 'medium'
     self.parts ||= []
     self.labor ||= []
     self.custom_fields ||= {}
-  end
-  
-  def status_changed_to_completed?
-    status == 'completed' && status_changed?
-  end
-  
-  def set_completed_date
-    self.completed_date = Time.current if completed_date.nil?
   end
 end

@@ -30,11 +30,24 @@ module Providers
       def send_message(to:, from:, subject:, body:, cc: nil, bcc: nil, reply_to: nil, metadata: {}, **options)
         require_config(:address, :port, :user_name, :password)
         
-        log_info("Sending email to #{to} via SMTP")
+        log_info("="*80)
+        log_info("SMTP EMAIL SEND ATTEMPT")
+        log_info("To: #{to}")
+        log_info("From: #{from}")
+        log_info("Subject: #{subject}")
+        log_info("CC: #{cc}") if cc.present?
+        log_info("BCC: #{bcc}") if bcc.present?
+        log_info("Reply-To: #{reply_to}") if reply_to.present?
+        log_info("Body length: #{body.length} characters")
+        log_info("SMTP Server: #{config[:address]}:#{config[:port]}")
+        log_info("SMTP Username: #{config[:user_name]}")
+        log_info("SMTP Authentication: #{config[:authentication]}")
+        log_info("SMTP Domain: #{config[:domain]}")
+        log_info("="*80)
         
         begin
           # Use ActionMailer to send
-          message_id = send_via_action_mailer(
+          message_id, delivery_result = send_via_action_mailer(
             to: to,
             from: from,
             subject: subject,
@@ -45,17 +58,35 @@ module Providers
             options: options
           )
           
-          log_info("Email sent successfully to #{to}, message_id: #{message_id}")
+          log_info("✅ SMTP accepted email for delivery")
+          log_info("Message-ID: #{message_id}")
+          
+          # delivery_result may be nil if send_via_action_mailer only returns message_id
+          if delivery_result.present?
+            log_info("SMTP Response: #{delivery_result[:response]}")
+          end
+          
+          log_info("="*80)
+          log_info("⚠️  NOTE: Email accepted by SMTP does NOT guarantee delivery!")
+          log_info("Gmail may silently filter to spam or reject after acceptance.")
+          log_info("Check: 1) Gmail Spam folder, 2) Gmail All Mail, 3) Gmail account security")
+          log_info("="*80)
           
           success_result(
             external_id: message_id,
             details: {
               smtp_server: config[:address],
-              port: config[:port]
+              port: config[:port],
+              smtp_response: delivery_result&.dig(:response),
+              accepted_at: Time.current.iso8601
             }
           )
         rescue => e
-          log_error("Failed to send email to #{to}: #{e.message}")
+          log_error("❌ SMTP ERROR")
+          log_error("Error Class: #{e.class}")
+          log_error("Error Message: #{e.message}")
+          log_error("Error Backtrace: #{e.backtrace.first(5).join('\n')}")
+          log_error("="*80)
           raise SendError, "SMTP send failed: #{e.message}"
         end
       end

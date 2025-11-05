@@ -3,148 +3,160 @@
 module Api
   module Public
     class InvitationsController < ApplicationController
-      skip_before_action :authenticate, only: [:verify, :accept]
+      # Public endpoints - no authentication required for invitation acceptance
       
       # GET /api/public/invitations/verify?token=xxx
-      def verify
+      def verify_token
         token = params[:token]
         
         unless token.present?
-          return render json: {
-            valid: false,
-            error: 'Token is required'
+          return render json: { 
+            success: false,
+            error: 'Invitation token is required' 
           }, status: :bad_request
         end
         
-        service = InvitationService.new(invited_by: nil)
-        result = service.verify_invitation(token)
+        user = User.find_by(invitation_token: token)
         
-        if result[:valid]
-          invitation = result[:invitation]
-          
-          render json: {
-            valid: true,
-            invitation: {
-              id: invitation.id,
-              invitationType: invitation.invitation_type,
-              email: invitation.email,
-              recipientName: invitation.recipient_name,
-              companyName: invitation.company&.name,
-              role: invitation.role,
-              message: invitation.message,
-              expiresAt: invitation.expires_at&.iso8601
-            }
-          }, status: :ok
-        else
-          render json: {
-            valid: false,
-            error: 'Invalid or expired invitation'
+        unless user
+          return render json: { 
+            success: false,
+            error: 'Invalid or expired invitation token' 
           }, status: :not_found
         end
-      rescue InvitationService::InvitationNotFoundError => e
-        render json: {
-          valid: false,
-          error: e.message
-        }, status: :not_found
-      rescue StandardError => e
-        Rails.logger.error("Invitation verification failed: #{e.message}")
-        render json: {
-          valid: false,
-          error: 'An error occurred while verifying the invitation'
-        }, status: :internal_server_error
+        
+        # Check if invitation has expired
+        if user.invitation_expires_at && user.invitation_expires_at < Time.current
+          return render json: { 
+            success: false,
+            error: 'This invitation has expired',
+            expired: true
+          }, status: :unprocessable_entity
+        end
+        
+        # Check if already accepted
+        if user.status == 'active'
+          return render json: { 
+            success: false,
+            error: 'This invitation has already been accepted',
+            already_accepted: true
+          }, status: :unprocessable_entity
+        end
+        
+        # Return user info for account setup in format frontend expects
+        response_data = {
+          success: true,
+          email: user.email,
+          recipientName: [user.first_name, user.last_name].compact.join(' '),
+          role: user.role,
+          companyName: user.company&.name || 'Unknown Company',
+          expiresAt: user.invitation_expires_at&.iso8601,
+          isExpired: false,
+          token: token
+        }
+        
+        Rails.logger.info "[INVITATION VERIFY] Returning response: #{response_data.to_json}"
+        
+        render json: response_data
       end
       
       # POST /api/public/invitations/accept
       def accept
         token = params[:token]
+        password = params[:password]
+        password_confirmation = params[:password_confirmation] || params[:password] # Use password if confirmation not provided
+        first_name = params[:firstName] || params[:first_name]
+        last_name = params[:lastName] || params[:last_name]
+        phone = params[:phone]
         
         unless token.present?
-          return render json: {
+          return render json: { 
             success: false,
-            error: 'Token is required'
+            error: 'Invitation token is required' 
           }, status: :bad_request
         end
         
-        service = InvitationService.new(invited_by: nil)
+        unless password.present?
+          return render json: { 
+            success: false,
+            error: 'Password is required' 
+          }, status: :bad_request
+        end
         
-        user_params = {
-          name: params[:name],
-          first_name: params[:first_name] || params[:firstName],
-          last_name: params[:last_name] || params[:lastName],
-          password: params[:password],
-          company_name: params[:company_name] || params[:companyName],
-          domain: params[:domain]
+        unless password == password_confirmation
+          return render json: { 
+            success: false,
+            error: 'Passwords do not match' 
+          }, status: :unprocessable_entity
+        end
+        
+        user = User.find_by(invitation_token: token)
+        
+        unless user
+          return render json: { 
+            success: false,
+            error: 'Invalid or expired invitation token' 
+          }, status: :not_found
+        end
+        
+        # Check if invitation has expired
+        if user.invitation_expires_at && user.invitation_expires_at < Time.current
+          return render json: { 
+            success: false,
+            error: 'This invitation has expired' 
+          }, status: :unprocessable_entity
+        end
+        
+        # Check if already accepted
+        if user.status == 'active'
+          return render json: { 
+            success: false,
+            error: 'This invitation has already been accepted' 
+          }, status: :unprocessable_entity
+        end
+        
+        # Update user with new password and activate account
+        update_attrs = {
+          password: password,
+          password_confirmation: password_confirmation,
+          status: 'active',
+          invitation_token: nil,
+          invitation_expires_at: nil
         }
         
-        result = service.accept_invitation(
-          token: token,
-          user_params: user_params,
-          ip_address: request.remote_ip,
-          user_agent: request.user_agent
-        )
+        # Update name fields if provided
+        update_attrs[:first_name] = first_name if first_name.present?
+        update_attrs[:last_name] = last_name if last_name.present?
+        update_attrs[:phone] = phone if phone.present?
         
-        if result[:success]
-          user = result[:user]
-          invitation = result[:invitation]
-          
-          # Generate JWT token pair for immediate login
-          tokens = JsonWebToken.generate_token_pair(user)
-          
-          # Build user response with both role and user_type for compatibility
-          user_response = {
-            id: user.id,
+        if user.update(update_attrs)
+          # Generate JWT token for immediate login
+          token = JsonWebToken.encode(
+            user_id: user.id,
             email: user.email,
-            name: user.name,
-            firstName: user.first_name,
-            lastName: user.last_name,
-            role: user.role,
-            user_type: user.role # Add user_type for AuthContext compatibility
-          }
-          
-          # Add company_id if user has one
-          user_response[:companyId] = user.company_id if user.respond_to?(:company_id) && user.company_id.present?
+            company_id: user.company_id,
+            role: user.role
+          )
           
           render json: {
             success: true,
-            message: 'Invitation accepted successfully',
-            user: user_response,
-            access_token: tokens[:access_token],
-            refresh_token: tokens[:refresh_token],
-            expires_in: tokens[:expires_in],
-            invitation: {
-              id: invitation.id,
-              type: invitation.invitation_type
+            message: 'Account activated successfully',
+            token: token,
+            user: {
+              id: user.id,
+              email: user.email,
+              firstName: user.first_name,
+              lastName: user.last_name,
+              role: user.role,
+              companyId: user.company_id
             }
-          }, status: :ok
+          }
         else
-          render json: {
+          render json: { 
             success: false,
-            error: result[:error]
+            error: user.errors.full_messages.join(', ')
           }, status: :unprocessable_entity
         end
-      rescue InvitationService::InvitationNotFoundError => e
-        render json: {
-          success: false,
-          error: 'Invalid or expired invitation'
-        }, status: :not_found
-      rescue InvitationService::InvitationExpiredError => e
-        render json: {
-          success: false,
-          error: 'This invitation has expired'
-        }, status: :gone
-      rescue InvitationService::InvitationAlreadyAcceptedError => e
-        render json: {
-          success: false,
-          error: 'This invitation has already been accepted'
-        }, status: :conflict
-      rescue StandardError => e
-        Rails.logger.error("Invitation acceptance failed: #{e.message}")
-        Rails.logger.error(e.backtrace.first(5).join("\n"))
-        
-        render json: {
-          success: false,
-          error: e.message
-        }, status: :internal_server_error
       end
     end
   end
