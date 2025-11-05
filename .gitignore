@@ -56,3 +56,4 @@ STAGING_FIXES_SUMMARY.md
 push_fixes_to_staging.sh
 verify_staging_api.sh
 test_portal_registration.sh
+PORTAL_REGISTRATION_COMPLETE.md
