@@ -36,7 +36,15 @@ class CreateServiceTickets < ActiveRecord::Migration[7.2]
     add_index :service_tickets, :priority unless index_exists?(:service_tickets, :priority)
     add_index :service_tickets, :assigned_to unless index_exists?(:service_tickets, :assigned_to)
     add_index :service_tickets, :scheduled_date unless index_exists?(:service_tickets, :scheduled_date)
-    add_index :service_tickets, :deleted_at unless index_exists?(:service_tickets, :deleted_at)
-    add_index :service_tickets, [:customer_type, :customer_id] unless index_exists?(:service_tickets, [:customer_type, :customer_id])
+    
+    # Only add deleted_at index if the column exists
+    if column_exists?(:service_tickets, :deleted_at)
+      add_index :service_tickets, :deleted_at unless index_exists?(:service_tickets, :deleted_at)
+    end
+    
+    # Only add customer index if columns exist
+    if column_exists?(:service_tickets, :customer_type) && column_exists?(:service_tickets, :customer_id)
+      add_index :service_tickets, [:customer_type, :customer_id] unless index_exists?(:service_tickets, [:customer_type, :customer_id])
+    end
   end
 end
