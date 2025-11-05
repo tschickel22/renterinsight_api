@@ -59,6 +59,14 @@ Rails.application.routes.draw do
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
       end
       
+      # ==================== SERVICE TICKETS ====================
+      resources :service_tickets, path: 'service-tickets' do
+        collection do
+          get :stats
+          get :export
+        end
+      end
+      
       # ==================== LAND MANAGEMENT ====================
       resources :land_parcels, path: 'land-parcels' do
         collection do
@@ -69,6 +77,24 @@ Rails.application.routes.draw do
       end
       
       # ==================== ACTIVITIES ====================
+      
+      # ==================== MFA (Multi-Factor Authentication) ====================
+      scope path: 'mfa', controller: 'mfa' do
+        # Shared MFA routes
+        get 'status', action: :status
+        post 'disable', action: :disable
+        
+        # TOTP routes (keep existing)
+        post 'enroll', action: :enroll
+        post 'verify', action: :verify
+        post 'backup_codes/regenerate', action: :regenerate_backup_codes
+        
+        # SMS routes (new - parallel to TOTP)
+        post 'sms/enroll', action: :sms_enroll
+        post 'sms/verify', action: :sms_verify
+        post 'sms/resend', action: :sms_resend
+        post 'sms/disable', action: :sms_disable
+      end
       get 'activities/recent', to: 'activities#recent'
       
       # ==================== QUOTES ====================
@@ -92,6 +118,15 @@ Rails.application.routes.draw do
       # Contact activity reminders (for marking as sent)
       post 'contact_activities/:id/mark_reminder_sent', to: 'contact_activities#mark_reminder_sent'
       
+      # ==================== PORTAL USERS ====================
+      resources :portal_users, path: 'portal_users' do
+        collection do
+          get :stats
+          post :password_reset
+          post :invite
+        end
+      end
+      
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
@@ -103,6 +138,7 @@ Rails.application.routes.draw do
           patch :opt_out_sms, to: 'contacts#opt_out_sms'
           get :deals
           get :quotes
+          get :portal_status
         end
         
         collection do
@@ -189,13 +225,13 @@ Rails.application.routes.draw do
   mount ActionCable.server => '/cable'
 
   namespace :api, defaults: { format: :json } do
-    # ==================== INVITATIONS ====================
-  namespace :public do
-    get 'invitations/verify', to: 'invitations#verify_token'
-    post 'invitations/accept', to: 'invitations#accept'
-  end
-  
-  # ==================== COMPANIES API ====================
+    # ==================== INVITATIONS (User Invitations) ====================
+    namespace :public do
+      get 'invitations/verify', to: 'invitations#verify_token'
+      post 'invitations/accept', to: 'invitations#accept'
+    end
+    
+    # ==================== COMPANIES API ====================
     resources :companies, only: [] do
       resources :users, controller: 'companies/users' do
         member do
@@ -213,7 +249,11 @@ Rails.application.routes.draw do
     end
     
     # ==================== USERS API ====================
-    resources :users, only: %i[index show create update destroy]
+    resources :users, only: %i[index show create update destroy] do
+      member do
+        post :restore
+      end
+    end
     
     # ==================== SETTINGS API ====================
     get 'settings/tenant', to: 'settings#tenant'
@@ -441,6 +481,13 @@ Rails.application.routes.draw do
         post :test_email, on: :collection
         post :test_sms, on: :collection
       end
+      
+      # Company Security Settings
+      scope path: ':company_id/security' do
+        get 'settings', to: 'security_settings#show'
+        patch 'settings', to: 'security_settings#update'
+        get 'mfa_stats', to: 'security_settings#mfa_stats'
+      end
     end
 
     # ==================== PLATFORM SETTINGS ====================
@@ -494,13 +541,60 @@ Rails.application.routes.draw do
       # Magic Link
       post 'request_magic_link', to: 'magic_link#request_magic_link'
       get 'verify_magic_link', to: 'magic_link#verify_magic_link'
+      
+      # Phase 6 - Token Management
+      resource :tokens, only: [] do
+        post :refresh, on: :collection
+        post :validate, on: :collection
+        delete :logout, on: :collection
+      end
+    end
+    
+    # MFA (Multi-Factor Authentication) - Phase 3: User Enrollment
+    scope path: 'mfa' do
+      # Status
+      get 'status', to: 'mfa#status'
+      
+      # Enrollment
+      post 'enroll/start', to: 'mfa#enroll_start'
+      post 'enroll/verify', to: 'mfa#enroll_verify'
+      
+      # Backup Codes
+      get 'backup-codes', to: 'mfa#backup_codes_status'
+      post 'backup-codes/regenerate', to: 'mfa#regenerate_backup_codes'
+      
+      # Disable
+      post 'disable', to: 'mfa#disable'
+      
+      # Login Verification (Phase 4)
+      post 'verify-login', to: 'mfa#verify_login'
+    end
+    
+    # Phase 6 - Unified Invitation System (User Invitations)
+    # Public invitation endpoints (no auth required)
+    namespace :public do
+      get 'invitations/verify', to: 'invitations#verify'
+      post 'invitations/accept', to: 'invitations#accept'
+    end
+    
+    # Authenticated invitation endpoints
+    resources :invitations, only: [:show, :destroy] do
+      member do
+        post :resend
+      end
+    end
+    
+    # Company-scoped invitations
+    scope path: 'companies/:company_id' do
+      get 'invitations', to: 'invitations#index'
+      post 'invitations', to: 'invitations#create'
     end
   end
 
-  # Phase 4A & 4B - Portal
+  # Phase 4A & 4B - Portal (Portal User System)
   namespace :api do
     namespace :portal do
-      # Phase 4A - Authentication
+      # Phase 4A - Authentication (Portal Users)
       post 'auth/login', to: 'auth#login'
       post 'auth/request_magic_link', to: 'auth#request_magic_link'
       post 'auth/magic-link', to: 'auth#request_magic_link'
@@ -510,6 +604,8 @@ Rails.application.routes.draw do
       post 'auth/reset-password', to: 'auth#reset_password'
       patch 'auth/reset_password', to: 'auth#reset_password'
       get 'auth/profile', to: 'auth#profile'
+      get 'auth/verify_invitation', to: 'auth#verify_invitation'
+      post 'auth/complete_registration', to: 'auth#complete_registration'
       
       # Phase 4B - Quote Management
       resources :quotes, only: [:index, :show] do

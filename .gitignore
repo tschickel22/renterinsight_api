@@ -43,3 +43,9 @@ storage/*
 *.bak.DELETED
 
 /config/credentials/staging.key
+# Local test and setup scripts
+create_test_invitation.rb
+test_*.rb
+setup_*.sh
+setup_*.bat
+script/create_portal_user_templates.rb

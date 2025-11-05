@@ -9,49 +9,29 @@ class ApplicationController < ActionController::API
   private
 
   def authenticate
-    # Extract and verify JWT token
+    # Extract token from Authorization header
     header = request.headers['Authorization']
     
     if header.present?
       token = header.split(' ').last
+      decoded = JsonWebToken.decode(token)
       
-      begin
-        decoded = JWT.decode(
-          token,
-          Rails.application.credentials.jwt_secret || ENV['JWT_SECRET'] || Rails.application.secret_key_base,
-          true,
-          { algorithm: 'HS256' }
-        )[0]
-        
-        @current_user = User.find_by(id: decoded['user_id'])
-        @current_company_id = @current_user&.company_id || decoded['company_id'] || 1
-        
-        # If user not found or token invalid, log and reject
-        unless @current_user
-          Rails.logger.warn "[ApplicationController] JWT decode error: User not found for id=#{decoded['user_id']}"
-          render json: { error: 'Unauthorized - Invalid or missing token' }, status: :unauthorized
-          return
-        end
-        
-      rescue JWT::ExpiredSignature => e
-        Rails.logger.info "[ApplicationController] JWT decode error: Signature has expired"
-        render json: { error: 'Unauthorized - Token has expired', expired: true }, status: :unauthorized
+      if decoded
+        # Valid JWT token found
+        @current_user_id = decoded[:user_id]
+        @current_company_id = decoded[:company_id] || request.headers['X-Company-Id']&.to_i || 1
         return
-      rescue JWT::DecodeError => e
-        Rails.logger.warn "[ApplicationController] JWT decode error: #{e.message}"
-        render json: { error: 'Unauthorized - Invalid or missing token' }, status: :unauthorized
-        return
-      end
-    else
-      # No authorization header - use fallback for development/legacy support
-      @current_company_id = (request.headers['X-Company-Id'] || 1).to_i
-      @current_user ||= User.first # Fallback for development
-      
-      unless Rails.env.development?
-        render json: { error: 'Unauthorized - Missing authorization header' }, status: :unauthorized
+      else
+        # Token decode failed (expired or invalid)
+        Rails.logger.warn "[ApplicationController] JWT decode failed for token"
+        render json: { error: 'Unauthorized - Invalid or expired token' }, status: :unauthorized
         return
       end
     end
+    
+    # No valid token - return unauthorized
+    Rails.logger.warn "[ApplicationController] No authorization header present"
+    render json: { error: 'Unauthorized - Missing authorization header' }, status: :unauthorized
   end
 
   def current_company_id
@@ -59,7 +39,23 @@ class ApplicationController < ActionController::API
   end
 
   def current_user
-    @current_user ||= User.first # Fallback for development
+    return @current_user if defined?(@current_user)
+    
+    # Load user from JWT token
+    if @current_user_id
+      @current_user = User.find_by(id: @current_user_id)
+      
+      unless @current_user
+        Rails.logger.error("JWT token contains invalid user_id: #{@current_user_id}")
+        render json: { error: 'Unauthorized - User not found' }, status: :unauthorized
+        return nil
+      end
+      
+      return @current_user
+    end
+    
+    # No authenticated user
+    nil
   end
   
   # Portal authentication helpers

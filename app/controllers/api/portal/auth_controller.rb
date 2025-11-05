@@ -1,6 +1,17 @@
 module Api
   module Portal
     class AuthController < ApplicationController
+      # Skip authentication for public endpoints
+      skip_before_action :authenticate, only: [
+        :login, 
+        :request_magic_link, 
+        :verify_magic_link, 
+        :request_reset, 
+        :reset_password,
+        :verify_invitation,
+        :complete_registration
+      ]
+      
       before_action :authenticate_portal_buyer!, only: [:profile]
       before_action :rate_limit_auth!, only: [:login, :request_magic_link, :request_reset]
       
@@ -117,15 +128,87 @@ module Api
         }, status: :ok
       end
       
+      def verify_invitation
+        buyer_access = BuyerPortalAccess.find_by(invitation_token: params[:token])
+        
+        if buyer_access&.invitation_token_valid?
+          # Get first/last name from Contact if available
+          first_name = buyer_access.buyer&.first_name
+          last_name = buyer_access.buyer&.last_name
+          
+          render json: {
+            ok: true,
+            email: buyer_access.email,
+            buyer_type: buyer_access.buyer_type,
+            first_name: first_name,
+            last_name: last_name
+          }, status: :ok
+        else
+          render json: {
+            ok: false,
+            error: 'Invalid or expired invitation token'
+          }, status: :unauthorized
+        end
+      end
+      
+      def complete_registration
+        buyer_access = BuyerPortalAccess.find_by(invitation_token: params[:token])
+        
+        if !buyer_access&.invitation_token_valid?
+          return render json: {
+            ok: false,
+            error: 'Invalid or expired invitation token'
+          }, status: :unauthorized
+        end
+        
+        if params[:password] != params[:password_confirmation]
+          return render json: {
+            ok: false,
+            error: 'Passwords do not match'
+          }, status: :unprocessable_entity
+        end
+        
+        begin
+          buyer_access.accept_invitation!(
+            params[:first_name],
+            params[:last_name],
+            params[:password]
+          )
+          
+          # Generate JWT token for auto-login
+          token = JsonWebToken.encode(buyer_portal_access_id: buyer_access.id)
+          buyer_access.record_login!(request.remote_ip)
+          
+          render json: {
+            ok: true,
+            token: token,
+            buyer: buyer_profile(buyer_access)
+          }, status: :ok
+        rescue ActiveRecord::RecordInvalid => e
+          render json: {
+            ok: false,
+            error: e.message,
+            errors: buyer_access.errors.full_messages
+          }, status: :unprocessable_entity
+        end
+      end
+      
       private
       
       def buyer_profile(buyer_access)
         {
           id: buyer_access.id,
+          account_id: buyer_access.buyer_id || 1,
+          first_name: buyer_access.buyer&.first_name,
+          last_name: buyer_access.buyer&.last_name,
           email: buyer_access.email,
+          phone: buyer_access.buyer&.phone,
+          status: buyer_access.portal_enabled ? 'active' : 'inactive',
+          created_at: buyer_access.created_at&.iso8601,
+          updated_at: buyer_access.updated_at&.iso8601,
           buyer_type: buyer_access.buyer_type,
           buyer_id: buyer_access.buyer_id,
-          last_login_at: buyer_access.last_login_at,
+          last_login_at: buyer_access.last_login_at&.iso8601,
           email_opt_in: buyer_access.email_opt_in,
           sms_opt_in: buyer_access.sms_opt_in,
           marketing_opt_in: buyer_access.marketing_opt_in
