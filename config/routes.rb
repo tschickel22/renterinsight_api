@@ -111,6 +111,15 @@ Rails.application.routes.draw do
       # Contact activity reminders (for marking as sent)
       post 'contact_activities/:id/mark_reminder_sent', to: 'contact_activities#mark_reminder_sent'
       
+      # ==================== PORTAL USERS ====================
+      resources :portal_users, path: 'portal_users' do
+        collection do
+          get :stats
+          post :password_reset
+          post :invite
+        end
+      end
+      
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
@@ -122,6 +131,7 @@ Rails.application.routes.draw do
           patch :opt_out_sms, to: 'contacts#opt_out_sms'
           get :deals
           get :quotes
+          get :portal_status
         end
         
         collection do
@@ -562,6 +572,8 @@ Rails.application.routes.draw do
       post 'auth/reset-password', to: 'auth#reset_password'
       patch 'auth/reset_password', to: 'auth#reset_password'
       get 'auth/profile', to: 'auth#profile'
+      get 'auth/verify_invitation', to: 'auth#verify_invitation'
+      post 'auth/complete_registration', to: 'auth#complete_registration'
       
       # Phase 4B - Quote Management
       resources :quotes, only: [:index, :show] do

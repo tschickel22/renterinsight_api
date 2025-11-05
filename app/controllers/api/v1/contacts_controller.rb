@@ -3,7 +3,7 @@
 module Api
   module V1
     class ContactsController < ApplicationController
-      before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes]
+      before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status]
       before_action :set_account, only: [:index]
 
       # GET /api/v1/contacts
@@ -273,6 +273,36 @@ module Api
           }}
         }
       rescue => e
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
+      # GET /api/v1/contacts/:id/portal_status
+      def portal_status
+        # Find portal access for this contact
+        portal_access = BuyerPortalAccess.find_by(
+          buyer_id: @contact.id,
+          buyer_type: 'Contact',
+          company_id: current_company_id
+        )
+
+        if portal_access
+          render json: {
+            hasPortalAccess: true,
+            status: portal_access.status&.downcase || 'pending',
+            invitationSentAt: portal_access.invitation_sent_at,
+            lastLoginAt: portal_access.last_login_at,
+            portalUserId: portal_access.id,
+            email: portal_access.email,
+            role: portal_access.role
+          }
+        else
+          render json: {
+            hasPortalAccess: false,
+            status: 'none'
+          }
+        end
+      rescue => e
+        Rails.logger.error "Error in contacts#portal_status: #{e.message}"
         render json: { error: e.message }, status: :internal_server_error
       end
 

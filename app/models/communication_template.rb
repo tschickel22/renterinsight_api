@@ -13,12 +13,12 @@ class CommunicationTemplate < ApplicationRecord
   # Validations
   validates :name, presence: true, length: { maximum: 255 }
   validates :channel, presence: true, inclusion: { in: %w[email sms] }
-  validates :body_template, presence: true
-  validates :subject_template, presence: true, if: -> { channel == 'email' }
+  validates :body, presence: true
+  validates :subject, presence: true, if: -> { channel == 'email' }
   validates :template_type, inclusion: { in: TEMPLATE_TYPES }, allow_nil: true
   
   # Scopes
-  scope :active, -> { where(active: true) }
+  scope :active, -> { where(is_active: true) }
   scope :for_channel, ->(channel) { where(channel: channel) }
   scope :by_category, ->(category) { where(category: category) }
   scope :by_type, ->(type) { where(template_type: type) }
@@ -35,16 +35,16 @@ class CommunicationTemplate < ApplicationRecord
   # Extract variables from templates using Liquid syntax
   # Looks for {{ variable_name }} patterns
   def extract_variables
-    return if body_template.blank?
+    return if body.blank?
     
     vars = []
     
-    # Extract from body template
-    vars += body_template.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/).flatten
+    # Extract from body
+    vars += body.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/).flatten
     
-    # Extract from subject template if email
-    if channel == 'email' && subject_template.present?
-      vars += subject_template.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/).flatten
+    # Extract from subject if email
+    if channel == 'email' && subject.present?
+      vars += subject.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/).flatten
     end
     
     # Store unique variables
@@ -61,11 +61,11 @@ class CommunicationTemplate < ApplicationRecord
   
   def render_subject(context = {})
     return nil unless channel == 'email'
-    TemplateRenderingService.render(subject_template, context)
+    TemplateRenderingService.render(subject, context)
   end
   
   def render_body(context = {})
-    TemplateRenderingService.render(body_template, context)
+    TemplateRenderingService.render(body, context)
   end
   
   # Get list of available variables

@@ -1,12 +1,19 @@
 # frozen_string_literal: true
 
 class BuyerPortalAccess < ApplicationRecord
-  has_secure_password
+  has_secure_password validations: false
   
   belongs_to :buyer, polymorphic: true
+  belongs_to :company, optional: true
+  
+  # Convenience method to get the Contact when buyer_type is 'Contact'
+  def contact
+    buyer if buyer_type == 'Contact'
+  end
   
   # Serialize preference_history as JSON for SQLite compatibility
   serialize :preference_history, coder: JSON
+  # permissions column is already JSON type - no serialization needed
   
   validates :email, presence: true, 
                     uniqueness: { case_sensitive: false },
@@ -26,6 +33,8 @@ class BuyerPortalAccess < ApplicationRecord
   scope :email_enabled, -> { where(email_opt_in: true) }
   scope :sms_enabled, -> { where(sms_opt_in: true) }
   scope :marketing_enabled, -> { where(marketing_opt_in: true) }
+  scope :for_company, ->(company_id) { where(company_id: company_id) }
+  scope :by_status, ->(status) { where(status: status) }
   
   def generate_reset_token
     self.reset_token = SecureRandom.urlsafe_base64(32)
@@ -45,6 +54,45 @@ class BuyerPortalAccess < ApplicationRecord
   
   def login_token_valid?
     login_token_expires_at.present? && login_token_expires_at > Time.current
+  end
+  
+  def generate_invitation_token
+    self.invitation_token = SecureRandom.urlsafe_base64(32)
+    self.invitation_token_expires_at = 7.days.from_now
+    self.status = 'Invited'
+    save!
+  end
+  
+  def invitation_token_valid?
+    invitation_token_expires_at.present? && 
+    invitation_token_expires_at > Time.current &&
+    invitation_accepted_at.nil?
+  end
+  
+  def accept_invitation!(first_name, last_name, password)
+    transaction do
+      # Update the associated Contact's name if buyer_type is Contact
+      if buyer_type == 'Contact' && buyer.present?
+        buyer.update!(
+          first_name: first_name,
+          last_name: last_name
+        )
+        
+        # Set company_id from the associated contact
+        self.company_id = buyer.company_id if buyer.respond_to?(:company_id)
+      end
+      
+      # Update BuyerPortalAccess
+      update!(
+        password: password,
+        password_confirmation: password,
+        invitation_accepted_at: Time.current,
+        status: 'Active',
+        portal_enabled: true,
+        invitation_token: nil,
+        invitation_token_expires_at: nil
+      )
+    end
   end
   
   def record_login!(ip_address)
@@ -78,6 +126,9 @@ class BuyerPortalAccess < ApplicationRecord
   
   def set_defaults
     self.preference_history ||= []
+    self.permissions ||= []
+    self.role ||= 'Client'
+    self.status ||= 'Pending'
   end
 
   def track_preference_changes
