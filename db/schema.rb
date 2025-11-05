@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_02_050000) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_05_000001) do
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -239,10 +239,22 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_02_050000) do
     t.text "preference_history"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "company_id"
+    t.string "role", default: "Client"
+    t.string "status", default: "Pending"
+    t.json "permissions", default: []
+    t.datetime "invitation_sent_at"
+    t.string "invitation_token"
+    t.datetime "invitation_token_expires_at"
+    t.datetime "invitation_accepted_at"
+    t.index ["buyer_type", "buyer_id", "company_id"], name: "index_buyer_portal_on_buyer_and_company"
     t.index ["buyer_type", "buyer_id"], name: "index_buyer_portal_accesses_on_buyer"
+    t.index ["company_id"], name: "index_buyer_portal_accesses_on_company_id"
     t.index ["email"], name: "index_buyer_portal_accesses_on_email", unique: true
+    t.index ["invitation_token"], name: "index_buyer_portal_accesses_on_invitation_token", unique: true
     t.index ["login_token"], name: "index_buyer_portal_accesses_on_login_token"
     t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
+    t.index ["status"], name: "index_buyer_portal_accesses_on_status"
   end
 
   create_table "communication_events", force: :cascade do |t|
