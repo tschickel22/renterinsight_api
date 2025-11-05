@@ -49,3 +49,10 @@ test_*.rb
 setup_*.sh
 setup_*.bat
 script/create_portal_user_templates.rb
+
+# Local helper files
+DEPLOYMENT_INSTRUCTIONS.md
+STAGING_FIXES_SUMMARY.md
+push_fixes_to_staging.sh
+verify_staging_api.sh
+test_portal_registration.sh
