@@ -10,7 +10,10 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_05_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_07_214400) do
+  # These are extensions that must be enabled in order to support this database
+  enable_extension "pg_catalog.plpgsql"
+
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
     t.integer "user_id"
@@ -526,9 +529,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_05_000001) do
     t.string "customer_name"
     t.integer "source_id"
     t.string "assigned_to"
+    t.integer "company_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
+    t.index ["company_id"], name: "index_deals_on_company_id"
     t.index ["contact_id"], name: "index_deals_on_contact_id"
     t.index ["deleted_at"], name: "index_deals_on_deleted_at"
     t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
@@ -817,7 +822,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_05_000001) do
     t.string "enrollable_type"
     t.integer "enrollable_id"
     t.index ["enrollable_type", "enrollable_id"], name: "index_nurture_enrollments_on_enrollable_type_and_enrollable_id"
-    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "status IN ('running','paused')"
+    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[]))"
     t.index ["lead_id", "nurture_sequence_id"], name: "index_nurture_enrollments_on_lead_id_and_nurture_sequence_id"
     t.index ["lead_id"], name: "index_nurture_enrollments_on_lead_id"
     t.index ["nurture_sequence_id"], name: "index_nurture_enrollments_on_nurture_sequence_id"
@@ -1246,8 +1251,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_05_000001) do
     t.string "sales_photo"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
-    t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "serial_number IS NOT NULL"
-    t.index ["company_id", "vin"], name: "index_vehicles_on_company_id_and_vin", unique: true, where: "vin IS NOT NULL"
+    t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "(serial_number IS NOT NULL)"
+    t.index ["company_id", "vin"], name: "index_vehicles_on_company_id_and_vin", unique: true, where: "(vin IS NOT NULL)"
     t.index ["company_id"], name: "index_vehicles_on_company_id"
     t.index ["condition"], name: "index_vehicles_on_condition"
     t.index ["dwelling_type"], name: "index_vehicles_on_dwelling_type"
@@ -1314,6 +1319,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_05_000001) do
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
   add_foreign_key "deals", "accounts"
+  add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
   add_foreign_key "deals", "sources"
   add_foreign_key "deals", "users"

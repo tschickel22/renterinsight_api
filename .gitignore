@@ -7,8 +7,10 @@
 # Ignore bundler config.
 /.bundle
 
-# Ignore all environment files.
-/.env*
+# Ignore environment files except .env.example
+/.env
+/.env.local
+/.env.*.local
 
 # Ignore SSL certificates (local development only)
 *.pem

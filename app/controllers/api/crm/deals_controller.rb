@@ -255,7 +255,7 @@ module Api
           :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
           :win_reason, :loss_reason, :competitor,
-          :customer_name, :source_id
+          :customer_name, :source_id, :company_id
         )
       end
 

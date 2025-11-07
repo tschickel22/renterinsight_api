@@ -2,6 +2,9 @@
 module Api
   module Crm
     class CommunicationsController < ApplicationController
+      # Skip authentication for test endpoints
+      skip_before_action :authenticate, only: [:email, :sms]
+      
       before_action :set_lead, except: [:create_log, :email, :sms]
       before_action :set_lead_from_params, only: [:email, :sms]
 

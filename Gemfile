@@ -1,9 +1,12 @@
 source "https://rubygems.org"
 
+# Ruby version
+ruby "3.2.3"
+
 # Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
 gem "rails", "~> 8.0.3"
-# Use sqlite3 as the database for Active Record
-gem "sqlite3", ">= 2.1"
+# Use PostgreSQL as the database for Active Record (all environments)
+gem "pg", "~> 1.5"
 # Use the Puma web server [https://github.com/puma/puma]
 gem "puma", ">= 5.0"
 # Build JSON APIs with ease [https://github.com/rails/jbuilder]
@@ -79,6 +82,4 @@ gem 'twilio-ruby', '~> 7.3'
 gem 'prawn', '~> 2.4'
 gem 'prawn-table', '~> 0.2'
 
-# Use Postgres in production (Render)
-gem 'pg', '~> 1.5', group: :production
 gem 'rotp', '~> 6.3'
