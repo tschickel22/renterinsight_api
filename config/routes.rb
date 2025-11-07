@@ -23,6 +23,12 @@ Rails.application.routes.draw do
   
   # API endpoints for public forms (for frontend)
   namespace :api do
+    # ==================== PUBLIC INVITATIONS (No Auth Required) ====================
+    namespace :public do
+      get 'invitations/verify', to: 'invitations#verify_token'
+      post 'invitations/accept', to: 'invitations#accept'
+    end
+    
     scope path: 'f' do
       get ':public_id', to: '/public/forms#show'
       post ':public_id/submit', to: '/public/forms#submit'
@@ -226,10 +232,7 @@ Rails.application.routes.draw do
 
   namespace :api, defaults: { format: :json } do
     # ==================== INVITATIONS (User Invitations) ====================
-    namespace :public do
-      get 'invitations/verify', to: 'invitations#verify_token'
-      post 'invitations/accept', to: 'invitations#accept'
-    end
+    # NOTE: Public invitation endpoints are declared at the top of the first api namespace (line ~26)
     
     # ==================== COMPANIES API ====================
     resources :companies, only: [] do
@@ -571,11 +574,7 @@ Rails.application.routes.draw do
     end
     
     # Phase 6 - Unified Invitation System (User Invitations)
-    # Public invitation endpoints (no auth required)
-    namespace :public do
-      get 'invitations/verify', to: 'invitations#verify'
-      post 'invitations/accept', to: 'invitations#accept'
-    end
+    # NOTE: Public invitation endpoints are declared at the top of the api namespace
     
     # Authenticated invitation endpoints
     resources :invitations, only: [:show, :destroy] do

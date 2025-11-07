@@ -45,11 +45,19 @@ module Api
       )
       
       if result[:success]
-        render json: {
+        response_data = {
           success: true,
           invitation: invitation_json(result[:invitation]),
           message: result[:message]
-        }, status: :created
+        }
+        
+        # For development: include token in response
+        if Rails.env.development? && result[:invitation].token.present?
+          response_data[:token] = result[:invitation].token
+          response_data[:invitation_url] = "#{ENV['FRONTEND_URL'] || 'https://localhost:5173'}/invitations/accept?token=#{result[:invitation].token}"
+        end
+        
+        render json: response_data, status: :created
       else
         render json: {
           success: false,

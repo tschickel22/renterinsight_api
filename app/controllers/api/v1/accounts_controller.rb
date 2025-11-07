@@ -289,20 +289,20 @@ module Api
 
       # GET /api/v1/accounts/:id/insights
       def insights
-        # Get communications for this account
-        communications = Communication.where(communicable: @account)
-                                     .order(created_at: :desc)
-                                     .limit(50)
+        # Get all communications for stats (don't limit yet)
+        all_communications = Communication.where(communicable: @account)
         
-        # Get recent activities - Account has 'activities' association, not 'account_activities'
-        activities = @account.activities
-                             .order(created_at: :desc)
-                             .limit(20)
+        # Get recent communications for display
+        recent_communications = all_communications.order(created_at: :desc).limit(10)
+        
+        # Get recent activities
+        all_activities = @account.activities
+        recent_activities = all_activities.order(created_at: :desc).limit(20)
         
         # Get communication stats
-        total_communications = communications.count
-        email_count = communications.where(channel: 'email').count
-        sms_count = communications.where(channel: 'sms').count
+        total_communications = all_communications.count
+        email_count = all_communications.where(channel: 'email').count
+        sms_count = all_communications.where(channel: 'sms').count
         
         # Get recent notes
         notes = Note.where(entity_type: 'Account', entity_id: @account.id)
@@ -310,7 +310,7 @@ module Api
                    .limit(10)
         
         # Calculate engagement score
-        engagement_score = calculate_engagement_score(@account, communications)
+        engagement_score = calculate_engagement_score(@account, all_communications)
         
         render json: {
           account_id: @account.id,
@@ -320,9 +320,9 @@ module Api
             total: total_communications,
             email: email_count,
             sms: sms_count,
-            last_contact: communications.first&.created_at
+            last_contact: recent_communications.first&.created_at
           },
-          recent_communications: communications.limit(10).map { |c| 
+          recent_communications: recent_communications.map { |c| 
             {
               id: c.id,
               channel: c.channel,
@@ -333,11 +333,11 @@ module Api
               created_at: c.created_at
             }
           },
-          recent_activities: activities.map { |a|
+          recent_activities: recent_activities.map { |a|
             {
               id: a.id,
               activity_type: a.activity_type,
-              title: a.title,
+              description: a.description || a.activity_type&.titleize,
               status: a.status,
               due_date: a.due_date,
               created_at: a.created_at
@@ -350,7 +350,7 @@ module Api
               created_at: n.created_at
             }
           },
-          insights: generate_insights(@account, communications, activities)
+          insights: generate_insights(@account, recent_communications, recent_activities)
         }
       end
 

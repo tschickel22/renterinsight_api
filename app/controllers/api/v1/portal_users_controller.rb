@@ -131,7 +131,7 @@ module Api
           return render json: { error: 'Contact must have an email address' }, status: :unprocessable_entity
         end
 
-        # Check if portal access already exists
+        # ✅ FIX: Check if portal access already exists for this contact
         existing_access = BuyerPortalAccess.find_by(
           buyer_id: contact.id,
           buyer_type: 'Contact',
@@ -142,6 +142,17 @@ module Api
           return render json: { error: 'Contact already has active portal access' }, status: :unprocessable_entity
         end
 
+        # ✅ FIX: Check if email is already used by another portal user (globally)
+        email_to_use = (params[:email] || contact.email).downcase
+        email_conflict = BuyerPortalAccess.find_by(email: email_to_use)
+        
+        if email_conflict && email_conflict.id != existing_access&.id
+          Rails.logger.error("Email conflict: #{email_to_use} already used by BuyerPortalAccess ##{email_conflict.id}")
+          return render json: { 
+            error: "The email #{email_to_use} is already registered to another portal user. Please use a different email address." 
+          }, status: :unprocessable_entity
+        end
+
         # Create or update portal access
         @portal_user = existing_access || BuyerPortalAccess.new(
           buyer_id: contact.id,
@@ -150,7 +161,7 @@ module Api
         )
 
         @portal_user.assign_attributes(
-          email: params[:email] || contact.email,
+          email: email_to_use,
           role: params[:role] || 'Client',
           status: 'Pending',
           permissions: params[:permissions] || ['view_quotes', 'accept_quotes', 'view_documents'],
@@ -204,6 +215,7 @@ module Api
             errors: errors.any? ? errors : nil
           }, status: :created
         else
+          Rails.logger.error("Failed to save portal user: #{@portal_user.errors.full_messages.join(', ')}")
           render json: { errors: @portal_user.errors.full_messages }, status: :unprocessable_entity
         end
       rescue StandardError => e

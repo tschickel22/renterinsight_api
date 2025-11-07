@@ -27,120 +27,46 @@ module Api
       # POST /api/companies/:company_id/users
       # POST /api/companies/:company_id/invitations (alias)
       def create
-        # Prioritize invitation-style params (unwrapped with recipientName)
-        # over user-style params (wrapped in user: {})
-        user_attributes = if params[:recipientName].present? || params[:recipient_name].present?
-          invitation_params
-        elsif params[:user].present?
-          user_params
-        else
-          invitation_params
-        end
+        # ✅ FIX: Use InvitationService to create proper invitations
+        service = InvitationService.new(
+          invited_by: current_user,
+          company: @company
+        )
         
-        @user = @company.users.new(user_attributes)
+        # Get recipient name
+        recipient_name = params[:recipient_name] || params[:recipientName]
         
-        # Set status to pending for invited users
-        @user.status = 'pending'
+        # Determine delivery method
+        delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'email'
         
-        # Generate temporary password
-        temp_password = SecureRandom.alphanumeric(12)
-        @user.password = temp_password
-        @user.password_confirmation = temp_password
+        # Create invitation via service
+        result = service.create_invitation(
+          invitation_type: 'company_user',
+          email: params[:email],
+          phone: params[:phone],
+          recipient_name: recipient_name,
+          role: params[:role] || 'staff',
+          permissions: params[:permissions] || [],
+          delivery_method: delivery_method,
+          message: params[:message]
+        )
         
-        if @user.save
-          # Generate invitation token
-          invitation_token = SecureRandom.urlsafe_base64(32)
-          invitation_expires = 7.days.from_now
+        if result[:success]
+          invitation = result[:invitation]
           
-          # Store token in user record (you may need to add these fields to users table)
-          @user.update(
-            invitation_token: invitation_token,
-            invitation_sent_at: Time.current,
-            invitation_expires_at: invitation_expires
-          )
-          
-          # Build invitation acceptance URL
-          frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
-          invitation_url = "#{frontend_url}/invitations/accept?token=#{invitation_token}"
-          
-          # Send invitation based on delivery method
-          begin
-            delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'email'
-            
-            # Prepare invitation data for template
-            template_context = {
-              recipient_name: [@user.first_name, @user.last_name].compact.join(' '),
-              first_name: @user.first_name,
-              last_name: @user.last_name,
-              email: @user.email,
-              phone: @user.phone,
-              role: @user.role,
-              role_name: @user.role.to_s.titleize,
-              company_name: @company.name,
-              invited_by: current_user ? current_user.name : 'Admin',
-              invitation_url: invitation_url,
-              invitation_expires: invitation_expires.strftime('%B %d, %Y at %I:%M %p'),
-              days_until_expiry: 7,
-              setup_instructions: 'Click the link above to set your password and access your account.',
-              login_url: "#{frontend_url}/login"
-            }
-            
-            # Find appropriate template
-            email_template = CommunicationTemplate.find_by(
-              template_type: 'company_user_invitation',
-              channel: 'email',
-              is_active: true
-            )
-            
-            sms_template = CommunicationTemplate.find_by(
-              template_type: 'company_user_invitation',
-              channel: 'sms',
-              is_active: true
-            )
-            
-            # Send email invitation
-            if (delivery_method == 'email' || delivery_method == 'both') && email_template
-              CommunicationService.send_communication(
-                communicable: @user,
-                channel: 'email',
-                to: @user.email,
-                template: email_template,
-                template_context: template_context,
-                category: 'transactional',
-                portal_visible: false,
-                skip_preference_check: true
-              )
-            end
-            
-            # Send SMS invitation
-            if (delivery_method == 'sms' || delivery_method == 'both') && @user.phone.present? && sms_template
-              CommunicationService.send_communication(
-                communicable: @user,
-                channel: 'sms',
-                to: @user.phone,
-                template: sms_template,
-                template_context: template_context,
-                category: 'transactional',
-                skip_preference_check: true
-              )
-            end
-          rescue => e
-            Rails.logger.error "Failed to send invitation: #{e.message}"
-            Rails.logger.error e.backtrace.join("\n")
-            # Don't fail the request if communication fails
-          end
+          # Get the placeholder user that was created
+          @user = User.find_by(email: invitation.email)
           
           render json: {
             success: true,
-            invitation: serialize_user(@user),
-            user: serialize_user(@user),
-            message: 'User invitation sent successfully'
+            invitation: serialize_invitation(invitation),
+            user: @user ? serialize_user(@user) : serialize_invitation(invitation),
+            message: result[:message]
           }, status: :created
         else
           render json: { 
             success: false,
-            errors: @user.errors.full_messages,
-            error: @user.errors.full_messages.join(', ')
+            error: result[:error]
           }, status: :unprocessable_entity
         end
       end
@@ -185,119 +111,37 @@ module Api
       
       # POST /api/companies/:company_id/users/:id/resend_invitation
       def resend_invitation
-        # Check if user is still in pending/invited status
-        unless ['pending', 'invited', 'inactive'].include?(@user.status)
+        # ✅ FIX: Use InvitationService to resend invitations properly
+        
+        # Find the invitation for this user
+        invitation = Invitation.find_by(email: @user.email, status: 'pending')
+        
+        unless invitation
           return render json: { 
             success: false,
-            error: 'User has already accepted invitation' 
-          }, status: :unprocessable_entity
+            error: 'No pending invitation found for this user' 
+          }, status: :not_found
         end
         
-        # Generate new invitation token
-        invitation_token = SecureRandom.urlsafe_base64(32)
-        invitation_expires = 7.days.from_now
-        
-        # Update user with new token and timestamps
-        @user.update!(
-          invitation_token: invitation_token,
-          invitation_sent_at: Time.current,
-          invitation_expires_at: invitation_expires
+        # Use service to resend
+        service = InvitationService.new(
+          invited_by: current_user,
+          company: @company
         )
         
-        # Build invitation acceptance URL
-        frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
-        invitation_url = "#{frontend_url}/invitations/accept?token=#{invitation_token}"
+        result = service.resend_invitation(invitation.id)
         
-        # Prepare invitation data for template
-        template_context = {
-          recipient_name: [@user.first_name, @user.last_name].compact.join(' '),
-          first_name: @user.first_name,
-          last_name: @user.last_name,
-          email: @user.email,
-          phone: @user.phone,
-          role: @user.role,
-          role_name: @user.role.to_s.titleize,
-          company_name: @company.name,
-          invited_by: current_user ? current_user.name : 'Admin',
-          invitation_url: invitation_url,
-          invitation_expires: invitation_expires.strftime('%B %d, %Y at %I:%M %p'),
-          days_until_expiry: 7,
-          setup_instructions: 'Click the link above to set your password and access your account.',
-          login_url: "#{frontend_url}/login"
-        }
-        
-        # Find appropriate templates
-        email_template = CommunicationTemplate.find_by(
-          template_type: 'company_user_invitation',
-          channel: 'email',
-          is_active: true
-        )
-        
-        sms_template = CommunicationTemplate.find_by(
-          template_type: 'company_user_invitation',
-          channel: 'sms',
-          is_active: true
-        )
-        
-        # Determine delivery method (check params or default to both)
-        delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'both'
-        
-        sent_channels = []
-        errors = []
-        
-        begin
-          # Send email invitation
-          if (delivery_method == 'email' || delivery_method == 'both') && email_template
-            CommunicationService.send_communication(
-              communicable: @user,
-              channel: 'email',
-              to: @user.email,
-              template: email_template,
-              template_context: template_context,
-              category: 'transactional',
-              portal_visible: false,
-              skip_preference_check: true
-            )
-            sent_channels << 'email'
-          end
-        rescue => e
-          Rails.logger.error "Failed to send email invitation: #{e.message}"
-          errors << "Email: #{e.message}"
-        end
-        
-        begin
-          # Send SMS invitation
-          if (delivery_method == 'sms' || delivery_method == 'both') && @user.phone.present? && sms_template
-            CommunicationService.send_communication(
-              communicable: @user,
-              channel: 'sms',
-              to: @user.phone,
-              template: sms_template,
-              template_context: template_context,
-              category: 'transactional',
-              skip_preference_check: true
-            )
-            sent_channels << 'sms'
-          end
-        rescue => e
-          Rails.logger.error "Failed to send SMS invitation: #{e.message}"
-          errors << "SMS: #{e.message}"
-        end
-        
-        # Return response based on what was sent
-        if sent_channels.any?
+        if result[:success]
           render json: { 
             success: true,
-            message: "Invitation resent successfully via #{sent_channels.join(' and ')}",
+            message: 'Invitation resent successfully',
             user: serialize_user(@user.reload),
-            sent_via: sent_channels,
-            errors: errors.any? ? errors : nil
+            invitation: serialize_invitation(result[:invitation])
           }
         else
           render json: { 
             success: false,
-            error: 'Failed to send invitation',
-            details: errors
+            error: result[:error]
           }, status: :unprocessable_entity
         end
       rescue => e
@@ -365,6 +209,42 @@ module Api
         
         # Clean up the hash
         permitted.except(:recipient_name, :recipientName, :invitation_type, :invitationType, :delivery_method, :deliveryMethod, :message, :permissions)
+      end
+      
+      def serialize_invitation(invitation)
+        {
+          id: invitation.id,
+          invitationType: invitation.invitation_type,
+          email: invitation.email,
+          phone: invitation.phone,
+          status: invitation.status,
+          role: invitation.role,
+          recipientName: invitation.recipient_name,
+          deliveryMethod: invitation.delivery_method,
+          message: invitation.message,
+          sentAt: invitation.sent_at&.iso8601,
+          expiresAt: invitation.expires_at&.iso8601,
+          acceptedAt: invitation.accepted_at&.iso8601,
+          lastSentAt: invitation.last_sent_at&.iso8601,
+          resendCount: invitation.resend_count,
+          attempts: invitation.attempts,
+          viewedAt: invitation.viewed_at&.iso8601,
+          canResend: invitation.can_accept?,
+          canRevoke: invitation.status == 'pending',
+          isExpired: invitation.expired?,
+          daysUntilExpiry: ((invitation.expires_at - Time.current) / 1.day).round,
+          createdAt: invitation.created_at&.iso8601,
+          updatedAt: invitation.updated_at&.iso8601,
+          invitedBy: {
+            id: invitation.invited_by.id,
+            name: invitation.invited_by.name || invitation.invited_by.email,
+            email: invitation.invited_by.email
+          },
+          company: invitation.company ? {
+            id: invitation.company.id,
+            name: invitation.company.name
+          } : nil
+        }
       end
       
       def serialize_user(user)
