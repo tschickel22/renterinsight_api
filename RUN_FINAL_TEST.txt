@@ -1,1 +1,0 @@
-cd ~/src/renterinsight_api && chmod +x quick_retest.sh && ./quick_retest.sh

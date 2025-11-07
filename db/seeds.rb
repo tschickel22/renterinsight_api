@@ -5,6 +5,9 @@
 
 puts "🌱 Starting seed..."
 
+# Load lead sources
+load Rails.root.join('db', 'seeds', 'sources.rb')
+
 # Load company user invitation templates
 load Rails.root.join('db', 'seeds', 'company_user_invitation_templates.rb')
 

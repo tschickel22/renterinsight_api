@@ -53,6 +53,7 @@ module Api
               lastName: user.last_name,
               user_type: determine_user_type(user),
               role: user.role,
+              company_id: user.company_id,
               permissions: user.permissions || []
             }
           }, status: :ok
@@ -146,7 +147,8 @@ module Api
             firstName: current_user.first_name,
             lastName: current_user.last_name,
             user_type: determine_user_type(current_user),
-            role: current_user.role
+            role: current_user.role,
+            company_id: current_user.company_id
           }
         }, status: :ok
       end
@@ -162,6 +164,7 @@ module Api
             lastName: current_user.last_name,
             user_type: determine_user_type(current_user),
             role: current_user.role,
+            company_id: current_user.company_id,
             permissions: current_user.permissions || []
           }
         }, status: :ok

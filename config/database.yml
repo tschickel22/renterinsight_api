@@ -1,57 +1,66 @@
-# SQLite. Versions 3.8.0 and up are supported.
-#   gem install sqlite3
+# PostgreSQL configuration for all environments
+# Ensures dev, staging, and production use the same database engine
 #
-#   Ensure the SQLite 3 gem is defined in your Gemfile
-#   gem "sqlite3"
-#
+# Local development: Use DATABASE_URL env var or default connection
+# Staging/Production: Render provides DATABASE_URL automatically
+
 default: &default
-  adapter: sqlite3
-  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 10 } %>
   timeout: 5000
 
 development:
   <<: *default
-  database: storage/development.sqlite3
+  database: ri_dms_dev
+  # If using Docker Postgres locally:
+  # Set DATABASE_URL in .env file
+  # Example: DATABASE_URL=postgres://postgres:postgres@localhost:5432/ri_dms_dev
+  url: <%= ENV['DATABASE_URL'] %>
 
-# Warning: The database defined as "test" will be erased and
-# re-generated from your development database when you run "rake".
-# Do not set this db to the same as development or production.
 test:
   <<: *default
-  database: storage/test.sqlite3
+  database: ri_dms_test
+  url: <%= ENV['DATABASE_URL']&.gsub('ri_dms_dev', 'ri_dms_test') || 'postgres://postgres:postgres@localhost:5432/ri_dms_test' %>
 
 staging:
   primary:
     <<: *default
-    database: storage/staging.sqlite3
+    # Render provides DATABASE_URL automatically
+    url: <%= ENV['DATABASE_URL'] %>
   cache:
     <<: *default
-    database: storage/staging_cache.sqlite3
+    database: ri_dms_staging_cache
+    url: <%= ENV['CACHE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_staging_cache') %>
     migrations_paths: db/cache_migrate
   queue:
     <<: *default
-    database: storage/staging_queue.sqlite3
+    database: ri_dms_staging_queue
+    url: <%= ENV['QUEUE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_staging_queue') %>
     migrations_paths: db/queue_migrate
   cable:
     <<: *default
-    database: storage/staging_cable.sqlite3
+    database: ri_dms_staging_cable
+    url: <%= ENV['CABLE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_staging_cable') %>
     migrations_paths: db/cable_migrate
 
-# Store production database in the storage/ directory, which by default
-# is mounted as a persistent Docker volume in config/deploy.yml.
 production:
   primary:
     <<: *default
-    database: storage/production.sqlite3
+    # Render provides DATABASE_URL automatically
+    url: <%= ENV['DATABASE_URL'] %>
   cache:
     <<: *default
-    database: storage/production_cache.sqlite3
+    database: ri_dms_production_cache
+    url: <%= ENV['CACHE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_production_cache') %>
     migrations_paths: db/cache_migrate
   queue:
     <<: *default
-    database: storage/production_queue.sqlite3
+    database: ri_dms_production_queue
+    url: <%= ENV['QUEUE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_production_queue') %>
     migrations_paths: db/queue_migrate
   cable:
     <<: *default
-    database: storage/production_cable.sqlite3
+    database: ri_dms_production_cable
+    url: <%= ENV['CABLE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_production_cable') %>
     migrations_paths: db/cable_migrate

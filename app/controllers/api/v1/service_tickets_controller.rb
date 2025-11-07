@@ -104,6 +104,11 @@ module Api
       end
       
       def serialize_ticket(ticket)
+        # Ensure parts and labor are always arrays
+        parts_array = ticket.parts.is_a?(Array) ? ticket.parts : (ticket.parts.present? ? (JSON.parse(ticket.parts) rescue []) : [])
+        labor_array = ticket.labor.is_a?(Array) ? ticket.labor : (ticket.labor.present? ? (JSON.parse(ticket.labor) rescue []) : [])
+        custom_fields_hash = ticket.custom_fields.is_a?(Hash) ? ticket.custom_fields : (ticket.custom_fields.present? ? (JSON.parse(ticket.custom_fields) rescue {}) : {})
+        
         {
           id: ticket.id,
           accountId: ticket.account_id,
@@ -116,9 +121,9 @@ module Api
           assignedTo: ticket.assigned_to,
           scheduledDate: ticket.scheduled_date,
           notes: ticket.notes,
-          parts: ticket.parts,
-          labor: ticket.labor,
-          customFields: ticket.custom_fields,
+          parts: parts_array,
+          labor: labor_array,
+          customFields: custom_fields_hash,
           createdAt: ticket.created_at,
           updatedAt: ticket.updated_at,
           account: ticket.account ? {

@@ -30,6 +30,11 @@ class ServiceTicket < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :vehicle, optional: true
   
+  # Serialize JSON columns to ensure they're always arrays
+  attribute :parts, :json, default: []
+  attribute :labor, :json, default: []
+  attribute :custom_fields, :json, default: {}
+  
   # Validations
   validates :title, presence: true
   validates :description, presence: true
@@ -54,11 +59,13 @@ class ServiceTicket < ApplicationRecord
   
   # Instance methods
   def parts_total
-    parts.sum { |p| p['total'].to_f }
+    parts_array = parts.is_a?(Array) ? parts : (parts.present? ? (JSON.parse(parts) rescue []) : [])
+    parts_array.sum { |p| p['total'].to_f }
   end
   
   def labor_total
-    labor.sum { |l| l['total'].to_f }
+    labor_array = labor.is_a?(Array) ? labor : (labor.present? ? (JSON.parse(labor) rescue []) : [])
+    labor_array.sum { |l| l['total'].to_f }
   end
   
   def total_cost
