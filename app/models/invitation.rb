@@ -150,14 +150,8 @@ class Invitation < ApplicationRecord
   def invitation_url
     frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
     
-    path = case invitation_type
-           when 'company_user'
-             '/invitations/company-user'
-           when 'portal_user'
-             '/invitations/portal-user'
-           when 'tenant'
-             '/invitations/tenant'
-           end
+    # Use unified invitation path for all invitation types
+    path = '/invitations/accept'
     
     "#{frontend_url}#{path}?token=#{token}"
   end

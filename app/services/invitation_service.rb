@@ -241,7 +241,7 @@ class InvitationService
     # Fall back to platform template
     CommunicationTemplate
       .active
-      .platform
+      .platform_wide
       .by_type(template_type)
       .for_channel(invitation.delivery_method == 'sms' ? 'sms' : 'email')
       .first
@@ -251,23 +251,38 @@ class InvitationService
   def build_invitation_context(invitation, raw_token)
     frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
     
-    invitation_path = case invitation.invitation_type
-                      when 'company_user'
-                        '/invitations/company-user'
-                      when 'portal_user'
-                        '/invitations/portal-user'
-                      when 'tenant'
-                        '/invitations/tenant'
-                      end
+    # Use unified invitation path
+    invitation_path = '/invitations/accept'
+    
+    # Parse first/last name from recipient_name
+    first_name = nil
+    last_name = nil
+    if invitation.recipient_name.present?
+      parts = invitation.recipient_name.split(' ', 2)
+      first_name = parts[0]
+      last_name = parts[1] if parts.length > 1
+    end
     
     {
       'recipient_name' => invitation.recipient_name || invitation.email.split('@').first.capitalize,
+      'first_name' => first_name || invitation.email.split('@').first.capitalize,
+      'last_name' => last_name || '',
+      'email' => invitation.email,
+      'phone' => invitation.phone,
+      'role' => invitation.role&.titleize,
+      'role_name' => invitation.role&.titleize,
+      'invited_by' => invitation.invited_by.name || invitation.invited_by.email,
       'inviter_name' => invitation.invited_by.name || invitation.invited_by.email,
       'company_name' => invitation.company&.name,
       'invitation_url' => "#{frontend_url}#{invitation_path}?token=#{raw_token}",
-      'invitation_code' => raw_token[0..5].upcase, # Short code for SMS
+      'registration_url' => "#{frontend_url}#{invitation_path}?token=#{raw_token}",
+      'invitation_token' => raw_token,
+      'invitation_code' => raw_token[0..5].upcase,
+      'invitation_expires' => invitation.expires_at.strftime('%B %d, %Y at %I:%M %p'),
       'expires_at' => invitation.expires_at.strftime('%B %d, %Y at %I:%M %p'),
-      'role' => invitation.role&.titleize,
+      'days_until_expiry' => ((invitation.expires_at - Time.current) / 1.day).round,
+      'setup_instructions' => invitation.message || 'Please complete your account setup by clicking the link above.',
+      'login_url' => "#{frontend_url}/login",
       'message' => invitation.message
     }
   end
@@ -357,7 +372,7 @@ class InvitationService
     # Fall back to platform
     CommunicationTemplate
       .active
-      .platform
+      .platform_wide
       .by_type(template_type)
       .for_channel(channel)
       .first
@@ -390,6 +405,7 @@ class InvitationService
       permissions: invitation.permissions || [],
       status: 'invited',
       invitation_id: invitation.id,
+      company_id: invitation.company_id, # ← FIX: Set company_id so user appears in company list
       password: SecureRandom.hex(32) # Temporary password, will be replaced on acceptance
     )
   rescue ActiveRecord::RecordInvalid => e
@@ -419,6 +435,7 @@ class InvitationService
         first_name: user_params[:first_name],
         last_name: user_params[:last_name],
         name: user_params[:name] || "#{user_params[:first_name]} #{user_params[:last_name]}".strip,
+        phone: user_params[:phone], # ← FIX: Update phone if provided during registration
         password: user_params[:password],
         status: 'active',
         mfa_enabled: false
@@ -436,6 +453,7 @@ class InvitationService
         role: invitation.role || 'staff',
         permissions: invitation.permissions,
         status: 'active',
+        company_id: invitation.company_id, # ← FIX: Set company_id
         mfa_enabled: false
       )
     end

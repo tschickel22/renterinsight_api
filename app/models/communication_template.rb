@@ -66,16 +66,21 @@ class CommunicationTemplate < ApplicationRecord
     vars = []
     
     # Extract from body
-    vars += body.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/).flatten
+    body_vars = body.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/)
+    vars.concat(body_vars.flatten) if body_vars.any?
     
     # Extract from subject if email
     if channel == 'email' && subject.present?
-      vars += subject.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/).flatten
+      subject_vars = subject.scan(/\{\{\s*(\w+(?:\.\w+)*)\s*\}\}/)
+      vars.concat(subject_vars.flatten) if subject_vars.any?
     end
     
-    # Store unique variables
-    self.variables ||= {}
-    self.variables['available_variables'] = vars.uniq
+    # Build new hash with variables
+    self.variables = { 'available_variables' => vars.uniq }
+  rescue StandardError => e
+    # If there's any error, just set an empty array
+    self.variables = { 'available_variables' => [] }
+    Rails.logger.error("Error extracting variables: #{e.message}")
   end
   
   # Render template with variables (Liquid-style)
@@ -83,11 +88,19 @@ class CommunicationTemplate < ApplicationRecord
     rendered_body = body.dup
     rendered_subject = subject&.dup
     
-    # Replace {{variable}} with context values
+    # Replace {{variable}} or {{ variable }} with context values
     context.each do |key, value|
-      placeholder = "{{#{key}}}"
-      rendered_body.gsub!(placeholder, value.to_s)
-      rendered_subject&.gsub!(placeholder, value.to_s) if rendered_subject
+      # Handle both {{key}} and {{ key }} formats
+      placeholder_no_space = "{{#{key}}}"
+      placeholder_with_space = "{{ #{key} }}"
+      
+      rendered_body.gsub!(placeholder_no_space, value.to_s) if rendered_body
+      rendered_body.gsub!(placeholder_with_space, value.to_s) if rendered_body
+      
+      if rendered_subject
+        rendered_subject.gsub!(placeholder_no_space, value.to_s)
+        rendered_subject.gsub!(placeholder_with_space, value.to_s)
+      end
     end
     
     {
