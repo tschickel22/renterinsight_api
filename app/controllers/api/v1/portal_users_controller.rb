@@ -319,8 +319,8 @@ module Api
         portal_base_url = ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'
         registration_url = "#{portal_base_url}/client/register?token=#{portal_user.invitation_token}"
         
-        # ✅ FIX: Load company directly instead of relying on current_user.company
-        company = Company.find(current_company_id)
+        # Load company directly
+        company = ::Company.find(current_company_id)
         
         # IMPORTANT: Set both portal_url and registration_url to registration page
         # This ensures templates using either variable work correctly
@@ -376,8 +376,8 @@ module Api
         # Generate password reset token
         portal_user.generate_reset_token
         
-        # ✅ FIX: Load company directly instead of relying on current_user.company
-        company = Company.find(current_company_id)
+        # Load company directly
+        company = ::Company.find(current_company_id)
         
         # Build template context
         portal_base_url = ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'
@@ -443,8 +443,8 @@ module Api
         
         Rails.logger.info("📝 Using SMS template: #{template.name}")
 
-        # ✅ FIX: Load company directly instead of relying on current_user.company
-        company = Company.find(current_company_id)
+        # Load company directly
+        company = ::Company.find(current_company_id)
 
         # Build template context
         portal_base_url = ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'
