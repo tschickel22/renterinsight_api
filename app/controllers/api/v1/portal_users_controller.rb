@@ -319,13 +319,16 @@ module Api
         portal_base_url = ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'
         registration_url = "#{portal_base_url}/client/register?token=#{portal_user.invitation_token}"
         
+        # ✅ FIX: Load company directly instead of relying on current_user.company
+        company = Company.find(current_company_id)
+        
         # IMPORTANT: Set both portal_url and registration_url to registration page
         # This ensures templates using either variable work correctly
         template_context = {
           recipient_name: recipient_name,
           portal_url: registration_url,
           registration_url: registration_url,
-          company_name: current_user.company.name
+          company_name: company.name
         }
 
         # Render the template
@@ -373,12 +376,15 @@ module Api
         # Generate password reset token
         portal_user.generate_reset_token
         
+        # ✅ FIX: Load company directly instead of relying on current_user.company
+        company = Company.find(current_company_id)
+        
         # Build template context
         portal_base_url = ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'
         template_context = {
           recipient_name: recipient_name,
           reset_url: "#{portal_base_url}/client/reset-password/new?token=#{portal_user.reset_token}",
-          company_name: current_user.company.name
+          company_name: company.name
         }
 
         # Render the template
@@ -437,6 +443,9 @@ module Api
         
         Rails.logger.info("📝 Using SMS template: #{template.name}")
 
+        # ✅ FIX: Load company directly instead of relying on current_user.company
+        company = Company.find(current_company_id)
+
         # Build template context
         portal_base_url = ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'
         registration_url = "#{portal_base_url}/client/register?token=#{portal_user.invitation_token}"
@@ -444,7 +453,7 @@ module Api
           recipient_name: recipient_name,
           portal_url: registration_url,
           registration_url: registration_url,
-          company_name: current_user.company.name
+          company_name: company.name
         }
         
         Rails.logger.info("🔧 Template context: #{template_context.inspect}")
