@@ -138,8 +138,8 @@ class PasswordResetService
         user = User.find_by(email: email.downcase)
         user ||= BuyerPortalAccess.find_by(email: email.downcase)
       elsif phone
-        # Try multiple phone formats for flexibility
-        user = find_user_by_phone(phone, ['admin', 'super_admin'])
+        # Try User model first (ALL company users: admin, staff, manager, etc.)
+        user = find_user_by_phone(phone, nil)
         unless user
           # For BuyerPortalAccess, check the associated Contact's phone
           user = find_client_by_phone(phone)
@@ -147,10 +147,11 @@ class PasswordResetService
       end
       user
     elsif user_type == 'admin'
+      # Admin user_type means company users (User model) - ALL roles accepted
       if email
-        User.where(role: ['admin', 'super_admin']).find_by(email: email.downcase)
+        User.find_by(email: email.downcase)
       elsif phone
-        find_user_by_phone(phone, ['admin', 'super_admin'])
+        find_user_by_phone(phone, nil)
       end
     elsif user_type == 'client'
       if email
