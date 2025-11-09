@@ -107,6 +107,7 @@ module Api
           new_password: new_password
         )
 
+        # Result now includes token and user data for auto-login
         render json: result, status: :ok
       rescue PasswordResetService::UserNotFoundError => e
         render json: {
