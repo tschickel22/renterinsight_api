@@ -107,6 +107,12 @@ module Api
           new_password: new_password
         )
 
+        # Debug logging to see what's being returned
+        Rails.logger.info("🔍 Password reset result: #{result.inspect}")
+        Rails.logger.info("🔍 Has token: #{result[:token].present?}")
+        Rails.logger.info("🔍 Has user: #{result[:user].present?}")
+        Rails.logger.info("🔍 User data: #{result[:user].inspect}")
+
         # Result now includes token and user data for auto-login
         render json: result, status: :ok
       rescue PasswordResetService::UserNotFoundError => e

@@ -211,7 +211,10 @@ class PasswordResetService
   def determine_user_type(user, requested_type)
     return requested_type unless requested_type == 'auto'
 
-    if user.is_a?(User) && (user.admin? || user.role.in?(['admin', 'super_admin']))
+    # CRITICAL FIX: Use model class, not role
+    # User model = company/admin users (all roles: admin, staff, manager, etc.)
+    # BuyerPortalAccess model = client/portal users
+    if user.is_a?(User)
       'admin'
     else
       'client'

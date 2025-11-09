@@ -195,7 +195,15 @@ module Api
     end
 
     def serialize_branding
-      branding = Setting.get('Company', @company.id, 'branding', {})
+      # Get company branding (highest priority)
+      company_branding_raw = Setting.get('Company', @company.id, 'branding', {})
+      
+      # Get platform branding (fallback)
+      platform_branding_raw = Setting.get('Platform', 0, 'branding', {})
+      
+      # Symbolize keys for easier access (Setting.get returns string keys)
+      company_branding = company_branding_raw.deep_symbolize_keys
+      platform_branding = platform_branding_raw.deep_symbolize_keys
       
       default_branding = {
         primaryColor: '#3b82f6',
@@ -203,7 +211,40 @@ module Api
         fontFamily: 'Inter'
       }
 
-      default_branding.merge(branding.deep_symbolize_keys)
+      # Merge: defaults < platform < company (company takes highest priority)
+      merged_branding = default_branding
+        .merge(platform_branding)
+        .merge(company_branding)
+      
+      # Convert logo URLs from relative to absolute
+      if merged_branding[:logo].present?
+        merged_branding[:logo] = absolute_url(merged_branding[:logo])
+      end
+      
+      if merged_branding[:portalLogo].present?
+        merged_branding[:portalLogo] = absolute_url(merged_branding[:portalLogo])
+      end
+      
+      # Also include platformLogo separately for fallback in frontend
+      if platform_branding[:logo].present? && company_branding[:logo].blank?
+        merged_branding[:platformLogo] = absolute_url(platform_branding[:logo])
+      end
+      
+      merged_branding
+    end
+
+    def absolute_url(path)
+      return path if path.blank?
+      return path if path.start_with?('http://', 'https://')
+      
+      # Get base URL from request or ENV
+      base_url = if request.present?
+        "#{request.protocol}#{request.host_with_port}"
+      else
+        ENV['RAILS_API_URL'] || 'https://localhost:3001'
+      end
+      
+      "#{base_url}#{path}"
     end
 
     def serialize_custom_fields

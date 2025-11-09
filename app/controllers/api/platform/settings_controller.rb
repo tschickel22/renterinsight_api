@@ -146,7 +146,18 @@ module Api
 
       def fetch_branding_settings
         stored = Setting.get('Platform', 0, 'branding')
-        stored || default_branding_settings
+        branding = stored || default_branding_settings
+        
+        # Convert logo URLs from relative to absolute
+        if branding['logo'].present?
+          branding['logo'] = absolute_url(branding['logo'])
+        end
+        
+        if branding['portalLogo'].present?
+          branding['portalLogo'] = absolute_url(branding['portalLogo'])
+        end
+        
+        branding
       end
 
       def save_communications_settings(settings)
@@ -283,6 +294,20 @@ module Api
           portalName: ENV['PORTAL_NAME'] || 'Customer Portal',
           portalLogo: nil
         }
+      end
+      
+      def absolute_url(path)
+        return path if path.blank?
+        return path if path.start_with?('http://', 'https://')
+        
+        # Get base URL from request or ENV
+        base_url = if request.present?
+          "#{request.protocol}#{request.host_with_port}"
+        else
+          ENV['RAILS_API_URL'] || 'https://localhost:3001'
+        end
+        
+        "#{base_url}#{path}"
       end
     end
   end
