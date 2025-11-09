@@ -38,8 +38,9 @@ class PasswordResetService
     )
 
     # Send reset instructions
+    determined_user_type = determine_user_type(user, user_type)
     if delivery_method == 'email'
-      send_email_reset(user, raw_token, identifier)
+      send_email_reset(user, raw_token, identifier, determined_user_type)
     else
       send_sms_reset(user, raw_token, identifier)
     end
@@ -110,9 +111,15 @@ class PasswordResetService
     # Log the reset
     log_password_reset(user, token_record.user_type)
 
+    # Generate JWT token for auto-login
+    jwt_token = generate_auth_token(user)
+    user_data = serialize_user(user)
+
     {
       success: true,
-      message: 'Password has been reset successfully'
+      message: 'Password has been reset successfully',
+      token: jwt_token,
+      user: user_data
     }
   rescue StandardError => e
     Rails.logger.error("Password reset error: #{e.message}")
@@ -287,8 +294,8 @@ class PasswordResetService
     nil
   end
 
-  def send_email_reset(user, token, email)
-    reset_url = generate_reset_url(token)
+  def send_email_reset(user, token, email, user_type = 'auto')
+    reset_url = generate_reset_url(token, user_type)
 
     # Get email settings from platform/company
     email_settings = get_email_settings(user)
@@ -410,10 +417,20 @@ class PasswordResetService
     nil
   end
 
-  def generate_reset_url(token)
+  def generate_reset_url(token, user_type = 'auto')
     # Get frontend URL from ENV or default
     frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
-    "#{frontend_url}/reset-password?token=#{token}"
+    
+    # Generate user-type-specific URLs for Phase 5A unified login
+    case user_type
+    when 'admin'
+      "#{frontend_url}/admin/verify-reset-code?token=#{token}"
+    when 'client'
+      "#{frontend_url}/client/verify-reset-code?token=#{token}"
+    else
+      # For 'auto' user type, use unified route
+      "#{frontend_url}/verify-reset-code?token=#{token}"
+    end
   end
 
   def extract_user_name(user)
@@ -474,5 +491,39 @@ class PasswordResetService
   rescue StandardError => e
     Rails.logger.error("❌ Failed to configure ActionMailer: #{e.message}")
     Rails.logger.error(e.backtrace.first(5).join("\n"))
+  end
+
+  def generate_auth_token(user)
+    if user.is_a?(BuyerPortalAccess)
+      JsonWebToken.encode(buyer_portal_access_id: user.id)
+    else
+      JsonWebToken.encode(user_id: user.id)
+    end
+  end
+
+  def serialize_user(user)
+    if user.is_a?(BuyerPortalAccess)
+      {
+        id: user.id,
+        account_id: user.buyer_id || 1,
+        first_name: user.buyer&.first_name,
+        last_name: user.buyer&.last_name,
+        email: user.email,
+        phone: user.buyer&.phone,
+        status: user.portal_enabled ? 'active' : 'inactive',
+        created_at: user.created_at&.iso8601,
+        updated_at: user.updated_at&.iso8601,
+        user_type: 'client'
+      }
+    else
+      {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role,
+        user_type: 'admin'
+      }
+    end
   end
 end
