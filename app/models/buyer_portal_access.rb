@@ -3,6 +3,10 @@
 class BuyerPortalAccess < ApplicationRecord
   has_secure_password validations: false
   
+  # Custom password validations
+  validates :password, length: { minimum: 6 }, allow_nil: true
+  validates :password, presence: true, length: { minimum: 6 }, if: :password_required_for_authentication?
+  
   belongs_to :buyer, polymorphic: true
   belongs_to :company, optional: true
   
@@ -82,16 +86,14 @@ class BuyerPortalAccess < ApplicationRecord
         self.company_id = buyer.company_id if buyer.respond_to?(:company_id)
       end
       
-      # Update BuyerPortalAccess
-      update!(
-        password: password,
-        password_confirmation: password,
-        invitation_accepted_at: Time.current,
-        status: 'Active',
-        portal_enabled: true,
-        invitation_token: nil,
-        invitation_token_expires_at: nil
-      )
+      # Update BuyerPortalAccess - set password directly
+      self.password = password
+      self.invitation_accepted_at = Time.current
+      self.status = 'Active'
+      self.portal_enabled = true
+      self.invitation_token = nil
+      self.invitation_token_expires_at = nil
+      save!
     end
   end
   
@@ -119,6 +121,12 @@ class BuyerPortalAccess < ApplicationRecord
   end
   
   private
+  
+  def password_required_for_authentication?
+    # Only require password validation when explicitly setting a new password
+    # Don't require it during invitation creation or other updates
+    password.present?
+  end
   
   def downcase_email
     self.email = email.downcase if email.present?

@@ -2,6 +2,8 @@
 
 module Api
   class SettingsController < ApplicationController
+    # Skip authentication for tenant endpoint (branding is public info)
+    skip_before_action :authenticate, only: [:tenant]
     before_action :set_company
 
     # GET /api/settings/tenant
@@ -166,6 +168,10 @@ module Api
           workflowAutomation: true
         }
       }
+
+      # Add Platform Name from Platform settings (for "Powered by" branding)
+      platform_general = Setting.get('Platform', 0, 'general', {})
+      base_settings[:platformName] = platform_general['platformName'] || platform_general[:platformName] || ''
 
       # Merge in custom settings
       custom_settings = Setting.where(scope_type: 'Company', scope_id: @company.id)

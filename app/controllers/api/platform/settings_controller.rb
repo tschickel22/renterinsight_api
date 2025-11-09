@@ -3,17 +3,24 @@
 module Api
   module Platform
     class SettingsController < ApplicationController
+      # Skip authentication for maintenance mode check (must work before login)
+      skip_before_action :authenticate, only: [:show]
+      
       # GET /api/platform/settings
       def show
         render json: {
           communications: fetch_communications_settings,
-          notifications: fetch_notifications_settings
+          notifications: fetch_notifications_settings,
+          general: fetch_general_settings,
+          branding: fetch_branding_settings
         }, status: :ok
       rescue => e
         Rails.logger.error "[PlatformSettings#show] Error: #{e.message}"
         render json: {
           communications: default_communications_settings,
-          notifications: default_notifications_settings
+          notifications: default_notifications_settings,
+          general: default_general_settings,
+          branding: default_branding_settings
         }, status: :ok
       end
 
@@ -31,6 +38,18 @@ module Api
         if params[:notifications].present?
           save_notifications_settings(params[:notifications])
           updated_settings[:notifications] = fetch_notifications_settings
+        end
+
+        # Update general settings if provided
+        if params[:general].present?
+          save_general_settings(params[:general])
+          updated_settings[:general] = fetch_general_settings
+        end
+
+        # Update branding settings if provided
+        if params[:branding].present?
+          save_branding_settings(params[:branding])
+          updated_settings[:branding] = fetch_branding_settings
         end
         
         render json: {
@@ -120,6 +139,16 @@ module Api
         stored || default_notifications_settings
       end
 
+      def fetch_general_settings
+        stored = Setting.get('Platform', 0, 'general')
+        stored || default_general_settings
+      end
+
+      def fetch_branding_settings
+        stored = Setting.get('Platform', 0, 'branding')
+        stored || default_branding_settings
+      end
+
       def save_communications_settings(settings)
         # Encrypt sensitive credentials before saving
         encrypted_settings = encrypt_sensitive_fields(settings, :communications)
@@ -128,6 +157,14 @@ module Api
 
       def save_notifications_settings(settings)
         Setting.set('Platform', 0, 'notifications', settings)
+      end
+
+      def save_general_settings(settings)
+        Setting.set('Platform', 0, 'general', settings)
+      end
+
+      def save_branding_settings(settings)
+        Setting.set('Platform', 0, 'branding', settings)
       end
 
       def encrypt_sensitive_fields(settings, channel)
@@ -224,6 +261,27 @@ module Api
             autoClose: true,
             autoCloseDelay: 5000
           }
+        }
+      end
+
+      def default_general_settings
+        {
+          platformName: ENV['PLATFORM_NAME'] || 'RenterInsight',
+          supportEmail: ENV['SUPPORT_EMAIL'] || 'support@renterinsight.com',
+          maintenanceMode: false,
+          maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
+        }
+      end
+
+      def default_branding_settings
+        {
+          logo: nil,
+          primaryColor: '#3b82f6',
+          secondaryColor: '#8b5cf6',
+          fontFamily: 'Inter',
+          sideMenuColor: nil,
+          portalName: ENV['PORTAL_NAME'] || 'Customer Portal',
+          portalLogo: nil
         }
       end
     end

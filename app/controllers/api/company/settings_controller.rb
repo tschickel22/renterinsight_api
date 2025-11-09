@@ -10,13 +10,15 @@ module Api
         render json: {
           communications: fetch_communications_settings(company),
           notifications: fetch_notifications_settings(company),
+          branding: fetch_branding_settings(company),
           companyId: company&.id
         }, status: :ok
       rescue => e
         Rails.logger.error "[CompanySettings#show] Error: #{e.message}"
         render json: {
           communications: default_communications_settings,
-          notifications: default_notifications_settings
+          notifications: default_notifications_settings,
+          branding: default_branding_settings
         }, status: :ok
       end
 
@@ -38,6 +40,12 @@ module Api
             save_notifications_settings(company, params[:notifications])
             updated_settings[:notifications] = fetch_notifications_settings(company)
           end
+
+          # Update branding settings if provided
+          if params[:branding].present?
+            save_branding_settings(company, params[:branding])
+            updated_settings[:branding] = fetch_branding_settings(company)
+          end
           
           render json: {
             **updated_settings,
@@ -48,6 +56,7 @@ module Api
           render json: {
             communications: params[:communications] || default_communications_settings,
             notifications: params[:notifications] || default_notifications_settings,
+            branding: params[:branding] || default_branding_settings,
             message: 'Settings saved (no company record yet)'
           }, status: :ok
         end
@@ -153,6 +162,12 @@ module Api
         company.notifications_settings || default_notifications_settings
       end
 
+      def fetch_branding_settings(company)
+        return default_branding_settings unless company
+        
+        company.branding_settings || default_branding_settings
+      end
+
       def save_communications_settings(company, settings)
         # Encrypt sensitive credentials before saving
         encrypted_settings = encrypt_sensitive_fields(settings, :communications)
@@ -161,6 +176,10 @@ module Api
 
       def save_notifications_settings(company, settings)
         company.notifications_settings = settings
+      end
+
+      def save_branding_settings(company, settings)
+        company.branding_settings = settings
       end
 
       def encrypt_sensitive_fields(settings, channel)
@@ -251,6 +270,18 @@ module Api
             autoClose: true,
             autoCloseDelay: 5000
           }
+        }
+      end
+
+      def default_branding_settings
+        {
+          logo: nil,
+          primaryColor: '#3b82f6',
+          secondaryColor: '#8b5cf6',
+          fontFamily: 'Inter',
+          sideMenuColor: nil,
+          portalName: 'Customer Portal',
+          portalLogo: nil
         }
       end
     end
