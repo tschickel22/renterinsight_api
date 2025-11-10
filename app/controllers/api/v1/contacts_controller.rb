@@ -3,16 +3,18 @@
 module Api
   module V1
     class ContactsController < ApplicationController
+      before_action :set_company_scope
       before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status]
       before_action :set_account, only: [:index]
 
       # GET /api/v1/contacts
       # GET /api/v1/accounts/:account_id/contacts
       def index
+        # STRICT TENANT ISOLATION: Only show contacts from current company
         @contacts = if @account
                       @account.contacts
                     else
-                      Contact.all
+                      @company.contacts
                     end
 
         # Apply filters
@@ -51,7 +53,8 @@ module Api
 
       # GET /api/v1/contacts/stats
       def stats
-        render json: Contact.statistics
+        # STRICT TENANT ISOLATION: Only stats for current company
+        render json: @company.contacts.statistics
       rescue => e
         Rails.logger.error "Error in contacts#stats: #{e.message}"
         render json: { error: e.message }, status: :internal_server_error
@@ -67,8 +70,8 @@ module Api
         # Extract tags from the contact params before creating
         tag_names = contact_params_with_extra[:tags] || []
         
-        @contact = Contact.new(contact_params)
-        @contact.company_id ||= current_company_id  # Auto-set company from current context
+        # STRICT TENANT ISOLATION: Create contact within current company
+        @contact = @company.contacts.new(contact_params)
 
         if @contact.save
           # Handle tags if provided
@@ -115,7 +118,8 @@ module Api
         errors = []
 
         contacts_data.each_with_index do |contact_data, index|
-          contact = Contact.new(contact_data.permit(
+          # STRICT TENANT ISOLATION: Create contacts within current company
+          contact = @company.contacts.new(contact_data.permit(
             :account_id, :company_id, :first_name, :last_name, :email, :phone,
             :title, :department, :is_primary, :notes
           ))
@@ -308,16 +312,42 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [ContactsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        unless current_user.company_id.present?
+          Rails.logger.error "🚫 [ContactsController] User #{current_user.id} has no company_id"
+          render json: { error: 'No company assigned' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: current_user.company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [ContactsController] Company #{current_user.company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [ContactsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_contact
-        @contact = Contact.find(params[:id])
+        # STRICT TENANT ISOLATION: Only access contacts in same company
+        @contact = @company.contacts.find(params[:id])
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Contact not found' }, status: :not_found
+        render json: { error: 'Contact not found or access denied' }, status: :not_found
       end
 
       def set_account
-        @account = Account.find(params[:account_id]) if params[:account_id]
+        # STRICT TENANT ISOLATION: Only access accounts in same company
+        @account = @company.accounts.find(params[:account_id]) if params[:account_id]
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Account not found' }, status: :not_found
+        render json: { error: 'Account not found or access denied' }, status: :not_found
       end
 
       def contact_params

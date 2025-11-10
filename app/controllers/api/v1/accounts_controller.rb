@@ -3,11 +3,13 @@
 module Api
   module V1
     class AccountsController < ApplicationController
+      before_action :set_company_scope
       before_action :set_account, only: %i[show update destroy convert_to_customer add_tags remove_tag activities deals insights score]
 
       # GET /api/v1/accounts
       def index
-        @accounts = Account.active.includes(:tags, :source, :owner)
+        # STRICT TENANT ISOLATION: Only show accounts from current company
+        @accounts = @company.accounts.active.includes(:tags, :source, :owner)
         
         # Apply filters
         @accounts = @accounts.where(account_type: params[:type]) if params[:type].present?
@@ -40,8 +42,8 @@ module Api
 
       # POST /api/v1/accounts
       def create
-        @account = Account.new(account_params)
-        @account.company_id ||= current_company_id  # Auto-set company from current context
+        # STRICT TENANT ISOLATION: Create account within current company
+        @account = @company.accounts.new(account_params)
         @account.owner_id = current_user&.id
         
         # Set default values for required fields
@@ -189,25 +191,28 @@ module Api
 
       # GET /api/v1/accounts/stats
       def stats
+        # STRICT TENANT ISOLATION: Only stats for current company
         render json: {
-          total: Account.active.count,
-          by_type: Account.active.group(:account_type).count,
-          by_status: Account.active.group(:status).count,
-          by_rating: Account.active.group(:rating).count,
-          recent_conversions: Account.where('converted_date >= ?', 30.days.ago).count,
-          high_value: Account.high_value.count
+          total: @company.accounts.active.count,
+          by_type: @company.accounts.active.group(:account_type).count,
+          by_status: @company.accounts.active.group(:status).count,
+          by_rating: @company.accounts.active.group(:rating).count,
+          recent_conversions: @company.accounts.where('converted_date >= ?', 30.days.ago).count,
+          high_value: @company.accounts.high_value.count
         }
       end
 
       # GET /api/v1/accounts/industries
       def industries
-        industries = Account.active.where.not(industry: [nil, '']).distinct.pluck(:industry)
+        # STRICT TENANT ISOLATION: Only industries from current company
+        industries = @company.accounts.active.where.not(industry: [nil, '']).distinct.pluck(:industry)
         render json: industries
       end
 
       # GET /api/v1/accounts/export
       def export
-        accounts = Account.active.includes(:tags, :source, :owner)
+        # STRICT TENANT ISOLATION: Only export accounts from current company
+        accounts = @company.accounts.active.includes(:tags, :source, :owner)
         
         # Apply filters
         accounts = accounts.where(account_type: params[:type]) if params[:type].present?
@@ -242,10 +247,11 @@ module Api
 
       # POST /api/v1/accounts/convert_lead
       def convert_lead
-        lead = Lead.find(params[:lead_id])
+        # STRICT TENANT ISOLATION: Only convert leads from current company
+        lead = @company.leads.find(params[:lead_id])
         
         # Create account from lead
-        account = Account.create!(
+        account = @company.accounts.create!(
           name: lead.name || "#{lead.first_name} #{lead.last_name}",
           email: lead.email,
           phone: lead.phone,
@@ -253,7 +259,6 @@ module Api
           account_type: 'prospect',
           source_id: lead.source_id,
           owner_id: current_user&.id,
-          company_id: current_company&.id,
           billing_street: lead.street,
           billing_city: lead.city,
           billing_state: lead.state,
@@ -281,7 +286,8 @@ module Api
         account_ids = params[:account_ids] || []
         update_attrs = params[:attributes] || {}
         
-        accounts = Account.where(id: account_ids)
+        # STRICT TENANT ISOLATION: Only update accounts from current company
+        accounts = @company.accounts.where(id: account_ids)
         accounts.update_all(update_attrs.permit(:status, :rating, :account_type, :owner_id))
         
         render json: { updated_count: accounts.count }
@@ -375,8 +381,35 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [AccountsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        unless current_user.company_id.present?
+          Rails.logger.error "🚫 [AccountsController] User #{current_user.id} has no company_id"
+          render json: { error: 'No company assigned' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: current_user.company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [AccountsController] Company #{current_user.company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [AccountsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_account
-        @account = Account.find(params[:id])
+        # STRICT TENANT ISOLATION: Only access accounts in same company
+        @account = @company.accounts.find(params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Account not found or access denied' }, status: :not_found
       end
 
       def account_params
@@ -387,18 +420,6 @@ module Api
           :shipping_street, :shipping_city, :shipping_state, :shipping_postal_code, :shipping_country,
           :parent_account_id, :source_id, :owner_id, :notes
         )
-      end
-
-      def current_company
-        # This should be implemented based on your authentication/authorization system
-        # For now, return the first company or nil
-        ::Company.first
-      end
-
-      def current_user
-        # This should be implemented based on your authentication/authorization system
-        # For now, return the first user or nil
-        ::User.first
       end
 
       # Helper methods for insights and scoring

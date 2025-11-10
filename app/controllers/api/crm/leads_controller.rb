@@ -1,11 +1,13 @@
 module Api
   module Crm
     class LeadsController < ApplicationController
+      before_action :set_company_scope
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score]
 
       def index
-        # Only show non-converted leads
-        leads = Lead.where(is_converted: [false, nil])
+        # STRICT TENANT ISOLATION: Only show non-converted leads from current company
+        leads = @company.leads
+                    .where(is_converted: [false, nil])
                     .includes(:source)
                     .order(created_at: :desc)
         
@@ -20,8 +22,8 @@ module Api
         Rails.logger.info "[LeadsController#create] Received params: #{params.inspect}"
         Rails.logger.info "[LeadsController#create] Processed lead_params: #{lead_params.inspect}"
         
-        l = Lead.new(lead_params)
-        l.company_id ||= current_company_id  # Auto-set company from current context
+        # STRICT TENANT ISOLATION: Create lead within current company
+        l = @company.leads.new(lead_params)
         
         if l.save
           Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
@@ -216,8 +218,35 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [LeadsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        unless current_user.company_id.present?
+          Rails.logger.error "🚫 [LeadsController] User #{current_user.id} has no company_id"
+          render json: { error: 'No company assigned' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: current_user.company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [LeadsController] Company #{current_user.company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [LeadsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_lead
-        @lead = Lead.find(params[:id])
+        # STRICT TENANT ISOLATION: Only access leads in same company
+        @lead = @company.leads.find(params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Lead not found or access denied' }, status: :not_found
       end
 
       # Merge root + nested (:lead), accept camel & snake, normalize to snake.

@@ -39,6 +39,14 @@ class User < ApplicationRecord
     role == 'admin' || role == 'super_admin'
   end
   
+  def tenant?
+    role == 'tenant'
+  end
+  
+  def super_admin?
+    role == 'super_admin'
+  end
+  
   def client?
     role == 'client' || role == 'buyer'
   end

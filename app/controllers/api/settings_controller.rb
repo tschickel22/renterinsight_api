@@ -2,8 +2,9 @@
 
 module Api
   class SettingsController < ApplicationController
-    # Skip authentication for tenant endpoint (branding is public info)
-    skip_before_action :authenticate, only: [:tenant]
+    # REMOVED: include TenantResolver (doesn't exist)
+    
+    # Require authentication - users must be logged in to see company settings
     before_action :set_company
 
     # GET /api/settings/tenant
@@ -11,6 +12,12 @@ module Api
       render json: {
         tenant: serialize_tenant
       }
+    rescue => e
+      Rails.logger.error "Tenant settings error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+      render json: { 
+        error: 'Failed to load tenant settings',
+        details: Rails.env.development? ? e.message : nil
+      }, status: :internal_server_error
     end
 
     # PATCH /api/settings
@@ -142,7 +149,37 @@ module Api
     private
 
     def set_company
-      @company = ::Company.first
+      # STRICT TENANT ISOLATION: Only load company from authenticated user
+      unless current_user
+        Rails.logger.error "🚫 [SettingsController] No authenticated user found"
+        render json: { 
+          error: 'Authentication required',
+          message: 'You must be logged in to access company settings'
+        }, status: :unauthorized
+        return
+      end
+      
+      unless current_user.company_id.present?
+        Rails.logger.error "🚫 [SettingsController] User #{current_user.id} has no company_id"
+        render json: { 
+          error: 'No company assigned',
+          message: 'Your account is not associated with a company. Please contact support.'
+        }, status: :forbidden
+        return
+      end
+      
+      @company = ::Company.find_by(id: current_user.company_id)
+      
+      if @company.nil?
+        Rails.logger.error "🚫 [SettingsController] Company #{current_user.company_id} not found for user #{current_user.id}"
+        render json: { 
+          error: 'Company not found',
+          message: 'The company associated with your account could not be found. Please contact support.'
+        }, status: :not_found
+        return
+      end
+      
+      Rails.logger.info "✅ [SettingsController] Loaded company: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email} (ID: #{current_user.id})"
     end
 
     def serialize_tenant
@@ -195,14 +232,8 @@ module Api
     end
 
     def serialize_branding
-      # Get company branding (highest priority)
-      company_branding_raw = Setting.get('Company', @company.id, 'branding', {})
-      
-      # Get platform branding (fallback)
+      # Get platform branding (fallback/defaults)
       platform_branding_raw = Setting.get('Platform', 0, 'branding', {})
-      
-      # Symbolize keys for easier access (Setting.get returns string keys)
-      company_branding = company_branding_raw.deep_symbolize_keys
       platform_branding = platform_branding_raw.deep_symbolize_keys
       
       default_branding = {
@@ -211,10 +242,19 @@ module Api
         fontFamily: 'Inter'
       }
 
-      # Merge: defaults < platform < company (company takes highest priority)
-      merged_branding = default_branding
-        .merge(platform_branding)
-        .merge(company_branding)
+      # Merge company branding with platform and defaults
+      if @company.present?
+        company_branding_raw = Setting.get('Company', @company.id, 'branding', {})
+        company_branding = company_branding_raw.deep_symbolize_keys
+        
+        # Merge: defaults < platform < company (company takes highest priority)
+        merged_branding = default_branding
+          .merge(platform_branding)
+          .merge(company_branding)
+      else
+        # On base domain, use only platform branding
+        merged_branding = default_branding.merge(platform_branding)
+      end
       
       # Convert logo URLs from relative to absolute
       if merged_branding[:logo].present?
@@ -225,8 +265,8 @@ module Api
         merged_branding[:portalLogo] = absolute_url(merged_branding[:portalLogo])
       end
       
-      # Also include platformLogo separately for fallback in frontend
-      if platform_branding[:logo].present? && company_branding[:logo].blank?
+      # Include platformLogo separately for reference
+      if platform_branding[:logo].present?
         merged_branding[:platformLogo] = absolute_url(platform_branding[:logo])
       end
       

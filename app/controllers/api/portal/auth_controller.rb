@@ -66,14 +66,17 @@ module Api
           
           token = JsonWebToken.encode(buyer_portal_access_id: buyer_access.id)
           
+          # Format response to match frontend expectations (success + user)
+          user_data = buyer_profile(buyer_access).merge(user_type: 'client')
+          
           render json: {
-            ok: true,
+            success: true,
             token: token,
-            buyer: buyer_profile(buyer_access)
+            user: user_data
           }, status: :ok
         else
           render json: {
-            ok: false,
+            success: false,
             error: 'Invalid or expired magic link'
           }, status: :unauthorized
         end
@@ -131,17 +134,63 @@ module Api
       def verify_invitation
         buyer_access = BuyerPortalAccess.find_by(invitation_token: params[:token])
         
+        Rails.logger.info "[PORTAL VERIFY] BuyerPortalAccess found: #{buyer_access.present?}, ID: #{buyer_access&.id}"
+        Rails.logger.info "[PORTAL VERIFY] Company: #{buyer_access&.company.present?}, Company ID: #{buyer_access&.company_id}"
+        
         if buyer_access&.invitation_token_valid?
           # Get first/last name from Contact if available
           first_name = buyer_access.buyer&.first_name
           last_name = buyer_access.buyer&.last_name
+          
+          # Get company branding with error handling
+          company_branding = nil
+          begin
+            if buyer_access.company
+              company = buyer_access.company
+              
+              # Get platform name from general settings
+              platform_name = begin
+                general_settings = PlatformSetting.general
+                general_settings['platformName'] || general_settings[:platformName]
+              rescue StandardError => e
+                Rails.logger.warn "[PORTAL VERIFY] PlatformSetting error: #{e.message}"
+                nil
+              end
+              platform_name ||= 'Renter Insight DMS'
+              
+              # Get branding from company settings (stored as JSON)
+              branding = company.branding_settings || {}
+              
+              Rails.logger.info "[PORTAL VERIFY INVITATION] Company ID: #{company.id}, Branding: #{branding.inspect}"
+              
+              company_branding = {
+                logo: branding['logo'],
+                portalLogo: branding['portalLogo'],
+                primaryColor: branding['primaryColor'] || '#3b82f6',
+                secondaryColor: branding['secondaryColor'] || '#8b5cf6',
+                fontFamily: branding['fontFamily'] || 'Inter',
+                portalName: branding['portalName'] || 'Customer Portal',
+                platformName: platform_name
+              }
+              
+              Rails.logger.info "[PORTAL VERIFY INVITATION] Sending branding: #{company_branding.inspect}"
+            else
+              Rails.logger.warn "[PORTAL VERIFY INVITATION] No company found for BuyerPortalAccess ID: #{buyer_access.id}"
+            end
+          rescue StandardError => e
+            Rails.logger.error "[PORTAL VERIFY INVITATION] Error loading branding: #{e.message}"
+            Rails.logger.error e.backtrace.first(5).join("\n")
+            # Continue without branding rather than failing the request
+            company_branding = nil
+          end
           
           render json: {
             ok: true,
             email: buyer_access.email,
             buyer_type: buyer_access.buyer_type,
             first_name: first_name,
-            last_name: last_name
+            last_name: last_name,
+            branding: company_branding
           }, status: :ok
         else
           render json: {
@@ -149,6 +198,14 @@ module Api
             error: 'Invalid or expired invitation token'
           }, status: :unauthorized
         end
+      rescue StandardError => e
+        Rails.logger.error "[PORTAL VERIFY INVITATION] Unexpected error: #{e.message}"
+        Rails.logger.error e.backtrace.first(10).join("\n")
+        
+        render json: {
+          ok: false,
+          error: 'An error occurred while verifying the invitation'
+        }, status: :internal_server_error
       end
       
       def complete_registration

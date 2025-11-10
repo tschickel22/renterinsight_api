@@ -495,6 +495,20 @@ Rails.application.routes.draw do
 
     # ==================== PLATFORM SETTINGS ====================
     namespace :platform do
+      # ==================== TENANTS (TENANT MANAGEMENT) ====================
+      resources :tenants do
+        member do
+          post :verify_domain
+          post :generate_domain_token
+          post :generate_email_dns_records
+          post :verify_email_domain
+        end
+        collection do
+          get :check_subdomain_available
+          get :check_domain_available
+        end
+      end
+      
       resource :settings, only: %i[show update] do
         post :test_email, on: :collection
         post :test_sms, on: :collection
@@ -634,6 +648,9 @@ Rails.application.routes.draw do
       get 'preferences', to: 'preferences#show'
       patch 'preferences', to: 'preferences#update'
       get 'preferences/history', to: 'preferences#history'
+      
+      # Portal Settings (Branding)
+      get 'settings/branding', to: 'settings#branding'
     end
     
     # Admin Impersonation (Testing Only)

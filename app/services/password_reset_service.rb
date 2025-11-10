@@ -520,12 +520,14 @@ class PasswordResetService
         user_type: 'client'
       }
     else
+      # Admin/Staff user payload - must match magic link format
       {
         id: user.id,
         email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
+        firstName: user.first_name,
+        lastName: user.last_name,
         role: user.role,
+        companyId: user.company_id,
         user_type: 'admin'
       }
     end

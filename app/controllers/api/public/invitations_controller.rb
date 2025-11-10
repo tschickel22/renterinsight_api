@@ -24,21 +24,53 @@ module Api
         if result[:valid]
           invitation = result[:invitation]
           
+          # Get company branding for portal display
+          company_branding = nil
+          if invitation.company
+            # Get platform name from platform settings
+            platform_name = begin
+              general_settings = PlatformSetting.general
+              general_settings['platformName'] || general_settings[:platformName]
+            rescue StandardError => e
+              Rails.logger.warn "[INVITATION VERIFY] PlatformSetting error: #{e.message}"
+              nil
+            end
+            platform_name ||= 'Renter Insight DMS'
+            
+            # Get branding from company settings (stored as JSON)
+            branding = invitation.company.branding_settings || {}
+            
+            Rails.logger.info "[INVITATION BRANDING] Company ID: #{invitation.company.id}, Branding: #{branding.inspect}"
+            
+            company_branding = {
+              logo: branding['logo'],
+              portalLogo: branding['portalLogo'],
+              primaryColor: branding['primaryColor'] || '#3b82f6',
+              secondaryColor: branding['secondaryColor'] || '#8b5cf6',
+              fontFamily: branding['fontFamily'] || 'Inter',
+              portalName: branding['portalName'] || 'Customer Portal',
+              platformName: platform_name
+            }
+            
+            Rails.logger.info "[INVITATION BRANDING] Sending to frontend: #{company_branding.inspect}"
+          end
+          
           # Return invitation info for account setup in format frontend expects
           response_data = {
             success: true,
             email: invitation.email,
-            phone: invitation.phone, # ← FIX: Include phone for pre-population
+            phone: invitation.phone,
             recipientName: invitation.recipient_name,
             role: invitation.role,
             companyName: invitation.company&.name,
             expiresAt: invitation.expires_at&.iso8601,
             message: invitation.message,
             invitationType: invitation.invitation_type,
-            token: token
+            token: token,
+            branding: company_branding
           }
           
-          Rails.logger.info "[INVITATION VERIFY] Returning response: #{response_data.to_json}"
+          Rails.logger.info "[INVITATION VERIFY] Returning response with branding: #{response_data.to_json}"
           
           render json: response_data
         else
@@ -111,6 +143,11 @@ module Api
         if result[:success]
           user = result[:user]
           
+          # CRITICAL DEBUG: Log what we're encoding in JWT
+          Rails.logger.info "🔐 [JWT GENERATION] User ID: #{user.id}, Email: #{user.email}"
+          Rails.logger.info "🔐 [JWT GENERATION] Company ID: #{user.company_id}, Role: #{user.role}"
+          Rails.logger.info "🔐 [JWT GENERATION] Company Name: #{user.company&.name}"
+          
           # Generate JWT token for immediate login
           jwt_token = JsonWebToken.encode(
             user_id: user.id,
@@ -118,6 +155,8 @@ module Api
             company_id: user.company_id,
             role: user.role
           )
+          
+          Rails.logger.info "🔐 [JWT GENERATED] Token created for company_id: #{user.company_id}"
           
           render json: {
             success: true,

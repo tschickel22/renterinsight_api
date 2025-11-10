@@ -81,8 +81,28 @@ module Api
       end
       
       def set_company
-        # TODO: Get company from current_user when auth is implemented
-        @company = ::Company.first
+        # STRICT TENANT ISOLATION: Only load company from authenticated user
+        unless current_user
+          Rails.logger.error "🚫 [ServiceTicketsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        unless current_user.company_id.present?
+          Rails.logger.error "🚫 [ServiceTicketsController] User #{current_user.id} has no company_id"
+          render json: { error: 'No company assigned' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: current_user.company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [ServiceTicketsController] Company #{current_user.company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [ServiceTicketsController] Company scope set: #{@company.name} (ID: #{@company.id})"
       end
       
       def service_ticket_params

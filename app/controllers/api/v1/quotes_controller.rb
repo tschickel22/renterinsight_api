@@ -5,11 +5,13 @@ require 'csv'
 module Api
   module V1
     class QuotesController < ApplicationController
+      before_action :set_company_scope
       before_action :set_quote, only: %i[show update destroy send_quote pdf]
 
       # GET /api/v1/quotes
       def index
-        @quotes = Quote.active.includes(:account, :contact)
+        # STRICT TENANT ISOLATION: Only return quotes from current user's company
+        @quotes = @company.quotes.active.includes(:account, :contact)
         
         # Apply filters
         @quotes = @quotes.by_account(params[:account_id]) if params[:account_id].present?
@@ -69,7 +71,7 @@ module Api
           end
         end
         
-        # Create quote with safe params
+        # Create quote with safe params + STRICT TENANT ISOLATION
         safe_params = transformed_params.slice(
           'account_id',
           'contact_id',
@@ -85,7 +87,7 @@ module Api
           'custom_fields'
         )
         
-        @quote = Quote.new(safe_params)
+        @quote = @company.quotes.new(safe_params)
         
         # Set default valid_until if not provided (30 days from now)
         @quote.valid_until ||= 30.days.from_now.to_date
@@ -211,7 +213,8 @@ module Api
 
       # GET /api/v1/quotes/stats
       def stats
-        quotes = Quote.active
+        # STRICT TENANT ISOLATION: Only stats from current user's company
+        quotes = @company.quotes.active
         
         render json: {
           total: quotes.count,
@@ -258,7 +261,8 @@ module Api
 
       # GET /api/v1/quotes/export
       def export
-        quotes = Quote.active.includes(:account, :contact)
+        # STRICT TENANT ISOLATION: Only export quotes from current user's company
+        quotes = @company.quotes.active.includes(:account, :contact)
         
         # Apply same filters as index
         quotes = quotes.by_account(params[:account_id]) if params[:account_id].present?
@@ -291,8 +295,35 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [QuotesController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        unless current_user.company_id.present?
+          Rails.logger.error "🚫 [QuotesController] User #{current_user.id} has no company_id"
+          render json: { error: 'No company assigned' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: current_user.company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [QuotesController] Company #{current_user.company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [QuotesController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
+      end
+
       def set_quote
-        @quote = Quote.find(params[:id])
+        # STRICT TENANT ISOLATION: Only find quotes within company
+        @quote = @company.quotes.find(params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Quote not found or access denied' }, status: :not_found
       end
     end
   end

@@ -92,36 +92,54 @@ class InvitationService
       raise Error, "Token is required to send invitation"
     end
     
-    # Get appropriate template
-    template = find_template(invitation)
-    
-    unless template
-      raise TemplateNotFoundError, "No template found for #{invitation.invitation_type}"
-    end
-    
-    # Build context for template rendering
+    # Build context for template rendering (includes invitation URL)
     context = build_invitation_context(invitation, raw_token)
     
-    # Send via email if required
-    if invitation.delivery_method.in?(['email', 'both'])
-      send_email_invitation(invitation, template, context)
+    # ALWAYS log invitation URL in development (before attempting to send)
+    if Rails.env.development?
+      log_invitation_url(invitation, context)
     end
     
-    # Send via SMS if required
-    if invitation.delivery_method.in?(['sms', 'both'])
-      send_sms_invitation(invitation, template, context)
+    # Try to send via templates (optional in development)
+    begin
+      # Get appropriate template
+      template = find_template(invitation)
+      
+      if template
+        # Send via email if required
+        if invitation.delivery_method.in?(['email', 'both'])
+          send_email_invitation(invitation, template, context)
+        end
+        
+        # Send via SMS if required
+        if invitation.delivery_method.in?(['sms', 'both'])
+          send_sms_invitation(invitation, template, context)
+        end
+      elsif Rails.env.production?
+        # In production, templates are required
+        raise TemplateNotFoundError, "No template found for #{invitation.invitation_type}"
+      else
+        # In development, just log and continue
+        Rails.logger.warn "⚠️  No template found for #{invitation.invitation_type} - invitation created but not sent"
+      end
+    rescue StandardError => e
+      if Rails.env.production?
+        # In production, fail hard
+        Rails.logger.error("Failed to send invitation: #{e.message}")
+        raise DeliveryFailedError, "Failed to send invitation: #{e.message}"
+      else
+        # In development, log and continue
+        Rails.logger.warn "⚠️  Failed to send invitation (#{e.message}) - invitation created but not sent"
+      end
     end
     
-    # Update invitation status
+    # Update invitation status (even if sending failed in development)
     invitation.update!(
       sent_at: Time.current,
       last_sent_at: Time.current
     )
     
     true
-  rescue StandardError => e
-    Rails.logger.error("Failed to send invitation: #{e.message}")
-    raise DeliveryFailedError, "Failed to send invitation: #{e.message}"
   end
   
   # Verify an invitation token
@@ -220,6 +238,37 @@ class InvitationService
   end
   
   private
+  
+  # Log invitation URL to console (development only)
+  def log_invitation_url(invitation, context)
+    separator = "="*80
+    
+    Rails.logger.info "\n#{separator}"
+    Rails.logger.info "🎉 INVITATION CREATED - #{invitation.invitation_type.upcase}"
+    Rails.logger.info separator
+    Rails.logger.info "Invitation ID: #{invitation.id}"
+    Rails.logger.info "Email: #{invitation.email}"
+    Rails.logger.info "Phone: #{invitation.phone || 'Not provided'}"
+    Rails.logger.info "Recipient: #{invitation.recipient_name || 'Not provided'}"
+    Rails.logger.info "Company: #{invitation.company&.name || 'N/A'}"
+    Rails.logger.info "Role: #{invitation.role&.titleize || 'N/A'}"
+    Rails.logger.info "Delivery: #{invitation.delivery_method.titleize}"
+    Rails.logger.info "Expires: #{invitation.expires_at.strftime('%B %d, %Y at %I:%M %p')}"
+    Rails.logger.info ""
+    Rails.logger.info "🔗 INVITATION URL:"
+    Rails.logger.info context['invitation_url']
+    Rails.logger.info ""
+    Rails.logger.info "Copy this URL to test the invitation flow!"
+    Rails.logger.info "#{separator}\n"
+    
+    # Also output to STDOUT for terminal visibility
+    puts "\n#{separator}"
+    puts "🎉 INVITATION CREATED - #{invitation.invitation_type.upcase}"
+    puts separator
+    puts "🔗 INVITATION URL:"
+    puts context['invitation_url']
+    puts "#{separator}\n"
+  end
   
   # Find appropriate template for invitation type
   def find_template(invitation)
@@ -483,19 +532,25 @@ class InvitationService
     # Create a new company (tenant)
     company = Company.create!(
       name: user_params[:company_name],
-      domain: user_params[:domain]
+      domain: user_params[:domain],
+      status: 'active'
     )
     
-    # Create admin user for the new company
-    User.create!(
+    # Create tenant owner user for the new company
+    user = User.create!(
       email: invitation.email,
-      phone: invitation.phone,
-      name: user_params[:name],
+      phone: user_params[:phone] || invitation.phone,
+      name: user_params[:name] || "#{user_params[:first_name]} #{user_params[:last_name]}".strip,
       first_name: user_params[:first_name],
       last_name: user_params[:last_name],
       password: user_params[:password],
-      role: 'admin',
-      status: 'active'
+      role: 'tenant',
+      company_id: company.id,
+      status: 'active',
+      mfa_enabled: false
     )
+    
+    Rails.logger.info "✅ Created tenant #{company.id} with owner user #{user.id}"
+    user
   end
 end

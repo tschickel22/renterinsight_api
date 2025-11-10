@@ -1,8 +1,11 @@
 module Api
   class UsersController < ApplicationController
+    before_action :set_company_scope
+    
     # GET /api/users
     def index
-      users = User.all
+      # STRICT TENANT ISOLATION: Only return users from current user's company
+      users = @company.users
       
       # Filter by role if provided
       users = users.where(role: params[:role]) if params[:role].present?
@@ -21,13 +24,17 @@ module Api
     
     # GET /api/users/:id
     def show
-      user = User.find(params[:id])
+      # STRICT TENANT ISOLATION: Only allow access to users in same company
+      user = @company.users.find(params[:id])
       render json: user_json(user)
+    rescue ActiveRecord::RecordNotFound
+      render json: { error: 'User not found or access denied' }, status: :not_found
     end
     
     # POST /api/users
     def create
-      user = User.new(user_params)
+      # STRICT TENANT ISOLATION: Create user within current company
+      user = @company.users.new(user_params)
       
       if user.save
         render json: user_json(user), status: :created
@@ -38,7 +45,8 @@ module Api
     
     # PUT/PATCH /api/users/:id
     def update
-      user = User.find(params[:id])
+      # STRICT TENANT ISOLATION: Only update users in same company
+      user = @company.users.find(params[:id])
       
       if user.update(user_params)
         render json: {
@@ -57,7 +65,8 @@ module Api
     
     # DELETE /api/users/:id
     def destroy
-      user = User.find(params[:id])
+      # STRICT TENANT ISOLATION: Only delete users in same company
+      user = @company.users.find(params[:id])
       reason = params[:reason] || 'No reason provided'
       
       if user.destroy
@@ -76,6 +85,30 @@ module Api
     end
     
     private
+    
+    def set_company_scope
+      unless current_user
+        Rails.logger.error "🚫 [UsersController] No authenticated user found"
+        render json: { error: 'Authentication required' }, status: :unauthorized
+        return
+      end
+      
+      unless current_user.company_id.present?
+        Rails.logger.error "🚫 [UsersController] User #{current_user.id} has no company_id"
+        render json: { error: 'No company assigned' }, status: :forbidden
+        return
+      end
+      
+      @company = ::Company.find_by(id: current_user.company_id)
+      
+      if @company.nil?
+        Rails.logger.error "🚫 [UsersController] Company #{current_user.company_id} not found"
+        render json: { error: 'Company not found' }, status: :not_found
+        return
+      end
+      
+      Rails.logger.info "✅ [UsersController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
+    end
     
     def user_params
       params.require(:user).permit(

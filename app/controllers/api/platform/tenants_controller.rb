@@ -1,0 +1,473 @@
+# frozen_string_literal: true
+
+module Api
+  module Platform
+    class TenantsController < ApplicationController
+      # Skip authentication for public availability checks
+      skip_before_action :authenticate, only: [:check_subdomain_available, :check_domain_available]
+      
+      before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :generate_email_dns_records, :verify_email_domain]
+      
+      # GET /api/platform/tenants
+      def index
+        begin
+          @tenants = ::Company.all.order(created_at: :desc)
+          
+          # Apply filters
+          @tenants = @tenants.where(status: params[:status]) if params[:status].present?
+          @tenants = @tenants.where(subscription_tier: params[:subscription_tier]) if params[:subscription_tier].present?
+          
+          # Search
+          if params[:search].present?
+            search_term = "%#{params[:search]}%"
+            @tenants = @tenants.where(
+              'name ILIKE ? OR subdomain ILIKE ? OR custom_domain ILIKE ?',
+              search_term, search_term, search_term
+            )
+          end
+          
+          # Pagination
+          page = params[:page]&.to_i || 1
+          per_page = params[:per_page]&.to_i || 20
+          total = @tenants.count
+          @tenants = @tenants.offset((page - 1) * per_page).limit(per_page)
+          
+          # Serialize with error handling
+          serialized_tenants = @tenants.map do |t|
+            begin
+              serialize_tenant(t)
+            rescue => e
+              Rails.logger.error "Error serializing tenant #{t.id}: #{e.message}"
+              {
+                id: t.id,
+                name: t.try(:name) || 'Error',
+                subdomain: t.try(:subdomain),
+                custom_domain: nil,
+                domain_verified: false,
+                status: 'active',
+                subscription_tier: nil,
+                created_at: Time.current,
+                updated_at: Time.current
+              }
+            end
+          end
+          
+          render json: {
+            tenants: serialized_tenants,
+            pagination: {
+              page: page,
+              per_page: per_page,
+              total: total,
+              total_pages: (total.to_f / per_page).ceil
+            }
+          }
+        rescue => e
+          Rails.logger.error "Tenants index error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            error: 'Failed to fetch tenants', 
+            details: Rails.env.development? ? e.message : 'Internal error',
+            tenants: [],
+            pagination: { page: 1, per_page: 20, total: 0, total_pages: 0 }
+          }, status: :ok
+        end
+      end
+      
+      # GET /api/platform/tenants/:id
+      def show
+        render json: { tenant: serialize_tenant(@tenant, detailed: true) }
+      end
+      
+      # POST /api/platform/tenants
+      def create
+        begin
+          @tenant = ::Company.new(tenant_params.except(:owner_email, :owner_first_name, :owner_last_name, :owner_phone))
+          
+          if @tenant.save
+            # Auto-create tenant owner user if email provided
+            if tenant_params[:owner_email].present?
+              begin
+                create_tenant_owner(@tenant)
+              rescue => e
+                Rails.logger.error "Failed to create tenant owner: #{e.message}"
+                # Don't fail the whole request if user creation fails
+              end
+            end
+            
+            render json: { 
+              tenant: serialize_tenant(@tenant, detailed: true),
+              message: 'Tenant created successfully'
+            }, status: :created
+          else
+            render json: { errors: @tenant.errors.full_messages }, status: :unprocessable_entity
+          end
+        rescue => e
+          Rails.logger.error "Tenant creation error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            errors: [Rails.env.development? ? e.message : 'Failed to create tenant']
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # PATCH /api/platform/tenants/:id
+      def update
+        begin
+          if @tenant.update(tenant_params)
+            render json: { 
+              tenant: serialize_tenant(@tenant, detailed: true),
+              message: 'Tenant updated successfully'
+            }
+          else
+            # Return detailed validation errors
+            render json: { 
+              errors: @tenant.errors.full_messages,
+              field_errors: @tenant.errors.messages
+            }, status: :unprocessable_entity
+          end
+        rescue => e
+          Rails.logger.error "Tenant update error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            errors: [Rails.env.development? ? e.message : 'Failed to update tenant']
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # DELETE /api/platform/tenants/:id
+      def destroy
+        begin
+          if @tenant.destroy
+            render json: { message: 'Tenant deleted successfully' }
+          else
+            render json: { errors: ['Failed to delete tenant'] }, status: :unprocessable_entity
+          end
+        rescue => e
+          Rails.logger.error "Tenant delete error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            errors: [Rails.env.development? ? e.message : 'Failed to delete tenant']
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # GET /api/platform/tenants/check_subdomain_available
+      def check_subdomain_available
+        begin
+          subdomain = params[:subdomain]&.downcase&.strip
+          
+          if subdomain.blank?
+            return render json: { available: false, error: 'Subdomain is required' }
+          end
+          
+          # Check format - allow 1-63 characters, alphanumeric and dashes
+          # Must start and end with alphanumeric
+          unless subdomain.match?(/\A[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\z/)
+            return render json: { 
+              available: false, 
+              error: 'Subdomain must be 1-63 characters, alphanumeric with dashes' 
+            }
+          end
+          
+          # Check availability
+          exists = ::Company.where(subdomain: subdomain).exists?
+          
+          # Check reserved subdomains
+          reserved = %w[www api app admin platform staging production demo test]
+          is_reserved = reserved.include?(subdomain)
+          
+          render json: { 
+            available: !exists && !is_reserved,
+            error: if exists
+                    'Subdomain is already taken'
+                  elsif is_reserved
+                    'Subdomain is reserved'
+                  end
+          }
+        rescue => e
+          Rails.logger.error "Subdomain check error: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+          render json: { available: true, error: nil }
+        end
+      end
+      
+      # GET /api/platform/tenants/check_domain_available
+      def check_domain_available
+        begin
+          domain = params[:domain]&.downcase&.strip
+          
+          if domain.blank?
+            return render json: { available: false, error: 'Domain is required' }
+          end
+          
+          # Check format
+          unless domain.match?(/\A[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}\z/i)
+            return render json: { 
+              available: false, 
+              error: 'Invalid domain format' 
+            }
+          end
+          
+          # Check availability
+          exists = ::Company.where(custom_domain: domain).exists?
+          
+          render json: { 
+            available: !exists,
+            error: exists ? 'Domain is already in use' : nil
+          }
+        rescue => e
+          Rails.logger.error "Domain check error: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+          render json: { available: true, error: nil }
+        end
+      end
+      
+      # POST /api/platform/tenants/:id/generate_domain_token
+      def generate_domain_token
+        begin
+          @tenant.generate_domain_verification_token
+          
+          render json: { 
+            verification_token: @tenant.domain_verification_token,
+            message: 'Verification token generated'
+          }
+        rescue => e
+          Rails.logger.error "Generate token error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            error: Rails.env.development? ? e.message : 'Failed to generate token'
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/platform/tenants/:id/verify_domain
+      def verify_domain
+        begin
+          if @tenant.custom_domain.blank?
+            return render json: { error: 'No custom domain configured' }, status: :unprocessable_entity
+          end
+          
+          @tenant.verify_domain!
+          
+          render json: { 
+            tenant: serialize_tenant(@tenant, detailed: true),
+            message: 'Domain verified successfully'
+          }
+        rescue => e
+          Rails.logger.error "Verify domain error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            error: Rails.env.development? ? e.message : 'Failed to verify domain'
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/platform/tenants/:id/generate_email_dns_records
+      def generate_email_dns_records
+        begin
+          if @tenant.email_domain.blank?
+            return render json: { error: 'No email domain configured' }, status: :unprocessable_entity
+          end
+          
+          # Generate DKIM selector and keys
+          dkim_selector = "mail"
+          dkim_public_key = "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC..." # Placeholder
+          
+          # Generate DNS records
+          dns_records = [
+            {
+              type: 'TXT',
+              name: '@',
+              value: 'v=spf1 include:_spf.landlordinsight.com ~all',
+              purpose: 'SPF - Authorizes our servers to send email from your domain',
+              priority: 1
+            },
+            {
+              type: 'TXT',
+              name: "#{dkim_selector}._domainkey",
+              value: dkim_public_key,
+              purpose: 'DKIM - Cryptographic signature for email authentication',
+              priority: 2
+            },
+            {
+              type: 'TXT',
+              name: '_dmarc',
+              value: 'v=DMARC1; p=none; rua=mailto:dmarc@landlordinsight.com',
+              purpose: 'DMARC - Email authentication policy',
+              priority: 3
+            },
+            {
+              type: 'MX',
+              name: '@',
+              value: 'mail.landlordinsight.com',
+              priority: 10,
+              purpose: 'MX - Mail server for receiving email (optional)'
+            }
+          ]
+          
+          render json: { 
+            email_domain: @tenant.email_domain,
+            dns_records: dns_records,
+            instructions: {
+              step1: 'Log in to your domain registrar or DNS provider',
+              step2: 'Add the DNS records listed above',
+              step3: 'Wait 24-48 hours for DNS propagation',
+              step4: 'Click Verify to check your configuration'
+            }
+          }
+        rescue => e
+          Rails.logger.error "Generate email DNS error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            error: Rails.env.development? ? e.message : 'Failed to generate DNS records'
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/platform/tenants/:id/verify_email_domain
+      def verify_email_domain
+        begin
+          if @tenant.email_domain.blank?
+            return render json: { error: 'No email domain configured' }, status: :unprocessable_entity
+          end
+          
+          # Note: DNS verification would check SPF, DKIM records
+          # For initial implementation, manual verification
+          @tenant.verify_email_domain!
+          
+          render json: { 
+            tenant: serialize_tenant(@tenant, detailed: true),
+            message: 'Email domain verified successfully',
+            verified: true
+          }
+        rescue => e
+          Rails.logger.error "Verify email domain error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            error: Rails.env.development? ? e.message : 'Failed to verify email domain'
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      private
+      
+      def create_tenant_owner(tenant)
+      # Use InvitationService to create proper invitation
+      invitation_service = InvitationService.new(
+        invited_by: current_user, 
+        company: tenant
+      )
+      
+      # Determine delivery method based on whether phone is provided
+      delivery_method = tenant_params[:owner_phone].present? ? 'both' : 'email'
+      
+      # Build recipient name
+      recipient_name = [
+      tenant_params[:owner_first_name],
+      tenant_params[:owner_last_name]
+      ].compact.join(' ').presence || tenant_params[:owner_email].split('@').first.capitalize
+      
+      # Create and send invitation
+      result = invitation_service.create_invitation(
+        invitation_type: 'tenant',
+        email: tenant_params[:owner_email],
+        phone: tenant_params[:owner_phone],
+        recipient_name: recipient_name,
+          role: 'tenant',
+      permissions: [],
+      delivery_method: delivery_method,
+      message: "You've been invited to set up your company account for #{tenant.name}."
+    )
+    
+    if result[:success]
+      invitation = result[:invitation]
+      Rails.logger.info "✅ Tenant invitation created for #{tenant.name}: ID #{invitation.id}"
+      
+      if Rails.env.development?
+        puts "\n" + "="*80
+        puts "TENANT INVITATION CREATED"
+        puts "="*80
+        puts "Email: #{invitation.email}"
+        puts "Phone: #{invitation.phone || 'Not provided'}"
+        puts "Tenant: #{tenant.name}"
+        puts "Role: Tenant Owner (Full Admin)"
+        puts "Delivery: #{delivery_method.titleize}"
+        puts "Invitation ID: #{invitation.id}"
+        puts "Check invitation URL via: /api/public/invitations/verify?token=XXX"
+        puts "="*80 + "\n"
+      end
+    else
+      error_msg = "Failed to create tenant invitation: #{result[:error]}"
+      Rails.logger.error "❌ #{error_msg}"
+      raise StandardError, result[:error]
+    end
+    
+    invitation
+  end
+      
+      
+      
+      def set_tenant
+        @tenant = ::Company.find(params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Tenant not found' }, status: :not_found
+      end
+      
+      def tenant_params
+        params.require(:tenant).permit(
+          :name,
+          :subdomain,
+          :custom_domain,
+          :email_domain,
+          :status,
+          :trial_ends_at,
+          :subscription_tier,
+          :max_users,
+          :max_storage_gb,
+          :zoho_subscription_id,
+          :zoho_customer_id,
+          :owner_email,
+          :owner_first_name,
+          :owner_last_name,
+          :owner_phone
+        )
+      end
+      
+      def serialize_tenant(tenant, detailed: false)
+        base = {
+          id: tenant.id,
+          name: tenant.name,
+          subdomain: tenant.subdomain,
+          custom_domain: tenant.custom_domain,
+          domain_verified: false,
+          status: tenant.status || 'active',
+          subscription_tier: tenant.subscription_tier,
+          created_at: tenant.created_at,
+          updated_at: tenant.updated_at
+        }
+        
+        if detailed
+          base.merge!(
+            email_domain: tenant.email_domain,
+            email_domain_verified: false,
+            trial_ends_at: tenant.trial_ends_at,
+            max_users: tenant.max_users,
+            max_storage_gb: tenant.max_storage_gb,
+            users_count: tenant.users_count,
+            users_remaining: tenant.users_remaining,
+            zoho_subscription_id: tenant.zoho_subscription_id,
+            zoho_customer_id: tenant.zoho_customer_id,
+            domain_verification_token: tenant.domain_verification_token,
+            primary_domain: tenant.custom_domain || tenant.subdomain,
+            subdomain_url: tenant.subdomain
+          )
+        end
+        
+        base
+      rescue => e
+        Rails.logger.error "Serialize error for tenant #{tenant.id}: #{e.message}"
+        {
+          id: tenant.id,
+          name: tenant.name || 'Unknown',
+          subdomain: tenant.subdomain,
+          custom_domain: nil,
+          domain_verified: false,
+          status: 'active',
+          subscription_tier: nil,
+          created_at: Time.current,
+          updated_at: Time.current
+        }
+      end
+    end
+  end
+end

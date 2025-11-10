@@ -1,11 +1,14 @@
 module Api
   module Crm
     class DealsController < ApplicationController
+      before_action :set_company_scope
       before_action :set_deal, only: [:show, :update, :destroy, :move_stage]
 
       # GET /api/crm/deals
       def index
-        deals = Deal.includes(:account, :contact, :territory, :user, :deal_products)
+        # STRICT TENANT ISOLATION: Only show deals from current company
+        deals = @company.deals
+                    .includes(:account, :contact, :territory, :user, :deal_products)
                     .order(created_at: :desc)
         
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
@@ -49,7 +52,9 @@ module Api
           return
         end
         
-        deals = Deal.where(stage: stage)
+        # STRICT TENANT ISOLATION: Only show deals from current company
+        deals = @company.deals
+                    .where(stage: stage)
                     .includes(:account, :contact, :territory, :user, :deal_products)
                     .order(created_at: :desc)
         
@@ -58,12 +63,15 @@ module Api
 
       # GET /api/crm/deals/metrics
       def metrics
+        # STRICT TENANT ISOLATION: Only metrics for current company
+        company_deals = @company.deals
+        
         # Overall metrics
-        total_value = Deal.open.sum(:value)
-        total_count = Deal.open.count
-        won_value = Deal.won.sum(:value)
-        won_count = Deal.won.count
-        lost_count = Deal.lost.count
+        total_value = company_deals.open.sum(:value)
+        total_count = company_deals.open.count
+        won_value = company_deals.won.sum(:value)
+        won_count = company_deals.won.count
+        lost_count = company_deals.lost.count
         
         # Win rate
         closed_count = won_count + lost_count
@@ -73,13 +81,13 @@ module Api
         avg_deal_value = total_count > 0 ? (total_value / total_count).round(2) : 0
         
         # By stage - using lowercase normalized stages
-        by_stage = Deal.open.group(:stage).count
-        value_by_stage = Deal.open.group(:stage).sum(:value)
+        by_stage = company_deals.open.group(:stage).count
+        value_by_stage = company_deals.open.group(:stage).sum(:value)
         
         # Recent activity
-        recent_created = Deal.where('created_at >= ?', 30.days.ago).count
-        recent_won = Deal.where('won_at >= ?', 30.days.ago).count
-        recent_lost = Deal.where('lost_at >= ?', 30.days.ago).count
+        recent_created = company_deals.where('created_at >= ?', 30.days.ago).count
+        recent_won = company_deals.where('won_at >= ?', 30.days.ago).count
+        recent_lost = company_deals.where('lost_at >= ?', 30.days.ago).count
         
         render json: {
           total: {
@@ -107,6 +115,7 @@ module Api
 
       # GET /api/crm/deals/forecast
       def forecast
+        # STRICT TENANT ISOLATION: Only forecast for current company
         # Calculate forecast by territory and time period
         period = params[:period] || 'month' # month, quarter, year
         
@@ -119,7 +128,8 @@ module Api
           '1 month'
         end
         
-        forecast_deals = Deal.where('expected_close_date <= ?', date_field.to_s.split.first.to_i.send(date_field.split.last).from_now)
+        forecast_deals = @company.deals
+                            .where('expected_close_date <= ?', date_field.to_s.split.first.to_i.send(date_field.split.last).from_now)
                             .where(stage: ['proposal', 'negotiation', 'closing'])
         
         total_forecast = forecast_deals.sum(:value)
@@ -152,10 +162,10 @@ module Api
       # POST /api/crm/deals
       # FIX: Improved error handling for deal creation
       def create
-        deal = Deal.new(deal_params)
+        # STRICT TENANT ISOLATION: Create deal within current company
+        deal = @company.deals.new(deal_params)
         # Don't set user_id if there's no real current_user
         # deal.user_id ||= current_user&.id
-        deal.company_id ||= current_company_id  # Auto-set company from current context
         
         if deal.save
           # FIX: Safely create stage history with error handling
@@ -245,8 +255,35 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [DealsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        unless current_user.company_id.present?
+          Rails.logger.error "🚫 [DealsController] User #{current_user.id} has no company_id"
+          render json: { error: 'No company assigned' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: current_user.company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [DealsController] Company #{current_user.company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [DealsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_deal
-        @deal = Deal.find(params[:id])
+        # STRICT TENANT ISOLATION: Only access deals in same company
+        @deal = @company.deals.find(params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Deal not found or access denied' }, status: :not_found
       end
 
       def deal_params

@@ -66,10 +66,16 @@ module Api
           # Generate JWT
           jwt_token = generate_jwt(user)
           
+          # Build user payload
+          user_data = user_payload(user)
+          
+          Rails.logger.info "[MagicLinkController] Verification successful for #{user[:type]}: #{user_data[:email]}"
+          Rails.logger.info "[MagicLinkController] Returning user data: #{user_data.keys.join(', ')}"
+          
           render json: {
             success: true,
             token: jwt_token,
-            user: user_payload(user)
+            user: user_data
           }, status: :ok
         else
           render json: {
@@ -154,6 +160,8 @@ module Api
         if user_type == 'User'
           record.update!(magic_link_token: nil, magic_link_expires_at: nil)
         else
+          # Record login for portal users
+          record.record_login!(request.remote_ip) if record.respond_to?(:record_login!)
           record.update!(login_token: nil, login_token_expires_at: nil)
         end
       end
@@ -183,15 +191,27 @@ module Api
             firstName: record.first_name,
             lastName: record.last_name,
             role: record.role,
+            companyId: record.company_id,
             user_type: 'admin'
           }
         else
-          # Client portal user payload
+          # Client portal user payload - MUST match PortalAuthContext expectations
           {
             id: record.id,
+            account_id: record.buyer_id || 1,
+            first_name: record.buyer&.first_name,
+            last_name: record.buyer&.last_name,
             email: record.email,
+            phone: record.buyer&.phone,
+            status: record.portal_enabled ? 'active' : 'inactive',
+            created_at: record.created_at&.iso8601,
+            updated_at: record.updated_at&.iso8601,
             buyer_type: record.buyer_type,
             buyer_id: record.buyer_id,
+            last_login_at: record.last_login_at&.iso8601,
+            email_opt_in: record.email_opt_in,
+            sms_opt_in: record.sms_opt_in,
+            marketing_opt_in: record.marketing_opt_in,
             user_type: 'client',
             role: 'client'
           }

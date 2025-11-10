@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_07_214400) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_09_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -384,7 +384,24 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_07_214400) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "domain"
+    t.string "subdomain"
+    t.string "custom_domain"
+    t.datetime "domain_verified_at"
+    t.string "domain_verification_token"
+    t.string "email_domain"
+    t.datetime "email_domain_verified_at"
+    t.string "status", default: "active"
+    t.datetime "trial_ends_at"
+    t.string "subscription_tier"
+    t.integer "max_users"
+    t.integer "max_storage_gb"
+    t.string "zoho_subscription_id"
+    t.string "zoho_customer_id"
+    t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
+    t.index ["status"], name: "index_companies_on_status"
+    t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
+    t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
   end
 
   create_table "contact_activities", force: :cascade do |t|
