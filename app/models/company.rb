@@ -54,18 +54,147 @@ class Company < ApplicationRecord
     false
   end
   
-  def verify_domain!
-    update(domain_verified_at: Time.current)
-  rescue => e
-    Rails.logger.error "Error verifying domain for Company #{id}: #{e.message}"
-    false
+  # Check if domain verification TXT record exists
+  def check_domain_verification
+    return { success: false, error: 'No custom domain configured' } if custom_domain.blank?
+    return { success: false, error: 'No verification token generated' } if domain_verification_token.blank?
+    
+    require 'resolv'
+    
+    begin
+      resolver = Resolv::DNS.new
+      txt_records = resolver.getresources(custom_domain, Resolv::DNS::Resource::IN::TXT)
+      
+      if txt_records.empty?
+        return { 
+          success: false, 
+          error: 'No TXT records found for domain',
+          details: 'Add TXT record to your DNS settings'
+        }
+      end
+      
+      # Look for our verification token in TXT records
+      expected_value = "landlordinsight-verification=#{domain_verification_token}"
+      found = txt_records.any? { |record| record.data == expected_value }
+      
+      if found
+        { success: true, message: 'Domain verification record found' }
+      else
+        { 
+          success: false, 
+          error: 'Verification token not found in TXT records',
+          expected: expected_value,
+          found: txt_records.map(&:data)
+        }
+      end
+    rescue Resolv::ResolvError => e
+      { success: false, error: "DNS lookup failed: #{e.message}" }
+    rescue => e
+      Rails.logger.error "Domain verification check error for Company #{id}: #{e.message}"
+      { success: false, error: "Verification failed: #{e.message}" }
+    end
   end
   
+  # Verify domain by checking DNS TXT record
+  def verify_domain!
+    verification_result = check_domain_verification
+    
+    if verification_result[:success]
+      update!(domain_verified_at: Time.current)
+      { success: true, message: 'Domain verified successfully' }
+    else
+      { success: false, error: verification_result[:error], details: verification_result }
+    end
+  rescue => e
+    Rails.logger.error "Error verifying domain for Company #{id}: #{e.message}"
+    { success: false, error: e.message }
+  end
+  
+  # Check email domain DNS records (SPF, DKIM, DMARC)
+  def check_email_dns_records
+    return { success: false, error: 'No email domain configured' } if email_domain.blank?
+    
+    require 'resolv'
+    
+    begin
+      resolver = Resolv::DNS.new
+      results = {
+        spf: { status: 'not_found', record: nil },
+        dkim: { status: 'not_found', record: nil },
+        dmarc: { status: 'not_found', record: nil }
+      }
+      
+      # Check SPF record (TXT at root domain)
+      begin
+        txt_records = resolver.getresources(email_domain, Resolv::DNS::Resource::IN::TXT)
+        spf_record = txt_records.find { |r| r.data.start_with?('v=spf1') }
+        
+        if spf_record
+          if spf_record.data.include?('landlordinsight.com')
+            results[:spf] = { status: 'valid', record: spf_record.data }
+          else
+            results[:spf] = { status: 'invalid', record: spf_record.data, error: 'Does not include landlordinsight.com' }
+          end
+        end
+      rescue Resolv::ResolvError
+        results[:spf][:error] = 'DNS lookup failed'
+      end
+      
+      # Check DKIM record (TXT at mail._domainkey.domain)
+      begin
+        dkim_domain = "mail._domainkey.#{email_domain}"
+        dkim_records = resolver.getresources(dkim_domain, Resolv::DNS::Resource::IN::TXT)
+        dkim_record = dkim_records.find { |r| r.data.start_with?('v=DKIM1') }
+        
+        if dkim_record
+          results[:dkim] = { status: 'valid', record: dkim_record.data }
+        end
+      rescue Resolv::ResolvError
+        results[:dkim][:error] = 'DNS lookup failed'
+      end
+      
+      # Check DMARC record (TXT at _dmarc.domain)
+      begin
+        dmarc_domain = "_dmarc.#{email_domain}"
+        dmarc_records = resolver.getresources(dmarc_domain, Resolv::DNS::Resource::IN::TXT)
+        dmarc_record = dmarc_records.find { |r| r.data.start_with?('v=DMARC1') }
+        
+        if dmarc_record
+          results[:dmarc] = { status: 'valid', record: dmarc_record.data }
+        end
+      rescue Resolv::ResolvError
+        results[:dmarc][:error] = 'DNS lookup failed'
+      end
+      
+      # Determine overall success (at least SPF must be valid)
+      if results[:spf][:status] == 'valid'
+        { success: true, message: 'Email DNS records found', records: results }
+      else
+        { 
+          success: false, 
+          error: 'SPF record is required and must include landlordinsight.com',
+          records: results 
+        }
+      end
+    rescue => e
+      Rails.logger.error "Email DNS check error for Company #{id}: #{e.message}"
+      { success: false, error: "DNS check failed: #{e.message}" }
+    end
+  end
+  
+  # Verify email domain by checking DNS records
   def verify_email_domain!
-    update(email_domain_verified_at: Time.current)
+    verification_result = check_email_dns_records
+    
+    if verification_result[:success]
+      update!(email_domain_verified_at: Time.current)
+      { success: true, message: 'Email domain verified successfully', records: verification_result[:records] }
+    else
+      { success: false, error: verification_result[:error], records: verification_result[:records] }
+    end
   rescue => e
     Rails.logger.error "Error verifying email domain for Company #{id}: #{e.message}"
-    false
+    { success: false, error: e.message }
   end
   
   # Tenant status methods

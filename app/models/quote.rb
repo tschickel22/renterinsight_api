@@ -6,6 +6,7 @@ class Quote < ApplicationRecord
   STATUSES = %w[draft sent viewed accepted rejected expired].freeze
   
   # Associations
+  belongs_to :company
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship

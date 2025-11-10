@@ -498,8 +498,10 @@ Rails.application.routes.draw do
       # ==================== TENANTS (TENANT MANAGEMENT) ====================
       resources :tenants do
         member do
+          get :check_domain_dns
           post :verify_domain
           post :generate_domain_token
+          get :check_email_dns
           post :generate_email_dns_records
           post :verify_email_domain
         end

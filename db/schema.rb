@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_09_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_10_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -931,7 +931,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_09_000001) do
     t.datetime "updated_at", null: false
     t.integer "resend_count", default: 0, null: false
     t.datetime "last_sent_at"
+    t.integer "company_id"
     t.index ["account_id"], name: "index_quotes_on_account_id"
+    t.index ["company_id"], name: "index_quotes_on_company_id"
     t.index ["contact_id"], name: "index_quotes_on_contact_id"
     t.index ["created_at"], name: "index_quotes_on_created_at"
     t.index ["customer_id"], name: "index_quotes_on_customer_id"

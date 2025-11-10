@@ -6,7 +6,7 @@ module Api
       # Skip authentication for public availability checks
       skip_before_action :authenticate, only: [:check_subdomain_available, :check_domain_available]
       
-      before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :generate_email_dns_records, :verify_email_domain]
+      before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :generate_email_dns_records, :verify_email_domain, :check_domain_dns, :check_email_dns]
       
       # GET /api/platform/tenants
       def index
@@ -233,6 +233,25 @@ module Api
         end
       end
       
+      # GET /api/platform/tenants/:id/check_domain_dns
+      def check_domain_dns
+        begin
+          if @tenant.custom_domain.blank?
+            return render json: { error: 'No custom domain configured' }, status: :unprocessable_entity
+          end
+          
+          result = @tenant.check_domain_verification
+          
+          render json: result
+        rescue => e
+          Rails.logger.error "Check domain DNS error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            success: false,
+            error: Rails.env.development? ? e.message : 'Failed to check domain DNS'
+          }, status: :internal_server_error
+        end
+      end
+      
       # POST /api/platform/tenants/:id/verify_domain
       def verify_domain
         begin
@@ -240,16 +259,26 @@ module Api
             return render json: { error: 'No custom domain configured' }, status: :unprocessable_entity
           end
           
-          @tenant.verify_domain!
+          result = @tenant.verify_domain!
           
-          render json: { 
-            tenant: serialize_tenant(@tenant, detailed: true),
-            message: 'Domain verified successfully'
-          }
+          if result[:success]
+            render json: { 
+              tenant: serialize_tenant(@tenant, detailed: true),
+              message: result[:message],
+              verified: true
+            }
+          else
+            render json: { 
+              error: result[:error],
+              details: result[:details],
+              verified: false
+            }, status: :unprocessable_entity
+          end
         rescue => e
           Rails.logger.error "Verify domain error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
           render json: { 
-            error: Rails.env.development? ? e.message : 'Failed to verify domain'
+            error: Rails.env.development? ? e.message : 'Failed to verify domain',
+            verified: false
           }, status: :unprocessable_entity
         end
       end
@@ -315,6 +344,25 @@ module Api
         end
       end
       
+      # GET /api/platform/tenants/:id/check_email_dns
+      def check_email_dns
+        begin
+          if @tenant.email_domain.blank?
+            return render json: { error: 'No email domain configured' }, status: :unprocessable_entity
+          end
+          
+          result = @tenant.check_email_dns_records
+          
+          render json: result
+        rescue => e
+          Rails.logger.error "Check email DNS error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            success: false,
+            error: Rails.env.development? ? e.message : 'Failed to check email DNS'
+          }, status: :internal_server_error
+        end
+      end
+      
       # POST /api/platform/tenants/:id/verify_email_domain
       def verify_email_domain
         begin
@@ -322,19 +370,27 @@ module Api
             return render json: { error: 'No email domain configured' }, status: :unprocessable_entity
           end
           
-          # Note: DNS verification would check SPF, DKIM records
-          # For initial implementation, manual verification
-          @tenant.verify_email_domain!
+          result = @tenant.verify_email_domain!
           
-          render json: { 
-            tenant: serialize_tenant(@tenant, detailed: true),
-            message: 'Email domain verified successfully',
-            verified: true
-          }
+          if result[:success]
+            render json: { 
+              tenant: serialize_tenant(@tenant, detailed: true),
+              message: result[:message],
+              verified: true,
+              records: result[:records]
+            }
+          else
+            render json: { 
+              error: result[:error],
+              verified: false,
+              records: result[:records]
+            }, status: :unprocessable_entity
+          end
         rescue => e
           Rails.logger.error "Verify email domain error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
           render json: { 
-            error: Rails.env.development? ? e.message : 'Failed to verify email domain'
+            error: Rails.env.development? ? e.message : 'Failed to verify email domain',
+            verified: false
           }, status: :unprocessable_entity
         end
       end
@@ -429,7 +485,7 @@ module Api
           name: tenant.name,
           subdomain: tenant.subdomain,
           custom_domain: tenant.custom_domain,
-          domain_verified: false,
+          domain_verified: tenant.domain_verified?,
           status: tenant.status || 'active',
           subscription_tier: tenant.subscription_tier,
           created_at: tenant.created_at,
@@ -439,7 +495,9 @@ module Api
         if detailed
           base.merge!(
             email_domain: tenant.email_domain,
-            email_domain_verified: false,
+            email_domain_verified: tenant.email_domain_verified?,
+            domain_verified_at: tenant.domain_verified_at,
+            email_domain_verified_at: tenant.email_domain_verified_at,
             trial_ends_at: tenant.trial_ends_at,
             max_users: tenant.max_users,
             max_storage_gb: tenant.max_storage_gb,
@@ -449,7 +507,7 @@ module Api
             zoho_customer_id: tenant.zoho_customer_id,
             domain_verification_token: tenant.domain_verification_token,
             primary_domain: tenant.custom_domain || tenant.subdomain,
-            subdomain_url: tenant.subdomain
+            subdomain_url: tenant.subdomain_url
           )
         end
         
