@@ -24,9 +24,41 @@ module Api
         if result[:valid]
           invitation = result[:invitation]
           
-          # Get company branding for portal display
+          # Get branding based on invitation type
           company_branding = nil
-          if invitation.company
+          
+          # For tenant invitations, use PLATFORM branding (not company branding)
+          if invitation.invitation_type == 'tenant'
+            # Get platform settings
+            platform_general = PlatformSetting.general
+            platform_branding_settings = PlatformSetting.branding
+            
+            platform_name = platform_general['platformName'] || platform_general[:platformName] || 'RenterInsight'
+            logo_value = platform_branding_settings['logo'] || platform_branding_settings[:logo]
+            
+            # Convert relative logo URLs to absolute URLs
+            frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
+            if logo_value.present?
+              if logo_value.start_with?('http://', 'https://')
+                logo_url = logo_value
+              else
+                logo_url = "#{frontend_url}#{logo_value.start_with?('/') ? logo_value : '/' + logo_value}"
+              end
+            else
+              logo_url = nil
+            end
+            
+            company_branding = {
+              logo: logo_url,
+              primaryColor: platform_branding_settings['primaryColor'] || platform_branding_settings[:primaryColor] || '#3b82f6',
+              secondaryColor: platform_branding_settings['secondaryColor'] || platform_branding_settings[:secondaryColor] || '#8b5cf6',
+              fontFamily: platform_branding_settings['fontFamily'] || platform_branding_settings[:fontFamily] || 'Inter',
+              platformName: platform_name
+            }
+            
+            Rails.logger.info "[TENANT INVITATION] Using platform branding: #{company_branding.inspect}"
+          elsif invitation.company
+            # For company_user and portal_user, use company branding
             # Get platform name from platform settings
             platform_name = begin
               general_settings = PlatformSetting.general

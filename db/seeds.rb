@@ -11,4 +11,7 @@ load Rails.root.join('db', 'seeds', 'sources.rb')
 # Load company user invitation templates
 load Rails.root.join('db', 'seeds', 'company_user_invitation_templates.rb')
 
+# Load tenant invitation templates
+load Rails.root.join('db', 'seeds', 'tenant_invitation_templates.rb')
+
 puts "✨ Seed completed!"

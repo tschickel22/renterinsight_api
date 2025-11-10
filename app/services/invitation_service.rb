@@ -312,6 +312,33 @@ class InvitationService
       last_name = parts[1] if parts.length > 1
     end
     
+    # Get platform settings
+    platform_general = PlatformSetting.general
+    platform_branding = PlatformSetting.branding
+    platform_name = platform_general[:platformName] || platform_general['platformName'] || 'RenterInsight'
+    
+    # Get logo URL
+    logo_value = platform_branding[:logo] || platform_branding['logo']
+    
+    # Ensure logo URL is absolute (emails need full URLs)
+    if logo_value.present?
+      # If logo starts with http:// or https://, use as-is
+      if logo_value.start_with?('http://', 'https://')
+        platform_logo_url = logo_value
+      else
+        # Otherwise, prepend frontend URL to make it absolute
+        platform_logo_url = "#{frontend_url}#{logo_value.start_with?('/') ? logo_value : '/' + logo_value}"
+      end
+    else
+      # Fallback to default logo
+      platform_logo_url = "#{frontend_url}/platform-logo.png"
+    end
+    
+    # Log logo URL in development for debugging
+    if Rails.env.development?
+      Rails.logger.info "🖼️  Platform Logo URL: #{platform_logo_url}"
+    end
+    
     {
       'recipient_name' => invitation.recipient_name || invitation.email.split('@').first.capitalize,
       'first_name' => first_name || invitation.email.split('@').first.capitalize,
@@ -323,6 +350,7 @@ class InvitationService
       'invited_by' => invitation.invited_by.name || invitation.invited_by.email,
       'inviter_name' => invitation.invited_by.name || invitation.invited_by.email,
       'company_name' => invitation.company&.name,
+      'platform_name' => platform_name,
       'invitation_url' => "#{frontend_url}#{invitation_path}?token=#{raw_token}",
       'registration_url' => "#{frontend_url}#{invitation_path}?token=#{raw_token}",
       'invitation_token' => raw_token,
@@ -332,7 +360,8 @@ class InvitationService
       'days_until_expiry' => ((invitation.expires_at - Time.current) / 1.day).round,
       'setup_instructions' => invitation.message || 'Please complete your account setup by clicking the link above.',
       'login_url' => "#{frontend_url}/login",
-      'message' => invitation.message
+      'message' => invitation.message,
+      'platform_logo_url' => platform_logo_url
     }
   end
   
@@ -529,28 +558,44 @@ class InvitationService
   end
   
   def create_tenant(invitation, user_params)
-    # Create a new company (tenant)
-    company = Company.create!(
-      name: user_params[:company_name],
-      domain: user_params[:domain],
-      status: 'active'
-    )
+    # Use existing company from invitation (DO NOT create new one)
+    company = invitation.company
+    raise Error, "No company associated with invitation" unless company
     
-    # Create tenant owner user for the new company
-    user = User.create!(
-      email: invitation.email,
-      phone: user_params[:phone] || invitation.phone,
-      name: user_params[:name] || "#{user_params[:first_name]} #{user_params[:last_name]}".strip,
-      first_name: user_params[:first_name],
-      last_name: user_params[:last_name],
-      password: user_params[:password],
-      role: 'tenant',
-      company_id: company.id,
-      status: 'active',
-      mfa_enabled: false
-    )
+    # Find or update existing placeholder user
+    user = User.find_by(email: invitation.email, company_id: company.id)
     
-    Rails.logger.info "✅ Created tenant #{company.id} with owner user #{user.id}"
+    if user
+      # Update placeholder user created during invitation
+      user.update!(
+        first_name: user_params[:first_name],
+        last_name: user_params[:last_name],
+        name: user_params[:name] || "#{user_params[:first_name]} #{user_params[:last_name]}".strip,
+        phone: user_params[:phone] || invitation.phone,
+        password: user_params[:password],
+        status: 'active',
+        role: 'tenant',
+        mfa_enabled: false
+      )
+      Rails.logger.info "✅ Updated tenant owner user #{user.id} for company #{company.id} (#{company.name})"
+    else
+      # Create new user if doesn't exist (fallback)
+      user = User.create!(
+        email: invitation.email,
+        phone: user_params[:phone] || invitation.phone,
+        name: user_params[:name] || "#{user_params[:first_name]} #{user_params[:last_name]}".strip,
+        first_name: user_params[:first_name],
+        last_name: user_params[:last_name],
+        password: user_params[:password],
+        role: 'tenant',
+        permissions: invitation.permissions || [],
+        company_id: company.id,
+        status: 'active',
+        mfa_enabled: false
+      )
+      Rails.logger.info "✅ Created tenant owner user #{user.id} for company #{company.id} (#{company.name})"
+    end
+    
     user
   end
 end
