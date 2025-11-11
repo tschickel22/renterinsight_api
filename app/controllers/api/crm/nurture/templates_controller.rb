@@ -5,12 +5,16 @@ module Api
     module Nurture
       class TemplatesController < ApplicationController
         def index
-          templates = Template.where(template_type: %w[email sms]).order(created_at: :desc)
+          # Scope templates to current company for tenant isolation
+          company = ::Company.find(current_company_id)
+          templates = company.templates.where(template_type: %w[email sms]).order(created_at: :desc)
           render json: templates.map { |t| template_json(t) }, status: :ok
         end
 
         def create
-          template = Template.new(template_params)
+          # Scope to current company
+          company = ::Company.find(current_company_id)
+          template = company.templates.new(template_params)
           
           # Handle file attachments if present
           if params[:attachments].present?
@@ -27,7 +31,9 @@ module Api
         end
 
         def update
-          template = Template.find(params[:id])
+          # Scope to current company
+          company = ::Company.find(current_company_id)
+          template = company.templates.find(params[:id])
           
           # Handle file attachments if present
           if params[:attachments].present?
@@ -44,14 +50,18 @@ module Api
         end
 
         def destroy
-          template = Template.find(params[:id])
+          # Scope to current company
+          company = ::Company.find(current_company_id)
+          template = company.templates.find(params[:id])
           template.destroy!
           head :no_content
         end
         
         # Delete a specific attachment
         def delete_attachment
-          template = Template.find(params[:id])
+          # Scope to current company
+          company = ::Company.find(current_company_id)
+          template = company.templates.find(params[:id])
           attachment = template.attachments.find(params[:attachment_id])
           attachment.purge
           render json: template_json(template), status: :ok
@@ -61,17 +71,20 @@ module Api
           upsert_templates = params[:upsert] || []
           delete_ids = params[:delete] || []
           
+          # Scope to current company
+          company = ::Company.find(current_company_id)
+          
           ActiveRecord::Base.transaction do
-            # Delete templates
+            # Delete templates (scoped to company)
             if delete_ids.any?
-              Template.where(id: delete_ids).destroy_all
+              company.templates.where(id: delete_ids).destroy_all
             end
             
             # Upsert templates
             upsert_templates.each do |tpl_data|
               if tpl_data[:id].present?
-                # Update existing
-                template = Template.find(tpl_data[:id])
+                # Update existing (scoped to company)
+                template = company.templates.find(tpl_data[:id])
                 template.update!(template_params_from_hash(tpl_data))
                 
                 # Handle attachments if present
@@ -81,8 +94,8 @@ module Api
                   end
                 end
               else
-                # Create new
-                template = Template.create!(template_params_from_hash(tpl_data))
+                # Create new (scoped to company)
+                template = company.templates.create!(template_params_from_hash(tpl_data))
                 
                 # Handle attachments if present
                 if tpl_data[:attachments].present?
@@ -94,8 +107,8 @@ module Api
             end
           end
           
-          # Return all templates
-          templates = Template.where(template_type: %w[email sms]).order(created_at: :desc)
+          # Return all templates (scoped to company)
+          templates = company.templates.where(template_type: %w[email sms]).order(created_at: :desc)
           render json: templates.map { |t| template_json(t) }, status: :ok
         rescue StandardError => e
           Rails.logger.error("Template bulk error: #{e.message}")

@@ -12,6 +12,8 @@ class Company < ApplicationRecord
   has_many :service_tickets, dependent: :destroy
   has_many :users, dependent: :destroy
   has_many :quotes, dependent: :destroy
+  has_many :brochures, dependent: :destroy
+  has_many :templates, dependent: :destroy
   
   # Validations for tenant fields
   validates :subdomain, 

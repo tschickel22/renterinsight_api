@@ -21,6 +21,9 @@ Rails.application.routes.draw do
     post ':public_id/submit', to: 'forms#submit', as: :form_submit
   end
   
+  # ==================== PUBLIC BROCHURES ====================
+  get '/b/:public_id', to: 'api/v1/brochures#public_view', as: :public_brochure
+  
   # API endpoints for public forms (for frontend)
   namespace :api do
     # ==================== PUBLIC INVITATIONS (No Auth Required) ====================
@@ -64,6 +67,21 @@ Rails.application.routes.draw do
         # Vehicle image uploads
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
       end
+      
+      # ==================== BROCHURES ====================
+      resources :brochures do
+        member do
+          post :share
+        end
+        
+        collection do
+          get :stats
+          get :templates
+        end
+      end
+      
+      # ==================== BROCHURE TEMPLATES ====================
+      resources :brochure_templates, path: 'brochure-templates', only: [:index, :show, :create, :update, :destroy]
       
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do

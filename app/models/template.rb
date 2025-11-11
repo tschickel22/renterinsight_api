@@ -1,4 +1,7 @@
 class Template < ApplicationRecord
+  # Associations
+  belongs_to :company
+  
   # String-backed enum on the `template_type` column
   enum :template_type, { email: 'email', sms: 'sms' }
 

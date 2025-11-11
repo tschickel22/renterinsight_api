@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_10_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_11_211943) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -221,6 +221,46 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_10_000001) do
     t.index ["requested_by_id"], name: "index_approval_workflows_on_requested_by_id"
     t.index ["status"], name: "index_approval_workflows_on_status"
     t.index ["workflow_type"], name: "index_approval_workflows_on_workflow_type"
+  end
+
+  create_table "brochure_templates", force: :cascade do |t|
+    t.string "name", null: false
+    t.text "description"
+    t.string "template_key", null: false
+    t.string "theme"
+    t.string "preview_image"
+    t.jsonb "template_data", default: {}, null: false
+    t.boolean "is_default", default: false
+    t.boolean "active", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_brochure_templates_on_active"
+    t.index ["is_default"], name: "index_brochure_templates_on_is_default"
+    t.index ["template_key"], name: "index_brochure_templates_on_template_key", unique: true
+  end
+
+  create_table "brochures", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "title", null: false
+    t.text "description"
+    t.string "public_id", null: false
+    t.string "template_name"
+    t.jsonb "template_data", default: {}
+    t.jsonb "vehicle_ids", default: []
+    t.boolean "is_public", default: true
+    t.integer "view_count", default: 0
+    t.integer "share_count", default: 0
+    t.integer "download_count", default: 0
+    t.string "status", default: "active"
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_deleted"], name: "index_brochures_on_company_id_and_is_deleted"
+    t.index ["company_id", "status"], name: "index_brochures_on_company_id_and_status"
+    t.index ["company_id"], name: "index_brochures_on_company_id"
+    t.index ["created_at"], name: "index_brochures_on_created_at"
+    t.index ["public_id"], name: "index_brochures_on_public_id", unique: true
   end
 
   create_table "buyer_portal_accesses", force: :cascade do |t|
@@ -1055,6 +1095,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_10_000001) do
     t.boolean "is_active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "company_id", null: false
+    t.index ["company_id"], name: "index_templates_on_company_id"
     t.index ["template_type", "name"], name: "index_templates_on_template_type_and_name"
   end
 
@@ -1325,6 +1367,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_10_000001) do
   add_foreign_key "approval_workflows", "deals"
   add_foreign_key "approval_workflows", "users", column: "approved_by_id"
   add_foreign_key "approval_workflows", "users", column: "requested_by_id"
+  add_foreign_key "brochures", "companies"
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
@@ -1377,6 +1420,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_10_000001) do
   add_foreign_key "service_tickets", "contacts"
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "tag_assignments", "tags"
+  add_foreign_key "templates", "companies"
   add_foreign_key "territories", "users"
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"

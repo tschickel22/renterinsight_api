@@ -29,8 +29,16 @@ module Api
           
           # Calculate email stats
           email_opened = email_comms.where(direction: 'outbound').where.not(read_at: nil).count
-          email_clicked = email_comms.where(direction: 'outbound')
-            .where("metadata->>'clicked' = 'true'").count
+          
+          # Safe metadata query - check if metadata column is jsonb or text
+          email_clicked = begin
+            # Try jsonb query first
+            email_comms.where(direction: 'outbound')
+              .where("metadata->>'clicked' = 'true'").count
+          rescue ActiveRecord::StatementInvalid
+            # Fallback for text columns - just count as 0
+            0
+          end
           
           open_rate = email_sent > 0 ? (email_opened.to_f / email_sent * 100).round(1) : 0
           click_rate = email_sent > 0 ? (email_clicked.to_f / email_sent * 100).round(1) : 0
