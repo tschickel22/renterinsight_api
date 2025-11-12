@@ -189,13 +189,20 @@ module Api
         company = @brochure.company
         branding = company.branding_settings || {}
         
+        # Get template data and enhance with theme
+        template_data = @brochure.template_data
+        if template_data && template_data['theme'].is_a?(String)
+          # Replace theme ID with full theme object
+          template_data['theme'] = get_theme_data(template_data['theme'])
+        end
+        
         render json: {
           brochure: {
             id: @brochure.public_id,
             title: @brochure.title,
             description: @brochure.description,
             templateName: @brochure.template_name,
-            templateData: @brochure.template_data,
+            templateData: template_data,
             vehicles: vehicles,
             viewCount: @brochure.view_count,
             createdAt: @brochure.created_at,
@@ -233,40 +240,29 @@ module Api
       def templates
         Rails.logger.info "✅ [BrochuresController] Templates endpoint called by user: #{current_user&.email || 'anonymous'}"
         
-        # Return default templates
-        # In production, these could be stored in database or loaded from config
-        default_templates = [
-          {
-            id: 'modern',
-            name: 'Modern Showcase',
-            description: 'Clean, contemporary design with bold typography',
-            theme: 'modern',
-            preview_image: '/templates/modern-preview.jpg'
-          },
-          {
-            id: 'luxury',
-            name: 'Luxury Collection',
-            description: 'Elegant design for premium properties',
-            theme: 'luxury',
-            preview_image: '/templates/luxury-preview.jpg'
-          },
-          {
-            id: 'outdoor',
-            name: 'Outdoor Adventure',
-            description: 'Nature-inspired design for RV and outdoor properties',
-            theme: 'outdoor',
-            preview_image: '/templates/outdoor-preview.jpg'
-          },
-          {
-            id: 'family',
-            name: 'Family Friendly',
-            description: 'Warm, welcoming design for family homes',
-            theme: 'family',
-            preview_image: '/templates/family-preview.jpg'
-          }
-        ]
+        # Return actual BrochureTemplate records from database
+        templates = BrochureTemplate.active
         
-        render json: { templates: default_templates }
+        if templates.empty?
+          # If no templates exist, create default ones
+          Rails.logger.info "📝 [BrochuresController] No templates found, creating defaults"
+          create_default_templates
+          templates = BrochureTemplate.active
+        end
+        
+        # Format templates for frontend
+        formatted_templates = templates.map do |template|
+          {
+            id: template.template_key,
+            name: template.name,
+            description: template.description,
+            theme: template.theme,
+            previewImage: template.preview_image,
+            templateData: template.template_data
+          }
+        end
+        
+        render json: { templates: formatted_templates }
       rescue => e
         Rails.logger.error "🚫 [BrochuresController] Error in templates endpoint: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
@@ -308,6 +304,13 @@ module Api
       def brochure_json(brochure, detailed: false)
         base_url = request.base_url
         
+        # Get template data and enhance with theme
+        template_data = brochure.template_data
+        if template_data && template_data['theme'].is_a?(String)
+          # Replace theme ID with full theme object
+          template_data['theme'] = get_theme_data(template_data['theme'])
+        end
+        
         json = {
           id: brochure.id.to_s,
           title: brochure.title,
@@ -315,7 +318,7 @@ module Api
           publicId: brochure.public_id,
           publicUrl: brochure.public_url(base_url),
           templateName: brochure.template_name,
-          templateData: brochure.template_data,
+          templateData: template_data,
           vehicleIds: brochure.vehicle_ids,
           vehicleCount: brochure.vehicle_count,
           isPublic: brochure.is_public,
@@ -370,8 +373,10 @@ module Api
           features: vehicle.features || [],
           images: full_image_urls,
           location: {
+            street: vehicle.address1,
             city: vehicle.location_city,
-            state: vehicle.location_state
+            state: vehicle.location_state,
+            zip: vehicle.location_zip
           },
           bedrooms: vehicle.bedrooms,
           bathrooms: vehicle.bathrooms,
@@ -381,6 +386,193 @@ module Api
           vin: vehicle.vin,
           serialNumber: vehicle.serial_number
         }
+      end
+      
+      # Theme definitions matching frontend
+      def get_theme_data(theme_id)
+        themes = {
+          'modern' => {
+            id: 'modern',
+            name: 'Modern',
+            description: 'Clean, contemporary design with bold typography',
+            primaryColor: '#3b82f6',
+            secondaryColor: '#64748b',
+            accentColor: '#f59e0b',
+            fontFamily: 'Inter',
+            headerFont: 'Inter',
+            bodyFont: 'Inter'
+          },
+          'luxury' => {
+            id: 'luxury',
+            name: 'Luxury',
+            description: 'Elegant design for premium properties',
+            primaryColor: '#1f2937',
+            secondaryColor: '#6b7280',
+            accentColor: '#d97706',
+            fontFamily: 'Playfair Display',
+            headerFont: 'Playfair Display',
+            bodyFont: 'Inter'
+          },
+          'outdoor' => {
+            id: 'outdoor',
+            name: 'Outdoor Adventure',
+            description: 'Nature-inspired design for RV and outdoor properties',
+            primaryColor: '#059669',
+            secondaryColor: '#374151',
+            accentColor: '#dc2626',
+            fontFamily: 'Montserrat',
+            headerFont: 'Montserrat',
+            bodyFont: 'Open Sans'
+          },
+          'family' => {
+            id: 'family',
+            name: 'Family Friendly',
+            description: 'Warm, welcoming design for family homes',
+            primaryColor: '#7c3aed',
+            secondaryColor: '#6b7280',
+            accentColor: '#f59e0b',
+            fontFamily: 'Poppins',
+            headerFont: 'Poppins',
+            bodyFont: 'Inter'
+          }
+        }
+        
+        themes[theme_id] || themes['modern']
+      end
+      
+      # Create default templates if none exist
+      def create_default_templates
+        templates_config = [
+          {
+            name: 'Modern Showcase',
+            template_key: 'modern',
+            description: 'Clean, contemporary design with bold typography',
+            theme: 'modern',
+            template_data: {
+              theme: 'modern',
+              blocks: [
+                {
+                  id: 'hero-1',
+                  type: 'hero',
+                  config: {
+                    title: 'Modern Homes Collection',
+                    subtitle: 'Explore our contemporary properties'
+                  }
+                },
+                {
+                  id: 'gallery-1',
+                  type: 'gallery',
+                  config: {
+                    title: 'Featured Properties',
+                    subtitle: 'Discover your next home',
+                    maxItems: 15
+                  }
+                }
+              ]
+            },
+            is_default: true
+          },
+          {
+            name: 'Luxury Collection',
+            template_key: 'luxury',
+            description: 'Elegant design for premium properties',
+            theme: 'luxury',
+            template_data: {
+              theme: 'luxury',
+              blocks: [
+                {
+                  id: 'hero-1',
+                  type: 'hero',
+                  config: {
+                    title: 'Luxury Estates',
+                    subtitle: 'Experience sophisticated living'
+                  }
+                },
+                {
+                  id: 'gallery-1',
+                  type: 'gallery',
+                  config: {
+                    title: 'Premium Homes',
+                    subtitle: 'Curated collection of luxury properties',
+                    maxItems: 15
+                  }
+                }
+              ]
+            },
+            is_default: true
+          },
+          {
+            name: 'Outdoor Explorer',
+            template_key: 'outdoor',
+            description: 'Nature-inspired design for RVs focused on camping and outdoor adventures. Earthy, adventurous feel.',
+            theme: 'outdoor',
+            template_data: {
+              theme: 'outdoor',
+              blocks: [
+                {
+                  id: 'hero-1',
+                  type: 'hero',
+                  config: {
+                    title: 'Adventure Awaits',
+                    subtitle: 'Your Gateway to the Great Outdoors'
+                  }
+                },
+                {
+                  id: 'gallery-1',
+                  type: 'gallery',
+                  config: {
+                    title: 'Adventure-Ready RVs',
+                    subtitle: 'Built for exploration and outdoor living',
+                    maxItems: 15
+                  }
+                }
+              ]
+            },
+            is_default: true
+          },
+          {
+            name: 'Family Friendly',
+            template_key: 'family',
+            description: 'Warm, welcoming design for family homes',
+            theme: 'family',
+            template_data: {
+              theme: 'family',
+              blocks: [
+                {
+                  id: 'hero-1',
+                  type: 'hero',
+                  config: {
+                    title: 'Family Homes',
+                    subtitle: 'Perfect spaces for growing families'
+                  }
+                },
+                {
+                  id: 'gallery-1',
+                  type: 'gallery',
+                  config: {
+                    title: 'Family-Friendly Properties',
+                    subtitle: 'Comfort and space for everyone',
+                    maxItems: 15
+                  }
+                }
+              ]
+            },
+            is_default: true
+          }
+        ]
+        
+        templates_config.each do |config|
+          BrochureTemplate.find_or_create_by!(template_key: config[:template_key]) do |template|
+            template.name = config[:name]
+            template.description = config[:description]
+            template.theme = config[:theme]
+            template.template_data = config[:template_data]
+            template.is_default = config[:is_default]
+            template.active = true
+          end
+        end
+        
+        Rails.logger.info "✅ [BrochuresController] Created #{templates_config.size} default templates"
       end
     end
   end
