@@ -1,0 +1,369 @@
+# frozen_string_literal: true
+
+module Api
+  module V1
+    class ListingsController < ApplicationController
+      before_action :set_company
+      before_action :set_listing, only: [:show, :update, :destroy, :publish, :unpublish]
+
+      # GET /api/v1/listings
+      def index
+        Rails.logger.info "[Listings#index] ========== START =========="
+        Rails.logger.info "[Listings#index] Params: #{params.inspect}"
+        Rails.logger.info "[Listings#index] vehicle_type param: '#{params[:vehicle_type]}'"
+        
+        listings = @company.listings.active
+        Rails.logger.info "[Listings#index] Initial count: #{listings.count}"
+        
+        # Join vehicle table once if needed for any filter
+        needs_vehicle_join = params[:search].present? || params[:vehicle_type].present?
+        if needs_vehicle_join
+          listings = listings.joins(:vehicle)
+          Rails.logger.info "[Listings#index] After joins(:vehicle): #{listings.count}"
+        end
+        
+        # Filters
+        listings = listings.by_status(params[:status]) if params[:status].present?
+        listings = listings.by_offer_type(params[:offer_type]) if params[:offer_type].present?
+        
+        # Filter by vehicle listing type (manufactured_home vs rv)
+        if params[:vehicle_type].present?
+          Rails.logger.info "[Listings#index] Filtering by vehicle_type: #{params[:vehicle_type]}"
+          listings = listings.where(vehicles: { listing_type: params[:vehicle_type] })
+          Rails.logger.info "[Listings#index] After vehicle_type filter: #{listings.count}"
+          Rails.logger.info "[Listings#index] SQL: #{listings.to_sql}"
+        end
+        
+        # Search by description or vehicle info
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          listings = listings.where(
+            "listings.description ILIKE ? OR vehicles.make ILIKE ? OR vehicles.model ILIKE ?",
+            search_term, search_term, search_term
+          )
+        end
+        
+        # Filter by offer type (sale vs rent) - keeping legacy support
+        case params[:listing_type]
+        when 'sale'
+          listings = listings.for_sale
+        when 'rent'
+          listings = listings.for_rent
+        when 'manufactured_home', 'rv'
+          # Support vehicle type via listing_type for backwards compatibility
+          unless needs_vehicle_join
+            listings = listings.joins(:vehicle)
+            needs_vehicle_join = true
+          end
+          listings = listings.where(vehicles: { listing_type: params[:listing_type] })
+        end
+        
+        # Filter by published status
+        case params[:published]
+        when 'true', true
+          listings = listings.published
+        when 'false', false
+          listings = listings.draft
+        end
+
+        # Sorting
+        sort_by = params[:sort_by] || 'created_at'
+        sort_order = params[:sort_order] || 'desc'
+        listings = listings.order("#{sort_by} #{sort_order}")
+
+        # Pagination
+        page = params[:page]&.to_i || 1
+        per_page = [params[:per_page]&.to_i || 25, 100].min
+        total_count = listings.count
+        listings = listings.offset((page - 1) * per_page).limit(per_page)
+
+        render json: {
+          listings: listings.map { |l| listing_json(l) },
+          meta: {
+            current_page: page,
+            per_page: per_page,
+            total_count: total_count,
+            total_pages: (total_count.to_f / per_page).ceil
+          }
+        }
+      end
+
+      # GET /api/v1/listings/:id
+      def show
+        render json: { listing: listing_json(@listing, detailed: true) }
+      end
+
+      # POST /api/v1/listings
+      def create
+        vehicle = @company.vehicles.find_by(id: params[:listing][:vehicle_id])
+        
+        unless vehicle
+          return render json: { error: 'Vehicle not found' }, status: :not_found
+        end
+
+        listing = @company.listings.new(listing_params)
+        listing.vehicle = vehicle
+
+        if listing.save
+          render json: { 
+            listing: listing_json(listing, detailed: true),
+            message: 'Listing created successfully'
+          }, status: :created
+        else
+          render json: { errors: listing.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      # PATCH /api/v1/listings/:id
+      def update
+        if @listing.update(listing_params)
+          render json: { 
+            listing: listing_json(@listing, detailed: true),
+            message: 'Listing updated successfully'
+          }
+        else
+          render json: { errors: @listing.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      # DELETE /api/v1/listings/:id
+      def destroy
+        @listing.soft_delete!
+        render json: { message: 'Listing deleted successfully' }
+      end
+
+      # POST /api/v1/listings/:id/publish
+      def publish
+        unless @listing.valid_for_publishing?
+          missing_fields = @listing.missing_required_fields
+          return render json: { 
+            error: 'Cannot publish listing with missing required fields',
+            missing_fields: missing_fields 
+          }, status: :unprocessable_entity
+        end
+
+        @listing.publish!
+        render json: { 
+          listing: listing_json(@listing, detailed: true),
+          message: 'Listing published successfully'
+        }
+      end
+
+      # POST /api/v1/listings/:id/unpublish
+      def unpublish
+        @listing.unpublish!
+        render json: { 
+          listing: listing_json(@listing, detailed: true),
+          message: 'Listing unpublished successfully'
+        }
+      end
+
+      # GET /api/v1/listings/stats
+      def stats
+        listings = @company.listings.active
+        
+        # Count by vehicle type
+        vehicle_type_counts = listings.joins(:vehicle)
+          .group('vehicles.listing_type')
+          .count
+        
+        Rails.logger.info "[Listings#stats] Vehicle type counts: #{vehicle_type_counts.inspect}"
+        
+        render json: {
+          total: listings.count,
+          published: listings.published.count,
+          draft: listings.draft.count,
+          active: listings.where(status: 'active').count,
+          by_status: listings.group(:status).count,
+          by_offer_type: listings.group(:offer_type).count,
+          by_vehicle_type: vehicle_type_counts,
+          for_sale: listings.for_sale.count,
+          for_rent: listings.for_rent.count,
+          mh_village_ready: listings.select(&:mh_village_ready?).count,
+          mits_ready: listings.select(&:mits_ready?).count
+        }
+      end
+
+      private
+
+      def set_company
+        @company = ::Company.find_by(id: current_user.company_id)
+        @company ||= ::Company.first
+        
+        unless @company
+          render json: { error: 'Company not found' }, status: :not_found
+        end
+      end
+
+      def set_listing
+        @listing = @company.listings.active.find(params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Listing not found' }, status: :not_found
+      end
+
+      def listing_params
+        params.require(:listing).permit(
+          :vehicle_id,
+          :status,
+          :offer_type,
+          :sale_price,
+          :rent_price,
+          :rent_period,
+          :description,
+          :features,
+          :package_type,
+          :location_type,
+          :community_name,
+          :lot_rent,
+          :financing_available,
+          :delivery_available,
+          :setup_included,
+          :has_garage,
+          :has_fireplace,
+          :has_deck,
+          :has_shed,
+          :has_appliances,
+          :has_ac,
+          :is_furnished,
+          :pets_allowed,
+          :seller_name,
+          :seller_phone,
+          :seller_email,
+          :agent_name,
+          :agent_phone,
+          :agent_email,
+          :property_name,
+          :unit_number,
+          :floor_plan_name,
+          :security_deposit,
+          :application_fee,
+          :admin_fee,
+          :lease_terms,
+          :available_date,
+          :effective_rent,
+          :latitude,
+          :longitude,
+          :concessions,
+          :promotional_text,
+          office_hours: [],
+          parking_details: {},
+          pet_policy: {},
+          property_amenities: [],
+          unit_amenities: [],
+          additional_features: {}
+        )
+      end
+
+      def listing_json(listing, detailed: false)
+        vehicle = listing.vehicle
+        
+        json = {
+          id: listing.id.to_s,
+          vehicleId: vehicle.id.to_s,
+          status: listing.status,
+          offerType: listing.offer_type,
+          salePrice: listing.sale_price&.to_f,
+          rentPrice: listing.rent_price&.to_f,
+          rentPeriod: listing.rent_period,
+          description: listing.description,
+          features: listing.features,
+          displayName: listing.display_name,
+          priceDisplay: listing.price_display,
+          
+          # Status flags
+          published: listing.published?,
+          mhVillageReady: listing.mh_village_ready?,
+          mitsReady: listing.mits_ready?,
+          
+          # MH Village fields
+          packageType: listing.package_type,
+          locationType: listing.location_type,
+          communityName: listing.community_name,
+          lotRent: listing.lot_rent&.to_f,
+          financingAvailable: listing.financing_available,
+          deliveryAvailable: listing.delivery_available,
+          setupIncluded: listing.setup_included,
+          
+          # Feature flags
+          hasGarage: listing.has_garage?,
+          hasFireplace: listing.has_fireplace?,
+          hasDeck: listing.has_deck?,
+          hasShed: listing.has_shed?,
+          hasAppliances: listing.has_appliances?,
+          hasAc: listing.has_ac?,
+          isFurnished: listing.is_furnished?,
+          petsAllowed: listing.pets_allowed?,
+          
+          # Contact info
+          sellerName: listing.seller_name,
+          sellerPhone: listing.seller_phone,
+          sellerEmail: listing.seller_email,
+          agentName: listing.agent_name,
+          agentPhone: listing.agent_phone,
+          agentEmail: listing.agent_email,
+          
+          # MITS fields
+          propertyName: listing.property_name,
+          unitNumber: listing.unit_number,
+          floorPlanName: listing.floor_plan_name,
+          securityDeposit: listing.security_deposit&.to_f,
+          applicationFee: listing.application_fee&.to_f,
+          adminFee: listing.admin_fee&.to_f,
+          leaseTerms: listing.lease_terms,
+          availableDate: listing.available_date,
+          effectiveRent: listing.effective_rent&.to_f,
+          latitude: listing.latitude&.to_f,
+          longitude: listing.longitude&.to_f,
+          officeHours: listing.formatted_office_hours,
+          parkingDetails: listing.formatted_parking,
+          petPolicy: listing.formatted_pet_policy,
+          propertyAmenities: listing.formatted_property_amenities,
+          unitAmenities: listing.formatted_unit_amenities,
+          concessions: listing.concessions,
+          promotionalText: listing.promotional_text,
+          
+          # Timestamps
+          publishedAt: listing.published_at,
+          lastSyncedAt: listing.last_synced_at,
+          createdAt: listing.created_at,
+          updatedAt: listing.updated_at,
+          
+          # Associated vehicle summary
+          vehicle: {
+            id: vehicle.id.to_s,
+            inventoryId: vehicle.inventory_id,
+            listingType: vehicle.listing_type,
+            displayName: vehicle.display_name,
+            year: vehicle.year,
+            make: vehicle.make,
+            model: vehicle.model,
+            bedrooms: vehicle.bedrooms,
+            bathrooms: vehicle.bathrooms,
+            squareFeet: vehicle.square_feet,
+            images: vehicle.images || [],
+            location: {
+              city: vehicle.location_city,
+              state: vehicle.location_state,
+              zip: vehicle.location_zip
+            }
+          }
+        }
+        
+        # Add detailed vehicle data if requested
+        if detailed
+          json[:vehicle].merge!({
+            serialNumber: vehicle.serial_number,
+            vin: vehicle.vin,
+            length: vehicle.length,
+            width: vehicle.width,
+            condition: vehicle.condition,
+            images: vehicle.images || [],
+            features: vehicle.features || []
+          })
+        end
+        
+        json
+      end
+    end
+  end
+end

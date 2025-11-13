@@ -68,6 +68,18 @@ Rails.application.routes.draw do
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
       end
       
+      # ==================== LISTINGS ====================
+      resources :listings do
+        member do
+          post :publish
+          post :unpublish
+        end
+        
+        collection do
+          get :stats
+        end
+      end
+      
       # ==================== BROCHURES ====================
       resources :brochures do
         member do
@@ -550,6 +562,13 @@ Rails.application.routes.draw do
           member do
             post :test
           end
+        end
+      end
+      
+      # ==================== SYNDICATION PARTNERS ====================
+      resources :syndication_partners, path: 'syndication-partners' do
+        member do
+          patch :toggle
         end
       end
     end

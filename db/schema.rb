@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_11_211943) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_13_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -802,6 +802,74 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_11_211943) do
     t.index ["source_id"], name: "index_leads_on_source_id"
   end
 
+  create_table "listings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "vehicle_id", null: false
+    t.string "status", default: "draft", null: false
+    t.string "offer_type", null: false
+    t.decimal "sale_price", precision: 12, scale: 2
+    t.decimal "rent_price", precision: 10, scale: 2
+    t.string "rent_period"
+    t.text "description"
+    t.text "features"
+    t.jsonb "additional_features", default: {}
+    t.string "package_type"
+    t.string "location_type"
+    t.string "community_name"
+    t.decimal "lot_rent", precision: 10, scale: 2
+    t.string "financing_available"
+    t.string "delivery_available"
+    t.string "setup_included"
+    t.boolean "has_garage", default: false
+    t.boolean "has_fireplace", default: false
+    t.boolean "has_deck", default: false
+    t.boolean "has_shed", default: false
+    t.boolean "has_appliances", default: false
+    t.boolean "has_ac", default: false
+    t.boolean "is_furnished", default: false
+    t.boolean "pets_allowed", default: false
+    t.string "seller_name"
+    t.string "seller_phone"
+    t.string "seller_email"
+    t.string "agent_name"
+    t.string "agent_phone"
+    t.string "agent_email"
+    t.datetime "published_at"
+    t.datetime "last_synced_at"
+    t.jsonb "syndication_metadata", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "property_name"
+    t.jsonb "office_hours", default: {}
+    t.jsonb "parking_details", default: {}
+    t.jsonb "pet_policy", default: {}
+    t.text "concessions"
+    t.text "promotional_text"
+    t.decimal "security_deposit", precision: 10, scale: 2
+    t.decimal "application_fee", precision: 10, scale: 2
+    t.decimal "admin_fee", precision: 10, scale: 2
+    t.string "lease_terms"
+    t.date "available_date"
+    t.decimal "effective_rent", precision: 10, scale: 2
+    t.jsonb "property_amenities", default: []
+    t.jsonb "unit_amenities", default: []
+    t.decimal "latitude", precision: 10, scale: 6
+    t.decimal "longitude", precision: 10, scale: 6
+    t.string "unit_number"
+    t.string "floor_plan_name"
+    t.index ["company_id", "is_deleted"], name: "index_listings_on_company_id_and_is_deleted"
+    t.index ["company_id", "property_name"], name: "index_listings_on_company_id_and_property_name"
+    t.index ["company_id", "status"], name: "index_listings_on_company_id_and_status"
+    t.index ["company_id"], name: "index_listings_on_company_id"
+    t.index ["offer_type"], name: "index_listings_on_offer_type"
+    t.index ["published_at"], name: "index_listings_on_published_at"
+    t.index ["status"], name: "index_listings_on_status"
+    t.index ["unit_number"], name: "index_listings_on_unit_number"
+    t.index ["vehicle_id"], name: "index_listings_on_vehicle_id"
+  end
+
   create_table "lot_map_history_entries", force: :cascade do |t|
     t.integer "lot_id", null: false
     t.string "action", null: false
@@ -1056,6 +1124,36 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_11_211943) do
     t.decimal "conversion_rate"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+  end
+
+  create_table "syndication_partners", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "partner_type", null: false
+    t.string "format", default: "json", null: false
+    t.text "listing_types", default: [], array: true
+    t.string "feed_url"
+    t.string "account_id"
+    t.string "lead_email"
+    t.string "contact_name"
+    t.string "contact_phone"
+    t.boolean "active", default: true
+    t.datetime "last_synced_at"
+    t.jsonb "settings", default: {}
+    t.jsonb "sync_metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "api_key"
+    t.string "webhook_url"
+    t.string "feed_token"
+    t.string "sync_status"
+    t.text "sync_error"
+    t.index ["active"], name: "index_syndication_partners_on_active"
+    t.index ["company_id", "active"], name: "index_syndication_partners_on_company_id_and_active"
+    t.index ["company_id", "partner_type"], name: "index_syndication_partners_on_company_id_and_partner_type"
+    t.index ["company_id"], name: "index_syndication_partners_on_company_id"
+    t.index ["feed_token"], name: "index_syndication_partners_on_feed_token", unique: true
+    t.index ["partner_type"], name: "index_syndication_partners_on_partner_type"
   end
 
   create_table "tag_assignments", force: :cascade do |t|
@@ -1400,6 +1498,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_11_211943) do
   add_foreign_key "leads", "accounts", column: "converted_account_id"
   add_foreign_key "leads", "companies"
   add_foreign_key "leads", "sources"
+  add_foreign_key "listings", "companies"
+  add_foreign_key "listings", "vehicles"
   add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id"
   add_foreign_key "lot_map_history_entries", "users"
   add_foreign_key "lot_map_history_entries", "vehicles", column: "inventory_id"
@@ -1419,6 +1519,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_11_211943) do
   add_foreign_key "service_tickets", "companies"
   add_foreign_key "service_tickets", "contacts"
   add_foreign_key "service_tickets", "vehicles"
+  add_foreign_key "syndication_partners", "companies"
   add_foreign_key "tag_assignments", "tags"
   add_foreign_key "templates", "companies"
   add_foreign_key "territories", "users"

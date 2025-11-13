@@ -5,6 +5,7 @@ class Vehicle < ApplicationRecord
   belongs_to :company, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
 
   # Vehicle types

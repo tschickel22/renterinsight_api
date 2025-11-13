@@ -8,6 +8,8 @@ class Company < ApplicationRecord
   has_many :custom_fields, dependent: :destroy
   has_many :leads, dependent: :destroy
   has_many :vehicles, dependent: :destroy
+  has_many :listings, dependent: :destroy
+  has_many :syndication_partners, dependent: :destroy
   has_many :land_parcels, dependent: :destroy
   has_many :service_tickets, dependent: :destroy
   has_many :users, dependent: :destroy
