@@ -168,6 +168,8 @@ Rails.application.routes.draw do
         collection do
           get :stats
           post :bulk_create
+          post :check_duplicate
+          post :quick_create
         end
         
         # Contact Communications

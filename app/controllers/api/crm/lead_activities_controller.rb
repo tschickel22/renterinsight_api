@@ -35,8 +35,8 @@ module Api
         Rails.logger.info "[LeadActivitiesController#create] Starting create with params: #{params.inspect}"
         
         @activity = @lead.lead_activities.build(activity_params)
-        @activity.user = current_user_or_first
-        @activity.assigned_to ||= current_user_or_first
+        @activity.user = current_user
+        @activity.assigned_to ||= current_user
         
         Rails.logger.info "[LeadActivitiesController#create] Built activity: #{@activity.attributes.inspect}"
 
@@ -123,17 +123,17 @@ module Api
       private
       
       def set_lead
-        @lead = Lead.find(params[:lead_id])
+        @lead = Lead.where(company_id: current_company_id).find(params[:lead_id])
+      rescue ActiveRecord::RecordNotFound
+        Rails.logger.error "[LeadActivitiesController] Lead not found: #{params[:lead_id]} for company: #{current_company_id}"
+        render json: { error: 'Lead not found' }, status: :not_found
       end
       
       def set_activity
         @activity = @lead.lead_activities.find(params[:id])
-      end
-      
-      def current_user_or_first
-        # In production, use actual current_user from authentication
-        # For now, use first user
-        User.first
+      rescue ActiveRecord::RecordNotFound
+        Rails.logger.error "[LeadActivitiesController] Activity not found: #{params[:id]} for lead: #{@lead&.id}"
+        render json: { error: 'Activity not found' }, status: :not_found
       end
       
       def activity_params

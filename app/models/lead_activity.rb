@@ -10,7 +10,7 @@ class LeadActivity < ApplicationRecord
   # Serialize reminder_method as JSON array for SQLite compatibility
   serialize :reminder_method, coder: JSON
   
-  ACTIVITY_TYPES = %w[task meeting call reminder].freeze
+  ACTIVITY_TYPES = %w[task meeting call reminder note].freeze
   STATUSES = %w[pending in_progress completed cancelled].freeze
   PRIORITIES = %w[low medium high urgent].freeze
   CALL_DIRECTIONS = %w[inbound outbound].freeze

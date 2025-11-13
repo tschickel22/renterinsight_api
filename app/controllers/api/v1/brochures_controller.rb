@@ -9,7 +9,21 @@ module Api
 
       # GET /api/v1/brochures
       def index
-        brochures = @company.brochures.active.includes(:company)
+        brochures = @company.brochures.includes(:company)
+        
+        # Status filter - active, inactive, or all
+        if params[:status].present?
+          case params[:status]
+          when 'active'
+            brochures = brochures.active
+          when 'inactive'
+            brochures = brochures.inactive
+          end
+          # If status is 'all' or any other value, show all records (no filter)
+        else
+          # Default to active only if no status parameter specified
+          brochures = brochures.active
+        end
         
         # Filters
         brochures = brochures.by_template(params[:template_name]) if params[:template_name].present?
@@ -138,8 +152,14 @@ module Api
           :from_phone,
           :cc,
           :bcc,
+          :contact_id,
+          :lead_id,
           delivery_methods: []
         ).to_h
+        
+        # Extract contact_id and lead_id for activity tracking
+        contact_id = send_params.delete(:contact_id)
+        lead_id = send_params.delete(:lead_id)
         
         # Default to email if no delivery methods specified
         send_params[:delivery_methods] ||= ['email']
@@ -154,11 +174,20 @@ module Api
             # Increment share count
             @brochure.increment_share_count!
             
+            # Create activity if contact_id or lead_id provided
+            activity = nil
+            if contact_id.present?
+              activity = create_contact_share_activity(contact_id, result, send_params)
+            elsif lead_id.present?
+              activity = create_lead_share_activity(lead_id, result, send_params)
+            end
+            
             render json: {
               success: true,
               brochure: brochure_json(@brochure),
               sent_via: result[:sent].map { |r| { channel: r[:channel], to: r[:to] } },
-              communications: result[:sent].map { |r| r[:communication]&.id }
+              communications: result[:sent].map { |r| r[:communication]&.id },
+              activity_id: activity&.id
             }
           else
             render json: {
@@ -218,34 +247,32 @@ module Api
 
       # GET /api/v1/brochures/stats
       def stats
-        Rails.logger.info "✅ [BrochuresController] Stats endpoint called for company: #{@company&.name}"
-        
-        brochures = @company.brochures.active
+        # Get all brochures for stats (not just active)
+        all_brochures = @company.brochures
+        active_brochures = all_brochures.active
         
         render json: {
-          total: brochures.count,
-          by_template: brochures.group(:template_name).count,
-          total_views: brochures.sum(:view_count),
-          total_shares: brochures.sum(:share_count),
-          total_downloads: brochures.sum(:download_count),
-          recent_count: brochures.where('created_at >= ?', 30.days.ago).count
+          total: all_brochures.count,
+          by_status: all_brochures.group(:status).count,
+          by_template: active_brochures.group(:template_name).count,
+          total_views: all_brochures.sum(:view_count),
+          total_shares: all_brochures.sum(:share_count),
+          total_downloads: all_brochures.sum(:download_count),
+          recent_count: all_brochures.where('created_at >= ?', 30.days.ago).count
         }
       rescue => e
-        Rails.logger.error "🚫 [BrochuresController] Error in stats endpoint: #{e.message}"
+        Rails.logger.error "[BrochuresController] Error in stats endpoint: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
         render json: { error: 'Failed to load stats', message: e.message }, status: :internal_server_error
       end
 
       # GET /api/v1/brochures/templates
       def templates
-        Rails.logger.info "✅ [BrochuresController] Templates endpoint called by user: #{current_user&.email || 'anonymous'}"
-        
         # Return actual BrochureTemplate records from database
         templates = BrochureTemplate.active
         
         if templates.empty?
           # If no templates exist, create default ones
-          Rails.logger.info "📝 [BrochuresController] No templates found, creating defaults"
           create_default_templates
           templates = BrochureTemplate.active
         end
@@ -264,7 +291,7 @@ module Api
         
         render json: { templates: formatted_templates }
       rescue => e
-        Rails.logger.error "🚫 [BrochuresController] Error in templates endpoint: #{e.message}"
+        Rails.logger.error "[BrochuresController] Error in templates endpoint: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
         render json: { error: 'Failed to load templates', message: e.message }, status: :internal_server_error
       end
@@ -273,13 +300,13 @@ module Api
 
       def set_company_scope
         unless current_user
-          Rails.logger.error "🚫 [BrochuresController] No authenticated user found"
+          Rails.logger.error "[BrochuresController] No authenticated user found"
           render json: { error: 'Authentication required' }, status: :unauthorized
           return
         end
         
         unless current_user.company_id.present?
-          Rails.logger.error "🚫 [BrochuresController] User #{current_user.id} has no company_id"
+          Rails.logger.error "[BrochuresController] User #{current_user.id} has no company_id"
           render json: { error: 'No company assigned' }, status: :forbidden
           return
         end
@@ -287,12 +314,10 @@ module Api
         @company = ::Company.find_by(id: current_user.company_id)
         
         if @company.nil?
-          Rails.logger.error "🚫 [BrochuresController] Company #{current_user.company_id} not found"
+          Rails.logger.error "[BrochuresController] Company #{current_user.company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
-        
-        Rails.logger.info "✅ [BrochuresController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
       end
 
       def set_brochure
@@ -301,6 +326,110 @@ module Api
         render json: { error: 'Brochure not found or access denied' }, status: :not_found
       end
 
+      # Create activity record for brochure share to contact
+      def create_contact_share_activity(contact_id, result, send_params)
+        # Verify contact belongs to this company for tenant isolation
+        contact = @company.contacts.find_by(id: contact_id)
+        return nil unless contact
+        
+        # Build activity description
+        channels = result[:sent].map { |r| r[:channel] }.uniq.join(' and ')
+        recipients = result[:sent].map { |r| r[:to] }.uniq
+        
+        description_parts = []
+        description_parts << "Shared brochure via #{channels}"
+        description_parts << "Recipients: #{recipients.join(', ')}"
+        description_parts << "Custom message: #{send_params[:custom_message]}" if send_params[:custom_message].present?
+        description_parts << "\n#{@brochure.vehicle_count} properties included in collection"
+        
+        # Build brochure link
+        base_url = request.base_url
+        brochure_url = @brochure.public_url(base_url)
+        brochure_link = @brochure.status == 'active' ? "\n\nView brochure: #{brochure_url}" : "\n\n(Brochure is no longer active)"
+        
+        description = description_parts.join("\n") + brochure_link
+        
+        # Create the activity
+        activity = ContactActivity.create!(
+          contact: contact,
+          user: current_user,
+          activity_type: 'note',
+          subject: "Shared brochure: #{@brochure.title}",
+          description: description,
+          status: 'completed',
+          priority: 'medium',
+          completed_at: Time.current,
+          metadata: {
+            brochure_id: @brochure.id,
+            brochure_public_id: @brochure.public_id,
+            brochure_url: brochure_url,
+            brochure_status: @brochure.status,
+            vehicle_count: @brochure.vehicle_count,
+            channels_used: result[:sent].map { |r| r[:channel] },
+            communications: result[:sent].map { |r| r[:communication]&.id }.compact
+          }
+        )
+        
+        Rails.logger.info "Created activity #{activity.id} for brochure share to contact #{contact.id}"
+        activity
+      rescue => e
+        Rails.logger.error "Failed to create share activity: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        nil
+      end
+
+      # Create activity record for brochure share to lead
+      def create_lead_share_activity(lead_id, result, send_params)
+        # Verify lead belongs to this company for tenant isolation
+        lead = Lead.where(company_id: @company.id).find_by(id: lead_id)
+        return nil unless lead
+        
+        # Build activity description
+        channels = result[:sent].map { |r| r[:channel] }.uniq.join(' and ')
+        recipients = result[:sent].map { |r| r[:to] }.uniq
+        
+        description_parts = []
+        description_parts << "Shared brochure via #{channels}"
+        description_parts << "Recipients: #{recipients.join(', ')}"
+        description_parts << "Custom message: #{send_params[:custom_message]}" if send_params[:custom_message].present?
+        description_parts << "\n#{@brochure.vehicle_count} properties included in collection"
+        
+        # Build brochure link
+        base_url = request.base_url
+        brochure_url = @brochure.public_url(base_url)
+        brochure_link = @brochure.status == 'active' ? "\n\nView brochure: #{brochure_url}" : "\n\n(Brochure is no longer active)"
+        
+        description = description_parts.join("\n") + brochure_link
+        
+        # Create the activity
+        activity = LeadActivity.create!(
+          lead: lead,
+          user: current_user,
+          activity_type: 'note',
+          subject: "Shared brochure: #{@brochure.title}",
+          description: description,
+          status: 'completed',
+          priority: 'medium',
+          completed_at: Time.current,
+          metadata: {
+            brochure_id: @brochure.id,
+            brochure_public_id: @brochure.public_id,
+            brochure_url: brochure_url,
+            brochure_status: @brochure.status,
+            vehicle_count: @brochure.vehicle_count,
+            channels_used: result[:sent].map { |r| r[:channel] },
+            communications: result[:sent].map { |r| r[:communication]&.id }.compact
+          }
+        )
+        
+        Rails.logger.info "Created activity #{activity.id} for brochure share to lead #{lead.id}"
+        activity
+      rescue => e
+        Rails.logger.error "Failed to create lead share activity: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        nil
+      end
+      
       def brochure_json(brochure, detailed: false)
         base_url = request.base_url
         
@@ -572,7 +701,7 @@ module Api
           end
         end
         
-        Rails.logger.info "✅ [BrochuresController] Created #{templates_config.size} default templates"
+        Rails.logger.info "[BrochuresController] Created #{templates_config.size} default templates"
       end
     end
   end

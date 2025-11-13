@@ -142,6 +142,120 @@ module Api
         }, status: (errors.any? ? :multi_status : :created)
       end
 
+      # POST /api/v1/contacts/check_duplicate
+      def check_duplicate
+        email = params[:email]&.strip&.downcase
+        phone = params[:phone]&.strip
+        
+        if email.blank? && phone.blank?
+          render json: { 
+            duplicate_found: false,
+            message: 'No email or phone provided'
+          }
+          return
+        end
+
+        # STRICT TENANT ISOLATION: Only check within current company
+        query = @company.contacts
+        
+        conditions = []
+        conditions << "LOWER(email) = ?" if email.present?
+        conditions << "phone = ?" if phone.present?
+        
+        params_array = []
+        params_array << email if email.present?
+        params_array << phone if phone.present?
+        
+        existing_contact = query.where(conditions.join(' OR '), *params_array).first
+
+        if existing_contact
+          render json: {
+            duplicate_found: true,
+            contact: contact_json(existing_contact, detailed: false),
+            matched_field: existing_contact.email&.downcase == email ? 'email' : 'phone'
+          }
+        else
+          render json: {
+            duplicate_found: false,
+            message: 'No duplicate found'
+          }
+        end
+      rescue => e
+        Rails.logger.error "Error in contacts#check_duplicate: #{e.message}\n#{e.backtrace.join("\n")}"
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
+      # POST /api/v1/contacts/quick_create
+      def quick_create
+        # STRICT TENANT ISOLATION: Create contact within current company
+        contact_data = {
+          first_name: params[:first_name]&.strip,
+          last_name: params[:last_name]&.strip,
+          email: params[:email]&.strip&.downcase,
+          phone: params[:phone]&.strip,
+          notes: params[:notes]&.strip
+        }.compact
+
+        if contact_data[:first_name].blank?
+          render json: { 
+            errors: ['First name is required'] 
+          }, status: :unprocessable_entity
+          return
+        end
+
+        if contact_data[:email].blank? && contact_data[:phone].blank?
+          render json: { 
+            errors: ['Email or phone is required'] 
+          }, status: :unprocessable_entity
+          return
+        end
+
+        # Check for duplicates before creating
+        if contact_data[:email].present? || contact_data[:phone].present?
+          query = @company.contacts
+          conditions = []
+          params_array = []
+          
+          if contact_data[:email].present?
+            conditions << "LOWER(email) = ?"
+            params_array << contact_data[:email]
+          end
+          
+          if contact_data[:phone].present?
+            conditions << "phone = ?"
+            params_array << contact_data[:phone]
+          end
+          
+          existing_contact = query.where(conditions.join(' OR '), *params_array).first
+          
+          if existing_contact
+            render json: {
+              duplicate_found: true,
+              contact: contact_json(existing_contact, detailed: true),
+              message: 'Contact already exists'
+            }, status: :conflict
+            return
+          end
+        end
+
+        @contact = @company.contacts.new(contact_data)
+
+        if @contact.save
+          Rails.logger.info "✅ [ContactsController] Quick-created contact: #{@contact.id} for company: #{@company.id}"
+          render json: {
+            success: true,
+            contact: contact_json(@contact, detailed: true)
+          }, status: :created
+        else
+          render json: { 
+            errors: @contact.errors.full_messages 
+          }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error "Error in contacts#quick_create: #{e.message}\n#{e.backtrace.join("\n")}"
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
       # POST /api/v1/contacts/:id/tags
       def add_tags
         tag_names = params[:tags] || []
