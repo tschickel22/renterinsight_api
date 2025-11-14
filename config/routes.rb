@@ -24,6 +24,11 @@ Rails.application.routes.draw do
   # ==================== PUBLIC BROCHURES ====================
   get '/b/:public_id', to: 'api/v1/brochures#public_view', as: :public_brochure
   
+  # ==================== PUBLIC SYNDICATION FEEDS ====================
+  namespace :public do
+    get 'feeds/:id', to: 'syndication_feeds#show', as: :syndication_feed
+  end
+  
   # API endpoints for public forms (for frontend)
   namespace :api do
     # ==================== PUBLIC INVITATIONS (No Auth Required) ====================

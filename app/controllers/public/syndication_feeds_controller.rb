@@ -2,12 +2,12 @@
 
 module Public
   class SyndicationFeedsController < ApplicationController
-    skip_before_action :authenticate_user!
+    skip_before_action :authenticate
     before_action :set_partner
     before_action :verify_token
     before_action :set_cors_headers
 
-    # GET /public/feeds/:partner_id?token=xxx
+    # GET /public/feeds/:id?token=xxx
     def show
       listings = fetch_listings
 
@@ -26,7 +26,7 @@ module Public
     private
 
     def set_partner
-      @partner = SyndicationPartner.find(params[:partner_id])
+      @partner = SyndicationPartner.find(params[:id])
     rescue ActiveRecord::RecordNotFound
       render json: { error: 'Syndication partner not found' }, status: :not_found
     end
