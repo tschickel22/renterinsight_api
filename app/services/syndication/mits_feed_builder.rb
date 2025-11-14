@@ -200,14 +200,23 @@ module Syndication
     end
     
     def add_unit(xml, listing)
-      xml.ILS_Unit(IDValue: listing.unit_number || listing.id) do
+      xml.ILS_Unit(IDValue: listing.id) do
         xml.Units do
           xml.Unit do
-            xml.MarketingName listing.unit_number || listing.display_name
+            xml.MarketingName listing.display_name
             xml.MinSquareFeet listing.vehicle.square_feet || 500
             xml.MarketRent listing.rent_price.to_i
+            
+            # Unit details
+            xml.UnitType listing.unit_type if listing.unit_type.present?
+            xml.FloorPlanName listing.floor_plan_name if listing.floor_plan_name.present?
+            xml.FloorNumber listing.floor_number if listing.floor_number.present?
+            xml.Furnished listing.is_furnished? ? 'Yes' : 'No'
           end
         end
+        
+        # Deposits and fees
+        add_deposits_and_fees(xml, listing)
         
         add_concession(xml, listing)
         
@@ -217,6 +226,9 @@ module Syndication
             Max: listing.rent_price.to_i
           )
         end
+        
+        # Lease terms
+        add_lease_terms(xml, listing)
         
         add_availability(xml, listing)
         add_unit_amenities(xml, listing)
@@ -232,16 +244,63 @@ module Syndication
       end
     end
     
+    def add_deposits_and_fees(xml, listing)
+      xml.Deposit do
+        xml.Amount listing.security_deposit.to_i if listing.security_deposit.present?
+        xml.PetDeposit listing.pet_deposit.to_i if listing.pet_deposit.present?
+        xml.KeyDeposit listing.key_deposit.to_i if listing.key_deposit.present?
+        xml.OtherDeposit listing.other_deposit.to_i if listing.other_deposit.present?
+      end if listing.security_deposit.present? || listing.pet_deposit.present?
+      
+      # Monthly fees
+      xml.Fee do
+        xml.ApplicationFee listing.application_fee.to_i if listing.application_fee.present?
+        xml.AdminFee listing.admin_fee.to_i if listing.admin_fee.present?
+        xml.PetRent listing.pet_rent.to_i if listing.pet_rent.present?
+        xml.ParkingFee listing.parking_fee.to_i if listing.parking_fee.present?
+        xml.StorageFee listing.storage_fee.to_i if listing.storage_fee.present?
+        xml.TrashFee listing.trash_fee.to_i if listing.trash_fee.present?
+      end if listing.application_fee.present? || listing.admin_fee.present? || 
+             listing.pet_rent.present? || listing.parking_fee.present?
+    end
+    
+    def add_lease_terms(xml, listing)
+      return unless listing.lease_terms.present? || listing.min_lease_term.present?
+      
+      xml.LeaseTerm do
+        xml.MinimumMonths listing.min_lease_term if listing.min_lease_term.present?
+        xml.MaximumMonths listing.max_lease_term if listing.max_lease_term.present?
+        
+        # Format lease type properly
+        lease_type = listing.lease_type.presence || 'fixed'
+        formatted_lease_type = case lease_type.downcase
+                               when 'fixed' then 'Fixed'
+                               when 'month_to_month' then 'month_to_month'
+                               when 'both' then 'Both'
+                               else lease_type.titleize
+                               end
+        xml.LeaseType formatted_lease_type
+        
+        xml.Terms listing.lease_terms if listing.lease_terms.present?
+      end
+    end
+    
     def add_availability(xml, listing)
       return unless listing.available_date.present?
       
+      # Parse date if it's a string
+      date = listing.available_date.is_a?(String) ? Date.parse(listing.available_date) : listing.available_date
+      
       xml.Availability do
         xml.MadeReadyDate(
-          Month: listing.available_date.strftime('%m'),
-          Day: listing.available_date.strftime('%d'),
-          Year: listing.available_date.strftime('%Y')
+          Month: date.strftime('%m'),
+          Day: date.strftime('%d'),
+          Year: date.strftime('%Y')
         )
       end
+    rescue ArgumentError, TypeError
+      # Skip if date is invalid
+      nil
     end
     
     def add_unit_amenities(xml, listing)
@@ -255,17 +314,33 @@ module Syndication
     end
     
     def add_property_photos(xml, listing)
-      # Placeholder for photo integration with ActiveStorage
-      # In production, this would pull from listing.photos or vehicle.photos
+      vehicle = listing.vehicle
+      return if vehicle.images.blank?
       
-      # Example structure:
-      # xml.File(Active: 'true') do
-      #   xml.FileType 'Photo'
-      #   xml.Name 'property-photo.jpg'
-      #   xml.Format 'image/jpeg'
-      #   xml.Src 'https://cdn.example.com/photo.jpg'
-      #   xml.Rank 1
-      # end
+      vehicle.images.each_with_index do |image, index|
+        # Handle both string URLs and hash objects
+        image_url = image.is_a?(Hash) ? (image['url'] || image[:url]) : image
+        next if image_url.blank?
+        
+        # Extract filename from URL
+        filename = image_url.split('/').last || "photo-#{index + 1}.jpg"
+        
+        # Determine format from filename or default to jpeg
+        format = case filename.downcase.split('.').last
+                 when 'png' then 'image/png'
+                 when 'gif' then 'image/gif'
+                 when 'webp' then 'image/webp'
+                 else 'image/jpeg'
+                 end
+        
+        xml.File(Active: 'true') do
+          xml.FileType 'Photo'
+          xml.Name filename
+          xml.Format format
+          xml.Src image_url
+          xml.Rank index + 1
+        end
+      end
     end
     
     def add_promotional(xml, listing)

@@ -4,7 +4,7 @@ module Api
   module Platform
     class SyndicationPartnersController < ApplicationController
       before_action :set_company
-      before_action :set_partner, only: [:show, :update, :destroy, :toggle]
+      before_action :set_partner, only: [:show, :update, :destroy, :toggle, :regenerate_token]
 
       # GET /api/platform/syndication-partners
       def index
@@ -58,6 +58,15 @@ module Api
         render json: { 
           partner: partner_json(@partner, detailed: true),
           message: @partner.active ? 'Partner activated' : 'Partner deactivated'
+        }
+      end
+
+      # POST /api/platform/syndication-partners/:id/regenerate-token
+      def regenerate_token
+        @partner.regenerate_token!
+        render json: {
+          partner: partner_json(@partner, detailed: true),
+          message: 'Feed token regenerated successfully. Update your feed URL with the new token.'
         }
       end
 

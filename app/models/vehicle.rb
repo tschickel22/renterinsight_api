@@ -84,6 +84,11 @@ class Vehicle < ApplicationRecord
     [location_city, location_state].compact.join(', ')
   end
 
+  def location_address
+    parts = [address1, address2].compact.reject(&:blank?)
+    parts.any? ? parts.join(', ') : ''
+  end
+
   def price_display
     sale_price || rent_price
   end

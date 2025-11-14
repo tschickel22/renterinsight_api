@@ -27,7 +27,7 @@ class SyndicationPartner < ApplicationRecord
   # Callbacks
   before_validation :normalize_fields
   after_create :generate_feed_url
-  after_update :regenerate_feed_url, if: :should_regenerate_feed_url?
+  after_update :update_feed_url_format, if: :saved_change_to_format?
   
   # Status helpers
   def active?
@@ -49,6 +49,11 @@ class SyndicationPartner < ApplicationRecord
   
   def deactivate!
     update!(active: false)
+  end
+  
+  # Explicitly regenerate token (e.g., if compromised)
+  def regenerate_token!
+    regenerate_feed_url
   end
   
   # Listing type helpers
@@ -98,6 +103,21 @@ class SyndicationPartner < ApplicationRecord
     
     update_column(:feed_url, "#{base_url}/public/feeds/#{id}?token=#{token}")
     update_column(:feed_token, token)
+  end
+  
+  def update_feed_url_format
+    # Just update the feed_url without changing the token
+    # This preserves the existing token when only format changes
+    base_url = if Rails.env.development?
+      'https://localhost:3001'
+    elsif Rails.env.staging?
+      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://renterinsight-api-staging.onrender.com')
+    else
+      ENV.fetch('PUBLIC_FEED_BASE_URL', 'https://api.landlordinsight.com')
+    end
+    
+    # Keep existing token
+    update_column(:feed_url, "#{base_url}/public/feeds/#{id}?token=#{feed_token}")
   end
   
   # Sync tracking
@@ -180,7 +200,5 @@ class SyndicationPartner < ApplicationRecord
     self.listing_types = listing_types.map(&:downcase) if listing_types.present?
   end
   
-  def should_regenerate_feed_url?
-    saved_change_to_format? || saved_change_to_partner_type?
-  end
+  # Removed should_regenerate_feed_url? - format changes no longer regenerate tokens
 end

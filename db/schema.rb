@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_13_000004) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -859,14 +859,38 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000004) do
     t.decimal "longitude", precision: 10, scale: 6
     t.string "unit_number"
     t.string "floor_plan_name"
+    t.decimal "pet_deposit", precision: 10, scale: 2
+    t.decimal "key_deposit", precision: 10, scale: 2
+    t.decimal "other_deposit", precision: 10, scale: 2
+    t.string "other_deposit_description"
+    t.decimal "pet_rent", precision: 10, scale: 2
+    t.decimal "parking_fee", precision: 10, scale: 2
+    t.decimal "storage_fee", precision: 10, scale: 2
+    t.decimal "trash_fee", precision: 10, scale: 2
+    t.jsonb "utilities_included", default: {}
+    t.integer "min_lease_term"
+    t.integer "max_lease_term"
+    t.string "lease_type"
+    t.integer "floor_number"
+    t.string "unit_type"
+    t.text "specials_description"
+    t.string "move_in_date_type", default: "specific_date"
+    t.boolean "immediately_available", default: false
+    t.decimal "income_requirement_multiplier", precision: 3, scale: 1
+    t.boolean "credit_check_required", default: true
+    t.boolean "background_check_required", default: true
+    t.index ["available_date"], name: "index_listings_on_available_date"
     t.index ["company_id", "is_deleted"], name: "index_listings_on_company_id_and_is_deleted"
     t.index ["company_id", "property_name"], name: "index_listings_on_company_id_and_property_name"
     t.index ["company_id", "status"], name: "index_listings_on_company_id_and_status"
     t.index ["company_id"], name: "index_listings_on_company_id"
+    t.index ["floor_number"], name: "index_listings_on_floor_number"
+    t.index ["immediately_available"], name: "index_listings_on_immediately_available"
     t.index ["offer_type"], name: "index_listings_on_offer_type"
     t.index ["published_at"], name: "index_listings_on_published_at"
     t.index ["status"], name: "index_listings_on_status"
     t.index ["unit_number"], name: "index_listings_on_unit_number"
+    t.index ["unit_type"], name: "index_listings_on_unit_type"
     t.index ["vehicle_id"], name: "index_listings_on_vehicle_id"
   end
 

@@ -750,7 +750,7 @@ module Api
           insulationType: :insulation_type,
           ceilingType: :ceiling_type,
           wallType: :wall_type,
-          squareFootage: :square_feet,
+          squareFeet: :square_feet,
           # Boolean amenities
           hasFireplace: :fireplace,
           hasDeck: :deck,
@@ -938,7 +938,7 @@ module Api
             length2: vehicle.length2,
             width3: vehicle.width3,
             length3: vehicle.length3,
-            squareFootage: vehicle.square_feet,
+            squareFeet: vehicle.square_feet,
             roofType: vehicle.roof_type,
             sidingType: vehicle.siding_type,
             lotRent: vehicle.lot_rent&.to_f,

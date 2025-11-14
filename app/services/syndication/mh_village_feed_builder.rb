@@ -89,6 +89,9 @@ module Syndication
         description: listing.description,
         features: listing.feature_list,
         
+        # Images
+        images: vehicle.images || [],
+        
         # Features (Yes/No format for MH Village)
         has_garage: listing.has_garage? ? 'Yes' : 'No',
         has_fireplace: listing.has_fireplace? ? 'Yes' : 'No',
@@ -196,6 +199,21 @@ module Syndication
         xml.Status listing.status
         xml.PublishedAt listing.published_at&.iso8601
         xml.UpdatedAt listing.updated_at.iso8601
+        
+        # Images
+        if vehicle.images.present?
+          xml.Images do
+            vehicle.images.each_with_index do |image, index|
+              image_url = image.is_a?(Hash) ? (image['url'] || image[:url]) : image
+              next if image_url.blank?
+              
+              xml.Image do
+                xml.URL image_url
+                xml.Rank index + 1
+              end
+            end
+          end
+        end
       end
     end
     

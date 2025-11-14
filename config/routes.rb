@@ -574,6 +574,7 @@ Rails.application.routes.draw do
       resources :syndication_partners, path: 'syndication-partners' do
         member do
           patch :toggle
+          post :regenerate_token, path: 'regenerate-token'
         end
       end
     end

@@ -43,7 +43,7 @@ class Listing < ApplicationRecord
   
   # Callbacks
   before_validation :normalize_fields
-  before_save :set_published_at, if: -> { status_changed_to_active? }
+  before_save :ensure_published_at
   
   # Soft delete
   def soft_delete!
@@ -241,11 +241,10 @@ class Listing < ApplicationRecord
     self.rent_period = rent_period&.downcase if rent_period.present?
   end
   
-  def status_changed_to_active?
-    status_changed? && status == 'active'
-  end
-  
-  def set_published_at
-    self.published_at ||= Time.current
+  def ensure_published_at
+    # Automatically set published_at when status is active
+    if status == 'active' && published_at.nil?
+      self.published_at = Time.current
+    end
   end
 end
