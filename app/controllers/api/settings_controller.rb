@@ -36,9 +36,15 @@ module Api
     # PATCH /api/settings/branding
     def update_branding
       branding_params = params.require(:branding).permit(
-        :primaryColor, :secondaryColor, :fontFamily, :logo,
+        :primaryColor, :secondaryColor, :fontFamily, :logo, :favicon, :faviconUrl,
         :sideMenuColor, :portalName, :portalLogo
       )
+
+      # Normalize faviconUrl to favicon for storage
+      if branding_params[:faviconUrl].present?
+        branding_params[:favicon] = branding_params[:faviconUrl]
+        branding_params.delete(:faviconUrl)
+      end
 
       Setting.set('Company', @company.id, 'branding', branding_params.to_h)
 
@@ -259,6 +265,11 @@ module Api
       # Convert logo URLs from relative to absolute
       if merged_branding[:logo].present?
         merged_branding[:logo] = absolute_url(merged_branding[:logo])
+      end
+      
+      if merged_branding[:favicon].present?
+        merged_branding[:favicon] = absolute_url(merged_branding[:favicon])
+        merged_branding[:faviconUrl] = merged_branding[:favicon]  # Also provide as faviconUrl for frontend
       end
       
       if merged_branding[:portalLogo].present?

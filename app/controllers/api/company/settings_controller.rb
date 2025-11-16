@@ -172,8 +172,16 @@ module Api
           branding['logo'] = absolute_url(branding['logo'])
         end
         
+        if branding['favicon'].present?
+          branding['favicon'] = absolute_url(branding['favicon'])
+        end
+        
         if branding['portalLogo'].present?
           branding['portalLogo'] = absolute_url(branding['portalLogo'])
+        end
+        
+        if branding['platformLogo'].present?
+          branding['platformLogo'] = absolute_url(branding['platformLogo'])
         end
         
         branding
@@ -287,12 +295,15 @@ module Api
       def default_branding_settings
         {
           logo: nil,
+          favicon: nil,
           primaryColor: '#3b82f6',
           secondaryColor: '#8b5cf6',
           fontFamily: 'Inter',
           sideMenuColor: nil,
           portalName: 'Customer Portal',
-          portalLogo: nil
+          portalLogo: nil,
+          platformLogo: nil,
+          platformName: nil
         }
       end
       

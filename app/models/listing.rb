@@ -3,6 +3,7 @@
 class Listing < ApplicationRecord
   # Associations
   belongs_to :company
+  belongs_to :location, optional: true
   belongs_to :vehicle
   
   # Statuses

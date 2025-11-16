@@ -153,8 +153,18 @@ module Api
           branding['logo'] = absolute_url(branding['logo'])
         end
         
+        # Convert favicon to faviconUrl for frontend (camelCase)
+        if branding['favicon'].present?
+          branding['faviconUrl'] = absolute_url(branding['favicon'])
+          branding.delete('favicon')
+        end
+        
         if branding['portalLogo'].present?
           branding['portalLogo'] = absolute_url(branding['portalLogo'])
+        end
+        
+        if branding['platformLogo'].present?
+          branding['platformLogo'] = absolute_url(branding['platformLogo'])
         end
         
         branding
@@ -175,7 +185,15 @@ module Api
       end
 
       def save_branding_settings(settings)
-        Setting.set('Platform', 0, 'branding', settings)
+        # Convert frontend field names to backend format for storage
+        normalized = settings.deep_dup
+        
+        # Convert faviconUrl to favicon for storage
+        if normalized['faviconUrl'].present?
+          normalized['favicon'] = normalized.delete('faviconUrl')
+        end
+        
+        Setting.set('Platform', 0, 'branding', normalized)
       end
 
       def encrypt_sensitive_fields(settings, channel)
@@ -287,12 +305,15 @@ module Api
       def default_branding_settings
         {
           logo: nil,
+          favicon: nil,
           primaryColor: '#3b82f6',
           secondaryColor: '#8b5cf6',
           fontFamily: 'Inter',
           sideMenuColor: nil,
           portalName: ENV['PORTAL_NAME'] || 'Customer Portal',
-          portalLogo: nil
+          portalLogo: nil,
+          platformLogo: nil,
+          platformName: ENV['PLATFORM_NAME'] || 'RenterInsight'
         }
       end
       

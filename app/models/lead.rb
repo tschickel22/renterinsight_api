@@ -3,6 +3,7 @@
 class Lead < ApplicationRecord
   include Communicable
   belongs_to :company
+  belongs_to :location, optional: true
   belongs_to :converted_account, class_name: "Account", optional: true
   belongs_to :source, class_name: "Source", optional: true
 

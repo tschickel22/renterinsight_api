@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_14_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -95,10 +95,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.datetime "last_activity_date"
     t.boolean "is_deleted", default: false, null: false
     t.datetime "deleted_at"
+    t.bigint "location_id"
     t.index ["account_number"], name: "index_accounts_on_account_number", unique: true
     t.index ["account_type"], name: "index_accounts_on_account_type"
+    t.index ["company_id", "location_id"], name: "index_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_accounts_on_company_id"
     t.index ["is_deleted"], name: "index_accounts_on_is_deleted"
+    t.index ["location_id"], name: "index_accounts_on_location_id"
     t.index ["name"], name: "index_accounts_on_name"
     t.index ["owner_id"], name: "index_accounts_on_owner_id"
     t.index ["parent_account_id"], name: "index_accounts_on_parent_account_id"
@@ -504,8 +507,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.datetime "opt_out_email_at"
     t.boolean "opt_out_sms", default: false, null: false
     t.datetime "opt_out_sms_at"
+    t.bigint "location_id"
     t.index ["account_id"], name: "index_contacts_on_account_id"
+    t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
+    t.index ["location_id"], name: "index_contacts_on_location_id"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
   end
@@ -587,13 +593,16 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.integer "source_id"
     t.string "assigned_to"
     t.integer "company_id"
+    t.bigint "location_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
+    t.index ["company_id", "location_id"], name: "index_deals_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_deals_on_company_id"
     t.index ["contact_id"], name: "index_deals_on_contact_id"
     t.index ["deleted_at"], name: "index_deals_on_deleted_at"
     t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
+    t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["source_id"], name: "index_deals_on_source_id"
     t.index ["stage"], name: "index_deals_on_stage"
@@ -797,8 +806,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.bigint "company_id"
     t.boolean "is_converted", default: false
     t.datetime "converted_at"
+    t.bigint "location_id"
+    t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
+    t.index ["location_id"], name: "index_leads_on_location_id"
     t.index ["source_id"], name: "index_leads_on_source_id"
   end
 
@@ -879,19 +891,57 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.decimal "income_requirement_multiplier", precision: 3, scale: 1
     t.boolean "credit_check_required", default: true
     t.boolean "background_check_required", default: true
+    t.bigint "location_id"
     t.index ["available_date"], name: "index_listings_on_available_date"
     t.index ["company_id", "is_deleted"], name: "index_listings_on_company_id_and_is_deleted"
+    t.index ["company_id", "location_id"], name: "index_listings_on_company_id_and_location_id"
     t.index ["company_id", "property_name"], name: "index_listings_on_company_id_and_property_name"
     t.index ["company_id", "status"], name: "index_listings_on_company_id_and_status"
     t.index ["company_id"], name: "index_listings_on_company_id"
     t.index ["floor_number"], name: "index_listings_on_floor_number"
     t.index ["immediately_available"], name: "index_listings_on_immediately_available"
+    t.index ["location_id"], name: "index_listings_on_location_id"
     t.index ["offer_type"], name: "index_listings_on_offer_type"
     t.index ["published_at"], name: "index_listings_on_published_at"
     t.index ["status"], name: "index_listings_on_status"
     t.index ["unit_number"], name: "index_listings_on_unit_number"
     t.index ["unit_type"], name: "index_listings_on_unit_type"
     t.index ["vehicle_id"], name: "index_listings_on_vehicle_id"
+  end
+
+  create_table "locations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "code", limit: 10
+    t.text "description"
+    t.string "phone"
+    t.string "email"
+    t.string "address_line1"
+    t.string "address_line2"
+    t.string "city"
+    t.string "state"
+    t.string "zip_code"
+    t.string "country", default: "US"
+    t.string "timezone", default: "America/New_York"
+    t.jsonb "business_hours", default: {}
+    t.decimal "delivery_radius_miles", precision: 10, scale: 2
+    t.jsonb "branding_settings", default: {}
+    t.jsonb "communication_settings", default: {}
+    t.jsonb "operational_settings", default: {}
+    t.jsonb "integration_settings", default: {}
+    t.boolean "active", default: true, null: false
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.string "created_by"
+    t.string "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_locations_on_active"
+    t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
+    t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
+    t.index ["company_id", "is_deleted"], name: "index_locations_on_company_id_and_is_deleted"
+    t.index ["company_id"], name: "index_locations_on_company_id"
+    t.index ["deleted_at"], name: "index_locations_on_deleted_at"
   end
 
   create_table "lot_map_history_entries", force: :cascade do |t|
@@ -1064,12 +1114,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.integer "resend_count", default: 0, null: false
     t.datetime "last_sent_at"
     t.integer "company_id"
+    t.bigint "location_id"
     t.index ["account_id"], name: "index_quotes_on_account_id"
+    t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"
     t.index ["contact_id"], name: "index_quotes_on_contact_id"
     t.index ["created_at"], name: "index_quotes_on_created_at"
     t.index ["customer_id"], name: "index_quotes_on_customer_id"
     t.index ["is_deleted"], name: "index_quotes_on_is_deleted"
+    t.index ["location_id"], name: "index_quotes_on_location_id"
     t.index ["quote_number"], name: "index_quotes_on_quote_number", unique: true
     t.index ["status"], name: "index_quotes_on_status"
     t.index ["valid_until"], name: "index_quotes_on_valid_until"
@@ -1117,12 +1170,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "location_id"
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
+    t.index ["company_id", "location_id"], name: "index_service_tickets_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
+    t.index ["location_id"], name: "index_service_tickets_on_location_id"
     t.index ["priority"], name: "index_service_tickets_on_priority"
     t.index ["scheduled_date"], name: "index_service_tickets_on_scheduled_date"
     t.index ["status"], name: "index_service_tickets_on_status"
@@ -1257,6 +1313,23 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.index ["territory_id", "user_id"], name: "index_territory_users_on_territory_id_and_user_id", unique: true
     t.index ["territory_id"], name: "index_territory_users_on_territory_id"
     t.index ["user_id"], name: "index_territory_users_on_user_id"
+  end
+
+  create_table "user_locations", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "location_id", null: false
+    t.bigint "company_id", null: false
+    t.string "location_role", default: "location_staff"
+    t.boolean "active", default: true, null: false
+    t.string "assigned_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_user_locations_on_active"
+    t.index ["company_id", "location_id"], name: "index_user_locations_on_company_id_and_location_id"
+    t.index ["company_id"], name: "index_user_locations_on_company_id"
+    t.index ["location_id"], name: "index_user_locations_on_location_id"
+    t.index ["user_id", "location_id"], name: "index_user_locations_on_user_id_and_location_id", unique: true
+    t.index ["user_id"], name: "index_user_locations_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -1432,8 +1505,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.string "photo_url"
     t.string "virtual_tour"
     t.string "sales_photo"
+    t.bigint "location_id"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
+    t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
     t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "(serial_number IS NOT NULL)"
     t.index ["company_id", "vin"], name: "index_vehicles_on_company_id_and_vin", unique: true, where: "(vin IS NOT NULL)"
     t.index ["company_id"], name: "index_vehicles_on_company_id"
@@ -1443,6 +1518,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
     t.index ["home_type"], name: "index_vehicles_on_home_type"
     t.index ["is_deleted"], name: "index_vehicles_on_is_deleted"
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
+    t.index ["location_id"], name: "index_vehicles_on_location_id"
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
@@ -1475,6 +1551,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
 
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
+  add_foreign_key "accounts", "locations"
   add_foreign_key "accounts", "sources"
   add_foreign_key "accounts", "users", column: "owner_id"
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
@@ -1498,6 +1575,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
   add_foreign_key "contact_activities", "contacts"
   add_foreign_key "contact_activities", "users"
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
+  add_foreign_key "contacts", "locations"
   add_foreign_key "custom_fields", "companies"
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
@@ -1505,6 +1583,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
+  add_foreign_key "deals", "locations"
   add_foreign_key "deals", "sources"
   add_foreign_key "deals", "users"
   add_foreign_key "intake_forms", "companies"
@@ -1521,9 +1600,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
   add_foreign_key "lead_tasks", "leads"
   add_foreign_key "leads", "accounts", column: "converted_account_id"
   add_foreign_key "leads", "companies"
+  add_foreign_key "leads", "locations"
   add_foreign_key "leads", "sources"
   add_foreign_key "listings", "companies"
+  add_foreign_key "listings", "locations"
   add_foreign_key "listings", "vehicles"
+  add_foreign_key "locations", "companies"
   add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id"
   add_foreign_key "lot_map_history_entries", "users"
   add_foreign_key "lot_map_history_entries", "vehicles", column: "inventory_id"
@@ -1537,11 +1619,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
   add_foreign_key "nurture_steps", "templates"
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
+  add_foreign_key "quotes", "locations"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
   add_foreign_key "service_tickets", "accounts"
   add_foreign_key "service_tickets", "companies"
   add_foreign_key "service_tickets", "contacts"
+  add_foreign_key "service_tickets", "locations"
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "syndication_partners", "companies"
   add_foreign_key "tag_assignments", "tags"
@@ -1550,9 +1634,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_13_000005) do
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"
   add_foreign_key "territory_users", "users"
+  add_foreign_key "user_locations", "companies"
+  add_foreign_key "user_locations", "locations"
+  add_foreign_key "user_locations", "users"
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
+  add_foreign_key "vehicles", "locations"
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"
 end

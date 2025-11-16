@@ -3,6 +3,7 @@
 class Vehicle < ApplicationRecord
   # Associations
   belongs_to :company, optional: true
+  belongs_to :location, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
   has_many :listings, dependent: :destroy

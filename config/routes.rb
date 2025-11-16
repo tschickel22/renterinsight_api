@@ -44,6 +44,16 @@ Rails.application.routes.draw do
     
     # ==================== V1 API ====================
     namespace :v1 do
+      # ==================== COMPANY SETTINGS (OPERATIONAL) ====================
+      scope path: 'company_settings', controller: 'company_settings' do
+        get 'operational', action: :show_operational
+        patch 'operational', action: :update_operational
+        get 'branding', action: :show_branding
+        patch 'branding', action: :update_branding
+        get 'communication', action: :show_communication
+        patch 'communication', action: :update_communication
+      end
+      
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
@@ -100,6 +110,26 @@ Rails.application.routes.draw do
       # ==================== BROCHURE TEMPLATES ====================
       resources :brochure_templates, path: 'brochure-templates', only: [:index, :show, :create, :update, :destroy]
       
+      # ==================== LOCATIONS ====================
+      resources :locations do
+        member do
+          post :restore
+          get :users
+          post :assign_user, path: 'assign-user'
+          delete 'remove_user/:user_id', action: :remove_user, as: :remove_user
+          get :metrics
+          get :stats
+          get :activities
+        end
+        
+        collection do
+          get :stats
+          post :bulk_activate
+          post :bulk_deactivate
+          post :bulk_delete
+        end
+      end
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         collection do
@@ -114,6 +144,21 @@ Rails.application.routes.draw do
           get :stats
           get :export
           post :bulk_delete
+        end
+      end
+      
+      # ==================== USERS (COMPANY USERS) ====================
+      resources :users, only: %i[index show create update destroy] do
+        member do
+          post :restore
+          get :locations, action: :user_locations
+          post :assign_location, path: 'assign-location'
+          delete 'remove_location/:location_id', action: :remove_location, as: :remove_location
+        end
+        
+        collection do
+          post :bulk_activate
+          post :bulk_deactivate
         end
       end
       
@@ -285,13 +330,6 @@ Rails.application.routes.draw do
           post :resend, action: :resend_invitation
           delete '', action: :destroy
         end
-      end
-    end
-    
-    # ==================== USERS API ====================
-    resources :users, only: %i[index show create update destroy] do
-      member do
-        post :restore
       end
     end
     

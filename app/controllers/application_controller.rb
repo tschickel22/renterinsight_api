@@ -102,4 +102,68 @@ class ApplicationController < ActionController::API
     end
   end
 
+  # Location-based authorization helpers
+  def current_user_locations
+    return [] unless current_user
+    return @current_user_locations if defined?(@current_user_locations)
+    
+    # Company admins have access to all locations
+    if current_user.admin?
+      @current_user_locations = current_company.locations.where(is_deleted: false, active: true)
+    else
+      # Regular users only access their assigned locations
+      @current_user_locations = current_user.locations
+                                           .where(is_deleted: false, active: true)
+                                           .where(user_locations: { active: true })
+    end
+    
+    @current_user_locations
+  end
+  
+  def can_access_location?(location)
+    return false unless current_user && location
+    
+    # Company admins can access all locations
+    return true if current_user.admin?
+    
+    # Check if user has an active assignment to this location
+    current_user_locations.exists?(id: location.id)
+  end
+  
+  def location_admin?(location)
+    return false unless current_user && location
+    
+    # Company admins have admin rights everywhere
+    return true if current_user.admin?
+    
+    # Check if user is a location admin for this specific location
+    UserLocation.exists?(
+      user_id: current_user.id,
+      location_id: location.id,
+      location_role: 'location_admin',
+      active: true
+    )
+  end
+  
+  def can_manage_location?(location)
+    return false unless current_user && location
+    
+    # Company admins can manage all locations
+    return true if current_user.admin?
+    
+    # Location admins and managers can manage operations
+    user_location = UserLocation.find_by(
+      user_id: current_user.id,
+      location_id: location.id,
+      active: true
+    )
+    
+    user_location&.location_role&.in?(['location_admin', 'location_manager'])
+  end
+  
+  def current_company
+    return @current_company if defined?(@current_company)
+    @current_company = ::Company.find_by(id: current_company_id)
+  end
+
 end

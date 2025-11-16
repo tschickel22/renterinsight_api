@@ -7,6 +7,8 @@ class User < ApplicationRecord
   belongs_to :company, optional: true
   has_many :activities, dependent: :nullify
   has_many :reminders, dependent: :destroy
+  has_many :user_locations, dependent: :destroy
+  has_many :locations, through: :user_locations
 
   validates :email, presence: true, uniqueness: true
   validates :first_name, presence: true, if: -> { name.blank? }

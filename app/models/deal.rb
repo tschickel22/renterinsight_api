@@ -1,5 +1,6 @@
 class Deal < ApplicationRecord
   belongs_to :company, optional: true
+  belongs_to :location, optional: true
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
   belongs_to :user, optional: true  # FIX: Made optional to prevent 422 errors when user_id not set

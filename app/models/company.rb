@@ -16,6 +16,7 @@ class Company < ApplicationRecord
   has_many :quotes, dependent: :destroy
   has_many :brochures, dependent: :destroy
   has_many :templates, dependent: :destroy
+  has_many :locations, dependent: :destroy
   
   # Validations for tenant fields
   validates :subdomain, 
@@ -254,7 +255,7 @@ class Company < ApplicationRecord
     nil
   end
   
-  # Settings management (existing methods)
+  # Settings management
   def communications_settings
     setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'communications')
     setting ? JSON.parse(setting.value) : nil
@@ -315,6 +316,48 @@ class Company < ApplicationRecord
     setting.save!
   rescue => e
     Rails.logger.error "Error saving branding_settings for Company #{id}: #{e.message}"
+    false
+  end
+
+  def integration_settings
+    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'integrations')
+    setting ? JSON.parse(setting.value) : nil
+  rescue => e
+    Rails.logger.error "Error loading integration_settings for Company #{id}: #{e.message}"
+    nil
+  end
+  
+  def integration_settings=(value)
+    setting = Setting.find_or_initialize_by(
+      scope_type: 'Company',
+      scope_id: id,
+      key: 'integrations'
+    )
+    setting.value = value.to_json
+    setting.save!
+  rescue => e
+    Rails.logger.error "Error saving integration_settings for Company #{id}: #{e.message}"
+    false
+  end
+
+  def operational_settings
+    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'operational')
+    setting ? JSON.parse(setting.value) : nil
+  rescue => e
+    Rails.logger.error "Error loading operational_settings for Company #{id}: #{e.message}"
+    nil
+  end
+  
+  def operational_settings=(value)
+    setting = Setting.find_or_initialize_by(
+      scope_type: 'Company',
+      scope_id: id,
+      key: 'operational'
+    )
+    setting.value = value.to_json
+    setting.save!
+  rescue => e
+    Rails.logger.error "Error saving operational_settings for Company #{id}: #{e.message}"
     false
   end
 end
