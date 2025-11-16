@@ -35,9 +35,10 @@ class ApplicationController < ActionController::API
   end
 
   def current_company_id
-    # For tenant/super_admin users, allow override via X-Company-Context header
+    # For tenant/super_admin users, allow override via X-Company-ID header (platform admin switching)
     if current_user&.role.in?(['tenant', 'super_admin', 'admin'])
-      context_company_id = request.headers['X-Company-Context']&.to_i
+      # Try both X-Company-ID and X-Company-Context for backward compatibility
+      context_company_id = request.headers['X-Company-ID']&.to_i || request.headers['X-Company-Context']&.to_i
       return context_company_id if context_company_id.present? && context_company_id > 0
     end
     

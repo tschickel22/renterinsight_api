@@ -265,16 +265,22 @@ class Company < ApplicationRecord
   end
   
   def communications_settings=(value)
+    Rails.logger.info "📝 [Company#communications_settings=] Setting for Company #{id}"
+    
     setting = Setting.find_or_initialize_by(
       scope_type: 'Company',
       scope_id: id,
       key: 'communications'
     )
     setting.value = value.to_json
-    setting.save!
+    
+    if setting.save!
+      Rails.logger.info "✅ [Company#communications_settings=] Saved successfully"
+      true
+    end
   rescue => e
-    Rails.logger.error "Error saving communications_settings for Company #{id}: #{e.message}"
-    false
+    Rails.logger.error "❌ [Company#communications_settings=] Error: #{e.class} - #{e.message}"
+    raise e
   end
   
   def notifications_settings
@@ -286,16 +292,22 @@ class Company < ApplicationRecord
   end
   
   def notifications_settings=(value)
+    Rails.logger.info "📝 [Company#notifications_settings=] Setting for Company #{id}"
+    
     setting = Setting.find_or_initialize_by(
       scope_type: 'Company',
       scope_id: id,
       key: 'notifications'
     )
     setting.value = value.to_json
-    setting.save!
+    
+    if setting.save!
+      Rails.logger.info "✅ [Company#notifications_settings=] Saved successfully"
+      true
+    end
   rescue => e
-    Rails.logger.error "Error saving notifications_settings for Company #{id}: #{e.message}"
-    false
+    Rails.logger.error "❌ [Company#notifications_settings=] Error: #{e.class} - #{e.message}"
+    raise e
   end
 
   def branding_settings
@@ -307,16 +319,22 @@ class Company < ApplicationRecord
   end
   
   def branding_settings=(value)
+    Rails.logger.info "📝 [Company#branding_settings=] Setting for Company #{id}"
+    
     setting = Setting.find_or_initialize_by(
       scope_type: 'Company',
       scope_id: id,
       key: 'branding'
     )
     setting.value = value.to_json
-    setting.save!
+    
+    if setting.save!
+      Rails.logger.info "✅ [Company#branding_settings=] Saved successfully"
+      true
+    end
   rescue => e
-    Rails.logger.error "Error saving branding_settings for Company #{id}: #{e.message}"
-    false
+    Rails.logger.error "❌ [Company#branding_settings=] Error: #{e.class} - #{e.message}"
+    raise e
   end
 
   def integration_settings
@@ -328,16 +346,22 @@ class Company < ApplicationRecord
   end
   
   def integration_settings=(value)
+    Rails.logger.info "📝 [Company#integration_settings=] Setting for Company #{id}"
+    
     setting = Setting.find_or_initialize_by(
       scope_type: 'Company',
       scope_id: id,
       key: 'integrations'
     )
     setting.value = value.to_json
-    setting.save!
+    
+    if setting.save!
+      Rails.logger.info "✅ [Company#integration_settings=] Saved successfully"
+      true
+    end
   rescue => e
-    Rails.logger.error "Error saving integration_settings for Company #{id}: #{e.message}"
-    false
+    Rails.logger.error "❌ [Company#integration_settings=] Error: #{e.class} - #{e.message}"
+    raise e
   end
 
   def operational_settings
@@ -349,15 +373,54 @@ class Company < ApplicationRecord
   end
   
   def operational_settings=(value)
+    Rails.logger.info "📝 [Company#operational_settings=] Setting operational settings for Company #{id}"
+    Rails.logger.info "📝 [Company#operational_settings=] Value: #{value.inspect}"
+    
     setting = Setting.find_or_initialize_by(
       scope_type: 'Company',
       scope_id: id,
       key: 'operational'
     )
+    
+    Rails.logger.info "📝 [Company#operational_settings=] Setting record: #{setting.inspect}"
+    
     setting.value = value.to_json
-    setting.save!
+    Rails.logger.info "📝 [Company#operational_settings=] JSON value: #{setting.value}"
+    
+    if setting.save!
+      Rails.logger.info "✅ [Company#operational_settings=] Setting saved successfully"
+      true
+    end
   rescue => e
-    Rails.logger.error "Error saving operational_settings for Company #{id}: #{e.message}"
+    Rails.logger.error "❌ [Company#operational_settings=] Error: #{e.class} - #{e.message}"
+    Rails.logger.error "❌ [Company#operational_settings=] Backtrace: #{e.backtrace.first(5).join("\n")}"
+    raise e  # Re-raise instead of swallowing
+  end
+
+  # Check if company has meaningful communication settings configured
+  def has_communication_settings?
+    comm_settings = communications_settings
+    return false if comm_settings.nil? || comm_settings.empty?
+    
+    # Check if email settings have required fields
+    email_settings = comm_settings['email'] || comm_settings[:email]
+    if email_settings.present?
+      # Has email if there's a provider and from email configured
+      has_email = email_settings['fromEmail'].present? || email_settings[:fromEmail].present?
+      return true if has_email
+    end
+    
+    # Check if SMS settings have required fields
+    sms_settings = comm_settings['sms'] || comm_settings[:sms]
+    if sms_settings.present?
+      # Has SMS if there's a provider and from number configured
+      has_sms = sms_settings['fromNumber'].present? || sms_settings[:fromNumber].present?
+      return true if has_sms
+    end
+    
+    false
+  rescue => e
+    Rails.logger.error "Error checking communication settings for Company #{id}: #{e.message}"
     false
   end
 end

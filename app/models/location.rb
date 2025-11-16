@@ -13,6 +13,7 @@ class Location < ApplicationRecord
   has_many :contacts, dependent: :nullify
   has_many :service_tickets, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  has_many :location_activities, dependent: :destroy
 
   # Validations
   validates :company_id, presence: true
@@ -35,6 +36,7 @@ class Location < ApplicationRecord
   # Callbacks
   before_validation :normalize_fields
   before_validation :set_defaults, on: :create
+  after_update :track_settings_changes
   
   # Soft delete
   def soft_delete!
@@ -78,7 +80,8 @@ class Location < ApplicationRecord
     resolved.merge(
       'timezone' => timezone,
       'business_hours' => business_hours.presence || resolved['business_hours'],
-      'delivery_radius_miles' => delivery_radius_miles || resolved['delivery_radius_miles']
+      'delivery_radius_miles' => delivery_radius_miles || resolved['delivery_radius_miles'],
+      'clock_format' => operational_settings&.dig('clock_format') || resolved['clock_format'] || '24'
     )
   rescue => e
     Rails.logger.error "Error resolving operational settings for Location #{id}: #{e.message}"
@@ -192,5 +195,126 @@ class Location < ApplicationRecord
     self.operational_settings ||= {}
     self.integration_settings ||= {}
     self.business_hours ||= {}
+  end
+
+  def track_settings_changes
+    return unless saved_change_to_branding_settings? || 
+                  saved_change_to_communication_settings? || 
+                  saved_change_to_operational_settings? ||
+                  saved_change_to_business_hours? ||
+                  saved_change_to_timezone? ||
+                  saved_change_to_delivery_radius_miles?
+
+    user = User.find_by(id: updated_by) if updated_by.present?
+
+    if saved_change_to_branding_settings?
+      old_settings = saved_change_to_branding_settings[0] || {}
+      new_settings = saved_change_to_branding_settings[1] || {}
+      
+      if new_settings.empty? && old_settings.present?
+        LocationActivity.log_settings_cleared(
+          location: self,
+          category: 'branding',
+          user: user
+        )
+      elsif new_settings.present?
+        changes = calculate_setting_changes(old_settings, new_settings)
+        LocationActivity.log_settings_change(
+          location: self,
+          category: 'branding',
+          user: user,
+          changes: changes
+        ) if changes.any?
+      end
+    end
+
+    if saved_change_to_communication_settings?
+      old_settings = saved_change_to_communication_settings[0] || {}
+      new_settings = saved_change_to_communication_settings[1] || {}
+      
+      if new_settings.empty? && old_settings.present?
+        LocationActivity.log_settings_cleared(
+          location: self,
+          category: 'communication',
+          user: user
+        )
+      elsif new_settings.present?
+        changes = calculate_setting_changes(old_settings, new_settings)
+        LocationActivity.log_settings_change(
+          location: self,
+          category: 'communication',
+          user: user,
+          changes: changes
+        ) if changes.any?
+      end
+    end
+
+    if saved_change_to_operational_settings?
+      old_settings = saved_change_to_operational_settings[0] || {}
+      new_settings = saved_change_to_operational_settings[1] || {}
+      
+      if new_settings.empty? && old_settings.present?
+        LocationActivity.log_settings_cleared(
+          location: self,
+          category: 'operational',
+          user: user
+        )
+      elsif new_settings.present?
+        changes = calculate_setting_changes(old_settings, new_settings)
+        LocationActivity.log_settings_change(
+          location: self,
+          category: 'operational',
+          user: user,
+          changes: changes
+        ) if changes.any?
+      end
+    end
+
+    # Track changes to operational column fields (business_hours, timezone, delivery_radius)
+    operational_column_changes = {}
+    
+    if saved_change_to_business_hours?
+      old_hours = saved_change_to_business_hours[0]
+      new_hours = saved_change_to_business_hours[1]
+      operational_column_changes['business_hours'] = { from: old_hours, to: new_hours }
+    end
+    
+    if saved_change_to_timezone?
+      old_tz = saved_change_to_timezone[0]
+      new_tz = saved_change_to_timezone[1]
+      operational_column_changes['timezone'] = { from: old_tz, to: new_tz }
+    end
+    
+    if saved_change_to_delivery_radius_miles?
+      old_radius = saved_change_to_delivery_radius_miles[0]
+      new_radius = saved_change_to_delivery_radius_miles[1]
+      operational_column_changes['delivery_radius_miles'] = { from: old_radius, to: new_radius }
+    end
+    
+    if operational_column_changes.any?
+      LocationActivity.log_settings_change(
+        location: self,
+        category: 'operational',
+        user: user,
+        changes: operational_column_changes
+      )
+    end
+  rescue => e
+    Rails.logger.error "Error tracking location settings changes: #{e.message}"
+  end
+
+  def calculate_setting_changes(old_settings, new_settings)
+    changes = {}
+    
+    (old_settings.keys + new_settings.keys).uniq.each do |key|
+      old_val = old_settings[key]
+      new_val = new_settings[key]
+      
+      if old_val != new_val
+        changes[key] = { from: old_val, to: new_val }
+      end
+    end
+    
+    changes
   end
 end

@@ -134,6 +134,14 @@ module Api
 
         ul = @location.assign_user(user, role: location_role, assigned_by: current_user.id.to_s)
 
+        # Log the assignment activity
+        LocationActivity.log_user_assignment(
+          location: @location,
+          user: current_user,
+          assigned_user: user,
+          role: location_role
+        )
+
         render json: {
           user_location: {
             user_id: ul.user_id,
@@ -328,6 +336,9 @@ module Api
           company_has_operational = location.company.operational_settings.present? && 
                                    location.company.operational_settings.any?
           
+          # Check if company has communication settings (meaningful, not just empty structure)
+          company_has_communication = location.company.has_communication_settings?
+          
           json.merge!({
             branding_settings: location.branding_settings,
             communication_settings: location.communication_settings,
@@ -338,7 +349,8 @@ module Api
             resolved_operational: location.resolved_operational_settings,
             resolved_integration: location.resolved_integration_settings,
             # Metadata for inheritance detection
-            company_has_operational_settings: company_has_operational
+            company_has_operational_settings: company_has_operational,
+            company_has_communication_settings: company_has_communication
           })
         end
 
@@ -393,11 +405,35 @@ module Api
       def fetch_location_activities(location, limit)
         activities = []
 
+        # Recent location activities (settings changes, etc)
+        begin
+          recent_location_activities = location.location_activities
+                                              .includes(:user)
+                                              .order(occurred_at: :desc)
+                                              .limit(limit / 4)
+          recent_location_activities.each do |la|
+            activities << {
+              id: "location-activity-#{la.id}",
+              type: activity_type_from_category(la.category),
+              action: la.action,
+              title: activity_title_from_category(la.category, la.action),
+              description: la.description,
+              timestamp: la.occurred_at.iso8601,
+              time_ago: time_ago(la.occurred_at),
+              entity_type: 'LocationActivity',
+              entity_id: la.id,
+              user_name: la.user&.name || la.user&.email
+            }
+          end
+        rescue => e
+          Rails.logger.warn "Failed to fetch location activities: #{e.message}"
+        end
+
         # Recent vehicles at this location
         begin
           recent_vehicles = location.vehicles.where(is_deleted: false)
                                    .order(created_at: :desc)
-                                   .limit(limit / 3)
+                                   .limit(limit / 4)
           recent_vehicles.each do |vehicle|
             activities << {
               id: "vehicle-#{vehicle.id}",
@@ -420,7 +456,7 @@ module Api
           recent_assignments = location.user_locations
                                       .where(active: true)
                                       .order(created_at: :desc)
-                                      .limit(limit / 3)
+                                      .limit(limit / 4)
                                       .includes(:user)
           recent_assignments.each do |ul|
             next unless ul.user
@@ -443,7 +479,7 @@ module Api
         # Recent leads at this location
         begin
           if defined?(Lead)
-            recent_leads = location.leads.order(created_at: :desc).limit(limit / 3)
+            recent_leads = location.leads.order(created_at: :desc).limit(limit / 4)
             recent_leads.each do |lead|
               activities << {
                 id: "lead-#{lead.id}",
@@ -464,6 +500,28 @@ module Api
 
         # Sort by timestamp descending and limit
         activities.sort_by { |a| a[:timestamp] }.reverse.take(limit)
+      end
+
+      def activity_type_from_category(category)
+        case category
+        when 'branding' then 'settings'
+        when 'communication' then 'settings'
+        when 'operational' then 'settings'
+        when 'user_assignment' then 'user'
+        else 'settings'
+        end
+      end
+
+      def activity_title_from_category(category, action)
+        case action
+        when 'branding_changed' then 'Branding updated'
+        when 'communication_changed' then 'Communication updated'
+        when 'operational_changed' then 'Operational settings updated'
+        when 'settings_cleared' then "#{category.humanize} cleared"
+        when 'user_assigned' then 'User assigned'
+        when 'user_removed' then 'User removed'
+        else category.humanize
+        end
       end
 
       def time_ago(time)

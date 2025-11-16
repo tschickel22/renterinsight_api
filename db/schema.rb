@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_14_000003) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -909,6 +909,24 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_14_000003) do
     t.index ["vehicle_id"], name: "index_listings_on_vehicle_id"
   end
 
+  create_table "location_activities", force: :cascade do |t|
+    t.bigint "location_id", null: false
+    t.bigint "user_id"
+    t.string "action", null: false
+    t.string "category", null: false
+    t.text "description"
+    t.jsonb "metadata", default: {}
+    t.datetime "occurred_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["action"], name: "index_location_activities_on_action"
+    t.index ["category"], name: "index_location_activities_on_category"
+    t.index ["location_id", "occurred_at"], name: "index_location_activities_on_location_id_and_occurred_at"
+    t.index ["location_id"], name: "index_location_activities_on_location_id"
+    t.index ["occurred_at"], name: "index_location_activities_on_occurred_at"
+    t.index ["user_id"], name: "index_location_activities_on_user_id"
+  end
+
   create_table "locations", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -1605,6 +1623,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_14_000003) do
   add_foreign_key "listings", "companies"
   add_foreign_key "listings", "locations"
   add_foreign_key "listings", "vehicles"
+  add_foreign_key "location_activities", "locations"
+  add_foreign_key "location_activities", "users"
   add_foreign_key "locations", "companies"
   add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id"
   add_foreign_key "lot_map_history_entries", "users"

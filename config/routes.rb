@@ -6,6 +6,9 @@ Rails.application.routes.draw do
   # Root
   root to: proc { [200, {}, ['Renter Insight API']] }
   
+  # Serve uploaded files (logos, images, etc.) - Legacy URLs without /api prefix
+  get 'uploads/*path', to: 'api/uploads#show', format: false
+  
   # ==================== WEBHOOKS (NO AUTH REQUIRED) ====================
   namespace :webhooks do
     # Email tracking pixel (no auth required)
@@ -335,7 +338,10 @@ Rails.application.routes.draw do
     
     # ==================== SETTINGS API ====================
     get 'settings/tenant', to: 'settings#tenant'
+    get 'settings/platform', to: 'settings#platform'  # Get platform defaults
     patch 'settings', to: 'settings#update'
+    put 'settings', to: 'settings#update'  # Support PUT for company settings
+    delete 'settings', to: 'settings#destroy'  # Reset to platform defaults
     patch 'settings/branding', to: 'settings#update_branding'
     get 'settings/quotes', to: 'settings#quotes'
     patch 'settings/quotes', to: 'settings#update_quotes'
@@ -347,6 +353,7 @@ Rails.application.routes.draw do
     delete 'settings/custom_fields/:id', to: 'settings#destroy_custom_field'
     
     # ==================== UPLOADS API ====================
+    get 'uploads/*path', to: 'uploads#show', format: false  # Serve uploaded files
     post 'uploads/logo', to: 'uploads#logo'
     post 'uploads', to: 'uploads#create'
     delete 'uploads', to: 'uploads#destroy'

@@ -9,6 +9,8 @@ module Api
 
     # GET /api/settings/tenant
     def tenant
+      Rails.logger.info "🏢 [SettingsController#tenant] Loading tenant for company: #{@company.name} (ID: #{@company.id})"
+      
       render json: {
         tenant: serialize_tenant
       }
@@ -20,17 +22,151 @@ module Api
       }, status: :internal_server_error
     end
 
-    # PATCH /api/settings
-    def update
-      settings_params = params.require(:settings).permit!
-      
-      settings_params.each do |key, value|
-        Setting.set('Company', @company.id, key, value)
+    # GET /api/settings/platform
+    def platform
+      settings_hash = {
+        communications: {},
+        operational: {},
+        branding: {},
+        integrations: {}
+      }
+
+      # Load all platform settings (scope_type: 'Platform', scope_id: 0)
+      Setting.where(scope_type: 'Platform', scope_id: 0).each do |setting|
+        begin
+          value = JSON.parse(setting.value)
+          settings_hash[setting.key.to_sym] = value
+        rescue JSON::ParserError => e
+          Rails.logger.error "Failed to parse platform setting #{setting.key}: #{e.message}"
+        end
       end
 
+      render json: settings_hash
+    rescue => e
+      Rails.logger.error "Platform settings error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+      render json: { 
+        error: 'Failed to load platform settings',
+        details: Rails.env.development? ? e.message : nil
+      }, status: :internal_server_error
+    end
+
+    # PATCH /api/settings (old format)
+    # PUT /api/settings (new format)
+    def update
+      Rails.logger.info "🔧 [SettingsController#update] Received params: #{params.inspect}"
+      Rails.logger.info "🔧 [SettingsController#update] Company: #{@company&.name} (ID: #{@company&.id})"
+      
+      # Support two different formats:
+      # 1. Old format: { settings: { key1: value1, key2: value2 } }
+      # 2. New format: { scope_type: 'Company', scope_id: id, key: 'communications', value: {...} }
+      # 3. Company attributes: { name: 'New Name', domain: 'newdomain.com' }
+      
+      # Handle company attribute updates (name, domain)
+      if params[:name].present? || params[:domain].present?
+        Rails.logger.info "🏢 [SettingsController#update] Updating company attributes: name=#{params[:name]}, domain=#{params[:domain]}"
+        company_params = {}
+        company_params[:name] = params[:name] if params[:name].present?
+        company_params[:domain] = params[:domain] if params[:domain].present?
+        
+        if @company.update(company_params)
+          Rails.logger.info "✅ [SettingsController#update] Company updated successfully: #{@company.name}"
+          render json: {
+            tenant: serialize_tenant,
+            message: 'Company updated successfully'
+          }
+        else
+          Rails.logger.error "❌ [SettingsController#update] Company update failed: #{@company.errors.full_messages}"
+          render json: {
+            errors: @company.errors.full_messages
+          }, status: :unprocessable_entity
+        end
+        return
+      end
+      
+      if params[:key].present? && params[:value].present?
+        # New format - single key/value update
+        scope_type = params[:scope_type] || 'Company'
+        # If scope_id not provided, use company from auth context
+        scope_id = params[:scope_id] || @company.id
+        key = params[:key]
+        value = params[:value]
+        
+        # Verify user has access to this scope
+        if scope_type == 'Company' && scope_id.to_s != @company.id.to_s
+          Rails.logger.error "🚫 [SettingsController] Unauthorized: User trying to access company #{scope_id} but authenticated for company #{@company.id}"
+          render json: { error: 'Unauthorized' }, status: :forbidden
+          return
+        end
+        
+        Rails.logger.info "✅ [SettingsController] Updating setting: scope=#{scope_type}:#{scope_id}, key=#{key}"
+        Setting.set(scope_type, scope_id, key, value)
+        
+        render json: {
+          setting: {
+            scope_type: scope_type,
+            scope_id: scope_id,
+            key: key,
+            value: value
+          },
+          message: 'Settings updated successfully'
+        }
+      elsif params[:settings].present?
+        # Old format - multiple settings
+        settings_params = params.require(:settings).permit!
+        
+        settings_params.each do |key, value|
+          Setting.set('Company', @company.id, key, value)
+        end
+
+        render json: {
+          tenant: serialize_tenant
+        }
+      else
+        render json: { error: 'Invalid params format' }, status: :unprocessable_entity
+      end
+    rescue => e
+      Rails.logger.error "Settings update error: #{e.message}\n#{e.backtrace.join("\n")}"
       render json: {
-        tenant: serialize_tenant
+        error: e.message
+      }, status: :internal_server_error
+    end
+
+    # DELETE /api/settings
+    # Reset company settings to platform defaults by removing company overrides
+    def destroy
+      key = params[:key]
+      
+      unless key.present?
+        render json: { error: 'Key parameter is required' }, status: :unprocessable_entity
+        return
+      end
+      
+      # Only allow resetting specific keys (whitelist for security)
+      allowed_keys = ['communications', 'operational', 'branding', 'integrations']
+      unless allowed_keys.include?(key)
+        render json: { error: "Invalid key. Allowed keys: #{allowed_keys.join(', ')}" }, status: :unprocessable_entity
+        return
+      end
+      
+      # Delete the company setting to revert to platform defaults
+      deleted_count = Setting.where(
+        scope_type: 'Company',
+        scope_id: @company.id,
+        key: key
+      ).delete_all
+      
+      Rails.logger.info "✅ [SettingsController] Reset #{key} for company #{@company.id}: deleted #{deleted_count} setting(s)"
+      
+      render json: {
+        message: "Settings for '#{key}' have been reset to platform defaults",
+        key: key,
+        deleted_count: deleted_count
       }
+    rescue => e
+      Rails.logger.error "Settings delete error: #{e.message}\n#{e.backtrace.join("\n")}"
+      render json: {
+        error: e.message
+      }, status: :internal_server_error
     end
 
     # PATCH /api/settings/branding
@@ -155,37 +291,56 @@ module Api
     private
 
     def set_company
-      # STRICT TENANT ISOLATION: Only load company from authenticated user
-      unless current_user
-        Rails.logger.error "🚫 [SettingsController] No authenticated user found"
-        render json: { 
-          error: 'Authentication required',
-          message: 'You must be logged in to access company settings'
-        }, status: :unauthorized
-        return
+      # For platform admins, allow selecting a company via X-Company-ID header
+      selected_company_id = request.headers['X-Company-ID']
+      
+      if (current_user.admin? || current_user.super_admin?) && selected_company_id.present?
+        # Platform admin is selecting a specific company to manage
+        @company = ::Company.find_by(id: selected_company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [SettingsController] Platform admin selected invalid company ID: #{selected_company_id}"
+          render json: { 
+            error: 'Selected company not found',
+            message: 'The selected company could not be found.'
+          }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [SettingsController] Platform admin #{current_user.email} selected company: #{@company.name} (ID: #{@company.id})"
+      else
+        # Regular users: use their assigned company_id
+        unless current_user
+          Rails.logger.error "🚫 [SettingsController] No authenticated user found"
+          render json: { 
+            error: 'Authentication required',
+            message: 'You must be logged in to access company settings'
+          }, status: :unauthorized
+          return
+        end
+        
+        unless current_user.company_id.present?
+          Rails.logger.error "🚫 [SettingsController] User #{current_user.id} has no company_id"
+          render json: { 
+            error: 'No company assigned',
+            message: 'Your account is not associated with a company. Please contact support.'
+          }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: current_user.company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [SettingsController] Company #{current_user.company_id} not found for user #{current_user.id}"
+          render json: { 
+            error: 'Company not found',
+            message: 'The company associated with your account could not be found. Please contact support.'
+          }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [SettingsController] Loaded company: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email} (ID: #{current_user.id})"
       end
-      
-      unless current_user.company_id.present?
-        Rails.logger.error "🚫 [SettingsController] User #{current_user.id} has no company_id"
-        render json: { 
-          error: 'No company assigned',
-          message: 'Your account is not associated with a company. Please contact support.'
-        }, status: :forbidden
-        return
-      end
-      
-      @company = ::Company.find_by(id: current_user.company_id)
-      
-      if @company.nil?
-        Rails.logger.error "🚫 [SettingsController] Company #{current_user.company_id} not found for user #{current_user.id}"
-        render json: { 
-          error: 'Company not found',
-          message: 'The company associated with your account could not be found. Please contact support.'
-        }, status: :not_found
-        return
-      end
-      
-      Rails.logger.info "✅ [SettingsController] Loaded company: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email} (ID: #{current_user.id})"
     end
 
     def serialize_tenant
@@ -216,7 +371,17 @@ module Api
       platform_general = Setting.get('Platform', 0, 'general', {})
       base_settings[:platformName] = platform_general['platformName'] || platform_general[:platformName] || ''
 
-      # Merge in custom settings
+      # Merge in operational settings from company JSONB column
+      if @company.operational_settings.present?
+        operational = @company.operational_settings.deep_symbolize_keys
+        base_settings[:timezone] = operational[:timezone] if operational[:timezone].present?
+        base_settings[:businessHours] = operational[:business_hours] if operational[:business_hours].present?
+        base_settings[:deliveryRadiusMiles] = operational[:delivery_radius_miles] if operational[:delivery_radius_miles].present?
+        base_settings[:allowWeekendDelivery] = operational[:allow_weekend_delivery] if operational.key?(:allow_weekend_delivery)
+        base_settings[:requireAppointment] = operational[:require_appointment] if operational.key?(:require_appointment)
+      end
+
+      # Merge in custom settings from Settings table
       custom_settings = Setting.where(scope_type: 'Company', scope_id: @company.id)
         .where.not(key: ['branding', 'quotes'])
         .pluck(:key, :value)

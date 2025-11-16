@@ -2,7 +2,48 @@
 
 module Api
   class UploadsController < ApplicationController
-    before_action :set_company
+    skip_before_action :authenticate, only: [:show]
+    before_action :set_company, except: [:show]
+
+    # GET /api/uploads/*path
+    def show
+      # Path comes from params[:path] (wildcard route)
+      file_path = params[:path]
+      
+      # Construct full path to file in public/uploads
+      full_path = Rails.root.join('public', 'uploads', file_path)
+      
+      Rails.logger.info "📁 [UploadsController] Serving file: #{file_path}"
+      Rails.logger.info "📁 [UploadsController] Full path: #{full_path}"
+      
+      # Check if file exists
+      unless File.exist?(full_path)
+        Rails.logger.error "❌ [UploadsController] File not found: #{full_path}"
+        render json: { error: 'File not found' }, status: :not_found
+        return
+      end
+      
+      # Determine content type based on file extension
+      content_type = case File.extname(file_path).downcase
+      when '.jpg', '.jpeg' then 'image/jpeg'
+      when '.png' then 'image/png'
+      when '.gif' then 'image/gif'
+      when '.svg' then 'image/svg+xml'
+      when '.webp' then 'image/webp'
+      when '.ico' then 'image/x-icon'
+      when '.pdf' then 'application/pdf'
+      else 'application/octet-stream'
+      end
+      
+      # Send file with appropriate headers
+      send_file full_path, 
+        type: content_type,
+        disposition: 'inline',
+        status: :ok
+    rescue => e
+      Rails.logger.error "❌ [UploadsController] Error serving file: #{e.message}"
+      render json: { error: 'Failed to serve file' }, status: :internal_server_error
+    end
 
     # POST /api/uploads/logo
     def logo

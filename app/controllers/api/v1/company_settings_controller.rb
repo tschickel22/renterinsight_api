@@ -7,7 +7,8 @@ module Api
 
       # GET /api/v1/company_settings/operational
       def show_operational
-        settings = current_company.operational_settings || {}
+        # Use .presence to return nil if empty/blank, not empty hash
+        settings = current_company.operational_settings.presence
         
         render json: {
           operational_settings: settings,
@@ -17,15 +18,29 @@ module Api
 
       # PATCH /api/v1/company_settings/operational
       def update_operational
+        Rails.logger.info "🔧 [CompanySettings#update_operational] Received params: #{params.inspect}"
+        Rails.logger.info "🔧 [CompanySettings#update_operational] Company: #{current_company&.name} (ID: #{current_company&.id})"
+        
         settings = params[:operational_settings] || {}
+        Rails.logger.info "📊 [CompanySettings#update_operational] Operational settings: #{settings.inspect}"
         
         current_company.operational_settings = settings
         
-        render json: {
-          operational_settings: current_company.operational_settings,
-          message: 'Operational settings updated successfully'
-        }
+        if current_company.save
+          Rails.logger.info "✅ [CompanySettings#update_operational] Settings saved successfully"
+          render json: {
+            operational_settings: current_company.operational_settings,
+            message: 'Operational settings updated successfully'
+          }
+        else
+          Rails.logger.error "❌ [CompanySettings#update_operational] Save failed: #{current_company.errors.full_messages}"
+          render json: {
+            errors: current_company.errors.full_messages
+          }, status: :unprocessable_entity
+        end
       rescue => e
+        Rails.logger.error "Error updating operational settings: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
         render json: {
           errors: [e.message]
         }, status: :unprocessable_entity
@@ -47,11 +62,19 @@ module Api
         
         current_company.branding_settings = settings
         
-        render json: {
-          branding_settings: current_company.branding_settings,
-          message: 'Branding settings updated successfully'
-        }
+        if current_company.save
+          render json: {
+            branding_settings: current_company.branding_settings,
+            message: 'Branding settings updated successfully'
+          }
+        else
+          render json: {
+            errors: current_company.errors.full_messages
+          }, status: :unprocessable_entity
+        end
       rescue => e
+        Rails.logger.error "Error updating branding settings: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
         render json: {
           errors: [e.message]
         }, status: :unprocessable_entity
@@ -73,11 +96,19 @@ module Api
         
         current_company.communications_settings = settings
         
-        render json: {
-          communication_settings: current_company.communications_settings,
-          message: 'Communication settings updated successfully'
-        }
+        if current_company.save
+          render json: {
+            communication_settings: current_company.communications_settings,
+            message: 'Communication settings updated successfully'
+          }
+        else
+          render json: {
+            errors: current_company.errors.full_messages
+          }, status: :unprocessable_entity
+        end
       rescue => e
+        Rails.logger.error "Error updating communication settings: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
         render json: {
           errors: [e.message]
         }, status: :unprocessable_entity
@@ -90,8 +121,23 @@ module Api
       end
 
       def authorize_company_admin!
-        unless current_user&.admin?
-          render json: { error: 'Admin access required' }, status: :forbidden
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+
+        unless current_company
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+
+        # Platform admins can manage any company (via proxy)
+        return if current_user.admin? || current_user.super_admin?
+
+        # Company users can only manage their own company
+        unless current_user.company_id == current_company.id
+          render json: { error: 'Forbidden - You can only manage your own company settings' }, status: :forbidden
+          return
         end
       end
     end
