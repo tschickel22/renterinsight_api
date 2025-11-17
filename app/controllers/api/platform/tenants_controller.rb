@@ -46,6 +46,7 @@ module Api
                 domain_verified: false,
                 status: 'active',
                 subscription_tier: nil,
+                users_count: 0,
                 created_at: Time.current,
                 updated_at: Time.current
               }
@@ -488,6 +489,7 @@ module Api
           domain_verified: tenant.domain_verified?,
           status: tenant.status || 'active',
           subscription_tier: tenant.subscription_tier,
+          users_count: tenant.users_count || 0,
           created_at: tenant.created_at,
           updated_at: tenant.updated_at
         }
@@ -522,6 +524,7 @@ module Api
           domain_verified: false,
           status: 'active',
           subscription_tier: nil,
+          users_count: 0,
           created_at: Time.current,
           updated_at: Time.current
         }
