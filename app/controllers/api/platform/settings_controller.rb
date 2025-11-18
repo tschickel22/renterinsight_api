@@ -70,8 +70,11 @@ module Api
         
         return render_missing_settings('email') if email_settings.blank?
         
+        # Convert ActionController::Parameters to hash for service
+        settings_hash = email_settings.is_a?(ActionController::Parameters) ? email_settings.to_unsafe_h : email_settings
+        
         # Test the email configuration
-        result = TestCommunicationService.new(email_settings, :email).test
+        result = TestCommunicationService.new(settings_hash, :email).test
         
         if result[:success]
           render json: {
@@ -101,8 +104,11 @@ module Api
         
         return render_missing_settings('sms') if sms_settings.blank?
         
+        # Convert ActionController::Parameters to hash for service
+        settings_hash = sms_settings.is_a?(ActionController::Parameters) ? sms_settings.to_unsafe_h : sms_settings
+        
         # Test the SMS configuration
-        result = TestCommunicationService.new(sms_settings, :sms).test
+        result = TestCommunicationService.new(settings_hash, :sms).test
         
         if result[:success]
           render json: {

@@ -113,6 +113,34 @@ Rails.application.routes.draw do
       # ==================== BROCHURE TEMPLATES ====================
       resources :brochure_templates, path: 'brochure-templates', only: [:index, :show, :create, :update, :destroy]
       
+      # ==================== RBAC ROLES ====================
+      resources :roles do
+        member do
+          get :permissions
+          post :clone
+        end
+        
+        collection do
+          get :system, action: :system_roles, as: :system
+        end
+      end
+      
+      # ==================== RBAC RESOURCES ====================
+      resources :resources, only: [:index, :show, :create, :update, :destroy]
+      
+      # ==================== RBAC ACTIONS ====================
+      resources :actions, only: [:index, :show, :create, :update, :destroy]
+      
+      # ==================== RBAC SCOPES ====================
+      resources :scopes, only: [:index, :show, :create, :update, :destroy]
+      
+      # ==================== RBAC PERMISSIONS ====================
+      scope path: 'permissions', controller: 'permissions' do
+        get 'check', action: :check
+        get 'user/:user_id', action: :user_permissions
+        post 'bulk_check', action: :bulk_check
+      end
+      
       # ==================== LOCATIONS ====================
       resources :locations do
         member do

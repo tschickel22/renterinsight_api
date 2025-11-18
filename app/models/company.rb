@@ -18,6 +18,9 @@ class Company < ApplicationRecord
   has_many :templates, dependent: :destroy
   has_many :locations, dependent: :destroy
   
+  # RBAC System Associations
+  has_many :roles, dependent: :destroy
+  
   # Validations for tenant fields
   validates :subdomain, 
             uniqueness: { case_sensitive: false, allow_nil: true },
@@ -394,7 +397,7 @@ class Company < ApplicationRecord
   rescue => e
     Rails.logger.error "❌ [Company#operational_settings=] Error: #{e.class} - #{e.message}"
     Rails.logger.error "❌ [Company#operational_settings=] Backtrace: #{e.backtrace.first(5).join("\n")}"
-    raise e  # Re-raise instead of swallowing
+    raise e
   end
 
   # Check if company has meaningful communication settings configured

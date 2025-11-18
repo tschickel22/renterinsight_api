@@ -8,20 +8,14 @@ CommunicationTemplate.find_or_create_by!(
   name: 'Company User Invitation - Email',
   template_type: 'company_user_invitation',
   channel: 'email',
-  scope_type: 'Platform'
+  company_id: nil
 ) do |t|
-  t.subject_template = 'You\'re Invited to Join {{ company_name }} on Platform DMS'
-  t.body_template = <<~HTML
+  t.subject = 'You\'re Invited to Join {{ company_name }} on Platform DMS'
+  t.body = <<~HTML
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2>Hello {{ recipient_name }},</h2>
       
-      <p>{{ inviter_name }} has invited you to join <strong>{{ company_name }}</strong> on Platform DMS.</p>
-      
-      {% if message %}
-      <div style="background: #f5f5f5; padding: 15px; border-left: 4px solid #4f46e5; margin: 20px 0;">
-        <p style="margin: 0;"><em>{{ message }}</em></p>
-      </div>
-      {% endif %}
+      <p>{{ invited_by }} has invited you to join <strong>{{ company_name }}</strong> on Platform DMS.</p>
       
       <p><strong>Your Role:</strong> {{ role }}</p>
       
@@ -44,9 +38,7 @@ CommunicationTemplate.find_or_create_by!(
       </p>
     </div>
   HTML
-  t.category = 'invitations'
-  t.active = true
-  t.description = 'Default template for company user invitations via email'
+  t.is_active = true
 end
 
 # Company User Invitation - SMS
@@ -54,12 +46,10 @@ CommunicationTemplate.find_or_create_by!(
   name: 'Company User Invitation - SMS',
   template_type: 'company_user_invitation',
   channel: 'sms',
-  scope_type: 'Platform'
+  company_id: nil
 ) do |t|
-  t.body_template = "{{ inviter_name }} invited you to join {{ company_name }} on Platform DMS. Accept: {{ invitation_url }}"
-  t.category = 'invitations'
-  t.active = true
-  t.description = 'Default template for company user invitations via SMS'
+  t.body = "{{ invited_by }} invited you to join {{ company_name }} on Platform DMS. Accept: {{ invitation_url }}"
+  t.is_active = true
 end
 
 # Portal User Invitation - Email
@@ -67,20 +57,14 @@ CommunicationTemplate.find_or_create_by!(
   name: 'Portal User Invitation - Email',
   template_type: 'portal_user_invitation',
   channel: 'email',
-  scope_type: 'Platform'
+  company_id: nil
 ) do |t|
-  t.subject_template = 'Access Your Client Portal - {{ company_name }}'
-  t.body_template = <<~HTML
+  t.subject = 'Access Your Client Portal - {{ company_name }}'
+  t.body = <<~HTML
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2>Hello {{ recipient_name }},</h2>
       
-      <p>{{ inviter_name }} from <strong>{{ company_name }}</strong> has invited you to access your client portal.</p>
-      
-      {% if message %}
-      <div style="background: #f5f5f5; padding: 15px; border-left: 4px solid #10b981; margin: 20px 0;">
-        <p style="margin: 0;"><em>{{ message }}</em></p>
-      </div>
-      {% endif %}
+      <p>{{ invited_by }} from <strong>{{ company_name }}</strong> has invited you to access your client portal.</p>
       
       <p>Through the client portal, you can:</p>
       <ul>
@@ -109,9 +93,7 @@ CommunicationTemplate.find_or_create_by!(
       </p>
     </div>
   HTML
-  t.category = 'invitations'
-  t.active = true
-  t.description = 'Default template for portal user invitations via email'
+  t.is_active = true
 end
 
 # Portal User Invitation - SMS
@@ -119,12 +101,10 @@ CommunicationTemplate.find_or_create_by!(
   name: 'Portal User Invitation - SMS',
   template_type: 'portal_user_invitation',
   channel: 'sms',
-  scope_type: 'Platform'
+  company_id: nil
 ) do |t|
-  t.body_template = "{{ company_name }}: Access your client portal. Activate: {{ invitation_url }}"
-  t.category = 'invitations'
-  t.active = true
-  t.description = 'Default template for portal user invitations via SMS'
+  t.body = "{{ company_name }}: Access your client portal. Activate: {{ invitation_url }}"
+  t.is_active = true
 end
 
 # Tenant Invitation - Email
@@ -132,22 +112,16 @@ CommunicationTemplate.find_or_create_by!(
   name: 'Tenant Invitation - Email',
   template_type: 'tenant_invitation',
   channel: 'email',
-  scope_type: 'Platform'
+  company_id: nil
 ) do |t|
-  t.subject_template = 'Welcome to Platform DMS - Set Up Your Company Account'
-  t.body_template = <<~HTML
+  t.subject = 'Welcome to Platform DMS - Set Up Your Company Account'
+  t.body = <<~HTML
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2>Welcome to Platform DMS!</h2>
       
       <p>Hello {{ recipient_name }},</p>
       
-      <p>{{ inviter_name }} has invited you to set up a new company account on Platform DMS.</p>
-      
-      {% if message %}
-      <div style="background: #f5f5f5; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0;">
-        <p style="margin: 0;"><em>{{ message }}</em></p>
-      </div>
-      {% endif %}
+      <p>{{ invited_by }} has invited you to set up a new company account on Platform DMS.</p>
       
       <p>Platform DMS is a comprehensive rental management system that will help you:</p>
       <ul>
@@ -176,9 +150,7 @@ CommunicationTemplate.find_or_create_by!(
       </p>
     </div>
   HTML
-  t.category = 'invitations'
-  t.active = true
-  t.description = 'Default template for tenant invitations via email'
+  t.is_active = true
 end
 
 # Tenant Invitation - SMS
@@ -186,12 +158,10 @@ CommunicationTemplate.find_or_create_by!(
   name: 'Tenant Invitation - SMS',
   template_type: 'tenant_invitation',
   channel: 'sms',
-  scope_type: 'Platform'
+  company_id: nil
 ) do |t|
-  t.body_template = "Welcome to Platform DMS! Set up your company account: {{ invitation_url }}"
-  t.category = 'invitations'
-  t.active = true
-  t.description = 'Default template for tenant invitations via SMS'
+  t.body = "Welcome to Platform DMS! Set up your company account: {{ invitation_url }}"
+  t.is_active = true
 end
 
 puts "✅ Invitation templates seeded successfully!"

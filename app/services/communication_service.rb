@@ -341,6 +341,8 @@ class CommunicationService
       communicable.company
     when 'User'
       communicable.company if communicable.respond_to?(:company)
+    when 'Invitation'
+      communicable.company
     else
       # Try to get company if the object responds to it
       communicable.company if communicable.respond_to?(:company)

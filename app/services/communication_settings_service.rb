@@ -14,7 +14,7 @@ class CommunicationSettingsService
   end
   
   def email_config
-    config = communication_settings.dig('email') || {}
+    config = merged_settings.dig('email') || {}
     
     {
       provider: config['provider'] || ENV['DEFAULT_EMAIL_PROVIDER'] || 'smtp',
@@ -31,7 +31,7 @@ class CommunicationSettingsService
   end
   
   def sms_config
-    config = communication_settings.dig('sms') || {}
+    config = merged_settings.dig('sms') || {}
     
     {
       provider: config['provider'] || ENV['SMS_PROVIDER'] || 'twilio',
@@ -44,20 +44,69 @@ class CommunicationSettingsService
   
   private
   
-  def communication_settings
-    return @communication_settings if defined?(@communication_settings)
+  # NEW METHOD: Intelligently merge Company + Platform settings
+  # Company settings override Platform, but missing/blank fields use Platform defaults
+  def merged_settings
+    return @merged_settings if defined?(@merged_settings)
     
-    setting = nil
+    # Always load platform settings as the base
+    platform_setting = Setting.find_by(key: 'communications', scope_type: 'Platform', scope_id: 0)
+    platform_data = if platform_setting&.value.present?
+                      platform_setting.value.is_a?(Hash) ? platform_setting.value : JSON.parse(platform_setting.value)
+                    else
+                      {}
+                    end
     
-    if company
-      setting = Setting.find_by(key: 'communications', scope_type: 'Company', scope_id: company.id)
+    # If no company, just use platform settings
+    unless company
+      @merged_settings = platform_data
+      return @merged_settings
     end
     
-    setting ||= Setting.find_by(key: 'communications', scope_type: ['Platform', nil])
+    # Load company settings
+    company_setting = Setting.find_by(key: 'communications', scope_type: 'Company', scope_id: company.id)
+    company_data = if company_setting&.value.present?
+                     company_setting.value.is_a?(Hash) ? company_setting.value : JSON.parse(company_setting.value)
+                   else
+                     {}
+                   end
     
-    @communication_settings = setting&.value.present? ? JSON.parse(setting.value) : {}
-  rescue JSON::ParserError
+    # Deep merge: Company overrides Platform, but blank/nil company fields use platform values
+    @merged_settings = deep_merge_settings(platform_data, company_data)
+    
+    Rails.logger.debug("📧 Merged settings for company_id=#{company.id}: email.fromEmail=#{@merged_settings.dig('email', 'fromEmail')}, sms.fromNumber=#{@merged_settings.dig('sms', 'fromNumber')}")
+    
+    @merged_settings
+  rescue JSON::ParserError => e
+    Rails.logger.error("Failed to parse communication settings: #{e.message}")
     {}
+  rescue StandardError => e
+    Rails.logger.error("Failed to merge communication settings: #{e.message}")
+    platform_data || {}
+  end
+  
+  # Deep merge helper: recursively merges hashes, with override taking precedence
+  # CRITICAL: Only merges non-blank values from override (treats "" same as nil)
+  def deep_merge_settings(base, override)
+    result = base.deep_dup
+    
+    override.each do |key, value|
+      if value.is_a?(Hash) && result[key].is_a?(Hash)
+        # Recursively merge nested hashes
+        result[key] = deep_merge_settings(result[key], value)
+      elsif value.present? # This checks for non-nil AND non-blank (excludes "", [], {})
+        # Override with non-blank values only
+        result[key] = value
+      end
+      # If value is nil or blank, skip it and keep base value
+    end
+    
+    result
+  end
+  
+  # DEPRECATED: Keep for backwards compatibility, but now just delegates to merged_settings
+  def communication_settings
+    merged_settings
   end
   
   def decrypt_value(value)

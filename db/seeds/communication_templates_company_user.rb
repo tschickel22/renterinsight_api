@@ -12,8 +12,8 @@ email_template = CommunicationTemplate.find_or_initialize_by(
 )
 
 email_template.assign_attributes(
-  subject_template: 'Welcome to {{ company_name }} - Set Up Your Account',
-  body_template: <<~BODY,
+  subject: 'Welcome to {{ company_name }} - Set Up Your Account',
+  body: <<~BODY,
     <!DOCTYPE html>
     <html>
     <head>
@@ -60,14 +60,7 @@ email_template.assign_attributes(
             </ol>
           </div>
           
-          {% if message %}
-          <div style="background: #f0f9ff; padding: 15px; border-radius: 4px; margin: 20px 0;">
-            <p><strong>Message from {{ company_name }}:</strong></p>
-            <p>{{ message }}</p>
-          </div>
-          {% endif %}
-          
-          <p>If you have any questions or need assistance, please contact {{ inviter_name }}.</p>
+          <p>If you have any questions or need assistance, please contact {{ invited_by }}.</p>
           
           <p>Best regards,<br>The {{ company_name }} Team</p>
         </div>
@@ -79,9 +72,8 @@ email_template.assign_attributes(
     </body>
     </html>
   BODY
-  active: true,
-  scope_type: 'Platform',
-  scope_id: nil
+  is_active: true,
+  company_id: nil
 )
 
 if email_template.save
@@ -98,11 +90,9 @@ sms_template = CommunicationTemplate.find_or_initialize_by(
 )
 
 sms_template.assign_attributes(
-  subject_template: nil, # SMS doesn't need subject
-  body_template: 'Hi {{ recipient_name }}! Your {{ company_name }} account is ready. Set up your password: {{ invitation_url }} (Expires {{ expires_at }})',
-  active: true,
-  scope_type: 'Platform',
-  scope_id: nil
+  body: 'Hi {{ recipient_name }}! Your {{ company_name }} account is ready. Set up your password: {{ invitation_url }}',
+  is_active: true,
+  company_id: nil
 )
 
 if sms_template.save

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_17_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -108,6 +108,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
     t.index ["rating"], name: "index_accounts_on_rating"
     t.index ["source_id"], name: "index_accounts_on_source_id"
     t.index ["status"], name: "index_accounts_on_status"
+  end
+
+  create_table "actions", force: :cascade do |t|
+    t.string "key", limit: 100, null: false
+    t.string "name", null: false
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_actions_on_key", unique: true
   end
 
   create_table "active_storage_attachments", force: :cascade do |t|
@@ -440,11 +449,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
     t.integer "max_storage_gb"
     t.string "zoho_subscription_id"
     t.string "zoho_customer_id"
+    t.boolean "use_rbac_system", default: false, null: false
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
+    t.index ["use_rbac_system"], name: "index_companies_on_use_rbac_system"
   end
 
   create_table "contact_activities", force: :cascade do |t|
@@ -1167,6 +1178,61 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
     t.index ["user_id"], name: "index_reminders_on_user_id"
   end
 
+  create_table "resources", force: :cascade do |t|
+    t.string "key", limit: 100, null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "category", limit: 50
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_resources_on_active"
+    t.index ["category"], name: "index_resources_on_category"
+    t.index ["key"], name: "index_resources_on_key", unique: true
+  end
+
+  create_table "role_permissions", force: :cascade do |t|
+    t.bigint "role_id", null: false
+    t.bigint "resource_id", null: false
+    t.bigint "action_id", null: false
+    t.bigint "scope_id", null: false
+    t.boolean "granted", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["action_id"], name: "index_role_permissions_on_action_id"
+    t.index ["resource_id"], name: "index_role_permissions_on_resource_id"
+    t.index ["role_id", "granted"], name: "index_role_permissions_granted"
+    t.index ["role_id", "resource_id", "action_id", "scope_id"], name: "index_role_permissions_unique", unique: true
+    t.index ["role_id"], name: "index_role_permissions_on_role_id"
+    t.index ["scope_id"], name: "index_role_permissions_on_scope_id"
+  end
+
+  create_table "roles", force: :cascade do |t|
+    t.bigint "company_id"
+    t.string "tier", limit: 50, null: false
+    t.string "key", limit: 100, null: false
+    t.string "name", null: false
+    t.text "description"
+    t.boolean "is_system_role", default: false, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_roles_on_active"
+    t.index ["company_id", "tier", "key"], name: "index_roles_unique_per_company", unique: true
+    t.index ["company_id"], name: "index_roles_on_company_id"
+    t.index ["is_system_role"], name: "index_roles_on_is_system_role"
+    t.index ["tier"], name: "index_roles_on_tier"
+  end
+
+  create_table "scopes", force: :cascade do |t|
+    t.string "key", limit: 100, null: false
+    t.string "name", null: false
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_scopes_on_key", unique: true
+  end
+
   create_table "service_tickets", force: :cascade do |t|
     t.integer "company_id", null: false
     t.integer "account_id"
@@ -1348,6 +1414,29 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
     t.index ["location_id"], name: "index_user_locations_on_location_id"
     t.index ["user_id", "location_id"], name: "index_user_locations_on_user_id_and_location_id", unique: true
     t.index ["user_id"], name: "index_user_locations_on_user_id"
+  end
+
+  create_table "user_role_assignments", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "role_id", null: false
+    t.string "tier", limit: 50, null: false
+    t.bigint "region_id"
+    t.bigint "location_id"
+    t.bigint "assigned_by_id"
+    t.datetime "assigned_at", default: -> { "CURRENT_TIMESTAMP" }
+    t.datetime "expires_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "company_id", null: false
+    t.index ["company_id"], name: "index_user_role_assignments_on_company_id"
+    t.index ["expires_at"], name: "index_user_role_assignments_on_expires_at"
+    t.index ["location_id"], name: "index_user_role_assignments_on_location_id"
+    t.index ["region_id"], name: "index_user_role_assignments_on_region_id"
+    t.index ["role_id"], name: "index_user_role_assignments_on_role_id"
+    t.index ["tier"], name: "index_user_role_assignments_on_tier"
+    t.index ["user_id", "role_id", "tier", "region_id", "location_id"], name: "index_user_role_assignments_unique", unique: true
+    t.index ["user_id"], name: "index_user_role_assignments_on_user_id"
+    t.check_constraint "tier::text = 'company'::text AND region_id IS NULL AND location_id IS NULL OR tier::text = 'region'::text AND region_id IS NOT NULL AND location_id IS NULL OR tier::text = 'location'::text AND location_id IS NOT NULL", name: "check_tier_assignment"
   end
 
   create_table "users", force: :cascade do |t|
@@ -1642,6 +1731,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
   add_foreign_key "quotes", "locations"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
+  add_foreign_key "role_permissions", "actions", on_delete: :cascade
+  add_foreign_key "role_permissions", "resources", on_delete: :cascade
+  add_foreign_key "role_permissions", "roles", on_delete: :cascade
+  add_foreign_key "role_permissions", "scopes", on_delete: :cascade
+  add_foreign_key "roles", "companies", on_delete: :cascade
   add_foreign_key "service_tickets", "accounts"
   add_foreign_key "service_tickets", "companies"
   add_foreign_key "service_tickets", "contacts"
@@ -1657,6 +1751,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_16_012156) do
   add_foreign_key "user_locations", "companies"
   add_foreign_key "user_locations", "locations"
   add_foreign_key "user_locations", "users"
+  add_foreign_key "user_role_assignments", "companies", on_delete: :cascade
+  add_foreign_key "user_role_assignments", "roles", on_delete: :cascade
+  add_foreign_key "user_role_assignments", "users", column: "assigned_by_id", on_delete: :nullify
+  add_foreign_key "user_role_assignments", "users", on_delete: :cascade
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"

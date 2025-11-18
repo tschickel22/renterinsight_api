@@ -119,8 +119,14 @@ class InvitationService
         # In production, templates are required
         raise TemplateNotFoundError, "No template found for #{invitation.invitation_type}"
       else
-        # In development, just log and continue
-        Rails.logger.warn "⚠️  No template found for #{invitation.invitation_type} - invitation created but not sent"
+        # In development, log clearly and output to console
+        error_msg = "⚠️  TEMPLATE MISSING: No #{invitation.delivery_method} template found for '#{invitation.invitation_type}'"
+        Rails.logger.error error_msg
+        puts "\n" + "="*80
+        puts error_msg
+        puts "Run: rails runner db/seeds/invitation_templates.rb"
+        puts "Or: rails runner db/seeds/run_template_seed.rb"
+        puts "="*80 + "\n"
       end
     rescue StandardError => e
       if Rails.env.production?
@@ -128,8 +134,16 @@ class InvitationService
         Rails.logger.error("Failed to send invitation: #{e.message}")
         raise DeliveryFailedError, "Failed to send invitation: #{e.message}"
       else
-        # In development, log and continue
-        Rails.logger.warn "⚠️  Failed to send invitation (#{e.message}) - invitation created but not sent"
+        # In development, log clearly with details
+        error_msg = "❌ INVITATION SEND FAILED (#{invitation.delivery_method}): #{e.class.name} - #{e.message}"
+        Rails.logger.error error_msg
+        Rails.logger.error e.backtrace.first(3).join("\n")
+        puts "\n" + "="*80
+        puts error_msg
+        puts "Invitation Type: #{invitation.invitation_type}"
+        puts "Delivery Method: #{invitation.delivery_method}"
+        puts "Error: #{e.message}"
+        puts "="*80 + "\n"
       end
     end
     
