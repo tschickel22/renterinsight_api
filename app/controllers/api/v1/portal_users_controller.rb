@@ -118,12 +118,16 @@ module Api
           return render json: { error: 'contactId is required' }, status: :unprocessable_entity
         end
 
-        Rails.logger.info("Portal invite: Looking for contact_id=#{params[:contact_id]}, company_id=#{current_company_id}")
+        # SECURITY: For portal invites, ALWAYS use user's JWT company_id
+        # Never use X-Company-ID header - users can only invite to their own company
+        @user_company_id = @current_company_id # From JWT, not header
+        
+        Rails.logger.info("Portal invite: Looking for contact_id=#{params[:contact_id]}, company_id=#{@user_company_id}")
 
-        contact = Contact.find_by(id: params[:contact_id], company_id: current_company_id)
+        contact = Contact.find_by(id: params[:contact_id], company_id: @user_company_id)
         
         unless contact
-          Rails.logger.error("Contact not found: id=#{params[:contact_id]}, company_id=#{current_company_id}")
+          Rails.logger.error("Contact not found: id=#{params[:contact_id]}, company_id=#{@user_company_id}")
           return render json: { error: 'Contact not found' }, status: :not_found
         end
 
@@ -131,18 +135,18 @@ module Api
           return render json: { error: 'Contact must have an email address' }, status: :unprocessable_entity
         end
 
-        # ✅ FIX: Check if portal access already exists for this contact
+        # Check if portal access already exists for this contact
         existing_access = BuyerPortalAccess.find_by(
           buyer_id: contact.id,
           buyer_type: 'Contact',
-          company_id: current_company_id
+          company_id: @user_company_id
         )
 
         if existing_access && existing_access.status == 'Active'
           return render json: { error: 'Contact already has active portal access' }, status: :unprocessable_entity
         end
 
-        # ✅ FIX: Check if email is already used by another portal user (globally)
+        # Check if email is already used by another portal user (globally)
         email_to_use = (params[:email] || contact.email).downcase
         email_conflict = BuyerPortalAccess.find_by(email: email_to_use)
         
@@ -157,7 +161,7 @@ module Api
         @portal_user = existing_access || BuyerPortalAccess.new(
           buyer_id: contact.id,
           buyer_type: 'Contact',
-          company_id: current_company_id
+          company_id: @user_company_id
         )
 
         @portal_user.assign_attributes(
@@ -263,6 +267,12 @@ module Api
 
       private
 
+      # Helper to get the correct company_id for sensitive operations
+      # Uses JWT company_id if set (from invite), otherwise current_company_id
+      def secure_company_id
+        @user_company_id || current_company_id
+      end
+
       def set_portal_user
         @portal_user = BuyerPortalAccess.find_by(
           id: params[:id],
@@ -307,7 +317,7 @@ module Api
         template = CommunicationTemplate.find_by(
           template_type: 'portal_user_invitation',
           channel: 'email',
-          company_id: current_company_id
+          company_id: secure_company_id
         )
 
         unless template
@@ -320,7 +330,7 @@ module Api
         registration_url = "#{portal_base_url}/client/register?token=#{portal_user.invitation_token}"
         
         # Load company directly
-        company = ::Company.find(current_company_id)
+        company = ::Company.find(secure_company_id)
         
         # IMPORTANT: Set both portal_url and registration_url to registration page
         # This ensures templates using either variable work correctly
@@ -433,7 +443,7 @@ module Api
         template = CommunicationTemplate.find_by(
           template_type: 'portal_user_invitation',
           channel: 'sms',
-          company_id: current_company_id
+          company_id: secure_company_id
         )
 
         unless template
@@ -444,7 +454,7 @@ module Api
         Rails.logger.info("📝 Using SMS template: #{template.name}")
 
         # Load company directly
-        company = ::Company.find(current_company_id)
+        company = ::Company.find(secure_company_id)
 
         # Build template context
         portal_base_url = ENV['PORTAL_URL'] || ENV['FRONTEND_URL'] || 'https://localhost:5173'
@@ -508,7 +518,7 @@ module Api
             Best regards,
             {{company_name}}
           TEXT
-          company_id: current_company_id
+          company_id: secure_company_id
         )
       end
 
@@ -538,7 +548,7 @@ module Api
           template_type: 'portal_user_invitation',
           channel: 'sms',
           body: 'Hi {{recipient_name}}, you have been invited to {{company_name}} portal! Complete registration: {{registration_url}}',
-          company_id: current_company_id
+          company_id: secure_company_id
         )
       end
     end
