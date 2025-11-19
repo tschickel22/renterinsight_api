@@ -55,6 +55,7 @@ Rails.application.routes.draw do
         patch 'branding', action: :update_branding
         get 'communication', action: :show_communication
         patch 'communication', action: :update_communication
+        patch 'rbac', action: :update_rbac
       end
       
       # ==================== NOTES ====================

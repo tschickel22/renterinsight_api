@@ -114,6 +114,39 @@ module Api
         }, status: :unprocessable_entity
       end
 
+      # PATCH /api/v1/company_settings/rbac
+      def update_rbac
+        Rails.logger.info "🔐 [CompanySettings#update_rbac] Received params: #{params.inspect}"
+        
+        use_rbac = params[:use_rbac_system]
+        
+        if use_rbac.nil?
+          render json: { error: 'use_rbac_system parameter is required' }, status: :bad_request
+          return
+        end
+        
+        current_company.use_rbac_system = ActiveModel::Type::Boolean.new.cast(use_rbac)
+        
+        if current_company.save
+          Rails.logger.info "✅ [CompanySettings#update_rbac] RBAC #{current_company.use_rbac_system ? 'enabled' : 'disabled'} for company #{current_company.name}"
+          render json: {
+            use_rbac_system: current_company.use_rbac_system,
+            message: "RBAC system #{current_company.use_rbac_system ? 'enabled' : 'disabled'} successfully"
+          }
+        else
+          Rails.logger.error "❌ [CompanySettings#update_rbac] Failed to update: #{current_company.errors.full_messages}"
+          render json: {
+            errors: current_company.errors.full_messages
+          }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error "Error updating RBAC setting: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: {
+          errors: [e.message]
+        }, status: :unprocessable_entity
+      end
+
       private
 
       def current_company

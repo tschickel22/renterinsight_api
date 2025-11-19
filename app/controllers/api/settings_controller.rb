@@ -348,6 +348,7 @@ module Api
         id: @company.id.to_s,
         name: @company.name,
         domain: @company.try(:domain) || "#{@company.name.parameterize}.renterinsight.com",
+        use_rbac_system: @company.use_rbac_system || false,
         settings: serialize_settings,
         branding: serialize_branding,
         customFields: serialize_custom_fields,

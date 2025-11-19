@@ -5,6 +5,9 @@
 
 puts "🌱 Starting seed..."
 
+# Load RBAC system (resources, actions, scopes, roles, permissions)
+load Rails.root.join('db', 'seeds', 'rbac_system_seed.rb')
+
 # Load lead sources
 load Rails.root.join('db', 'seeds', 'sources.rb')
 
