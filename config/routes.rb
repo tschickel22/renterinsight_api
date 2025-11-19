@@ -120,6 +120,7 @@ Rails.application.routes.draw do
           get :permissions
           put :permissions, action: :set_permissions
           post :clone
+          post :toggle_visibility
         end
         
         collection do

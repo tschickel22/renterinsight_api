@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_19_175939) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -456,6 +456,16 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_175939) do
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
     t.index ["use_rbac_system"], name: "index_companies_on_use_rbac_system"
+  end
+
+  create_table "company_hidden_roles", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "role_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "role_id"], name: "index_company_hidden_roles_on_company_and_role", unique: true
+    t.index ["company_id"], name: "index_company_hidden_roles_on_company_id"
+    t.index ["role_id"], name: "index_company_hidden_roles_on_role_id"
   end
 
   create_table "contact_activities", force: :cascade do |t|
@@ -1678,6 +1688,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_175939) do
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
+  add_foreign_key "company_hidden_roles", "companies"
+  add_foreign_key "company_hidden_roles", "roles"
   add_foreign_key "contact_activities", "accounts"
   add_foreign_key "contact_activities", "contact_activities", column: "related_activity_id"
   add_foreign_key "contact_activities", "contacts"

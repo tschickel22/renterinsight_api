@@ -20,6 +20,8 @@ class Company < ApplicationRecord
   
   # RBAC System Associations
   has_many :roles, dependent: :destroy
+  has_many :company_hidden_roles, dependent: :destroy
+  has_many :hidden_roles, through: :company_hidden_roles, source: :role
   
   # Validations for tenant fields
   validates :subdomain, 

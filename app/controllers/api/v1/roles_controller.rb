@@ -10,7 +10,7 @@ module Api
     class RolesController < ApplicationController
       before_action :ensure_rbac_enabled, except: [:system_roles]
       before_action :set_role, only: [:show, :update, :destroy, :clone, :permissions, :set_permissions]
-      before_action :authorize_role_management, except: [:index, :show, :system_roles, :permissions]
+      before_action :authorize_role_management, except: [:index, :show, :system_roles, :permissions, :toggle_visibility]
       
       # GET /api/v1/roles
       def index
@@ -208,6 +208,37 @@ module Api
         }
       end
       
+      # POST /api/v1/roles/:id/toggle_visibility
+      # Toggle whether a system role is hidden for the current company
+      def toggle_visibility
+        role = Role.find(params[:id])
+        
+        unless role.system_role?
+          render json: {
+            error: 'Can only toggle visibility for system roles'
+          }, status: :unprocessable_entity
+          return
+        end
+        
+        if CompanyHiddenRole.role_hidden_for_company?(current_company_id, role.id)
+          CompanyHiddenRole.show_role_for_company(current_company_id, role.id)
+          message = "Role '#{role.name}' is now visible"
+          is_hidden = false
+        else
+          CompanyHiddenRole.hide_role_for_company(current_company_id, role.id)
+          message = "Role '#{role.name}' is now hidden"
+          is_hidden = true
+        end
+        
+        render json: {
+          message: message,
+          role: serialize_role(role),
+          is_hidden: is_hidden
+        }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Role not found' }, status: :not_found
+      end
+      
       # POST /api/v1/roles/:id/clone
       def clone
         unless @role.system_role?
@@ -304,6 +335,7 @@ module Api
           color: role.color,
           is_system: role.is_system_role,
           is_active: role.active,
+          is_hidden_for_company: role.system_role? && current_company_id ? role.hidden_for_company?(current_company_id) : false,
           company_id: role.company_id,
           users_count: role.user_role_assignments.count,
           created_at: role.created_at,

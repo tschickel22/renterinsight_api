@@ -20,6 +20,8 @@ class Role < ApplicationRecord
   has_many :scopes, through: :role_permissions
   has_many :user_role_assignments, dependent: :destroy
   has_many :users, through: :user_role_assignments
+  has_many :company_hidden_roles, dependent: :destroy
+  has_many :companies_hidden_from, through: :company_hidden_roles, source: :company
 
   # Validations
   validates :tier, presence: true, inclusion: { in: %w[company region location] }
@@ -48,6 +50,14 @@ class Role < ApplicationRecord
 
   def custom_role?
     !is_system_role && company_id.present?
+  end
+
+  def hidden_for_company?(company_id)
+    CompanyHiddenRole.role_hidden_for_company?(company_id, id)
+  end
+
+  def visible_for_company?(company_id)
+    !hidden_for_company?(company_id)
   end
 
   def has_permission?(resource_key, action_key, scope_key = 'all')
