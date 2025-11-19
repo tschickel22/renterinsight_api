@@ -107,6 +107,7 @@ module Api
           id: scope.id,
           key: scope.key,
           name: scope.name,
+          display_name: scope.name,
           description: scope.description,
           created_at: scope.created_at,
           updated_at: scope.updated_at

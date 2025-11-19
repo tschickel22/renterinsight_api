@@ -96,28 +96,32 @@ class Role < ApplicationRecord
       tier: 'company',
       key: 'company_admin',
       name: 'Company Administrator',
-      description: 'Full access to all company resources and settings'
+      description: 'Full access to all company resources and settings',
+      color: '#ef4444'
     )
 
     company_manager = create_system_role!(
       tier: 'company',
       key: 'company_manager',
       name: 'Company Manager',
-      description: 'Operational control with assigned region/location access'
+      description: 'Operational control with assigned region/location access',
+      color: '#f97316'
     )
 
     company_staff = create_system_role!(
       tier: 'company',
       key: 'company_staff',
       name: 'Company Staff',
-      description: 'Standard user with assigned location access'
+      description: 'Standard user with assigned location access',
+      color: '#3b82f6'
     )
 
     company_read_only = create_system_role!(
       tier: 'company',
       key: 'company_read_only',
       name: 'Read-Only User',
-      description: 'View-only access to assigned areas'
+      description: 'View-only access to assigned areas',
+      color: '#6b7280'
     )
 
     # Location-level system roles
@@ -125,21 +129,24 @@ class Role < ApplicationRecord
       tier: 'location',
       key: 'location_admin',
       name: 'Location Administrator',
-      description: 'Full control over assigned locations'
+      description: 'Full control over assigned locations',
+      color: '#8b5cf6'
     )
 
     location_manager = create_system_role!(
       tier: 'location',
       key: 'location_manager',
       name: 'Location Manager',
-      description: 'Operational control at assigned locations'
+      description: 'Operational control at assigned locations',
+      color: '#06b6d4'
     )
 
     location_staff = create_system_role!(
       tier: 'location',
       key: 'location_staff',
       name: 'Location Staff',
-      description: 'Standard staff access at assigned locations'
+      description: 'Standard staff access at assigned locations',
+      color: '#10b981'
     )
 
     # Grant permissions to Company Admin (full access to everything)

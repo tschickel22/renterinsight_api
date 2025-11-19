@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_17_000002) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_19_175939) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1217,6 +1217,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_17_000002) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "color"
     t.index ["active"], name: "index_roles_on_active"
     t.index ["company_id", "tier", "key"], name: "index_roles_unique_per_company", unique: true
     t.index ["company_id"], name: "index_roles_on_company_id"

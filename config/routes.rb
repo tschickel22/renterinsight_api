@@ -117,6 +117,7 @@ Rails.application.routes.draw do
       resources :roles do
         member do
           get :permissions
+          put :permissions, action: :set_permissions
           post :clone
         end
         
