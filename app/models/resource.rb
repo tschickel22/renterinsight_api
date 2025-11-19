@@ -40,7 +40,8 @@ class Resource < ApplicationRecord
       { key: 'portal', name: 'Client Portal', category: 'core', description: 'Manage client portal access and content' },
       { key: 'branding', name: 'Branding & White Label', category: 'admin', description: 'Manage branding, logos, and appearance' },
       { key: 'communications', name: 'Communications', category: 'operations', description: 'Send and manage emails/SMS' },
-      { key: 'listings', name: 'Property Listings', category: 'operations', description: 'Manage property listings and syndication' }
+      { key: 'listings', name: 'Property Listings', category: 'operations', description: 'Manage property listings and syndication' },
+      { key: 'products', name: 'Products', category: 'operations', description: 'Manage product catalog and pricing' }
     ].each do |resource_data|
       find_or_create_by!(key: resource_data[:key]) do |resource|
         resource.name = resource_data[:name]

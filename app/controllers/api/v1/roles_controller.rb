@@ -4,36 +4,19 @@
 #
 # Manages roles and their permissions for companies using RBAC system.
 # Supports CRUD operations, permission management, and system role cloning.
-#
-# Authorization:
-# - Company admins can manage company-level roles
-# - Platform admins can manage system roles
-#
-# Routes:
-#   GET    /api/v1/roles           - List all roles
-#   GET    /api/v1/roles/:id       - Show role details
-#   POST   /api/v1/roles           - Create new role
-#   PATCH  /api/v1/roles/:id       - Update role
-#   DELETE /api/v1/roles/:id       - Delete role
-#   POST   /api/v1/roles/:id/clone - Clone system role to company
-#   GET    /api/v1/roles/system    - List system default roles
-#   GET    /api/v1/roles/:id/permissions - Get role permissions matrix
 
 module Api
   module V1
     class RolesController < ApplicationController
       before_action :ensure_rbac_enabled, except: [:system_roles]
-      before_action :set_role, only: [:show, :update, :destroy, :clone, :permissions]
+      before_action :set_role, only: [:show, :update, :destroy, :clone, :permissions, :set_permissions]
       before_action :authorize_role_management, except: [:index, :show, :system_roles, :permissions]
       
       # GET /api/v1/roles
-      # List all roles accessible to current user
       def index
         if current_user.super_admin?
-          # Platform admins see all system roles
           @roles = Role.system_roles.active
         else
-          # Company users see system roles + their company's custom roles
           @roles = Role.where(
             '(is_system_role = ? AND company_id IS NULL) OR company_id = ?',
             true,
@@ -47,7 +30,6 @@ module Api
       end
       
       # GET /api/v1/roles/system
-      # List system default roles (available to all companies)
       def system_roles
         @roles = Role.system_roles.active.order(:tier, :name)
         
@@ -57,7 +39,6 @@ module Api
       end
       
       # GET /api/v1/roles/:id
-      # Show role details
       def show
         render json: {
           role: serialize_role(@role, include_permissions: true)
@@ -65,18 +46,99 @@ module Api
       end
       
       # GET /api/v1/roles/:id/permissions
-      # Get role permissions matrix
+      # Returns role permissions in array format for frontend compatibility
       def permissions
-        permissions_matrix = build_permissions_matrix(@role)
+        # Get all permissions for this role
+        role_permissions = @role.role_permissions.granted.includes(:resource, :action, :scope)
+        
+        # Transform to frontend format
+        permissions_data = role_permissions.map do |perm|
+          {
+            id: perm.id,
+            resource_id: perm.resource_id,
+            action_id: perm.action_id,
+            scope_id: perm.scope_id,
+            granted: perm.granted
+          }
+        end
+        
+        # Get all available metadata
+        resources_data = Resource.active.order(:category, :name).map do |resource|
+          {
+            id: resource.id,
+            key: resource.key,
+            name: resource.name,
+            display_name: resource.name,
+            category: resource.category,
+            description: resource.description
+          }
+        end
+        
+        actions_data = Action.order(:key).map do |action|
+          {
+            id: action.id,
+            key: action.key,
+            name: action.name,
+            display_name: action.name,
+            description: action.description
+          }
+        end
+        
+        scopes_data = Scope.order(:key).map do |scope|
+          {
+            id: scope.id,
+            key: scope.key,
+            name: scope.name,
+            display_name: scope.name,
+            description: scope.description
+          }
+        end
         
         render json: {
           role: serialize_role(@role),
-          permissions: permissions_matrix
+          permissions: permissions_data,
+          resources: resources_data,
+          actions: actions_data,
+          scopes: scopes_data
         }
       end
       
+      # PUT /api/v1/roles/:id/permissions
+      # Set permissions for a role (replaces all existing permissions)
+      def set_permissions
+        unless params[:permissions].is_a?(Array)
+          render json: {
+            error: 'Invalid permissions format - expected array'
+          }, status: :unprocessable_entity
+          return
+        end
+        
+        ActiveRecord::Base.transaction do
+          # Clear existing permissions for this role
+          @role.role_permissions.destroy_all
+          
+          # Create new permissions
+          params[:permissions].each do |perm_data|
+            RolePermission.create!(
+              role: @role,
+              resource_id: perm_data[:resource_id],
+              action_id: perm_data[:action_id],
+              scope_id: perm_data[:scope_id],
+              granted: true
+            )
+          end
+        end
+        
+        # Return updated permissions
+        permissions
+      rescue ActiveRecord::RecordInvalid => e
+        render json: {
+          error: 'Failed to update permissions',
+          errors: e.record.errors.full_messages
+        }, status: :unprocessable_entity
+      end
+      
       # POST /api/v1/roles
-      # Create new company-specific role
       def create
         @role = Role.new(role_params)
         @role.company_id = current_company_id
@@ -84,7 +146,6 @@ module Api
         @role.active = true
         
         if @role.save
-          # Apply permissions if provided
           if params[:permissions].present?
             apply_permissions(@role, params[:permissions])
           end
@@ -102,21 +163,15 @@ module Api
       end
       
       # PATCH /api/v1/roles/:id
-      # Update role details and permissions
       def update
-        if @role.system_role?
+        if @role.system_role? && !current_user.super_admin?
           render json: {
-            error: 'Cannot modify system roles'
+            error: 'Only platform administrators can modify system roles'
           }, status: :forbidden
           return
         end
         
         if @role.update(role_params)
-          # Update permissions if provided
-          if params[:permissions].present?
-            apply_permissions(@role, params[:permissions])
-          end
-          
           render json: {
             role: serialize_role(@role, include_permissions: true),
             message: 'Role updated successfully'
@@ -130,7 +185,6 @@ module Api
       end
       
       # DELETE /api/v1/roles/:id
-      # Delete custom role (system roles cannot be deleted)
       def destroy
         if @role.system_role?
           render json: {
@@ -139,7 +193,6 @@ module Api
           return
         end
         
-        # Check if role is in use
         if @role.user_role_assignments.exists?
           render json: {
             error: 'Cannot delete role that is assigned to users',
@@ -156,7 +209,6 @@ module Api
       end
       
       # POST /api/v1/roles/:id/clone
-      # Clone system role to company (create customizable copy)
       def clone
         unless @role.system_role?
           render json: {
@@ -165,16 +217,15 @@ module Api
           return
         end
         
-        # Create company-specific copy
         new_role = @role.dup
         new_role.company_id = current_company_id
         new_role.is_system_role = false
-        new_role.key = "#{@role.key}_custom_#{Time.now.to_i}"
-        new_role.name = params[:name] || "#{@role.name} (Custom)"
+        new_role.key = params[:name] || "#{@role.key}_#{SecureRandom.hex(4)}"
+        new_role.name = params[:display_name] || "#{@role.name} (Custom)"
         new_role.description = params[:description] || @role.description
+        new_role.tier = params[:tier] || 'company'
         
         if new_role.save
-          # Copy all permissions
           @role.role_permissions.each do |permission|
             RolePermission.create!(
               role: new_role,
@@ -235,7 +286,10 @@ module Api
           :tier,
           :key,
           :name,
-          :description
+          :description,
+          :color,
+          :is_active,
+          :active
         )
       end
       
@@ -244,10 +298,13 @@ module Api
           id: role.id,
           key: role.key,
           name: role.name,
+          display_name: role.name,
           description: role.description,
           tier: role.tier,
-          is_system_role: role.is_system_role,
-          active: role.active,
+          color: role.color,
+          is_system: role.is_system_role,
+          is_active: role.active,
+          company_id: role.company_id,
           users_count: role.user_role_assignments.count,
           created_at: role.created_at,
           updated_at: role.updated_at
@@ -256,56 +313,22 @@ module Api
         if include_permissions
           data[:permissions] = role.role_permissions.granted.includes(:resource, :action, :scope).map do |perm|
             {
+              id: perm.id,
+              resource_id: perm.resource_id,
+              action_id: perm.action_id,
+              scope_id: perm.scope_id,
               resource: perm.resource.key,
               resource_name: perm.resource.name,
               action: perm.action.key,
               action_name: perm.action.name,
               scope: perm.scope.key,
-              scope_name: perm.scope.name
+              scope_name: perm.scope.name,
+              granted: perm.granted
             }
           end
         end
         
         data
-      end
-      
-      def build_permissions_matrix(role)
-        resources = Resource.active.order(:category, :name)
-        actions = Action.order(:key)
-        scopes = Scope.order(:key)
-        
-        matrix = {}
-        
-        resources.each do |resource|
-          matrix[resource.key] = {
-            name: resource.name,
-            category: resource.category,
-            actions: {}
-          }
-          
-          actions.each do |action|
-            matrix[resource.key][:actions][action.key] = {
-              name: action.name,
-              scopes: {}
-            }
-            
-            scopes.each do |scope|
-              permission = role.role_permissions.find_by(
-                resource_id: resource.id,
-                action_id: action.id,
-                scope_id: scope.id
-              )
-              
-              matrix[resource.key][:actions][action.key][:scopes][scope.key] = {
-                name: scope.name,
-                granted: permission&.granted || false,
-                permission_id: permission&.id
-              }
-            end
-          end
-        end
-        
-        matrix
       end
       
       def apply_permissions(role, permissions_data)

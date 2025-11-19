@@ -107,6 +107,7 @@ module Api
           id: action.id,
           key: action.key,
           name: action.name,
+          display_name: action.name,
           description: action.description,
           created_at: action.created_at,
           updated_at: action.updated_at

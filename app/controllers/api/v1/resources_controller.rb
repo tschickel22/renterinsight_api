@@ -109,6 +109,7 @@ module Api
           id: resource.id,
           key: resource.key,
           name: resource.name,
+          display_name: resource.name,
           description: resource.description,
           category: resource.category,
           active: resource.active,
