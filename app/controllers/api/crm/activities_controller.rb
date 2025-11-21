@@ -2,9 +2,6 @@
 module Api
   module Crm
     class ActivitiesController < ApplicationController
-      include RbacAuthorization
-      rbac_resource :crm
-
       before_action :set_company_scope
       before_action :set_lead
       before_action :set_activity, only: [:update, :destroy]
