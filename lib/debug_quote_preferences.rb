@@ -1,3 +1,4 @@
-# This file has been disabled for production
-# The debug script was causing deployment failures
-# To use, copy contents back and run manually with: rails runner lib/debug_quote_preferences.rb <quote_id>
+# Disabled debug script - placeholder for Zeitwerk autoloading
+# Original debug functionality has been removed for production
+module DebugQuotePreferences
+end
