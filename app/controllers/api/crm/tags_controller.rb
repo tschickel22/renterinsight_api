@@ -1,17 +1,30 @@
+# Tags are now company-scoped for proper multi-tenant isolation
+
 module Api
   module Crm
     class TagsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm,
+        read_actions: [:index, :entity_tags, :entity_tags_for_lead],
+        create_actions: [:create, :assign, :assign_to_lead],
+        update_actions: [:update],
+        delete_actions: [:destroy, :remove_assignment, :remove_from_lead]
+
+      before_action :set_company_scope
       before_action :set_tag, only: [:update, :destroy]
 
       # ---------- Tag catalog ----------
       def index
-        scope = Tag.respond_to?(:active) ? Tag.active : Tag.all
+        # Company-scoped tags (includes company tags + global tags with nil company_id)
+        scope = Tag.for_company(@company.id)
+        scope = scope.active if Tag.respond_to?(:active)
         render json: scope.order(:name).map { |t| tag_json(t) }
       end
 
       def create
         tag_data = params[:tag] || params
-        tag = Tag.new(
+        # Create tag within current company
+        tag = @company.tags.new(
           name:        tag_data[:name],
           description: tag_data[:description],
           color:       tag_data[:color].presence || '#6B7280',
@@ -100,8 +113,34 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
+
       def set_tag
-        @tag = Tag.find(params[:id])
+        # Company-scoped tags (includes company tags + global tags)
+        @tag = Tag.for_company(@company.id).find_by(id: params[:id])
+        unless @tag
+          render json: { error: 'Tag not found or access denied' }, status: :not_found
+          return
+        end
       end
 
       # Normalize entity inputs and classify the type ("lead" -> "Lead")

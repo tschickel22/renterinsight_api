@@ -3,7 +3,8 @@
 module Api
   module Companies
     class UsersController < ApplicationController
-      before_action :set_company
+      before_action :authenticate_user!
+      before_action :set_company_and_verify_access
       before_action :set_user, only: [:show, :update, :destroy, :resend_invitation]
       
       # GET /api/companies/:company_id/users
@@ -25,21 +26,15 @@ module Api
       end
       
       # POST /api/companies/:company_id/users
-      # POST /api/companies/:company_id/invitations (alias)
       def create
-        # ✅ FIX: Use InvitationService to create proper invitations
         service = InvitationService.new(
           invited_by: current_user,
           company: @company
         )
         
-        # Get recipient name
         recipient_name = params[:recipient_name] || params[:recipientName]
-        
-        # Determine delivery method
         delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'email'
         
-        # Create invitation via service
         result = service.create_invitation(
           invitation_type: 'company_user',
           email: params[:email],
@@ -53,8 +48,6 @@ module Api
         
         if result[:success]
           invitation = result[:invitation]
-          
-          # Get the placeholder user that was created
           @user = User.find_by(email: invitation.email)
           
           render json: {
@@ -73,8 +66,38 @@ module Api
       
       # PATCH/PUT /api/companies/:company_id/users/:id
       def update
-        # ✅ FIX: Always return {success: true, user: {...}} format
+        # SECURITY: Prevent self-privilege escalation
+        new_role = params[:user][:role] || params[:role]
+        role_changed = new_role.present? && new_role != @user.role
+        
+        if role_changed && @user.id == current_user.id
+          Rails.logger.warn "🚫 [SECURITY] User #{current_user.id} attempted to change their own role from '#{@user.role}' to '#{new_role}'"
+          return render json: {
+            success: false,
+            error: 'You cannot change your own role. Please contact an administrator.'
+          }, status: :forbidden
+        end
+        
+        # SECURITY: Enforce role hierarchy - users can only assign roles at or below their level
+        if role_changed && !can_assign_role?(new_role)
+          Rails.logger.warn "🚫 [SECURITY] User #{current_user.id} (#{current_user.role}) attempted to assign role '#{new_role}' without sufficient privileges"
+          return render json: {
+            success: false,
+            error: 'You do not have permission to assign this role.'
+          }, status: :forbidden
+        end
+        
         if @user.update(user_params)
+          # If role changed, update RBAC assignment
+          if role_changed && @company.use_rbac_system
+            @user.replace_rbac_role(
+              new_role,
+              company_id: @company.id,
+              assigned_by: current_user
+            )
+            Rails.logger.info "✅ [UsersController] Updated RBAC role to '#{new_role}' for user #{@user.id}"
+          end
+          
           render json: {
             success: true,
             user: serialize_user(@user),
@@ -91,7 +114,6 @@ module Api
       
       # DELETE /api/companies/:company_id/users/:id
       def destroy
-        # ✅ FIX: Explicitly return status: :ok to prevent Rails from returning 204 No Content
         reason = params[:reason] || 'No reason provided'
         
         if @user.destroy
@@ -99,7 +121,7 @@ module Api
             success: true,
             message: 'User deleted successfully',
             reason: reason
-          }, status: :ok  # ← CRITICAL: Must explicitly set :ok, otherwise Rails returns 204 No Content
+          }, status: :ok
         else
           render json: { 
             success: false,
@@ -111,10 +133,7 @@ module Api
       
       # POST /api/companies/:company_id/users/:id/resend_invitation
       def resend_invitation
-        # ✅ FIX: Use InvitationService to resend invitations properly
-        
-        # Find the invitation for this user
-        invitation = Invitation.find_by(email: @user.email, status: 'pending')
+        invitation = @company.invitations.find_by(email: @user.email, status: 'pending')
         
         unless invitation
           return render json: { 
@@ -123,7 +142,6 @@ module Api
           }, status: :not_found
         end
         
-        # Use service to resend
         service = InvitationService.new(
           invited_by: current_user,
           company: @company
@@ -157,17 +175,36 @@ module Api
       
       private
       
-      def set_company
-        @company = ::Company.find(params[:company_id])
-      rescue ActiveRecord::RecordNotFound
-        render json: { success: false, error: 'Company not found' }, status: :not_found
+      def set_company_and_verify_access
+        requested_company_id = params[:company_id]
+        
+        if current_user.platform_admin? || current_user.super_admin?
+          @company = ::Company.find_by(id: requested_company_id)
+          unless @company
+            render json: { success: false, error: 'Company not found' }, status: :not_found
+            return
+          end
+          Rails.logger.info "✅ [Companies::UsersController] Platform admin accessing company #{@company.id}"
+        else
+          unless current_user.company_id.to_s == requested_company_id.to_s
+            Rails.logger.error "🚫 [Companies::UsersController] User #{current_user.id} attempted to access company #{requested_company_id} but belongs to #{current_user.company_id}"
+            render json: { success: false, error: 'Forbidden - Cannot access other company users' }, status: :forbidden
+            return
+          end
+          
+          @company = ::Company.find_by(id: current_user.company_id)
+          unless @company
+            render json: { success: false, error: 'Company not found' }, status: :not_found
+            return
+          end
+        end
       end
       
       def set_user
-        # All company users should have company_id
-        @user = @company.users.find(params[:id])
-      rescue ActiveRecord::RecordNotFound
-        render json: { success: false, error: 'User not found' }, status: :not_found
+        @user = @company.users.find_by(id: params[:id])
+        unless @user
+          render json: { success: false, error: 'User not found' }, status: :not_found
+        end
       end
       
       def user_params
@@ -183,32 +220,46 @@ module Api
         )
       end
       
-      def invitation_params
-        # Map invitation-style params to user attributes
-        permitted = params.permit(
-          :email,
-          :phone,
-          :recipient_name,
-          :recipientName,
-          :role,
-          :invitation_type,
-          :invitationType,
-          :delivery_method,
-          :deliveryMethod,
-          :message,
-          permissions: []
-        )
+      # Role hierarchy for permission checking
+      # Higher number = higher privilege
+      ROLE_HIERARCHY = {
+        'platform_admin' => 100,
+        'super_admin' => 100,
+        'Company Administrator' => 50,
+        'company_admin' => 50,
+        'admin' => 50,
+        'Company Manager' => 40,
+        'company_manager' => 40,
+        'manager' => 40,
+        'Company Staff' => 30,
+        'company_staff' => 30,
+        'staff' => 30,
+        'Read-Only User' => 10,
+        'company_read_only' => 10,
+        'read_only' => 10
+      }.freeze
+      
+      def can_assign_role?(target_role)
+        # Platform admins and super admins can assign any role
+        return true if current_user.platform_admin? || current_user.super_admin?
         
-        # Map recipientName to first_name and last_name
-        name = permitted[:recipient_name] || permitted[:recipientName]
-        if name.present?
-          parts = name.split(' ', 2)
-          permitted[:first_name] = parts[0]
-          permitted[:last_name] = parts[1] if parts.length > 1
+        # Get current user's role level
+        current_level = ROLE_HIERARCHY[current_user.role] || 0
+        
+        # Check RBAC roles if the user has them
+        if @company&.use_rbac_system
+          current_user.roles_for_company(@company.id).each do |role|
+            role_level = ROLE_HIERARCHY[role.key] || ROLE_HIERARCHY[role.name] || 0
+            current_level = [current_level, role_level].max
+          end
         end
         
-        # Clean up the hash
-        permitted.except(:recipient_name, :recipientName, :invitation_type, :invitationType, :delivery_method, :deliveryMethod, :message, :permissions)
+        # Get target role level
+        target_level = ROLE_HIERARCHY[target_role] || 0
+        
+        # Users can only assign roles at or below their level
+        # But they cannot assign their own level (prevents lateral escalation)
+        current_level > target_level
       end
       
       def serialize_invitation(invitation)
@@ -232,7 +283,7 @@ module Api
           canResend: invitation.can_accept?,
           canRevoke: invitation.status == 'pending',
           isExpired: invitation.expired?,
-          daysUntilExpiry: ((invitation.expires_at - Time.current) / 1.day).round,
+          daysUntilExpiry: invitation.expires_at ? ((invitation.expires_at - Time.current) / 1.day).round : 0,
           createdAt: invitation.created_at&.iso8601,
           updatedAt: invitation.updated_at&.iso8601,
           invitedBy: {
@@ -274,22 +325,14 @@ module Api
           updatedAt: user.updated_at
         }
         
-        # Add invitedBy if current_user exists
         if current_user
           result[:invitedBy] = {
             id: current_user.id,
             name: [current_user.first_name, current_user.last_name].compact.join(' '),
             email: current_user.email
           }
-        else
-          result[:invitedBy] = {
-            id: 1,
-            name: 'Admin',
-            email: 'admin@example.com'
-          }
         end
         
-        # Add company if @company is set
         if @company
           result[:company] = {
             id: @company.id,
@@ -297,7 +340,6 @@ module Api
           }
         end
         
-        # Add deletedAt if the model supports it
         result[:deletedAt] = user.deleted_at if user.respond_to?(:deleted_at)
         
         result

@@ -1,12 +1,19 @@
 module Api
   module Crm
     class WinLossReportsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :reports, read_actions: [:index, :show, :summary, :trends]
+
+      before_action :set_company_scope
       before_action :set_deal, except: [:index, :summary, :trends]
       before_action :set_report, only: [:show, :update, :destroy]
 
       # GET /api/crm/win_loss_reports
       def index
-        reports = WinLossReport.includes(:deal, :user)
+        # Scope reports to this company's deals only
+        deal_ids = @company.deals.pluck(:id)
+        reports = WinLossReport.where(deal_id: deal_ids)
+                              .includes(:deal, :user)
                               .order(created_at: :desc)
         
         # Filter by result if provided
@@ -14,11 +21,11 @@ module Api
         
         # Filter by date range
         if params[:start_date].present?
-          reports = reports.where('created_at >= ?', params[:start_date])
+          reports = reports.where('win_loss_reports.created_at >= ?', params[:start_date])
         end
         
         if params[:end_date].present?
-          reports = reports.where('created_at <= ?', params[:end_date])
+          reports = reports.where('win_loss_reports.created_at <= ?', params[:end_date])
         end
         
         render json: reports.map { |r| report_json(r) }
@@ -29,7 +36,9 @@ module Api
         start_date = params[:start_date]&.to_date || 90.days.ago
         end_date = params[:end_date]&.to_date || Date.today
         
-        reports = WinLossReport.where(created_at: start_date..end_date)
+        # Scope to this company's deals
+        deal_ids = @company.deals.pluck(:id)
+        reports = WinLossReport.where(deal_id: deal_ids, created_at: start_date..end_date)
         
         won_reports = reports.where(result: 'won')
         lost_reports = reports.where(result: 'lost')
@@ -53,18 +62,22 @@ module Api
                                 .sort_by { |_, count| -count }
                                 .first(5)
         
+        total_won = won_reports.count
+        total_lost = lost_reports.count
+        total = total_won + total_lost
+        
         render json: {
           period: {
             startDate: start_date.iso8601,
             endDate: end_date.iso8601
           },
           totals: {
-            won: won_reports.count,
-            lost: lost_reports.count,
-            winRate: (won_reports.count.to_f / (won_reports.count + lost_reports.count) * 100).round(2)
+            won: total_won,
+            lost: total_lost,
+            winRate: total > 0 ? (total_won.to_f / total * 100).round(2) : 0
           },
-          wonValue: Deal.where(id: won_reports.pluck(:deal_id)).sum(:value),
-          lostValue: Deal.where(id: lost_reports.pluck(:deal_id)).sum(:value),
+          wonValue: @company.deals.where(id: won_reports.pluck(:deal_id)).sum(:value),
+          lostValue: @company.deals.where(id: lost_reports.pluck(:deal_id)).sum(:value),
           topWinReasons: win_reasons.map { |reason, count| { reason: reason, count: count } },
           topLossReasons: loss_reasons.map { |reason, count| { reason: reason, count: count } },
           topCompetitors: competitors.map { |competitor, count| { name: competitor, count: count } }
@@ -76,20 +89,24 @@ module Api
         period = params[:period] || 'month' # day, week, month, quarter
         limit = params[:limit]&.to_i || 12
         
+        # PostgreSQL date formatting (not SQLite strftime)
         date_format = case period
         when 'day'
-          '%Y-%m-%d'
+          'YYYY-MM-DD'
         when 'week'
-          '%Y-%U'
+          'IYYY-IW'
         when 'quarter'
-          '%Y-Q%q'
+          'YYYY-"Q"Q'
         else
-          '%Y-%m'
+          'YYYY-MM'
         end
         
-        reports = WinLossReport.where('created_at >= ?', limit.send(period.pluralize).ago)
+        # Scope to this company's deals
+        deal_ids = @company.deals.pluck(:id)
+        reports = WinLossReport.where(deal_id: deal_ids)
+                              .where('win_loss_reports.created_at >= ?', limit.send(period.pluralize).ago)
         
-        trends_data = reports.group("strftime('#{date_format}', created_at)")
+        trends_data = reports.group(Arel.sql("to_char(created_at, '#{date_format}')"))
                             .group(:result)
                             .count
         
@@ -114,7 +131,7 @@ module Api
       # POST /api/crm/deals/:deal_id/win_loss_report
       def create
         report = @deal.build_win_loss_report(report_params)
-        report.user_id = current_user_id
+        report.user_id = current_user&.id
         
         if report.save
           render json: report_json(report, detailed: true), status: :created
@@ -140,8 +157,38 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [WinLossReportsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [WinLossReportsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [WinLossReportsController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [WinLossReportsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_deal
-        @deal = Deal.find(params[:deal_id])
+        @deal = @company.deals.find_by(id: params[:deal_id])
+        unless @deal
+          render json: { error: 'Deal not found or access denied' }, status: :not_found
+          return
+        end
       end
 
       def set_report
@@ -159,11 +206,6 @@ module Api
           :customer_feedback, :internal_notes, :lessons_learned,
           :deal_quality_score, :sales_process_score, :product_fit_score
         )
-      end
-
-      def current_user_id
-        # This should be set by your authentication system
-        current_user&.id
       end
 
       def report_json(report, detailed: false)
@@ -194,7 +236,7 @@ module Api
               id: report.deal.id,
               name: report.deal.name,
               value: report.deal.value,
-stage: report.deal.stage,
+              stage: report.deal.stage,
               accountName: report.deal.account&.name
             }
           )

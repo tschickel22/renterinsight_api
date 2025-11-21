@@ -3,6 +3,13 @@
 module Api
   module V1
     class ActivitiesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm,
+        read_actions: [:recent],
+        create_actions: [],
+        update_actions: [],
+        delete_actions: []
+
       before_action :set_company
 
       # GET /api/v1/activities/recent
@@ -17,11 +24,13 @@ module Api
       private
 
       def set_company
-        @company = ::Company.find_by(id: current_user.company_id)
-        @company ||= ::Company.first
+        # TENANT ISOLATION: Use current_company_id which respects X-Company-ID for platform admins
+        @company = ::Company.find_by(id: current_company_id)
         
         unless @company
+          Rails.logger.warn "[ActivitiesController] Company not found for company_id: #{current_company_id}"
           render json: { error: 'Company not found' }, status: :not_found
+          return
         end
       end
 

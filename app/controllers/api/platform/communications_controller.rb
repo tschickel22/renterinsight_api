@@ -4,6 +4,7 @@ module Api
   module Platform
     class CommunicationsController < ApplicationController
       before_action :set_entity, only: [:history, :stats, :destroy]
+      before_action :authorize_communication_access!, only: [:email, :sms]
 
       # GET /api/platform/communications/:entity_type/:entity_id/history
       def history
@@ -138,12 +139,42 @@ module Api
           return
         end
         
-        @entity = entity_class.find_by(id: @entity_id)
+        # Scope entity lookup to current company for tenant isolation
+        if entity_class.column_names.include?('company_id')
+          @entity = entity_class.where(company_id: current_company_id).find_by(id: @entity_id)
+        else
+          # For entities without company_id, still do a basic lookup but log warning
+          Rails.logger.warn "[Platform::CommunicationsController] Entity #{@entity_type} has no company_id - cannot enforce tenant isolation"
+          @entity = entity_class.find_by(id: @entity_id)
+        end
+        
         unless @entity
           render json: { error: "#{@entity_type} not found" }, status: :not_found
         end
       rescue => e
         render json: { error: e.message }, status: :bad_request
+      end
+      
+      # Verify the user can send communications (either platform admin or within their company)
+      def authorize_communication_access!
+        # Platform admins can send from any context
+        return true if current_user&.platform_admin? || current_user&.super_admin?
+        
+        # For entity-scoped sends, verify entity belongs to user's company
+        if params[:entity_type].present? && params[:entity_id].present?
+          entity_class = params[:entity_type].constantize rescue nil
+          return true unless entity_class
+          
+          if entity_class.column_names.include?('company_id')
+            entity = entity_class.find_by(id: params[:entity_id])
+            unless entity&.company_id == current_company_id
+              render json: { error: 'Unauthorized - Entity belongs to another company' }, status: :forbidden
+              return false
+            end
+          end
+        end
+        
+        true
       end
 
       def send_email_unified

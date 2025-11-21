@@ -2,7 +2,10 @@ module Api
   module Crm
     module Intake
       class FormsController < ApplicationController
-        before_action :set_company
+        include RbacAuthorization
+        rbac_resource :crm
+
+        before_action :set_company_scope
         before_action :set_form, only: [:show, :update, :destroy]
 
         def index
@@ -73,16 +76,38 @@ module Api
 
         private
 
-        def set_company
-          @company = ::Company.find(current_company_id)
-        rescue ActiveRecord::RecordNotFound
-          render json: { error: 'Company not found' }, status: :not_found
+        def set_company_scope
+          unless current_user
+            Rails.logger.error "🚫 [Intake::FormsController] No authenticated user found"
+            render json: { error: 'Authentication required' }, status: :unauthorized
+            return
+          end
+          
+          company_id = current_company_id
+          
+          unless company_id.present?
+            Rails.logger.error "🚫 [Intake::FormsController] No company context available"
+            render json: { error: 'No company context' }, status: :forbidden
+            return
+          end
+          
+          @company = ::Company.find_by(id: company_id)
+          
+          if @company.nil?
+            Rails.logger.error "🚫 [Intake::FormsController] Company #{company_id} not found"
+            render json: { error: 'Company not found' }, status: :not_found
+            return
+          end
+          
+          Rails.logger.info "✅ [Intake::FormsController] Company scope set: #{@company.name} (ID: #{@company.id})"
         end
 
         def set_form
-          @form = @company.intake_forms.find(params[:id])
-        rescue ActiveRecord::RecordNotFound
-          render json: { error: 'Form not found' }, status: :not_found
+          @form = @company.intake_forms.find_by(id: params[:id])
+          unless @form
+            render json: { error: 'Form not found or access denied' }, status: :not_found
+            return
+          end
         end
 
         def form_params

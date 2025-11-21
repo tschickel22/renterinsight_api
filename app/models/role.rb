@@ -251,7 +251,9 @@ class Role < ApplicationRecord
   end
 
   def self.grant_read_only_permissions!(role)
-    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    # Read-only users get 'all' scope for read access (company-wide visibility)
+    # This is intentional - read-only means they can VIEW everything but not modify
+    all_scope = Scope.find_by!(key: 'all')
     read_action = Action.find_by!(key: 'read')
 
     Resource.active.each do |resource|
@@ -259,7 +261,7 @@ class Role < ApplicationRecord
         role: role,
         resource: resource,
         action: read_action,
-        scope: assigned_locations_scope,
+        scope: all_scope,
         granted: true
       )
     end

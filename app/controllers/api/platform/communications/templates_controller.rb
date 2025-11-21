@@ -4,14 +4,23 @@ module Api
   module Platform
     module Communications
       class TemplatesController < ApplicationController
+        before_action :set_company_scope_for_templates
+        before_action :authorize_communications_access!
         before_action :set_template, only: [:show, :update, :destroy, :test]
+        before_action :authorize_template_access!, only: [:show, :update, :destroy, :test]
         
         # GET /api/platform/communications/templates
         def index
-          templates = CommunicationTemplate.all
+          templates = if current_user_is_platform_admin?
+            # Platform admins can see all templates
+            CommunicationTemplate.all
+          else
+            # Company users can only see platform defaults + their company's templates
+            CommunicationTemplate.where(company_id: [nil, @company&.id])
+          end
           
           # Apply filters
-          templates = templates.where(company_id: params[:company_id]) if params[:company_id].present?
+          templates = templates.where(company_id: params[:company_id]) if params[:company_id].present? && current_user_is_platform_admin?
           templates = templates.where(template_type: params[:template_type]) if params[:template_type].present?
           templates = templates.where(channel: params[:channel]) if params[:channel].present?
           templates = templates.where(is_active: params[:is_active]) if params[:is_active].present?
@@ -33,6 +42,11 @@ module Api
         # POST /api/platform/communications/templates
         def create
           @template = CommunicationTemplate.new(template_params)
+          
+          # Non-platform admins can only create templates for their own company
+          unless current_user_is_platform_admin?
+            @template.company_id = @company&.id
+          end
           
           if @template.save
             render json: {
@@ -153,6 +167,59 @@ module Api
         
         private
         
+        def set_company_scope_for_templates
+          # Get company from header or params
+          company_id = request.headers['X-Company-ID'] || params[:company_id]
+          
+          if company_id.present?
+            @company = ::Company.find_by(id: company_id)
+          end
+          
+          # For non-platform admins, we need a company context
+          unless current_user_is_platform_admin? || @company.present?
+            # Try to get company from user
+            @company = current_user.companies.first if current_user.respond_to?(:companies)
+          end
+          
+          Rails.logger.info "[TemplatesController] Company scope: #{@company&.name} (ID: #{@company&.id}) for user: #{current_user&.email}"
+        end
+        
+        def current_user_is_platform_admin?
+          current_user&.platform_admin? || current_user&.super_admin?
+        end
+        
+        def authorize_communications_access!
+          # Platform admins always have access
+          return if current_user_is_platform_admin?
+          
+          # Check if user has communications permission
+          unless @company.present?
+            Rails.logger.warn "[TemplatesController] No company context for non-platform admin user #{current_user&.id}"
+            render json: { error: 'Company context required' }, status: :forbidden
+            return
+          end
+          
+          # Skip RBAC check if company doesn't use RBAC
+          return unless @company.use_rbac_system
+          
+          # Check for communications read permission
+          unless current_user.has_permission?('communications', 'read', 'all', @company.id)
+            Rails.logger.warn "[RBAC] User #{current_user.id} denied READ access to communications for company #{@company.id}"
+            render json: { error: 'Permission denied: You do not have permission to view communication templates' }, status: :forbidden
+          end
+        end
+        
+        def authorize_template_access!
+          # Platform admins can access any template
+          return if current_user_is_platform_admin?
+          
+          # Company users can only access their own company's templates or platform defaults (no company_id)
+          if @template.company_id.present? && @template.company_id != @company&.id
+            Rails.logger.warn "[TemplatesController] User #{current_user.id} attempted to access template #{@template.id} belonging to company #{@template.company_id}"
+            render json: { error: 'Permission denied: You do not have access to this template' }, status: :forbidden
+          end
+        end
+        
         def set_template
           @template = CommunicationTemplate.find(params[:id])
         rescue ActiveRecord::RecordNotFound
@@ -163,7 +230,7 @@ module Api
         end
         
         def template_params
-          params.require(:template).permit(
+          permitted = params.require(:template).permit(
             :name,
             :template_type,
             :channel,
@@ -174,6 +241,16 @@ module Api
             :company_id,
             :description
           )
+          
+          # Non-platform admins cannot set is_default or change company_id to another company
+          unless current_user_is_platform_admin?
+            permitted.delete(:is_default)
+            if permitted[:company_id].present? && permitted[:company_id].to_i != @company&.id
+              permitted[:company_id] = @company&.id
+            end
+          end
+          
+          permitted
         end
         
         def serialize_template(template)

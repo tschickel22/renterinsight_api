@@ -2,6 +2,14 @@
 module Api
   module V1
     class AccountMessagesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :communications,
+        read_actions: [:index],
+        create_actions: [:create],
+        update_actions: [],
+        delete_actions: []
+
+      before_action :set_company
       before_action :set_account
 
       # GET /api/v1/accounts/:account_id/messages
@@ -30,10 +38,22 @@ module Api
 
       private
 
+      def set_company
+        @company = ::Company.find_by(id: current_company_id)
+        unless @company
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
+
       def set_account
-        @account = Account.find(params[:account_id])
-      rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Account not found', accountId: params[:account_id] }, status: :not_found
+        # TENANT ISOLATION: Only find accounts within the current company
+        @account = @company.accounts.find_by(id: params[:account_id])
+        unless @account
+          Rails.logger.warn "[AccountMessagesController] Account #{params[:account_id]} not found in company #{@company.id}"
+          render json: { error: 'Account not found or access denied', accountId: params[:account_id] }, status: :not_found
+          return
+        end
       end
 
       def send_email

@@ -5,14 +5,41 @@ require 'cgi'
 module Api
   module V1
     class PortalUsersController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :portal,
+        read_actions: [:index, :show, :stats],
+        create_actions: [:create, :invite],
+        update_actions: [:update, :password_reset],
+        delete_actions: [:destroy]
+
       before_action :set_portal_user, only: [:show, :update, :destroy]
 
       # GET /api/v1/portal_users
       def index
-        @portal_users = BuyerPortalAccess
-          .includes(:buyer)
-          .where(company_id: current_company_id)
-          .order(created_at: :desc)
+        # STRICT TENANT ISOLATION: Only return portal users from current user's company
+        # RBAC: Location-tier users only see portal users for contacts in their assigned locations
+        @portal_users = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include portal users for contacts in assigned locations OR unassigned contacts (NULL location_id)
+            BuyerPortalAccess
+              .includes(:buyer)
+              .where(company_id: current_company_id, buyer_type: 'Contact')
+              .joins("INNER JOIN contacts ON contacts.id = buyer_portal_accesses.buyer_id")
+              .where("contacts.location_id IN (?) OR contacts.location_id IS NULL", location_ids)
+              .order(created_at: :desc)
+          else
+            BuyerPortalAccess
+              .includes(:buyer)
+              .where(company_id: current_company_id)
+              .order(created_at: :desc)
+          end
+        else
+          BuyerPortalAccess
+            .includes(:buyer)
+            .where(company_id: current_company_id)
+            .order(created_at: :desc)
+        end
 
         # Apply filters
         @portal_users = @portal_users.where(status: params[:status]) if params[:status].present?
@@ -274,13 +301,26 @@ module Api
       end
 
       def set_portal_user
-        @portal_user = BuyerPortalAccess.find_by(
-          id: params[:id],
-          company_id: current_company_id
-        )
+        # STRICT TENANT ISOLATION: Only find portal users within company
+        # RBAC: Location-tier users only access portal users for contacts in their assigned locations
+        @portal_user = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include portal users for contacts in assigned locations OR unassigned contacts (NULL location_id)
+            BuyerPortalAccess
+              .where(id: params[:id], company_id: current_company_id, buyer_type: 'Contact')
+              .joins("INNER JOIN contacts ON contacts.id = buyer_portal_accesses.buyer_id")
+              .where("contacts.location_id IN (?) OR contacts.location_id IS NULL", location_ids)
+              .first
+          else
+            BuyerPortalAccess.find_by(id: params[:id], company_id: current_company_id)
+          end
+        else
+          BuyerPortalAccess.find_by(id: params[:id], company_id: current_company_id)
+        end
 
         unless @portal_user
-          render json: { error: 'Portal user not found' }, status: :not_found
+          render json: { error: 'Portal user not found or access denied' }, status: :not_found
         end
       end
 

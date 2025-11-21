@@ -3,7 +3,13 @@
 module Api
   module V1
     class BrochureTemplatesController < ApplicationController
-      before_action :require_admin, except: [:index, :show]
+      include RbacAuthorization
+      rbac_resource :branding,
+        read_actions: [:index, :show],
+        create_actions: [:create],
+        update_actions: [:update],
+        delete_actions: [:destroy]
+
       before_action :set_template, only: [:show, :update, :destroy]
 
       # GET /api/v1/brochure-templates
@@ -106,12 +112,6 @@ module Api
         @template = BrochureTemplate.find(params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Template not found' }, status: :not_found
-      end
-
-      def require_admin
-        unless current_user&.admin? || current_user&.super_admin?
-          render json: { error: 'Admin access required' }, status: :forbidden
-        end
       end
 
       def template_json(template, detailed: false)

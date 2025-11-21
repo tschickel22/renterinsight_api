@@ -1,25 +1,23 @@
 # frozen_string_literal: true
-# app/controllers/api/crm/sources_controller.rb
+# Sources are now company-scoped for proper multi-tenant isolation
 
 module Api
   module Crm
     class SourcesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm,
+        read_actions: [:index, :show, :stats],
+        create_actions: [:create],
+        update_actions: [:update],
+        delete_actions: [:destroy]
+
+      before_action :set_company_scope
       before_action :set_source, only: [:show, :update, :destroy, :stats]
 
       # GET /api/crm/sources
       def index
-        # Try to get real sources from database
-        sources = Source.order(:name) rescue []
-        
-        # Fallback to mock data if no sources exist (for development)
-        if sources.blank?
-          sources = [
-            OpenStruct.new(id: 1, name: "Web", is_active: true),
-            OpenStruct.new(id: 2, name: "Referral", is_active: true),
-            OpenStruct.new(id: 3, name: "Walk-in", is_active: true)
-          ]
-        end
-        
+        # Company-scoped sources (includes company sources + global sources with nil company_id)
+        sources = Source.for_company(@company.id).order(:name)
         render json: sources.map { |s| source_json(s) }, status: :ok
       end
 
@@ -30,14 +28,14 @@ module Api
 
       # POST /api/crm/sources
       def create
-        # Extract params from either nested or root level
         name = params[:name] || params.dig(:source, :name)
         
         if name.blank?
           return render json: { error: 'Name is required' }, status: :unprocessable_entity
         end
         
-        source = Source.new(source_params)
+        # Create source within current company
+        source = @company.sources.new(source_params)
         
         if source.save
           render json: source_json(source), status: :created
@@ -47,14 +45,6 @@ module Api
             errors: source.errors.full_messages 
           }, status: :unprocessable_entity
         end
-      rescue => e
-        # Fallback for development if Source table doesn't exist yet
-        render json: { 
-          ok: true, 
-          id: rand(1000), 
-          name: name,
-          message: "Source created (mock mode)" 
-        }, status: :created
       end
 
       # PATCH/PUT /api/crm/sources/:id
@@ -67,9 +57,6 @@ module Api
             errors: @source.errors.full_messages 
           }, status: :unprocessable_entity
         end
-      rescue => e
-        # Fallback for development
-        render json: { ok: true, message: "Source updated (mock mode)" }, status: :ok
       end
 
       # DELETE /api/crm/sources/:id
@@ -82,31 +69,55 @@ module Api
 
       # GET /api/crm/sources/:id/stats
       def stats
-        leads_count = Lead.where(source_id: @source.id).count rescue 0
+        # STRICT TENANT ISOLATION: Only count leads from current company
+        leads_count = @company.leads.where(source_id: @source.id).count
+        deals_count = @company.deals.where(source_id: @source.id).count
         
         render json: {
           sourceId: @source.id,
           sourceName: @source.name,
           leadsCount: leads_count,
           conversionRate: @source.try(:conversion_rate) || 0.0,
-          dealsCount: 0
+          dealsCount: deals_count
         }, status: :ok
       end
 
       private
 
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
+
       def set_source
-        @source = Source.find(params[:id])
-      rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Source not found' }, status: :not_found
+        # Company-scoped sources (includes company sources + global sources)
+        @source = Source.for_company(@company.id).find_by(id: params[:id])
+        unless @source
+          render json: { error: 'Source not found or access denied' }, status: :not_found
+          return
+        end
       end
 
       def source_params
-        # Try nested params first
         if params[:source].present?
           params.require(:source).permit(:name, :source_type, :tracking_code, :is_active)
         else
-          # Fall back to root-level params
           {
             name: params[:name],
             source_type: params[:source_type] || params[:type],

@@ -1,30 +1,28 @@
+# frozen_string_literal: true
+
 module Api
   module Admin
     class DocumentsController < ApplicationController
+      before_action :authenticate_user!
+      before_action :require_admin_access!
+      before_action :set_company_scope
       before_action :set_document, only: [:show, :update, :destroy, :download]
 
       def index
-        # Get documents with owner (buyer_portal_access)
-        documents = PortalDocument.where(owner_type: 'BuyerPortalAccess').includes(:owner).order(created_at: :desc)
+        documents = company_scoped_documents.includes(:owner).order(created_at: :desc)
         
-        # Apply search filter
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          # Join with buyer_portal_accesses
-          owner_ids = BuyerPortalAccess.where('email LIKE ?', search_term).pluck(:id)
+          owner_ids = company_scoped_portal_accesses.where('email ILIKE ?', search_term).pluck(:id)
           documents = documents.where(
-            'portal_documents.description LIKE ? OR portal_documents.category LIKE ? OR owner_id IN (?)',
+            'portal_documents.description ILIKE ? OR portal_documents.category ILIKE ? OR owner_id IN (?)',
             search_term, search_term, owner_ids
           )
         end
         
-        # Apply category filter
         documents = documents.where(category: params[:category]) if params[:category].present?
-        
-        # Apply buyer_id filter
         documents = documents.where(owner_id: params[:buyer_id]) if params[:buyer_id].present?
         
-        # Pagination
         page = (params[:page] || 1).to_i
         per_page = (params[:per_page] || 20).to_i
         total = documents.count
@@ -43,8 +41,8 @@ module Api
       end
 
       def create
-        buyer_portal_access = BuyerPortalAccess.find_by(id: params[:buyer_id])
-        return render json: { error: 'Client not found' }, status: :not_found unless buyer_portal_access
+        buyer_portal_access = company_scoped_portal_accesses.find_by(id: params[:buyer_id])
+        return render json: { error: 'Client not found in your company' }, status: :not_found unless buyer_portal_access
         
         @document = PortalDocument.new(
           owner: buyer_portal_access,
@@ -91,10 +89,35 @@ module Api
 
       private
 
+      def require_admin_access!
+        unless current_user&.admin? || current_user&.platform_admin? || current_user&.super_admin?
+          render json: { error: 'Forbidden - Admin access required' }, status: :forbidden
+          return false
+        end
+        true
+      end
+
       def set_document
-        @document = PortalDocument.find(params[:id])
-      rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Document not found' }, status: :not_found
+        @document = company_scoped_documents.find_by(id: params[:id])
+        unless @document
+          render json: { error: 'Document not found' }, status: :not_found
+        end
+      end
+
+      def company_scoped_portal_accesses
+        lead_ids = @company.leads.pluck(:id)
+        contact_ids = @company.contacts.pluck(:id)
+
+        BuyerPortalAccess.where(
+          "(buyer_type = 'Lead' AND buyer_id IN (?)) OR (buyer_type = 'Contact' AND buyer_id IN (?))",
+          lead_ids,
+          contact_ids
+        )
+      end
+
+      def company_scoped_documents
+        portal_access_ids = company_scoped_portal_accesses.pluck(:id)
+        PortalDocument.where(owner_type: 'BuyerPortalAccess', owner_id: portal_access_ids)
       end
 
       def update_params
@@ -103,29 +126,10 @@ module Api
 
       def document_json(doc)
         buyer_portal_access = doc.owner
+        return nil unless buyer_portal_access
         
-        # Get the actual buyer record
-        actual_buyer = begin
-          buyer_portal_access.buyer_type.constantize.find_by(id: buyer_portal_access.buyer_id)
-        rescue
-          nil
-        end
-        
-        # Build buyer name from available fields
-        if actual_buyer.is_a?(Lead)
-          buyer_name = [actual_buyer.first_name, actual_buyer.last_name].compact.join(' ')
-          buyer_name = actual_buyer.email.split('@').first if buyer_name.blank?
-        elsif actual_buyer.respond_to?(:name)
-          buyer_name = actual_buyer.name
-        elsif actual_buyer.respond_to?(:contact_name)
-          buyer_name = actual_buyer.contact_name
-        elsif actual_buyer.respond_to?(:first_name)
-          buyer_name = [actual_buyer.first_name, actual_buyer.last_name].compact.join(' ')
-        else
-          buyer_name = buyer_portal_access.email.split('@').first
-        end
-        
-        # Determine if buyer uploaded based on uploaded_by field
+        actual_buyer = find_actual_buyer(buyer_portal_access)
+        buyer_name = extract_buyer_name(actual_buyer, buyer_portal_access)
         is_buyer_uploaded = doc.uploaded_by == 'buyer'
         
         {
@@ -147,6 +151,32 @@ module Api
           is_buyer_uploaded: is_buyer_uploaded,
           status: 'active'
         }
+      end
+
+      def find_actual_buyer(buyer_portal_access)
+        case buyer_portal_access.buyer_type
+        when 'Lead'
+          @company.leads.find_by(id: buyer_portal_access.buyer_id)
+        when 'Contact'
+          @company.contacts.find_by(id: buyer_portal_access.buyer_id)
+        end
+      end
+
+      def extract_buyer_name(actual_buyer, buyer_portal_access)
+        return buyer_portal_access.email.split('@').first unless actual_buyer
+
+        if actual_buyer.is_a?(Lead)
+          name = [actual_buyer.first_name, actual_buyer.last_name].compact.join(' ')
+          name.presence || actual_buyer.email&.split('@')&.first
+        elsif actual_buyer.respond_to?(:name)
+          actual_buyer.name
+        elsif actual_buyer.respond_to?(:contact_name)
+          actual_buyer.contact_name
+        elsif actual_buyer.respond_to?(:first_name)
+          [actual_buyer.first_name, actual_buyer.last_name].compact.join(' ')
+        else
+          buyer_portal_access.email.split('@').first
+        end
       end
     end
   end

@@ -3,6 +3,10 @@
 module Api
   module Crm
     class ContactActivitiesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm, update_actions: [:update, :complete, :cancel]
+
+      before_action :set_company_scope
       before_action :set_contact
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
       
@@ -14,13 +18,16 @@ module Api
                              .order(Arel.sql('COALESCE(due_date, start_time, created_at) ASC'))
         
         # If contact is linked to an account, also include account activities
+        # STRICT TENANT ISOLATION: Verify account belongs to same company
         if @contact.account_id.present?
-          account_activities = AccountActivity.where(account_id: @contact.account_id)
-                                               .includes(:user, :assigned_to)
-          # Merge and sort all activities
-          all_activities = (activities.to_a + account_activities.to_a)
-                            .sort_by { |a| a.due_date || a.start_time || a.created_at }
-          activities = all_activities
+          account = @company.accounts.find_by(id: @contact.account_id)
+          if account
+            account_activities = account.account_activities.includes(:user, :assigned_to)
+            # Merge and sort all activities
+            all_activities = (activities.to_a + account_activities.to_a)
+                              .sort_by { |a| a.due_date || a.start_time || a.created_at }
+            activities = all_activities
+          end
         end
         
         # Filter by type if provided
@@ -104,19 +111,48 @@ module Api
       end
       
       private
+
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
       
       def set_contact
-        @contact = Contact.find(params[:contact_id])
+        # STRICT TENANT ISOLATION: Only access contacts in same company
+        @contact = @company.contacts.find_by(id: params[:contact_id])
+        unless @contact
+          render json: { error: 'Contact not found or access denied' }, status: :not_found
+          return
+        end
       end
       
       def set_activity
-        @activity = @contact.contact_activities.find(params[:id])
+        @activity = @contact.contact_activities.find_by(id: params[:id])
+        unless @activity
+          render json: { error: 'Activity not found or access denied' }, status: :not_found
+          return
+        end
       end
       
       def current_user_or_first
-        # In production, use actual current_user from authentication
-        # For now, use first user
-        User.first
+        # Use actual current_user from authentication
+        current_user
       end
       
       def activity_params

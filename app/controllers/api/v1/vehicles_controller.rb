@@ -3,11 +3,34 @@
 module Api
   module V1
     class VehiclesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :inventory,
+        read_actions: [:index, :show, :stats, :export, :print],
+        create_actions: [:create, :clone, :import],
+        update_actions: [:update, :bulk_update],
+        delete_actions: [:destroy, :bulk_delete]
+
       before_action :set_company
       before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone]
 
       def index
-        vehicles = @company.vehicles.active
+        # STRICT TENANT ISOLATION: Only return vehicles from current user's company
+        # RBAC: Location-tier users only see their assigned locations
+        vehicles = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.vehicles.active
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              # Include vehicles in assigned locations OR unassigned vehicles (NULL location_id)
+              @company.vehicles.active.where("location_id IN (?) OR location_id IS NULL", location_ids)
+            else
+              @company.vehicles.active
+            end
+          end
+        else
+          @company.vehicles.active
+        end
         
         # Filters
         vehicles = vehicles.by_type(params[:type]) if params[:type].present?
@@ -47,6 +70,12 @@ module Api
 
       def create
         vehicle = @company.vehicles.new(vehicle_params)
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          vehicle.location_id ||= location_ids.first if location_ids.any?
+        end
 
         if vehicle.save
           render json: { vehicle: vehicle_json(vehicle, detailed: true) }, status: :created
@@ -653,20 +682,42 @@ module Api
       end
 
       def set_company
-        @company = ::Company.find_by(id: current_user.company_id)
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
         
-        # Fallback to first company if none found (for demo/dev)
-        @company ||= ::Company.first
-        
-        unless @company
-          render json: { error: 'Company not found' }, status: :not_found
+        unless company_id.present?
+          Rails.logger.error "[VehiclesController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
         end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "[VehiclesController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "[VehiclesController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
       end
 
       def set_vehicle
-        @vehicle = @company.vehicles.active.find(params[:id])
+        # STRICT TENANT ISOLATION: Only find vehicles within company
+        # RBAC: Location-tier users only access their assigned locations
+        @vehicle = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include vehicles in assigned locations OR unassigned vehicles (NULL location_id)
+            @company.vehicles.active.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+          else
+            @company.vehicles.active.find(params[:id])
+          end
+        else
+          @company.vehicles.active.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Vehicle not found' }, status: :not_found
+        render json: { error: 'Vehicle not found or access denied' }, status: :not_found
       end
 
       # Helper method to format currency like the quotes PDF generator

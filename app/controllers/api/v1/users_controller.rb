@@ -9,6 +9,9 @@ module Api
 
       # GET /api/v1/users
       def index
+        # RBAC: Check if user can read users
+        return unless authorize_action!('users', 'read')
+        
         @users = current_company.users.where(deleted_at: nil)
 
         # Filter by status if provided
@@ -29,8 +32,8 @@ module Api
                         .distinct
         end
 
-        # Include deleted users if requested
-        if params[:include_deleted] == 'true' && current_user.admin?
+        # Include deleted users if requested (requires delete permission)
+        if params[:include_deleted] == 'true' && can?('users', 'delete')
           @users = current_company.users
         end
 
@@ -47,6 +50,9 @@ module Api
 
       # GET /api/v1/users/:id
       def show
+        # RBAC: Check if user can read users
+        return unless authorize_action!('users', 'read')
+        
         render json: {
           user: user_json(@user, include_locations: true)
         }
@@ -54,6 +60,9 @@ module Api
 
       # POST /api/v1/users
       def create
+        # RBAC: Check if user can create users
+        return unless authorize_action!('users', 'create')
+        
         @user = current_company.users.build(user_params)
         @user.status ||= 'active'
 
@@ -64,6 +73,16 @@ module Api
         end
 
         if @user.save
+          # Assign RBAC role if company uses RBAC system
+          if current_company&.use_rbac_system && @user.role.present?
+            @user.assign_rbac_role(
+              @user.role,
+              company_id: current_company.id,
+              assigned_by: current_user
+            )
+            Rails.logger.info "✅ [V1::UsersController] Assigned RBAC role '#{@user.role}' to new user #{@user.id}"
+          end
+          
           # Handle location assignments if provided
           if params[:location_ids].present?
             assign_locations_to_user(@user, params[:location_ids], params[:location_role])
@@ -82,12 +101,32 @@ module Api
 
       # PATCH/PUT /api/v1/users/:id
       def update
+        # RBAC: Check if user can update users (or updating own profile)
+        unless @user.id == current_user.id || can?('users', 'update')
+          render json: { error: 'Forbidden - Insufficient permissions' }, status: :forbidden
+          return
+        end
+        
         # Track reason for audit
         reason = params[:reason] || 'Updated via API'
+        
+        # Check if role is being changed
+        new_role = params[:user][:role] if params[:user].present?
+        role_changed = new_role.present? && new_role != @user.role
 
         if @user.update(user_params)
-          # Handle location assignments if provided
-          if params[:location_ids].present?
+          # Handle RBAC role change if company uses RBAC system
+          if role_changed && current_company&.use_rbac_system
+            @user.replace_rbac_role(
+              new_role,
+              company_id: current_company.id,
+              assigned_by: current_user
+            )
+            Rails.logger.info "✅ [V1::UsersController] Updated RBAC role to '#{new_role}' for user #{@user.id}"
+          end
+          
+          # Handle location assignments if provided (only if user has manage permission)
+          if params[:location_ids].present? && can?('users', 'manage')
             sync_user_locations(@user, params[:location_ids], params[:location_role])
           end
 
@@ -107,6 +146,9 @@ module Api
 
       # DELETE /api/v1/users/:id
       def destroy
+        # RBAC: Check if user can delete users
+        return unless authorize_action!('users', 'delete')
+        
         # Soft delete
         if @user.update(deleted_at: Time.current, status: 'inactive')
           # Deactivate all location assignments
@@ -125,7 +167,12 @@ module Api
       # GET /api/v1/users/:id/locations
       def user_locations
         @user = current_company.users.find(params[:id])
-        authorize_user_access!(@user)
+        
+        # RBAC: Check if user can read users or accessing own profile
+        unless @user.id == current_user.id || can?('users', 'read')
+          render json: { error: 'Forbidden - Insufficient permissions' }, status: :forbidden
+          return
+        end
 
         @locations = @user.locations.where(is_deleted: false)
                          .includes(:user_locations)
@@ -150,7 +197,9 @@ module Api
       # POST /api/v1/users/:id/assign_location
       def assign_location
         @user = current_company.users.find(params[:id])
-        authorize_user_management!
+        
+        # RBAC: Check if user can manage users (assign permissions)
+        return unless authorize_action!('users', 'assign')
 
         location = current_company.locations.find(params[:location_id])
         location_role = params[:location_role] || 'location_staff'
@@ -175,7 +224,9 @@ module Api
       # DELETE /api/v1/users/:id/remove_location/:location_id
       def remove_location
         @user = current_company.users.find(params[:id])
-        authorize_user_management!
+        
+        # RBAC: Check if user can manage users (assign permissions)
+        return unless authorize_action!('users', 'assign')
 
         location = current_company.locations.find(params[:location_id])
         location.remove_user(@user)
@@ -187,7 +238,8 @@ module Api
 
       # POST /api/v1/users/bulk_activate
       def bulk_activate
-        authorize_user_management!
+        # RBAC: Check if user can manage users
+        return unless authorize_action!('users', 'manage')
 
         user_ids = params[:user_ids] || []
         users = current_company.users.where(id: user_ids)
@@ -207,7 +259,8 @@ module Api
 
       # POST /api/v1/users/bulk_deactivate
       def bulk_deactivate
-        authorize_user_management!
+        # RBAC: Check if user can manage users
+        return unless authorize_action!('users', 'manage')
 
         user_ids = params[:user_ids] || []
         users = current_company.users.where(id: user_ids)
@@ -290,16 +343,26 @@ module Api
       end
 
       def authorize_user_management!
-        # Only company admins can manage users
-        # Location admins can only manage users within their locations (handled by location controller)
-        unless current_user.admin?
-          render json: { error: 'Admin access required' }, status: :forbidden
+        # RBAC-aware authorization for user management
+        # Check if user can perform the specific action on users resource
+        action = case action_name
+                when 'create' then 'create'
+                when 'update' then 'update'
+                when 'destroy' then 'delete'
+                else 'manage'
+                end
+        
+        unless can?('users', action)
+          render json: { 
+            error: 'Forbidden - Insufficient permissions',
+            required_permission: "users:#{action}"
+          }, status: :forbidden
         end
       end
 
       def authorize_user_access!(user)
-        # Company admins can access all users
-        return if current_user.admin?
+        # Company admins or users with read permission can access all users
+        return if can?('users', 'read')
 
         # Users can access their own profile
         return if current_user.id == user.id

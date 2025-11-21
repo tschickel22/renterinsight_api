@@ -2,9 +2,17 @@
 module Api
   module Crm
     class CommunicationsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :communications,
+        read_actions: [:index],
+        create_actions: [:create, :create_log, :email, :sms, :send_email, :send_sms],
+        update_actions: [],
+        delete_actions: []
+
       # Skip authentication for test endpoints
       skip_before_action :authenticate, only: [:email, :sms]
       
+      before_action :set_company_scope
       before_action :set_lead, except: [:create_log, :email, :sms]
       before_action :set_lead_from_params, only: [:email, :sms]
 
@@ -212,23 +220,52 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
+
       def set_lead
-        @lead = Lead.find(params[:lead_id])
-      rescue ActiveRecord::RecordNotFound => e
-        render json: { 
-          error: 'Lead not found',
-          leadId: params[:lead_id]
-        }, status: :not_found
+        # STRICT TENANT ISOLATION: Only access leads in same company
+        @lead = @company.leads.find_by(id: params[:lead_id])
+        unless @lead
+          render json: { 
+            error: 'Lead not found or access denied',
+            leadId: params[:lead_id]
+          }, status: :not_found
+          return
+        end
       end
 
       def set_lead_from_params
         lead_id = params[:lead_id] || params[:leadId]
-        @lead = Lead.find(lead_id) if lead_id
-      rescue ActiveRecord::RecordNotFound => e
-        render json: { 
-          error: 'Lead not found',
-          leadId: lead_id
-        }, status: :not_found
+        return unless lead_id.present?
+        
+        # STRICT TENANT ISOLATION: Only access leads in same company
+        @lead = @company.leads.find_by(id: lead_id)
+        unless @lead
+          render json: { 
+            error: 'Lead not found or access denied',
+            leadId: lead_id
+          }, status: :not_found
+          return
+        end
       end
 
       # Get effective communication settings (company overrides platform)

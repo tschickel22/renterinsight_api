@@ -3,6 +3,13 @@
 module Api
   module V1
     class ContactActivitiesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm,
+        read_actions: [:index, :show, :reminders],
+        create_actions: [:create],
+        update_actions: [:update, :complete, :cancel, :mark_reminder_sent],
+        delete_actions: [:destroy]
+
       before_action :set_contact, except: [:mark_reminder_sent]
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
       
@@ -132,10 +139,24 @@ module Api
       private
       
       def set_contact
-        @contact = Contact.where(company_id: current_company_id).find(params[:contact_id])
+        # STRICT TENANT ISOLATION: Only find contacts within company
+        # RBAC: Location-tier users only access contacts in their assigned locations
+        @contact = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include contacts in assigned locations OR unassigned contacts (NULL location_id)
+            Contact.where(company_id: current_company_id)
+                   .where("location_id IN (?) OR location_id IS NULL", location_ids)
+                   .find(params[:contact_id])
+          else
+            Contact.where(company_id: current_company_id).find(params[:contact_id])
+          end
+        else
+          Contact.where(company_id: current_company_id).find(params[:contact_id])
+        end
       rescue ActiveRecord::RecordNotFound
-        Rails.logger.error "[ContactActivitiesController] Contact not found: #{params[:contact_id]} for company: #{current_company_id}"
-        render json: { error: 'Contact not found' }, status: :not_found
+        Rails.logger.error "[ContactActivitiesController] Contact not found or access denied: #{params[:contact_id]} for company: #{current_company_id}"
+        render json: { error: 'Contact not found or access denied' }, status: :not_found
       end
       
       def set_activity

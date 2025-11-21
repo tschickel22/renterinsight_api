@@ -6,7 +6,6 @@ module Api
       skip_before_action :authenticate
       before_action :authenticate_portal_buyer!
       before_action :set_quote, only: [:show, :accept, :reject]
-      before_action :authorize_quote_access!, only: [:show, :accept, :reject]
 
       # GET /api/portal/quotes
       def index
@@ -96,18 +95,10 @@ module Api
       private
 
       def set_quote
-        @quote = Quote.find_by(id: params[:id])
+        # Scope quote lookup to buyer's quotes for tenant isolation
+        @quote = buyer_quotes.find_by(id: params[:id])
         unless @quote
           render json: { ok: false, error: 'Quote not found' }, status: :not_found
-        end
-      end
-
-      def authorize_quote_access!
-        buyer_portal_access = current_portal_buyer
-        account = buyer_portal_access.buyer_type.constantize.find_by(id: buyer_portal_access.buyer_id)
-        
-        unless @quote.account_id == account.id
-          render json: { ok: false, error: 'Unauthorized' }, status: :forbidden
         end
       end
 

@@ -8,6 +8,38 @@ class ApplicationController < ActionController::API
 
   private
 
+  # Standard tenant isolation - sets @company from current user
+  # Use as: before_action :set_company_scope
+  def set_company_scope
+    unless current_user
+      Rails.logger.error "🚫 [set_company_scope] No authenticated user found"
+      render json: { error: 'Authentication required' }, status: :unauthorized
+      return false
+    end
+    
+    unless current_user.company_id.present?
+      Rails.logger.error "🚫 [set_company_scope] User #{current_user.id} has no company_id"
+      render json: { error: 'No company assigned to user' }, status: :forbidden
+      return false
+    end
+    
+    @company = ::Company.find_by(id: current_user.company_id)
+    
+    if @company.nil?
+      Rails.logger.error "🚫 [set_company_scope] Company #{current_user.company_id} not found for user #{current_user.id}"
+      render json: { error: 'Company not found' }, status: :not_found
+      return false
+    end
+    
+    Rails.logger.info "✅ [set_company_scope] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
+    true
+  end
+
+  # Alias for compatibility
+  def authenticate_user!
+    authenticate
+  end
+
   def authenticate
     # Extract token from Authorization header
     header = request.headers['Authorization']
@@ -35,15 +67,23 @@ class ApplicationController < ActionController::API
   end
 
   def current_company_id
-    # For tenant/super_admin users, allow override via X-Company-ID header (platform admin switching)
-    if current_user&.role.in?(['tenant', 'super_admin', 'admin'])
+    # For platform_admin/tenant/super_admin users, allow override via X-Company-ID header (platform admin switching)
+    if current_user&.role.in?(['platform_admin', 'tenant', 'super_admin', 'admin'])
       # Try both X-Company-ID and X-Company-Context for backward compatibility
       context_company_id = request.headers['X-Company-ID']&.to_i || request.headers['X-Company-Context']&.to_i
-      return context_company_id if context_company_id.present? && context_company_id > 0
+      
+      if context_company_id.present? && context_company_id > 0
+        Rails.logger.info "[ApplicationController] Platform admin #{current_user.email} switching to company #{context_company_id}"
+        # Verify the platform admin has access to this company
+        # For now, platform admins can access any company
+        return context_company_id
+      end
     end
     
-    # Otherwise use the company from JWT token
-    @current_company_id
+    # Otherwise use the company from JWT token or user's company
+    company_id = @current_company_id || current_user&.company_id
+    Rails.logger.info "[ApplicationController] Using company_id #{company_id} for user #{current_user&.email}"
+    company_id
   end
 
   def current_user
@@ -94,12 +134,14 @@ class ApplicationController < ActionController::API
   def authenticate_portal_buyer!
     unless current_portal_buyer
       render json: { error: 'Unauthorized' }, status: :unauthorized
+      return
     end
   end
 
   def authorize_buyer_resource!(resource)
     unless current_portal_buyer.buyer == resource.buyer
       render json: { error: 'Forbidden' }, status: :forbidden
+      return
     end
   end
 
@@ -179,11 +221,47 @@ class ApplicationController < ActionController::API
   def can?(resource_key, action_key, scope_key = 'all', context = {})
     return false unless current_user
     
-    # If company uses RBAC, use new system
-    if current_user.uses_rbac?
-      current_user.can?(resource_key, action_key, scope_key, context)
+    # Platform admins, super admins always have full access
+    return true if current_user.platform_admin?
+    return true if current_user.super_admin?
+    
+    # Get the company context for RBAC checks
+    company_id = current_company_id
+    company = Company.find_by(id: company_id)
+    
+    # Check if the company uses RBAC
+    if company && company.use_rbac_system
+      # Check if user is a company admin (via RBAC) - they get full access
+      if current_user.company_admin?
+        Rails.logger.info "[RBAC] Company Admin full access for #{current_user.email}"
+        return true
+      end
+      
+      # Check RBAC permissions
+      result = current_user.has_permission?(resource_key, action_key, scope_key, company_id)
+      
+      # Fallback: Check user_role_assignments for company_admin role (flexible match)
+      if !result
+        has_admin_role = current_user.user_role_assignments
+          .joins(:role)
+          .where(company_id: company_id)
+          .where(roles: { tier: 'company' })
+          .where("roles.key IN (?)", ['company_admin', 'admin', 'super_admin'])
+          .exists?
+        
+        if has_admin_role
+          Rails.logger.info "[RBAC] Company Admin role override for #{current_user.email}"
+          return true
+        end
+      end
+      
+      result
     else
-      # Fallback to legacy role-based authorization
+      # Company doesn't use RBAC, use legacy authorization
+      # Legacy admin/tenant check
+      return true if current_user.admin?
+      return true if current_user.tenant?
+      
       legacy_authorize(resource_key, action_key)
     end
   end
@@ -194,7 +272,7 @@ class ApplicationController < ActionController::API
   # @param action_key [String] Action identifier
   # @param scope_key [String] Scope identifier (default: 'all')
   # @param context [Hash] Context for scope validation
-  # @raise [ActionController::RoutingError] if unauthorized
+  # @return [Boolean] true if authorized, renders error and returns false if not
   def authorize_action!(resource_key, action_key, scope_key = 'all', context = {})
     unless can?(resource_key, action_key, scope_key, context)
       Rails.logger.warn(
@@ -204,7 +282,9 @@ class ApplicationController < ActionController::API
         error: 'Forbidden - Insufficient permissions',
         required_permission: "#{resource_key}:#{action_key}:#{scope_key}"
       }, status: :forbidden
+      return false
     end
+    true
   end
   
   # Check if current user can access a specific location (RBAC-aware)
@@ -280,7 +360,7 @@ class ApplicationController < ActionController::API
   # @param action_key [String] Action identifier
   # @return [Boolean] true if authorized
   def legacy_authorize(resource_key, action_key)
-    return true if current_user.admin? || current_user.super_admin?
+    return true if current_user.platform_admin? || current_user.admin? || current_user.super_admin?
     
     # Basic legacy rules
     case action_key
@@ -293,6 +373,22 @@ class ApplicationController < ActionController::API
     else
       false
     end
+  end
+  
+  # Require platform admin role for sensitive operations
+  #
+  # @return [Boolean] true if authorized, renders error and returns false if not
+  def require_platform_admin!
+    unless current_user&.platform_admin? || current_user&.super_admin?
+      Rails.logger.warn(
+        "[Authorization] User #{current_user&.id} denied platform admin access"
+      )
+      render json: { 
+        error: 'Forbidden - Platform admin access required'
+      }, status: :forbidden
+      return false
+    end
+    true
   end
 
 end

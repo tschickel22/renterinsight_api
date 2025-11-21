@@ -4,17 +4,27 @@ module Api
   module Crm
     module Nurture
       class TemplatesController < ApplicationController
+        include RbacAuthorization
+        rbac_resource :crm
+
+        before_action :set_company_scope
+
         def index
-          # Scope templates to current company for tenant isolation
-          company = ::Company.find(current_company_id)
-          templates = company.templates.where(template_type: %w[email sms]).order(created_at: :desc)
+          templates = @company.templates.where(template_type: %w[email sms]).order(created_at: :desc)
           render json: templates.map { |t| template_json(t) }, status: :ok
         end
 
+        def show
+          template = @company.templates.find_by(id: params[:id])
+          unless template
+            render json: { error: 'Template not found' }, status: :not_found
+            return
+          end
+          render json: template_json(template), status: :ok
+        end
+
         def create
-          # Scope to current company
-          company = ::Company.find(current_company_id)
-          template = company.templates.new(template_params)
+          template = @company.templates.new(template_params)
           
           # Handle file attachments if present
           if params[:attachments].present?
@@ -31,9 +41,11 @@ module Api
         end
 
         def update
-          # Scope to current company
-          company = ::Company.find(current_company_id)
-          template = company.templates.find(params[:id])
+          template = @company.templates.find_by(id: params[:id])
+          unless template
+            render json: { error: 'Template not found' }, status: :not_found
+            return
+          end
           
           # Handle file attachments if present
           if params[:attachments].present?
@@ -50,19 +62,30 @@ module Api
         end
 
         def destroy
-          # Scope to current company
-          company = ::Company.find(current_company_id)
-          template = company.templates.find(params[:id])
+          template = @company.templates.find_by(id: params[:id])
+          unless template
+            render json: { error: 'Template not found' }, status: :not_found
+            return
+          end
+          
           template.destroy!
           head :no_content
         end
         
         # Delete a specific attachment
         def delete_attachment
-          # Scope to current company
-          company = ::Company.find(current_company_id)
-          template = company.templates.find(params[:id])
-          attachment = template.attachments.find(params[:attachment_id])
+          template = @company.templates.find_by(id: params[:id])
+          unless template
+            render json: { error: 'Template not found' }, status: :not_found
+            return
+          end
+          
+          attachment = template.attachments.find_by(id: params[:attachment_id])
+          unless attachment
+            render json: { error: 'Attachment not found' }, status: :not_found
+            return
+          end
+          
           attachment.purge
           render json: template_json(template), status: :ok
         end
@@ -71,20 +94,19 @@ module Api
           upsert_templates = params[:upsert] || []
           delete_ids = params[:delete] || []
           
-          # Scope to current company
-          company = ::Company.find(current_company_id)
-          
           ActiveRecord::Base.transaction do
             # Delete templates (scoped to company)
             if delete_ids.any?
-              company.templates.where(id: delete_ids).destroy_all
+              @company.templates.where(id: delete_ids).destroy_all
             end
             
             # Upsert templates
             upsert_templates.each do |tpl_data|
               if tpl_data[:id].present?
                 # Update existing (scoped to company)
-                template = company.templates.find(tpl_data[:id])
+                template = @company.templates.find_by(id: tpl_data[:id])
+                next unless template # Skip if not found in this company
+                
                 template.update!(template_params_from_hash(tpl_data))
                 
                 # Handle attachments if present
@@ -95,7 +117,7 @@ module Api
                 end
               else
                 # Create new (scoped to company)
-                template = company.templates.create!(template_params_from_hash(tpl_data))
+                template = @company.templates.create!(template_params_from_hash(tpl_data))
                 
                 # Handle attachments if present
                 if tpl_data[:attachments].present?
@@ -108,7 +130,7 @@ module Api
           end
           
           # Return all templates (scoped to company)
-          templates = company.templates.where(template_type: %w[email sms]).order(created_at: :desc)
+          templates = @company.templates.where(template_type: %w[email sms]).order(created_at: :desc)
           render json: templates.map { |t| template_json(t) }, status: :ok
         rescue StandardError => e
           Rails.logger.error("Template bulk error: #{e.message}")
@@ -118,13 +140,37 @@ module Api
 
         private
 
+        def set_company_scope
+          unless current_user
+            Rails.logger.error "🚫 [Nurture::TemplatesController] No authenticated user found"
+            render json: { error: 'Authentication required' }, status: :unauthorized
+            return
+          end
+          
+          company_id = current_company_id
+          
+          unless company_id.present?
+            Rails.logger.error "🚫 [Nurture::TemplatesController] No company context available"
+            render json: { error: 'No company context' }, status: :forbidden
+            return
+          end
+          
+          @company = ::Company.find_by(id: company_id)
+          
+          if @company.nil?
+            Rails.logger.error "🚫 [Nurture::TemplatesController] Company #{company_id} not found"
+            render json: { error: 'Company not found' }, status: :not_found
+            return
+          end
+          
+          Rails.logger.info "✅ [Nurture::TemplatesController] Company scope set: #{@company.name} (ID: #{@company.id})"
+        end
+
         def template_params
           params.require(:template).permit(:name, :template_type, :subject, :body, :is_active)
         end
 
         def template_params_from_hash(hash)
-          # template_type should be 'email' or 'sms' from the hash
-          # type is a different field for categorization (welcome, follow_up, etc)
           {
             name: hash[:name],
             template_type: hash[:template_type],

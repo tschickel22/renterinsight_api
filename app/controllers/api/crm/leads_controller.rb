@@ -5,25 +5,50 @@ module Api
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score]
 
       def index
+        return unless authorize_action!('leads', 'read')
+        
         # STRICT TENANT ISOLATION: Only show non-converted leads from current company
-        leads = @company.leads
-                    .where(is_converted: [false, nil])
-                    .includes(:source)
-                    .order(created_at: :desc)
+        # RBAC: Location-tier users only see their assigned locations
+        leads = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.leads.where(is_converted: [false, nil])
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              @company.leads.where(is_converted: [false, nil], location_id: location_ids)
+            else
+              @company.leads.where(is_converted: [false, nil])
+            end
+          end
+        else
+          @company.leads.where(is_converted: [false, nil])
+        end
+        
+        leads = leads.includes(:source).order(created_at: :desc)
         
         render json: leads.map { |l| lead_json(l) }
       end
 
       def show
+        return unless authorize_action!('leads', 'read')
+        
         render json: lead_json(@lead)
       end
 
       def create
+        return unless authorize_action!('leads', 'create')
+        
         Rails.logger.info "[LeadsController#create] Received params: #{params.inspect}"
         Rails.logger.info "[LeadsController#create] Processed lead_params: #{lead_params.inspect}"
         
         # STRICT TENANT ISOLATION: Create lead within current company
         l = @company.leads.new(lead_params)
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          l.location_id ||= location_ids.first if location_ids.any?
+        end
         
         if l.save
           Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
@@ -54,21 +79,29 @@ module Api
       end
 
       def update
+        return unless authorize_action!('leads', 'update')
+        
         @lead.update!(lead_params)
         render json: lead_json(@lead)
       end
 
       def destroy
+        return unless authorize_action!('leads', 'delete')
+        
         @lead.destroy!
         head :no_content
       end
 
       def notes
+        return unless authorize_action!('leads', 'update')
+        
         @lead.update!(notes: params[:notes].to_s)
         render json: lead_json(@lead)
       end
 
       def score
+        return unless authorize_action!('leads', 'read')
+        
         # Calculate lead score based on various factors
         score_value = calculate_lead_score(@lead)
         
@@ -85,6 +118,8 @@ module Api
       end
 
       def convert
+        return unless authorize_action!('leads', 'update')
+        
         begin
           Rails.logger.info "Starting lead conversion for lead #{params[:id]}"
           
@@ -111,6 +146,12 @@ module Api
           account.phone = @lead.phone if @lead.phone.present?
           account.source_id = @lead.source_id if @lead.source_id.present?
           account.notes = @lead.notes if @lead.notes.present?
+          
+          # RBAC: Location-tier users auto-assign to their location
+          if current_user.uses_rbac? && !current_user.effective_admin?
+            location_ids = permission_service.accessible_location_ids
+            account.location_id = location_ids.first if location_ids.any?
+          end
           
           # Try to set account_type if the field exists
           if account.respond_to?(:account_type=)
@@ -225,16 +266,19 @@ module Api
           return
         end
         
-        unless current_user.company_id.present?
-          Rails.logger.error "🚫 [LeadsController] User #{current_user.id} has no company_id"
-          render json: { error: 'No company assigned' }, status: :forbidden
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [LeadsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
           return
         end
         
-        @company = ::Company.find_by(id: current_user.company_id)
+        @company = ::Company.find_by(id: company_id)
         
         if @company.nil?
-          Rails.logger.error "🚫 [LeadsController] Company #{current_user.company_id} not found"
+          Rails.logger.error "🚫 [LeadsController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
@@ -244,9 +288,20 @@ module Api
 
       def set_lead
         # STRICT TENANT ISOLATION: Only access leads in same company
-        @lead = @company.leads.find(params[:id])
+        # RBAC: Location-tier users only access their assigned locations
+        @lead = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            @company.leads.where(location_id: location_ids).find(params[:id])
+          else
+            @company.leads.find(params[:id])
+          end
+        else
+          @company.leads.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Lead not found or access denied' }, status: :not_found
+        return
       end
 
       # Merge root + nested (:lead), accept camel & snake, normalize to snake.

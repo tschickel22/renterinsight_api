@@ -6,7 +6,13 @@ module Api
       # Authentication inherited from ApplicationController
       before_action :set_location, only: [:show, :update, :destroy, :restore, :users, :metrics, :stats, :activities]
       before_action :authorize_company_access!
-      before_action :authorize_location_admin!, only: [:update, :destroy]
+      
+      # RBAC permission checks
+      before_action -> { authorize_rbac!('locations', 'read') }, only: [:index, :show, :users, :metrics, :stats, :activities]
+      before_action -> { authorize_rbac!('locations', 'create') }, only: [:create]
+      before_action -> { authorize_rbac!('locations', 'update') }, only: [:update, :bulk_activate, :bulk_deactivate]
+      before_action -> { authorize_rbac!('locations', 'delete') }, only: [:destroy, :bulk_delete, :restore]
+      before_action -> { authorize_rbac!('locations', 'assign') }, only: [:assign_user, :remove_user]
 
       # GET /api/v1/locations
       def index
@@ -86,7 +92,6 @@ module Api
       # POST /api/v1/locations/:id/restore
       def restore
         @location = current_company.locations.find(params[:id])
-        authorize_location_admin!
 
         if @location.restore!
           render json: {
@@ -102,9 +107,6 @@ module Api
 
       # GET /api/v1/locations/:id/users
       def users
-        @location = current_company.locations.find(params[:id])
-        authorize_location_access!
-
         @users = @location.users.where(deleted_at: nil)
                          .includes(:user_locations)
 
@@ -127,7 +129,6 @@ module Api
       # POST /api/v1/locations/:id/assign_user
       def assign_user
         @location = current_company.locations.find(params[:id])
-        authorize_location_admin!
 
         user = current_company.users.find(params[:user_id])
         location_role = params[:location_role] || 'location_staff'
@@ -160,7 +161,6 @@ module Api
       # DELETE /api/v1/locations/:id/remove_user/:user_id
       def remove_user
         @location = current_company.locations.find(params[:id])
-        authorize_location_admin!
 
         user = current_company.users.find(params[:user_id])
         @location.remove_user(user)
@@ -172,8 +172,6 @@ module Api
 
       # GET /api/v1/locations/:id/metrics
       def metrics
-        authorize_location_access!
-
         render json: {
           metrics: {
             active_vehicles: @location.active_vehicles_count,
@@ -185,10 +183,8 @@ module Api
         }
       end
 
-      # GET /api/v1/locations/:id/stats (alias for metrics)
+      # GET /api/v1/locations/:id/stats
       def stats
-        authorize_location_access!
-
         render json: {
           stats: {
             active_vehicles: @location.active_vehicles_count,
@@ -201,8 +197,6 @@ module Api
 
       # GET /api/v1/locations/:id/activities
       def activities
-        authorize_location_access!
-        
         limit = [params[:limit]&.to_i || 20, 50].min
         activities = fetch_location_activities(@location, limit)
         
@@ -254,8 +248,6 @@ module Api
 
       # POST /api/v1/locations/bulk_delete
       def bulk_delete
-        authorize_location_admin_for_bulk!
-        
         location_ids = params[:location_ids] || []
         locations = current_company.locations.where(id: location_ids)
 
@@ -364,41 +356,27 @@ module Api
       def authorize_company_access!
         unless current_company.present?
           render json: { error: 'No company associated with user' }, status: :forbidden
-          return
         end
       end
 
-      def authorize_location_access!
-        # Company admins can access all locations
-        return if current_user.admin?
-
-        # Check if user has access to this specific location
-        unless @location.has_user?(current_user)
-          render json: { error: 'Access denied to this location' }, status: :forbidden
-        end
-      end
-
-      def authorize_location_admin!
-        # Company admins can manage all locations
-        return if current_user.admin?
-
-        # Check if user is a location admin for this specific location
-        ul = UserLocation.find_by(
-          user_id: current_user.id,
-          location_id: @location.id,
-          location_role: 'location_admin',
-          active: true
-        )
-
-        unless ul.present?
-          render json: { error: 'Admin access required for this location' }, status: :forbidden
-        end
-      end
-
-      def authorize_location_admin_for_bulk!
-        # Only company admins can perform bulk operations
-        unless current_user.admin?
-          render json: { error: 'Admin access required for bulk operations' }, status: :forbidden
+      # RBAC permission check with proper halting
+      # Platform admins and super admins bypass all checks
+      # If RBAC is disabled for company, allow all access
+      def authorize_rbac!(resource, action, scope = 'all')
+        # Platform admins bypass ALL permission checks
+        return if current_user.platform_admin?
+        return if current_user.super_admin?
+        
+        # If RBAC is disabled for this company, allow access
+        return unless current_company&.use_rbac_system
+        
+        # Check RBAC permission
+        unless current_user.has_permission?(resource, action, scope, current_company.id)
+          Rails.logger.warn "[RBAC] Access denied: User #{current_user.id} lacks #{resource}:#{action}:#{scope}"
+          render json: { 
+            error: 'Access denied',
+            details: "You don't have permission to #{action} #{resource}"
+          }, status: :forbidden
         end
       end
 

@@ -5,6 +5,10 @@ module Api
     class BrochuresController < ApplicationController
       before_action :set_company_scope, except: [:templates, :public_view]
       before_action :set_brochure, only: [:show, :update, :destroy, :share]
+      before_action :authorize_read!, only: [:index, :show, :stats]
+      before_action :authorize_create!, only: [:create]
+      before_action :authorize_update!, only: [:update, :share]
+      before_action :authorize_delete!, only: [:destroy]
       skip_before_action :authenticate, only: [:public_view]
 
       # GET /api/v1/brochures
@@ -298,6 +302,47 @@ module Api
 
       private
 
+      # RBAC Authorization Methods
+      def authorize_read!
+        return if skip_rbac?
+        unless current_user.has_permission?('branding', 'read', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied READ access to branding for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to view brochures' }, status: :forbidden
+        end
+      end
+
+      def authorize_create!
+        return if skip_rbac?
+        unless current_user.has_permission?('branding', 'create', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied CREATE access to branding for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to create brochures' }, status: :forbidden
+        end
+      end
+
+      def authorize_update!
+        return if skip_rbac?
+        unless current_user.has_permission?('branding', 'update', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to branding for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to update brochures' }, status: :forbidden
+        end
+      end
+
+      def authorize_delete!
+        return if skip_rbac?
+        unless current_user.has_permission?('branding', 'delete', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied DELETE access to branding for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to delete brochures' }, status: :forbidden
+        end
+      end
+
+      # Skip RBAC for platform admins or if company doesn't use RBAC
+      def skip_rbac?
+        return true if current_user.platform_admin?
+        return true if current_user.super_admin?
+        return true unless @company&.use_rbac_system
+        false
+      end
+
       def set_company_scope
         unless current_user
           Rails.logger.error "[BrochuresController] No authenticated user found"
@@ -305,19 +350,24 @@ module Api
           return
         end
         
-        unless current_user.company_id.present?
-          Rails.logger.error "[BrochuresController] User #{current_user.id} has no company_id"
-          render json: { error: 'No company assigned' }, status: :forbidden
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "[BrochuresController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
           return
         end
         
-        @company = ::Company.find_by(id: current_user.company_id)
+        @company = ::Company.find_by(id: company_id)
         
         if @company.nil?
-          Rails.logger.error "[BrochuresController] Company #{current_user.company_id} not found"
+          Rails.logger.error "[BrochuresController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
+        
+        Rails.logger.info "[BrochuresController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
       end
 
       def set_brochure

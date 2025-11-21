@@ -3,13 +3,18 @@
 module Api
   module V1
     class CompanySettingsController < ApplicationController
-      before_action :authorize_company_admin!
+      before_action :set_company_scope
+      
+      # RBAC Authorization - map to appropriate resources
+      before_action :authorize_settings_read!, only: [:show_operational, :show_communication]
+      before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac]
+      before_action :authorize_branding_read!, only: [:show_branding]
+      before_action :authorize_branding_update!, only: [:update_branding]
 
       # GET /api/v1/company_settings/operational
       def show_operational
-        # Use .presence to return nil if empty/blank, not empty hash
-        settings = current_company.operational_settings.presence
-        
+        settings = @company.operational_settings.presence
+
         render json: {
           operational_settings: settings,
           defaults: PlatformDefaults.operational_settings
@@ -19,23 +24,23 @@ module Api
       # PATCH /api/v1/company_settings/operational
       def update_operational
         Rails.logger.info "🔧 [CompanySettings#update_operational] Received params: #{params.inspect}"
-        Rails.logger.info "🔧 [CompanySettings#update_operational] Company: #{current_company&.name} (ID: #{current_company&.id})"
-        
+        Rails.logger.info "🔧 [CompanySettings#update_operational] Company: #{@company&.name} (ID: #{@company&.id})"
+
         settings = params[:operational_settings] || {}
         Rails.logger.info "📊 [CompanySettings#update_operational] Operational settings: #{settings.inspect}"
-        
-        current_company.operational_settings = settings
-        
-        if current_company.save
+
+        @company.operational_settings = settings
+
+        if @company.save
           Rails.logger.info "✅ [CompanySettings#update_operational] Settings saved successfully"
           render json: {
-            operational_settings: current_company.operational_settings,
+            operational_settings: @company.operational_settings,
             message: 'Operational settings updated successfully'
           }
         else
-          Rails.logger.error "❌ [CompanySettings#update_operational] Save failed: #{current_company.errors.full_messages}"
+          Rails.logger.error "❌ [CompanySettings#update_operational] Save failed: #{@company.errors.full_messages}"
           render json: {
-            errors: current_company.errors.full_messages
+            errors: @company.errors.full_messages
           }, status: :unprocessable_entity
         end
       rescue => e
@@ -48,8 +53,8 @@ module Api
 
       # GET /api/v1/company_settings/branding
       def show_branding
-        settings = current_company.branding_settings || {}
-        
+        settings = @company.branding_settings || {}
+
         render json: {
           branding_settings: settings,
           defaults: PlatformDefaults.branding_settings
@@ -59,17 +64,17 @@ module Api
       # PATCH /api/v1/company_settings/branding
       def update_branding
         settings = params[:branding_settings] || {}
-        
-        current_company.branding_settings = settings
-        
-        if current_company.save
+
+        @company.branding_settings = settings
+
+        if @company.save
           render json: {
-            branding_settings: current_company.branding_settings,
+            branding_settings: @company.branding_settings,
             message: 'Branding settings updated successfully'
           }
         else
           render json: {
-            errors: current_company.errors.full_messages
+            errors: @company.errors.full_messages
           }, status: :unprocessable_entity
         end
       rescue => e
@@ -82,8 +87,8 @@ module Api
 
       # GET /api/v1/company_settings/communication
       def show_communication
-        settings = current_company.communications_settings || {}
-        
+        settings = @company.communications_settings || {}
+
         render json: {
           communication_settings: settings,
           defaults: PlatformDefaults.communication_settings
@@ -93,17 +98,17 @@ module Api
       # PATCH /api/v1/company_settings/communication
       def update_communication
         settings = params[:communication_settings] || {}
-        
-        current_company.communications_settings = settings
-        
-        if current_company.save
+
+        @company.communications_settings = settings
+
+        if @company.save
           render json: {
-            communication_settings: current_company.communications_settings,
+            communication_settings: @company.communications_settings,
             message: 'Communication settings updated successfully'
           }
         else
           render json: {
-            errors: current_company.errors.full_messages
+            errors: @company.errors.full_messages
           }, status: :unprocessable_entity
         end
       rescue => e
@@ -117,26 +122,26 @@ module Api
       # PATCH /api/v1/company_settings/rbac
       def update_rbac
         Rails.logger.info "🔐 [CompanySettings#update_rbac] Received params: #{params.inspect}"
-        
+
         use_rbac = params[:use_rbac_system]
-        
+
         if use_rbac.nil?
           render json: { error: 'use_rbac_system parameter is required' }, status: :bad_request
           return
         end
-        
-        current_company.use_rbac_system = ActiveModel::Type::Boolean.new.cast(use_rbac)
-        
-        if current_company.save
-          Rails.logger.info "✅ [CompanySettings#update_rbac] RBAC #{current_company.use_rbac_system ? 'enabled' : 'disabled'} for company #{current_company.name}"
+
+        @company.use_rbac_system = ActiveModel::Type::Boolean.new.cast(use_rbac)
+
+        if @company.save
+          Rails.logger.info "✅ [CompanySettings#update_rbac] RBAC #{@company.use_rbac_system ? 'enabled' : 'disabled'} for company #{@company.name}"
           render json: {
-            use_rbac_system: current_company.use_rbac_system,
-            message: "RBAC system #{current_company.use_rbac_system ? 'enabled' : 'disabled'} successfully"
+            use_rbac_system: @company.use_rbac_system,
+            message: "RBAC system #{@company.use_rbac_system ? 'enabled' : 'disabled'} successfully"
           }
         else
-          Rails.logger.error "❌ [CompanySettings#update_rbac] Failed to update: #{current_company.errors.full_messages}"
+          Rails.logger.error "❌ [CompanySettings#update_rbac] Failed to update: #{@company.errors.full_messages}"
           render json: {
-            errors: current_company.errors.full_messages
+            errors: @company.errors.full_messages
           }, status: :unprocessable_entity
         end
       rescue => e
@@ -149,29 +154,72 @@ module Api
 
       private
 
-      def current_company
-        @current_company ||= ::Company.find_by(id: current_company_id)
+      # RBAC Authorization Methods for company_settings resource
+      def authorize_settings_read!
+        return if skip_rbac?
+        unless current_user.has_permission?('company_settings', 'read', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied READ access to company_settings for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to view company settings' }, status: :forbidden
+        end
       end
 
-      def authorize_company_admin!
+      def authorize_settings_update!
+        return if skip_rbac?
+        unless current_user.has_permission?('company_settings', 'update', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to company_settings for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to modify company settings' }, status: :forbidden
+        end
+      end
+
+      # RBAC Authorization Methods for branding resource
+      def authorize_branding_read!
+        return if skip_rbac?
+        unless current_user.has_permission?('branding', 'read', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied READ access to branding for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to view branding settings' }, status: :forbidden
+        end
+      end
+
+      def authorize_branding_update!
+        return if skip_rbac?
+        unless current_user.has_permission?('branding', 'update', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to branding for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to modify branding settings' }, status: :forbidden
+        end
+      end
+
+      # Skip RBAC for platform admins or if company doesn't use RBAC
+      def skip_rbac?
+        return true if current_user.platform_admin?
+        return true if current_user.super_admin?
+        return true unless @company&.use_rbac_system
+        false
+      end
+
+      def set_company_scope
         unless current_user
+          Rails.logger.error "[CompanySettingsController] No authenticated user found"
           render json: { error: 'Authentication required' }, status: :unauthorized
           return
         end
 
-        unless current_company
+        company_id = current_company_id
+
+        unless company_id.present?
+          Rails.logger.error "[CompanySettingsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+
+        @company = ::Company.find_by(id: company_id)
+
+        if @company.nil?
+          Rails.logger.error "[CompanySettingsController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
 
-        # Platform admins can manage any company (via proxy)
-        return if current_user.admin? || current_user.super_admin?
-
-        # Company users can only manage their own company
-        unless current_user.company_id == current_company.id
-          render json: { error: 'Forbidden - You can only manage your own company settings' }, status: :forbidden
-          return
-        end
+        Rails.logger.info "[CompanySettingsController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
       end
     end
   end

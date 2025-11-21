@@ -1,11 +1,23 @@
+# Territories are now company-scoped for proper multi-tenant isolation
+
 module Api
   module Crm
     class TerritoriesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm,
+        read_actions: [:index, :show, :stats],
+        create_actions: [:create],
+        update_actions: [:update, :assign_user],
+        delete_actions: [:destroy]
+
+      before_action :set_company_scope
       before_action :set_territory, only: [:show, :update, :destroy, :assign_user, :stats]
 
       # GET /api/crm/territories
       def index
-        territories = Territory.includes(:territory_rules, :user, :territory_users)
+        # Company-scoped territories (includes company territories + global territories with nil company_id)
+        territories = Territory.for_company(@company.id)
+                              .includes(:territory_rules, :user, :territory_users)
                               .order(name: :asc)
         
         render json: territories.map { |t| territory_json(t) }
@@ -18,8 +30,8 @@ module Api
 
       # GET /api/crm/territories/:id/stats
       def stats
-        # Calculate statistics for this territory
-        deals = Deal.where(territory_id: @territory.id)
+        # STRICT TENANT ISOLATION: Only count deals from current company
+        deals = @company.deals.where(territory_id: @territory.id)
         
         total_value = deals.sum(:value)
         open_value = deals.open.sum(:value)
@@ -50,14 +62,18 @@ module Api
 
       # POST /api/crm/territories
       def create
-        territory = Territory.new(territory_params.except(:assigned_to, :rules))
+        # Create territory within current company
+        territory = @company.territories.new(territory_params.except(:assigned_to, :rules))
         
         if territory.save
           # Handle assigned users via join table
           if params[:territory][:assigned_to].present?
             user_ids = Array(params[:territory][:assigned_to]).map(&:to_i)
             user_ids.each do |user_id|
-              territory.territory_users.create(user_id: user_id)
+              # Verify user belongs to same company
+              if @company.users.exists?(user_id)
+                territory.territory_users.create(user_id: user_id)
+              end
             end
           end
           
@@ -85,19 +101,19 @@ module Api
         if @territory.update(territory_params.except(:assigned_to, :rules))
           # Handle assigned users via join table
           if params[:territory][:assigned_to].present?
-            # Clear existing assignments
             @territory.territory_users.destroy_all
             
-            # Create new assignments
             user_ids = Array(params[:territory][:assigned_to]).map(&:to_i)
             user_ids.each do |user_id|
-              @territory.territory_users.create(user_id: user_id)
+              # Verify user belongs to same company
+              if @company.users.exists?(user_id)
+                @territory.territory_users.create(user_id: user_id)
+              end
             end
           end
           
           # Handle rules update if provided
           if params[:territory][:rules].present?
-            # Remove existing rules and create new ones
             @territory.territory_rules.destroy_all
             
             params[:territory][:rules].each do |rule_params|
@@ -126,6 +142,12 @@ module Api
           return
         end
         
+        # Verify user belongs to same company
+        unless @company.users.exists?(user_id)
+          render json: { error: 'User not found or access denied' }, status: :not_found
+          return
+        end
+        
         if @territory.update(user_id: user_id)
           render json: territory_json(@territory, detailed: true)
         else
@@ -135,8 +157,8 @@ module Api
 
       # DELETE /api/crm/territories/:id
       def destroy
-        # Check if territory has deals
-        if @territory.deals.exists?
+        # Check if territory has deals in current company
+        if @company.deals.where(territory_id: @territory.id).exists?
           render json: { error: 'Cannot delete territory with existing deals' }, status: :unprocessable_entity
           return
         end
@@ -147,8 +169,34 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
+
       def set_territory
-        @territory = Territory.find(params[:id])
+        # Company-scoped territories (includes company territories + global territories)
+        @territory = Territory.for_company(@company.id).find_by(id: params[:id])
+        unless @territory
+          render json: { error: 'Territory not found or access denied' }, status: :not_found
+          return
+        end
       end
 
       def territory_params
@@ -160,13 +208,15 @@ module Api
       end
 
       def territory_json(territory, detailed: false)
-        # Get assigned users from join table (safely handle if association doesn't exist)
         assigned_user_ids = begin
           territory.territory_users.pluck(:user_id).map(&:to_s)
         rescue => e
           Rails.logger.error("Error loading territory_users: #{e.message}")
           []
         end
+        
+        # STRICT TENANT ISOLATION: Scope deals count to company
+        deals = @company.deals.where(territory_id: territory.id)
         
         base = {
           id: territory.id,
@@ -179,15 +229,15 @@ module Api
           assignedTo: assigned_user_ids,
           rules: territory.territory_rules.map { |r| territory_rule_json(r) },
           isActive: territory.is_active,
-          dealsCount: territory.deals.count,
-          openDealsValue: territory.deals.open.sum(:value),
+          dealsCount: deals.count,
+          openDealsValue: deals.open.sum(:value),
           createdAt: territory.created_at&.iso8601,
           updatedAt: territory.updated_at&.iso8601
         }
         
         if detailed
           base.merge!(
-            recentDeals: territory.deals.order(created_at: :desc).limit(5).map { |d| deal_summary_json(d) }
+            recentDeals: deals.order(created_at: :desc).limit(5).map { |d| deal_summary_json(d) }
           )
         end
         

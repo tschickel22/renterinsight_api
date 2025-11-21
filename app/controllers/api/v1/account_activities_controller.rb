@@ -1,6 +1,13 @@
 module Api
   module V1
     class AccountActivitiesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm,
+        read_actions: [:index, :show, :reminders],
+        create_actions: [:create],
+        update_actions: [:update, :complete, :cancel, :mark_reminder_sent],
+        delete_actions: [:destroy]
+
       before_action :set_account, except: [:mark_reminder_sent]
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
 
@@ -119,10 +126,24 @@ module Api
       private
 
       def set_account
-        @account = Account.where(company_id: current_company_id).find(params[:account_id])
+        # STRICT TENANT ISOLATION: Only find accounts within company
+        # RBAC: Location-tier users only access accounts in their assigned locations
+        @account = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include accounts in assigned locations OR unassigned accounts (NULL location_id)
+            Account.where(company_id: current_company_id)
+                   .where("location_id IN (?) OR location_id IS NULL", location_ids)
+                   .find(params[:account_id])
+          else
+            Account.where(company_id: current_company_id).find(params[:account_id])
+          end
+        else
+          Account.where(company_id: current_company_id).find(params[:account_id])
+        end
       rescue ActiveRecord::RecordNotFound
-        Rails.logger.error "[AccountActivitiesController] Account not found: #{params[:account_id]} for company: #{current_company_id}"
-        render json: { error: 'Account not found' }, status: :not_found
+        Rails.logger.error "[AccountActivitiesController] Account not found or access denied: #{params[:account_id]} for company: #{current_company_id}"
+        render json: { error: 'Account not found or access denied' }, status: :not_found
       end
 
       def set_activity

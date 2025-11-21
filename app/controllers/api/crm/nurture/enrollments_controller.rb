@@ -4,13 +4,19 @@ module Api
   module Crm
     module Nurture
       class EnrollmentsController < ApplicationController
+        include RbacAuthorization
+        rbac_resource :crm
+
+        before_action :set_company_scope
+
         def index
           # Support filtering by lead_id, entity_type, or entity_id
           lead_ids = params[:lead_id]
           entity_type = params[:entity_type]
           entity_id = params[:entity_id]
           
-          enrollments = NurtureEnrollment.all
+          # Scope enrollments to this company
+          enrollments = NurtureEnrollment.for_company(@company.id)
           
           # Filter by entity_type
           if entity_type.present?
@@ -18,7 +24,13 @@ module Api
             enrollments = enrollments.where(enrollable_id: entity_id) if entity_id.present?
           # Backward compatibility: filter by lead_id
           elsif lead_ids.present?
-            enrollments = enrollments.for_lead(lead_ids)
+            # Verify lead belongs to company
+            lead = @company.leads.find_by(id: lead_ids)
+            if lead
+              enrollments = enrollments.for_lead(lead_ids)
+            else
+              enrollments = enrollments.none
+            end
           end
           
           enrollments = enrollments.includes(:nurture_sequence).order(created_at: :desc)
@@ -29,18 +41,36 @@ module Api
           render json: { error: e.message }, status: :internal_server_error
         end
 
+        def show
+          enrollment = NurtureEnrollment.for_company(@company.id).find_by(id: params[:id])
+          unless enrollment
+            render json: { error: 'Enrollment not found' }, status: :not_found
+            return
+          end
+          render json: enrollment_json(enrollment), status: :ok
+        end
+
         def create
           # Determine entity from params
           entity_type, entity_id = extract_entity_params
           
+          # Validate entity belongs to company
+          unless validate_entity_ownership(entity_type, entity_id)
+            render json: { error: 'Entity not found or access denied' }, status: :not_found
+            return
+          end
+          
           # Pause any existing running enrollments for this entity
           if entity_type && entity_id
-            NurtureEnrollment.for_entity(entity_type, entity_id)
+            NurtureEnrollment.for_company(@company.id)
+              .for_entity(entity_type, entity_id)
               .where(status: 'running')
               .update_all(status: 'paused')
           end
           
           enrollment = NurtureEnrollment.new(enrollment_params)
+          enrollment.company_id = @company.id
+          
           if enrollment.save
             # Start processing if status is running
             if enrollment.status == 'running'
@@ -53,7 +83,11 @@ module Api
         end
 
         def update
-          enrollment = NurtureEnrollment.find(params[:id])
+          enrollment = NurtureEnrollment.for_company(@company.id).find_by(id: params[:id])
+          unless enrollment
+            render json: { error: 'Enrollment not found' }, status: :not_found
+            return
+          end
           
           # If setting to running, pause other enrollments for this entity
           if params.dig(:enrollment, :status) == 'running' || params[:status] == 'running'
@@ -61,7 +95,8 @@ module Api
             entity_id = enrollment.entity_id
             
             if entity_type && entity_id
-              NurtureEnrollment.for_entity(entity_type, entity_id)
+              NurtureEnrollment.for_company(@company.id)
+                .for_entity(entity_type, entity_id)
                 .where(status: 'running')
                 .where.not(id: enrollment.id)
                 .update_all(status: 'paused')
@@ -80,7 +115,12 @@ module Api
         end
 
         def destroy
-          enrollment = NurtureEnrollment.find(params[:id])
+          enrollment = NurtureEnrollment.for_company(@company.id).find_by(id: params[:id])
+          unless enrollment
+            render json: { error: 'Enrollment not found' }, status: :not_found
+            return
+          end
+          
           enrollment.destroy!
           head :no_content
         end
@@ -92,18 +132,18 @@ module Api
           results = []
           
           ActiveRecord::Base.transaction do
-            # Handle deletions
+            # Handle deletions (scoped to company)
             delete_ids.each do |id|
-              enrollment = NurtureEnrollment.find_by(id: id)
+              enrollment = NurtureEnrollment.for_company(@company.id).find_by(id: id)
               enrollment&.destroy
             end
             
             # Handle upserts (create or update)
             upsert_data.each do |enr_data|
               enrollment = if enr_data[:id].present?
-                NurtureEnrollment.find_or_initialize_by(id: enr_data[:id])
+                NurtureEnrollment.for_company(@company.id).find_or_initialize_by(id: enr_data[:id])
               else
-                NurtureEnrollment.new
+                NurtureEnrollment.new(company_id: @company.id)
               end
               
               # Extract entity info (polymorphic or legacy lead_id)
@@ -111,12 +151,17 @@ module Api
               entity_id = enr_data[:entity_id] || enr_data[:entityId]
               lead_id = enr_data[:lead_id] || enr_data[:leadId]
               
-              # Set polymorphic or legacy association
+              # Validate entity ownership
               if entity_type.present? && entity_id.present?
+                unless validate_entity_ownership(entity_type, entity_id)
+                  next # Skip this enrollment if entity not owned
+                end
                 enrollment.enrollable_type = entity_type
                 enrollment.enrollable_id = entity_id
               elsif lead_id.present?
-                # Backward compatibility: set both lead_id and polymorphic
+                unless @company.leads.exists?(id: lead_id)
+                  next # Skip if lead not owned
+                end
                 enrollment.lead_id = lead_id
                 enrollment.enrollable_type = 'Lead'
                 enrollment.enrollable_id = lead_id
@@ -126,9 +171,15 @@ module Api
               sequence_id = enr_data[:nurture_sequence_id] || enr_data[:nurtureSequenceId] || enr_data[:sequenceId]
               status = enr_data[:status] || 'running'
               
+              # Validate sequence belongs to company
+              if sequence_id.present? && !@company.nurture_sequences.exists?(id: sequence_id)
+                next # Skip if sequence not owned
+              end
+              
               enrollment.nurture_sequence_id = sequence_id if sequence_id
               enrollment.status = status
               enrollment.current_step_index = enr_data[:current_step_index] || enr_data[:currentStepIndex] || 0
+              enrollment.company_id = @company.id
               
               # If setting to running, pause other enrollments for this entity
               if status == 'running'
@@ -136,7 +187,8 @@ module Api
                 eid = enrollment.entity_id
                 
                 if etype && eid
-                  NurtureEnrollment.for_entity(etype, eid)
+                  NurtureEnrollment.for_company(@company.id)
+                    .for_entity(etype, eid)
                     .where(status: 'running')
                     .where.not(id: enrollment.id)
                     .update_all(status: 'paused')
@@ -161,6 +213,32 @@ module Api
         end
 
         private
+
+        def set_company_scope
+          unless current_user
+            Rails.logger.error "🚫 [Nurture::EnrollmentsController] No authenticated user found"
+            render json: { error: 'Authentication required' }, status: :unauthorized
+            return
+          end
+          
+          company_id = current_company_id
+          
+          unless company_id.present?
+            Rails.logger.error "🚫 [Nurture::EnrollmentsController] No company context available"
+            render json: { error: 'No company context' }, status: :forbidden
+            return
+          end
+          
+          @company = ::Company.find_by(id: company_id)
+          
+          if @company.nil?
+            Rails.logger.error "🚫 [Nurture::EnrollmentsController] Company #{company_id} not found"
+            render json: { error: 'Company not found' }, status: :not_found
+            return
+          end
+          
+          Rails.logger.info "✅ [Nurture::EnrollmentsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+        end
 
         def enrollment_params
           params.require(:enrollment).permit(
@@ -198,6 +276,21 @@ module Api
           end
           
           [entity_type, entity_id]
+        end
+
+        def validate_entity_ownership(entity_type, entity_id)
+          return false unless entity_type && entity_id
+          
+          case entity_type
+          when 'Lead'
+            @company.leads.exists?(id: entity_id)
+          when 'Account'
+            @company.accounts.exists?(id: entity_id) if @company.respond_to?(:accounts)
+          when 'Contact'
+            @company.contacts.exists?(id: entity_id) if @company.respond_to?(:contacts)
+          else
+            false
+          end
         end
 
         def enrollment_json(enrollment)

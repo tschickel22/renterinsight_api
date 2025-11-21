@@ -10,11 +10,28 @@ module Api
       # GET /api/v1/contacts
       # GET /api/v1/accounts/:account_id/contacts
       def index
+        return unless authorize_action!('crm', 'read')
+        
         # STRICT TENANT ISOLATION: Only show contacts from current company
+        # RBAC: Location-tier users only see their assigned locations
         @contacts = if @account
                       @account.contacts
                     else
-                      @company.contacts
+                      if current_user.uses_rbac?
+                        if current_user.effective_admin?  # Use RBAC-aware admin check
+                          @company.contacts
+                        else
+                          location_ids = permission_service.accessible_location_ids
+                          if location_ids.any?
+                            # Include contacts in assigned locations OR unassigned contacts (NULL location_id)
+                            @company.contacts.where("location_id IN (?) OR location_id IS NULL", location_ids)
+                          else
+                            @company.contacts
+                          end
+                        end
+                      else
+                        @company.contacts
+                      end
                     end
 
         # Apply filters
@@ -53,6 +70,8 @@ module Api
 
       # GET /api/v1/contacts/stats
       def stats
+        return unless authorize_action!('crm', 'read')
+        
         # STRICT TENANT ISOLATION: Only stats for current company
         render json: @company.contacts.statistics
       rescue => e
@@ -62,16 +81,26 @@ module Api
 
       # GET /api/v1/contacts/:id
       def show
+        return unless authorize_action!('crm', 'read')
+        
         render json: contact_json(@contact, detailed: true)
       end
 
       # POST /api/v1/contacts
       def create
+        return unless authorize_action!('crm', 'create')
+        
         # Extract tags from the contact params before creating
         tag_names = contact_params_with_extra[:tags] || []
         
         # STRICT TENANT ISOLATION: Create contact within current company
         @contact = @company.contacts.new(contact_params)
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          @contact.location_id ||= location_ids.first if location_ids.any?
+        end
 
         if @contact.save
           # Handle tags if provided
@@ -89,6 +118,8 @@ module Api
 
       # PATCH/PUT /api/v1/contacts/:id
       def update
+        return unless authorize_action!('crm', 'update')
+        
         # Extract tags from the contact params before updating
         tag_names = contact_params_with_extra[:tags]
         
@@ -107,12 +138,16 @@ module Api
 
       # DELETE /api/v1/contacts/:id
       def destroy
+        return unless authorize_action!('crm', 'delete')
+        
         @contact.destroy
         head :no_content
       end
 
       # POST /api/v1/contacts/bulk_create
       def bulk_create
+        return unless authorize_action!('crm', 'create')
+        
         contacts_data = params[:contacts] || []
         created_contacts = []
         errors = []
@@ -123,6 +158,12 @@ module Api
             :account_id, :company_id, :first_name, :last_name, :email, :phone,
             :title, :department, :is_primary, :notes
           ))
+          
+          # RBAC: Location-tier users auto-assign to their location
+          if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+            location_ids = permission_service.accessible_location_ids
+            contact.location_id ||= location_ids.first if location_ids.any?
+          end
 
           if contact.save
             created_contacts << contact
@@ -144,6 +185,8 @@ module Api
 
       # POST /api/v1/contacts/check_duplicate
       def check_duplicate
+        return unless authorize_action!('crm', 'read')
+        
         email = params[:email]&.strip&.downcase
         phone = params[:phone]&.strip
         
@@ -187,6 +230,8 @@ module Api
 
       # POST /api/v1/contacts/quick_create
       def quick_create
+        return unless authorize_action!('crm', 'create')
+        
         # STRICT TENANT ISOLATION: Create contact within current company
         contact_data = {
           first_name: params[:first_name]&.strip,
@@ -239,6 +284,12 @@ module Api
         end
 
         @contact = @company.contacts.new(contact_data)
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          @contact.location_id ||= location_ids.first if location_ids.any?
+        end
 
         if @contact.save
           Rails.logger.info "✅ [ContactsController] Quick-created contact: #{@contact.id} for company: #{@company.id}"
@@ -258,6 +309,8 @@ module Api
 
       # POST /api/v1/contacts/:id/tags
       def add_tags
+        return unless authorize_action!('crm', 'update')
+        
         tag_names = params[:tags] || []
         added_tags = []
 
@@ -277,6 +330,8 @@ module Api
 
       # DELETE /api/v1/contacts/:id/tags/:tag_name
       def remove_tag
+        return unless authorize_action!('crm', 'update')
+        
         tag = @contact.tags.find_by(name: params[:tag_name])
 
         if tag
@@ -289,6 +344,8 @@ module Api
 
       # PATCH /api/v1/contacts/:id/opt_in_email
       def opt_in_email
+        return unless authorize_action!('crm', 'update')
+        
         @contact.opt_in_email!
         render json: {
           message: 'Contact opted in to email communications',
@@ -300,6 +357,8 @@ module Api
 
       # PATCH /api/v1/contacts/:id/opt_out_email
       def opt_out_email
+        return unless authorize_action!('crm', 'update')
+        
         @contact.opt_out_email!(params[:reason])
         render json: {
           message: 'Contact opted out of email communications',
@@ -311,6 +370,8 @@ module Api
 
       # PATCH /api/v1/contacts/:id/opt_in_sms
       def opt_in_sms
+        return unless authorize_action!('crm', 'update')
+        
         @contact.opt_in_sms!
         render json: {
           message: 'Contact opted in to SMS communications',
@@ -322,6 +383,8 @@ module Api
 
       # PATCH /api/v1/contacts/:id/opt_out_sms
       def opt_out_sms
+        return unless authorize_action!('crm', 'update')
+        
         @contact.opt_out_sms!(params[:reason])
         render json: {
           message: 'Contact opted out of SMS communications',
@@ -333,6 +396,8 @@ module Api
 
       # GET /api/v1/contacts/:id/deals
       def deals
+        return unless authorize_action!('crm', 'read')
+        
         if @contact.account.nil?
           render json: {
             success: true,
@@ -363,6 +428,8 @@ module Api
 
       # GET /api/v1/contacts/:id/quotes
       def quotes
+        return unless authorize_action!('crm', 'read')
+        
         @quotes = Quote.where(contact_id: @contact.id)
                        .or(Quote.where(account_id: @contact.account_id))
                        .where(is_deleted: false)
@@ -396,6 +463,8 @@ module Api
 
       # GET /api/v1/contacts/:id/portal_status
       def portal_status
+        return unless authorize_action!('crm', 'read')
+        
         # Find portal access for this contact
         portal_access = BuyerPortalAccess.find_by(
           buyer_id: @contact.id,
@@ -433,16 +502,19 @@ module Api
           return
         end
         
-        unless current_user.company_id.present?
-          Rails.logger.error "🚫 [ContactsController] User #{current_user.id} has no company_id"
-          render json: { error: 'No company assigned' }, status: :forbidden
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [ContactsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
           return
         end
         
-        @company = ::Company.find_by(id: current_user.company_id)
+        @company = ::Company.find_by(id: company_id)
         
         if @company.nil?
-          Rails.logger.error "🚫 [ContactsController] Company #{current_user.company_id} not found"
+          Rails.logger.error "🚫 [ContactsController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
@@ -452,9 +524,21 @@ module Api
 
       def set_contact
         # STRICT TENANT ISOLATION: Only access contacts in same company
-        @contact = @company.contacts.find(params[:id])
+        # RBAC: Location-tier users only access their assigned locations
+        @contact = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include contacts in assigned locations OR unassigned contacts (NULL location_id)
+            @company.contacts.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+          else
+            @company.contacts.find(params[:id])
+          end
+        else
+          @company.contacts.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Contact not found or access denied' }, status: :not_found
+        return
       end
 
       def set_account
@@ -462,6 +546,7 @@ module Api
         @account = @company.accounts.find(params[:account_id]) if params[:account_id]
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Account not found or access denied' }, status: :not_found
+        return
       end
 
       def contact_params

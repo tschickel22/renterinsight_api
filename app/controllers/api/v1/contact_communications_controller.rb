@@ -3,6 +3,13 @@
 module Api
   module V1
     class ContactCommunicationsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :communications,
+        read_actions: [:index],
+        create_actions: [:email, :sms, :log],
+        update_actions: [],
+        delete_actions: []
+
       before_action :set_contact
 
       # GET /api/v1/contacts/:contact_id/communications
@@ -174,9 +181,23 @@ module Api
       private
 
       def set_contact
-        @contact = Contact.find(params[:contact_id])
+        # STRICT TENANT ISOLATION: Only find contacts within company
+        # RBAC: Location-tier users only access contacts in their assigned locations
+        @contact = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include contacts in assigned locations OR unassigned contacts (NULL location_id)
+            Contact.where(company_id: current_company_id)
+                   .where("location_id IN (?) OR location_id IS NULL", location_ids)
+                   .find(params[:contact_id])
+          else
+            Contact.where(company_id: current_company_id).find(params[:contact_id])
+          end
+        else
+          Contact.where(company_id: current_company_id).find(params[:contact_id])
+        end
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Contact not found' }, status: :not_found
+        render json: { error: 'Contact not found or access denied' }, status: :not_found
       end
 
       def communication_json(comm)

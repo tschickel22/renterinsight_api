@@ -6,9 +6,26 @@ module Api
 
       # GET /api/crm/deals
       def index
+        return unless authorize_action!('deals', 'read')
+        
         # STRICT TENANT ISOLATION: Only show deals from current company
-        deals = @company.deals
-                    .includes(:account, :contact, :territory, :user, :deal_products)
+        # RBAC: Location-tier users only see their assigned locations
+        deals = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.deals
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              @company.deals.where(location_id: location_ids)
+            else
+              @company.deals
+            end
+          end
+        else
+          @company.deals
+        end
+        
+        deals = deals.includes(:account, :contact, :territory, :user, :deal_products)
                     .order(created_at: :desc)
         
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
@@ -46,6 +63,8 @@ module Api
 
       # GET /api/crm/deals/by_stage
       def by_stage
+        return unless authorize_action!('deals', 'read')
+        
         stage = params[:stage]
         if stage.blank?
           render json: { error: 'Stage parameter is required' }, status: :bad_request
@@ -63,6 +82,8 @@ module Api
 
       # GET /api/crm/deals/metrics
       def metrics
+        return unless authorize_action!('deals', 'read')
+        
         # STRICT TENANT ISOLATION: Only metrics for current company
         company_deals = @company.deals
         
@@ -115,6 +136,8 @@ module Api
 
       # GET /api/crm/deals/forecast
       def forecast
+        return unless authorize_action!('deals', 'read')
+        
         # STRICT TENANT ISOLATION: Only forecast for current company
         # Calculate forecast by territory and time period
         period = params[:period] || 'month' # month, quarter, year
@@ -136,7 +159,8 @@ module Api
         weighted_forecast = forecast_deals.sum('value * probability / 100')
         
         by_territory = {}
-        Territory.all.each do |territory|
+        # STRICT TENANT ISOLATION: Only show territories for current company
+        @company.territories.each do |territory|
           territory_deals = forecast_deals.where(territory_id: territory.id)
           by_territory[territory.id] = {
             name: territory.name,
@@ -156,16 +180,26 @@ module Api
 
       # GET /api/crm/deals/:id
       def show
+        return unless authorize_action!('deals', 'read')
+        
         render json: deal_json(@deal, detailed: true)
       end
 
       # POST /api/crm/deals
       # FIX: Improved error handling for deal creation
       def create
+        return unless authorize_action!('deals', 'create')
+        
         # STRICT TENANT ISOLATION: Create deal within current company
         deal = @company.deals.new(deal_params)
         # Don't set user_id if there's no real current_user
         # deal.user_id ||= current_user&.id
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          deal.location_id ||= location_ids.first if location_ids.any?
+        end
         
         if deal.save
           # FIX: Safely create stage history with error handling
@@ -193,6 +227,8 @@ module Api
 
       # PATCH/PUT /api/crm/deals/:id
       def update
+        return unless authorize_action!('deals', 'update')
+        
         old_stage = @deal.stage
         
         if @deal.update(deal_params)
@@ -218,6 +254,8 @@ module Api
 
       # POST /api/crm/deals/:id/move_stage
       def move_stage
+        return unless authorize_action!('deals', 'update')
+        
         new_stage = params[:stage]
         notes = params[:notes]
         
@@ -249,6 +287,8 @@ module Api
 
       # DELETE /api/crm/deals/:id
       def destroy
+        return unless authorize_action!('deals', 'delete')
+        
         @deal.destroy
         head :no_content
       end
@@ -262,16 +302,19 @@ module Api
           return
         end
         
-        unless current_user.company_id.present?
-          Rails.logger.error "🚫 [DealsController] User #{current_user.id} has no company_id"
-          render json: { error: 'No company assigned' }, status: :forbidden
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [DealsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
           return
         end
         
-        @company = ::Company.find_by(id: current_user.company_id)
+        @company = ::Company.find_by(id: company_id)
         
         if @company.nil?
-          Rails.logger.error "🚫 [DealsController] Company #{current_user.company_id} not found"
+          Rails.logger.error "🚫 [DealsController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
@@ -281,9 +324,20 @@ module Api
 
       def set_deal
         # STRICT TENANT ISOLATION: Only access deals in same company
-        @deal = @company.deals.find(params[:id])
+        # RBAC: Location-tier users only access their assigned locations
+        @deal = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            @company.deals.where(location_id: location_ids).find(params[:id])
+          else
+            @company.deals.find(params[:id])
+          end
+        else
+          @company.deals.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Deal not found or access denied' }, status: :not_found
+        return
       end
 
       def deal_params

@@ -1,4 +1,6 @@
 class NurtureEnrollment < ApplicationRecord
+  belongs_to :company, optional: true
+  
   # Polymorphic association - can belong to Lead or Account
   belongs_to :enrollable, polymorphic: true, optional: true
   
@@ -20,6 +22,7 @@ class NurtureEnrollment < ApplicationRecord
   scope :for_lead, ->(lead_id) { where(lead_id: lead_id).or(where(enrollable_type: 'Lead', enrollable_id: lead_id)) }
   scope :for_account, ->(account_id) { where(enrollable_type: 'Account', enrollable_id: account_id) }
   scope :for_entity, ->(entity_type, entity_id) { where(enrollable_type: entity_type, enrollable_id: entity_id) }
+  scope :for_company, ->(company_id) { where(company_id: company_id) }
   scope :active, -> { where(status: ['idle', 'running']) }
   scope :running, -> { where(status: 'running') }
   

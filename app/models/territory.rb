@@ -1,4 +1,5 @@
 class Territory < ApplicationRecord
+  belongs_to :company, optional: true
   belongs_to :user, optional: true
   
   has_many :territory_rules, dependent: :destroy
@@ -8,11 +9,14 @@ class Territory < ApplicationRecord
   has_many :territory_users, dependent: :destroy
   has_many :assigned_users, through: :territory_users, source: :user
   
-  validates :name, presence: true, uniqueness: true
+  validates :name, presence: true
+  validates :name, uniqueness: { scope: :company_id }, if: -> { company_id.present? }
   
   # Set default type_field if not provided
   before_validation :set_default_type_field
   
+  scope :active, -> { where(is_active: [true, nil]) }
+  scope :for_company, ->(company_id) { where(company_id: [company_id, nil]) }
   scope :with_user, -> { where.not(user_id: nil) }
   scope :without_user, -> { where(user_id: nil) }
   scope :by_region, ->(region) { where(region: region) }

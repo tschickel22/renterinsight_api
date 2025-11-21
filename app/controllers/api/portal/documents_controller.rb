@@ -8,7 +8,6 @@ module Api
       skip_before_action :authenticate
       before_action :authenticate_portal_buyer!
       before_action :set_document, only: [:show, :download, :destroy]
-      before_action :authorize_document!, only: [:show, :download, :destroy]
       
       # GET /api/portal/documents
       def index
@@ -100,15 +99,10 @@ module Api
       private
       
       def set_document
-        @document = PortalDocument.find_by(id: params[:id])
+        # Scope document lookup to buyer's documents for tenant isolation
+        @document = buyer_documents.find_by(id: params[:id])
         unless @document
           render json: { ok: false, error: 'Document not found' }, status: :not_found
-        end
-      end
-      
-      def authorize_document!
-        unless @document.owner == current_portal_buyer
-          render json: { ok: false, error: 'Unauthorized' }, status: :forbidden
         end
       end
       

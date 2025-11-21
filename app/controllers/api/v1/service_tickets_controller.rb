@@ -8,9 +8,27 @@ module Api
       
       # GET /api/v1/service-tickets
       def index
-        @service_tickets = @company.service_tickets
-                                    .includes(:account, :contact, :vehicle)
-                                    .recent
+        return unless authorize_action!('service', 'read')
+        
+        # STRICT TENANT ISOLATION: Only return service tickets from current user's company
+        # RBAC: Location-tier users only see their assigned locations
+        @service_tickets = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.service_tickets
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              # Include tickets in assigned locations OR unassigned tickets (NULL location_id)
+              @company.service_tickets.where("location_id IN (?) OR location_id IS NULL", location_ids)
+            else
+              @company.service_tickets
+            end
+          end
+        else
+          @company.service_tickets
+        end
+        
+        @service_tickets = @service_tickets.includes(:account, :contact, :vehicle).recent
         
         # Apply filters
         @service_tickets = @service_tickets.where(status: params[:status]) if params[:status].present?
@@ -25,6 +43,8 @@ module Api
       
       # GET /api/v1/service-tickets/:id
       def show
+        return unless authorize_action!('service', 'read')
+        
         render json: {
           data: serialize_ticket(@service_ticket)
         }
@@ -32,7 +52,15 @@ module Api
       
       # POST /api/v1/service-tickets
       def create
+        return unless authorize_action!('service', 'create')
+        
         @service_ticket = @company.service_tickets.new(service_ticket_params)
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          @service_ticket.location_id ||= location_ids.first if location_ids.any?
+        end
         
         if @service_ticket.save
           render json: { data: serialize_ticket(@service_ticket) }, status: :created
@@ -43,6 +71,8 @@ module Api
       
       # PATCH/PUT /api/v1/service-tickets/:id
       def update
+        return unless authorize_action!('service', 'update')
+        
         if @service_ticket.update(service_ticket_params)
           render json: { data: serialize_ticket(@service_ticket) }
         else
@@ -52,12 +82,16 @@ module Api
       
       # DELETE /api/v1/service-tickets/:id
       def destroy
+        return unless authorize_action!('service', 'delete')
+        
         @service_ticket.destroy
         head :no_content
       end
       
       # GET /api/v1/service-tickets/stats
       def stats
+        return unless authorize_action!('service', 'read')
+        
         tickets = @company.service_tickets
         
         stats_data = {
@@ -75,9 +109,22 @@ module Api
       private
       
       def set_service_ticket
-        @service_ticket = @company.service_tickets.find(params[:id])
+        # STRICT TENANT ISOLATION: Only find service tickets within company
+        # RBAC: Location-tier users only access their assigned locations
+        @service_ticket = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include tickets in assigned locations OR unassigned tickets (NULL location_id)
+            @company.service_tickets.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+          else
+            @company.service_tickets.find(params[:id])
+          end
+        else
+          @company.service_tickets.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Service ticket not found' }, status: :not_found
+        render json: { error: 'Service ticket not found or access denied' }, status: :not_found
+        return
       end
       
       def set_company
@@ -88,16 +135,19 @@ module Api
           return
         end
         
-        unless current_user.company_id.present?
-          Rails.logger.error "🚫 [ServiceTicketsController] User #{current_user.id} has no company_id"
-          render json: { error: 'No company assigned' }, status: :forbidden
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [ServiceTicketsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
           return
         end
         
-        @company = ::Company.find_by(id: current_user.company_id)
+        @company = ::Company.find_by(id: company_id)
         
         if @company.nil?
-          Rails.logger.error "🚫 [ServiceTicketsController] Company #{current_user.company_id} not found"
+          Rails.logger.error "🚫 [ServiceTicketsController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end

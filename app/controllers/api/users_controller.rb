@@ -37,6 +37,16 @@ module Api
       user = @company.users.new(user_params)
       
       if user.save
+        # Assign RBAC role if company uses RBAC system
+        if @company.use_rbac_system && user.role.present?
+          user.assign_rbac_role(
+            user.role,
+            company_id: @company.id,
+            assigned_by: current_user
+          )
+          Rails.logger.info "✅ [Api::UsersController] Assigned RBAC role '#{user.role}' to new user #{user.id}"
+        end
+        
         render json: user_json(user), status: :created
       else
         render json: { errors: user.errors.full_messages }, status: :unprocessable_entity
@@ -48,7 +58,21 @@ module Api
       # STRICT TENANT ISOLATION: Only update users in same company
       user = @company.users.find(params[:id])
       
+      # Check if role is being changed
+      new_role = params[:user][:role] if params[:user].present?
+      role_changed = new_role.present? && new_role != user.role
+      
       if user.update(user_params)
+        # Handle RBAC role change if company uses RBAC system
+        if role_changed && @company.use_rbac_system
+          user.replace_rbac_role(
+            new_role,
+            company_id: @company.id,
+            assigned_by: current_user
+          )
+          Rails.logger.info "✅ [Api::UsersController] Updated RBAC role to '#{new_role}' for user #{user.id}"
+        end
+        
         render json: {
           success: true,
           user: user_json(user),

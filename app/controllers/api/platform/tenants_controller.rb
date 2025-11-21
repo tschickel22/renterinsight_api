@@ -6,6 +6,8 @@ module Api
       # Skip authentication for public availability checks
       skip_before_action :authenticate, only: [:check_subdomain_available, :check_domain_available]
       
+      # Require platform admin for all tenant management actions
+      before_action :require_platform_admin!, except: [:check_subdomain_available, :check_domain_available]
       before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :generate_email_dns_records, :verify_email_domain, :check_domain_dns, :check_email_dns]
       
       # GET /api/platform/tenants

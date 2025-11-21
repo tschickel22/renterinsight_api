@@ -29,7 +29,7 @@ class Account < ApplicationRecord
   # Validations
   validates :name, presence: true, uniqueness: { scope: :company_id }
   validates :email, format: { with: URI::MailTo::EMAIL_REGEXP }, allow_blank: true
-  validates :status, inclusion: { in: STATUSES }
+  validates :status, inclusion: { in: STATUSES }, allow_blank: true, allow_nil: true  # Many existing accounts don't have status set
   validates :account_type, inclusion: { in: ACCOUNT_TYPES }, allow_blank: true
   validates :rating, inclusion: { in: RATINGS }, allow_blank: true
   validates :ownership, inclusion: { in: OWNERSHIP_TYPES }, allow_blank: true
@@ -38,7 +38,7 @@ class Account < ApplicationRecord
   validates :employee_count, numericality: { greater_than_or_equal_to: 0, only_integer: true }, allow_blank: true
   
   # Scopes
-  scope :active, -> { where(status: 'active', is_deleted: false) }
+  scope :active, -> { where(is_deleted: [false, nil]) }  # Don't filter by status - many accounts don't have it set
   scope :customers, -> { where(account_type: 'customer') }
   scope :prospects, -> { where(account_type: 'prospect') }
   scope :converted_leads, -> { where(account_type: 'converted_lead') }
@@ -114,6 +114,15 @@ class Account < ApplicationRecord
       send("#{prefix}_postal_code"),
       send("#{prefix}_country")
     ].compact.join(', ')
+  end
+  
+  # Soft delete functionality
+  def soft_delete!
+    update_columns(is_deleted: true, deleted_at: Time.current)
+  end
+  
+  def restore!
+    update_columns(is_deleted: false, deleted_at: nil)
   end
   
   def as_json(options = {})

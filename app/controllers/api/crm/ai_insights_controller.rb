@@ -1,7 +1,12 @@
 module Api
   module Crm
     class AiInsightsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm, create_actions: [:generate], update_actions: [:mark_read]
+
+      before_action :set_company_scope
       before_action :set_lead, only: [:index, :generate]
+      before_action :set_insight, only: [:mark_read]
 
       def index
         insights = @lead.ai_insights.recent
@@ -19,15 +24,54 @@ module Api
       end
 
       def mark_read
-        insight = AiInsight.find(params[:id])
-        insight.mark_as_read!
-        render json: insight_json(insight)
+        @insight.mark_as_read!
+        render json: insight_json(@insight)
       end
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [AiInsightsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [AiInsightsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [AiInsightsController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [AiInsightsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_lead
-        @lead = Lead.find(params[:lead_id] || params[:id])
+        @lead = @company.leads.find_by(id: params[:lead_id] || params[:id])
+        unless @lead
+          render json: { error: 'Lead not found or access denied' }, status: :not_found
+          return
+        end
+      end
+
+      def set_insight
+        # Find insight through company's leads to ensure tenant isolation
+        lead_ids = @company.leads.pluck(:id)
+        @insight = AiInsight.where(lead_id: lead_ids).find_by(id: params[:id])
+        unless @insight
+          render json: { error: 'Insight not found or access denied' }, status: :not_found
+          return
+        end
       end
 
       def generate_insights_for_lead(lead)
@@ -66,6 +110,7 @@ module Api
         end
         
         # Priority 2: Check for recent activity (only if not a new lead)
+        # Scope activities to company's leads for safety
         if !insight_types_used.include?('next_action')
           recent_activities = Activity.where(lead_id: lead.id).where('created_at > ?', 7.days.ago).count
           if recent_activities == 0 && lead.created_at < 7.days.ago
@@ -84,6 +129,7 @@ module Api
         end
         
         # Priority 3: Email engagement analysis
+        # Scope communications to this lead (already scoped through lead_id)
         email_logs = Communication.where(communicable_type: 'Lead', communicable_id: lead.id, channel: 'email')
         email_count = email_logs.count
         email_opens = email_logs.where.not(read_at: nil).count

@@ -2,6 +2,14 @@
 module Api
   module Crm
     class RemindersController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm,
+        read_actions: [:index],
+        create_actions: [:create],
+        update_actions: [:update, :complete],
+        delete_actions: [:destroy]
+
+      before_action :set_company_scope
       before_action :set_lead, only: [:index, :create, :update]
       before_action :set_reminder, only: [:update, :complete, :destroy]
 
@@ -13,8 +21,9 @@ module Api
       def create
         data = extract_reminder_params
         reminder = @lead.reminders.build(data)
-        # match your create default
-        reminder.user_id ||= 1
+        # Use current_user for proper tenant isolation
+        reminder.user_id ||= current_user&.id
+        
         if reminder.save
           render json: reminder_json(reminder), status: :created
         else
@@ -27,13 +36,18 @@ module Api
 
       def update
         payload = extract_reminder_params
-        # Never allow user_id to become NULL.
         raw = params[:reminder].respond_to?(:to_unsafe_h) ? params[:reminder].to_unsafe_h : (params[:reminder] || {})
         uid = raw['user_id'] || raw[:user_id]
+        
         if uid && uid.to_s.strip != ''
-          payload[:user_id] = (uid.to_s =~ /^\d+$/) ? uid.to_i : (@reminder.user_id || 1)
+          # Verify user belongs to same company for security
+          if @company.users.exists?(uid.to_i)
+            payload[:user_id] = uid.to_i
+          else
+            payload[:user_id] = @reminder.user_id || current_user&.id
+          end
         else
-          payload[:user_id] = @reminder.user_id || 1
+          payload[:user_id] = @reminder.user_id || current_user&.id
         end
 
         if @reminder.update(payload)
@@ -47,7 +61,7 @@ module Api
       end
 
       def complete
-        @reminder.update!(is_completed: true, completed_at: Time.current, user_id: (@reminder.user_id || 1))
+        @reminder.update!(is_completed: true, completed_at: Time.current, user_id: (@reminder.user_id || current_user&.id))
         render json: reminder_json(@reminder), status: :ok
       rescue => e
         Rails.logger.error "[RemindersController#complete] #{e.class}: #{e.message}"
@@ -64,15 +78,51 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
+
       def set_lead
-        @lead = Lead.find(params[:lead_id])
+        # STRICT TENANT ISOLATION: Only access leads in same company
+        @lead = @company.leads.find_by(id: params[:lead_id])
+        unless @lead
+          render json: { error: 'Lead not found or access denied' }, status: :not_found
+          return
+        end
       end
 
       def set_reminder
-        @reminder = Reminder.find(params[:id])
+        # STRICT TENANT ISOLATION: Only access reminders through lead scoped to company
+        lead = @company.leads.find_by(id: params[:lead_id])
+        unless lead
+          render json: { error: 'Lead not found or access denied' }, status: :not_found
+          return
+        end
+        
+        @reminder = lead.reminders.find_by(id: params[:id])
+        unless @reminder
+          render json: { error: 'Reminder not found or access denied' }, status: :not_found
+          return
+        end
       end
 
-      # No user_id here—never invent or null it out from params mapping.
       def extract_reminder_params
         raw = if params[:reminder].present?
                 p = params[:reminder]
@@ -81,7 +131,6 @@ module Api
                 params.respond_to?(:to_unsafe_h) ? params.to_unsafe_h : params.to_h
               end
 
-        # Use fetch with default to handle false values properly
         is_completed_val = raw.key?('is_completed') ? raw['is_completed'] : 
                           raw.key?(:is_completed) ? raw[:is_completed] :
                           raw.key?('isCompleted') ? raw['isCompleted'] :
@@ -96,7 +145,6 @@ module Api
           is_completed:  is_completed_val,
         }.compact_blank
 
-        # Re-add is_completed if it was explicitly set to false
         mapped[:is_completed] = is_completed_val if is_completed_val == false
 
         ActionController::Parameters.new(mapped).permit!

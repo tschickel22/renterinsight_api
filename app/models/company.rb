@@ -17,6 +17,11 @@ class Company < ApplicationRecord
   has_many :brochures, dependent: :destroy
   has_many :templates, dependent: :destroy
   has_many :locations, dependent: :destroy
+  has_many :sources, dependent: :destroy
+  has_many :tags, dependent: :destroy
+  has_many :territories, dependent: :destroy
+  has_many :nurture_sequences, dependent: :destroy
+  has_many :nurture_enrollments, dependent: :destroy
   
   # RBAC System Associations
   has_many :roles, dependent: :destroy

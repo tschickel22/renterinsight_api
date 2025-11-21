@@ -3,27 +3,34 @@
 module Api
   class UploadsController < ApplicationController
     skip_before_action :authenticate, only: [:show]
-    before_action :set_company, except: [:show]
+    before_action :authenticate_user!, except: [:show]
+    before_action :set_company_scope, except: [:show]
+    
+    # RBAC Authorization for uploads
+    before_action :authorize_branding_upload!, only: [:logo]
+    before_action :authorize_general_upload!, only: [:create]
+    before_action :authorize_upload_delete!, only: [:destroy]
 
     # GET /api/uploads/*path
     def show
-      # Path comes from params[:path] (wildcard route)
       file_path = params[:path]
       
-      # Construct full path to file in public/uploads
+      if file_path.include?('..') || file_path.include?("\0")
+        Rails.logger.error "❌ [UploadsController] Potential path traversal attempt: #{file_path}"
+        render json: { error: 'Invalid path' }, status: :bad_request
+        return
+      end
+      
       full_path = Rails.root.join('public', 'uploads', file_path)
       
       Rails.logger.info "📁 [UploadsController] Serving file: #{file_path}"
-      Rails.logger.info "📁 [UploadsController] Full path: #{full_path}"
       
-      # Check if file exists
       unless File.exist?(full_path)
         Rails.logger.error "❌ [UploadsController] File not found: #{full_path}"
         render json: { error: 'File not found' }, status: :not_found
         return
       end
       
-      # Determine content type based on file extension
       content_type = case File.extname(file_path).downcase
       when '.jpg', '.jpeg' then 'image/jpeg'
       when '.png' then 'image/png'
@@ -35,7 +42,6 @@ module Api
       else 'application/octet-stream'
       end
       
-      # Send file with appropriate headers
       send_file full_path, 
         type: content_type,
         disposition: 'inline',
@@ -54,12 +60,10 @@ module Api
         return render json: { error: 'No file provided' }, status: :unprocessable_entity
       end
 
-      # Validate file type
       unless valid_image?(file)
         return render json: { error: 'Invalid file type. Only images are allowed.' }, status: :unprocessable_entity
       end
 
-      # Upload file
       uploaded_file = upload_to_storage(file, "logos/#{upload_type}")
 
       render json: {
@@ -82,7 +86,6 @@ module Api
         return render json: { error: 'No file provided' }, status: :unprocessable_entity
       end
 
-      # Upload file
       uploaded_file = upload_to_storage(file, category)
 
       render json: {
@@ -104,23 +107,55 @@ module Api
         return render json: { error: 'No URL provided' }, status: :unprocessable_entity
       end
 
-      # In a real implementation, you would delete the file from storage
-      # For now, we'll just return success
       head :no_content
     end
 
     private
 
-    # FIX: Improved company validation with better error handling
-    def set_company
-      @company = ::Company.find_by(id: current_user&.company_id) if current_user
-      @company ||= ::Company.first
-      
-      unless @company
-        render json: { error: 'No company found. Please contact support.' }, 
-               status: :unprocessable_entity
+    # ============================================
+    # RBAC Authorization Methods
+    # ============================================
+
+    def authorize_branding_upload!
+      return if skip_rbac?
+      unless current_user.has_permission?('branding', 'update', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied UPLOAD access to branding for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to upload logos' }, status: :forbidden
       end
     end
+
+    def authorize_general_upload!
+      return if skip_rbac?
+      # For general uploads, check if user has any create permission
+      # This covers inventory images, documents, etc.
+      has_any_create = current_user.has_permission?('inventory', 'create', 'all', @company&.id) ||
+                       current_user.has_permission?('branding', 'update', 'all', @company&.id) ||
+                       current_user.has_permission?('crm', 'create', 'all', @company&.id)
+      
+      unless has_any_create
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied UPLOAD access for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to upload files' }, status: :forbidden
+      end
+    end
+
+    def authorize_upload_delete!
+      return if skip_rbac?
+      unless current_user.has_permission?('branding', 'delete', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied DELETE access to uploads for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to delete files' }, status: :forbidden
+      end
+    end
+
+    def skip_rbac?
+      return true if current_user.platform_admin?
+      return true if current_user.super_admin?
+      return true unless @company&.use_rbac_system
+      false
+    end
+
+    # ============================================
+    # Helper Methods
+    # ============================================
 
     def valid_image?(file)
       return false unless file.respond_to?(:content_type)
@@ -137,23 +172,18 @@ module Api
       allowed_types.include?(file.content_type)
     end
 
-    # FIX: Added comprehensive error handling and file size validation
     def upload_to_storage(file, category)
-      # Validate company exists
-      raise StandardError, 'Company not found' unless @company
+      raise StandardError, 'Company not found - authentication required' unless @company
       
-      # Validate file size (10MB limit)
       max_size = 10.megabytes
       if file.size > max_size
         raise StandardError, "File size exceeds maximum allowed (#{max_size / 1.megabyte}MB)"
       end
       
-      # Generate unique filename
       extension = File.extname(file.original_filename)
       filename = "#{SecureRandom.uuid}#{extension}"
       path = "uploads/#{@company.id}/#{category}/#{filename}"
 
-      # Ensure directory exists
       full_path = Rails.root.join('public', path)
       
       begin
@@ -163,7 +193,6 @@ module Api
         raise StandardError, "Failed to create upload directory"
       end
 
-      # Save file with error handling
       begin
         File.open(full_path, 'wb') do |f|
           f.write(file.read)
@@ -173,7 +202,6 @@ module Api
         raise StandardError, "Failed to save file to storage"
       end
 
-      # Return URL (adjust based on your setup)
       {
         url: "/#{path}",
         path: full_path.to_s

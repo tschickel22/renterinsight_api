@@ -3,6 +3,7 @@
 module Api
   module Platform
     class CommunicationTemplatesController < ApplicationController
+      before_action :require_platform_admin!
       before_action :set_template, only: [:show, :update, :destroy, :send_test]
       
       # GET /api/platform/communications/templates

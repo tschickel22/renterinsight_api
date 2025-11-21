@@ -3,6 +3,10 @@
 module Api
   module Crm
     class LeadActivitiesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm, read_actions: [:index, :show, :reminders], update_actions: [:update, :complete, :cancel, :mark_reminder_sent]
+
+      before_action :set_company_scope
       before_action :set_lead, except: [:mark_reminder_sent]
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
       
@@ -111,8 +115,19 @@ module Api
 
       # POST /api/crm/leads/:lead_id/lead_activities/:id/mark_reminder_sent
       def mark_reminder_sent
-        # Don't require lead for this action
-        activity = LeadActivity.find(params[:id])
+        # STRICT TENANT ISOLATION: Scope through company
+        lead = @company.leads.find_by(id: params[:lead_id])
+        unless lead
+          render json: { error: 'Lead not found or access denied' }, status: :not_found
+          return
+        end
+        
+        activity = lead.lead_activities.find_by(id: params[:id])
+        unless activity
+          render json: { error: 'Activity not found or access denied' }, status: :not_found
+          return
+        end
+        
         activity.update!(reminder_sent: true)
         render json: activity_json(activity), status: :ok
       rescue => e
@@ -121,19 +136,45 @@ module Api
       end
       
       private
+
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
       
       def set_lead
-        @lead = Lead.where(company_id: current_company_id).find(params[:lead_id])
-      rescue ActiveRecord::RecordNotFound
-        Rails.logger.error "[LeadActivitiesController] Lead not found: #{params[:lead_id]} for company: #{current_company_id}"
-        render json: { error: 'Lead not found' }, status: :not_found
+        # STRICT TENANT ISOLATION: Only access leads in same company
+        @lead = @company.leads.find_by(id: params[:lead_id])
+        unless @lead
+          Rails.logger.error "[LeadActivitiesController] Lead not found: #{params[:lead_id]} for company: #{@company&.id}"
+          render json: { error: 'Lead not found or access denied' }, status: :not_found
+          return
+        end
       end
       
       def set_activity
-        @activity = @lead.lead_activities.find(params[:id])
-      rescue ActiveRecord::RecordNotFound
-        Rails.logger.error "[LeadActivitiesController] Activity not found: #{params[:id]} for lead: #{@lead&.id}"
-        render json: { error: 'Activity not found' }, status: :not_found
+        @activity = @lead.lead_activities.find_by(id: params[:id])
+        unless @activity
+          Rails.logger.error "[LeadActivitiesController] Activity not found: #{params[:id]} for lead: #{@lead&.id}"
+          render json: { error: 'Activity not found or access denied' }, status: :not_found
+          return
+        end
       end
       
       def activity_params

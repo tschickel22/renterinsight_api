@@ -2,10 +2,16 @@
 
 module Api
   class SettingsController < ApplicationController
-    # REMOVED: include TenantResolver (doesn't exist)
-    
-    # Require authentication - users must be logged in to see company settings
     before_action :set_company
+    
+    # RBAC Authorization
+    before_action :authorize_settings_read!, only: [:tenant, :platform, :quotes, :custom_fields]
+    before_action :authorize_settings_update!, only: [:update, :update_quotes]
+    before_action :authorize_branding_read!, only: []  # No read-only branding endpoints here
+    before_action :authorize_branding_update!, only: [:update_branding]
+    before_action :authorize_custom_fields_create!, only: [:create_custom_field]
+    before_action :authorize_custom_fields_update!, only: [:update_custom_field]
+    before_action :authorize_custom_fields_delete!, only: [:destroy_custom_field]
 
     # GET /api/settings/tenant
     def tenant
@@ -31,7 +37,6 @@ module Api
         integrations: {}
       }
 
-      # Load all platform settings (scope_type: 'Platform', scope_id: 0)
       Setting.where(scope_type: 'Platform', scope_id: 0).each do |setting|
         begin
           value = JSON.parse(setting.value)
@@ -56,11 +61,6 @@ module Api
       Rails.logger.info "🔧 [SettingsController#update] Received params: #{params.inspect}"
       Rails.logger.info "🔧 [SettingsController#update] Company: #{@company&.name} (ID: #{@company&.id})"
       
-      # Support two different formats:
-      # 1. Old format: { settings: { key1: value1, key2: value2 } }
-      # 2. New format: { scope_type: 'Company', scope_id: id, key: 'communications', value: {...} }
-      # 3. Company attributes: { name: 'New Name', domain: 'newdomain.com' }
-      
       # Handle company attribute updates (name, domain)
       if params[:name].present? || params[:domain].present?
         Rails.logger.info "🏢 [SettingsController#update] Updating company attributes: name=#{params[:name]}, domain=#{params[:domain]}"
@@ -84,14 +84,11 @@ module Api
       end
       
       if params[:key].present? && params[:value].present?
-        # New format - single key/value update
         scope_type = params[:scope_type] || 'Company'
-        # If scope_id not provided, use company from auth context
         scope_id = params[:scope_id] || @company.id
         key = params[:key]
         value = params[:value]
         
-        # Verify user has access to this scope
         if scope_type == 'Company' && scope_id.to_s != @company.id.to_s
           Rails.logger.error "🚫 [SettingsController] Unauthorized: User trying to access company #{scope_id} but authenticated for company #{@company.id}"
           render json: { error: 'Unauthorized' }, status: :forbidden
@@ -111,7 +108,6 @@ module Api
           message: 'Settings updated successfully'
         }
       elsif params[:settings].present?
-        # Old format - multiple settings
         settings_params = params.require(:settings).permit!
         
         settings_params.each do |key, value|
@@ -132,7 +128,6 @@ module Api
     end
 
     # DELETE /api/settings
-    # Reset company settings to platform defaults by removing company overrides
     def destroy
       key = params[:key]
       
@@ -141,14 +136,12 @@ module Api
         return
       end
       
-      # Only allow resetting specific keys (whitelist for security)
       allowed_keys = ['communications', 'operational', 'branding', 'integrations']
       unless allowed_keys.include?(key)
         render json: { error: "Invalid key. Allowed keys: #{allowed_keys.join(', ')}" }, status: :unprocessable_entity
         return
       end
       
-      # Delete the company setting to revert to platform defaults
       deleted_count = Setting.where(
         scope_type: 'Company',
         scope_id: @company.id,
@@ -176,7 +169,6 @@ module Api
         :sideMenuColor, :portalName, :portalLogo
       )
 
-      # Normalize faviconUrl to favicon for storage
       if branding_params[:faviconUrl].present?
         branding_params[:favicon] = branding_params[:faviconUrl]
         branding_params.delete(:faviconUrl)
@@ -290,12 +282,73 @@ module Api
 
     private
 
+    # ============================================
+    # RBAC Authorization Methods
+    # ============================================
+    
+    def authorize_settings_read!
+      return if skip_rbac?
+      unless current_user.has_permission?('company_settings', 'read', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied READ access to company_settings for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to view company settings' }, status: :forbidden
+      end
+    end
+
+    def authorize_settings_update!
+      return if skip_rbac?
+      unless current_user.has_permission?('company_settings', 'update', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to company_settings for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to modify company settings' }, status: :forbidden
+      end
+    end
+
+    def authorize_branding_update!
+      return if skip_rbac?
+      unless current_user.has_permission?('branding', 'update', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to branding for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to modify branding settings' }, status: :forbidden
+      end
+    end
+
+    def authorize_custom_fields_create!
+      return if skip_rbac?
+      unless current_user.has_permission?('company_settings', 'create', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied CREATE access to custom_fields for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to create custom fields' }, status: :forbidden
+      end
+    end
+
+    def authorize_custom_fields_update!
+      return if skip_rbac?
+      unless current_user.has_permission?('company_settings', 'update', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to custom_fields for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to modify custom fields' }, status: :forbidden
+      end
+    end
+
+    def authorize_custom_fields_delete!
+      return if skip_rbac?
+      unless current_user.has_permission?('company_settings', 'delete', 'all', @company&.id)
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied DELETE access to custom_fields for company #{@company&.id}"
+        render json: { error: 'Permission denied: You do not have permission to delete custom fields' }, status: :forbidden
+      end
+    end
+
+    def skip_rbac?
+      return true if current_user.platform_admin?
+      return true if current_user.super_admin?
+      return true unless @company&.use_rbac_system
+      false
+    end
+
+    # ============================================
+    # Company Setup
+    # ============================================
+
     def set_company
-      # For platform admins, allow selecting a company via X-Company-ID header
       selected_company_id = request.headers['X-Company-ID']
       
       if (current_user.admin? || current_user.super_admin?) && selected_company_id.present?
-        # Platform admin is selecting a specific company to manage
         @company = ::Company.find_by(id: selected_company_id)
         
         if @company.nil?
@@ -309,7 +362,6 @@ module Api
         
         Rails.logger.info "✅ [SettingsController] Platform admin #{current_user.email} selected company: #{@company.name} (ID: #{@company.id})"
       else
-        # Regular users: use their assigned company_id
         unless current_user
           Rails.logger.error "🚫 [SettingsController] No authenticated user found"
           render json: { 
@@ -343,6 +395,10 @@ module Api
       end
     end
 
+    # ============================================
+    # Serializers
+    # ============================================
+
     def serialize_tenant
       {
         id: @company.id.to_s,
@@ -368,11 +424,9 @@ module Api
         }
       }
 
-      # Add Platform Name from Platform settings (for "Powered by" branding)
       platform_general = Setting.get('Platform', 0, 'general', {})
       base_settings[:platformName] = platform_general['platformName'] || platform_general[:platformName] || ''
 
-      # Merge in operational settings from company JSONB column
       if @company.operational_settings.present?
         operational = @company.operational_settings.deep_symbolize_keys
         base_settings[:timezone] = operational[:timezone] if operational[:timezone].present?
@@ -382,7 +436,6 @@ module Api
         base_settings[:requireAppointment] = operational[:require_appointment] if operational.key?(:require_appointment)
       end
 
-      # Merge in custom settings from Settings table
       custom_settings = Setting.where(scope_type: 'Company', scope_id: @company.id)
         .where.not(key: ['branding', 'quotes'])
         .pluck(:key, :value)
@@ -396,7 +449,6 @@ module Api
         end
       end
 
-      # Add quotes settings
       quotes_setting = Setting.get('Company', @company.id, 'quotes', {})
       base_settings[:quotes] = quotes_setting.deep_symbolize_keys if quotes_setting.present?
 
@@ -404,7 +456,6 @@ module Api
     end
 
     def serialize_branding
-      # Get platform branding (fallback/defaults)
       platform_branding_raw = Setting.get('Platform', 0, 'branding', {})
       platform_branding = platform_branding_raw.deep_symbolize_keys
       
@@ -414,35 +465,30 @@ module Api
         fontFamily: 'Inter'
       }
 
-      # Merge company branding with platform and defaults
       if @company.present?
         company_branding_raw = Setting.get('Company', @company.id, 'branding', {})
         company_branding = company_branding_raw.deep_symbolize_keys
         
-        # Merge: defaults < platform < company (company takes highest priority)
         merged_branding = default_branding
           .merge(platform_branding)
           .merge(company_branding)
       else
-        # On base domain, use only platform branding
         merged_branding = default_branding.merge(platform_branding)
       end
       
-      # Convert logo URLs from relative to absolute
       if merged_branding[:logo].present?
         merged_branding[:logo] = absolute_url(merged_branding[:logo])
       end
       
       if merged_branding[:favicon].present?
         merged_branding[:favicon] = absolute_url(merged_branding[:favicon])
-        merged_branding[:faviconUrl] = merged_branding[:favicon]  # Also provide as faviconUrl for frontend
+        merged_branding[:faviconUrl] = merged_branding[:favicon]
       end
       
       if merged_branding[:portalLogo].present?
         merged_branding[:portalLogo] = absolute_url(merged_branding[:portalLogo])
       end
       
-      # Include platformLogo separately for reference
       if platform_branding[:logo].present?
         merged_branding[:platformLogo] = absolute_url(platform_branding[:logo])
       end
@@ -454,7 +500,6 @@ module Api
       return path if path.blank?
       return path if path.start_with?('http://', 'https://')
       
-      # Get base URL from request or ENV
       base_url = if request.present?
         "#{request.protocol}#{request.host_with_port}"
       else

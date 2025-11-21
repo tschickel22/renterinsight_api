@@ -3,6 +3,10 @@
 module Api
   module Crm
     class DealProductsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :deals, create_actions: [:create, :bulk_create]
+
+      before_action :set_company_scope
       before_action :set_deal
       before_action :set_deal_product, only: [:show, :update, :destroy]
 
@@ -80,16 +84,46 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [DealProductsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [DealProductsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [DealProductsController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [DealProductsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_deal
-        @deal = Deal.find(params[:deal_id])
-      rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Deal not found' }, status: :not_found
+        @deal = @company.deals.find_by(id: params[:deal_id])
+        unless @deal
+          render json: { error: 'Deal not found or access denied' }, status: :not_found
+          return
+        end
       end
 
       def set_deal_product
-        @deal_product = @deal.deal_products.find(params[:id])
-      rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Product not found' }, status: :not_found
+        @deal_product = @deal.deal_products.find_by(id: params[:id])
+        unless @deal_product
+          render json: { error: 'Product not found' }, status: :not_found
+          return
+        end
       end
 
       def deal_product_params

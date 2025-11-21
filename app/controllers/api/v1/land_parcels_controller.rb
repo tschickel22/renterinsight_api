@@ -3,11 +3,34 @@
 module Api
   module V1
     class LandParcelsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :inventory,
+        read_actions: [:index, :show, :stats, :export],
+        create_actions: [:create],
+        update_actions: [:update],
+        delete_actions: [:destroy, :bulk_delete]
+
       before_action :set_company
       before_action :set_land_parcel, only: [:show, :update, :destroy]
       
       def index
-        parcels = @company.land_parcels.active
+        # STRICT TENANT ISOLATION: Only return land parcels from current user's company
+        # RBAC: Location-tier users only see their assigned locations
+        parcels = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.land_parcels.active
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              # Include parcels in assigned locations OR unassigned parcels (NULL location_id)
+              @company.land_parcels.active.where("location_id IN (?) OR location_id IS NULL", location_ids)
+            else
+              @company.land_parcels.active
+            end
+          end
+        else
+          @company.land_parcels.active
+        end
         
         # Filters
         parcels = parcels.by_status(params[:status]) if params[:status].present?
@@ -59,6 +82,12 @@ module Api
         
         parcel = @company.land_parcels.new(permitted_params)
         parcel.created_by = current_user&.id
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          parcel.location_id ||= location_ids.first if location_ids.any?
+        end
         
         if parcel.save
           render json: { parcel: parcel_json(parcel) }, status: :created
@@ -159,18 +188,50 @@ module Api
       private
       
       def set_company
-        @company = ::Company.find_by(id: current_user.company_id)
-        @company ||= ::Company.first # Fallback for demo/dev
-        
-        unless @company
-          render json: { error: 'Company not found' }, status: :not_found
+        # STRICT TENANT ISOLATION: Only load company from authenticated user
+        unless current_user
+          Rails.logger.error "🚫 [LandParcelsController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
         end
+        
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [LandParcelsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [LandParcelsController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [LandParcelsController] Company scope set: #{@company.name} (ID: #{@company.id})"
       end
       
       def set_land_parcel
-        @parcel = @company.land_parcels.active.find(params[:id])
+        # STRICT TENANT ISOLATION: Only find parcels within company
+        # RBAC: Location-tier users only access their assigned locations
+        @parcel = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include parcels in assigned locations OR unassigned parcels (NULL location_id)
+            @company.land_parcels.active.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+          else
+            @company.land_parcels.active.find(params[:id])
+          end
+        else
+          @company.land_parcels.active.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Land parcel not found' }, status: :not_found
+        render json: { error: 'Land parcel not found or access denied' }, status: :not_found
+        return
       end
       
       def parcel_params

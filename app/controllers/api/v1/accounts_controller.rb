@@ -8,8 +8,28 @@ module Api
 
       # GET /api/v1/accounts
       def index
+        return unless authorize_action!('crm', 'read')
+        
         # STRICT TENANT ISOLATION: Only show accounts from current company
-        @accounts = @company.accounts.active.includes(:tags, :source, :owner)
+        # RBAC: Location-tier users only see their assigned locations
+        @accounts = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.accounts.where(is_deleted: [false, nil])
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              # Include accounts in assigned locations OR unassigned accounts (NULL location_id)
+              @company.accounts.where(is_deleted: [false, nil])
+                              .where("location_id IN (?) OR location_id IS NULL", location_ids)
+            else
+              @company.accounts.where(is_deleted: [false, nil])
+            end
+          end
+        else
+          @company.accounts.where(is_deleted: [false, nil])
+        end
+        
+        @accounts = @accounts.includes(:tags, :source, :owner)
         
         # Apply filters
         @accounts = @accounts.where(account_type: params[:type]) if params[:type].present?
@@ -37,14 +57,24 @@ module Api
 
       # GET /api/v1/accounts/:id
       def show
+        return unless authorize_action!('crm', 'read')
+        
         render json: @account.as_json
       end
 
       # POST /api/v1/accounts
       def create
+        return unless authorize_action!('crm', 'create')
+        
         # STRICT TENANT ISOLATION: Create account within current company
         @account = @company.accounts.new(account_params)
         @account.owner_id = current_user&.id
+        
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          @account.location_id ||= location_ids.first if location_ids.any?
+        end
         
         # Set default values for required fields
         @account.status ||= 'active'
@@ -73,6 +103,8 @@ module Api
 
       # PATCH/PUT /api/v1/accounts/:id
       def update
+        return unless authorize_action!('crm', 'update')
+        
         # Clean up website field if blank
         if params.key?(:website) && params[:website].blank?
           params[:website] = nil
@@ -102,18 +134,24 @@ module Api
 
       # DELETE /api/v1/accounts/:id
       def destroy
+        return unless authorize_action!('crm', 'delete')
+        
         @account.soft_delete!
         head :no_content
       end
 
       # POST /api/v1/accounts/:id/convert_to_customer
       def convert_to_customer
+        return unless authorize_action!('crm', 'update')
+        
         @account.convert_to_customer!
         render json: @account.as_json
       end
 
       # POST /api/v1/accounts/:id/tags
       def add_tags
+        return unless authorize_action!('crm', 'update')
+        
         tag_names = params[:tags] || []
         tag_names = tag_names.split(',') if tag_names.is_a?(String)
         
@@ -129,6 +167,8 @@ module Api
 
       # DELETE /api/v1/accounts/:id/tags/:tag_name
       def remove_tag
+        return unless authorize_action!('crm', 'update')
+        
         tag = Tag.find_by(name: params[:tag_name])
         @account.tag_assignments.where(tag: tag).destroy_all if tag
         render json: @account.as_json
@@ -136,6 +176,8 @@ module Api
 
       # GET /api/v1/accounts/:id/activities
       def activities
+        return unless authorize_action!('crm', 'read')
+        
         activities = @account.lead_activities.includes(:lead).order(created_at: :desc)
         
         # Simple pagination
@@ -158,6 +200,8 @@ module Api
 
       # GET /api/v1/accounts/:id/deals
       def deals
+        return unless authorize_action!('crm', 'read')
+        
         # Placeholder until Deal model exists
         render json: {
           deals: [],
@@ -191,12 +235,15 @@ module Api
 
       # GET /api/v1/accounts/stats
       def stats
+        return unless authorize_action!('crm', 'read')
+        
         # STRICT TENANT ISOLATION: Only stats for current company
+        base_accounts = @company.accounts.where(is_deleted: [false, nil])
         render json: {
-          total: @company.accounts.active.count,
-          by_type: @company.accounts.active.group(:account_type).count,
-          by_status: @company.accounts.active.group(:status).count,
-          by_rating: @company.accounts.active.group(:rating).count,
+          total: base_accounts.count,
+          by_type: base_accounts.group(:account_type).count,
+          by_status: base_accounts.group(:status).count,
+          by_rating: base_accounts.group(:rating).count,
           recent_conversions: @company.accounts.where('converted_date >= ?', 30.days.ago).count,
           high_value: @company.accounts.high_value.count
         }
@@ -204,15 +251,19 @@ module Api
 
       # GET /api/v1/accounts/industries
       def industries
+        return unless authorize_action!('crm', 'read')
+        
         # STRICT TENANT ISOLATION: Only industries from current company
-        industries = @company.accounts.active.where.not(industry: [nil, '']).distinct.pluck(:industry)
+        industries = @company.accounts.where(is_deleted: [false, nil]).where.not(industry: [nil, '']).distinct.pluck(:industry)
         render json: industries
       end
 
       # GET /api/v1/accounts/export
       def export
+        return unless authorize_action!('crm', 'export')
+        
         # STRICT TENANT ISOLATION: Only export accounts from current company
-        accounts = @company.accounts.active.includes(:tags, :source, :owner)
+        accounts = @company.accounts.where(is_deleted: [false, nil]).includes(:tags, :source, :owner)
         
         # Apply filters
         accounts = accounts.where(account_type: params[:type]) if params[:type].present?
@@ -247,6 +298,8 @@ module Api
 
       # POST /api/v1/accounts/convert_lead
       def convert_lead
+        return unless authorize_action!('crm', 'create')
+        
         # STRICT TENANT ISOLATION: Only convert leads from current company
         lead = @company.leads.find(params[:lead_id])
         
@@ -266,6 +319,12 @@ module Api
           billing_country: lead.country || 'USA'
         )
         
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          account.update(location_id: location_ids.first) if location_ids.any? && account.location_id.nil?
+        end
+        
         # Copy tags
         lead.tags.each do |tag|
           account.tag_assignments.create!(tag: tag, assigned_at: Time.current)
@@ -283,6 +342,8 @@ module Api
 
       # POST /api/v1/accounts/bulk_update
       def bulk_update
+        return unless authorize_action!('crm', 'update')
+        
         account_ids = params[:account_ids] || []
         update_attrs = params[:attributes] || {}
         
@@ -295,6 +356,8 @@ module Api
 
       # GET /api/v1/accounts/:id/insights
       def insights
+        return unless authorize_action!('crm', 'read')
+        
         # Get all communications for stats (don't limit yet)
         all_communications = Communication.where(communicable: @account)
         
@@ -362,6 +425,8 @@ module Api
 
       # GET /api/v1/accounts/:id/score
       def score
+        return unless authorize_action!('crm', 'read')
+        
         score_data = {
           account_id: @account.id,
           account_name: @account.name,
@@ -388,16 +453,19 @@ module Api
           return
         end
         
-        unless current_user.company_id.present?
-          Rails.logger.error "🚫 [AccountsController] User #{current_user.id} has no company_id"
-          render json: { error: 'No company assigned' }, status: :forbidden
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [AccountsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
           return
         end
         
-        @company = ::Company.find_by(id: current_user.company_id)
+        @company = ::Company.find_by(id: company_id)
         
         if @company.nil?
-          Rails.logger.error "🚫 [AccountsController] Company #{current_user.company_id} not found"
+          Rails.logger.error "🚫 [AccountsController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
@@ -407,9 +475,21 @@ module Api
 
       def set_account
         # STRICT TENANT ISOLATION: Only access accounts in same company
-        @account = @company.accounts.find(params[:id])
+        # RBAC: Location-tier users only access their assigned locations
+        @account = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include accounts in assigned locations OR unassigned accounts (NULL location_id)
+            @company.accounts.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+          else
+            @company.accounts.find(params[:id])
+          end
+        else
+          @company.accounts.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Account not found or access denied' }, status: :not_found
+        return
       end
 
       def account_params

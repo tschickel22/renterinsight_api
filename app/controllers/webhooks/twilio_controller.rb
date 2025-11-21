@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 module Webhooks
-  # Inherit from ActionController::API instead of ApplicationController to avoid authentication
   class TwilioController < ActionController::API
+    before_action :verify_twilio_signature, only: [:sms_status]
+
     # POST /webhooks/twilio/sms/status
     def sms_status
       message_sid = params['MessageSid']
@@ -10,7 +11,6 @@ module Webhooks
       
       Rails.logger.info "[Twilio] Webhook received: SID=#{message_sid}, Status=#{status}"
       
-      # Find communication by external_id (Twilio message SID)
       communication = Communication.find_by(external_id: message_sid)
       
       unless communication
@@ -50,10 +50,46 @@ module Webhooks
     rescue => e
       Rails.logger.error "[Twilio] Webhook error: #{e.message}"
       Rails.logger.error e.backtrace.first(5).join("\n")
-      head :ok  # Always return 200 to Twilio
+      head :ok
     end
     
     private
+    
+    def verify_twilio_signature
+      auth_token = ENV['TWILIO_AUTH_TOKEN']
+      
+      unless auth_token.present?
+        Rails.logger.warn "[Twilio] Auth token not configured - skipping signature verification"
+        return true
+      end
+      
+      signature = request.headers['X-Twilio-Signature']
+      
+      unless signature.present?
+        Rails.logger.error "[Twilio] Missing X-Twilio-Signature header"
+        head :forbidden
+        return false
+      end
+      
+      validator = Twilio::Security::RequestValidator.new(auth_token)
+      url = request.original_url
+      post_params = request.request_parameters
+      
+      unless validator.validate(url, post_params, signature)
+        Rails.logger.error "[Twilio] Invalid signature - possible spoofed request"
+        head :forbidden
+        return false
+      end
+      
+      true
+    rescue NameError => e
+      Rails.logger.warn "[Twilio] Twilio gem not loaded - skipping signature verification: #{e.message}"
+      true
+    rescue => e
+      Rails.logger.error "[Twilio] Signature verification error: #{e.message}"
+      head :internal_server_error
+      false
+    end
     
     def twilio_params
       {

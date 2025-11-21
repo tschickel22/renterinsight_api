@@ -2,6 +2,10 @@
 module Api
   module Crm
     class ActivitiesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :crm
+
+      before_action :set_company_scope
       before_action :set_lead
       before_action :set_activity, only: [:update, :destroy]
 
@@ -17,12 +21,12 @@ module Api
         Rails.logger.info "[ActivitiesController#create] Normalized attrs: #{attrs.inspect}"
         Rails.logger.info "[ActivitiesController#create] Lead: #{@lead.id}, Lead exists: #{@lead.persisted?}"
         
-        # Get user_id outside of activity creation
-        user_id = attrs[:user_id] || User.first&.id
+        # Use current_user for activity creation - tenant safe
+        user_id = attrs[:user_id] || current_user&.id
         Rails.logger.info "[ActivitiesController#create] Using user_id: #{user_id}"
         
         unless user_id
-          render json: { error: 'No users available in system' }, status: :unprocessable_entity
+          render json: { error: 'User context required' }, status: :unprocessable_entity
           return
         end
         
@@ -65,12 +69,47 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          Rails.logger.error "🚫 [ActivitiesController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [ActivitiesController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [ActivitiesController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [ActivitiesController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+
       def set_lead
-        @lead = Lead.find(params[:lead_id])
+        # STRICT TENANT ISOLATION: Only access leads in same company
+        @lead = @company.leads.find(params[:lead_id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Lead not found or access denied' }, status: :not_found
+        return
       end
 
       def set_activity
-        @activity = Activity.find(params[:id])
+        # STRICT TENANT ISOLATION: Only access activities for leads in same company
+        @activity = @lead.activities.find(params[:id])
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Activity not found or access denied' }, status: :not_found
+        return
       end
 
       def normalize_activity_params
@@ -117,32 +156,6 @@ module Api
         }.compact
       end
 
-      # Ensure a default user exists for activities
-      def get_or_create_system_user
-        # First, check if any user exists
-        existing_user = User.first
-        return existing_user.id if existing_user
-        
-        # No users exist - try to create one outside of the activity transaction
-        Rails.logger.info "[ActivitiesController] No users found, creating system user"
-        
-        begin
-          # Create in a separate transaction
-          user = nil
-          User.transaction do
-            user = User.create!(
-              email: 'system@example.com',
-              name: 'System User'
-            )
-          end
-          Rails.logger.info "[ActivitiesController] Created system user with id=#{user.id}"
-          return user.id
-        rescue => e
-          Rails.logger.error "[ActivitiesController] Failed to create system user: #{e.message}"
-          Rails.logger.error e.backtrace.first(5).join("\n")
-          raise "Cannot create activity: No users available and failed to create default user (#{e.message})"
-        end
-      end
     end
   end
 end

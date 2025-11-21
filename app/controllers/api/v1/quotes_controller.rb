@@ -10,8 +10,27 @@ module Api
 
       # GET /api/v1/quotes
       def index
+        return unless authorize_action!('finance', 'read')
+        
         # STRICT TENANT ISOLATION: Only return quotes from current user's company
-        @quotes = @company.quotes.active.includes(:account, :contact)
+        # RBAC: Location-tier users only see their assigned locations
+        @quotes = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.quotes.active
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              # Include quotes in assigned locations OR unassigned quotes (NULL location_id)
+              @company.quotes.active.where("location_id IN (?) OR location_id IS NULL", location_ids)
+            else
+              @company.quotes.active
+            end
+          end
+        else
+          @company.quotes.active
+        end
+        
+        @quotes = @quotes.includes(:account, :contact)
         
         # Apply filters
         @quotes = @quotes.by_account(params[:account_id]) if params[:account_id].present?
@@ -46,11 +65,15 @@ module Api
 
       # GET /api/v1/quotes/:id
       def show
+        return unless authorize_action!('finance', 'read')
+        
         render json: @quote.as_json(include_account: true, include_contact: true)
       end
 
       # POST /api/v1/quotes
       def create
+        return unless authorize_action!('finance', 'create')
+        
         # Get quote params and convert to hash
         quote_params_hash = params.require(:quote).to_unsafe_h
         
@@ -89,6 +112,12 @@ module Api
         
         @quote = @company.quotes.new(safe_params)
         
+        # RBAC: Location-tier users auto-assign to their location
+        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          @quote.location_id ||= location_ids.first if location_ids.any?
+        end
+        
         # Set default valid_until if not provided (30 days from now)
         @quote.valid_until ||= 30.days.from_now.to_date
         
@@ -105,6 +134,8 @@ module Api
 
       # PATCH/PUT /api/v1/quotes/:id
       def update
+        return unless authorize_action!('finance', 'update')
+        
         # Get quote params and convert to hash
         quote_params_hash = params.require(:quote).to_unsafe_h
         
@@ -154,12 +185,16 @@ module Api
 
       # DELETE /api/v1/quotes/:id
       def destroy
+        return unless authorize_action!('finance', 'delete')
+        
         @quote.soft_delete!
         head :no_content
       end
 
       # POST /api/v1/quotes/:id/send
       def send_quote
+        return unless authorize_action!('finance', 'update')
+        
         # Extract send parameters
         send_params = params.permit(
           :to_email,
@@ -213,6 +248,8 @@ module Api
 
       # GET /api/v1/quotes/stats
       def stats
+        return unless authorize_action!('finance', 'read')
+        
         # STRICT TENANT ISOLATION: Only stats from current user's company
         quotes = @company.quotes.active
         
@@ -227,6 +264,8 @@ module Api
 
       # POST /api/v1/quotes/:id/accept
       def accept
+        return unless authorize_action!('finance', 'update')
+        
         set_quote
         if @quote.accept!
           render json: @quote.as_json(include_account: true, include_contact: true)
@@ -237,6 +276,8 @@ module Api
 
       # POST /api/v1/quotes/:id/reject
       def reject
+        return unless authorize_action!('finance', 'update')
+        
         set_quote
         if @quote.reject!
           render json: @quote.as_json(include_account: true, include_contact: true)
@@ -247,6 +288,8 @@ module Api
 
       # GET /api/v1/quotes/:id/pdf
       def pdf
+        return unless authorize_action!('finance', 'read')
+        
         pdf_content = QuotePdfGenerator.new(@quote).generate
         
         send_data pdf_content,
@@ -261,6 +304,8 @@ module Api
 
       # GET /api/v1/quotes/export
       def export
+        return unless authorize_action!('finance', 'export')
+        
         # STRICT TENANT ISOLATION: Only export quotes from current user's company
         quotes = @company.quotes.active.includes(:account, :contact)
         
@@ -302,16 +347,19 @@ module Api
           return
         end
         
-        unless current_user.company_id.present?
-          Rails.logger.error "🚫 [QuotesController] User #{current_user.id} has no company_id"
-          render json: { error: 'No company assigned' }, status: :forbidden
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [QuotesController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
           return
         end
         
-        @company = ::Company.find_by(id: current_user.company_id)
+        @company = ::Company.find_by(id: company_id)
         
         if @company.nil?
-          Rails.logger.error "🚫 [QuotesController] Company #{current_user.company_id} not found"
+          Rails.logger.error "🚫 [QuotesController] Company #{company_id} not found"
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
@@ -321,9 +369,21 @@ module Api
 
       def set_quote
         # STRICT TENANT ISOLATION: Only find quotes within company
-        @quote = @company.quotes.find(params[:id])
+        # RBAC: Location-tier users only access their assigned locations
+        @quote = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include quotes in assigned locations OR unassigned quotes (NULL location_id)
+            @company.quotes.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+          else
+            @company.quotes.find(params[:id])
+          end
+        else
+          @company.quotes.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Quote not found or access denied' }, status: :not_found
+        return
       end
     end
   end

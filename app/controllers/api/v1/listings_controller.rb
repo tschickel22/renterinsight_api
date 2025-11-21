@@ -3,6 +3,13 @@
 module Api
   module V1
     class ListingsController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :listings,
+        read_actions: [:index, :show, :stats],
+        create_actions: [:create],
+        update_actions: [:update, :publish, :unpublish],
+        delete_actions: [:destroy]
+
       before_action :set_company
       before_action :set_listing, only: [:show, :update, :destroy, :publish, :unpublish]
 
@@ -12,7 +19,24 @@ module Api
         Rails.logger.info "[Listings#index] Params: #{params.inspect}"
         Rails.logger.info "[Listings#index] vehicle_type param: '#{params[:vehicle_type]}'"
         
-        listings = @company.listings.active
+        # STRICT TENANT ISOLATION: Only return listings from current user's company
+        # RBAC: Location-tier users only see listings for vehicles in their assigned locations
+        listings = if current_user.uses_rbac?
+          if current_user.effective_admin?  # Use RBAC-aware admin check
+            @company.listings.active
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              # Include listings for vehicles in assigned locations OR unassigned vehicles (NULL location_id)
+              @company.listings.active.joins(:vehicle)
+                      .where("vehicles.location_id IN (?) OR vehicles.location_id IS NULL", location_ids)
+            else
+              @company.listings.active
+            end
+          end
+        else
+          @company.listings.active
+        end
         Rails.logger.info "[Listings#index] Initial count: #{listings.count}"
         
         # Join vehicle table once if needed for any filter
@@ -187,18 +211,44 @@ module Api
       private
 
       def set_company
-        @company = ::Company.find_by(id: current_user.company_id)
-        @company ||= ::Company.first
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
         
-        unless @company
-          render json: { error: 'Company not found' }, status: :not_found
+        unless company_id.present?
+          Rails.logger.error "[ListingsController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
         end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "[ListingsController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "[ListingsController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
       end
 
       def set_listing
-        @listing = @company.listings.active.find(params[:id])
+        # STRICT TENANT ISOLATION: Only find listings within company
+        # RBAC: Location-tier users only access listings for vehicles in their assigned locations
+        @listing = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include listings for vehicles in assigned locations OR unassigned vehicles (NULL location_id)
+            @company.listings.active.joins(:vehicle)
+                    .where("vehicles.location_id IN (?) OR vehicles.location_id IS NULL", location_ids)
+                    .find(params[:id])
+          else
+            @company.listings.active.find(params[:id])
+          end
+        else
+          @company.listings.active.find(params[:id])
+        end
       rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Listing not found' }, status: :not_found
+        render json: { error: 'Listing not found or access denied' }, status: :not_found
       end
 
       def listing_params

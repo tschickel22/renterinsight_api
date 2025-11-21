@@ -475,7 +475,11 @@ class InvitationService
   def create_invited_user_placeholder(invitation, recipient_name)
     # Check if user already exists
     existing_user = User.find_by(email: invitation.email)
-    return existing_user if existing_user
+    if existing_user
+      # Ensure existing user has RBAC role assigned
+      assign_rbac_role_to_user(existing_user, invitation.role, invitation.company_id)
+      return existing_user
+    end
     
     # Parse name
     first_name = nil
@@ -487,7 +491,7 @@ class InvitationService
     end
     
     # Create user with invited status
-    User.create!(
+    user = User.create!(
       email: invitation.email,
       phone: invitation.phone,
       first_name: first_name,
@@ -497,12 +501,38 @@ class InvitationService
       permissions: invitation.permissions || [],
       status: 'invited',
       invitation_id: invitation.id,
-      company_id: invitation.company_id, # ← FIX: Set company_id so user appears in company list
+      company_id: invitation.company_id,
       password: SecureRandom.hex(32) # Temporary password, will be replaced on acceptance
     )
+    
+    # Assign RBAC role
+    assign_rbac_role_to_user(user, invitation.role, invitation.company_id)
+    
+    user
   rescue ActiveRecord::RecordInvalid => e
     Rails.logger.warn("Could not create placeholder user: #{e.message}")
     nil
+  end
+  
+  # Assign RBAC role to user based on role identifier
+  def assign_rbac_role_to_user(user, role_identifier, company_id)
+    return unless user && company_id
+    return unless role_identifier.present?
+    
+    # Use User model's assign_rbac_role method
+    assignment = user.assign_rbac_role(
+      role_identifier,
+      company_id: company_id,
+      assigned_by: @invited_by
+    )
+    
+    if assignment
+      Rails.logger.info "✅ [InvitationService] RBAC role assigned to user #{user.id} (#{user.email})"
+    else
+      Rails.logger.warn "⚠️ [InvitationService] Could not assign RBAC role '#{role_identifier}' to user #{user.id}"
+    end
+    
+    assignment
   end
   
   # Create user from invitation
@@ -527,15 +557,19 @@ class InvitationService
         first_name: user_params[:first_name],
         last_name: user_params[:last_name],
         name: user_params[:name] || "#{user_params[:first_name]} #{user_params[:last_name]}".strip,
-        phone: user_params[:phone], # ← FIX: Update phone if provided during registration
+        phone: user_params[:phone],
         password: user_params[:password],
         status: 'active',
         mfa_enabled: false
       )
+      
+      # Ensure RBAC role is assigned (may have been set during placeholder creation, but verify)
+      assign_rbac_role_to_user(user, invitation.role, invitation.company_id)
+      
       user
     else
       # Fallback: create new user if somehow doesn't exist
-      User.create!(
+      new_user = User.create!(
         email: invitation.email,
         phone: invitation.phone,
         name: user_params[:name],
@@ -545,9 +579,14 @@ class InvitationService
         role: invitation.role || 'staff',
         permissions: invitation.permissions,
         status: 'active',
-        company_id: invitation.company_id, # ← FIX: Set company_id
+        company_id: invitation.company_id,
         mfa_enabled: false
       )
+      
+      # Assign RBAC role
+      assign_rbac_role_to_user(new_user, invitation.role, invitation.company_id)
+      
+      new_user
     end
   end
   

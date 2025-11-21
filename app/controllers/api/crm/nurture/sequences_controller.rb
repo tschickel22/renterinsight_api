@@ -4,16 +4,30 @@ module Api
   module Crm
     module Nurture
       class SequencesController < ApplicationController
+        include RbacAuthorization
+        rbac_resource :crm
+
+        before_action :set_company_scope
+
         def index
-          sequences = NurtureSequence.includes(:nurture_steps).order(created_at: :desc)
+          sequences = @company.nurture_sequences.includes(:nurture_steps).order(created_at: :desc)
           render json: sequences.map { |s| sequence_json(s) }, status: :ok
         rescue => e
           Rails.logger.error "Error in sequences#index: #{e.message}\n#{e.backtrace.join("\n")}"
           render json: { error: e.message }, status: :internal_server_error
         end
 
+        def show
+          sequence = @company.nurture_sequences.find_by(id: params[:id])
+          unless sequence
+            render json: { error: 'Sequence not found' }, status: :not_found
+            return
+          end
+          render json: sequence_json(sequence), status: :ok
+        end
+
         def create
-          sequence = NurtureSequence.new(sequence_params)
+          sequence = @company.nurture_sequences.new(sequence_params)
           if sequence.save
             render json: sequence_json(sequence), status: :created
           else
@@ -22,7 +36,12 @@ module Api
         end
 
         def update
-          sequence = NurtureSequence.find(params[:id])
+          sequence = @company.nurture_sequences.find_by(id: params[:id])
+          unless sequence
+            render json: { error: 'Sequence not found' }, status: :not_found
+            return
+          end
+          
           if sequence.update(sequence_params)
             render json: sequence_json(sequence), status: :ok
           else
@@ -31,7 +50,12 @@ module Api
         end
 
         def destroy
-          sequence = NurtureSequence.find(params[:id])
+          sequence = @company.nurture_sequences.find_by(id: params[:id])
+          unless sequence
+            render json: { error: 'Sequence not found' }, status: :not_found
+            return
+          end
+          
           sequence.destroy!
           head :no_content
         end
@@ -43,24 +67,25 @@ module Api
           results = []
           
           ActiveRecord::Base.transaction do
-            # Handle deletions
+            # Handle deletions (scoped to company)
             delete_ids.each do |id|
-              sequence = NurtureSequence.find_by(id: id)
+              sequence = @company.nurture_sequences.find_by(id: id)
               sequence&.destroy
             end
             
             # Handle upserts (create or update)
             upsert_data.each do |seq_data|
               sequence = if seq_data[:id].present?
-                NurtureSequence.find_or_initialize_by(id: seq_data[:id])
+                @company.nurture_sequences.find_or_initialize_by(id: seq_data[:id])
               else
-                NurtureSequence.new
+                @company.nurture_sequences.new
               end
               
               # Update sequence attributes
               sequence.name = seq_data[:name] if seq_data[:name].present?
               sequence.description = seq_data[:description] if seq_data.key?(:description)
               sequence.is_active = seq_data[:is_active] != false
+              sequence.company_id = @company.id # Ensure company scope
               
               sequence.save!
               
@@ -100,6 +125,32 @@ module Api
         end
 
         private
+
+        def set_company_scope
+          unless current_user
+            Rails.logger.error "🚫 [Nurture::SequencesController] No authenticated user found"
+            render json: { error: 'Authentication required' }, status: :unauthorized
+            return
+          end
+          
+          company_id = current_company_id
+          
+          unless company_id.present?
+            Rails.logger.error "🚫 [Nurture::SequencesController] No company context available"
+            render json: { error: 'No company context' }, status: :forbidden
+            return
+          end
+          
+          @company = ::Company.find_by(id: company_id)
+          
+          if @company.nil?
+            Rails.logger.error "🚫 [Nurture::SequencesController] Company #{company_id} not found"
+            render json: { error: 'Company not found' }, status: :not_found
+            return
+          end
+          
+          Rails.logger.info "✅ [Nurture::SequencesController] Company scope set: #{@company.name} (ID: #{@company.id})"
+        end
 
         def sequence_params
           params.require(:sequence).permit(:name, :description, :is_active)

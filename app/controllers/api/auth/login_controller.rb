@@ -46,16 +46,7 @@ module Api
             message: 'Login successful',
             token: tokens[:access_token],
             refreshToken: tokens[:refresh_token],
-            user: {
-              id: user.id,
-              email: user.email,
-              firstName: user.first_name,
-              lastName: user.last_name,
-              user_type: determine_user_type(user),
-              role: user.role,
-              company_id: user.company_id,
-              permissions: user.permissions || []
-            }
+            user: build_user_response(user)
           }, status: :ok
         else
           render json: {
@@ -65,6 +56,7 @@ module Api
         end
       rescue StandardError => e
         Rails.logger.error("Login error: #{e.message}")
+        Rails.logger.error(e.backtrace.first(10).join("\n"))
         render json: {
           success: false,
           message: 'An error occurred during login. Please try again.'
@@ -141,15 +133,7 @@ module Api
         render json: {
           success: true,
           valid: true,
-          user: {
-            id: current_user.id,
-            email: current_user.email,
-            firstName: current_user.first_name,
-            lastName: current_user.last_name,
-            user_type: determine_user_type(current_user),
-            role: current_user.role,
-            company_id: current_user.company_id
-          }
+          user: build_user_response(current_user)
         }, status: :ok
       end
 
@@ -157,16 +141,7 @@ module Api
       def me
         render json: {
           success: true,
-          user: {
-            id: current_user.id,
-            email: current_user.email,
-            firstName: current_user.first_name,
-            lastName: current_user.last_name,
-            user_type: determine_user_type(current_user),
-            role: current_user.role,
-            company_id: current_user.company_id,
-            permissions: current_user.permissions || []
-          }
+          user: build_user_response(current_user)
         }, status: :ok
       end
 
@@ -207,9 +182,6 @@ module Api
         end
       end
 
-      # Removed generate_access_token and generate_refresh_token methods
-      # Now using JsonWebToken.generate_token_pair for consistency
-
       def set_refresh_token_cookie(token)
         cookies[:refresh_token] = {
           value: token,
@@ -221,14 +193,64 @@ module Api
       end
 
       def determine_user_type(user)
-        return 'admin' if user.respond_to?(:admin?) && user.admin?
-        return 'admin' if user.role == 'admin' || user.role == 'super_admin'
-        return 'client' if user.respond_to?(:client?) && user.client?
-        return 'client' if user.role == 'client' || user.role == 'buyer'
-        return 'staff' if user.respond_to?(:staff?) && user.staff?
-        return 'staff' if user.role == 'staff' || user.role == 'employee'
-
+        return 'platform_admin' if user.platform_admin?
+        return 'super_admin' if user.super_admin?
+        return 'company_admin' if user.company_admin?  # Check RBAC-based company admin
+        return 'admin' if user.admin?
+        return 'client' if user.client?
+        return 'staff' if user.staff?
         'staff'
+      end
+
+      # Build consistent user response with RBAC permissions
+      def build_user_response(user)
+        company = user.company
+        
+        {
+          id: user.id,
+          email: user.email,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          user_type: determine_user_type(user),
+          role: user.role,
+          company_id: user.company_id,
+          companyName: company&.name,
+          # RBAC information
+          rbac_enabled: company&.use_rbac_system || false,
+          permissions: build_permissions(user, company),
+          roles: build_roles(user, company)
+        }
+      end
+
+      # Build permissions array for frontend
+      # Format: ["resource:action:scope", ...]
+      # Platform/super admins get full access wildcard
+      def build_permissions(user, company)
+        # Platform admins and super admins have all permissions
+        return ['*:*:*'] if user.platform_admin? || user.super_admin?
+        
+        # If RBAC is disabled, give all permissions
+        return ['*:*:*'] unless company&.use_rbac_system
+        
+        # Get actual RBAC permissions
+        user.permissions_for_company(company.id)
+      end
+
+      # Build roles array for frontend
+      def build_roles(user, company)
+        return [{ key: 'platform_admin', name: 'Platform Admin', tier: 'platform' }] if user.platform_admin?
+        return [{ key: 'super_admin', name: 'Super Admin', tier: 'platform' }] if user.super_admin?
+        
+        return [] unless company&.use_rbac_system
+        
+        user.roles_for_company(company.id).map do |role|
+          {
+            key: role.key,
+            name: role.name,
+            tier: role.tier,
+            color: role.color
+          }
+        end
       end
     end
   end

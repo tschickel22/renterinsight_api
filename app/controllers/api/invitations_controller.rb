@@ -2,11 +2,14 @@
 
 module Api
   class InvitationsController < ApplicationController
+    before_action :authenticate_user!
+    before_action :set_company_scope
     before_action :set_invitation, only: [:show, :resend, :destroy]
-    before_action :set_company, only: [:index, :create]
     
     # GET /api/companies/:company_id/invitations
     def index
+      verify_company_access!
+      
       invitations = @company.invitations
                             .where(invitation_type: params[:invitation_type] || 'company_user')
                             .recent
@@ -27,6 +30,8 @@ module Api
     
     # POST /api/companies/:company_id/invitations
     def create
+      verify_company_access!
+      
       service = InvitationService.new(
         invited_by: current_user,
         company: @company
@@ -51,7 +56,6 @@ module Api
           message: result[:message]
         }
         
-        # For development: include token in response
         if Rails.env.development? && result[:invitation].token.present?
           response_data[:token] = result[:invitation].token
           response_data[:invitation_url] = "#{ENV['FRONTEND_URL'] || 'https://localhost:5173'}/invitations/accept?token=#{result[:invitation].token}"
@@ -117,15 +121,35 @@ module Api
     private
     
     def set_invitation
-      @invitation = Invitation.find(params[:id])
-    rescue ActiveRecord::RecordNotFound
-      render json: { success: false, error: 'Invitation not found' }, status: :not_found
+      @invitation = @company.invitations.find_by(id: params[:id])
+      unless @invitation
+        render json: { success: false, error: 'Invitation not found' }, status: :not_found
+      end
     end
     
-    def set_company
-      @company = ::Company.find(params[:company_id])
-    rescue ActiveRecord::RecordNotFound
-      render json: { success: false, error: 'Company not found' }, status: :not_found
+    def verify_company_access!
+      requested_company_id = params[:company_id]
+      
+      return true unless requested_company_id.present?
+      
+      if requested_company_id.to_s != @company.id.to_s
+        unless current_user.platform_admin? || current_user.super_admin?
+          Rails.logger.error "🚫 [InvitationsController] User #{current_user.id} attempted to access company #{requested_company_id} but belongs to #{@company.id}"
+          render json: { success: false, error: 'Forbidden - Cannot access other company invitations' }, status: :forbidden
+          return false
+        end
+        
+        requested_company = ::Company.find_by(id: requested_company_id)
+        if requested_company
+          @company = requested_company
+          Rails.logger.info "✅ [InvitationsController] Platform admin accessing company #{@company.id}"
+        else
+          render json: { success: false, error: 'Company not found' }, status: :not_found
+          return false
+        end
+      end
+      
+      true
     end
     
     def invitation_json(invitation)

@@ -3,13 +3,22 @@
 module Api
   module V1
     class VehicleImagesController < ApplicationController
+      include RbacAuthorization
+      rbac_resource :inventory,
+        read_actions: [],
+        create_actions: [:create],
+        update_actions: [],
+        delete_actions: [:destroy]
+
       before_action :set_company
 
       # POST /api/v1/vehicles/:vehicle_id/images
       def create
         return render json: { error: 'No image provided' }, status: :bad_request unless params[:image]
 
-        vehicle = @company.vehicles.find(params[:vehicle_id])
+        vehicle = find_vehicle_with_rbac(params[:vehicle_id])
+        return unless vehicle
+        
         image_file = params[:image]
 
         # FIX: Validate file size (10MB limit)
@@ -78,8 +87,6 @@ module Api
           relative_url: image_url,  # Also return relative URL for database
           filename: filename
         }, status: :created
-      rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Vehicle not found' }, status: :not_found
       rescue => e
         Rails.logger.error "Image upload failed: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
@@ -88,7 +95,9 @@ module Api
 
       # DELETE /api/v1/vehicles/:vehicle_id/images
       def destroy
-        vehicle = @company.vehicles.find(params[:vehicle_id])
+        vehicle = find_vehicle_with_rbac(params[:vehicle_id])
+        return unless vehicle
+        
         image_url = params[:url]
 
         return render json: { error: 'No URL provided' }, status: :bad_request unless image_url
@@ -105,8 +114,6 @@ module Api
         end
 
         render json: { success: true }
-      rescue ActiveRecord::RecordNotFound
-        render json: { error: 'Vehicle not found' }, status: :not_found
       rescue => e
         Rails.logger.error "Image deletion failed: #{e.message}"
         render json: { error: "Deletion failed: #{e.message}" }, status: :internal_server_error
@@ -115,14 +122,52 @@ module Api
       private
 
       def set_company
-        # FIX: Better company validation
-        @company = ::Company.find_by(id: current_user&.company_id) if current_user
-        @company ||= ::Company.first
-        
-        unless @company
-          render json: { error: 'No company found. Please contact support.' }, 
-                 status: :unprocessable_entity
+        # STRICT TENANT ISOLATION: Only load company from authenticated user
+        unless current_user
+          Rails.logger.error "🚫 [VehicleImagesController] No authenticated user found"
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
         end
+        
+        # Use current_company_id which respects X-Company-ID header for platform admins
+        company_id = current_company_id
+        
+        unless company_id.present?
+          Rails.logger.error "🚫 [VehicleImagesController] No company context available"
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          Rails.logger.error "🚫 [VehicleImagesController] Company #{company_id} not found"
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+        
+        Rails.logger.info "✅ [VehicleImagesController] Company scope set: #{@company.name} (ID: #{@company.id})"
+      end
+      
+      def find_vehicle_with_rbac(vehicle_id)
+        # STRICT TENANT ISOLATION: Only find vehicles within company
+        # RBAC: Location-tier users only access vehicles in their assigned locations
+        vehicle = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            # Include vehicles in assigned locations OR unassigned vehicles (NULL location_id)
+            @company.vehicles.active.where("location_id IN (?) OR location_id IS NULL", location_ids).find(vehicle_id)
+          else
+            @company.vehicles.active.find(vehicle_id)
+          end
+        else
+          @company.vehicles.active.find(vehicle_id)
+        end
+        
+        vehicle
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Vehicle not found or access denied' }, status: :not_found
+        nil
       end
     end
   end

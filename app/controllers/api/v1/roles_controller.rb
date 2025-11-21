@@ -13,6 +13,7 @@ module Api
       before_action :authorize_role_management, except: [:index, :show, :system_roles, :permissions, :toggle_visibility]
       
       # GET /api/v1/roles
+      # FIX: Include permissions by default for proper matrix display
       def index
         if current_user.super_admin?
           @roles = Role.system_roles.active
@@ -24,8 +25,9 @@ module Api
           ).active.order(:tier, :name)
         end
         
+        # FIX: Include permissions in index to avoid N+1 queries in frontend
         render json: {
-          roles: @roles.map { |role| serialize_role(role) }
+          roles: @roles.map { |role| serialize_role(role, include_permissions: true) }
         }
       end
       
@@ -106,6 +108,8 @@ module Api
       # PUT /api/v1/roles/:id/permissions
       # Set permissions for a role (replaces all existing permissions)
       def set_permissions
+        Rails.logger.info "[RolesController] set_permissions called for role #{params[:id]}"
+        Rails.logger.info "[RolesController] Received #{params[:permissions]&.length || 0} permissions"
         unless params[:permissions].is_a?(Array)
           render json: {
             error: 'Invalid permissions format - expected array'
@@ -114,27 +118,68 @@ module Api
         end
         
         ActiveRecord::Base.transaction do
-          # Clear existing permissions for this role
-          @role.role_permissions.destroy_all
-          
-          # Create new permissions
+          # Build a set of permission keys for the new permissions
+          new_permission_keys = Set.new
           params[:permissions].each do |perm_data|
-            RolePermission.create!(
-              role: @role,
+            key = "#{perm_data[:resource_id]}-#{perm_data[:action_id]}-#{perm_data[:scope_id]}"
+            new_permission_keys.add(key)
+          end
+          
+          # Delete permissions that are not in the new set
+          @role.role_permissions.each do |existing_perm|
+            key = "#{existing_perm.resource_id}-#{existing_perm.action_id}-#{existing_perm.scope_id}"
+            unless new_permission_keys.include?(key)
+              existing_perm.destroy
+            end
+          end
+          
+          # Create or update permissions
+          params[:permissions].each do |perm_data|
+            # Validate IDs exist
+            unless Resource.exists?(perm_data[:resource_id])
+              raise ActiveRecord::RecordInvalid.new("Resource with ID #{perm_data[:resource_id]} not found")
+            end
+            unless Action.exists?(perm_data[:action_id])
+              raise ActiveRecord::RecordInvalid.new("Action with ID #{perm_data[:action_id]} not found")
+            end
+            unless Scope.exists?(perm_data[:scope_id])
+              raise ActiveRecord::RecordInvalid.new("Scope with ID #{perm_data[:scope_id]} not found")
+            end
+            
+            # Find or initialize the permission
+            permission = @role.role_permissions.find_or_initialize_by(
               resource_id: perm_data[:resource_id],
               action_id: perm_data[:action_id],
-              scope_id: perm_data[:scope_id],
-              granted: true
+              scope_id: perm_data[:scope_id]
             )
+            
+            # Update granted status
+            permission.granted = perm_data[:granted] || true
+            
+            # Save if new or changed
+            if permission.new_record? || permission.changed?
+              permission.save!
+            end
           end
         end
+        
+        # Clear any caches
+        Rails.cache.clear
         
         # Return updated permissions
         permissions
       rescue ActiveRecord::RecordInvalid => e
+        error_message = e.respond_to?(:record) ? e.record.errors.full_messages.join(', ') : e.message
         render json: {
           error: 'Failed to update permissions',
-          errors: e.record.errors.full_messages
+          errors: [error_message]
+        }, status: :unprocessable_entity
+      rescue StandardError => e
+        Rails.logger.error "[RolesController] set_permissions error: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: {
+          error: 'Failed to update permissions',
+          errors: [e.message]
         }, status: :unprocessable_entity
       end
       

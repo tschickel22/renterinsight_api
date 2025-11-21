@@ -3,9 +3,12 @@
 module Api
   module Admin
     class ImpersonationController < ApplicationController
-      # Admin-only endpoint to generate a portal token for any buyer
-      # USE FOR TESTING ONLY - Add proper admin authentication in production
+      before_action :authenticate_user!
+      before_action :require_platform_admin!
+      before_action :set_company_scope
       
+      ALLOWED_BUYER_TYPES = %w[Lead Contact].freeze
+
       # POST /api/admin/impersonate
       # Body: { buyer_id: 123, buyer_type: 'Lead' }
       def create
@@ -16,13 +19,15 @@ module Api
           return render json: { error: 'buyer_id is required' }, status: :bad_request
         end
 
-        # Find the buyer
-        buyer = buyer_type.constantize.find_by(id: buyer_id)
-        unless buyer
-          return render json: { error: "#{buyer_type} not found" }, status: :not_found
+        unless ALLOWED_BUYER_TYPES.include?(buyer_type)
+          return render json: { error: "Invalid buyer_type. Must be one of: #{ALLOWED_BUYER_TYPES.join(', ')}" }, status: :bad_request
         end
 
-        # Find or create portal access
+        buyer = find_scoped_buyer(buyer_type, buyer_id)
+        unless buyer
+          return render json: { error: "#{buyer_type} not found in your company" }, status: :not_found
+        end
+
         portal_access = BuyerPortalAccess.find_or_initialize_by(
           buyer: buyer,
           email: buyer.email
@@ -38,19 +43,20 @@ module Api
           portal_access.save!
         end
 
-        # Generate JWT token
         token = JWT.encode(
           {
             buyer_id: buyer.id,
             buyer_type: buyer_type,
             exp: 24.hours.from_now.to_i,
-            impersonated: true # Mark as impersonation for logging
+            impersonated: true,
+            impersonated_by: current_user.id,
+            company_id: @company.id
           },
           Rails.application.secret_key_base,
           'HS256'
         )
 
-        Rails.logger.info "[IMPERSONATION] Admin impersonating #{buyer_type} ##{buyer_id} (#{buyer.email})"
+        Rails.logger.info "[IMPERSONATION] User ##{current_user.id} (#{current_user.email}) impersonating #{buyer_type} ##{buyer_id} (#{buyer.email}) for Company ##{@company.id}"
 
         render json: {
           token: token,
@@ -72,12 +78,14 @@ module Api
       end
 
       # GET /api/admin/impersonate/buyers
-      # List all buyers with portal access for easy impersonation
+      # List buyers with portal access for impersonation (scoped to company)
       def buyers
-        portal_accesses = BuyerPortalAccess.includes(:buyer).order(created_at: :desc)
+        portal_accesses = company_scoped_portal_accesses.includes(:buyer).order(created_at: :desc)
 
         buyers_list = portal_accesses.map do |pa|
           buyer = pa.buyer
+          next unless buyer
+          
           {
             id: buyer.id,
             type: buyer.class.name,
@@ -87,13 +95,35 @@ module Api
             created_at: pa.created_at,
             last_login_at: pa.last_login_at
           }
-        end
+        end.compact
 
         render json: {
           buyers: buyers_list,
           total: buyers_list.length,
           message: 'Use buyer_id and buyer_type to impersonate any buyer'
         }, status: :ok
+      end
+
+      private
+
+      def find_scoped_buyer(buyer_type, buyer_id)
+        case buyer_type
+        when 'Lead'
+          @company.leads.find_by(id: buyer_id)
+        when 'Contact'
+          @company.contacts.find_by(id: buyer_id)
+        end
+      end
+
+      def company_scoped_portal_accesses
+        lead_ids = @company.leads.pluck(:id)
+        contact_ids = @company.contacts.pluck(:id)
+
+        BuyerPortalAccess.where(
+          "(buyer_type = 'Lead' AND buyer_id IN (?)) OR (buyer_type = 'Contact' AND buyer_id IN (?))",
+          lead_ids,
+          contact_ids
+        )
       end
     end
   end

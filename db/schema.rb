@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_21_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1059,6 +1059,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
     t.datetime "updated_at", null: false
     t.string "enrollable_type"
     t.integer "enrollable_id"
+    t.bigint "company_id"
+    t.index ["company_id"], name: "index_nurture_enrollments_on_company_id"
     t.index ["enrollable_type", "enrollable_id"], name: "index_nurture_enrollments_on_enrollable_type_and_enrollable_id"
     t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[]))"
     t.index ["lead_id", "nurture_sequence_id"], name: "index_nurture_enrollments_on_lead_id_and_nurture_sequence_id"
@@ -1072,6 +1074,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.text "description"
+    t.bigint "company_id"
+    t.index ["company_id"], name: "index_nurture_sequences_on_company_id"
   end
 
   create_table "nurture_steps", force: :cascade do |t|
@@ -1299,6 +1303,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
     t.decimal "conversion_rate"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "company_id"
+    t.index ["company_id", "name"], name: "index_sources_on_company_id_and_name"
+    t.index ["company_id"], name: "index_sources_on_company_id"
   end
 
   create_table "syndication_partners", force: :cascade do |t|
@@ -1339,6 +1346,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
     t.datetime "assigned_at", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "company_id"
+    t.index ["company_id"], name: "index_tag_assignments_on_company_id"
     t.index ["entity_type", "entity_id"], name: "index_tag_assignments_on_entity_type_and_entity_id"
     t.index ["tag_id", "entity_type", "entity_id"], name: "idx_tag_assignments_unique", unique: true
     t.index ["tag_id"], name: "index_tag_assignments_on_tag_id"
@@ -1356,8 +1365,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
     t.string "created_by"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "company_id"
     t.index ["category"], name: "index_tags_on_category"
-    t.index ["name"], name: "index_tags_on_name", unique: true
+    t.index ["company_id", "name"], name: "index_tags_on_company_id_and_name"
+    t.index ["company_id", "name"], name: "index_tags_unique_per_company", unique: true, where: "(company_id IS NOT NULL)"
+    t.index ["company_id"], name: "index_tags_on_company_id"
   end
 
   create_table "templates", force: :cascade do |t|
@@ -1382,7 +1394,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.boolean "is_active", default: true, null: false
-    t.index ["name"], name: "index_territories_on_name", unique: true
+    t.bigint "company_id"
+    t.index ["company_id", "name"], name: "index_territories_on_company_id_and_name"
+    t.index ["company_id", "name"], name: "index_territories_unique_per_company", unique: true, where: "(company_id IS NOT NULL)"
+    t.index ["company_id"], name: "index_territories_on_company_id"
     t.index ["user_id"], name: "index_territories_on_user_id"
   end
 
@@ -1735,8 +1750,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_19_210126) do
   add_foreign_key "lot_map_lots", "lot_map_layouts", column: "layout_id"
   add_foreign_key "lot_map_lots", "vehicles", column: "assigned_inventory_id"
   add_foreign_key "notes", "users"
+  add_foreign_key "nurture_enrollments", "companies"
   add_foreign_key "nurture_enrollments", "leads"
   add_foreign_key "nurture_enrollments", "nurture_sequences"
+  add_foreign_key "nurture_sequences", "companies"
   add_foreign_key "nurture_steps", "nurture_sequences"
   add_foreign_key "nurture_steps", "templates"
   add_foreign_key "quotes", "accounts"

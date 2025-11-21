@@ -3,15 +3,16 @@
 module Api
   module Company
     class SettingsController < ApplicationController
+      before_action :authenticate_user!
+      before_action :set_company_scope
+
       # GET /api/company/settings
       def show
-        company = find_or_create_company
-        
         render json: {
-          communications: fetch_communications_settings(company),
-          notifications: fetch_notifications_settings(company),
-          branding: fetch_branding_settings(company),
-          companyId: company&.id
+          communications: fetch_communications_settings(@company),
+          notifications: fetch_notifications_settings(@company),
+          branding: fetch_branding_settings(@company),
+          companyId: @company&.id
         }, status: :ok
       rescue => e
         Rails.logger.error "[CompanySettings#show] Error: #{e.message}"
@@ -24,42 +25,28 @@ module Api
 
       # PUT/PATCH /api/company/settings
       def update
-        company = find_or_create_company
+        updated_settings = {}
         
-        if company
-          updated_settings = {}
-          
-          # Update communications settings if provided
-          if params[:communications].present?
-            save_communications_settings(company, params[:communications])
-            updated_settings[:communications] = fetch_communications_settings(company)
-          end
-          
-          # Update notifications settings if provided
-          if params[:notifications].present?
-            save_notifications_settings(company, params[:notifications])
-            updated_settings[:notifications] = fetch_notifications_settings(company)
-          end
-
-          # Update branding settings if provided
-          if params[:branding].present?
-            save_branding_settings(company, params[:branding])
-            updated_settings[:branding] = fetch_branding_settings(company)
-          end
-          
-          render json: {
-            **updated_settings,
-            companyId: company.id,
-            message: 'Company settings updated successfully'
-          }, status: :ok
-        else
-          render json: {
-            communications: params[:communications] || default_communications_settings,
-            notifications: params[:notifications] || default_notifications_settings,
-            branding: params[:branding] || default_branding_settings,
-            message: 'Settings saved (no company record yet)'
-          }, status: :ok
+        if params[:communications].present?
+          save_communications_settings(@company, params[:communications])
+          updated_settings[:communications] = fetch_communications_settings(@company)
         end
+        
+        if params[:notifications].present?
+          save_notifications_settings(@company, params[:notifications])
+          updated_settings[:notifications] = fetch_notifications_settings(@company)
+        end
+
+        if params[:branding].present?
+          save_branding_settings(@company, params[:branding])
+          updated_settings[:branding] = fetch_branding_settings(@company)
+        end
+        
+        render json: {
+          **updated_settings,
+          companyId: @company.id,
+          message: 'Company settings updated successfully'
+        }, status: :ok
       rescue => e
         Rails.logger.error "[CompanySettings#update] Error: #{e.message}"
         render json: { 
@@ -74,10 +61,8 @@ module Api
         
         return render_missing_settings('email') if email_settings.blank?
         
-        # Convert ActionController::Parameters to hash for service
         settings_hash = email_settings.is_a?(ActionController::Parameters) ? email_settings.to_unsafe_h : email_settings
         
-        # Test the email configuration
         result = TestCommunicationService.new(settings_hash, :email).test
         
         if result[:success]
@@ -108,10 +93,8 @@ module Api
         
         return render_missing_settings('sms') if sms_settings.blank?
         
-        # Convert ActionController::Parameters to hash for service
         settings_hash = sms_settings.is_a?(ActionController::Parameters) ? sms_settings.to_unsafe_h : sms_settings
         
-        # Test the SMS configuration
         result = TestCommunicationService.new(settings_hash, :sms).test
         
         if result[:success]
@@ -138,33 +121,13 @@ module Api
 
       private
 
-      def find_or_create_company
-        # Try to find existing company
-        company = current_user&.company || ::Company.first rescue nil
-        
-        # If no company exists, create a default one
-        if company.nil? && defined?(::Company)
-          begin
-            company = ::Company.create!(name: 'Demo Company')
-          rescue => e
-            Rails.logger.warn "[CompanySettings] Could not create company: #{e.message}"
-            nil
-          end
-        end
-        
-        company
-      end
-
       def fetch_communications_settings(company)
         return default_communications_settings unless company
-        
-        # Get company-specific settings or fall back to defaults
         company.communications_settings || default_communications_settings
       end
 
       def fetch_notifications_settings(company)
         return default_notifications_settings unless company
-        
         company.notifications_settings || default_notifications_settings
       end
 
@@ -173,7 +136,6 @@ module Api
         
         branding = company.branding_settings || default_branding_settings
         
-        # Convert logo URLs from relative to absolute
         if branding['logo'].present?
           branding['logo'] = absolute_url(branding['logo'])
         end
@@ -194,7 +156,6 @@ module Api
       end
 
       def save_communications_settings(company, settings)
-        # Encrypt sensitive credentials before saving
         encrypted_settings = encrypt_sensitive_fields(settings, :communications)
         company.communications_settings = encrypted_settings
       end
@@ -212,7 +173,6 @@ module Api
         
         case channel
         when :communications
-          # Encrypt email credentials
           if encrypted.dig('email', 'smtpPassword').present?
             encrypted['email']['smtpPassword'] = encrypt(encrypted['email']['smtpPassword'])
           end
@@ -229,7 +189,6 @@ module Api
             encrypted['email']['awsSecretAccessKey'] = encrypt(encrypted['email']['awsSecretAccessKey'])
           end
           
-          # Encrypt SMS credentials
           if encrypted.dig('sms', 'twilioAuthToken').present?
             encrypted['sms']['twilioAuthToken'] = encrypt(encrypted['sms']['twilioAuthToken'])
           end
@@ -246,7 +205,6 @@ module Api
         return value if value.start_with?('encrypted:')
         
         secret_key = ENV['SETTINGS_ENCRYPTION_KEY'] || Rails.application.secret_key_base
-        # Ensure key is exactly 32 bytes for AES-256
         key = ActiveSupport::KeyGenerator.new(secret_key).generate_key('', 32)
         crypt = ActiveSupport::MessageEncryptor.new(key)
         "encrypted:#{crypt.encrypt_and_sign(value)}"
@@ -317,7 +275,6 @@ module Api
         return path if path.blank?
         return path if path.start_with?('http://', 'https://')
         
-        # Get base URL from request or ENV
         base_url = if request.present?
           "#{request.protocol}#{request.host_with_port}"
         else
