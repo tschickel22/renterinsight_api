@@ -18,11 +18,7 @@ module RenterinsightApi
     config.autoload_lib(ignore: %w[
       assets 
       tasks
-      debug_quote_preferences.rb
-      quick_fix_quote_prefs.rb
-      diagnose_quote_17.rb
-      fix_quote_17.rb
-      immediate_fix.rb
+      scripts
     ])
 
     # Configuration for the application, engines, and railties goes here.
