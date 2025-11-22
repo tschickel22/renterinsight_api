@@ -11,21 +11,26 @@ module Api
         return unless authorize_action!('service', 'read')
         
         # STRICT TENANT ISOLATION: Only return service tickets from current user's company
-        # RBAC: Location-tier users only see their assigned locations
+        # RBAC: Location-tier users only see their assigned locations (STRICT - no NULL fallback)
         @service_tickets = if current_user.uses_rbac?
           if current_user.effective_admin?  # Use RBAC-aware admin check
             @company.service_tickets
           else
             location_ids = permission_service.accessible_location_ids
             if location_ids.any?
-              # Include tickets in assigned locations OR unassigned tickets (NULL location_id)
-              @company.service_tickets.where("location_id IN (?) OR location_id IS NULL", location_ids)
+              # STRICT: Only tickets in assigned locations (no NULL fallback)
+              @company.service_tickets.where(location_id: location_ids)
             else
               @company.service_tickets
             end
           end
         else
           @company.service_tickets
+        end
+        
+        # Apply location selector filter (if user selected a specific location)
+        if Current.location_filtered?
+          @service_tickets = @service_tickets.where(location_id: Current.location_id)
         end
         
         @service_tickets = @service_tickets.includes(:account, :contact, :vehicle).recent
@@ -56,8 +61,11 @@ module Api
         
         @service_ticket = @company.service_tickets.new(service_ticket_params)
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?
+        # Auto-assign location from selector (if user selected a specific location)
+        @service_ticket.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if @service_ticket.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           @service_ticket.location_id ||= location_ids.first if location_ids.any?
         end
@@ -94,6 +102,11 @@ module Api
         
         tickets = @company.service_tickets
         
+        # Apply location selector filter for stats (if user selected a specific location)
+        if Current.location_filtered?
+          tickets = tickets.where(location_id: Current.location_id)
+        end
+        
         stats_data = {
           total: tickets.count,
           open: tickets.open.count,
@@ -110,12 +123,12 @@ module Api
       
       def set_service_ticket
         # STRICT TENANT ISOLATION: Only find service tickets within company
-        # RBAC: Location-tier users only access their assigned locations
+        # RBAC: Location-tier users only access their assigned locations (STRICT - no NULL fallback)
         @service_ticket = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
-            # Include tickets in assigned locations OR unassigned tickets (NULL location_id)
-            @company.service_tickets.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+            # STRICT: Only tickets in assigned locations (no NULL fallback)
+            @company.service_tickets.where(location_id: location_ids).find(params[:id])
           else
             @company.service_tickets.find(params[:id])
           end

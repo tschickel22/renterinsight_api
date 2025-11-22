@@ -3,6 +3,7 @@
 class Brochure < ApplicationRecord
   # Associations
   belongs_to :company
+  belongs_to :location, optional: true
 
   # Validations
   validates :title, presence: true

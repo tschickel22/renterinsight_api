@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 class Account < ApplicationRecord
   include Communicable
+  include LocationAware
+  
   # Account Types
   ACCOUNT_TYPES = %w[customer prospect vendor partner competitor converted_lead].freeze
   STATUSES = %w[active inactive pending archived].freeze
@@ -9,6 +11,7 @@ class Account < ApplicationRecord
   
   # Associations
   belongs_to :company, optional: true
+  belongs_to :location, optional: true
   belongs_to :source, optional: true
   belongs_to :parent_account, class_name: 'Account', optional: true
   belongs_to :owner, class_name: 'User', optional: true

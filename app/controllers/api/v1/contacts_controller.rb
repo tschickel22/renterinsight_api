@@ -23,8 +23,8 @@ module Api
                         else
                           location_ids = permission_service.accessible_location_ids
                           if location_ids.any?
-                            # Include contacts in assigned locations OR unassigned contacts (NULL location_id)
-                            @company.contacts.where("location_id IN (?) OR location_id IS NULL", location_ids)
+                            # Strict location filtering - only assigned locations
+                            @company.contacts.where(location_id: location_ids)
                           else
                             @company.contacts
                           end
@@ -33,6 +33,11 @@ module Api
                         @company.contacts
                       end
                     end
+
+        # Apply strict location filter - only contacts explicitly assigned to selected location
+        if Current.location_filtered?
+          @contacts = @contacts.where(location_id: Current.location_id)
+        end
 
         # Apply filters
         @contacts = apply_filters(@contacts)
@@ -73,7 +78,14 @@ module Api
         return unless authorize_action!('crm', 'read')
         
         # STRICT TENANT ISOLATION: Only stats for current company
-        render json: @company.contacts.statistics
+        contacts = @company.contacts
+        
+        # Apply strict location filter - only contacts explicitly assigned to selected location
+        if Current.location_filtered?
+          contacts = contacts.where(location_id: Current.location_id)
+        end
+        
+        render json: contacts.statistics
       rescue => e
         Rails.logger.error "Error in contacts#stats: #{e.message}"
         render json: { error: e.message }, status: :internal_server_error
@@ -96,8 +108,11 @@ module Api
         # STRICT TENANT ISOLATION: Create contact within current company
         @contact = @company.contacts.new(contact_params)
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+        # Auto-assign location from selector (if user selected a specific location)
+        @contact.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if @contact.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           @contact.location_id ||= location_ids.first if location_ids.any?
         end
@@ -159,8 +174,11 @@ module Api
             :title, :department, :is_primary, :notes
           ))
           
-          # RBAC: Location-tier users auto-assign to their location
-          if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+          # Auto-assign location from selector (if user selected a specific location)
+          contact.location_id ||= Current.location_id if Current.location_id.present?
+          
+          # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+          if contact.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
             location_ids = permission_service.accessible_location_ids
             contact.location_id ||= location_ids.first if location_ids.any?
           end
@@ -285,8 +303,11 @@ module Api
 
         @contact = @company.contacts.new(contact_data)
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+        # Auto-assign location from selector (if user selected a specific location)
+        @contact.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if @contact.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           @contact.location_id ||= location_ids.first if location_ids.any?
         end

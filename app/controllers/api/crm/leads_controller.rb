@@ -24,6 +24,9 @@ module Api
           @company.leads.where(is_converted: [false, nil])
         end
         
+        # Apply location selector filter (if user selected a specific location)
+        leads = leads.for_current_location
+        
         leads = leads.includes(:source).order(created_at: :desc)
         
         render json: leads.map { |l| lead_json(l) }
@@ -44,8 +47,11 @@ module Api
         # STRICT TENANT ISOLATION: Create lead within current company
         l = @company.leads.new(lead_params)
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?
+        # Auto-assign location from selector (if user selected a specific location)
+        l.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if l.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           l.location_id ||= location_ids.first if location_ids.any?
         end
@@ -147,8 +153,11 @@ module Api
           account.source_id = @lead.source_id if @lead.source_id.present?
           account.notes = @lead.notes if @lead.notes.present?
           
-          # RBAC: Location-tier users auto-assign to their location
-          if current_user.uses_rbac? && !current_user.effective_admin?
+          # Auto-assign location from selector (if user selected a specific location)
+          if Current.location_id.present?
+            account.location_id = Current.location_id
+          # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+          elsif current_user.uses_rbac? && !current_user.effective_admin?
             location_ids = permission_service.accessible_location_ids
             account.location_id = location_ids.first if location_ids.any?
           end

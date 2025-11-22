@@ -32,6 +32,20 @@ module Api
     def create
       verify_company_access!
       
+      # Log incoming params for debugging
+      received_location_ids = params[:location_ids] || params[:locationIds] || []
+      received_location_role = params[:location_role] || params[:locationRole]
+      
+      Rails.logger.info "📨 [InvitationsController] Creating invitation"
+      Rails.logger.info "📨 [InvitationsController] email: #{params[:email]}"
+      Rails.logger.info "📨 [InvitationsController] role: #{params[:role]}"
+      Rails.logger.info "📨 [InvitationsController] location_ids (snake): #{params[:location_ids].inspect}"
+      Rails.logger.info "📨 [InvitationsController] locationIds (camel): #{params[:locationIds].inspect}"
+      Rails.logger.info "📨 [InvitationsController] resolved location_ids: #{received_location_ids.inspect}"
+      Rails.logger.info "📨 [InvitationsController] location_role (snake): #{params[:location_role]}"
+      Rails.logger.info "📨 [InvitationsController] locationRole (camel): #{params[:locationRole]}"
+      Rails.logger.info "📨 [InvitationsController] resolved location_role: #{received_location_role}"
+      
       service = InvitationService.new(
         invited_by: current_user,
         company: @company
@@ -46,7 +60,9 @@ module Api
         role: params[:role],
         permissions: params[:permissions] || [],
         delivery_method: params[:delivery_method] || params[:deliveryMethod] || 'email',
-        message: params[:message]
+        message: params[:message],
+        location_ids: received_location_ids,
+        location_role: received_location_role
       )
       
       if result[:success]
@@ -163,6 +179,8 @@ module Api
         recipientName: invitation.recipient_name,
         deliveryMethod: invitation.delivery_method,
         message: invitation.message,
+        locationIds: invitation.location_ids || [],
+        locationRole: invitation.location_role,
         sentAt: invitation.sent_at&.iso8601,
         expiresAt: invitation.expires_at&.iso8601,
         acceptedAt: invitation.accepted_at&.iso8601,
@@ -180,7 +198,10 @@ module Api
         company: invitation.company ? {
           id: invitation.company.id,
           name: invitation.company.name
-        } : nil
+        } : nil,
+        locations: invitation.location_ids.present? ? Location.where(id: invitation.parsed_location_ids).map { |loc|
+          { id: loc.id, name: loc.name, code: loc.code }
+        } : []
       }
     end
   end

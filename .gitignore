@@ -62,3 +62,69 @@ PORTAL_REGISTRATION_COMPLETE.md
 
 # Uploaded files - don't commit to git
 public/uploads/*
+
+# Development/debug scripts and files
+debug_*.rb
+fix_*.rb
+check_*.rb
+seed_*.rb
+quick_test.sh
+phase3_backend_cleanup.sh
+test_rbac_migration.sh
+
+# Phase completion/summary documentation (development only)
+PHASE*.md
+*_COMPLETE.md
+*_SUMMARY.md
+*_FIX.md
+*_INSTRUCTIONS.md
+BAK_FILES_REPORT.md
+LOCATION_FIXES_SUMMARY.md
+QUICK_FIX_INSTRUCTIONS.md
+PASSWORD_VALIDATION_FIX.md
+PORTAL_PASSWORD_FIX.md
+MIGRATION_TEST_INSTRUCTIONS.md
+
+# Debug artifacts
+true
+Lead.count
+ActiveRecordBase.connection.active
+
+# Local backup directories
+/backups/
+/backup/
+/migrate_archive/
+/examples/
+
+# Development/debug scripts and files
+debug_*.rb
+fix_*.rb
+check_*.rb
+seed_*.rb
+quick_test.sh
+phase3_backend_cleanup.sh
+test_rbac_migration.sh
+
+# Phase completion/summary documentation (development only)
+PHASE*.md
+*_COMPLETE.md
+*_SUMMARY.md
+*_FIX.md
+*_INSTRUCTIONS.md
+BAK_FILES_REPORT.md
+LOCATION_FIXES_SUMMARY.md
+QUICK_FIX_INSTRUCTIONS.md
+PASSWORD_VALIDATION_FIX.md
+PORTAL_PASSWORD_FIX.md
+MIGRATION_TEST_INSTRUCTIONS.md
+
+# Debug artifacts
+true
+Lead.count
+ActiveRecordBase.connection.active
+
+# Local backup directories
+/backups/
+/backup/
+/migrate_archive/
+/examples/

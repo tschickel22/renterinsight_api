@@ -17,28 +17,37 @@ module Api
       # GET /api/v1/portal_users
       def index
         # STRICT TENANT ISOLATION: Only return portal users from current user's company
-        # RBAC: Location-tier users only see portal users for contacts in their assigned locations
+        # RBAC: Location-tier users only see portal users for contacts in their assigned locations (STRICT - no NULL fallback)
         @portal_users = if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
-            # Include portal users for contacts in assigned locations OR unassigned contacts (NULL location_id)
+            # STRICT: Only portal users for contacts in assigned locations (no NULL fallback)
             BuyerPortalAccess
-              .includes(:buyer)
               .where(company_id: current_company_id, buyer_type: 'Contact')
               .joins("INNER JOIN contacts ON contacts.id = buyer_portal_accesses.buyer_id")
-              .where("contacts.location_id IN (?) OR contacts.location_id IS NULL", location_ids)
+              .where(contacts: { location_id: location_ids })
               .order(created_at: :desc)
           else
             BuyerPortalAccess
-              .includes(:buyer)
               .where(company_id: current_company_id)
               .order(created_at: :desc)
           end
         else
           BuyerPortalAccess
-            .includes(:buyer)
             .where(company_id: current_company_id)
             .order(created_at: :desc)
+        end
+        
+        # Apply location selector filter (if user selected a specific location)
+        # Note: Only apply if we haven't already joined contacts for RBAC filtering
+        if Current.location_filtered?
+          # Check if contacts join already exists from RBAC filtering above
+          unless current_user.uses_rbac? && !current_user.effective_admin? && permission_service.accessible_location_ids.any?
+            @portal_users = @portal_users
+              .where(buyer_type: 'Contact')
+              .joins("INNER JOIN contacts ON contacts.id = buyer_portal_accesses.buyer_id")
+          end
+          @portal_users = @portal_users.where(contacts: { location_id: Current.location_id })
         end
 
         # Apply filters
@@ -48,10 +57,14 @@ module Api
         # Apply search
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          @portal_users = @portal_users.joins(:contact).where(
-            'contacts.first_name ILIKE ? OR contacts.last_name ILIKE ? OR contacts.email ILIKE ?',
-            search_term, search_term, search_term
-          )
+          # Only search contacts - join if not already joined
+          @portal_users = @portal_users
+            .where(buyer_type: 'Contact')
+            .joins("LEFT JOIN contacts AS search_contacts ON search_contacts.id = buyer_portal_accesses.buyer_id")
+            .where(
+              'search_contacts.first_name ILIKE ? OR search_contacts.last_name ILIKE ? OR search_contacts.email ILIKE ? OR buyer_portal_accesses.email ILIKE ?',
+              search_term, search_term, search_term, search_term
+            )
         end
 
         # Pagination
@@ -282,6 +295,14 @@ module Api
       # GET /api/v1/portal_users/stats
       def stats
         portal_users = BuyerPortalAccess.where(company_id: current_company_id)
+        
+        # Apply location selector filter for stats (if user selected a specific location)
+        if Current.location_filtered?
+          portal_users = portal_users
+            .where(buyer_type: 'Contact')
+            .joins("INNER JOIN contacts ON contacts.id = buyer_portal_accesses.buyer_id")
+            .where(contacts: { location_id: Current.location_id })
+        end
 
         render json: {
           total: portal_users.count,
@@ -302,15 +323,15 @@ module Api
 
       def set_portal_user
         # STRICT TENANT ISOLATION: Only find portal users within company
-        # RBAC: Location-tier users only access portal users for contacts in their assigned locations
+        # RBAC: Location-tier users only access portal users for contacts in their assigned locations (STRICT - no NULL fallback)
         @portal_user = if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
-            # Include portal users for contacts in assigned locations OR unassigned contacts (NULL location_id)
+            # STRICT: Only portal users for contacts in assigned locations (no NULL fallback)
             BuyerPortalAccess
               .where(id: params[:id], company_id: current_company_id, buyer_type: 'Contact')
               .joins("INNER JOIN contacts ON contacts.id = buyer_portal_accesses.buyer_id")
-              .where("contacts.location_id IN (?) OR contacts.location_id IS NULL", location_ids)
+              .where(contacts: { location_id: location_ids })
               .first
           else
             BuyerPortalAccess.find_by(id: params[:id], company_id: current_company_id)

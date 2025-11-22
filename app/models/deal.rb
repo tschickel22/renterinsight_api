@@ -1,4 +1,6 @@
 class Deal < ApplicationRecord
+  include LocationAware
+  
   belongs_to :company, optional: true
   belongs_to :location, optional: true
   belongs_to :account, optional: true

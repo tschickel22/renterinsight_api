@@ -13,6 +13,7 @@ class Location < ApplicationRecord
   has_many :contacts, dependent: :nullify
   has_many :service_tickets, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  has_many :brochures, dependent: :nullify
   has_many :location_activities, dependent: :destroy
 
   # Validations

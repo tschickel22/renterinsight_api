@@ -206,6 +206,9 @@ module Api
       def build_user_response(user)
         company = user.company
         
+        # Get user's location assignments
+        location_data = build_location_data(user, company)
+        
         {
           id: user.id,
           email: user.email,
@@ -218,8 +221,60 @@ module Api
           # RBAC information
           rbac_enabled: company&.use_rbac_system || false,
           permissions: build_permissions(user, company),
-          roles: build_roles(user, company)
+          roles: build_roles(user, company),
+          # Location assignments for location-tier users
+          user_tier: location_data[:user_tier],
+          location_ids: location_data[:location_ids],
+          location_role: location_data[:location_role],
+          assigned_locations: location_data[:assigned_locations]
         }
+      end
+      
+      # Build location data for user response
+      # Returns user_tier (company/location), location_ids, location_role, and detailed location info
+      def build_location_data(user, company)
+        # Platform/super admins and company-tier admins have company-level access
+        return { user_tier: 'platform', location_ids: [], location_role: nil, assigned_locations: [] } if user.platform_admin? || user.super_admin?
+        
+        # Check if user has location-tier assignments
+        user_locations = user.user_locations.active.includes(:location).where(company_id: company&.id)
+        
+        if user_locations.any?
+          # User is location-tier - they have specific location assignments
+          location_ids = user_locations.map(&:location_id)
+          
+          # Get the primary location role (use the highest-level role if multiple)
+          role_priority = { 'location_admin' => 3, 'location_manager' => 2, 'location_staff' => 1 }
+          primary_assignment = user_locations.max_by { |ul| role_priority[ul.location_role] || 0 }
+          
+          assigned_locations = user_locations.map do |ul|
+            {
+              id: ul.location_id,
+              name: ul.location&.name,
+              code: ul.location&.code,
+              role: ul.location_role
+            }
+          end
+          
+          {
+            user_tier: 'location',
+            location_ids: location_ids,
+            location_role: primary_assignment&.location_role,
+            assigned_locations: assigned_locations
+          }
+        else
+          # User is company-tier or has no location restrictions
+          # Check RBAC roles to determine if they're company-tier
+          is_company_tier = user.company_admin? || 
+                            user.roles_for_company(company&.id).any? { |r| r.tier == 'company' }
+          
+          {
+            user_tier: is_company_tier ? 'company' : 'location',
+            location_ids: [],
+            location_role: nil,
+            assigned_locations: []
+          }
+        end
       end
 
       # Build permissions array for frontend

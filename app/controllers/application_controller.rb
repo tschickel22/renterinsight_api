@@ -5,8 +5,23 @@ class ApplicationController < ActionController::API
   include ActionController::Cookies
   
   before_action :authenticate
+  before_action :set_current_attributes
 
   private
+  
+  # Set Current attributes for use throughout the request
+  # This allows models to access current context without explicit passing
+  def set_current_attributes
+    Current.user = current_user
+    Current.company_id = current_company_id
+    Current.location_id = current_location_id
+    
+    if Rails.env.development? && Current.location_id.present?
+      Rails.logger.info "📍 [Current] Location context set: #{Current.location_id}"
+    end
+  rescue => e
+    Rails.logger.warn "[Current] Failed to set attributes: #{e.message}"
+  end
 
   # Standard tenant isolation - sets @company from current user
   # Use as: before_action :set_company_scope
@@ -207,6 +222,69 @@ class ApplicationController < ActionController::API
   def current_company
     return @current_company if defined?(@current_company)
     @current_company = ::Company.find_by(id: current_company_id)
+  end
+  
+  # Get the active location ID from X-Location-ID header
+  # Used for filtering data when user selects a specific location
+  def current_location_id
+    return @current_location_id if defined?(@current_location_id)
+    
+    header_location_id = request.headers['X-Location-ID']&.to_i
+    
+    if header_location_id.present? && header_location_id > 0
+      # Verify user has access to this location
+      if current_user&.platform_admin? || current_user&.super_admin? || current_user&.admin?
+        # Admins can access any location in their company
+        location = Location.find_by(id: header_location_id, company_id: current_company_id)
+        if location
+          @current_location_id = header_location_id
+          Rails.logger.info "[Location] Admin #{current_user.email} filtering by location: #{location.name} (#{header_location_id})"
+        else
+          Rails.logger.warn "[Location] Location #{header_location_id} not found or doesn't belong to company #{current_company_id}"
+          @current_location_id = nil
+        end
+      else
+        # Location-tier users can only access their assigned locations
+        user_location = UserLocation.find_by(
+          user_id: current_user&.id,
+          location_id: header_location_id,
+          active: true
+        )
+        
+        if user_location
+          @current_location_id = header_location_id
+          Rails.logger.info "[Location] User #{current_user.email} filtering by assigned location: #{header_location_id}"
+        else
+          Rails.logger.warn "[Location] User #{current_user&.email} does not have access to location #{header_location_id}"
+          @current_location_id = nil
+        end
+      end
+    else
+      @current_location_id = nil
+    end
+    
+    @current_location_id
+  end
+  
+  # Get the current location object
+  def current_location
+    return @current_location if defined?(@current_location)
+    @current_location = current_location_id ? Location.find_by(id: current_location_id) : nil
+  end
+  
+  # Helper to scope a query by location if a location is selected
+  # Usage: scope_by_location(Inventory.all, :location_id)
+  def scope_by_location(relation, location_column = :location_id)
+    if current_location_id.present?
+      relation.where(location_column => current_location_id)
+    else
+      relation
+    end
+  end
+  
+  # Check if we're filtering by a specific location
+  def location_filtered?
+    current_location_id.present?
   end
 
   # RBAC Authorization Helpers

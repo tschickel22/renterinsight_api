@@ -24,8 +24,11 @@
 #
 
 class ServiceTicket < ApplicationRecord
+  include LocationAware
+  
   # Associations
   belongs_to :company
+  belongs_to :location, optional: true
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
   belongs_to :vehicle, optional: true

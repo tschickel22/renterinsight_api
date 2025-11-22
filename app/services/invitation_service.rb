@@ -23,7 +23,9 @@ class InvitationService
     role: nil,
     permissions: [],
     delivery_method: 'email',
-    message: nil
+    message: nil,
+    location_ids: [],
+    location_role: nil
   )
     # Validate invitation type
     unless Invitation::INVITATION_TYPES.include?(invitation_type)
@@ -43,6 +45,19 @@ class InvitationService
       raise Error, "Phone number is required for SMS delivery"
     end
     
+    # Normalize location_ids to array of integers
+    normalized_location_ids = normalize_location_ids(location_ids)
+    
+    # Validate location_ids belong to company
+    if normalized_location_ids.any? && @company
+      valid_location_ids = Location.where(id: normalized_location_ids, company_id: @company.id).pluck(:id)
+      invalid_ids = normalized_location_ids - valid_location_ids
+      if invalid_ids.any?
+        raise Error, "Invalid location IDs: #{invalid_ids.join(', ')} - locations must belong to the company"
+      end
+      normalized_location_ids = valid_location_ids
+    end
+    
     # Create invitation record
     invitation, raw_token = Invitation.create_for_user(
       invitation_type: invitation_type,
@@ -55,7 +70,9 @@ class InvitationService
       recipient_name: recipient_name,
       recipient_data: recipient_data,
       delivery_method: delivery_method,
-      message: message
+      message: message,
+      location_ids: normalized_location_ids,
+      location_role: location_role
     )
     
     # Store raw token temporarily for sending
@@ -353,14 +370,27 @@ class InvitationService
       Rails.logger.info "🖼️  Platform Logo URL: #{platform_logo_url}"
     end
     
+    # Determine the display role - prefer location_role for location-based invitations
+    display_role = if invitation.location_role.present?
+      invitation.location_role.titleize.gsub('_', ' ')
+    elsif invitation.role.present?
+      invitation.role.titleize.gsub('_', ' ')
+    else
+      'Team Member'
+    end
+    
+    Rails.logger.info "🎭 [InvitationService] Building context - location_role: #{invitation.location_role.inspect}, role: #{invitation.role.inspect}, display_role: #{display_role}"
+    
     {
       'recipient_name' => invitation.recipient_name || invitation.email.split('@').first.capitalize,
       'first_name' => first_name || invitation.email.split('@').first.capitalize,
       'last_name' => last_name || '',
       'email' => invitation.email,
       'phone' => invitation.phone,
-      'role' => invitation.role&.titleize,
-      'role_name' => invitation.role&.titleize,
+      'role' => display_role,
+      'role_name' => display_role,
+      'location_role' => invitation.location_role&.titleize&.gsub('_', ' '),
+      'company_role' => invitation.role&.titleize&.gsub('_', ' '),
       'invited_by' => invitation.invited_by.name || invitation.invited_by.email,
       'inviter_name' => invitation.invited_by.name || invitation.invited_by.email,
       'company_name' => invitation.company&.name,
@@ -444,6 +474,14 @@ class InvitationService
     Rails.logger.info("✅ Invitation SMS sent to #{invitation.phone}")
   end
   
+  # Normalize location_ids to array of integers
+  def normalize_location_ids(location_ids)
+    return [] if location_ids.blank?
+    
+    ids = location_ids.is_a?(Array) ? location_ids : [location_ids]
+    ids.map(&:to_i).reject(&:zero?).uniq
+  end
+
   # Find template for specific channel
   def find_template_for_channel(invitation, channel)
     # Convert invitation_type to template_type (e.g., 'company_user' -> 'company_user_invitation')
@@ -473,11 +511,19 @@ class InvitationService
   
   # Create a placeholder user record when invitation is sent
   def create_invited_user_placeholder(invitation, recipient_name)
+    Rails.logger.info "📧 [InvitationService] Creating placeholder user for #{invitation.email}"
+    Rails.logger.info "📧 [InvitationService] Location IDs: #{invitation.location_ids.inspect}"
+    Rails.logger.info "📧 [InvitationService] Location Role: #{invitation.location_role}"
+    
     # Check if user already exists
     existing_user = User.find_by(email: invitation.email)
     if existing_user
+      Rails.logger.info "📧 [InvitationService] User already exists: #{existing_user.id}"
       # Ensure existing user has RBAC role assigned
       assign_rbac_role_to_user(existing_user, invitation.role, invitation.company_id)
+      # Assign to locations immediately
+      assignments = assign_user_to_locations_safe(invitation, existing_user)
+      Rails.logger.info "📧 [InvitationService] Location assignments for existing user: #{assignments.length}"
       return existing_user
     end
     
@@ -505,13 +551,75 @@ class InvitationService
       password: SecureRandom.hex(32) # Temporary password, will be replaced on acceptance
     )
     
+    Rails.logger.info "📧 [InvitationService] Created placeholder user: #{user.id} (#{user.email})"
+    
     # Assign RBAC role
     assign_rbac_role_to_user(user, invitation.role, invitation.company_id)
     
+    # Assign to locations immediately so they show in Assigned Users
+    assignments = assign_user_to_locations_safe(invitation, user)
+    Rails.logger.info "📧 [InvitationService] Location assignments for new user: #{assignments.length}"
+    
     user
   rescue ActiveRecord::RecordInvalid => e
-    Rails.logger.warn("Could not create placeholder user: #{e.message}")
+    Rails.logger.error("❌ [InvitationService] Could not create placeholder user: #{e.message}")
+    Rails.logger.error(e.backtrace.first(3).join("\n"))
     nil
+  end
+  
+  # Safe wrapper for location assignment with detailed logging
+  def assign_user_to_locations_safe(invitation, user)
+    Rails.logger.info "📍 [InvitationService] Assigning user #{user.id} to locations"
+    Rails.logger.info "📍 [InvitationService] Raw location_ids: #{invitation.location_ids.inspect} (class: #{invitation.location_ids.class})"
+    Rails.logger.info "📍 [InvitationService] Parsed location_ids: #{invitation.parsed_location_ids.inspect}"
+    Rails.logger.info "📍 [InvitationService] has_location_assignments?: #{invitation.has_location_assignments?}"
+    Rails.logger.info "📍 [InvitationService] company_id: #{invitation.company_id}"
+    
+    if !invitation.has_location_assignments?
+      Rails.logger.warn "⚠️ [InvitationService] No location assignments - location_ids is empty"
+      return []
+    end
+    
+    if !invitation.company_id
+      Rails.logger.warn "⚠️ [InvitationService] No company_id on invitation"
+      return []
+    end
+    
+    assignments = []
+    location_role_value = invitation.location_role || 'location_staff'
+    
+    invitation.parsed_location_ids.each do |loc_id|
+      Rails.logger.info "📍 [InvitationService] Looking for location #{loc_id} in company #{invitation.company_id}"
+      
+      location = Location.find_by(id: loc_id, company_id: invitation.company_id)
+      unless location
+        Rails.logger.warn "⚠️ [InvitationService] Location #{loc_id} not found in company #{invitation.company_id}"
+        next
+      end
+      
+      Rails.logger.info "📍 [InvitationService] Found location: #{location.id} (#{location.name})"
+      
+      user_location = UserLocation.find_or_initialize_by(
+        user_id: user.id,
+        location_id: location.id
+      )
+      
+      user_location.company_id = invitation.company_id
+      user_location.location_role = location_role_value
+      user_location.assigned_by = @invited_by&.id&.to_s
+      user_location.active = true
+      
+      Rails.logger.info "📍 [InvitationService] UserLocation attributes: #{user_location.attributes.except('created_at', 'updated_at')}"
+      
+      if user_location.save
+        assignments << user_location
+        Rails.logger.info "✅ [InvitationService] Assigned user #{user.id} to location #{location.id} with role #{location_role_value}"
+      else
+        Rails.logger.error "❌ [InvitationService] Failed to assign user #{user.id} to location #{location.id}: #{user_location.errors.full_messages.join(', ')}"
+      end
+    end
+    
+    assignments
   end
   
   # Assign RBAC role to user based on role identifier
@@ -548,10 +656,14 @@ class InvitationService
   end
   
   def create_company_user(invitation, user_params)
+    Rails.logger.info "👤 [InvitationService] Accepting invitation for #{invitation.email}"
+    
     # Find existing invited user
     user = User.find_by(email: invitation.email)
     
     if user
+      Rails.logger.info "👤 [InvitationService] Updating existing placeholder user: #{user.id}"
+      
       # Update existing placeholder user with full details
       user.update!(
         first_name: user_params[:first_name],
@@ -566,8 +678,19 @@ class InvitationService
       # Ensure RBAC role is assigned (may have been set during placeholder creation, but verify)
       assign_rbac_role_to_user(user, invitation.role, invitation.company_id)
       
+      # Ensure user to locations assignment (may already exist from placeholder creation)
+      existing_assignments = UserLocation.where(user_id: user.id).count
+      Rails.logger.info "👤 [InvitationService] User has #{existing_assignments} existing location assignments"
+      
+      if existing_assignments == 0
+        Rails.logger.info "👤 [InvitationService] Creating location assignments on acceptance"
+        assign_user_to_locations_safe(invitation, user)
+      end
+      
       user
     else
+      Rails.logger.info "👤 [InvitationService] No placeholder found - creating new user"
+      
       # Fallback: create new user if somehow doesn't exist
       new_user = User.create!(
         email: invitation.email,
@@ -585,6 +708,9 @@ class InvitationService
       
       # Assign RBAC role
       assign_rbac_role_to_user(new_user, invitation.role, invitation.company_id)
+      
+      # Assign user to locations if specified
+      assign_user_to_locations_safe(invitation, new_user)
       
       new_user
     end

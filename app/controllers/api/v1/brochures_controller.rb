@@ -13,7 +13,30 @@ module Api
 
       # GET /api/v1/brochures
       def index
-        brochures = @company.brochures.includes(:company)
+        # STRICT TENANT ISOLATION: Only return brochures from current user's company
+        # RBAC: Location-tier users only see their assigned locations
+        brochures = if current_user.uses_rbac?
+          if current_user.effective_admin?
+            @company.brochures
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              # Include brochures in assigned locations OR unassigned brochures (NULL location_id)
+              @company.brochures.where("location_id IN (?) OR location_id IS NULL", location_ids)
+            else
+              @company.brochures.where(location_id: nil)
+            end
+          end
+        else
+          @company.brochures
+        end
+        
+        # Apply strict location filter - only brochures explicitly assigned to selected location
+        if Current.location_filtered?
+          brochures = brochures.where(location_id: Current.location_id)
+        end
+        
+        brochures = brochures.includes(:company, :location)
         
         # Status filter - active, inactive, or all
         if params[:status].present?
@@ -86,10 +109,38 @@ module Api
           'template_data',
           'vehicle_ids',
           'is_public',
-          'status'
+          'status',
+          'location_id'
         )
         
         @brochure = @company.brochures.new(safe_params)
+        
+        # Auto-assign location from Current.location_id (set by X-Location-ID header)
+        @brochure.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if @brochure.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          @brochure.location_id ||= location_ids.first if location_ids.any?
+        end
+        
+        # Verify location belongs to company if specified
+        if @brochure.location_id.present?
+          location = @company.locations.find_by(id: @brochure.location_id)
+          unless location
+            render json: { error: 'Invalid location' }, status: :unprocessable_entity
+            return
+          end
+          
+          # RBAC: Verify user has access to this location (for non-admins)
+          if current_user.uses_rbac? && !current_user.effective_admin?
+            location_ids = permission_service.accessible_location_ids
+            unless location_ids.include?(@brochure.location_id)
+              render json: { error: 'You do not have access to this location' }, status: :forbidden
+              return
+            end
+          end
+        end
         
         if @brochure.save
           render json: { brochure: brochure_json(@brochure, detailed: true) }, status: :created
@@ -251,8 +302,27 @@ module Api
 
       # GET /api/v1/brochures/stats
       def stats
-        # Get all brochures for stats (not just active)
-        all_brochures = @company.brochures
+        # RBAC: Location-tier users only see stats for their assigned locations
+        all_brochures = if current_user.uses_rbac?
+          if current_user.effective_admin?
+            @company.brochures
+          else
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              @company.brochures.where("location_id IN (?) OR location_id IS NULL", location_ids)
+            else
+              @company.brochures.where(location_id: nil)
+            end
+          end
+        else
+          @company.brochures
+        end
+        
+        # Apply strict location filter for stats
+        if Current.location_filtered?
+          all_brochures = all_brochures.where(location_id: Current.location_id)
+        end
+        
         active_brochures = all_brochures.active
         
         render json: {
@@ -372,6 +442,16 @@ module Api
 
       def set_brochure
         @brochure = @company.brochures.find(params[:id])
+        
+        # RBAC: Verify user has access to this brochure's location
+        if @brochure.location_id.present? && current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          unless location_ids.include?(@brochure.location_id)
+            Rails.logger.warn "[RBAC] User #{current_user.id} denied access to brochure #{@brochure.id} at location #{@brochure.location_id}"
+            render json: { error: 'Access denied - you do not have access to this location' }, status: :forbidden
+            return
+          end
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Brochure not found or access denied' }, status: :not_found
       end
@@ -505,6 +585,8 @@ module Api
           viewCount: brochure.view_count,
           shareCount: brochure.share_count,
           downloadCount: brochure.download_count,
+          locationId: brochure.location_id&.to_s,
+          locationName: brochure.location&.name,
           createdAt: brochure.created_at,
           updatedAt: brochure.updated_at
         }

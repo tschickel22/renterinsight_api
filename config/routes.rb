@@ -149,6 +149,7 @@ Rails.application.routes.draw do
         member do
           post :restore
           get :users
+          get :available_users, path: 'available-users'
           post :assign_user, path: 'assign-user'
           delete 'remove_user/:user_id', action: :remove_user, as: :remove_user
           get :metrics
@@ -368,7 +369,8 @@ Rails.application.routes.draw do
     end
     
     # ==================== SETTINGS API ====================
-    get 'settings/tenant', to: 'settings#tenant'
+    get 'settings/tenant_basic', to: 'settings#tenant_basic'  # Basic tenant info for all authenticated users
+    get 'settings/tenant', to: 'settings#tenant'  # Full tenant settings (requires company_settings permission)
     get 'settings/platform', to: 'settings#platform'  # Get platform defaults
     patch 'settings', to: 'settings#update'
     put 'settings', to: 'settings#update'  # Support PUT for company settings

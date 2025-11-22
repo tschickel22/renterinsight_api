@@ -2,6 +2,8 @@
 
 class Lead < ApplicationRecord
   include Communicable
+  include LocationAware
+  
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :converted_account, class_name: "Account", optional: true

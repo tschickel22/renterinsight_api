@@ -5,16 +5,19 @@ class Invitation < ApplicationRecord
   INVITATION_TYPES = %w[company_user portal_user tenant].freeze
   STATUSES = %w[pending accepted expired revoked].freeze
   DELIVERY_METHODS = %w[email sms both].freeze
+  LOCATION_ROLES = %w[location_admin location_manager location_staff].freeze
   TOKEN_EXPIRY = 7.days # Invitations expire after 7 days
   
   # Associations
   belongs_to :invited_by, class_name: 'User'
   belongs_to :company, optional: true
+  has_many :invitation_locations, dependent: :destroy
   
   # Validations
   validates :invitation_type, inclusion: { in: INVITATION_TYPES }
   validates :status, inclusion: { in: STATUSES }
   validates :delivery_method, inclusion: { in: DELIVERY_METHODS }
+  validates :location_role, inclusion: { in: LOCATION_ROLES }, allow_nil: true
   validates :email, presence: true, format: { with: URI::MailTo::EMAIL_REGEXP }
   validates :token_digest, presence: true, uniqueness: true
   validates :expires_at, presence: true
@@ -48,7 +51,9 @@ class Invitation < ApplicationRecord
     recipient_name: nil,
     recipient_data: {},
     delivery_method: 'email',
-    message: nil
+    message: nil,
+    location_ids: [],
+    location_role: nil
   )
     # Generate secure token
     raw_token = SecureRandom.urlsafe_base64(32)
@@ -67,7 +72,9 @@ class Invitation < ApplicationRecord
       delivery_method: delivery_method,
       message: message,
       token_digest: token_digest,
-      status: 'pending'
+      status: 'pending',
+      location_ids: location_ids || [],
+      location_role: location_role
     )
     
     [invitation, raw_token]
@@ -174,8 +181,70 @@ class Invitation < ApplicationRecord
       'invitation_url' => invitation_url,
       'expires_at' => expires_at.strftime('%B %d, %Y at %I:%M %p'),
       'role' => role,
+      'location_role' => location_role,
       'message' => message
     }
+  end
+
+  # Get parsed location IDs from JSON array
+  # Handles PostgreSQL jsonb column which can be Array, String, or nil
+  def parsed_location_ids
+    return [] if location_ids.blank?
+    
+    ids = case location_ids
+          when Array
+            location_ids
+          when String
+            # Handle case where jsonb is returned as JSON string
+            begin
+              parsed = JSON.parse(location_ids)
+              parsed.is_a?(Array) ? parsed : []
+            rescue JSON::ParserError
+              []
+            end
+          else
+            []
+          end
+    
+    ids.map(&:to_i).reject(&:zero?).uniq
+  end
+
+  # Check if invitation has location assignments
+  def has_location_assignments?
+    parsed_location_ids.any?
+  end
+
+  # Assign user to locations after invitation acceptance
+  def assign_user_to_locations(user, assigned_by: nil)
+    return [] unless has_location_assignments?
+    return [] unless company_id
+
+    assignments = []
+    location_role_value = location_role || 'location_staff'
+
+    parsed_location_ids.each do |loc_id|
+      location = Location.find_by(id: loc_id, company_id: company_id)
+      next unless location
+
+      user_location = UserLocation.find_or_initialize_by(
+        user_id: user.id,
+        location_id: location.id
+      )
+      
+      user_location.company_id = company_id
+      user_location.location_role = location_role_value
+      user_location.assigned_by = assigned_by&.id&.to_s || invited_by&.id&.to_s
+      user_location.active = true
+      
+      if user_location.save
+        assignments << user_location
+        Rails.logger.info "✅ [Invitation] Assigned user #{user.id} to location #{location.id} with role #{location_role_value}"
+      else
+        Rails.logger.error "❌ [Invitation] Failed to assign user #{user.id} to location #{location.id}: #{user_location.errors.full_messages.join(', ')}"
+      end
+    end
+
+    assignments
   end
   
   private

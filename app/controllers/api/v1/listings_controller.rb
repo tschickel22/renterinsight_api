@@ -27,9 +27,9 @@ module Api
           else
             location_ids = permission_service.accessible_location_ids
             if location_ids.any?
-              # Include listings for vehicles in assigned locations OR unassigned vehicles (NULL location_id)
+              # Strict location filtering - only assigned locations
               @company.listings.active.joins(:vehicle)
-                      .where("vehicles.location_id IN (?) OR vehicles.location_id IS NULL", location_ids)
+                      .where(vehicles: { location_id: location_ids })
             else
               @company.listings.active
             end
@@ -37,6 +37,12 @@ module Api
         else
           @company.listings.active
         end
+        
+        # Apply strict location filter - only listings for vehicles explicitly assigned to selected location
+        if Current.location_filtered?
+          listings = listings.joins(:vehicle).where(vehicles: { location_id: Current.location_id })
+        end
+        
         Rails.logger.info "[Listings#index] Initial count: #{listings.count}"
         
         # Join vehicle table once if needed for any filter
@@ -186,6 +192,11 @@ module Api
       def stats
         listings = @company.listings.active
         
+        # Apply strict location filter - only listings for vehicles explicitly assigned to selected location
+        if Current.location_filtered?
+          listings = listings.joins(:vehicle).where(vehicles: { location_id: Current.location_id })
+        end
+        
         # Count by vehicle type
         vehicle_type_counts = listings.joins(:vehicle)
           .group('vehicles.listing_type')
@@ -237,9 +248,9 @@ module Api
         @listing = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
-            # Include listings for vehicles in assigned locations OR unassigned vehicles (NULL location_id)
+            # Strict location filtering - only assigned locations
             @company.listings.active.joins(:vehicle)
-                    .where("vehicles.location_id IN (?) OR vehicles.location_id IS NULL", location_ids)
+                    .where(vehicles: { location_id: location_ids })
                     .find(params[:id])
           else
             @company.listings.active.find(params[:id])

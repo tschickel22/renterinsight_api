@@ -4,7 +4,7 @@ module Api
   class SettingsController < ApplicationController
     before_action :set_company
     
-    # RBAC Authorization
+    # RBAC Authorization - tenant_basic is accessible by any authenticated company user
     before_action :authorize_settings_read!, only: [:tenant, :platform, :quotes, :custom_fields]
     before_action :authorize_settings_update!, only: [:update, :update_quotes]
     before_action :authorize_branding_read!, only: []  # No read-only branding endpoints here
@@ -13,7 +13,24 @@ module Api
     before_action :authorize_custom_fields_update!, only: [:update_custom_field]
     before_action :authorize_custom_fields_delete!, only: [:destroy_custom_field]
 
+    # GET /api/settings/tenant_basic
+    # Returns minimal tenant info needed by all authenticated users (no company_settings permission required)
+    def tenant_basic
+      Rails.logger.info "🏢 [SettingsController#tenant_basic] Loading basic tenant info for company: #{@company.name} (ID: #{@company.id})"
+      
+      render json: {
+        tenant: serialize_tenant_basic
+      }
+    rescue => e
+      Rails.logger.error "Tenant basic settings error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+      render json: { 
+        error: 'Failed to load tenant settings',
+        details: Rails.env.development? ? e.message : nil
+      }, status: :internal_server_error
+    end
+
     # GET /api/settings/tenant
+    # Full tenant settings - requires company_settings permission
     def tenant
       Rails.logger.info "🏢 [SettingsController#tenant] Loading tenant for company: #{@company.name} (ID: #{@company.id})"
       
@@ -411,6 +428,43 @@ module Api
         createdAt: @company.created_at,
         updatedAt: @company.updated_at
       }
+    end
+
+    # Minimal tenant info for all authenticated users (no sensitive settings)
+    def serialize_tenant_basic
+      {
+        id: @company.id.to_s,
+        name: @company.name,
+        domain: @company.try(:domain) || "#{@company.name.parameterize}.renterinsight.com",
+        use_rbac_system: @company.use_rbac_system || false,
+        settings: serialize_basic_settings,
+        branding: serialize_branding,
+        customFields: [],  # Don't expose custom fields to non-admin users
+        createdAt: @company.created_at,
+        updatedAt: @company.updated_at
+      }
+    end
+
+    # Basic settings that all users need (timezone, date format, etc.)
+    def serialize_basic_settings
+      base_settings = {
+        timezone: 'America/New_York',
+        currency: 'USD',
+        dateFormat: 'MM/dd/yyyy',
+        features: {
+          workflowAutomation: true
+        }
+      }
+
+      platform_general = Setting.get('Platform', 0, 'general', {})
+      base_settings[:platformName] = platform_general['platformName'] || platform_general[:platformName] || ''
+
+      if @company.operational_settings.present?
+        operational = @company.operational_settings.deep_symbolize_keys
+        base_settings[:timezone] = operational[:timezone] if operational[:timezone].present?
+      end
+
+      base_settings
     end
 
     def serialize_settings

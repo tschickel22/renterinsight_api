@@ -4,11 +4,11 @@ module Api
   module V1
     class LocationsController < ApplicationController
       # Authentication inherited from ApplicationController
-      before_action :set_location, only: [:show, :update, :destroy, :restore, :users, :metrics, :stats, :activities]
+      before_action :set_location, only: [:show, :update, :destroy, :restore, :users, :available_users, :metrics, :stats, :activities, :assign_user, :remove_user]
       before_action :authorize_company_access!
       
       # RBAC permission checks
-      before_action -> { authorize_rbac!('locations', 'read') }, only: [:index, :show, :users, :metrics, :stats, :activities]
+      before_action -> { authorize_rbac!('locations', 'read') }, only: [:index, :show, :users, :available_users, :metrics, :stats, :activities]
       before_action -> { authorize_rbac!('locations', 'create') }, only: [:create]
       before_action -> { authorize_rbac!('locations', 'update') }, only: [:update, :bulk_activate, :bulk_deactivate]
       before_action -> { authorize_rbac!('locations', 'delete') }, only: [:destroy, :bulk_delete, :restore]
@@ -18,7 +18,18 @@ module Api
       def index
         @locations = current_company.locations
                                     .where(is_deleted: false)
-                                    .order(:name)
+        
+        # RBAC: Location-tier users only see their assigned locations
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            @locations = @locations.where(id: location_ids)
+          end
+          # If no location_ids but not admin, they see nothing (empty array)
+          # unless they have no RBAC restrictions (legacy role)
+        end
+        
+        @locations = @locations.order(:name)
 
         # Optional filtering
         @locations = @locations.where(active: true) if params[:active] == 'true'
@@ -91,8 +102,6 @@ module Api
 
       # POST /api/v1/locations/:id/restore
       def restore
-        @location = current_company.locations.find(params[:id])
-
         if @location.restore!
           render json: {
             location: location_json(@location),
@@ -117,19 +126,77 @@ module Api
               id: user.id,
               email: user.email,
               name: user.name,
+              firstName: user.first_name,
+              lastName: user.last_name,
               role: user.role,
-              location_role: ul&.location_role,
+              status: user.status,
+              locationRole: ul&.location_role,
               active: ul&.active,
-              assigned_at: ul&.created_at
+              assignedAt: ul&.created_at&.iso8601
             }
           end
         }
       end
 
+      # GET /api/v1/locations/:id/available_users
+      # Returns company users who can be assigned to this specific location
+      # Excludes:
+      #   - Users already assigned to this location
+      #   - Users with company-wide legacy roles (platform_admin, super_admin, admin)
+      #   - Users with company-tier RBAC roles (company_admin, company_manager, company_staff)
+      #   These users already have access to ALL locations and don't need assignments
+      def available_users
+        assigned_user_ids = @location.user_locations.where(active: true).pluck(:user_id)
+        
+        # Get users with company-tier RBAC roles (they have all-location access)
+        company_tier_roles = Role.where(key: ['company_admin', 'company_manager', 'company_staff'])
+        company_tier_user_ids = if company_tier_roles.any?
+          UserRoleAssignment.where(
+            company_id: current_company.id,
+            role_id: company_tier_roles.pluck(:id),
+            tier: 'company'
+          ).active.pluck(:user_id)
+        else
+          []
+        end
+        
+        # Legacy roles that have company-wide access (don't need location assignments)
+        company_wide_legacy_roles = %w[platform_admin super_admin admin]
+        
+        # Exclude: already assigned, company-wide legacy roles, and company-tier RBAC roles
+        exclude_user_ids = (assigned_user_ids + company_tier_user_ids).uniq
+        
+        @users = current_company.users
+                               .where(deleted_at: nil)
+                               .where(status: 'active')
+                               .where.not(id: exclude_user_ids)
+                               .where.not(role: company_wide_legacy_roles)
+                               .order(:name, :email)
+
+        render json: {
+          users: @users.map do |user|
+            {
+              id: user.id,
+              email: user.email,
+              name: user.name || "#{user.first_name} #{user.last_name}".strip,
+              firstName: user.first_name,
+              lastName: user.last_name,
+              role: user.role,
+              status: user.status
+            }
+          end,
+          meta: {
+            total: @users.count,
+            locationId: @location.id,
+            locationName: @location.name,
+            excludedCompanyTier: company_tier_user_ids.length,
+            excludedAssigned: assigned_user_ids.length
+          }
+        }
+      end
+
       # POST /api/v1/locations/:id/assign_user
       def assign_user
-        @location = current_company.locations.find(params[:id])
-
         user = current_company.users.find(params[:user_id])
         location_role = params[:location_role] || 'location_staff'
 
@@ -160,8 +227,6 @@ module Api
 
       # DELETE /api/v1/locations/:id/remove_user/:user_id
       def remove_user
-        @location = current_company.locations.find(params[:id])
-
         user = current_company.users.find(params[:user_id])
         @location.remove_user(user)
 
@@ -214,6 +279,12 @@ module Api
       def bulk_activate
         location_ids = params[:location_ids] || []
         locations = current_company.locations.where(id: location_ids)
+        
+        # RBAC: Location-tier users can only bulk operate on their assigned locations
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          accessible_ids = permission_service.accessible_location_ids
+          locations = locations.where(id: accessible_ids)
+        end
 
         updated_count = 0
         locations.each do |location|
@@ -232,6 +303,12 @@ module Api
       def bulk_deactivate
         location_ids = params[:location_ids] || []
         locations = current_company.locations.where(id: location_ids)
+        
+        # RBAC: Location-tier users can only bulk operate on their assigned locations
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          accessible_ids = permission_service.accessible_location_ids
+          locations = locations.where(id: accessible_ids)
+        end
 
         updated_count = 0
         locations.each do |location|
@@ -250,6 +327,12 @@ module Api
       def bulk_delete
         location_ids = params[:location_ids] || []
         locations = current_company.locations.where(id: location_ids)
+        
+        # RBAC: Location-tier users can only bulk operate on their assigned locations
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          accessible_ids = permission_service.accessible_location_ids
+          locations = locations.where(id: accessible_ids)
+        end
 
         deleted_count = 0
         locations.each do |location|
@@ -268,6 +351,16 @@ module Api
 
       def set_location
         @location = current_company.locations.find(params[:id])
+        
+        # RBAC: Location-tier users can only access their assigned locations
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          unless location_ids.include?(@location.id)
+            Rails.logger.warn "[RBAC] User #{current_user.id} denied access to location #{@location.id}"
+            render json: { error: 'Location not found or access denied' }, status: :not_found
+            return
+          end
+        end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Location not found' }, status: :not_found
       end

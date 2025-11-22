@@ -22,14 +22,19 @@ module Api
           else
             location_ids = permission_service.accessible_location_ids
             if location_ids.any?
-              # Include vehicles in assigned locations OR unassigned vehicles (NULL location_id)
-              @company.vehicles.active.where("location_id IN (?) OR location_id IS NULL", location_ids)
+              # Strict location filtering - only assigned locations
+              @company.vehicles.active.where(location_id: location_ids)
             else
               @company.vehicles.active
             end
           end
         else
           @company.vehicles.active
+        end
+        
+        # Apply strict location filter - only vehicles explicitly assigned to selected location
+        if Current.location_filtered?
+          vehicles = vehicles.where(location_id: Current.location_id)
         end
         
         # Filters
@@ -71,8 +76,11 @@ module Api
       def create
         vehicle = @company.vehicles.new(vehicle_params)
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?
+        # Auto-assign location from selector (if user selected a specific location)
+        vehicle.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if vehicle.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           vehicle.location_id ||= location_ids.first if location_ids.any?
         end
@@ -525,6 +533,11 @@ module Api
       def stats
         vehicles = @company.vehicles.active
         
+        # Apply strict location filter - only vehicles explicitly assigned to selected location
+        if Current.location_filtered?
+          vehicles = vehicles.where(location_id: Current.location_id)
+        end
+        
         render json: {
           total: vehicles.count,
           available: vehicles.available.count,
@@ -546,6 +559,11 @@ module Api
       # GET /api/v1/vehicles/export
       def export
         vehicles = @company.vehicles.active
+        
+        # Apply strict location filter - only vehicles explicitly assigned to selected location
+        if Current.location_filtered?
+          vehicles = vehicles.where(location_id: Current.location_id)
+        end
         
         # Apply same filters as index
         vehicles = vehicles.by_type(params[:type]) if params[:type].present?
@@ -708,8 +726,8 @@ module Api
         @vehicle = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
-            # Include vehicles in assigned locations OR unassigned vehicles (NULL location_id)
-            @company.vehicles.active.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
+            # Strict location filtering - only assigned locations
+            @company.vehicles.active.where(location_id: location_ids).find(params[:id])
           else
             @company.vehicles.active.find(params[:id])
           end

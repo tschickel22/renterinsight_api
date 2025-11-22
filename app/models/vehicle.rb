@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Vehicle < ApplicationRecord
+  include LocationAware
+  
   # Associations
   belongs_to :company, optional: true
   belongs_to :location, optional: true

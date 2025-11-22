@@ -30,6 +30,11 @@ module Api
           @company.quotes.active
         end
         
+        # Apply strict location filter - only quotes explicitly assigned to selected location
+        if Current.location_filtered?
+          @quotes = @quotes.where(location_id: Current.location_id)
+        end
+        
         @quotes = @quotes.includes(:account, :contact)
         
         # Apply filters
@@ -112,8 +117,12 @@ module Api
         
         @quote = @company.quotes.new(safe_params)
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+        # Auto-assign location from Current.location_id (set by X-Location-ID header)
+        # This handles both admin users who selected a location and location-tier users
+        if Current.location_id.present?
+          @quote.location_id ||= Current.location_id
+        elsif current_user.uses_rbac? && !current_user.effective_admin?
+          # Fallback for RBAC location-tier users without header
           location_ids = permission_service.accessible_location_ids
           @quote.location_id ||= location_ids.first if location_ids.any?
         end
@@ -253,6 +262,11 @@ module Api
         # STRICT TENANT ISOLATION: Only stats from current user's company
         quotes = @company.quotes.active
         
+        # Apply strict location filter - only quotes explicitly assigned to selected location
+        if Current.location_filtered?
+          quotes = quotes.where(location_id: Current.location_id)
+        end
+        
         render json: {
           total: quotes.count,
           by_status: quotes.group(:status).count,
@@ -308,6 +322,11 @@ module Api
         
         # STRICT TENANT ISOLATION: Only export quotes from current user's company
         quotes = @company.quotes.active.includes(:account, :contact)
+        
+        # Apply strict location filter - only quotes explicitly assigned to selected location
+        if Current.location_filtered?
+          quotes = quotes.where(location_id: Current.location_id)
+        end
         
         # Apply same filters as index
         quotes = quotes.by_account(params[:account_id]) if params[:account_id].present?

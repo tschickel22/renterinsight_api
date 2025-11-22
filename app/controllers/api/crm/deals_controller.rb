@@ -25,6 +25,9 @@ module Api
           @company.deals
         end
         
+        # Apply location selector filter (if user selected a specific location)
+        deals = deals.for_current_location
+        
         deals = deals.includes(:account, :contact, :territory, :user, :deal_products)
                     .order(created_at: :desc)
         
@@ -72,9 +75,14 @@ module Api
         end
         
         # STRICT TENANT ISOLATION: Only show deals from current company
-        deals = @company.deals
-                    .where(stage: stage)
-                    .includes(:account, :contact, :territory, :user, :deal_products)
+        deals = @company.deals.where(stage: stage)
+        
+        # Apply strict location filter - only deals explicitly assigned to selected location
+        if Current.location_filtered?
+          deals = deals.where(location_id: Current.location_id)
+        end
+        
+        deals = deals.includes(:account, :contact, :territory, :user, :deal_products)
                     .order(created_at: :desc)
         
         render json: deals.map { |d| deal_json(d) }
@@ -86,6 +94,11 @@ module Api
         
         # STRICT TENANT ISOLATION: Only metrics for current company
         company_deals = @company.deals
+        
+        # Apply strict location filter - only deals explicitly assigned to selected location
+        if Current.location_filtered?
+          company_deals = company_deals.where(location_id: Current.location_id)
+        end
         
         # Overall metrics
         total_value = company_deals.open.sum(:value)
@@ -155,6 +168,11 @@ module Api
                             .where('expected_close_date <= ?', date_field.to_s.split.first.to_i.send(date_field.split.last).from_now)
                             .where(stage: ['proposal', 'negotiation', 'closing'])
         
+        # Apply strict location filter - only deals explicitly assigned to selected location
+        if Current.location_filtered?
+          forecast_deals = forecast_deals.where(location_id: Current.location_id)
+        end
+        
         total_forecast = forecast_deals.sum(:value)
         weighted_forecast = forecast_deals.sum('value * probability / 100')
         
@@ -195,8 +213,11 @@ module Api
         # Don't set user_id if there's no real current_user
         # deal.user_id ||= current_user&.id
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+        # Auto-assign location from selector (if user selected a specific location)
+        deal.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if deal.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           deal.location_id ||= location_ids.first if location_ids.any?
         end

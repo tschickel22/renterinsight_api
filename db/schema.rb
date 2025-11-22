@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_21_200000) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -268,10 +268,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_21_200000) do
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "location_id"
     t.index ["company_id", "is_deleted"], name: "index_brochures_on_company_id_and_is_deleted"
+    t.index ["company_id", "location_id"], name: "index_brochures_on_company_id_and_location_id"
     t.index ["company_id", "status"], name: "index_brochures_on_company_id_and_status"
     t.index ["company_id"], name: "index_brochures_on_company_id"
     t.index ["created_at"], name: "index_brochures_on_created_at"
+    t.index ["location_id"], name: "index_brochures_on_location_id"
     t.index ["public_id"], name: "index_brochures_on_public_id", unique: true
   end
 
@@ -696,12 +699,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_21_200000) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "location_ids", default: [], null: false
+    t.string "location_role", default: "location_staff"
     t.index ["company_id", "status"], name: "index_invitations_on_company_id_and_status"
     t.index ["company_id"], name: "index_invitations_on_company_id"
     t.index ["email"], name: "index_invitations_on_email"
     t.index ["expires_at"], name: "index_invitations_on_expires_at"
     t.index ["invitation_type", "status"], name: "index_invitations_on_invitation_type_and_status"
     t.index ["invited_by_id"], name: "index_invitations_on_invited_by_id"
+    t.index ["location_role"], name: "index_invitations_on_location_role"
     t.index ["status"], name: "index_invitations_on_status"
     t.index ["token_digest"], name: "index_invitations_on_token_digest", unique: true
   end

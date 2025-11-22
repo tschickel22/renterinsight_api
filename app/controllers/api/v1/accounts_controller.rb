@@ -29,6 +29,9 @@ module Api
           @company.accounts.where(is_deleted: [false, nil])
         end
         
+        # Apply location selector filter (if user selected a specific location)
+        @accounts = @accounts.for_current_location
+        
         @accounts = @accounts.includes(:tags, :source, :owner)
         
         # Apply filters
@@ -70,8 +73,11 @@ module Api
         @account = @company.accounts.new(account_params)
         @account.owner_id = current_user&.id
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?
+        # Auto-assign location from selector (if user selected a specific location)
+        @account.location_id ||= Current.location_id if Current.location_id.present?
+        
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        if @account.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           @account.location_id ||= location_ids.first if location_ids.any?
         end
@@ -239,13 +245,19 @@ module Api
         
         # STRICT TENANT ISOLATION: Only stats for current company
         base_accounts = @company.accounts.where(is_deleted: [false, nil])
+        
+        # Apply strict location filter - only accounts explicitly assigned to selected location
+        if Current.location_filtered?
+          base_accounts = base_accounts.where(location_id: Current.location_id)
+        end
+        
         render json: {
           total: base_accounts.count,
           by_type: base_accounts.group(:account_type).count,
           by_status: base_accounts.group(:status).count,
           by_rating: base_accounts.group(:rating).count,
-          recent_conversions: @company.accounts.where('converted_date >= ?', 30.days.ago).count,
-          high_value: @company.accounts.high_value.count
+          recent_conversions: base_accounts.where('converted_date >= ?', 30.days.ago).count,
+          high_value: base_accounts.high_value.count
         }
       end
 
@@ -319,10 +331,13 @@ module Api
           billing_country: lead.country || 'USA'
         )
         
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
+        # Auto-assign location from selector (if user selected a specific location)
+        if account.location_id.nil? && Current.location_id.present?
+          account.update(location_id: Current.location_id)
+        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+        elsif account.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
-          account.update(location_id: location_ids.first) if location_ids.any? && account.location_id.nil?
+          account.update(location_id: location_ids.first) if location_ids.any?
         end
         
         # Copy tags
@@ -493,13 +508,58 @@ module Api
       end
 
       def account_params
-        params.permit(
-          :name, :email, :phone, :website, :industry, :account_type, :status,
-          :rating, :ownership, :annual_revenue, :employee_count, :description,
-          :billing_street, :billing_city, :billing_state, :billing_postal_code, :billing_country,
-          :shipping_street, :shipping_city, :shipping_state, :shipping_postal_code, :shipping_country,
-          :parent_account_id, :source_id, :owner_id, :notes
-        )
+        # Support both wrapped { account: {...} } and unwrapped params
+        raw = params[:account].present? ? params[:account].to_unsafe_h : params.to_unsafe_h
+        
+        # Build clean params with snake_case only
+        clean = {}
+        
+        # Direct mappings (snake_case)
+        %w[name email phone website industry status rating ownership description notes
+           billing_street billing_city billing_state billing_postal_code billing_country
+           shipping_street shipping_city shipping_state shipping_postal_code shipping_country
+           parent_account_id owner_id].each do |key|
+          clean[key] = raw[key] if raw.key?(key)
+        end
+        
+        # Handle account_type (accept account_type, accountType, or type)
+        clean['account_type'] = raw['account_type'] || raw['accountType'] || raw['type']
+        
+        # Handle source_id (accept source_id or sourceId)
+        clean['source_id'] = raw['source_id'] || raw['sourceId']
+        
+        # Handle annual_revenue (accept annual_revenue or annualRevenue)
+        clean['annual_revenue'] = raw['annual_revenue'] || raw['annualRevenue']
+        
+        # Handle employee_count (accept employee_count or employeeCount)
+        clean['employee_count'] = raw['employee_count'] || raw['employeeCount']
+        
+        # Handle address object -> billing fields
+        if raw['address'].is_a?(Hash)
+          addr = raw['address']
+          clean['billing_street'] ||= addr['street']
+          clean['billing_city'] ||= addr['city']
+          clean['billing_state'] ||= addr['state']
+          clean['billing_postal_code'] ||= addr['zipCode'] || addr['zip_code']
+          clean['billing_country'] ||= addr['country']
+        end
+        
+        # Handle camelCase billing/shipping fields
+        clean['billing_street'] ||= raw['billingStreet']
+        clean['billing_city'] ||= raw['billingCity']
+        clean['billing_state'] ||= raw['billingState']
+        clean['billing_postal_code'] ||= raw['billingPostalCode']
+        clean['billing_country'] ||= raw['billingCountry']
+        clean['shipping_street'] ||= raw['shippingStreet']
+        clean['shipping_city'] ||= raw['shippingCity']
+        clean['shipping_state'] ||= raw['shippingState']
+        clean['shipping_postal_code'] ||= raw['shippingPostalCode']
+        clean['shipping_country'] ||= raw['shippingCountry']
+        clean['parent_account_id'] ||= raw['parentAccountId']
+        clean['owner_id'] ||= raw['ownerId']
+        
+        # Remove nil/blank values and return permitted params
+        clean.compact.reject { |_, v| v.blank? }
       end
 
       # Helper methods for insights and scoring

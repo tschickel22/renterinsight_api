@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
 class Contact < ApplicationRecord
+  include LocationAware
+  
   # Associations
   belongs_to :account, optional: true
   belongs_to :company, optional: true
+  belongs_to :location, optional: true
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
   has_many :note_records, class_name: 'Note', as: :entity, dependent: :destroy

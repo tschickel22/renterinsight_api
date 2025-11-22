@@ -35,6 +35,17 @@ module Api
         recipient_name = params[:recipient_name] || params[:recipientName]
         delivery_method = params[:deliveryMethod] || params[:delivery_method] || 'email'
         
+        # Extract location params (support both camelCase and snake_case)
+        location_ids = params[:location_ids] || params[:locationIds] || []
+        location_role = params[:location_role] || params[:locationRole]
+        
+        Rails.logger.info "📨 [Companies::UsersController] Creating invitation"
+        Rails.logger.info "📨 [Companies::UsersController] email: #{params[:email]}"
+        Rails.logger.info "📨 [Companies::UsersController] role: #{params[:role]}"
+        Rails.logger.info "📨 [Companies::UsersController] location_ids: #{location_ids.inspect}"
+        Rails.logger.info "📨 [Companies::UsersController] location_role: #{location_role}"
+        Rails.logger.info "📨 [Companies::UsersController] company: #{@company.id} (#{@company.name})"
+        
         result = service.create_invitation(
           invitation_type: 'company_user',
           email: params[:email],
@@ -43,7 +54,9 @@ module Api
           role: params[:role] || 'staff',
           permissions: params[:permissions] || [],
           delivery_method: delivery_method,
-          message: params[:message]
+          message: params[:message],
+          location_ids: location_ids,
+          location_role: location_role
         )
         
         if result[:success]
