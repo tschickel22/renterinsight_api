@@ -15,11 +15,9 @@
 #   POST /webhooks/zego/canceled
 
 class Webhooks::ZegoController < ApplicationController
-  # Skip CSRF verification for webhook endpoints
-  skip_before_action :verify_authenticity_token
-  
   # Skip authentication - webhooks come from external service
-  skip_before_action :authenticate_user!, if: -> { defined?(authenticate_user!) }
+  skip_before_action :authenticate
+  skip_before_action :set_current_attributes
   
   # Processed payment webhook
   # Called when Zego successfully processes a payment
