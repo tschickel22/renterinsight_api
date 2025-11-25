@@ -83,3 +83,6 @@ gem 'prawn', '~> 2.4'
 gem 'prawn-table', '~> 0.2'
 
 gem 'rotp', '~> 6.3'
+
+# XML parsing for payment gateway integration (Zego)
+gem 'xml-simple', '~> 1.1'

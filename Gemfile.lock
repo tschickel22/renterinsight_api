@@ -275,6 +275,7 @@ GEM
     regexp_parser (2.11.3)
     reline (0.6.2)
       io-console (~> 0.5)
+    rexml (3.4.4)
     rotp (6.3.0)
     rspec-core (3.13.5)
       rspec-support (~> 3.13.0)
@@ -381,6 +382,8 @@ GEM
       base64
       websocket-extensions (>= 0.1.0)
     websocket-extensions (0.1.5)
+    xml-simple (1.1.9)
+      rexml
     zeitwerk (2.7.3)
 
 PLATFORMS
@@ -423,6 +426,7 @@ DEPENDENCIES
   thruster
   twilio-ruby (~> 7.3)
   tzinfo-data
+  xml-simple (~> 1.1)
 
 RUBY VERSION
    ruby 3.2.3p157

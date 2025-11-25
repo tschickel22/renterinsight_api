@@ -10,6 +10,7 @@ module Api
       before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac]
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
+      before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
 
       # GET /api/v1/company_settings/operational
       def show_operational
@@ -152,6 +153,45 @@ module Api
         }, status: :unprocessable_entity
       end
 
+      # GET /api/v1/company_settings/loan
+      def show_loan
+        settings = @company.loan_settings || {}
+
+        render json: {
+          loan_settings: settings,
+          defaults: default_loan_settings
+        }
+      end
+
+      # PATCH /api/v1/company_settings/loan
+      def update_loan
+        Rails.logger.info "💰 [CompanySettings#update_loan] Received params: #{params.inspect}"
+
+        settings = params[:loan_settings] || {}
+        Rails.logger.info "📊 [CompanySettings#update_loan] Loan settings: #{settings.inspect}"
+
+        @company.loan_settings = settings
+
+        if @company.save
+          Rails.logger.info "✅ [CompanySettings#update_loan] Loan settings saved successfully"
+          render json: {
+            loan_settings: @company.loan_settings,
+            message: 'Loan settings updated successfully'
+          }
+        else
+          Rails.logger.error "❌ [CompanySettings#update_loan] Save failed: #{@company.errors.full_messages}"
+          render json: {
+            errors: @company.errors.full_messages
+          }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error "Error updating loan settings: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: {
+          errors: [e.message]
+        }, status: :unprocessable_entity
+      end
+
       private
 
       # RBAC Authorization Methods for company_settings resource
@@ -188,6 +228,15 @@ module Api
         end
       end
 
+      # RBAC Authorization Methods for finance resource
+      def authorize_finance_manage!
+        return if skip_rbac?
+        unless current_user.has_permission?('finance', 'manage', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied MANAGE access to finance for company #{@company&.id}"
+          render json: { error: 'Permission denied: You do not have permission to manage finance settings' }, status: :forbidden
+        end
+      end
+
       # Skip RBAC for platform admins or if company doesn't use RBAC
       def skip_rbac?
         return true if current_user.platform_admin?
@@ -220,6 +269,16 @@ module Api
         end
 
         Rails.logger.info "[CompanySettingsController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
+      end
+
+      # Default loan settings
+      def default_loan_settings
+        {
+          default_interest_rate: 6.99,
+          max_loan_term: 84,
+          min_down_payment_percent: 10,
+          default_payment_frequency: 'monthly'
+        }
       end
     end
   end

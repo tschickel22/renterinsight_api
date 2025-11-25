@@ -16,6 +16,10 @@ Rails.application.routes.draw do
     
     # Twilio SMS status callbacks (Twilio signature verification)
     post 'twilio/sms/status', to: 'twilio#sms_status'
+    
+    # Zego payment webhooks
+    post 'zego/processed', to: 'zego#processed'
+    post 'zego/canceled', to: 'zego#canceled'
   end
 
   # ==================== PUBLIC INTAKE FORMS ====================
@@ -56,6 +60,8 @@ Rails.application.routes.draw do
         get 'communication', action: :show_communication
         patch 'communication', action: :update_communication
         patch 'rbac', action: :update_rbac
+        get 'loan', action: :show_loan
+        patch 'loan', action: :update_loan
       end
       
       # ==================== NOTES ====================
@@ -96,6 +102,61 @@ Rails.application.routes.draw do
         
         collection do
           get :stats
+        end
+      end
+      
+      # ==================== PAYMENT METHODS ====================
+      resources :payment_methods, path: 'payment-methods' do
+        member do
+          patch :set_default
+          post :verify
+        end
+        
+        collection do
+          get :stats
+        end
+      end
+      
+      # Alias for underscore version (some frontend components use payment_methods)
+      get 'payment_methods', to: 'payment_methods#index', as: 'payment_methods_underscore_list'
+      get 'payment_methods/:id', to: 'payment_methods#show', as: 'payment_methods_underscore_show'
+      post 'payment_methods', to: 'payment_methods#create', as: 'payment_methods_underscore_create'
+      patch 'payment_methods/:id', to: 'payment_methods#update', as: 'payment_methods_underscore_update'
+      delete 'payment_methods/:id', to: 'payment_methods#destroy', as: 'payment_methods_underscore_destroy'
+      patch 'payment_methods/:id/set_default', to: 'payment_methods#set_default', as: 'payment_methods_underscore_set_default'
+      post 'payment_methods/:id/verify', to: 'payment_methods#verify', as: 'payment_methods_underscore_verify'
+      get 'payment_methods/stats', to: 'payment_methods#stats', as: 'payment_methods_underscore_stats'
+      
+      # ==================== PAYMENTS ====================
+      resources :payments do
+        member do
+          post :cancel
+          post :refund
+          post :void
+        end
+        
+        collection do
+          get :stats
+          get :export
+        end
+      end
+      
+      # ==================== LOANS ====================
+      resources :loans do
+        member do
+          post :activate
+          post :mark_defaulted, path: 'mark-defaulted'
+          post :record_payment, path: 'record-payment'
+          post :record_manual_payment, path: 'record-manual-payment'
+          get :documents
+          post :documents, action: :upload_documents
+          delete 'documents/:document_id', action: :destroy_document
+        end
+        
+        collection do
+          get :stats
+          post :calculate_schedule, path: 'calculate-schedule'
+          get :search_borrowers, path: 'search-borrowers'
         end
       end
       

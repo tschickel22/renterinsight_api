@@ -109,13 +109,18 @@ module Api
         @contact = @company.contacts.new(contact_params)
         
         # Auto-assign location from selector (if user selected a specific location)
+        Rails.logger.info "🔍 [ContactsController#create] Before auto-assign - Current.location_id: #{Current.location_id}, location_filtered: #{Current.location_filtered?}"
         @contact.location_id ||= Current.location_id if Current.location_id.present?
+        Rails.logger.info "🔍 [ContactsController#create] After Current.location_id assign - contact.location_id: #{@contact.location_id}"
         
         # RBAC fallback: Location-tier users auto-assign to their first location if no selector
         if @contact.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
+          Rails.logger.info "🔍 [ContactsController#create] RBAC fallback - accessible_location_ids: #{location_ids}"
           @contact.location_id ||= location_ids.first if location_ids.any?
         end
+        
+        Rails.logger.info "🔍 [ContactsController#create] Final location_id before save: #{@contact.location_id}"
 
         if @contact.save
           # Handle tags if provided
@@ -585,7 +590,12 @@ module Api
           :title,
           :department,
           :is_primary,
-          :notes
+          :notes,
+          :street,
+          :city,
+          :state,
+          :zip,
+          :country
         )
       end
 
@@ -605,6 +615,11 @@ module Api
           :department,
           :is_primary,
           :notes,
+          :street,
+          :city,
+          :state,
+          :zip,
+          :country,
           tags: []
         )
       end
@@ -665,6 +680,11 @@ module Api
           optOutEmailAt: contact.opt_out_email_at,
           optOutSms: contact.opt_out_sms,
           optOutSmsAt: contact.opt_out_sms_at,
+          street: contact.street,
+          city: contact.city,
+          state: contact.state,
+          zip: contact.zip,
+          country: contact.country,
           createdAt: contact.created_at,
           updatedAt: contact.updated_at
         }

@@ -32,16 +32,18 @@ class ApplicationController < ActionController::API
       return false
     end
     
-    unless current_user.company_id.present?
+    company_id = current_company_id
+    
+    unless company_id.present?
       Rails.logger.error "🚫 [set_company_scope] User #{current_user.id} has no company_id"
       render json: { error: 'No company assigned to user' }, status: :forbidden
       return false
     end
     
-    @company = ::Company.find_by(id: current_user.company_id)
+    @company = ::Company.find_by(id: company_id)
     
     if @company.nil?
-      Rails.logger.error "🚫 [set_company_scope] Company #{current_user.company_id} not found for user #{current_user.id}"
+      Rails.logger.error "🚫 [set_company_scope] Company #{company_id} not found for user #{current_user.id}"
       render json: { error: 'Company not found' }, status: :not_found
       return false
     end

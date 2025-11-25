@@ -23,6 +23,11 @@ class Company < ApplicationRecord
   has_many :nurture_sequences, dependent: :destroy
   has_many :nurture_enrollments, dependent: :destroy
   
+  # Finance Module Associations
+  has_many :payment_methods, dependent: :destroy
+  has_many :payments, dependent: :destroy
+  has_many :loans, dependent: :destroy
+  
   # RBAC System Associations
   has_many :roles, dependent: :destroy
   has_many :company_hidden_roles, dependent: :destroy
@@ -404,6 +409,33 @@ class Company < ApplicationRecord
   rescue => e
     Rails.logger.error "❌ [Company#operational_settings=] Error: #{e.class} - #{e.message}"
     Rails.logger.error "❌ [Company#operational_settings=] Backtrace: #{e.backtrace.first(5).join("\n")}"
+    raise e
+  end
+
+  def loan_settings
+    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'loan')
+    setting ? JSON.parse(setting.value) : nil
+  rescue => e
+    Rails.logger.error "Error loading loan_settings for Company #{id}: #{e.message}"
+    nil
+  end
+  
+  def loan_settings=(value)
+    Rails.logger.info "📝 [Company#loan_settings=] Setting for Company #{id}"
+    
+    setting = Setting.find_or_initialize_by(
+      scope_type: 'Company',
+      scope_id: id,
+      key: 'loan'
+    )
+    setting.value = value.to_json
+    
+    if setting.save!
+      Rails.logger.info "✅ [Company#loan_settings=] Saved successfully"
+      true
+    end
+  rescue => e
+    Rails.logger.error "❌ [Company#loan_settings=] Error: #{e.class} - #{e.message}"
     raise e
   end
 

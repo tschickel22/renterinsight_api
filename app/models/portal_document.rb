@@ -9,10 +9,10 @@ class PortalDocument < ApplicationRecord
   belongs_to :related_to, polymorphic: true, optional: true
   
   # Validations
-  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account BuyerPortalAccess] }
+  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account BuyerPortalAccess Loan] }
   validates :owner_id, presence: true
   validates :category, inclusion: { 
-    in: %w[insurance registration invoice receipt other contract warranty manual photo], 
+    in: %w[general insurance registration invoice receipt other contract warranty manual photo credit_application income_verification title_deed loan_agreement appraisal], 
     allow_nil: true 
   }
   # Note: File presence is validated in acceptable_file callback
@@ -44,6 +44,15 @@ class PortalDocument < ApplicationRecord
   MAX_FILE_SIZE = 10.megabytes
   
   # Instance methods
+  # Alias name to document_name for compatibility
+  def name
+    document_name
+  end
+  
+  def name=(value)
+    self.document_name = value
+  end
+  
   def filename
     file.attached? ? file.filename.to_s : ''
   end

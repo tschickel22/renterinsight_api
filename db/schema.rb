@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_25_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -184,6 +184,30 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
     t.index ["insight_type"], name: "index_ai_insights_on_insight_type"
     t.index ["lead_id", "is_read"], name: "index_ai_insights_on_lead_id_and_is_read"
     t.index ["lead_id"], name: "index_ai_insights_on_lead_id"
+  end
+
+  create_table "api_logs", force: :cascade do |t|
+    t.bigint "company_id"
+    t.string "provider", null: false
+    t.string "action"
+    t.string "url"
+    t.string "status", default: "pending"
+    t.text "request"
+    t.text "response"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.integer "duration_ms"
+    t.string "ip_address"
+    t.string "user_agent"
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "provider", "created_at"], name: "index_api_logs_on_company_id_and_provider_and_created_at"
+    t.index ["company_id"], name: "index_api_logs_on_company_id"
+    t.index ["created_at"], name: "index_api_logs_on_created_at"
+    t.index ["provider", "action"], name: "index_api_logs_on_provider_and_action"
+    t.index ["provider"], name: "index_api_logs_on_provider"
+    t.index ["status"], name: "index_api_logs_on_status"
   end
 
   create_table "approval_actions", force: :cascade do |t|
@@ -453,8 +477,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
     t.string "zoho_subscription_id"
     t.string "zoho_customer_id"
     t.boolean "use_rbac_system", default: false, null: false
+    t.jsonb "loan_settings", default: {}, null: false
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
+    t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
@@ -532,6 +558,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
     t.boolean "opt_out_sms", default: false, null: false
     t.datetime "opt_out_sms_at"
     t.bigint "location_id"
+    t.string "street"
+    t.string "city"
+    t.string "state"
+    t.string "zip"
+    t.string "country"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
@@ -936,6 +967,58 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
     t.index ["vehicle_id"], name: "index_listings_on_vehicle_id"
   end
 
+  create_table "loans", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "loan_number", null: false
+    t.string "loan_type"
+    t.string "status", default: "pending", null: false
+    t.string "borrower_type", null: false
+    t.bigint "borrower_id", null: false
+    t.string "financed_entity_type"
+    t.bigint "financed_entity_id"
+    t.decimal "principal_amount", precision: 12, scale: 2, null: false
+    t.decimal "interest_rate", precision: 5, scale: 2
+    t.integer "term_months"
+    t.date "origination_date", null: false
+    t.date "maturity_date"
+    t.date "first_payment_date"
+    t.string "payment_frequency", default: "monthly"
+    t.decimal "regular_payment_amount", precision: 10, scale: 2
+    t.integer "day_of_month_due"
+    t.decimal "current_balance", precision: 12, scale: 2, default: "0.0"
+    t.decimal "total_paid", precision: 12, scale: 2, default: "0.0"
+    t.decimal "total_interest_paid", precision: 12, scale: 2, default: "0.0"
+    t.integer "payments_made", default: 0
+    t.integer "payments_remaining"
+    t.date "last_payment_date"
+    t.date "next_payment_date"
+    t.integer "days_past_due", default: 0
+    t.decimal "late_fees_assessed", precision: 10, scale: 2, default: "0.0"
+    t.bigint "default_payment_method_id"
+    t.boolean "auto_pay_enabled", default: false
+    t.string "external_loan_id"
+    t.text "notes"
+    t.jsonb "metadata", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.string "created_by"
+    t.string "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.decimal "origination_fee", precision: 10, scale: 2, default: "0.0"
+    t.index ["borrower_type", "borrower_id"], name: "index_loans_on_borrower"
+    t.index ["company_id", "is_deleted"], name: "index_loans_on_company_id_and_is_deleted"
+    t.index ["company_id", "loan_number"], name: "index_loans_on_company_id_and_loan_number", unique: true
+    t.index ["company_id", "status"], name: "index_loans_on_company_id_and_status"
+    t.index ["company_id"], name: "index_loans_on_company_id"
+    t.index ["default_payment_method_id"], name: "index_loans_on_default_payment_method_id"
+    t.index ["financed_entity_type", "financed_entity_id"], name: "index_loans_on_financed_entity"
+    t.index ["location_id"], name: "index_loans_on_location_id"
+    t.index ["next_payment_date"], name: "index_loans_on_next_payment_date"
+    t.index ["status"], name: "index_loans_on_status"
+  end
+
   create_table "location_activities", force: :cascade do |t|
     t.bigint "location_id", null: false
     t.bigint "user_id"
@@ -1116,6 +1199,107 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
     t.index ["identifier", "created_at"], name: "index_password_reset_tokens_on_identifier_and_created_at"
     t.index ["token_digest"], name: "index_password_reset_tokens_on_token_digest", unique: true
     t.index ["user_id", "user_type"], name: "index_password_reset_tokens_on_user_id_and_user_type"
+  end
+
+  create_table "payment_methods", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "owner_type", null: false
+    t.bigint "owner_id", null: false
+    t.string "method_type", null: false
+    t.string "nickname"
+    t.string "ach_account_type"
+    t.string "ach_routing_number_encrypted"
+    t.string "ach_account_number_encrypted"
+    t.string "ach_last_4"
+    t.string "credit_card_number_encrypted"
+    t.string "credit_card_last_4"
+    t.string "credit_card_brand"
+    t.integer "credit_card_exp_month"
+    t.integer "credit_card_exp_year"
+    t.string "credit_card_cvv_encrypted"
+    t.boolean "is_debit_card", default: false
+    t.string "billing_first_name"
+    t.string "billing_last_name"
+    t.string "billing_street"
+    t.string "billing_city"
+    t.string "billing_state"
+    t.string "billing_zip"
+    t.string "billing_country", default: "US"
+    t.string "external_id"
+    t.string "alternate_external_id"
+    t.integer "api_partner_id"
+    t.boolean "is_default", default: false
+    t.boolean "is_active", default: true
+    t.boolean "is_verified", default: false
+    t.datetime "verified_at"
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.string "created_by"
+    t.string "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_deleted"], name: "index_payment_methods_on_company_id_and_is_deleted"
+    t.index ["company_id"], name: "index_payment_methods_on_company_id"
+    t.index ["external_id"], name: "index_payment_methods_on_external_id"
+    t.index ["location_id"], name: "index_payment_methods_on_location_id"
+    t.index ["method_type"], name: "index_payment_methods_on_method_type"
+    t.index ["owner_type", "owner_id", "is_default"], name: "idx_on_owner_type_owner_id_is_default_59ae03cd28"
+    t.index ["owner_type", "owner_id"], name: "index_payment_methods_on_owner"
+  end
+
+  create_table "payments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "payment_number", null: false
+    t.string "payment_type", null: false
+    t.string "status", default: "pending", null: false
+    t.bigint "loan_id"
+    t.bigint "payment_method_id"
+    t.string "payer_type", null: false
+    t.bigint "payer_id", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.decimal "principal_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "interest_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "fee_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "late_fee_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "processing_fee", precision: 10, scale: 2, default: "0.0"
+    t.string "fee_responsibility"
+    t.string "fee_type"
+    t.decimal "fee_value", precision: 10, scale: 2
+    t.decimal "total_charged", precision: 12, scale: 2
+    t.datetime "scheduled_at"
+    t.datetime "processed_at"
+    t.date "payment_date"
+    t.string "external_id"
+    t.string "gateway_name"
+    t.text "gateway_response"
+    t.string "failure_reason"
+    t.boolean "is_refunded", default: false
+    t.decimal "refund_amount", precision: 12, scale: 2
+    t.datetime "refunded_at"
+    t.string "refund_reason"
+    t.text "notes"
+    t.jsonb "metadata", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.string "created_by"
+    t.string "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_deleted"], name: "index_payments_on_company_id_and_is_deleted"
+    t.index ["company_id", "payment_number"], name: "index_payments_on_company_id_and_payment_number", unique: true
+    t.index ["company_id", "status"], name: "index_payments_on_company_id_and_status"
+    t.index ["company_id"], name: "index_payments_on_company_id"
+    t.index ["external_id"], name: "index_payments_on_external_id"
+    t.index ["loan_id", "payment_date"], name: "index_payments_on_loan_id_and_payment_date"
+    t.index ["loan_id"], name: "index_payments_on_loan_id"
+    t.index ["location_id"], name: "index_payments_on_location_id"
+    t.index ["payer_type", "payer_id"], name: "index_payments_on_payer"
+    t.index ["payment_date"], name: "index_payments_on_payment_date"
+    t.index ["payment_method_id"], name: "index_payments_on_payment_method_id"
+    t.index ["scheduled_at"], name: "index_payments_on_scheduled_at"
+    t.index ["status"], name: "index_payments_on_status"
   end
 
   create_table "portal_documents", force: :cascade do |t|
@@ -1698,6 +1882,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
   add_foreign_key "ai_insights", "leads"
+  add_foreign_key "api_logs", "companies"
   add_foreign_key "approval_actions", "approval_steps"
   add_foreign_key "approval_actions", "users"
   add_foreign_key "approval_steps", "approval_workflows"
@@ -1746,6 +1931,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
   add_foreign_key "listings", "companies"
   add_foreign_key "listings", "locations"
   add_foreign_key "listings", "vehicles"
+  add_foreign_key "loans", "companies"
+  add_foreign_key "loans", "locations"
+  add_foreign_key "loans", "payment_methods", column: "default_payment_method_id"
   add_foreign_key "location_activities", "locations"
   add_foreign_key "location_activities", "users"
   add_foreign_key "locations", "companies"
@@ -1762,6 +1950,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_22_010000) do
   add_foreign_key "nurture_sequences", "companies"
   add_foreign_key "nurture_steps", "nurture_sequences"
   add_foreign_key "nurture_steps", "templates"
+  add_foreign_key "payment_methods", "companies"
+  add_foreign_key "payment_methods", "locations"
+  add_foreign_key "payments", "companies"
+  add_foreign_key "payments", "loans"
+  add_foreign_key "payments", "locations"
+  add_foreign_key "payments", "payment_methods"
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
   add_foreign_key "quotes", "locations"

@@ -36,6 +36,10 @@ class Contact < ApplicationRecord
   def full_name
     [first_name, last_name].compact.join(' ')
   end
+  
+  def name
+    full_name
+  end
 
   def display_name
     full_name.presence || email || phone || 'Unnamed Contact'
