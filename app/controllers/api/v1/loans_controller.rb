@@ -188,13 +188,28 @@ module Api
         
         @loan = @company.loans.new(loan_params)
         
-        # Auto-assign location (from selector or RBAC fallback)
-        @loan.location_id ||= Current.location_id if Current.location_id.present?
+        # CRITICAL: Always set location_id to prevent orphaned loans
+        # Priority: 1) From params, 2) Current selector, 3) First company location, 4) RBAC fallback
+        if @loan.location_id.blank?
+          @loan.location_id = Current.location_id if Current.location_id.present?
+        end
         
-        # RBAC fallback: If user is location-tier and no location set, assign first accessible location
-        if @loan.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
+        # RBAC fallback for location-tier users
+        if @loan.location_id.blank? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
-          @loan.location_id ||= location_ids.first if location_ids.any?
+          @loan.location_id = location_ids.first if location_ids.any?
+        end
+        
+        # Final fallback: Use first company location
+        if @loan.location_id.blank?
+          first_location = @company.locations.active.first
+          @loan.location_id = first_location.id if first_location
+        end
+        
+        # Validate location was set
+        unless @loan.location_id.present?
+          render json: { error: 'Location is required. Please create a location first or select one from the dropdown.' }, status: :unprocessable_entity
+          return
         end
         
         # Calculate derived fields
