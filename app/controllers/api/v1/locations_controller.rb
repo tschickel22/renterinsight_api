@@ -422,7 +422,7 @@ module Api
                                    location.company.operational_settings.any?
           
           # Check if company has communication settings (meaningful, not just empty structure)
-          company_has_communication = location.company.has_communication_settings?
+          company_has_communication = location.company.try(:has_communication_settings?) || false
           
           json.merge!({
             branding_settings: location.branding_settings,

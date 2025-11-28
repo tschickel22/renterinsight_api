@@ -475,6 +475,7 @@ module Api
           :max_storage_gb,
           :zoho_subscription_id,
           :zoho_customer_id,
+          :external_payments_id,
           :owner_email,
           :owner_first_name,
           :owner_last_name,
@@ -509,6 +510,7 @@ module Api
             users_remaining: tenant.users_remaining,
             zoho_subscription_id: tenant.zoho_subscription_id,
             zoho_customer_id: tenant.zoho_customer_id,
+            external_payments_id: tenant.external_payments_id,
             domain_verification_token: tenant.domain_verification_token,
             primary_domain: tenant.custom_domain || tenant.subdomain,
             subdomain_url: tenant.subdomain_url

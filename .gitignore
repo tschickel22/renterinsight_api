@@ -128,3 +128,5 @@ ActiveRecordBase.connection.active
 /backup/
 /migrate_archive/
 /examples/
+
+/config/credentials/production.key

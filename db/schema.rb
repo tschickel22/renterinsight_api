@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_25_100000) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_26_000100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -259,6 +259,36 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_25_100000) do
     t.index ["workflow_type"], name: "index_approval_workflows_on_workflow_type"
   end
 
+  create_table "bank_accounts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id", null: false
+    t.string "account_purpose", null: false
+    t.string "account_type", null: false
+    t.string "bank_name"
+    t.string "routing_number", null: false
+    t.string "account_number", null: false
+    t.string "account_holder_name"
+    t.string "external_id"
+    t.boolean "is_active", default: true, null: false
+    t.boolean "is_verified", default: false, null: false
+    t.datetime "verified_at"
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.string "created_by"
+    t.string "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "display_last_four", limit: 4
+    t.text "admin_notes"
+    t.datetime "locked_at"
+    t.index ["company_id", "location_id"], name: "index_bank_accounts_on_company_id_and_location_id"
+    t.index ["company_id"], name: "index_bank_accounts_on_company_id"
+    t.index ["external_id"], name: "index_bank_accounts_on_external_id"
+    t.index ["is_deleted"], name: "index_bank_accounts_on_is_deleted"
+    t.index ["location_id", "account_purpose"], name: "index_bank_accounts_on_location_id_and_account_purpose"
+    t.index ["location_id"], name: "index_bank_accounts_on_location_id"
+  end
+
   create_table "brochure_templates", force: :cascade do |t|
     t.string "name", null: false
     t.text "description"
@@ -478,8 +508,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_25_100000) do
     t.string "zoho_customer_id"
     t.boolean "use_rbac_system", default: false, null: false
     t.jsonb "loan_settings", default: {}, null: false
+    t.string "external_payments_id"
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
+    t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
@@ -1064,12 +1096,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_25_100000) do
     t.string "updated_by"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "external_payments_property_id"
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
     t.index ["company_id", "is_deleted"], name: "index_locations_on_company_id_and_is_deleted"
     t.index ["company_id"], name: "index_locations_on_company_id"
     t.index ["deleted_at"], name: "index_locations_on_deleted_at"
+    t.index ["external_payments_property_id"], name: "index_locations_on_external_payments_property_id"
   end
 
   create_table "lot_map_history_entries", force: :cascade do |t|
@@ -1890,6 +1924,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_25_100000) do
   add_foreign_key "approval_workflows", "deals"
   add_foreign_key "approval_workflows", "users", column: "approved_by_id"
   add_foreign_key "approval_workflows", "users", column: "requested_by_id"
+  add_foreign_key "bank_accounts", "companies"
+  add_foreign_key "bank_accounts", "locations"
   add_foreign_key "brochures", "companies"
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"

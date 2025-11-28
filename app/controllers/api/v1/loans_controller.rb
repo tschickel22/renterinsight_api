@@ -502,7 +502,7 @@ module Api
         if payment.save
           begin
             # Process through gateway
-            api = RenterInsightZegoApi.new(@company)
+            api = ZegoPaymentApi.new(@company)
             
             if api.capture_payment(payment_method, payment, request)
               # Get transaction details

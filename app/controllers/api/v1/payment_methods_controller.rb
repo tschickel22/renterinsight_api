@@ -473,7 +473,7 @@ module Api
       # Determine if we should skip the payment gateway
       # Skip in development/test when:
       # 1. Gateway is explicitly disabled via setting, OR
-      # 2. We're in development/test mode (until proper Zego property registration is implemented)
+      # 2. Company doesn't have a valid Zego PM ID configured
       def should_skip_payment_gateway?
         # Check if gateway is explicitly disabled
         gateway_enabled = Setting.get_with_fallback('zego_enabled', @company&.id)
@@ -482,10 +482,15 @@ module Api
         # In production, always use the gateway
         return false if Rails.env.production?
         
-        # In development/test, skip gateway until proper Zego property registration is implemented
-        # TODO: Once locations are registered with Zego (via admin_add_property), 
-        # check if location.external_id (payee_id) exists before skipping
-        Rails.logger.info "[PaymentMethods] Skipping payment gateway - development mode"
+        # In development/test, check if company has valid Zego PM ID
+        # If they have a PM ID (even the fake one for testing), use the gateway
+        if @company&.external_payments_id.present?
+          Rails.logger.info "[PaymentMethods] Using payment gateway - company has PM ID: #{@company.external_payments_id}"
+          return false
+        end
+        
+        # No PM ID configured - skip gateway
+        Rails.logger.info "[PaymentMethods] Skipping payment gateway - no PM ID configured for company"
         true
       end
 

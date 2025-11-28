@@ -176,6 +176,15 @@ module Api
           @payment.location_id ||= location_ids.first if location_ids.any?
         end
         
+        # Convert contact_id/account_id to polymorphic payer_type/payer_id
+        if params[:contact_id].present?
+          @payment.payer_type = 'Contact'
+          @payment.payer_id = params[:contact_id]
+        elsif params[:account_id].present?
+          @payment.payer_type = 'Account'
+          @payment.payer_id = params[:account_id]
+        end
+        
         # Set gateway name
         @payment.gateway_name ||= 'zego'
         

@@ -106,7 +106,12 @@ class ZegoPaymentApi
       http.read_timeout = 30
       http.open_timeout = 30
       
-      self.response = http.post(uri, "XML=#{xml_post_data}")
+      # Create POST request with proper headers
+      post_request = Net::HTTP::Post.new(uri.request_uri)
+      post_request['Content-Type'] = 'application/x-www-form-urlencoded'
+      post_request.body = "XML=#{xml_post_data}"
+      
+      self.response = http.request(post_request)
       
       @response_data = XmlSimple.xml_in(self.response.body)
       
@@ -147,7 +152,12 @@ class ZegoPaymentApi
       http.read_timeout = 30
       http.open_timeout = 30
       
-      self.response = http.post(uri, xml_post_data)
+      # Create POST request with proper headers  
+      post_request = Net::HTTP::Post.new(uri.request_uri)
+      post_request['Content-Type'] = 'application/x-www-form-urlencoded'
+      post_request.body = xml_post_data
+      
+      self.response = http.request(post_request)
       
       @response_data = XmlSimple.xml_in(self.response.body)
       
@@ -468,27 +478,10 @@ class ZegoPaymentApi
       parameters[:card_code] = payment_method.credit_card_cvv
       parameters[:is_debit_card] = payment_method.debit_card?
       
-      parameters[:payment_reference_id] = payment_method.generate_reference_id
+      # No payment fields needed - just registering the card, not charging it
+      # This avoids the $5 pre-auth charge that confuses customers
       
-      # Get payee_id from company's operating bank account (if bank_accounts association exists)
-      # Otherwise fall back to settings/credentials
-      if @company.present? && @company.respond_to?(:bank_accounts)
-        begin
-          operating_account = @company.bank_accounts
-            .where(account_purpose: 'operating')
-            .where.not(property_id: nil, external_id: nil)
-            .first
-          parameters[:payee_id] = operating_account&.external_id
-        rescue => e
-          Rails.logger.warn "[ZegoPaymentApi] Could not access company bank_accounts: #{e.message}"
-        end
-      end
-      
-      # Fallback to platform default payee_id (required for card authorization)
-      parameters[:payee_id] ||= Setting.get_with_fallback('zego_payee_id', @company&.id) ||
-                                Rails.application.credentials.dig(:zego, :payee_id)
-      
-      make_call(request, 'CCPayment', parameters)
+      make_call(request, 'CreateCardPayerAccount', parameters)
     end
     
     return self.payment_success?
@@ -553,23 +546,41 @@ class ZegoPaymentApi
     payer_reference_id = payment_method.generate_reference_id
     
     # Determine gateway_payer_id and payee_id based on payment type
-    if payment.is_a?(CompanyPayment)
-      # Company-level payment (not property-specific)
-      gateway_payer_id = payment_method.external_id
-      payee_id = Setting.get_with_fallback('zego_payee_id', @company&.id) ||
-                 Rails.application.credentials.dig(:zego, :payee_id)
-    elsif payment.fee_type == 'screening_fee'
-      # Screening fee payment - uses alternate external ID
+    gateway_payer_id = payment_method.external_id
+    
+    if payment.fee_type == 'screening_fee'
+      # Screening fee payment - uses alternate external ID and company-level payee
       gateway_payer_id = payment_method.alternate_external_id
       payee_id = Setting.get_with_fallback('zego_payee_id', @company&.id) ||
                  Rails.application.credentials.dig(:zego, :payee_id)
-    else
-      # Regular property payment - use property's operating account
-      gateway_payer_id = payment_method.external_id
-      operating_account = payment.property.bank_accounts
+      Rails.logger.info "[ZegoPaymentApi] Screening fee payment - using company payee_id: #{payee_id}"
+    elsif payment.location_id.present?
+      # Regular payment with location - MUST use location's operating account (no fallback)
+      operating_account = payment.location.bank_accounts
         .where(account_purpose: 'operating')
         .first
       payee_id = operating_account&.external_id
+      
+      Rails.logger.info "[ZegoPaymentApi] Payment with location_id #{payment.location_id} - operating_account: #{operating_account&.id}, external_id: #{payee_id}"
+      
+      # NO FALLBACK - location must have valid bank account
+      if payee_id.nil?
+        error_msg = "Payment location (ID: #{payment.location_id}) has no operating bank account with external_id. Cannot process payment."
+        Rails.logger.error "[ZegoPaymentApi] #{error_msg}"
+        raise StandardError, error_msg
+      end
+    else
+      # Payment has no location - this should not happen
+      error_msg = "Payment (ID: #{payment.id}) has no location_id. Cannot determine payee account."
+      Rails.logger.error "[ZegoPaymentApi] #{error_msg}"
+      raise StandardError, error_msg
+    end
+    
+    # CRITICAL: Ensure payee_id is present
+    if payee_id.nil?
+      error_msg = "Cannot process payment: payee_id is nil. Company ID: #{@company&.id}, Loan ID: #{payment.loan_id}"
+      Rails.logger.error "[ZegoPaymentApi] #{error_msg}"
+      raise StandardError, error_msg
     end
     
     # Build base parameters
@@ -579,26 +590,29 @@ class ZegoPaymentApi
       payee_id: payee_id,
       gateway_payer_id: gateway_payer_id,
       amount: payment.amount,
-      fee: payment.fee,
+      fee: payment.processing_fee,
       fee_responsibility: payment.fee_responsibility,
       first_name: payment_method.billing_first_name,
       last_name: payment_method.billing_last_name
     }
     
-    # Handle split deposits for properties with separate deposit accounts
-    if !payment.is_a?(CompanyPayment) && 
+    # Handle split deposits for loan payments with properties that use separate deposit accounts
+    if payment.loan_id.present? && 
+       payment.loan.present? && 
+       payment.loan.respond_to?(:property) && 
+       payment.loan.property.present? &&
        !payment.company.use_same_bank_account_for_deposits?
       
       # Determine distribution between operating and deposit accounts
       distributions = AccountingService.determine_distribution(
-        payment.lease,
+        payment.loan.lease,
         payment.amount,
         payment.payment_at
       )
       
       # Check if payment includes deposits that need to be split
       if distributions.keys.include?('deposits_held')
-        deposit_account = payment.property.bank_accounts
+        deposit_account = payment.loan.property.bank_accounts
           .where(account_purpose: 'deposit')
           .first
         deposit_payee_id = deposit_account&.external_id
@@ -844,8 +858,8 @@ class ZegoPaymentApi
         }
       }
       
-    when 'CreateCardPayerAccount', 'CCPayment'
-      # Credit card account creation/payment
+    when 'CreateCardPayerAccount'
+      # Credit card account creation - register payment method only (no charge)
       post = {
         Transactions: {
           Transaction: {
@@ -867,21 +881,12 @@ class ZegoPaymentApi
             BillingState: parameters[:state],
             BillingCountry: parameters[:country],
             BillingZip: parameters[:zip],
-            IsDebitCard: parameters[:is_debit_card] ? "Yes" : "No",
-            
-            SaveAccount: "Yes",
-            CreditCardAction: "AUTH"
+            IsDebitCard: parameters[:is_debit_card] ? "Yes" : "No"
+            # No SaveAccount, CreditCardAction, PaymentReferenceId, PayeeId, or TotalAmount
+            # Those are only for actual payment transactions
           }
         }
       }
-      
-      # Add payment fields for CCPayment action
-      if action == 'CCPayment'
-        post[:Transactions][:Transaction][:PaymentReferenceId] = parameters[:payment_reference_id]
-        post[:Transactions][:Transaction][:PaymentTraceId] = @log.id
-        post[:Transactions][:Transaction][:PayeeId] = parameters[:payee_id]
-        post[:Transactions][:Transaction][:TotalAmount] = 5 # Authorization amount
-      end
       
     when 'SetResidents'
       # Admin API call for cash card setup

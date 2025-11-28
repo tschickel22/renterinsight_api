@@ -17,6 +17,7 @@ class Company < ApplicationRecord
   has_many :brochures, dependent: :destroy
   has_many :templates, dependent: :destroy
   has_many :locations, dependent: :destroy
+  has_many :bank_accounts, dependent: :destroy
   has_many :sources, dependent: :destroy
   has_many :tags, dependent: :destroy
   has_many :territories, dependent: :destroy
@@ -32,6 +33,9 @@ class Company < ApplicationRecord
   has_many :roles, dependent: :destroy
   has_many :company_hidden_roles, dependent: :destroy
   has_many :hidden_roles, through: :company_hidden_roles, source: :role
+  
+  # Callbacks
+  after_create :create_default_location
   
   # Validations for tenant fields
   validates :subdomain, 
@@ -437,6 +441,33 @@ class Company < ApplicationRecord
   rescue => e
     Rails.logger.error "❌ [Company#loan_settings=] Error: #{e.class} - #{e.message}"
     raise e
+  end
+  
+  private
+  
+  # Auto-create a default location for every company
+  # This ensures payment infrastructure always works (Zego requires properties)
+  def create_default_location
+    Rails.logger.info "🏢 [Company#create_default_location] Creating default location for Company #{id}: #{name}"
+    
+    location = locations.create!(
+      name: self.name || 'Main Office',
+      address_line1: self.street || 'TBD',
+      city: self.city || 'TBD',
+      state: self.state || 'CA',
+      zip_code: self.zip || '00000',
+      country: 'US',
+      timezone: self.timezone || 'America/New_York',
+      active: true,
+      is_deleted: false
+    )
+    
+    Rails.logger.info "✅ [Company#create_default_location] Created location #{location.id}: #{location.name}"
+  rescue => e
+    Rails.logger.error "❌ [Company#create_default_location] Error: #{e.class} - #{e.message}"
+    Rails.logger.error "Backtrace: #{e.backtrace.first(5).join("\n")}"
+    # Don't re-raise - we don't want company creation to fail
+    # Admin can manually create location later if needed
   end
 
   # Check if company has meaningful communication settings configured

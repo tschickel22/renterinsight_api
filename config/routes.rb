@@ -224,6 +224,14 @@ Rails.application.routes.draw do
           post :bulk_deactivate
           post :bulk_delete
         end
+        
+        # ==================== BANK ACCOUNTS (Nested under Locations) ====================
+        resources :bank_accounts, path: 'bank-accounts', only: [:index, :create, :update, :destroy] do
+          member do
+            post :sync_to_zego, path: 'sync-to-zego'
+            patch :update_display, path: 'update-display'
+          end
+        end
       end
       
       # ==================== SERVICE TICKETS ====================
@@ -850,6 +858,15 @@ Rails.application.routes.draw do
       
       # Admin Buyers List (for dropdown)
       resources :buyers, only: [:index]
+      
+      # Zego Payment Integration (Platform Admin Only)
+      namespace :zego do
+        post 'check_credentials', to: 'zego#check_credentials'
+        post 'sync_location', to: 'zego#sync_location'
+        get 'transactions', to: 'zego#transactions'
+        get 'properties', to: 'zego#properties'
+        get 'server_status', to: 'zego#server_status'
+      end
       
       # Impersonation routes (must be last to avoid conflicts)
       post 'impersonate', to: 'impersonation#create'

@@ -5,6 +5,7 @@ class Location < ApplicationRecord
   belongs_to :company
   has_many :user_locations, dependent: :destroy
   has_many :users, through: :user_locations
+  has_many :bank_accounts, dependent: :destroy
   has_many :vehicles, dependent: :nullify
   has_many :listings, dependent: :nullify
   has_many :leads, dependent: :nullify
@@ -171,6 +172,25 @@ class Location < ApplicationRecord
     deals.where(stage: ['qualification', 'proposal', 'negotiation']).count
   rescue
     0
+  end
+  
+  # Zego integration helpers
+  def synced_to_zego?
+    external_payments_property_id.present? && 
+      bank_accounts.active.any? { |ba| ba.external_id.present? }
+  end
+  
+  def zego_ready?
+    # Location is ready for Zego if it has at least one bank account configured
+    bank_accounts.active.any?
+  end
+  
+  def operating_bank_account
+    bank_accounts.active.operating.first
+  end
+  
+  def deposit_bank_account
+    bank_accounts.active.deposit.first
   end
 
   private
