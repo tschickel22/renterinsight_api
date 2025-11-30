@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_26_000100) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_28_225559) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -775,6 +775,59 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_26_000100) do
     t.index ["token_digest"], name: "index_invitations_on_token_digest", unique: true
   end
 
+  create_table "invoice_items", force: :cascade do |t|
+    t.bigint "invoice_id", null: false
+    t.string "item_type"
+    t.string "description", null: false
+    t.decimal "quantity", precision: 10, scale: 2, default: "1.0"
+    t.decimal "rate", precision: 10, scale: 2, null: false
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.bigint "listing_id"
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["invoice_id", "position"], name: "index_invoice_items_on_invoice_id_and_position"
+    t.index ["invoice_id"], name: "index_invoice_items_on_invoice_id"
+    t.index ["listing_id"], name: "index_invoice_items_on_listing_id"
+  end
+
+  create_table "invoices", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "contact_id", null: false
+    t.bigint "listing_id"
+    t.bigint "deal_id"
+    t.string "invoice_number", null: false
+    t.string "status", default: "draft"
+    t.date "invoice_date", null: false
+    t.date "due_date"
+    t.decimal "subtotal", precision: 10, scale: 2, default: "0.0"
+    t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
+    t.decimal "tax_amount", precision: 10, scale: 2, default: "0.0"
+    t.decimal "total", precision: 10, scale: 2, default: "0.0"
+    t.decimal "amount_paid", precision: 10, scale: 2, default: "0.0"
+    t.decimal "amount_due", precision: 10, scale: 2, default: "0.0"
+    t.text "notes"
+    t.text "terms"
+    t.text "footer_text"
+    t.string "payment_token"
+    t.datetime "sent_at"
+    t.datetime "viewed_at"
+    t.datetime "paid_at"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
+    t.index ["company_id"], name: "index_invoices_on_company_id"
+    t.index ["contact_id"], name: "index_invoices_on_contact_id"
+    t.index ["deal_id"], name: "index_invoices_on_deal_id"
+    t.index ["due_date"], name: "index_invoices_on_due_date"
+    t.index ["listing_id"], name: "index_invoices_on_listing_id"
+    t.index ["location_id"], name: "index_invoices_on_location_id"
+    t.index ["payment_token"], name: "index_invoices_on_payment_token", unique: true
+    t.index ["status"], name: "index_invoices_on_status"
+  end
+
   create_table "land_parcels", force: :cascade do |t|
     t.integer "company_id", null: false
     t.string "parcel_number", null: false
@@ -1321,6 +1374,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_26_000100) do
     t.string "updated_by"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "payable_type"
+    t.bigint "payable_id"
     t.index ["company_id", "is_deleted"], name: "index_payments_on_company_id_and_is_deleted"
     t.index ["company_id", "payment_number"], name: "index_payments_on_company_id_and_payment_number", unique: true
     t.index ["company_id", "status"], name: "index_payments_on_company_id_and_status"
@@ -1329,6 +1384,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_26_000100) do
     t.index ["loan_id", "payment_date"], name: "index_payments_on_loan_id_and_payment_date"
     t.index ["loan_id"], name: "index_payments_on_loan_id"
     t.index ["location_id"], name: "index_payments_on_location_id"
+    t.index ["payable_type", "payable_id"], name: "index_payments_on_payable_type_and_payable_id"
     t.index ["payer_type", "payer_id"], name: "index_payments_on_payer"
     t.index ["payment_date"], name: "index_payments_on_payment_date"
     t.index ["payment_method_id"], name: "index_payments_on_payment_method_id"
@@ -1953,6 +2009,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_26_000100) do
   add_foreign_key "intake_submissions", "leads"
   add_foreign_key "invitations", "companies"
   add_foreign_key "invitations", "users", column: "invited_by_id"
+  add_foreign_key "invoice_items", "invoices"
+  add_foreign_key "invoice_items", "listings"
+  add_foreign_key "invoices", "companies"
+  add_foreign_key "invoices", "contacts"
+  add_foreign_key "invoices", "deals"
+  add_foreign_key "invoices", "listings"
+  add_foreign_key "invoices", "locations"
   add_foreign_key "land_parcels", "companies"
   add_foreign_key "lead_activities", "lead_activities", column: "related_activity_id"
   add_foreign_key "lead_activities", "leads"

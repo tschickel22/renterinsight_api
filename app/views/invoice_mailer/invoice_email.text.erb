@@ -1,0 +1,61 @@
+<%= @company.name %>
+<% if @location.present? && @location.address_line1.present? %>
+<%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %>
+<% end %>
+
+================================================================================
+INVOICE <%= @invoice.invoice_number %>
+================================================================================
+
+Invoice Date: <%= @invoice.invoice_date.strftime('%B %d, %Y') %>
+<% if @invoice.due_date %>
+Due Date: <%= @invoice.due_date.strftime('%B %d, %Y') %>
+<% end %>
+
+Bill To:
+<%= @contact.full_name %>
+<%= @contact.email %>
+
+--------------------------------------------------------------------------------
+ITEMS
+--------------------------------------------------------------------------------
+
+<% @invoice.invoice_items.each do |item| %>
+<%= item.description %>
+Quantity: <%= number_with_precision(item.quantity, precision: 2) %> x <%= number_to_currency(item.rate) %> = <%= number_to_currency(item.amount) %>
+
+<% end %>
+--------------------------------------------------------------------------------
+
+Subtotal: <%= number_to_currency(@invoice.subtotal) %>
+<% if @invoice.tax_amount > 0 %>
+Tax (<%= @invoice.tax_rate %>%): <%= number_to_currency(@invoice.tax_amount) %>
+<% end %>
+TOTAL: <%= number_to_currency(@invoice.total) %>
+
+<% if @invoice.amount_paid > 0 %>
+Amount Paid: <%= number_to_currency(@invoice.amount_paid) %>
+<% end %>
+AMOUNT DUE: <%= number_to_currency(@invoice.amount_due) %>
+
+================================================================================
+
+<% if @invoice.notes.present? %>
+Notes:
+<%= @invoice.notes %>
+
+<% end %>
+PAY ONLINE: <%= @payment_link %>
+
+<% if @invoice.terms.present? %>
+Payment Terms:
+<%= @invoice.terms %>
+
+<% end %>
+<% if @location.present? %>
+Questions? Contact us:
+<% if @location.phone.present? %>Phone: <%= @location.phone %><% end %>
+<% if @location.email.present? %>Email: <%= @location.email %><% end %>
+<% end %>
+
+This is an automated invoice. Please do not reply to this email.

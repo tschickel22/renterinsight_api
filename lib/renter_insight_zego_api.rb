@@ -70,23 +70,31 @@ class RenterInsightZegoApi
   def capture_payment(payment_method, payment, request)
     
     payer_reference_id = payment_method.generate_reference_id
+    gateway_payer_id = payment_method.external_id
+    
+    # Get location from payment (different payment types store location differently)
+    location = payment.location if payment.respond_to?(:location)
+    location ||= payment.payable.location if payment.respond_to?(:payable) && payment.payable.respond_to?(:location)
+    location ||= payment.property if payment.respond_to?(:property)
+    
+    # Get payee_id from location's operating bank account, with fallback
+    payee_id = location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
+    payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
 
-    if payment.is_a?(CompanyPayment)
-      gateway_payer_id = payment_method.external_id
-      payee_id = Rails.application.credentials.dig(:zego, :payee_id)
-    elsif payment.fee_type == Setting::PAYMENT_FEE_TYPE_SCREENING_FEE
-      gateway_payer_id = payment_method.alternate_external_id
-      payee_id = Rails.application.credentials.dig(:zego, :payee_id)
-    else
-      gateway_payer_id = payment_method.external_id
-      # Try to get payee_id from location's bank account, with fallback to company credentials
-      payee_id = payment.location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
-      payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
-    end
+    parameters = { 
+      payment_reference_id: payment.id,  
+      payer_reference_id: payer_reference_id, 
+      payee_id: payee_id, 
+      gateway_payer_id: gateway_payer_id, 
+      amount: payment.amount, 
+      fee: payment.respond_to?(:processing_fee) ? payment.processing_fee : 0,
+      fee_responsibility: payment.respond_to?(:fee_responsibility) ? payment.fee_responsibility : nil
+    }
 
-    parameters = { payment_reference_id: payment.id,  payer_reference_id: payer_reference_id, payee_id: payee_id, gateway_payer_id: gateway_payer_id, amount: payment.amount, fee: payment.processing_fee, fee_responsibility: payment.fee_responsibility}
-
-    if !payment.company.use_same_bank_account_for_deposits
+    # Only handle deposit splits for lease payments that have this feature enabled
+    if payment.respond_to?(:lease) && payment.lease.present? && 
+       payment.company.respond_to?(:use_same_bank_account_for_deposits) && 
+       !payment.company.use_same_bank_account_for_deposits
       distributions = AccountingService.determine_distribution(payment.lease, payment.amount, payment.payment_at)
 
       # Do we need to split this payment?
@@ -130,8 +138,8 @@ class RenterInsightZegoApi
       make_call(request, 'CreateBankPayerAccount', parameters)
     else
 
-      exp_month = sprintf("%.2i", payment_method.credit_card_expires_on.month)
-      exp_year = payment_method.credit_card_expires_on.year.to_s[2,2]
+      exp_month = sprintf("%.2i", payment_method.credit_card_exp_month)
+      exp_year = payment_method.credit_card_exp_year.to_s[-2..-1]  # Last 2 digits
 
       parameters[:first_name] = payment_method.billing_first_name
       parameters[:last_name]  = payment_method.billing_last_name
@@ -484,6 +492,9 @@ class RenterInsightZegoApi
     post = nil
 
     if action == 'AccountPayment'
+      # Handle fee responsibility (nil means location/tenant pays, not the payer)
+      payer_pays_fee = parameters[:fee_responsibility] == 'payer' rescue false
+      
       post = {
         :Transactions => {
           :Transaction => {
@@ -493,9 +504,9 @@ class RenterInsightZegoApi
             :PaymentTraceId => @log.id,
             :PayeeId => parameters[:payee_id],
             :PayerReferenceId => parameters[:payer_reference_id],
-            :TotalAmount => parameters[:fee_responsibility] == Payment::RESPONSIBILITY_RESIDENT ? parameters[:amount] + parameters[:fee] : parameters[:amount],
-            :FeeAmount => parameters[:fee_responsibility] == Payment::RESPONSIBILITY_RESIDENT ? parameters[:fee] : 0,
-            :IncurFee =>  parameters[:fee_responsibility] == Payment::RESPONSIBILITY_RESIDENT ? "No" : "Yes",
+            :TotalAmount => payer_pays_fee ? parameters[:amount] + parameters[:fee] : parameters[:amount],
+            :FeeAmount => payer_pays_fee ? parameters[:fee] : 0,
+            :IncurFee => payer_pays_fee ? "No" : "Yes",
             :CheckScanned => 'No'
           }
         }

@@ -158,9 +158,8 @@ module Api
           return render json: { error: 'contactId is required' }, status: :unprocessable_entity
         end
 
-        # SECURITY: For portal invites, ALWAYS use user's JWT company_id
-        # Never use X-Company-ID header - users can only invite to their own company
-        @user_company_id = @current_company_id # From JWT, not header
+        # SECURITY: Use current_company_id (respects both JWT auth and company switching)
+        @user_company_id = current_company_id
         
         Rails.logger.info("Portal invite: Looking for contact_id=#{params[:contact_id]}, company_id=#{@user_company_id}")
 

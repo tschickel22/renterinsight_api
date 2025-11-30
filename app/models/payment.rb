@@ -21,6 +21,7 @@ class Payment < ApplicationRecord
   belongs_to :loan, optional: true
   belongs_to :payment_method, optional: true
   belongs_to :payer, polymorphic: true, optional: true
+  belongs_to :payable, polymorphic: true, optional: true
   
   # Validations
   validates :company_id, presence: true

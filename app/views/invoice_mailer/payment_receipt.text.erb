@@ -1,0 +1,65 @@
+<%= @company.name %>
+<% if @location.present? && @location.address_line1.present? %>
+<%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %>
+<% end %>
+
+================================================================================
+✓ PAYMENT RECEIVED
+================================================================================
+
+Thank you for your payment! We have successfully received your payment for 
+Invoice <%= @invoice.invoice_number %>.
+
+--------------------------------------------------------------------------------
+PAYMENT DETAILS
+--------------------------------------------------------------------------------
+
+Invoice Number: <%= @invoice.invoice_number %>
+Payment Date: <%= @payment.processed_at.strftime('%B %d, %Y at %I:%M %p') %>
+Payment Method: <%= @payment.payment_method.method_type.titleize %>
+Payment Amount: <%= number_to_currency(@payment.amount) %>
+<% if @payment.external_id.present? %>
+Transaction ID: <%= @payment.external_id %>
+<% end %>
+
+--------------------------------------------------------------------------------
+INVOICE SUMMARY
+--------------------------------------------------------------------------------
+
+Original Invoice Total: <%= number_to_currency(@invoice.total) %>
+Total Paid: <%= number_to_currency(@invoice.amount_paid) %>
+Remaining Balance: <%= number_to_currency(@invoice.amount_due) %>
+
+<% if @invoice.amount_due > 0 %>
+You can make another payment at: <%= @invoice.payment_url %>
+<% else %>
+✓ INVOICE PAID IN FULL
+<% end %>
+
+--------------------------------------------------------------------------------
+INVOICE LINE ITEMS
+--------------------------------------------------------------------------------
+
+<% @invoice.invoice_items.each do |item| %>
+<%= item.description %>
+Quantity: <%= number_with_precision(item.quantity, precision: 2) %> x <%= number_to_currency(item.rate) %> = <%= number_to_currency(item.amount) %>
+
+<% end %>
+Subtotal: <%= number_to_currency(@invoice.subtotal) %>
+<% if @invoice.tax_amount > 0 %>
+Tax (<%= @invoice.tax_rate %>%): <%= number_to_currency(@invoice.tax_amount) %>
+<% end %>
+Total: <%= number_to_currency(@invoice.total) %>
+
+================================================================================
+
+If you have any questions about this payment, please contact us.
+
+<%= @company.name %>
+<% if @location.present? %>
+<% if @location.address_line1.present? %><%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %><% end %>
+<% if @location.phone.present? %>Phone: <%= @location.phone %><% end %>
+<% if @location.email.present? %>Email: <%= @location.email %><% end %>
+<% end %>
+
+This is an automated receipt. Please do not reply to this email.

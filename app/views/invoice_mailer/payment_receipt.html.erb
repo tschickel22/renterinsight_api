@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { text-align: center; padding: 20px 0; border-bottom: 2px solid #e5e7eb; }
+    .logo { max-width: 200px; height: auto; }
+    .success-badge { background: #10b981; color: white; padding: 10px 20px; border-radius: 6px; display: inline-block; margin: 20px 0; }
+    .payment-details { background: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0; }
+    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+    .footer { text-align: center; padding: 20px 0; color: #6b7280; font-size: 0.9em; border-top: 1px solid #e5e7eb; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <% if @company.try(:logo_url).present? || @company.try(:logo).present? %>
+        <img src="<%= @company.try(:logo_url) || @company.try(:logo) %>" alt="<%= @company.name %>" class="logo">
+      <% else %>
+        <h1><%= @company.name %></h1>
+      <% end %>
+      
+      <div class="success-badge">✓ Payment Received</div>
+    </div>
+    
+    <div style="margin: 30px 0;">
+      <h2>Payment Receipt</h2>
+      <p>Thank you for your payment! We have successfully received your payment for Invoice <%= @invoice.invoice_number %>.</p>
+    </div>
+    
+    <div class="payment-details">
+      <div class="detail-row">
+        <span><strong>Invoice Number:</strong></span>
+        <span><%= @invoice.invoice_number %></span>
+      </div>
+      
+      <div class="detail-row">
+        <span><strong>Payment Date:</strong></span>
+        <span><%= @payment.processed_at.strftime('%B %d, %Y at %I:%M %p') %></span>
+      </div>
+      
+      <div class="detail-row">
+        <span><strong>Payment Method:</strong></span>
+        <span><%= @payment.payment_method.method_type.titleize %></span>
+      </div>
+      
+      <div class="detail-row">
+        <span><strong>Payment Amount:</strong></span>
+        <span style="font-size: 1.2em; color: #10b981;"><%= number_to_currency(@payment.amount) %></span>
+      </div>
+      
+      <% if @payment.external_id.present? %>
+        <div class="detail-row">
+          <span><strong>Transaction ID:</strong></span>
+          <span><%= @payment.external_id %></span>
+        </div>
+      <% end %>
+    </div>
+    
+    <div style="background: #fef3c7; padding: 15px; border-radius: 6px; margin: 20px 0;">
+      <strong>Invoice Summary:</strong><br>
+      Original Invoice Total: <%= number_to_currency(@invoice.total) %><br>
+      Total Paid: <%= number_to_currency(@invoice.amount_paid) %><br>
+      <strong>Remaining Balance: <%= number_to_currency(@invoice.amount_due) %></strong>
+    </div>
+    
+    <% if @invoice.amount_due <= 0 %>
+      <div style="text-align: center; padding: 20px; background: #d1fae5; border-radius: 8px; margin: 20px 0;">
+        <strong style="color: #10b981; font-size: 1.2em;">✓ Invoice Paid in Full</strong>
+      </div>
+    <% end %>
+    
+    <div class="footer">
+      <p>If you have any questions about this payment, please contact us.</p>
+      <p><%= @company.name %></p>
+      <% if @location.present? && @location.phone.present? %>
+        <p>Phone: <%= @location.phone %></p>
+      <% end %>
+      <% if @location.present? && @location.email.present? %>
+        <p>Email: <%= @location.email %></p>
+      <% end %>
+    </div>
+  </div>
+</body>
+</html>

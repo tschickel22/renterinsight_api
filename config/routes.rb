@@ -44,6 +44,18 @@ Rails.application.routes.draw do
       post 'invitations/accept', to: 'invitations#accept'
     end
     
+    # ==================== PUBLIC INVOICE PAYMENTS (No Auth Required) ====================
+    namespace :v1 do
+      namespace :public do
+        resources :invoice_payments, only: [], param: :token do
+          member do
+            get '', action: :show
+            post :process_payment
+          end
+        end
+      end
+    end
+    
     scope path: 'f' do
       get ':public_id', to: '/public/forms#show'
       post ':public_id/submit', to: '/public/forms#submit'
@@ -138,6 +150,20 @@ Rails.application.routes.draw do
         collection do
           get :stats
           get :export
+        end
+      end
+      
+      # ==================== INVOICES ====================
+      resources :invoices do
+        member do
+          post :send_invoice
+          post :send_sms
+          post :mark_paid
+          post :cancel
+        end
+        
+        collection do
+          get :stats
         end
       end
       
