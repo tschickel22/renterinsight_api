@@ -524,6 +524,16 @@ class RenterInsightZegoApi
       post_request.body = "XML=#{xml_post_data}"
       self.response = http.request(post_request)
 
+      # ==================== RESPONSE DEBUG START ====================
+      Rails.logger.info("")
+      Rails.logger.info("[ZEGO ADMIN DEBUG] Response code: #{self.response.code}")
+      Rails.logger.info("[ZEGO ADMIN DEBUG] Response body (first 1000 chars):")
+      Rails.logger.info(self.response.body[0..1000])
+      Rails.logger.info("[ZEGO ADMIN DEBUG] Is response HTML? #{self.response.body.include?('<html>') || self.response.body.include?('<!DOCTYPE')}")
+      Rails.logger.info("[ZEGO ADMIN DEBUG] Is response XML? #{self.response.body.include?('<?xml')}")
+      Rails.logger.info("=" * 80)
+      # ==================== RESPONSE DEBUG END ====================
+
       @response_data = XmlSimple.xml_in(self.response.body)
 
       if self.response.present? && self.response.code == '200' && @response_data['Errors'].nil?
@@ -552,6 +562,19 @@ class RenterInsightZegoApi
 
     post_data = self.admin_post_data(action, parameters)
     xml_post_data = self.admin_to_xml(post_data)
+
+    # ==================== DEBUG LOGGING START ====================
+    Rails.logger.info("=" * 80)
+    Rails.logger.info("[ZEGO ADMIN DEBUG] Making admin API call")
+    Rails.logger.info("[ZEGO ADMIN DEBUG] Action: #{action}")
+    Rails.logger.info("[ZEGO ADMIN DEBUG] Admin API URL: #{self.admin_api_url}")
+    Rails.logger.info("[ZEGO ADMIN DEBUG] Company: #{@company&.name} (ID: #{@company&.id})")
+    Rails.logger.info("[ZEGO ADMIN DEBUG] Company PM ID: #{@company&.external_payments_id}")
+    Rails.logger.info("")
+    Rails.logger.info("[ZEGO ADMIN DEBUG] Actual XML being sent:")
+    Rails.logger.info(xml_post_data)
+    Rails.logger.info("=" * 80)
+    # ==================== DEBUG LOGGING END ====================
 
     api_start(action, self.admin_api_url, self.admin_to_xml(self.clean_request(post_data)))
 
