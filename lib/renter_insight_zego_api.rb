@@ -861,9 +861,17 @@ class RenterInsightZegoApi
       Password: gateway_options[:password]
     }
 
+    # Debug logging for company context
+    Rails.logger.info("[ZEGO DEBUG] @company present?: #{@company.present?}")
+    Rails.logger.info("[ZEGO DEBUG] @company: #{@company.inspect}")
+    Rails.logger.info("[ZEGO DEBUG] @company.external_payments_id: #{@company&.external_payments_id}")
+
     if @company.present?
       post[:Credentials][:PmId] = @company.external_payments_id
       post[:Credentials][:ApiKey] = gateway_options[:admin_api_key]
+      Rails.logger.info("[ZEGO DEBUG] Added PmId and ApiKey to credentials")
+    else
+      Rails.logger.error("[ZEGO DEBUG] @company is nil - cannot add PmId/ApiKey!")
     end
 
     post[:Mode] = gateway_options[:test] ? 'Test' : 'Production'
@@ -873,6 +881,7 @@ class RenterInsightZegoApi
     Rails.logger.info("[ZEGO DEBUG] Rails.env.production?: #{Rails.env.production?}")
     Rails.logger.info("[ZEGO DEBUG] gateway_options[:test]: #{gateway_options[:test]}")
     Rails.logger.info("[ZEGO DEBUG] Mode being sent: #{post[:Mode]}")
+    Rails.logger.info("[ZEGO DEBUG] Final credentials: #{post[:Credentials].inspect}")
 
     return post
   end
