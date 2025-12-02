@@ -508,6 +508,10 @@ class RenterInsightZegoApi
     post_data = self.post_data(action, parameters)
     xml_post_data = self.to_xml(post_data)
 
+    # Debug: Log the actual XML being sent
+    Rails.logger.info("[ZEGO DEBUG] Actual XML being sent:")
+    Rails.logger.info(xml_post_data)
+
     api_start(action, self.api_url, self.to_xml(self.clean_request(post_data)))
 
     begin
