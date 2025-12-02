@@ -4,7 +4,7 @@ module Api
   module V1
     class LoansController < ApplicationController
       before_action :set_company_scope
-      before_action :set_loan, only: %i[show update destroy activate mark_defaulted record_payment record_manual_payment documents upload_documents destroy_document]
+      before_action :set_loan, only: %i[show update destroy activate mark_defaulted record_payment record_manual_payment documents upload_documents destroy_document amortization_data]
 
       # GET /api/v1/loans
       def index
@@ -152,8 +152,8 @@ module Api
       def show
         return unless authorize_action!('loans', 'read')
         
-        # Include payment history
-        payments = @loan.payments.order(created_at: :desc).limit(50)
+        # Include payment history with payment methods
+        payments = @loan.payments.includes(:payment_method).order(created_at: :desc).limit(50)
         
         # Get company payment settings for display
         loan_settings = @company.loan_settings || {}
@@ -175,7 +175,12 @@ module Api
                       :days_until_next_payment, :current?, :past_due?]
           ),
           payment_history: payments.as_json(
-            only: [:id, :amount, :principal_amount, :interest_amount, :status, :payment_date, :created_at],
+            only: [:id, :amount, :principal_amount, :interest_amount, :late_fee_amount, :status, :payment_date, :external_id, :created_at],
+            include: {
+              payment_method: {
+                only: [:id, :method_type, :display_name, :masked_account_number, :ach_last_four, :credit_card_last_four]
+              }
+            },
             methods: [:display_name]
           ),
           payment_settings: payment_settings
@@ -743,6 +748,204 @@ module Api
         else
           render json: { error: 'Failed to delete document' }, status: :unprocessable_entity
         end
+      end
+
+      # GET /api/v1/loans/:id/amortization-data
+      # Get the amortization schedule with actual vs scheduled comparison
+      def amortization_data
+        return unless authorize_action!('loans', 'read')
+        
+        # Use loan's actual values
+        principal = @loan.principal_amount.to_f
+        rate = @loan.interest_rate.to_f
+        term = @loan.term_months.to_i
+        origination_date = @loan.origination_date || @loan.created_at.to_date
+        first_payment_date = @loan.first_payment_date || (origination_date + 1.month)
+        
+        if principal <= 0 || term <= 0
+          render json: { error: 'Invalid loan parameters' }, status: :unprocessable_entity
+          return
+        end
+        
+        # Calculate monthly payment (or use stored value)
+        monthly_payment = if @loan.regular_payment_amount.present? && @loan.regular_payment_amount > 0
+          @loan.regular_payment_amount.to_f
+        elsif rate == 0
+          principal / term
+        else
+          r = (rate / 100) / 12
+          n = term
+          (principal * (r * (1 + r)**n)) / ((1 + r)**n - 1)
+        end
+        
+        # Get actual payments made and build lookup hash by payment number
+        actual_payments = @loan.payments
+                               .where(status: 'completed')
+                               .order(:payment_date)
+        
+        payments_made_count = actual_payments.count
+        
+        # Build hash: payment_number => payment_data
+        # Note: We don't have payment_number stored, so we use array index + 1
+        actual_payments_hash = {}
+        actual_payments.each_with_index do |payment, index|
+          payment_num = index + 1  # Assuming sequential payments
+          actual_payments_hash[payment_num] = {
+            id: payment.id,
+            payment_date: payment.payment_date,
+            amount: payment.amount.to_f,
+            principal_amount: payment.principal_amount.to_f,
+            interest_amount: payment.interest_amount.to_f,
+            late_fee_amount: payment.late_fee_amount.to_f
+          }
+        end
+        
+        # Build payment history array for response
+        payments_made = actual_payments.pluck(:id, :payment_date, :amount, :principal_amount, :interest_amount, :late_fee_amount)
+                                      .map do |id, date, amount, principal_amt, interest_amt, late_fee|
+          {
+            id: id,
+            payment_date: date.strftime('%Y-%m-%d'),
+            amount: amount.to_f,
+            principal_amount: principal_amt.to_f,
+            interest_amount: interest_amt.to_f,
+            late_fee_amount: late_fee.to_f
+          }
+        end
+        
+        # Generate amortization schedule with actual vs scheduled comparison
+        schedule = []
+        scheduled_balance = @loan.current_balance.to_f  # For future projections
+        actual_balance = principal  # Track actual balance from original principal
+        current_date = first_payment_date
+        
+        term.times do |i|
+          payment_number = i + 1
+          
+          # Determine status: paid, current (next due), or upcoming
+          status = if payment_number <= payments_made_count
+            'paid'
+          elsif payment_number == payments_made_count + 1
+            'current'
+          else
+            'upcoming'
+          end
+          
+          # Calculate scheduled amounts
+          if status == 'paid'
+            # For paid payments, calculate theoretical schedule from original principal
+            temp_balance = principal
+            (payment_number - 1).times do
+              interest_calc = (temp_balance * (rate / 100) / 12)
+              principal_calc = monthly_payment - interest_calc
+              temp_balance -= principal_calc
+            end
+            
+            scheduled_interest = (temp_balance * (rate / 100) / 12)
+            scheduled_principal = monthly_payment - scheduled_interest
+            scheduled_remaining = temp_balance - scheduled_principal
+            
+          elsif status == 'current'
+            # Next payment - calculate from ACTUAL current balance (from loan record)
+            scheduled_interest = (@loan.current_balance * (rate / 100) / 12)
+            scheduled_principal = monthly_payment - scheduled_interest
+            scheduled_remaining = @loan.current_balance - scheduled_principal
+            scheduled_remaining = 0 if scheduled_remaining < 0.01
+            
+            scheduled_balance = scheduled_remaining
+            
+          else
+            # Future payments - continue from current balance
+            scheduled_interest = (scheduled_balance * (rate / 100) / 12)
+            scheduled_principal = monthly_payment - scheduled_interest
+            scheduled_balance -= scheduled_principal
+            scheduled_balance = 0 if scheduled_balance < 0.01
+            scheduled_remaining = scheduled_balance
+          end
+          
+          # Get actual payment data if it exists
+          actual_payment = actual_payments_hash[payment_number]
+          
+          # Calculate ACTUAL remaining balance (what truly remains after actual payments)
+          actual_remaining_balance = if actual_payment
+            # Paid: subtract actual principal from running actual balance
+            actual_balance -= actual_payment[:principal_amount]
+            actual_balance = 0 if actual_balance < 0.01
+            actual_balance
+          elsif status == 'current'
+            # Current payment: use loan's current_balance (the true balance)
+            @loan.current_balance.to_f
+          else
+            # Future: project from current balance
+            nil  # Don't show projected actual balance for future payments
+          end
+          
+          # Build schedule entry with actual vs scheduled comparison
+          entry = {
+            payment_number: payment_number,
+            
+            # Scheduled fields (always present)
+            payment_date: current_date.strftime('%Y-%m-%d'),  # Due date
+            payment_amount: monthly_payment.round(2),
+            principal_amount: scheduled_principal.round(2),
+            interest_amount: scheduled_interest.round(2),
+            remaining_balance: scheduled_remaining.round(2),  # Scheduled balance
+            
+            # Actual fields (present only if payment was made or is current)
+            actual_payment_date: actual_payment ? actual_payment[:payment_date].strftime('%Y-%m-%d') : nil,
+            actual_amount: actual_payment ? actual_payment[:amount].round(2) : nil,
+            actual_principal: actual_payment ? actual_payment[:principal_amount].round(2) : nil,
+            actual_interest: actual_payment ? actual_payment[:interest_amount].round(2) : nil,
+            actual_late_fee: actual_payment ? actual_payment[:late_fee_amount].round(2) : nil,
+            actual_remaining_balance: actual_remaining_balance ? actual_remaining_balance.round(2) : nil,  # ACTUAL balance
+            
+            # Variance fields (calculated only if actual payment exists)
+            amount_variance: actual_payment ? (actual_payment[:amount] - monthly_payment).round(2) : nil,
+            principal_variance: actual_payment ? (actual_payment[:principal_amount] - scheduled_principal).round(2) : nil,
+            interest_variance: actual_payment ? (actual_payment[:interest_amount] - scheduled_interest).round(2) : nil,
+            
+            # Status
+            status: status
+          }
+          
+          schedule << entry
+          
+          # Increment date by frequency
+          current_date = case @loan.payment_frequency
+                        when 'biweekly'
+                          current_date + 2.weeks
+                        when 'weekly'
+                          current_date + 1.week
+                        else # monthly
+                          current_date + 1.month
+                        end
+        end
+        
+        total_interest = (monthly_payment * term) - principal
+        total_paid = @loan.total_paid.to_f
+        
+        render json: {
+          summary: {
+            loan_id: @loan.id,
+            borrower_name: @loan.borrower_name,
+            loan_type: @loan.loan_type,
+            status: @loan.status,
+            principal_amount: principal,
+            interest_rate: rate,
+            term_months: term,
+            payment_frequency: @loan.payment_frequency || 'monthly',
+            monthly_payment: monthly_payment.round(2),
+            total_interest: total_interest.round(2),
+            total_amount: (principal + total_interest).round(2),
+            current_balance: @loan.current_balance.to_f,
+            total_paid: total_paid,
+            origination_date: origination_date.strftime('%Y-%m-%d'),
+            first_payment_date: first_payment_date.strftime('%Y-%m-%d'),
+            payments_made_count: payments_made.count
+          },
+          schedule: schedule,
+          payments_made: payments_made
+        }
       end
 
       private

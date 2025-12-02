@@ -63,6 +63,103 @@ class RenterInsightZegoApi
     capture_payment(payment_method, payment, request)
   end
 
+  # Portal one-time payment - no account creation, direct card charge
+  def capture_portal_payment(payment_method, payment, request = nil)
+    payer_reference_id = payment_method.generate_reference_id
+    
+    # Get location from payment
+    location = payment.location if payment.respond_to?(:location)
+    location ||= payment.payable.location if payment.respond_to?(:payable) && payment.payable.respond_to?(:location)
+    
+    # Get payee_id from location's operating bank account, with fallback
+    payee_id = location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
+    payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
+
+    parameters = {
+      payment_reference_id: payment.id,
+      payer_reference_id: payer_reference_id,
+      payee_id: payee_id,
+      amount: payment.amount,
+      fee: payment.respond_to?(:processing_fee) ? payment.processing_fee : 0,
+      fee_responsibility: payment.respond_to?(:fee_responsibility) ? payment.fee_responsibility : nil,
+      first_name: payment_method.billing_first_name,
+      last_name: payment_method.billing_last_name,
+      address: payment_method.billing_street,
+      city: payment_method.billing_city,
+      state: payment_method.billing_state,
+      zip: payment_method.billing_zip,
+      country: payment_method.billing_country.present? ? payment_method.billing_country : StatesHelper::COUNTRY_CODE_US,
+      card_type: card_type_from_number(payment_method.credit_card_number),
+      card_num: payment_method.credit_card_number,
+      card_exp_month: sprintf("%.2i", payment_method.credit_card_exp_month),
+      card_exp_year: payment_method.credit_card_exp_year.to_s[-2..-1],
+      card_code: payment_method.credit_card_cvv,
+      is_debit_card: payment_method.is_debit_card
+    }
+
+    make_call(request, 'CardPayment', parameters)
+
+    return self.payment_success?
+  end
+
+  # Portal payment with account saving - handles both ACH and Credit Card
+  # Creates payment method in Zego AND processes payment in single call
+  # Returns GatewayPayerId for saving to payment_method.external_id
+  def capture_portal_payment_with_save(payment_method, payment, request = nil)
+    payer_reference_id = payment_method.generate_reference_id
+    
+    # Get location from payment
+    location = payment.location if payment.respond_to?(:location)
+    location ||= payment.payable.location if payment.respond_to?(:payable) && payment.payable.respond_to?(:location)
+    
+    # Get payee_id from location's operating bank account, with fallback
+    payee_id = location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
+    payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
+
+    parameters = {
+      payment_reference_id: payment.id,
+      payer_reference_id: payer_reference_id,
+      payee_id: payee_id,
+      amount: payment.amount,
+      fee: payment.respond_to?(:processing_fee) ? payment.processing_fee : 0,
+      fee_responsibility: payment.respond_to?(:fee_responsibility) ? payment.fee_responsibility : nil,
+      first_name: payment_method.billing_first_name,
+      last_name: payment_method.billing_last_name
+    }
+
+    # Determine payment type and add appropriate fields
+    if payment_method.ach?
+      # ACH Payment with account creation
+      parameters[:account_type] = (payment_method.ach_account_type || "checking").titleize
+      parameters[:account_full_name] = "#{payment_method.billing_first_name} #{payment_method.billing_last_name}"
+      parameters[:routing_number] = payment_method.ach_routing_number
+      parameters[:account_number] = payment_method.ach_account_number
+
+      make_call(request, 'ACHPayment', parameters)
+    else
+      # Credit Card Payment with account creation
+      exp_month = sprintf("%.2i", payment_method.credit_card_exp_month)
+      exp_year = payment_method.credit_card_exp_year.to_s[-2..-1]
+
+      parameters[:address] = payment_method.billing_street
+      parameters[:city] = payment_method.billing_city
+      parameters[:state] = payment_method.billing_state
+      parameters[:zip] = payment_method.billing_zip
+      parameters[:country] = payment_method.billing_country.present? ? payment_method.billing_country : StatesHelper::COUNTRY_CODE_US
+      parameters[:card_type] = card_type_from_number(payment_method.credit_card_number)
+      parameters[:card_num] = payment_method.credit_card_number
+      parameters[:card_exp_month] = exp_month
+      parameters[:card_exp_year] = exp_year
+      parameters[:card_code] = payment_method.credit_card_cvv
+      parameters[:is_debit_card] = payment_method.is_debit_card
+      parameters[:save_account] = true  # Save account for future payments
+
+      make_call(request, 'CardPayment', parameters)
+    end
+
+    return self.payment_success?
+  end
+
   def capture_scheduled_payment(payment_method, payment, request = nil)
     capture_payment(payment_method, payment, request)
   end
@@ -532,6 +629,34 @@ class RenterInsightZegoApi
           }
         }
       }
+    elsif action == 'ACHPayment'
+      # ACH Payment with account creation (SaveAccount: Yes)
+      payer_pays_fee = parameters[:fee_responsibility] == 'payer' rescue false
+      
+      post = {
+        :Transactions => {
+          :Transaction => {
+            :TransactionAction => action,
+            :PaymentReferenceId => parameters[:payment_reference_id],
+            :PaymentTraceId => @log.id,
+            :PayerReferenceId => parameters[:payer_reference_id],
+            :PayeeId => parameters[:payee_id],
+            :PayerFirstName => parameters[:first_name],
+            :PayerLastName => parameters[:last_name],
+            
+            :AccountType => parameters[:account_type],
+            :AccountFullName => parameters[:account_full_name],
+            :RoutingNumber => parameters[:routing_number],
+            :AccountNumber => parameters[:account_number],
+            
+            :TotalAmount => payer_pays_fee ? parameters[:amount] + parameters[:fee] : parameters[:amount],
+            :FeeAmount => payer_pays_fee ? parameters[:fee] : 0,
+            :IncurFee => payer_pays_fee ? "No" : "Yes",
+            :SaveAccount => "Yes",  # Save account for future payments
+            :CheckScanned => 'No'
+          }
+        }
+      }
     elsif action == 'CreateCardPayerAccount'
       # Register payment method only - no charge, no pre-auth
       post = {
@@ -558,6 +683,45 @@ class RenterInsightZegoApi
             :IsDebitCard => (parameters[:is_debit_card] ? "Yes": "No")
             # No SaveAccount, CreditCardAction, PaymentReferenceId, PayeeId, or TotalAmount
             # Those are only for actual payment transactions
+          }
+        }
+      }
+
+    elsif action == 'CardPayment'
+      # Card payment - can save account or be one-time based on parameter
+      payer_pays_fee = parameters[:fee_responsibility] == 'payer' rescue false
+      save_account = parameters[:save_account] == true ? "Yes" : "No"
+      
+      post = {
+        :Transactions => {
+          :Transaction => {
+            :TransactionAction => action,
+            :PaymentReferenceId => parameters[:payment_reference_id],
+            :PaymentTraceId => @log.id,
+            :PayerReferenceId => parameters[:payer_reference_id],
+            :PayeeId => parameters[:payee_id],
+            :PayerFirstName => parameters[:first_name],
+            :PayerLastName => parameters[:last_name],
+
+            :CreditCardType => parameters[:card_type],
+            :CreditCardNumber => parameters[:card_num],
+            :CreditCardExpMonth => parameters[:card_exp_month],
+            :CreditCardExpYear => parameters[:card_exp_year],
+            :CreditCardCvv2 => parameters[:card_code],
+
+            :BillingFirstName => parameters[:first_name],
+            :BillingLastName => parameters[:last_name],
+            :BillingStreetAddress => parameters[:address],
+            :BillingCity => parameters[:city],
+            :BillingState => parameters[:state],
+            :BillingCountry => parameters[:country],
+            :BillingZip => parameters[:zip],
+            :IsDebitCard => (parameters[:is_debit_card] ? "Yes": "No"),
+
+            :TotalAmount => payer_pays_fee ? parameters[:amount] + parameters[:fee] : parameters[:amount],
+            :FeeAmount => payer_pays_fee ? parameters[:fee] : 0,
+            :IncurFee => payer_pays_fee ? "No" : "Yes",
+            :SaveAccount => save_account
           }
         }
       }

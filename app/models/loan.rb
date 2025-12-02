@@ -247,7 +247,209 @@ class Loan < ApplicationRecord
     update!(status: 'defaulted')
   end
   
+  # Generate amortization schedule with actual payment data
+  # Returns hash with :schedule array and :summary object
+  def generate_amortization_schedule_with_actuals
+    return { schedule: [], summary: {} } unless valid_for_amortization?
+    
+    # Get completed payments ordered by payment date
+    completed_payments = payments.where(status: 'completed').order(:payment_date, :id)
+    
+    # Basic loan parameters
+    principal = BigDecimal(principal_amount.to_s)
+    monthly_rate = BigDecimal((interest_rate / 100.0 / 12.0).to_s)
+    monthly_payment = BigDecimal(regular_payment_amount.to_s)
+    
+    # Initialize tracking variables
+    schedule = []
+    current_balance = principal
+    current_date = first_payment_date || origination_date
+    total_actual_paid = BigDecimal('0')
+    total_principal_paid = BigDecimal('0')
+    total_interest_paid = BigDecimal('0')
+    total_unpaid_interest = BigDecimal('0')
+    
+    # Track payments by period
+    payment_index = 0
+    
+    # Generate schedule for each payment period
+    (1..term_months).each do |payment_number|
+      # Calculate scheduled interest and principal
+      scheduled_interest = current_balance * monthly_rate
+      scheduled_principal = monthly_payment - scheduled_interest
+      scheduled_principal = current_balance if scheduled_principal > current_balance
+      
+      # Collect actual payments for this period
+      period_payments = []
+      while payment_index < completed_payments.length
+        payment = completed_payments[payment_index]
+        # Check if payment belongs to this period (within 15 days of due date)
+        if payment.payment_date.present?
+          payment_date = payment.payment_date.to_date
+          period_start = current_date.to_date - 15.days
+          period_end = current_date.to_date + 15.days
+          
+          if payment_date >= period_start && payment_date <= period_end
+            period_payments << payment
+            payment_index += 1
+          else
+            break
+          end
+        else
+          payment_index += 1
+        end
+      end
+      
+      # Calculate actual payment total for this period
+      actual_payment_total = period_payments.sum { |p| BigDecimal(p.amount.to_s) }
+      
+      # Calculate interest due on current balance
+      interest_due = current_balance * monthly_rate
+      
+      # Apply actual payments: interest first, then principal
+      if actual_payment_total >= interest_due
+        # Payment covers all interest
+        actual_interest = interest_due
+        actual_principal = actual_payment_total - interest_due
+        unpaid_interest_this_period = BigDecimal('0')
+        
+        # Don't reduce balance below zero
+        actual_principal = current_balance if actual_principal > current_balance
+        
+        # Reduce balance by actual principal paid
+        current_balance -= actual_principal
+      else
+        # Partial payment - doesn't cover full interest
+        actual_interest = actual_payment_total
+        actual_principal = BigDecimal('0')
+        unpaid_interest_this_period = interest_due - actual_payment_total
+        # Balance stays the same
+      end
+      
+      # Determine status
+      status = if period_payments.any?
+        'Paid'
+      elsif payment_number == payments_made + 1
+        'Current'
+      else
+        'Upcoming'
+      end
+      
+      # Add to schedule
+      schedule << {
+        payment_number: payment_number,
+        due_date: current_date.to_date,
+        scheduled_payment: monthly_payment.to_f.round(2),
+        actual_payment: actual_payment_total.to_f.round(2),
+        scheduled_principal: scheduled_principal.to_f.round(2),
+        scheduled_interest: scheduled_interest.to_f.round(2),
+        actual_principal: actual_principal.to_f.round(2),
+        actual_interest: actual_interest.to_f.round(2),
+        unpaid_interest_this_period: unpaid_interest_this_period.to_f.round(2),
+        balance: current_balance.to_f.round(2),
+        status: status,
+        payment_ids: period_payments.map(&:id)
+      }
+      
+      # Update totals
+      total_actual_paid += actual_payment_total
+      total_principal_paid += actual_principal
+      total_interest_paid += actual_interest
+      total_unpaid_interest += unpaid_interest_this_period
+      
+      # Move to next month
+      current_date = current_date + 1.month
+      
+      # Stop if loan is paid off
+      break if current_balance <= BigDecimal('0.01')
+    end
+    
+    # Calculate summary
+    summary = {
+      original_principal: principal.to_f.round(2),
+      interest_rate: interest_rate.to_f,
+      term_months: term_months,
+      monthly_payment: monthly_payment.to_f.round(2),
+      total_scheduled_interest: (schedule.sum { |s| s[:scheduled_interest] }).round(2),
+      total_actual_paid: total_actual_paid.to_f.round(2),
+      total_principal_paid: total_principal_paid.to_f.round(2),
+      total_interest_paid: total_interest_paid.to_f.round(2),
+      total_unpaid_interest: total_unpaid_interest.to_f.round(2),
+      remaining_balance: current_balance.to_f.round(2),
+      scheduled_maturity: maturity_date&.to_date,
+      projected_maturity: calculate_projected_maturity(current_balance, monthly_rate, monthly_payment),
+      payments_made: completed_payments.count,
+      payments_remaining: [term_months - completed_payments.count, 0].max
+    }
+    
+    {
+      schedule: schedule,
+      summary: summary
+    }
+  end
+  
+  # Calculate new maturity date when extra principal is paid
+  def recalculate_maturity_with_extra_principal(extra_principal_amount = 0)
+    return maturity_date unless extra_principal_amount > 0
+    
+    # Calculate remaining balance after extra payment
+    new_balance = [current_balance - extra_principal_amount, 0].max
+    return nil if new_balance <= 0 # Loan would be paid off
+    
+    monthly_rate = interest_rate / 100.0 / 12.0
+    monthly_payment = regular_payment_amount.to_f
+    
+    # Handle zero interest case
+    if monthly_rate == 0
+      months_remaining = (new_balance / monthly_payment).ceil
+      return next_payment_date + (months_remaining - 1).months
+    end
+    
+    # Check if payment even covers interest
+    monthly_interest = new_balance * monthly_rate
+    return maturity_date if monthly_payment <= monthly_interest # Payment doesn't cover interest
+    
+    # Calculate months remaining using amortization formula
+    # n = -ln(1 - (r * P / PMT)) / ln(1 + r)
+    # Where: n = months, r = monthly rate, P = remaining balance, PMT = payment
+    numerator = -Math.log(1 - (monthly_rate * new_balance / monthly_payment))
+    denominator = Math.log(1 + monthly_rate)
+    months_remaining = (numerator / denominator).ceil
+    
+    # Calculate new maturity date from next payment date
+    next_payment_date + (months_remaining - 1).months
+  end
+  
   private
+  
+  def valid_for_amortization?
+    principal_amount.present? &&
+      principal_amount > 0 &&
+      term_months.present? &&
+      term_months > 0 &&
+      regular_payment_amount.present? &&
+      regular_payment_amount > 0 &&
+      interest_rate.present? &&
+      (first_payment_date.present? || origination_date.present?)
+  end
+  
+  def calculate_projected_maturity(remaining_balance, monthly_rate, monthly_payment)
+    return maturity_date if remaining_balance <= 0
+    return maturity_date if monthly_rate == 0
+    
+    monthly_interest = remaining_balance * monthly_rate.to_f
+    return maturity_date if monthly_payment.to_f <= monthly_interest
+    
+    numerator = -Math.log(1 - (monthly_rate.to_f * remaining_balance.to_f / monthly_payment.to_f))
+    denominator = Math.log(1 + monthly_rate.to_f)
+    months_remaining = (numerator / denominator).ceil
+    
+    base_date = next_payment_date || Date.current
+    (base_date + (months_remaining - 1).months).to_date
+  rescue => e
+    Rails.logger.error "Error calculating projected maturity: #{e.message}"
+    maturity_date
+  end
   
   def set_defaults
     self.status ||= 'pending'

@@ -1,0 +1,288 @@
+# frozen_string_literal: true
+
+module Api
+  module Portal
+    class InvoicesController < ApplicationController
+      skip_before_action :authenticate
+      before_action :authenticate_portal_buyer!
+      before_action :set_invoice, only: [:show, :payments, :make_payment, :download]
+
+      # GET /api/portal/invoices
+      def index
+        contact = current_portal_buyer.buyer
+        
+        unless contact
+          render json: { error: 'Contact not found' }, status: :not_found
+          return
+        end
+
+        invoices = contact.invoices.where(is_deleted: [false, nil])
+
+        # Filter by status if provided
+        if params[:status].present?
+          invoices = invoices.where(status: params[:status])
+        end
+
+        invoices = invoices.order(created_at: :desc)
+
+        render json: invoices.map { |invoice| invoice_json(invoice) }
+      end
+
+      # GET /api/portal/invoices/:id
+      def show
+        render json: invoice_detail_json(@invoice)
+      end
+
+      # GET /api/portal/invoices/:id/payments
+      def payments
+        payments = @invoice.payments.order(payment_date: :desc)
+        render json: payments.map { |payment| payment_json(payment) }
+      end
+
+      # POST /api/portal/invoices/:id/make_payment
+      def make_payment
+        amount = params[:amount].to_f
+        payment_method_data = params[:payment_method]
+
+        # Validate amount
+        if amount <= 0
+          render json: { success: false, error: 'Amount must be greater than 0' }, status: :unprocessable_entity
+          return
+        end
+
+        if amount > @invoice.amount_due
+          render json: { success: false, error: 'Amount cannot exceed amount due' }, status: :unprocessable_entity
+          return
+        end
+
+        # Create temporary payment method (not saved to database)
+        payment_method = create_temp_payment_method(payment_method_data)
+
+        unless payment_method.valid?
+          render json: { success: false, error: payment_method.errors.full_messages.join(', ') }, status: :unprocessable_entity
+          return
+        end
+
+        # Create payment record
+        payment = @invoice.payments.build(
+          amount: amount,
+          payment_date: Date.today,
+          payment_type: 'one_time',
+          status: 'pending',
+          company_id: @invoice.company_id,
+          payer: current_portal_buyer.buyer,
+          payable: @invoice
+        )
+
+        if payment.save
+          # Process payment via Zego (portal one-time, no account creation, no $5 pre-auth)
+          zego_api = RenterInsightZegoApi.new(@invoice.company)
+          success = zego_api.capture_portal_payment(payment_method, payment, request)
+
+          if success
+            # Update payment with transaction details
+            payment.update(
+              external_id: zego_api.read_transaction_id,
+              status: zego_api.payment_pending? ? 'pending' : 'completed',
+              processed_at: Time.current
+            )
+
+            # If completed, update invoice balance
+            if payment.status == 'completed'
+              @invoice.update(
+                amount_paid: @invoice.amount_paid + amount,
+                amount_due: @invoice.amount_due - amount
+              )
+
+              # Update invoice status
+              if @invoice.amount_due <= 0
+                @invoice.update(status: 'paid')
+              elsif @invoice.amount_paid > 0
+                @invoice.update(status: 'partial')
+              end
+            end
+
+            render json: {
+              success: true,
+              payment: payment_json(payment),
+              invoice: invoice_json(@invoice.reload)
+            }
+          else
+            # Payment failed
+            error_message = zego_api.payment_error_message || 'Payment processing failed'
+            payment.update(status: 'failed', notes: error_message)
+
+            render json: {
+              success: false,
+              error: error_message,
+              payment: payment_json(payment)
+            }, status: :unprocessable_entity
+          end
+        else
+          render json: {
+            success: false,
+            error: payment.errors.full_messages.join(', ')
+          }, status: :unprocessable_entity
+        end
+      end
+
+      # GET /api/portal/invoices/:id/download
+      def download
+        render json: { pdf_url: @invoice.pdf_url }
+      end
+
+      # GET /api/portal/invoices/stats
+      def stats
+        contact = current_portal_buyer.buyer
+        
+        unless contact
+          render json: { error: 'Contact not found' }, status: :not_found
+          return
+        end
+
+        invoices = contact.invoices.where(is_deleted: [false, nil])
+
+        total_invoices = invoices.count
+        total_amount = invoices.sum(:total)
+        total_paid = invoices.sum(:amount_paid)
+        total_due = invoices.sum(:amount_due)
+
+        overdue_invoices = invoices.where('due_date < ? AND amount_due > 0', Date.today)
+        overdue_count = overdue_invoices.count
+        overdue_amount = overdue_invoices.sum(:amount_due)
+
+        by_status = {
+          draft: invoices.where(status: 'draft').count,
+          sent: invoices.where(status: 'sent').count,
+          partial: invoices.where(status: 'partial').count,
+          paid: invoices.where(status: 'paid').count,
+          overdue: overdue_count
+        }
+
+        render json: {
+          total_invoices: total_invoices,
+          total_amount: total_amount,
+          total_paid: total_paid,
+          total_due: total_due,
+          overdue_count: overdue_count,
+          overdue_amount: overdue_amount,
+          by_status: by_status
+        }
+      end
+
+      private
+
+      def set_invoice
+        contact = current_portal_buyer.buyer
+        
+        unless contact
+          render json: { error: 'Contact not found' }, status: :not_found
+          return
+        end
+
+        @invoice = contact.invoices.find_by(id: params[:id])
+
+        unless @invoice
+          render json: { error: 'Invoice not found' }, status: :not_found
+          return
+        end
+      end
+
+      def create_temp_payment_method(data)
+        contact = current_portal_buyer.buyer
+        
+        payment_method = PaymentMethod.new(
+          method_type: data[:payment_type], # Frontend sends payment_type, map to method_type
+          company_id: contact.company_id,
+          owner: contact,
+          billing_first_name: data[:billing_first_name],
+          billing_last_name: data[:billing_last_name],
+          billing_street: data[:billing_street],
+          billing_city: data[:billing_city],
+          billing_state: data[:billing_state],
+          billing_zip: data[:billing_zip]
+        )
+
+        if data[:payment_type] == 'credit_card' || data[:payment_type] == 'debit_card'
+          payment_method.credit_card_number = data[:credit_card_number]
+          
+          # Parse expiration date (format: "YYYY-MM-DD")
+          if data[:credit_card_expires_on].present?
+            exp_date = Date.parse(data[:credit_card_expires_on]) rescue nil
+            if exp_date
+              payment_method.credit_card_exp_month = exp_date.month
+              payment_method.credit_card_exp_year = exp_date.year
+            end
+          end
+          
+          payment_method.credit_card_cvv = data[:credit_card_cvv]
+          payment_method.is_debit_card = data[:is_debit_card] || false
+        elsif data[:payment_type] == 'ach'
+          payment_method.ach_routing_number = data[:ach_routing_number]
+          payment_method.ach_account_number = data[:ach_account_number]
+          payment_method.ach_account_type = data[:ach_account_type]
+        end
+
+        payment_method
+      end
+
+      def invoice_json(invoice)
+        {
+          id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          invoice_date: invoice.invoice_date,
+          due_date: invoice.due_date,
+          status: invoice.status,
+          subtotal: invoice.subtotal,
+          tax_amount: invoice.tax_amount,
+          total: invoice.total,
+          amount_paid: invoice.amount_paid,
+          amount_due: invoice.amount_due,
+          is_overdue: invoice.due_date && invoice.due_date < Date.today && invoice.amount_due > 0,
+          days_overdue: invoice.due_date && invoice.due_date < Date.today ? (Date.today - invoice.due_date).to_i : 0
+        }
+      end
+
+      def invoice_detail_json(invoice)
+        invoice_json(invoice).merge(
+          invoice_items: invoice.invoice_items.map { |item| invoice_item_json(item) },
+          property: {
+            id: invoice.property_id,
+            name: invoice.property&.name
+          },
+          contact: {
+            id: invoice.contact_id,
+            name: "#{invoice.contact&.first_name} #{invoice.contact&.last_name}",
+            email: invoice.contact&.email
+          },
+          notes: invoice.notes,
+          payment_terms: invoice.payment_terms,
+          pdf_url: invoice.pdf_url
+        )
+      end
+
+      def invoice_item_json(item)
+        {
+          id: item.id,
+          description: item.description,
+          quantity: item.quantity,
+          rate: item.rate,
+          amount: item.amount
+        }
+      end
+
+      def payment_json(payment)
+        {
+          id: payment.id,
+          amount: payment.amount,
+          payment_date: payment.payment_date,
+          payment_method: payment.payment_type,
+          status: payment.status,
+          external_id: payment.external_id,
+          notes: payment.notes,
+          processed_at: payment.processed_at
+        }
+      end
+    end
+  end
+end

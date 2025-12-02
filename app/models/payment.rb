@@ -56,7 +56,7 @@ class Payment < ApplicationRecord
   before_validation :calculate_total_charged
   before_validation :set_payment_date, if: -> { payment_date.nil? && status == 'completed' }
   after_initialize :set_defaults, if: :new_record?
-  after_commit :update_loan_after_completion, if: -> { saved_change_to_status? && status == 'completed' }
+  after_commit :update_loan_after_completion, if: -> { saved_change_to_status? && status == 'completed' && !try(:skip_loan_processing?) }
   
   # Instance methods
   def display_name

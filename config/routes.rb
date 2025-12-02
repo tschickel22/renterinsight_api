@@ -177,6 +177,7 @@ Rails.application.routes.draw do
           get :documents
           post :documents, action: :upload_documents
           delete 'documents/:document_id', action: :destroy_document
+          get :amortization_data, path: 'amortization-data'
         end
         
         collection do
@@ -871,6 +872,34 @@ Rails.application.routes.draw do
       
       # Portal Settings (Branding)
       get 'settings/branding', to: 'settings#branding'
+      
+      # Phase 4F - Loans with Payment Processing
+      resources :loans, only: [:index, :show] do
+        member do
+          get :payments
+          post :make_payment
+        end
+      end
+      
+      # Phase 4F - Payment Methods (Saved Payment Methods)
+      resources :payment_methods, only: [:index, :destroy], path: 'payment-methods' do
+        member do
+          post :set_default
+        end
+      end
+      
+      # Phase 4G - Invoices with Payment Processing
+      resources :invoices, only: [:index, :show] do
+        member do
+          get :payments
+          post :make_payment
+          get :download
+        end
+        
+        collection do
+          get :stats
+        end
+      end
     end
     
     # Admin Impersonation (Testing Only)
