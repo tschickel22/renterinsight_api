@@ -29,11 +29,11 @@ class RenterInsightZegoApi
   end
 
   def api_url
-    Rails.application.credentials.dig(:zego, :url)
+    ENV['ZEGO_URL'] || Rails.application.credentials.dig(:zego, :url)
   end
 
   def admin_api_url
-    Rails.application.credentials.dig(:zego, :admin_url)
+    ENV['ZEGO_ADMIN_URL'] || Rails.application.credentials.dig(:zego, :admin_url)
   end
 
   def create_or_update_account(payment_method, id_field, request = nil)
@@ -73,7 +73,7 @@ class RenterInsightZegoApi
     
     # Get payee_id from location's operating bank account, with fallback
     payee_id = location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
-    payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
+    payee_id ||= ENV['ZEGO_PAYEE_ID'] || Rails.application.credentials.dig(:zego, :payee_id)
 
     parameters = {
       payment_reference_id: payment.id,
@@ -114,7 +114,7 @@ class RenterInsightZegoApi
     
     # Get payee_id from location's operating bank account, with fallback
     payee_id = location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
-    payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
+    payee_id ||= ENV['ZEGO_PAYEE_ID'] || Rails.application.credentials.dig(:zego, :payee_id)
 
     parameters = {
       payment_reference_id: payment.id,
@@ -176,7 +176,7 @@ class RenterInsightZegoApi
     
     # Get payee_id from location's operating bank account, with fallback
     payee_id = location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
-    payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
+    payee_id ||= ENV['ZEGO_PAYEE_ID'] || Rails.application.credentials.dig(:zego, :payee_id)
 
     parameters = { 
       payment_reference_id: payment.id,  
@@ -199,7 +199,7 @@ class RenterInsightZegoApi
 
         # Is it 100% deposit?  If so, don't split, just swap payee_id
         deposit_payee_id = payment.location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_DEPOSIT)&.first&.external_id
-        deposit_payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
+        deposit_payee_id ||= ENV['ZEGO_PAYEE_ID'] || Rails.application.credentials.dig(:zego, :payee_id)
 
         deposit_amount = distributions[Account::CODE_DEPOSITS_HELD.to_i]
         remaining_amount = (payment.amount - deposit_amount)
@@ -327,7 +327,7 @@ class RenterInsightZegoApi
     gateway_payer_id = payment_method.external_id
     payer_reference_id = payment_method.generate_reference_id
     payee_id = payout.location&.bank_accounts&.where(account_purpose: BankAccount::ACCOUNT_PURPOSE_OPERATING)&.first&.external_id
-    payee_id ||= Rails.application.credentials.dig(:zego, :payee_id)
+    payee_id ||= ENV['ZEGO_PAYEE_ID'] || Rails.application.credentials.dig(:zego, :payee_id)
 
     parameters = { payment_reference_id: payout.id,  payer_reference_id: payer_reference_id, payee_id: payee_id, gateway_payer_id: gateway_payer_id, amount: payout.amount}
 
@@ -485,13 +485,13 @@ class RenterInsightZegoApi
 
   def gateway_options
     {
-      gateway_id: Rails.application.credentials.dig(:zego, :gateway_id), # Also called Merchant ID
-      login:  Rails.application.credentials.dig(:zego, :login),
-      password:  Rails.application.credentials.dig(:zego, :password),
+      gateway_id: ENV['ZEGO_GATEWAY_ID'] || Rails.application.credentials.dig(:zego, :gateway_id), # Also called Merchant ID
+      login:  ENV['ZEGO_LOGIN'] || Rails.application.credentials.dig(:zego, :login),
+      password:  ENV['ZEGO_PASSWORD'] || Rails.application.credentials.dig(:zego, :password),
 
-      admin_api_key:  Rails.application.credentials.dig(:zego, :admin_api_key),
-      admin_username:  Rails.application.credentials.dig(:zego, :admin_username),
-      admin_password:  Rails.application.credentials.dig(:zego, :admin_password),
+      admin_api_key:  ENV['ZEGO_ADMIN_API_KEY'] || Rails.application.credentials.dig(:zego, :admin_api_key),
+      admin_username:  ENV['ZEGO_ADMIN_USERNAME'] || Rails.application.credentials.dig(:zego, :admin_username),
+      admin_password:  ENV['ZEGO_ADMIN_PASSWORD'] || Rails.application.credentials.dig(:zego, :admin_password),
 
       test: !Rails.env.production?
     }
