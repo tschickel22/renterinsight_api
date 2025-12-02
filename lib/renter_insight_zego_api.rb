@@ -413,6 +413,9 @@ class RenterInsightZegoApi
 
     if !payment_success?
       if self.response_data.present?
+        # Log full response for debugging
+        Rails.logger.error("[ZEGO DEBUG] Full response_data: #{self.response_data.inspect}")
+        
         error_message = read_simple_xml_value(self.response_data, 'Transactions/Transaction/Message')
 
         if error_message.blank?
@@ -864,6 +867,12 @@ class RenterInsightZegoApi
     end
 
     post[:Mode] = gateway_options[:test] ? 'Test' : 'Production'
+    
+    # Debug logging
+    Rails.logger.info("[ZEGO DEBUG] Rails.env: #{Rails.env}")
+    Rails.logger.info("[ZEGO DEBUG] Rails.env.production?: #{Rails.env.production?}")
+    Rails.logger.info("[ZEGO DEBUG] gateway_options[:test]: #{gateway_options[:test]}")
+    Rails.logger.info("[ZEGO DEBUG] Mode being sent: #{post[:Mode]}")
 
     return post
   end
