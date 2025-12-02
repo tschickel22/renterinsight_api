@@ -16,6 +16,7 @@ class Contact < ApplicationRecord
   has_many :payments, as: :payable, dependent: :destroy
   has_many :communications, as: :communicable, dependent: :destroy
   has_many :contact_activities, dependent: :destroy
+  has_many :portal_documents, as: :owner, dependent: :destroy
 
   # Validations
   validates :first_name, presence: true

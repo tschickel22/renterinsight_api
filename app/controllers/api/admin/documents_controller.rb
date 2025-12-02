@@ -13,10 +13,14 @@ module Api
         
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          owner_ids = company_scoped_portal_accesses.where('email ILIKE ?', search_term).pluck(:id)
+          # Search in Contact names and emails
+          contact_ids = @company.contacts.where(
+            'first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?',
+            search_term, search_term, search_term
+          ).pluck(:id)
           documents = documents.where(
-            'portal_documents.description ILIKE ? OR portal_documents.category ILIKE ? OR owner_id IN (?)',
-            search_term, search_term, owner_ids
+            'portal_documents.document_name ILIKE ? OR portal_documents.description ILIKE ? OR portal_documents.category ILIKE ? OR owner_id IN (?)',
+            search_term, search_term, search_term, contact_ids
           )
         end
         
@@ -44,8 +48,12 @@ module Api
         buyer_portal_access = company_scoped_portal_accesses.find_by(id: params[:buyer_id])
         return render json: { error: 'Client not found in your company' }, status: :not_found unless buyer_portal_access
         
+        # Get the actual Contact from the BuyerPortalAccess
+        contact = buyer_portal_access.buyer
+        return render json: { error: 'Client contact not found' }, status: :not_found unless contact.is_a?(::Contact)
+        
         @document = PortalDocument.new(
-          owner: buyer_portal_access,
+          owner: contact,  # Owner is Contact, not BuyerPortalAccess
           document_name: params[:document_name] || params[:title],
           category: params[:category],
           description: params[:description],
@@ -116,8 +124,9 @@ module Api
       end
 
       def company_scoped_documents
-        portal_access_ids = company_scoped_portal_accesses.pluck(:id)
-        PortalDocument.where(owner_type: 'BuyerPortalAccess', owner_id: portal_access_ids)
+        # Query for Contact-owned documents (new architecture)
+        contact_ids = @company.contacts.pluck(:id)
+        PortalDocument.where(owner_type: 'Contact', owner_id: contact_ids)
       end
 
       def update_params
@@ -125,6 +134,36 @@ module Api
       end
 
       def document_json(doc)
+        # For Contact-owned documents
+        if doc.owner_type == 'Contact'
+          contact = doc.owner
+          return nil unless contact
+          
+          buyer_name = "#{contact.first_name} #{contact.last_name}".strip
+          buyer_name = contact.email.split('@').first if buyer_name.blank?
+          
+          return {
+            id: doc.id,
+            buyer_id: contact.id,
+            buyer_name: buyer_name,
+            buyer_email: contact.email,
+            title: doc.document_name.presence || (doc.file.attached? ? doc.file.filename.to_s : (doc.description || 'Untitled')),
+            document_name: doc.document_name,
+            description: doc.description,
+            notes: doc.notes,
+            admin_notes: doc.admin_notes,
+            category: doc.category || 'other',
+            file_name: doc.file.attached? ? doc.file.filename.to_s : '',
+            file_size: doc.file.attached? ? doc.file.byte_size : 0,
+            content_type: doc.file.attached? ? doc.file.content_type : '',
+            uploaded_by: doc.uploaded_by || 'System',
+            uploaded_at: doc.uploaded_at || doc.created_at,
+            is_buyer_uploaded: doc.uploaded_by == 'buyer',
+            status: 'active'
+          }
+        end
+        
+        # Legacy: BuyerPortalAccess-owned documents
         buyer_portal_access = doc.owner
         return nil unless buyer_portal_access
         

@@ -9,7 +9,7 @@ class PortalDocument < ApplicationRecord
   belongs_to :related_to, polymorphic: true, optional: true
   
   # Validations
-  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account BuyerPortalAccess Loan] }
+  validates :owner_type, presence: true, inclusion: { in: %w[Lead Account Contact BuyerPortalAccess Loan] }
   validates :owner_id, presence: true
   validates :category, inclusion: { 
     in: %w[general insurance registration invoice receipt other contract warranty manual photo credit_application income_verification title_deed loan_agreement appraisal], 

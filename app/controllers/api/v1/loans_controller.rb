@@ -677,7 +677,9 @@ module Api
       def documents
         return unless authorize_action!('loans', 'read')
         
-        documents = @loan.documents.order(created_at: :desc)
+        # Use service to get ALL Contact-owned documents
+        service = LoanDocumentService.new(@loan, current_user)
+        documents = service.all_documents
         
         # Build base URL for file downloads
         api_host = request.base_url
@@ -704,23 +706,24 @@ module Api
         uploaded_count = 0
         errors = []
         
+        # Use service to create Contact-owned documents
+        service = LoanDocumentService.new(@loan, current_user)
+        
         if params[:documents].present?
           params[:documents].each do |_index, doc_params|
             next unless doc_params[:file].present?
             
-            document = @loan.documents.build(
-              owner: @loan,
-              category: doc_params[:category] || 'general',
-              document_name: doc_params[:name] || doc_params[:file].original_filename,
-              uploaded_by: current_user.id.to_s
-            )
-            
-            document.file.attach(doc_params[:file])
-            
-            if document.save
+            begin
+              service.upload_document(
+                file: doc_params[:file],
+                category: doc_params[:category] || 'general',
+                name: doc_params[:name] || doc_params[:file].original_filename,
+                description: doc_params[:description]
+              )
               uploaded_count += 1
-            else
-              errors << document.errors.full_messages.join(', ')
+            rescue => e
+              Rails.logger.error "[LoansController] Document upload failed: #{e.message}"
+              errors << e.message
             end
           end
         end
@@ -736,16 +739,16 @@ module Api
       def destroy_document
         return unless authorize_action!('loans', 'update')
         
-        document = @loan.documents.find_by(id: params[:document_id])
+        # Use service to delete Contact-owned documents
+        service = LoanDocumentService.new(@loan, current_user)
         
-        unless document
-          render json: { error: 'Document not found' }, status: :not_found
-          return
-        end
-        
-        if document.destroy
+        begin
+          service.delete_document(params[:document_id])
           render json: { message: 'Document deleted successfully' }
-        else
+        rescue ActiveRecord::RecordNotFound => e
+          render json: { error: e.message }, status: :not_found
+        rescue => e
+          Rails.logger.error "[LoansController] Document deletion failed: #{e.message}"
           render json: { error: 'Failed to delete document' }, status: :unprocessable_entity
         end
       end

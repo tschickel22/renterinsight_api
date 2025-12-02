@@ -52,7 +52,7 @@ module Api
       # POST /api/portal/documents
       def create
         document = PortalDocument.new(document_params)
-        document.owner = current_portal_buyer  # Use BuyerPortalAccess as owner
+        document.owner = current_portal_buyer.buyer  # Use Contact as owner
         document.uploaded_by = 'buyer'
         
         if document.save
@@ -107,7 +107,9 @@ module Api
       end
       
       def buyer_documents
-        PortalDocument.by_owner(current_portal_buyer)
+        # Documents are owned by Contact, not BuyerPortalAccess
+        contact = current_portal_buyer.buyer
+        PortalDocument.by_owner(contact)
       end
       
       def document_params

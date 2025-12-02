@@ -4,7 +4,7 @@ module Api
   module V1
     class ContactsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status]
+      before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status, :documents, :upload_documents]
       before_action :set_account, only: [:index]
 
       # GET /api/v1/contacts
@@ -519,6 +519,82 @@ module Api
         render json: { error: e.message }, status: :internal_server_error
       end
 
+      # GET /api/v1/contacts/:id/documents
+      def documents
+        return unless authorize_action!('crm', 'read')
+        
+        # Get ALL documents owned by this contact (regardless of related_to)
+        documents = @contact.portal_documents.order(created_at: :desc)
+        
+        # Also include documents related to this contact's loans
+        loan_related_docs = PortalDocument.where(
+          related_to_type: 'Loan',
+          related_to_id: @contact.loans.pluck(:id)
+        ).where.not(owner_id: @contact.id) # Don't duplicate contact-owned docs
+        
+        all_documents = (documents + loan_related_docs.to_a).uniq.sort_by { |d| d.created_at }.reverse
+        
+        render json: {
+          success: true,
+          documents: all_documents.map { |doc| document_json(doc) }
+        }
+      rescue => e
+        Rails.logger.error "Error in contacts#documents: #{e.message}"
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
+      # POST /api/v1/contacts/:id/documents
+      def upload_documents
+        return unless authorize_action!('crm', 'update')
+        
+        uploaded_count = 0
+        errors = []
+
+        if params[:documents].present?
+          params[:documents].each do |_index, doc_params|
+            next unless doc_params[:file].present?
+
+            begin
+              document = @contact.portal_documents.new(
+                document_name: doc_params[:name] || doc_params[:file].original_filename,
+                category: doc_params[:category] || 'general',
+                description: doc_params[:description],
+                uploaded_by: current_user&.id&.to_s || 'admin',
+                uploaded_at: Time.current
+              )
+              document.file.attach(doc_params[:file])
+              
+              if document.save
+                uploaded_count += 1
+              else
+                errors << document.errors.full_messages.join(', ')
+              end
+            rescue => e
+              Rails.logger.error "[ContactsController] Document upload failed: #{e.message}"
+              errors << e.message
+            end
+          end
+        end
+
+        if errors.empty?
+          render json: {
+            success: true,
+            message: "Successfully uploaded #{uploaded_count} document(s)",
+            uploaded_count: uploaded_count
+          }, status: :created
+        else
+          render json: {
+            success: uploaded_count > 0,
+            message: "Uploaded #{uploaded_count} document(s) with #{errors.length} error(s)",
+            uploaded_count: uploaded_count,
+            errors: errors
+          }, status: :multi_status
+        end
+      rescue => e
+        Rails.logger.error "Error in contacts#upload_documents: #{e.message}"
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
       private
 
       def set_company_scope
@@ -730,6 +806,27 @@ module Api
       rescue => e
         Rails.logger.error "Error in handle_tags: #{e.message}\n#{e.backtrace.join("\n")}"
         # Don't fail the whole request, just log the error
+      end
+
+      def document_json(document)
+        {
+          id: document.id,
+          documentName: document.document_name,
+          category: document.category,
+          description: document.description,
+          filename: document.filename,
+          contentType: document.content_type,
+          size: document.size,
+          uploadedBy: document.uploaded_by,
+          uploadedAt: document.uploaded_at,
+          ownerType: document.owner_type,
+          ownerId: document.owner_id,
+          relatedToType: document.related_to_type,
+          relatedToId: document.related_to_id,
+          downloadUrl: "/api/v1/documents/#{document.id}/download",
+          createdAt: document.created_at,
+          updatedAt: document.updated_at
+        }
       end
     end
   end

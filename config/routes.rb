@@ -356,6 +356,8 @@ Rails.application.routes.draw do
           get :deals
           get :quotes
           get :portal_status
+          get :documents
+          post :documents, action: :upload_documents
         end
         
         collection do
