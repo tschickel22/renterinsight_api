@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_01_221019) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1440,6 +1440,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_01_221019) do
     t.datetime "last_sent_at"
     t.integer "company_id"
     t.bigint "location_id"
+    t.string "public_token"
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"
@@ -1448,6 +1449,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_01_221019) do
     t.index ["customer_id"], name: "index_quotes_on_customer_id"
     t.index ["is_deleted"], name: "index_quotes_on_is_deleted"
     t.index ["location_id"], name: "index_quotes_on_location_id"
+    t.index ["public_token"], name: "index_quotes_on_public_token", unique: true
     t.index ["quote_number"], name: "index_quotes_on_quote_number", unique: true
     t.index ["status"], name: "index_quotes_on_status"
     t.index ["valid_until"], name: "index_quotes_on_valid_until"

@@ -1,0 +1,55 @@
+Quote <%= @quote.quote_number %> from <%= @company.name %>
+=====================================
+
+Hello <%= @contact.first_name %>,
+
+We've prepared a quote for you. Please review the details below.
+
+Quote Date: <%= @quote.created_at.strftime('%B %d, %Y') %>
+<% if @quote.valid_until %>
+Valid Until: <%= @quote.valid_until.strftime('%B %d, %Y') %>
+<% end %>
+
+<% if @location %>
+From: <%= @location.name %>
+<% if @location.address_line1.present? %>
+<%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %>
+<% end %>
+<% end %>
+
+Items:
+------
+<% @quote.items.each do |item| %>
+<%= item['description'] || item[:description] %>
+Quantity: <%= item['quantity'] || item[:quantity] %> x <%= number_to_currency(item['unitPrice'] || item['unit_price'] || item[:unitPrice] || item[:unit_price] || 0) %> = <%= number_to_currency(item['total'] || item[:total] || 0) %>
+
+<% end %>
+
+Subtotal: <%= number_to_currency(@subtotal) %>
+<% if @tax > 0 %>
+Tax: <%= number_to_currency(@tax) %>
+<% end %>
+Total: <%= number_to_currency(@total) %>
+
+<% if @quote.notes.present? %>
+Notes:
+<%= @quote.notes %>
+<% end %>
+
+View Quote: <%= @quote_link %>
+
+Click to view your quote (no login required).
+
+---
+<%= @company.name %>
+<% if @location.present? %>
+<% if @location.address_line1.present? %>
+<%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %>
+<% end %>
+<% if @location.phone.present? %>
+Phone: <%= @location.phone %>
+<% end %>
+<% if @location.email.present? %>
+Email: <%= @location.email %>
+<% end %>
+<% end %>

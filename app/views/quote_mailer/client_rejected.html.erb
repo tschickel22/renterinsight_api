@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #ef4444; color: white; text-align: center; padding: 30px; border-radius: 8px 8px 0 0; }
+    .header h1 { margin: 0; font-size: 24px; }
+    .content { background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px; }
+    .quote-info { background: #f3f4f6; padding: 20px; border-radius: 6px; margin: 20px 0; }
+    .quote-info p { margin: 8px 0; }
+    .reason-box { background: #fef2f2; border: 1px solid #fecaca; padding: 15px; border-radius: 6px; margin: 20px 0; }
+    .view-button { display: inline-block; background: #dc2626; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+    .footer { text-align: center; padding: 20px 0; color: #6b7280; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>✗ Quote Declined</h1>
+    </div>
+    
+    <div class="content">
+      <p><%= @contact.full_name %> has declined your quote.</p>
+      
+      <div class="quote-info">
+        <p><strong>Quote Number:</strong> <%= @quote.quote_number %></p>
+        <p><strong>Client:</strong> <%= @contact.full_name %></p>
+        <p><strong>Email:</strong> <%= @contact.email %></p>
+        <% if @contact.phone.present? %>
+          <p><strong>Phone:</strong> <%= @contact.phone %></p>
+        <% end %>
+        <p><strong>Total:</strong> <%= number_to_currency(@quote.total) %></p>
+        <p><strong>Declined:</strong> <%= Time.current.strftime('%B %d, %Y at %I:%M %p') %></p>
+      </div>
+      
+      <% if @rejection_reason.present? %>
+        <div class="reason-box">
+          <strong>Reason for declining:</strong><br>
+          <%= simple_format(@rejection_reason) %>
+        </div>
+      <% end %>
+      
+      <p>Next steps:</p>
+      <ul>
+        <li>Review the client's feedback if provided</li>
+        <li>Consider reaching out to discuss alternatives</li>
+        <li>Update the quote or create a revised version</li>
+      </ul>
+      
+      <div style="text-align: center;">
+        <a href="<%= ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com' %>/quotes/<%= @quote.id %>" class="view-button">View Quote in Dashboard</a>
+      </div>
+      
+      <% if @quote.notes.present? %>
+        <div style="margin: 20px 0; padding: 15px; background: #f9fafb; border-left: 4px solid #ef4444;">
+          <strong>Quote Notes:</strong><br>
+          <%= simple_format(@quote.notes) %>
+        </div>
+      <% end %>
+    </div>
+    
+    <div class="footer">
+      <p>This is an automated notification from your RenterInsight platform.</p>
+    </div>
+  </div>
+</body>
+</html>

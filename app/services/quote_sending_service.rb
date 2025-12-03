@@ -225,8 +225,8 @@ class QuoteSendingService
     end
     
     # Build HTML email body with clickable links
-    api_base_url = ENV['API_BASE_URL'] || 'http://localhost:3001'
-    pdf_url = "#{api_base_url}/api/v1/quotes/#{quote.id}/pdf"
+    # Use public quote link (no login required) instead of PDF
+    quote_url = quote.public_link
     
     portal_link_html = ''
     if ENV['BUYER_PORTAL_URL'].present?
@@ -297,7 +297,7 @@ class QuoteSendingService
         #{notes_html}
         
         <div style="margin: 30px 0; text-align: center;">
-          <a href="#{pdf_url}" style="display: inline-block; padding: 12px 30px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">View Quote</a>
+          <a href="#{quote_url}" style="display: inline-block; padding: 12px 30px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">View Quote</a>
         </div>
         
         #{portal_link_html}
@@ -328,10 +328,8 @@ class QuoteSendingService
     # Quote summary
     parts << "Quote #{quote.quote_number}: $#{format_currency(quote.total)}"
     
-    # PDF link - shortened
-    api_base_url = ENV['API_BASE_URL'] || 'http://localhost:3001'
-    pdf_url = "#{api_base_url}/api/v1/quotes/#{quote.id}/pdf"
-    parts << "View Quote: #{pdf_url}"
+    # Public quote link
+    parts << "View Quote: #{quote.public_link}"
     
     # Portal link if available
     if ENV['BUYER_PORTAL_URL'].present?

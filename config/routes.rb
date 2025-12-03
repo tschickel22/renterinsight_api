@@ -36,6 +36,11 @@ Rails.application.routes.draw do
     get 'feeds/:id', to: 'syndication_feeds#show', as: :syndication_feed
   end
   
+  # ==================== PUBLIC QUOTES ====================
+  get '/q/:token', to: 'api/public/quotes#show', as: :public_quote
+  post '/q/:token/accept', to: 'api/public/quotes#accept', as: :public_quote_accept
+  post '/q/:token/reject', to: 'api/public/quotes#reject', as: :public_quote_reject
+  
   # API endpoints for public forms (for frontend)
   namespace :api do
     # ==================== PUBLIC INVITATIONS (No Auth Required) ====================

@@ -37,6 +37,7 @@ class Quote < ApplicationRecord
   
   # Callbacks
   before_validation :generate_quote_number, on: :create
+  before_validation :generate_public_token, on: :create
   before_validation :calculate_totals
   before_validation :check_expiration
   
@@ -47,6 +48,15 @@ class Quote < ApplicationRecord
   
   def restore!
     update!(is_deleted: false, deleted_at: nil)
+  end
+  
+  # Public link for email viewing (no login required)
+  def public_link
+    # Ensure public_token exists (for existing quotes created before token was added)
+    generate_public_token if public_token.blank?
+    save! if changed?
+    
+    "#{ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'}/q/#{public_token}"
   end
   
   # Status transitions
@@ -245,6 +255,13 @@ class Quote < ApplicationRecord
     self.quote_number ||= loop do
       number = "QUO-#{Time.current.year}-#{SecureRandom.hex(4).upcase}"
       break number unless self.class.exists?(quote_number: number)
+    end
+  end
+  
+  def generate_public_token
+    self.public_token ||= loop do
+      token = SecureRandom.urlsafe_base64(32)
+      break token unless self.class.exists?(public_token: token)
     end
   end
   

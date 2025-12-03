@@ -1,0 +1,37 @@
+✗ Quote Declined
+=================
+
+<%= @contact.full_name %> has declined your quote.
+
+Quote Details:
+--------------
+Quote Number: <%= @quote.quote_number %>
+Client: <%= @contact.full_name %>
+Email: <%= @contact.email %>
+<% if @contact.phone.present? %>
+Phone: <%= @contact.phone %>
+<% end %>
+Total: <%= number_to_currency(@quote.total) %>
+Declined: <%= Time.current.strftime('%B %d, %Y at %I:%M %p') %>
+
+<% if @rejection_reason.present? %>
+Reason for declining:
+---------------------
+<%= @rejection_reason %>
+
+<% end %>
+Next steps:
+-----------
+- Review the client's feedback if provided
+- Consider reaching out to discuss alternatives
+- Update the quote or create a revised version
+
+View Quote: <%= ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com' %>/quotes/<%= @quote.id %>
+
+<% if @quote.notes.present? %>
+Quote Notes:
+<%= @quote.notes %>
+<% end %>
+
+---
+This is an automated notification from your RenterInsight platform.

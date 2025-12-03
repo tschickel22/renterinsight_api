@@ -1,0 +1,33 @@
+✓ Quote Accepted!
+==================
+
+Great news!
+
+<%= @contact.full_name %> has accepted your quote.
+
+Quote Details:
+--------------
+Quote Number: <%= @quote.quote_number %>
+Client: <%= @contact.full_name %>
+Email: <%= @contact.email %>
+<% if @contact.phone.present? %>
+Phone: <%= @contact.phone %>
+<% end %>
+Total: <%= number_to_currency(@quote.total) %>
+Accepted: <%= Time.current.strftime('%B %d, %Y at %I:%M %p') %>
+
+Next steps:
+-----------
+- Review the accepted quote in your dashboard
+- Contact the client to proceed with next steps
+- Update the quote status as needed
+
+View Quote: <%= ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com' %>/quotes/<%= @quote.id %>
+
+<% if @quote.notes.present? %>
+Quote Notes:
+<%= @quote.notes %>
+<% end %>
+
+---
+This is an automated notification from your RenterInsight platform.

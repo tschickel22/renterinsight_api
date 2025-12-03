@@ -11,6 +11,9 @@ module Api
       def index
         quotes = buyer_quotes
 
+        # FILTER OUT DRAFTS - clients should not see draft quotes
+        quotes = quotes.where.not(status: 'draft')
+
         # Filter by status if provided
         if params[:status].present?
           quotes = quotes.where(status: params[:status])
@@ -63,7 +66,12 @@ module Api
 
         @quote.update!(status: 'accepted', updated_at: Time.current)
 
-        create_quote_note(@quote, 'accepted', params[:notes])
+        # Accept notes from client (multiple param names supported)
+        notes = params[:notes] || params[:note] || params[:message]
+        create_quote_note(@quote, 'accepted', notes)
+        
+        # Send notification email to company
+        notify_company_quote_accepted(@quote)
 
         render json: {
           ok: true,
@@ -83,7 +91,12 @@ module Api
 
         @quote.update!(status: 'rejected', updated_at: Time.current)
 
-        create_quote_note(@quote, 'rejected', params[:reason])
+        # Accept reason/notes from client (multiple param names supported)
+        reason = params[:reason] || params[:notes] || params[:note] || params[:message]
+        create_quote_note(@quote, 'rejected', reason)
+        
+        # Send notification email to company
+        notify_company_quote_rejected(@quote, reason)
 
         render json: {
           ok: true,
@@ -102,14 +115,37 @@ module Api
         end
       end
 
+      # FIXED: Properly handle polymorphic buyer relationship
       def buyer_quotes
         buyer_portal_access = current_portal_buyer
-        account = buyer_portal_access.buyer_type.constantize.find_by(id: buyer_portal_access.buyer_id)
-        Quote.where(account_id: account.id)
+        
+        # Handle polymorphic buyer relationship correctly
+        case buyer_portal_access.buyer_type
+        when 'Contact'
+          contact = Contact.find_by(id: buyer_portal_access.buyer_id)
+          return Quote.none unless contact
+          
+          # Find quotes by BOTH account_id AND contact_id
+          # Company might set only account_id, only contact_id, or both
+          Quote.where(company_id: contact.company_id)
+               .where('account_id = ? OR contact_id = ?', contact.account_id, contact.id)
+          
+        when 'Account'
+          account = Account.find_by(id: buyer_portal_access.buyer_id)
+          return Quote.none unless account
+          
+          # For accounts, find all quotes for this account
+          Quote.where(account_id: account.id, company_id: account.company_id)
+          
+        else
+          # Unknown buyer type - return empty relation
+          Rails.logger.warn "[Portal] Unknown buyer_type: #{buyer_portal_access.buyer_type}"
+          Quote.none
+        end
       end
 
       def create_quote_note(quote, action, content)
-        note_content = "Quote #{action} by client"
+        note_content = "Quote #{action} by client via portal"
         note_content += ": #{content}" if content.present?
 
         buyer_portal_access = current_portal_buyer
@@ -119,9 +155,23 @@ module Api
           entity_type: 'quote',
           entity_id: quote.id.to_s,
           content: note_content,
-          created_by: user&.id&.to_s || buyer_portal_access.email,
+          user_id: user&.id,
           created_by_name: user ? "#{user.first_name} #{user.last_name}".strip : buyer_portal_access.email
         )
+      rescue => e
+        Rails.logger.error "[Portal] Failed to create quote note: #{e.message}"
+      end
+      
+      def notify_company_quote_accepted(quote)
+        QuoteMailer.client_accepted(quote).deliver_later
+      rescue => e
+        Rails.logger.error "[Portal] Failed to send quote accepted email: #{e.message}"
+      end
+      
+      def notify_company_quote_rejected(quote, reason)
+        QuoteMailer.client_rejected(quote, reason).deliver_later
+      rescue => e
+        Rails.logger.error "[Portal] Failed to send quote rejected email: #{e.message}"
       end
     end
   end
