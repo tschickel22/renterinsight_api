@@ -232,8 +232,19 @@ Rails.application.routes.draw do
         post 'bulk_check', action: :bulk_check
       end
       
+      # ==================== COMPANIES ====================
+      resources :companies, only: [] do
+        collection do
+          get :accessible
+        end
+      end
+      
       # ==================== LOCATIONS ====================
       resources :locations do
+        collection do
+          get :accessible
+        end
+        
         member do
           post :restore
           get :users

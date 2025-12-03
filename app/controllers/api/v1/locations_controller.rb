@@ -14,6 +14,30 @@ module Api
       before_action -> { authorize_rbac!('locations', 'delete') }, only: [:destroy, :bulk_delete, :restore]
       before_action -> { authorize_rbac!('locations', 'assign') }, only: [:assign_user, :remove_user]
 
+      # GET /api/v1/locations/accessible
+      # Returns accessible locations for current user with selection requirement flag
+      def accessible
+        @locations = current_company.locations
+                                    .where(is_deleted: false, active: true)
+        
+        # RBAC: Location-tier users only see their assigned locations
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            @locations = @locations.where(id: location_ids)
+          else
+            @locations = @locations.none
+          end
+        end
+        
+        @locations = @locations.order(:name)
+        
+        render json: {
+          locations: @locations.select(:id, :name, :code, :city, :state).as_json(only: [:id, :name, :code, :city, :state]),
+          requires_selection: @locations.count > 1
+        }
+      end
+      
       # GET /api/v1/locations
       def index
         @locations = current_company.locations

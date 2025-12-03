@@ -46,7 +46,9 @@ module Api
             message: 'Login successful',
             token: tokens[:access_token],
             refreshToken: tokens[:refresh_token],
-            user: build_user_response(user)
+            user: build_user_response(user),
+            requires_company_selection: requires_company_selection?(user),
+            requires_location_selection: requires_location_selection?(user)
           }, status: :ok
         else
           render json: {
@@ -305,6 +307,28 @@ module Api
             tier: role.tier,
             color: role.color
           }
+        end
+      end
+      
+      # Check if user needs to select a company (platform admins only)
+      def requires_company_selection?(user)
+        user.platform_admin? || user.super_admin?
+      end
+      
+      # Check if user needs to select a location (multi-location users)
+      def requires_location_selection?(user)
+        return false if user.platform_admin? || user.super_admin?
+        return false unless user.company.present?
+        
+        # Check accessible location count
+        if user.uses_rbac? && !user.effective_admin?
+          accessible_count = user.user_locations.active.where(company_id: user.company_id).count
+          accessible_count > 1
+        else
+          # Company admins have access to all locations
+          return false if user.admin?
+          # Check total company locations
+          user.company.locations.where(is_deleted: [false, nil], active: true).count > 1
         end
       end
     end
