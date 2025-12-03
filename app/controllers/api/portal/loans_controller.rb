@@ -247,6 +247,9 @@ module Api
               
               # Execute all loan updates atomically
               @loan.update!(loan_updates)
+              
+              # Send payment receipt email
+              BuyerPortalMailer.loan_payment_receipt(@loan, payment).deliver_later
             end
 
             render json: {

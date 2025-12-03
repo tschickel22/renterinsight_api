@@ -89,6 +89,35 @@ class BuyerPortalMailer < ApplicationMailer
     )
   end
   
+  # Loan payment receipt
+  def loan_payment_receipt(loan, payment)
+    @loan = loan
+    @payment = payment
+    @buyer = loan.borrower
+    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
+    @loan_url = "#{@portal_url}/loans/#{loan.id}"
+    
+    buyer_email = @buyer.respond_to?(:email) ? @buyer.email : nil
+    return unless buyer_email.present?
+    
+    # Configure SMTP from platform settings
+    configure_mailer_from_settings
+    
+    # Get from email from settings or ENV
+    from_email = get_from_email
+    from_name = get_from_name
+    
+    message = mail(
+      to: buyer_email,
+      from: "#{from_name} <#{from_email}>",
+      subject: "Payment Receipt for Loan #{loan.loan_number}"
+    )
+    
+    Rails.logger.info "Loan payment receipt sent to #{buyer_email} for loan #{loan.loan_number}"
+    message
+  end
+  
   # Internal notification when buyer replies in portal
   def communication_reply_notification(communication)
     @communication = communication
