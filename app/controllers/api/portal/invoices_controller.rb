@@ -42,6 +42,7 @@ module Api
       # POST /api/portal/invoices/:id/make_payment
       def make_payment
         amount = params[:amount].to_f
+        payment_method_id = params[:payment_method_id]
         payment_method_data = params[:payment_method]
 
         # Validate amount
@@ -55,11 +56,37 @@ module Api
           return
         end
 
-        # Create temporary payment method (not saved to database)
-        payment_method = create_temp_payment_method(payment_method_data)
-
-        unless payment_method.valid?
-          render json: { success: false, error: payment_method.errors.full_messages.join(', ') }, status: :unprocessable_entity
+        # Handle payment method - either use saved or create new
+        begin
+          if payment_method_id.present?
+            # Use existing saved payment method
+            contact = current_portal_buyer.buyer
+            payment_method = PaymentMethod.find_by(
+              id: payment_method_id,
+              owner_type: 'Contact',
+              owner_id: contact.id,
+              is_deleted: [false, nil]
+            )
+            
+            unless payment_method
+              render json: { success: false, error: 'Payment method not found' }, status: :not_found
+              return
+            end
+          elsif payment_method_data.present?
+            # Create and save new payment method
+            payment_method = create_and_save_payment_method(payment_method_data)
+          else
+            render json: { success: false, error: 'Payment method is required' }, status: :unprocessable_entity
+            return
+          end
+        rescue ActiveRecord::RecordInvalid => e
+          Rails.logger.error "Payment method validation failed: #{e.record.errors.full_messages.join(', ')}"
+          render json: { success: false, error: e.record.errors.full_messages.join(', ') }, status: :unprocessable_entity
+          return
+        rescue => e
+          Rails.logger.error "Payment method error: #{e.class} - #{e.message}"
+          Rails.logger.error e.backtrace.first(5).join("\n")
+          render json: { success: false, error: "Payment method error: #{e.message}" }, status: :unprocessable_entity
           return
         end
 
@@ -71,15 +98,36 @@ module Api
           status: 'pending',
           company_id: @invoice.company_id,
           payer: current_portal_buyer.buyer,
-          payable: @invoice
+          payable: @invoice,
+          payment_method_id: payment_method.id
         )
 
         if payment.save
-          # Process payment via Zego (portal one-time, no account creation, no $5 pre-auth)
+          # Process payment via Zego
           zego_api = RenterInsightZegoApi.new(@invoice.company)
-          success = zego_api.capture_portal_payment(payment_method, payment, request)
+          
+          # Determine which Zego method to use based on whether payment method has external_id
+          if payment_method.external_id.present?
+            # Use saved payment method account
+            success = zego_api.capture_portal_payment(payment_method, payment, request)
+          else
+            # New payment method - create account and save external_id
+            success = zego_api.capture_portal_payment(payment_method, payment, request)
+            
+            if success
+              # Save external_id from Zego to payment method for future reuse
+              gateway_payer_id = zego_api.read_gateway_payer_id
+              if gateway_payer_id.present?
+                payment_method.update(
+                  external_id: gateway_payer_id,
+                  api_partner_id: RenterInsightZegoApi::API_PARTNER_ID
+                )
+              end
+            end
+          end
 
           if success
+            
             # Update payment with transaction details
             payment.update(
               external_id: zego_api.read_transaction_id,
@@ -87,7 +135,7 @@ module Api
               processed_at: Time.current
             )
 
-            # If completed, update invoice balance
+            # If completed, update invoice balance and send receipt
             if payment.status == 'completed'
               @invoice.update(
                 amount_paid: @invoice.amount_paid + amount,
@@ -100,6 +148,9 @@ module Api
               elsif @invoice.amount_paid > 0
                 @invoice.update(status: 'partial')
               end
+              
+              # Send payment receipt email
+              InvoiceMailer.payment_receipt(@invoice, payment).deliver_later
             end
 
             render json: {
@@ -188,19 +239,27 @@ module Api
         end
       end
 
-      def create_temp_payment_method(data)
+      def create_and_save_payment_method(data)
         contact = current_portal_buyer.buyer
         
+        # Count existing payment methods to determine if this should be default
+        existing_count = PaymentMethod.where(
+          owner_type: 'Contact',
+          owner_id: contact.id,
+          is_deleted: [false, nil]
+        ).count
+        
         payment_method = PaymentMethod.new(
-          method_type: data[:payment_type], # Frontend sends payment_type, map to method_type
-          company_id: contact.company_id,
           owner: contact,
+          method_type: data[:payment_type],
+          company_id: contact.company_id,
           billing_first_name: data[:billing_first_name],
           billing_last_name: data[:billing_last_name],
           billing_street: data[:billing_street],
           billing_city: data[:billing_city],
           billing_state: data[:billing_state],
-          billing_zip: data[:billing_zip]
+          billing_zip: data[:billing_zip],
+          is_default: existing_count == 0
         )
 
         if data[:payment_type] == 'credit_card' || data[:payment_type] == 'debit_card'
@@ -208,10 +267,12 @@ module Api
           
           # Parse expiration date (format: "YYYY-MM-DD")
           if data[:credit_card_expires_on].present?
-            exp_date = Date.parse(data[:credit_card_expires_on]) rescue nil
-            if exp_date
+            begin
+              exp_date = Date.parse(data[:credit_card_expires_on])
               payment_method.credit_card_exp_month = exp_date.month
               payment_method.credit_card_exp_year = exp_date.year
+            rescue ArgumentError => e
+              Rails.logger.error "Failed to parse credit card expiration date: #{e.message}"
             end
           end
           
@@ -223,6 +284,7 @@ module Api
           payment_method.ach_account_type = data[:ach_account_type]
         end
 
+        payment_method.save!
         payment_method
       end
 

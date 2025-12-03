@@ -41,10 +41,12 @@
         <span><%= @payment.processed_at.strftime('%B %d, %Y at %I:%M %p') %></span>
       </div>
       
-      <div class="detail-row">
-        <span><strong>Payment Method:</strong></span>
-        <span><%= @payment.payment_method.method_type.titleize %></span>
-      </div>
+      <% if @payment.payment_method.present? %>
+        <div class="detail-row">
+          <span><strong>Payment Method:</strong></span>
+          <span><%= @payment.payment_method.method_type.titleize %></span>
+        </div>
+      <% end %>
       
       <div class="detail-row">
         <span><strong>Payment Amount:</strong></span>
