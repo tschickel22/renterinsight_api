@@ -41,7 +41,11 @@ class Resource < ApplicationRecord
       { key: 'branding', name: 'Branding & White Label', category: 'admin', description: 'Manage branding, logos, and appearance' },
       { key: 'communications', name: 'Communications', category: 'operations', description: 'Send and manage emails/SMS' },
       { key: 'listings', name: 'Property Listings', category: 'operations', description: 'Manage property listings and syndication' },
-      { key: 'products', name: 'Products', category: 'operations', description: 'Manage product catalog and pricing' }
+      { key: 'products', name: 'Products', category: 'operations', description: 'Manage product catalog and pricing' },
+      # Warranty Resources
+      { key: 'warranty_claims', name: 'Warranty Claims', category: 'operations', description: 'Manage warranty claims and submissions to manufacturers' },
+      { key: 'manufacturer_ar', name: 'Manufacturer AR', category: 'operations', description: 'Track and manage manufacturer accounts receivable' },
+      { key: 'manufacturers', name: 'Manufacturers', category: 'operations', description: 'View and manage manufacturer information' }
     ].each do |resource_data|
       find_or_create_by!(key: resource_data[:key]) do |resource|
         resource.name = resource_data[:name]

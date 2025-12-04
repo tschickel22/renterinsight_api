@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_03_052000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1215,6 +1215,76 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
     t.index ["number"], name: "index_lot_map_lots_on_number"
   end
 
+  create_table "manufacturer_ar_payments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "manufacturer_ar_transaction_id", null: false
+    t.string "payment_number", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.date "payment_date", null: false
+    t.string "payment_method"
+    t.string "reference_number"
+    t.text "notes"
+    t.string "recorded_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "payment_number"], name: "idx_on_company_id_payment_number_3a93ea434b", unique: true
+    t.index ["company_id"], name: "index_manufacturer_ar_payments_on_company_id"
+    t.index ["manufacturer_ar_transaction_id"], name: "index_mfr_ar_payments_on_transaction_id"
+    t.index ["payment_date"], name: "index_manufacturer_ar_payments_on_payment_date"
+    t.index ["payment_method"], name: "index_manufacturer_ar_payments_on_payment_method"
+  end
+
+  create_table "manufacturer_ar_transactions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "warranty_claim_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.string "transaction_number", null: false
+    t.decimal "original_claim_amount", precision: 12, scale: 2, null: false
+    t.decimal "amount_paid_to_date", precision: 12, scale: 2, default: "0.0"
+    t.decimal "amount_outstanding", precision: 12, scale: 2, null: false
+    t.string "status", default: "open", null: false
+    t.date "claim_date"
+    t.date "expected_payment_date"
+    t.date "paid_in_full_date"
+    t.text "notes"
+    t.text "write_off_reason"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["claim_date"], name: "index_manufacturer_ar_transactions_on_claim_date"
+    t.index ["company_id", "status"], name: "index_manufacturer_ar_transactions_on_company_id_and_status"
+    t.index ["company_id", "transaction_number"], name: "idx_on_company_id_transaction_number_c53913b19d", unique: true
+    t.index ["company_id"], name: "index_manufacturer_ar_transactions_on_company_id"
+    t.index ["expected_payment_date"], name: "index_manufacturer_ar_transactions_on_expected_payment_date"
+    t.index ["location_id"], name: "index_manufacturer_ar_transactions_on_location_id"
+    t.index ["manufacturer_id", "status"], name: "idx_on_manufacturer_id_status_a8bf3034f4"
+    t.index ["manufacturer_id"], name: "index_manufacturer_ar_transactions_on_manufacturer_id"
+    t.index ["status"], name: "index_manufacturer_ar_transactions_on_status"
+    t.index ["warranty_claim_id"], name: "index_manufacturer_ar_transactions_on_warranty_claim_id"
+  end
+
+  create_table "manufacturers", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "industry_type", null: false
+    t.string "contact_email"
+    t.string "contact_phone"
+    t.string "website"
+    t.jsonb "oem_codes", default: {}
+    t.boolean "has_portal_access", default: false, null: false
+    t.string "portal_url"
+    t.boolean "active", default: true, null: false
+    t.text "notes"
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active", "industry_type"], name: "index_manufacturers_on_active_and_industry_type"
+    t.index ["active"], name: "index_manufacturers_on_active"
+    t.index ["industry_type"], name: "index_manufacturers_on_industry_type"
+    t.index ["name"], name: "index_manufacturers_on_name"
+  end
+
   create_table "notes", force: :cascade do |t|
     t.text "content", null: false
     t.string "entity_type", null: false
@@ -1554,18 +1624,25 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "location_id"
+    t.boolean "is_warranty_suspected", default: false, null: false
+    t.boolean "is_warranty_confirmed", default: false, null: false
+    t.bigint "warranty_claim_id"
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
+    t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
     t.index ["company_id", "location_id"], name: "index_service_tickets_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
+    t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"
+    t.index ["is_warranty_suspected"], name: "index_service_tickets_on_is_warranty_suspected"
     t.index ["location_id"], name: "index_service_tickets_on_location_id"
     t.index ["priority"], name: "index_service_tickets_on_priority"
     t.index ["scheduled_date"], name: "index_service_tickets_on_scheduled_date"
     t.index ["status"], name: "index_service_tickets_on_status"
     t.index ["vehicle_id"], name: "index_service_tickets_on_vehicle_id"
+    t.index ["warranty_claim_id"], name: "index_service_tickets_on_warranty_claim_id"
   end
 
   create_table "settings", force: :cascade do |t|
@@ -1941,6 +2018,49 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 
+  create_table "warranty_claims", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "service_ticket_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.string "claim_number", null: false
+    t.string "manufacturer_claim_number"
+    t.decimal "estimated_amount", precision: 10, scale: 2
+    t.decimal "approved_amount", precision: 10, scale: 2
+    t.decimal "client_copay_amount", precision: 10, scale: 2, default: "0.0"
+    t.jsonb "parts", default: []
+    t.jsonb "labor", default: []
+    t.string "status", default: "draft", null: false
+    t.datetime "submitted_at"
+    t.datetime "manufacturer_responded_at"
+    t.datetime "approved_at"
+    t.datetime "denied_at"
+    t.datetime "closed_at"
+    t.text "notes_internal"
+    t.text "notes_to_manufacturer"
+    t.text "manufacturer_response"
+    t.text "denial_reason"
+    t.string "public_token", null: false
+    t.integer "views_count", default: 0
+    t.string "submitted_by"
+    t.string "approved_by"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "claim_number"], name: "index_warranty_claims_on_company_id_and_claim_number", unique: true
+    t.index ["company_id", "is_deleted"], name: "index_warranty_claims_on_company_id_and_is_deleted"
+    t.index ["company_id", "status"], name: "index_warranty_claims_on_company_id_and_status"
+    t.index ["company_id"], name: "index_warranty_claims_on_company_id"
+    t.index ["location_id"], name: "index_warranty_claims_on_location_id"
+    t.index ["manufacturer_id"], name: "index_warranty_claims_on_manufacturer_id"
+    t.index ["manufacturer_responded_at"], name: "index_warranty_claims_on_manufacturer_responded_at"
+    t.index ["public_token"], name: "index_warranty_claims_on_public_token", unique: true
+    t.index ["service_ticket_id"], name: "index_warranty_claims_on_service_ticket_id"
+    t.index ["status"], name: "index_warranty_claims_on_status"
+    t.index ["submitted_at"], name: "index_warranty_claims_on_submitted_at"
+  end
+
   create_table "win_loss_reports", force: :cascade do |t|
     t.integer "deal_id", null: false
     t.string "result", null: false
@@ -2046,6 +2166,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
   add_foreign_key "lot_map_layouts", "companies"
   add_foreign_key "lot_map_lots", "lot_map_layouts", column: "layout_id"
   add_foreign_key "lot_map_lots", "vehicles", column: "assigned_inventory_id"
+  add_foreign_key "manufacturer_ar_payments", "companies", on_delete: :cascade
+  add_foreign_key "manufacturer_ar_payments", "manufacturer_ar_transactions", on_delete: :cascade
+  add_foreign_key "manufacturer_ar_transactions", "companies", on_delete: :cascade
+  add_foreign_key "manufacturer_ar_transactions", "locations", on_delete: :nullify
+  add_foreign_key "manufacturer_ar_transactions", "manufacturers", on_delete: :restrict
+  add_foreign_key "manufacturer_ar_transactions", "warranty_claims", on_delete: :restrict
   add_foreign_key "notes", "users"
   add_foreign_key "nurture_enrollments", "companies"
   add_foreign_key "nurture_enrollments", "leads"
@@ -2074,6 +2200,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
   add_foreign_key "service_tickets", "contacts"
   add_foreign_key "service_tickets", "locations"
   add_foreign_key "service_tickets", "vehicles"
+  add_foreign_key "service_tickets", "warranty_claims", on_delete: :nullify
   add_foreign_key "syndication_partners", "companies"
   add_foreign_key "tag_assignments", "tags"
   add_foreign_key "templates", "companies"
@@ -2092,6 +2219,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_051444) do
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "vehicles", "locations"
+  add_foreign_key "warranty_claims", "companies", on_delete: :cascade
+  add_foreign_key "warranty_claims", "locations", on_delete: :nullify
+  add_foreign_key "warranty_claims", "manufacturers", on_delete: :restrict
+  add_foreign_key "warranty_claims", "service_tickets", on_delete: :restrict
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"
 end

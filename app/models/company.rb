@@ -30,6 +30,12 @@ class Company < ApplicationRecord
   has_many :loans, dependent: :destroy
   has_many :invoices, dependent: :destroy
   
+  # Warranty & Service Module Associations
+  has_many :manufacturers, dependent: :destroy
+  has_many :warranty_claims, dependent: :destroy
+  has_many :manufacturer_ar_transactions, dependent: :destroy
+  has_many :manufacturer_ar_payments, dependent: :destroy
+  
   # RBAC System Associations
   has_many :roles, dependent: :destroy
   has_many :company_hidden_roles, dependent: :destroy
@@ -149,80 +155,101 @@ class Company < ApplicationRecord
         dmarc: { status: 'not_found', record: nil }
       }
       
-      # Check SPF record (TXT at root domain)
+      # Check SPF record
       begin
-        txt_records = resolver.getresources(email_domain, Resolv::DNS::Resource::IN::TXT)
-        spf_record = txt_records.find { |r| r.data.start_with?('v=spf1') }
-        
+        spf_records = resolver.getresources(email_domain, Resolv::DNS::Resource::IN::TXT)
+        spf_record = spf_records.find { |r| r.data.start_with?('v=spf1') }
         if spf_record
-          if spf_record.data.include?('landlordinsight.com')
-            results[:spf] = { status: 'valid', record: spf_record.data }
-          else
-            results[:spf] = { status: 'invalid', record: spf_record.data, error: 'Does not include landlordinsight.com' }
-          end
+          results[:spf] = { status: 'found', record: spf_record.data }
         end
-      rescue Resolv::ResolvError
-        results[:spf][:error] = 'DNS lookup failed'
+      rescue => e
+        results[:spf] = { status: 'error', error: e.message }
       end
       
-      # Check DKIM record (TXT at mail._domainkey.domain)
+      # Check DKIM record (using default selector)
       begin
-        dkim_domain = "mail._domainkey.#{email_domain}"
+        dkim_domain = "default._domainkey.#{email_domain}"
         dkim_records = resolver.getresources(dkim_domain, Resolv::DNS::Resource::IN::TXT)
-        dkim_record = dkim_records.find { |r| r.data.start_with?('v=DKIM1') }
-        
+        dkim_record = dkim_records.find { |r| r.data.include?('k=rsa') }
         if dkim_record
-          results[:dkim] = { status: 'valid', record: dkim_record.data }
+          results[:dkim] = { status: 'found', record: dkim_record.data }
         end
-      rescue Resolv::ResolvError
-        results[:dkim][:error] = 'DNS lookup failed'
+      rescue => e
+        results[:dkim] = { status: 'error', error: e.message }
       end
       
-      # Check DMARC record (TXT at _dmarc.domain)
+      # Check DMARC record
       begin
         dmarc_domain = "_dmarc.#{email_domain}"
         dmarc_records = resolver.getresources(dmarc_domain, Resolv::DNS::Resource::IN::TXT)
         dmarc_record = dmarc_records.find { |r| r.data.start_with?('v=DMARC1') }
-        
         if dmarc_record
-          results[:dmarc] = { status: 'valid', record: dmarc_record.data }
+          results[:dmarc] = { status: 'found', record: dmarc_record.data }
         end
-      rescue Resolv::ResolvError
-        results[:dmarc][:error] = 'DNS lookup failed'
+      rescue => e
+        results[:dmarc] = { status: 'error', error: e.message }
       end
       
-      # Determine overall success (at least SPF must be valid)
-      if results[:spf][:status] == 'valid'
-        { success: true, message: 'Email DNS records found', records: results }
-      else
-        { 
-          success: false, 
-          error: 'SPF record is required and must include landlordinsight.com',
-          records: results 
-        }
-      end
+      { success: true, results: results }
     rescue => e
       Rails.logger.error "Email DNS check error for Company #{id}: #{e.message}"
-      { success: false, error: "DNS check failed: #{e.message}" }
+      { success: false, error: e.message }
     end
   end
   
   # Verify email domain by checking DNS records
   def verify_email_domain!
-    verification_result = check_email_dns_records
+    dns_results = check_email_dns_records
     
-    if verification_result[:success]
-      update!(email_domain_verified_at: Time.current)
-      { success: true, message: 'Email domain verified successfully', records: verification_result[:records] }
+    if dns_results[:success]
+      results = dns_results[:results]
+      # Require at least SPF and DMARC to be configured
+      if results[:spf][:status] == 'found' && results[:dmarc][:status] == 'found'
+        update!(email_domain_verified_at: Time.current)
+        { success: true, message: 'Email domain verified successfully', details: results }
+      else
+        { 
+          success: false, 
+          error: 'Required DNS records not found. Please configure SPF and DMARC records.',
+          details: results 
+        }
+      end
     else
-      { success: false, error: verification_result[:error], records: verification_result[:records] }
+      { success: false, error: dns_results[:error] }
     end
   rescue => e
     Rails.logger.error "Error verifying email domain for Company #{id}: #{e.message}"
     { success: false, error: e.message }
   end
   
-  # Tenant status methods
+  # Get domain for routing (prefer custom domain over subdomain)
+  def primary_domain
+    custom_domain.presence || subdomain_with_base_domain
+  end
+  
+  def subdomain_with_base_domain
+    return nil unless subdomain.present?
+    base_domain = Rails.application.credentials.dig(:domain, :base) || 'renterinsight.com'
+    "#{subdomain}.#{base_domain}"
+  end
+  
+  # Check if this company should receive traffic for the given host
+  def matches_host?(host)
+    return false if host.blank?
+    
+    # Normalize host (remove port if present)
+    normalized_host = host.split(':').first.downcase
+    
+    # Check custom domain
+    return true if custom_domain.present? && custom_domain.downcase == normalized_host
+    
+    # Check subdomain
+    return true if subdomain.present? && subdomain_with_base_domain&.downcase == normalized_host
+    
+    false
+  end
+  
+  # Tenant status checks
   def active?
     status == 'active'
   end
@@ -243,258 +270,201 @@ class Company < ApplicationRecord
     status == 'cancelled'
   end
   
-  # Usage limits
-  def can_add_user?
-    return true if max_users.nil?
-    users.where(deleted_at: nil).count < max_users
+  # Settings helpers
+  def operational_settings
+    @operational_settings ||= Setting.get('operational', 'Company', id)
   end
   
-  def users_remaining
-    return nil if max_users.nil?
-    remaining = max_users - users.where(deleted_at: nil).count
-    [remaining, 0].max
+  def branding_settings
+    @branding_settings ||= Setting.get('branding', 'Company', id)
   end
   
+  def communication_settings
+    @communication_settings ||= Setting.get('communication', 'Company', id)
+  end
+  
+  # Use the same bank account for deposits and rent collections
+  # If true, all payments go to operating account
+  # If false, deposits go to deposit account, rent goes to operating account
+  def use_same_bank_account_for_deposits
+    operational_settings['use_same_bank_account_for_deposits'] || false
+  end
+  
+  # Company counts (for platform admin dashboard)
   def users_count
     users.where(deleted_at: nil).count
   end
   
-  # Primary domain resolution (custom domain takes precedence over subdomain)
-  def primary_domain
-    custom_domain.presence || subdomain_url
-  rescue
-    subdomain
+  def active_users_count
+    users.where(deleted_at: nil, status: 'active').count
   end
   
-  def subdomain_url
-    return nil if subdomain.blank?
-    # This will be configured based on environment
-    base_domain = ENV.fetch('TENANT_BASE_DOMAIN', 'crm.landlordinsight.com')
-    "#{subdomain}.#{base_domain}"
-  rescue
-    nil
+  def leads_count
+    leads.where(is_deleted: false).count
   end
   
-  # Settings management
-  def communications_settings
-    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'communications')
-    setting ? JSON.parse(setting.value) : nil
-  rescue => e
-    Rails.logger.error "Error loading communications_settings for Company #{id}: #{e.message}"
-    nil
+  def contacts_count
+    contacts.where(is_deleted: false).count
   end
   
-  def communications_settings=(value)
-    Rails.logger.info "📝 [Company#communications_settings=] Setting for Company #{id}"
-    
-    setting = Setting.find_or_initialize_by(
-      scope_type: 'Company',
-      scope_id: id,
-      key: 'communications'
-    )
-    setting.value = value.to_json
-    
-    if setting.save!
-      Rails.logger.info "✅ [Company#communications_settings=] Saved successfully"
-      true
-    end
-  rescue => e
-    Rails.logger.error "❌ [Company#communications_settings=] Error: #{e.class} - #{e.message}"
-    raise e
+  def deals_count
+    deals.where(is_deleted: false).count
   end
   
-  def notifications_settings
-    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'notifications')
-    setting ? JSON.parse(setting.value) : nil
-  rescue => e
-    Rails.logger.error "Error loading notifications_settings for Company #{id}: #{e.message}"
-    nil
+  def service_tickets_count
+    service_tickets.where(is_deleted: false).count
   end
   
-  def notifications_settings=(value)
-    Rails.logger.info "📝 [Company#notifications_settings=] Setting for Company #{id}"
-    
-    setting = Setting.find_or_initialize_by(
-      scope_type: 'Company',
-      scope_id: id,
-      key: 'notifications'
-    )
-    setting.value = value.to_json
-    
-    if setting.save!
-      Rails.logger.info "✅ [Company#notifications_settings=] Saved successfully"
-      true
-    end
-  rescue => e
-    Rails.logger.error "❌ [Company#notifications_settings=] Error: #{e.class} - #{e.message}"
-    raise e
-  end
-
-  def branding_settings
-    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'branding')
-    setting ? JSON.parse(setting.value) : nil
-  rescue => e
-    Rails.logger.error "Error loading branding_settings for Company #{id}: #{e.message}"
-    nil
+  def vehicles_count
+    vehicles.where(is_deleted: false).count
   end
   
-  def branding_settings=(value)
-    Rails.logger.info "📝 [Company#branding_settings=] Setting for Company #{id}"
-    
-    setting = Setting.find_or_initialize_by(
-      scope_type: 'Company',
-      scope_id: id,
-      key: 'branding'
-    )
-    setting.value = value.to_json
-    
-    if setting.save!
-      Rails.logger.info "✅ [Company#branding_settings=] Saved successfully"
-      true
-    end
-  rescue => e
-    Rails.logger.error "❌ [Company#branding_settings=] Error: #{e.class} - #{e.message}"
-    raise e
-  end
-
-  def integration_settings
-    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'integrations')
-    setting ? JSON.parse(setting.value) : nil
-  rescue => e
-    Rails.logger.error "Error loading integration_settings for Company #{id}: #{e.message}"
-    nil
+  def listings_count
+    listings.where(is_deleted: false).count
   end
   
-  def integration_settings=(value)
-    Rails.logger.info "📝 [Company#integration_settings=] Setting for Company #{id}"
-    
-    setting = Setting.find_or_initialize_by(
-      scope_type: 'Company',
-      scope_id: id,
-      key: 'integrations'
-    )
-    setting.value = value.to_json
-    
-    if setting.save!
-      Rails.logger.info "✅ [Company#integration_settings=] Saved successfully"
-      true
-    end
-  rescue => e
-    Rails.logger.error "❌ [Company#integration_settings=] Error: #{e.class} - #{e.message}"
-    raise e
-  end
-
-  def operational_settings
-    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'operational')
-    setting ? JSON.parse(setting.value) : nil
-  rescue => e
-    Rails.logger.error "Error loading operational_settings for Company #{id}: #{e.message}"
-    nil
+  def quotes_count
+    quotes.where(is_deleted: false).count
   end
   
-  def operational_settings=(value)
-    Rails.logger.info "📝 [Company#operational_settings=] Setting operational settings for Company #{id}"
-    Rails.logger.info "📝 [Company#operational_settings=] Value: #{value.inspect}"
-    
-    setting = Setting.find_or_initialize_by(
-      scope_type: 'Company',
-      scope_id: id,
-      key: 'operational'
-    )
-    
-    Rails.logger.info "📝 [Company#operational_settings=] Setting record: #{setting.inspect}"
-    
-    setting.value = value.to_json
-    Rails.logger.info "📝 [Company#operational_settings=] JSON value: #{setting.value}"
-    
-    if setting.save!
-      Rails.logger.info "✅ [Company#operational_settings=] Setting saved successfully"
-      true
-    end
-  rescue => e
-    Rails.logger.error "❌ [Company#operational_settings=] Error: #{e.class} - #{e.message}"
-    Rails.logger.error "❌ [Company#operational_settings=] Backtrace: #{e.backtrace.first(5).join("\n")}"
-    raise e
-  end
-
-  def loan_settings
-    setting = Setting.find_by(scope_type: 'Company', scope_id: id, key: 'loan')
-    setting ? JSON.parse(setting.value) : nil
-  rescue => e
-    Rails.logger.error "Error loading loan_settings for Company #{id}: #{e.message}"
-    nil
+  def invoices_count
+    invoices.where(is_deleted: false).count
   end
   
-  def loan_settings=(value)
-    Rails.logger.info "📝 [Company#loan_settings=] Setting for Company #{id}"
-    
-    setting = Setting.find_or_initialize_by(
-      scope_type: 'Company',
-      scope_id: id,
-      key: 'loan'
-    )
-    setting.value = value.to_json
-    
-    if setting.save!
-      Rails.logger.info "✅ [Company#loan_settings=] Saved successfully"
-      true
-    end
-  rescue => e
-    Rails.logger.error "❌ [Company#loan_settings=] Error: #{e.class} - #{e.message}"
-    raise e
+  def locations_count
+    locations.count
   end
   
-  private
+  # RBAC System Methods
+  def uses_rbac_system?
+    use_rbac_system == true
+  end
   
-  # Auto-create a default location for every company
-  # This ensures payment infrastructure always works (Zego requires properties)
+  def rbac_enabled?
+    uses_rbac_system?
+  end
+  
+  # Get all available roles for this company (system roles + custom roles)
+  def available_roles
+    system_roles = Role.system_roles
+    custom_company_roles = roles.where(is_system_role: false, is_deleted: false)
+    
+    # Filter out hidden roles
+    hidden_role_ids = hidden_roles.pluck(:id)
+    
+    (system_roles + custom_company_roles).reject { |role| hidden_role_ids.include?(role.id) }
+  end
+  
+  # Check if a specific system role is hidden for this company
+  def role_hidden?(role_id)
+    hidden_roles.exists?(id: role_id)
+  end
+  
+  # Hide a system role for this company
+  def hide_role!(role_id)
+    role = Role.find(role_id)
+    return false unless role.is_system_role?
+    
+    company_hidden_roles.find_or_create_by!(role: role)
+    true
+  rescue ActiveRecord::RecordNotFound
+    false
+  end
+  
+  # Unhide a system role for this company
+  def unhide_role!(role_id)
+    company_hidden_roles.where(role_id: role_id).destroy_all
+    true
+  end
+  
+  # Get role by key (handles both system and custom roles)
+  def role_by_key(role_key)
+    # First check system roles
+    system_role = Role.find_by(role_key: role_key, is_system_role: true)
+    return system_role if system_role && !role_hidden?(system_role.id)
+    
+    # Then check custom company roles
+    roles.find_by(role_key: role_key, is_deleted: false)
+  end
+  
+  # Payment gateway configuration
+  def external_payments_enabled?
+    external_payments_id.present?
+  end
+  
+  def payment_gateway_configured?
+    external_payments_enabled?
+  end
+  
+  # Create default location after company creation
   def create_default_location
-    Rails.logger.info "🏢 [Company#create_default_location] Creating default location for Company #{id}: #{name}"
-    
-    location = locations.create!(
-      name: self.name || 'Main Office',
-      address_line1: self.street || 'TBD',
-      city: self.city || 'TBD',
-      state: self.state || 'CA',
-      zip_code: self.zip || '00000',
-      country: 'US',
-      timezone: self.timezone || 'America/New_York',
-      active: true,
-      is_deleted: false
+    locations.create!(
+      name: 'Main Location',
+      is_default: true,
+      status: 'active'
     )
-    
-    Rails.logger.info "✅ [Company#create_default_location] Created location #{location.id}: #{location.name}"
   rescue => e
-    Rails.logger.error "❌ [Company#create_default_location] Error: #{e.class} - #{e.message}"
-    Rails.logger.error "Backtrace: #{e.backtrace.first(5).join("\n")}"
-    # Don't re-raise - we don't want company creation to fail
-    # Admin can manually create location later if needed
+    Rails.logger.error "Failed to create default location for Company #{id}: #{e.message}"
   end
-
-  # Check if company has meaningful communication settings configured
-  def has_communication_settings?
-    comm_settings = communications_settings
-    return false if comm_settings.nil? || comm_settings.empty?
+  
+  # Default location
+  def default_location
+    locations.find_by(is_default: true) || locations.first
+  end
+  
+  # Soft delete
+  def soft_delete!
+    update!(
+      deleted_at: Time.current,
+      status: 'cancelled',
+      subdomain: "deleted-#{id}-#{subdomain}",
+      custom_domain: nil
+    )
+  end
+  
+  def restore!
+    update!(
+      deleted_at: nil,
+      status: 'active'
+    )
+  end
+  
+  # Search
+  def self.search(query)
+    return all if query.blank?
     
-    # Check if email settings have required fields
-    email_settings = comm_settings['email'] || comm_settings[:email]
-    if email_settings.present?
-      # Has email if there's a provider and from email configured
-      has_email = email_settings['fromEmail'].present? || email_settings[:fromEmail].present?
-      return true if has_email
-    end
+    where(
+      'name ILIKE ? OR subdomain ILIKE ? OR custom_domain ILIKE ?',
+      "%#{query}%", "%#{query}%", "%#{query}%"
+    )
+  end
+  
+  # Subscription management helpers
+  def can_add_user?
+    return true if subscription_tier == 'enterprise'
+    return true if max_users.nil?
     
-    # Check if SMS settings have required fields
-    sms_settings = comm_settings['sms'] || comm_settings[:sms]
-    if sms_settings.present?
-      # Has SMS if there's a provider and from number configured
-      has_sms = sms_settings['fromNumber'].present? || sms_settings[:fromNumber].present?
-      return true if has_sms
-    end
+    active_users_count < max_users
+  end
+  
+  def can_add_location?
+    return true if subscription_tier == 'enterprise'
+    return true if max_locations.nil?
     
-    false
-  rescue => e
-    Rails.logger.error "Error checking communication settings for Company #{id}: #{e.message}"
-    false
+    locations_count < max_locations
+  end
+  
+  def remaining_user_slots
+    return Float::INFINITY if subscription_tier == 'enterprise'
+    return Float::INFINITY if max_users.nil?
+    
+    max_users - active_users_count
+  end
+  
+  def remaining_location_slots
+    return Float::INFINITY if subscription_tier == 'enterprise'
+    return Float::INFINITY if max_locations.nil?
+    
+    max_locations - locations_count
   end
 end

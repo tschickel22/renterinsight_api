@@ -128,4 +128,38 @@ class Setting < ApplicationRecord
     setting.destroy
     true
   end
+  
+  # Warranty-specific settings helpers
+  #
+  # Get warranty settings with proper fallback hierarchy
+  # Platform defaults → Company overrides
+  #
+  # @param scope_type [String] 'Platform' or 'Company'
+  # @param scope_id [Integer] The scope ID (0 for Platform, company_id for Company)
+  # @return [Hash] Warranty settings with defaults
+  #
+  def self.get_warranty_settings(scope_type, scope_id)
+    stored = get(scope_type, scope_id, 'warranty')
+    warranty_defaults(scope_type, scope_id).merge(stored || {})
+  end
+  
+  # Default warranty settings
+  #
+  # @param scope_type [String] 'Platform' or 'Company'
+  # @param scope_id [Integer] The scope ID
+  # @return [Hash] Default warranty settings
+  #
+  def self.warranty_defaults(scope_type, scope_id)
+    {
+      'enabled' => true,
+      'requireManufacturerApprovalOver' => 500,
+      'autoCreateArOnApproval' => true,
+      'arAgingBuckets' => [30, 60, 90, 120],
+      'defaultClaimAssigneeId' => nil,
+      'notificationEmail' => nil,
+      'notifyManufacturerOnSubmission' => true,
+      'notifyCompanyOnResponse' => true,
+      'notifyClientOnResolution' => true
+    }
+  end
 end

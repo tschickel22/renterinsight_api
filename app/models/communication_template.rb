@@ -13,6 +13,10 @@ class CommunicationTemplate < ApplicationRecord
     quote_sent
     quote_accepted
     document_shared
+    warranty_submitted_to_manufacturer
+    warranty_manufacturer_responded
+    warranty_approved_client
+    warranty_denied_client
   ].freeze
   
   # Available merge variables for each template type
@@ -33,6 +37,24 @@ class CommunicationTemplate < ApplicationRecord
     ],
     'magic_link' => %w[
       user_name magic_link link_expires company_name
+    ],
+    'warranty_submitted_to_manufacturer' => %w[
+      manufacturer_name claim_number vehicle_info customer_name claim_date
+      estimated_amount parts_list labor_details claim_notes warranty_link
+      photos_count documents_count company_name company_phone company_email
+    ],
+    'warranty_manufacturer_responded' => %w[
+      company_user_name claim_number response_status response_date
+      manufacturer_response approved_amount_section claim_admin_link
+    ],
+    'warranty_approved_client' => %w[
+      customer_name vehicle_info ticket_description approved_amount
+      client_copay_section next_steps portal_link company_name company_phone
+      ticket_number
+    ],
+    'warranty_denied_client' => %w[
+      customer_name vehicle_info denial_reason customer_responsibility_section
+      portal_link company_name company_phone ticket_number
     ]
   }.freeze
   

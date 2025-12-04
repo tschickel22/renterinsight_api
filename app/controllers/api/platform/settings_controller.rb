@@ -12,7 +12,8 @@ module Api
           communications: fetch_communications_settings,
           notifications: fetch_notifications_settings,
           general: fetch_general_settings,
-          branding: fetch_branding_settings
+          branding: fetch_branding_settings,
+          warranty: fetch_warranty_settings
         }, status: :ok
       rescue => e
         Rails.logger.error "[PlatformSettings#show] Error: #{e.message}"
@@ -20,7 +21,8 @@ module Api
           communications: default_communications_settings,
           notifications: default_notifications_settings,
           general: default_general_settings,
-          branding: default_branding_settings
+          branding: default_branding_settings,
+          warranty: default_warranty_settings
         }, status: :ok
       end
 
@@ -50,6 +52,12 @@ module Api
         if params[:branding].present?
           save_branding_settings(params[:branding])
           updated_settings[:branding] = fetch_branding_settings
+        end
+        
+        # Update warranty settings if provided
+        if params[:warranty].present?
+          save_warranty_settings(params[:warranty])
+          updated_settings[:warranty] = fetch_warranty_settings
         end
         
         render json: {
@@ -175,6 +183,10 @@ module Api
         
         branding
       end
+      
+      def fetch_warranty_settings
+        Setting.get_warranty_settings('Platform', 0)
+      end
 
       def save_communications_settings(settings)
         # Encrypt sensitive credentials before saving
@@ -200,6 +212,10 @@ module Api
         end
         
         Setting.set('Platform', 0, 'branding', normalized)
+      end
+      
+      def save_warranty_settings(settings)
+        Setting.set('Platform', 0, 'warranty', settings)
       end
 
       def encrypt_sensitive_fields(settings, channel)
@@ -321,6 +337,10 @@ module Api
           platformLogo: nil,
           platformName: ENV['PLATFORM_NAME'] || 'RenterInsight'
         }
+      end
+      
+      def default_warranty_settings
+        Setting.warranty_defaults('Platform', 0)
       end
       
       def absolute_url(path)

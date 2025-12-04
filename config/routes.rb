@@ -41,6 +41,10 @@ Rails.application.routes.draw do
   post '/q/:token/accept', to: 'api/public/quotes#accept', as: :public_quote_accept
   post '/q/:token/reject', to: 'api/public/quotes#reject', as: :public_quote_reject
   
+  # ==================== PUBLIC WARRANTY CLAIMS ====================
+  get '/w/:token', to: 'api/public/warranty_claims#show', as: :public_warranty_claim
+  post '/w/:token/respond', to: 'api/public/warranty_claims#respond', as: :public_warranty_claim_respond
+  
   # API endpoints for public forms (for frontend)
   namespace :api do
     # ==================== PUBLIC INVITATIONS (No Auth Required) ====================
@@ -90,6 +94,41 @@ Rails.application.routes.draw do
           get :stats
         end
       end
+      
+      # ==================== WARRANTY SYSTEM ====================
+      # Manufacturers
+      resources :manufacturers, only: [:index, :show]
+      
+      # Warranty Claims
+      resources :warranty_claims, path: 'warranty-claims' do
+        member do
+          post :submit
+          post :approve
+          post :deny
+          post :request_more_info
+          post :resubmit
+          post :close
+          post :record_payment
+          get :public_link
+        end
+        collection do
+          get :stats
+        end
+      end
+      
+      # Manufacturer AR Transactions
+      resources :manufacturer_ar_transactions, path: 'manufacturer-ar-transactions' do
+        member do
+          post :mark_short_paid
+          post :write_off
+        end
+        collection do
+          get :stats
+        end
+      end
+      
+      # Manufacturer AR Payments
+      resources :manufacturer_ar_payments, path: 'manufacturer-ar-payments', only: [:index, :show]
       
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
