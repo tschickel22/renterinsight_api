@@ -429,7 +429,7 @@ DEPENDENCIES
   xml-simple (~> 1.1)
 
 RUBY VERSION
-   ruby 3.2.3p157
+   ruby 3.2.6p234
 
 BUNDLED WITH
    2.7.2
