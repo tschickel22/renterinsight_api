@@ -130,3 +130,4 @@ ActiveRecordBase.connection.active
 /examples/
 
 /config/credentials/production.key
+/vendor/bundle/
