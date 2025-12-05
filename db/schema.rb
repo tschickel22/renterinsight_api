@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_03_052000) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_04_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -527,6 +527,21 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_052000) do
     t.index ["company_id", "role_id"], name: "index_company_hidden_roles_on_company_and_role", unique: true
     t.index ["company_id"], name: "index_company_hidden_roles_on_company_id"
     t.index ["role_id"], name: "index_company_hidden_roles_on_role_id"
+  end
+
+  create_table "company_manufacturers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.string "dealer_code"
+    t.boolean "active", default: true, null: false
+    t.text "notes"
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_company_manufacturers_on_active"
+    t.index ["company_id", "manufacturer_id"], name: "index_company_manufacturers_on_company_and_manufacturer", unique: true
+    t.index ["company_id"], name: "index_company_manufacturers_on_company_id"
+    t.index ["manufacturer_id"], name: "index_company_manufacturers_on_manufacturer_id"
   end
 
   create_table "contact_activities", force: :cascade do |t|
@@ -1122,6 +1137,21 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_052000) do
     t.index ["location_id"], name: "index_location_activities_on_location_id"
     t.index ["occurred_at"], name: "index_location_activities_on_occurred_at"
     t.index ["user_id"], name: "index_location_activities_on_user_id"
+  end
+
+  create_table "location_manufacturers", force: :cascade do |t|
+    t.bigint "location_id", null: false
+    t.bigint "manufacturer_id", null: false
+    t.string "dealer_code"
+    t.boolean "active", default: true, null: false
+    t.text "notes"
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_location_manufacturers_on_active"
+    t.index ["location_id", "manufacturer_id"], name: "index_location_manufacturers_on_location_and_manufacturer", unique: true
+    t.index ["location_id"], name: "index_location_manufacturers_on_location_id"
+    t.index ["manufacturer_id"], name: "index_location_manufacturers_on_manufacturer_id"
   end
 
   create_table "locations", force: :cascade do |t|
@@ -2112,6 +2142,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_052000) do
   add_foreign_key "communications", "communication_threads"
   add_foreign_key "company_hidden_roles", "companies"
   add_foreign_key "company_hidden_roles", "roles"
+  add_foreign_key "company_manufacturers", "companies"
+  add_foreign_key "company_manufacturers", "manufacturers"
   add_foreign_key "contact_activities", "accounts"
   add_foreign_key "contact_activities", "contact_activities", column: "related_activity_id"
   add_foreign_key "contact_activities", "contacts"
@@ -2159,6 +2191,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_03_052000) do
   add_foreign_key "loans", "payment_methods", column: "default_payment_method_id"
   add_foreign_key "location_activities", "locations"
   add_foreign_key "location_activities", "users"
+  add_foreign_key "location_manufacturers", "locations"
+  add_foreign_key "location_manufacturers", "manufacturers"
   add_foreign_key "locations", "companies"
   add_foreign_key "lot_map_history_entries", "lot_map_lots", column: "lot_id"
   add_foreign_key "lot_map_history_entries", "users"

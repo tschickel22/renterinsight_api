@@ -58,7 +58,7 @@ module Api
       def create
         return unless authorize_action!('service', 'create')
         
-        service_ticket = @company.service_tickets.find(params[:service_ticket_id])
+        service_ticket = @company.service_tickets.find(params[:warranty_claim][:service_ticket_id])
         
         @warranty_claim = WarrantyClaim.new(warranty_claim_params)
         @warranty_claim.company = @company

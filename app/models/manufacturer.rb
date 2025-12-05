@@ -30,11 +30,22 @@ class Manufacturer < ApplicationRecord
   has_many :warranty_claims, dependent: :restrict_with_error
   has_many :manufacturer_ar_transactions, dependent: :restrict_with_error
   
+  # Company Associations (through join table)
+  has_many :company_manufacturers, dependent: :destroy
+  has_many :companies, through: :company_manufacturers
+  
+  # Location Associations (through join table)
+  has_many :location_manufacturers, dependent: :destroy
+  has_many :locations, through: :location_manufacturers
+  
   # Validations
   validates :name, presence: true, uniqueness: { case_sensitive: false }
   validates :industry_type, presence: true, inclusion: { in: INDUSTRY_TYPES }
   validates :contact_email, format: { with: URI::MailTo::EMAIL_REGEXP }, allow_blank: true
-  validates :website, format: { with: URI::DEFAULT_PARSER.make_regexp(%w[http https]) }, allow_blank: true
+  # Website validation - accept domains with or without protocol
+  validates :website, format: { 
+    with: /\A(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&\/\/=]*)\z/
+  }, allow_blank: true
   
   # Serialize JSONB columns
   attribute :oem_codes, :json, default: {}
@@ -54,6 +65,7 @@ class Manufacturer < ApplicationRecord
   
   # Callbacks
   before_save :normalize_name
+  before_save :normalize_website
   
   # Instance Methods
   
@@ -112,5 +124,17 @@ class Manufacturer < ApplicationRecord
   
   def normalize_name
     self.name = name.strip if name.present?
+  end
+  
+  def normalize_website
+    return if website.blank?
+    
+    # Strip whitespace
+    self.website = website.strip
+    
+    # Add https:// if no protocol specified
+    unless website.match?(/\Ahttps?:\/\//i)
+      self.website = "https://#{website}"
+    end
   end
 end

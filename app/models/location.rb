@@ -16,6 +16,10 @@ class Location < ApplicationRecord
   has_many :quotes, dependent: :nullify
   has_many :brochures, dependent: :nullify
   has_many :location_activities, dependent: :destroy
+  
+  # Warranty & Service Module Associations
+  has_many :location_manufacturers, dependent: :destroy
+  has_many :manufacturers, through: :location_manufacturers
 
   # Validations
   validates :company_id, presence: true

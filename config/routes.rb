@@ -314,6 +314,9 @@ Rails.application.routes.draw do
             patch :update_display, path: 'update-display'
           end
         end
+        
+        # ==================== LOCATION MANUFACTURERS (Warranty System) ====================
+        resources :manufacturers, only: [:index, :create, :update, :destroy], controller: 'locations/manufacturers'
       end
       
       # ==================== SERVICE TICKETS ====================
@@ -494,6 +497,87 @@ Rails.application.routes.draw do
           get :score
         end
       end
+      
+      # ==================== ADMIN NAMESPACE (Platform Admin Only) ====================
+      namespace :admin do
+        resources :manufacturers do
+          member do
+            post :activate
+            post :deactivate
+          end
+        end
+      end
+    end
+  end
+
+  # One-time setup endpoint for Render free tier
+  namespace :api do
+    get 'setup', to: 'setup#create'
+    post 'setup', to: 'setup#create'
+    get 'setup/sources', to: 'setup#create_sources'
+    post 'setup/sources', to: 'setup#create_sources'
+  end
+
+  # Phase 5A - Unified Login Authentication
+  namespace :api do
+    namespace :auth do
+      post 'login', to: 'login#create'
+      post 'logout', to: 'login#destroy'
+      post 'refresh', to: 'login#refresh'
+      get 'verify', to: 'login#verify'
+      get 'me', to: 'login#me'
+      
+      # Password Reset
+      post 'request_password_reset', to: 'password_reset#request_reset'
+      post 'verify_reset_token', to: 'password_reset#verify_token'
+      post 'reset_password', to: 'password_reset#reset_password'
+      
+      # Magic Link
+      post 'request_magic_link', to: 'magic_link#request_magic_link'
+      get 'verify_magic_link', to: 'magic_link#verify_magic_link'
+      
+      # Phase 6 - Token Management
+      resource :tokens, only: [] do
+        post :refresh, on: :collection
+        post :validate, on: :collection
+        delete :logout, on: :collection
+      end
+    end
+    
+    # MFA (Multi-Factor Authentication) - Phase 3: User Enrollment
+    scope path: 'mfa' do
+      # Status
+      get 'status', to: 'mfa#status'
+      
+      # Enrollment
+      post 'enroll/start', to: 'mfa#enroll_start'
+      post 'enroll/verify', to: 'mfa#enroll_verify'
+      
+      # Backup Codes
+      get 'backup-codes', to: 'mfa#backup_codes_status'
+      post 'backup-codes/regenerate', to: 'mfa#regenerate_backup_codes'
+      
+      # Disable
+      post 'disable', to: 'mfa#disable'
+      
+      # Login Verification (Phase 4)
+      post 'verify-login', to: 'mfa#verify_login'
+    end
+    
+    # Phase 6 - Unified Invitation System (User Invitations)
+    # NOTE: Public invitation endpoints are declared at the top of the api namespace
+    
+    # Authenticated invitation endpoints
+    resources :invitations, only: [:show, :destroy] do
+      member do
+        post :resend
+      end
+    end
+    
+    # Company-scoped invitations
+    scope path: 'companies/:company_id' do
+      get 'invitations', to: 'invitations#index'
+      post 'invitations', to: 'invitations#create'
     end
   end
 
@@ -753,6 +837,9 @@ Rails.application.routes.draw do
         post :test_sms, on: :collection
       end
       
+      # Company Manufacturers (Warranty System)
+      resources :manufacturers, only: [:index, :create, :update, :destroy]
+      
       # Company Security Settings
       scope path: ':company_id/security' do
         get 'settings', to: 'security_settings#show'
@@ -808,77 +895,6 @@ Rails.application.routes.draw do
           post :regenerate_token, path: 'regenerate-token'
         end
       end
-    end
-  end
-
-  # One-time setup endpoint for Render free tier
-  namespace :api do
-    get 'setup', to: 'setup#create'
-    post 'setup', to: 'setup#create'
-    get 'setup/sources', to: 'setup#create_sources'
-    post 'setup/sources', to: 'setup#create_sources'
-  end
-
-  # Phase 5A - Unified Login Authentication
-  namespace :api do
-    namespace :auth do
-      post 'login', to: 'login#create'
-      post 'logout', to: 'login#destroy'
-      post 'refresh', to: 'login#refresh'
-      get 'verify', to: 'login#verify'
-      get 'me', to: 'login#me'
-      
-      # Password Reset
-      post 'request_password_reset', to: 'password_reset#request_reset'
-      post 'verify_reset_token', to: 'password_reset#verify_token'
-      post 'reset_password', to: 'password_reset#reset_password'
-      
-      # Magic Link
-      post 'request_magic_link', to: 'magic_link#request_magic_link'
-      get 'verify_magic_link', to: 'magic_link#verify_magic_link'
-      
-      # Phase 6 - Token Management
-      resource :tokens, only: [] do
-        post :refresh, on: :collection
-        post :validate, on: :collection
-        delete :logout, on: :collection
-      end
-    end
-    
-    # MFA (Multi-Factor Authentication) - Phase 3: User Enrollment
-    scope path: 'mfa' do
-      # Status
-      get 'status', to: 'mfa#status'
-      
-      # Enrollment
-      post 'enroll/start', to: 'mfa#enroll_start'
-      post 'enroll/verify', to: 'mfa#enroll_verify'
-      
-      # Backup Codes
-      get 'backup-codes', to: 'mfa#backup_codes_status'
-      post 'backup-codes/regenerate', to: 'mfa#regenerate_backup_codes'
-      
-      # Disable
-      post 'disable', to: 'mfa#disable'
-      
-      # Login Verification (Phase 4)
-      post 'verify-login', to: 'mfa#verify_login'
-    end
-    
-    # Phase 6 - Unified Invitation System (User Invitations)
-    # NOTE: Public invitation endpoints are declared at the top of the api namespace
-    
-    # Authenticated invitation endpoints
-    resources :invitations, only: [:show, :destroy] do
-      member do
-        post :resend
-      end
-    end
-    
-    # Company-scoped invitations
-    scope path: 'companies/:company_id' do
-      get 'invitations', to: 'invitations#index'
-      post 'invitations', to: 'invitations#create'
     end
   end
 

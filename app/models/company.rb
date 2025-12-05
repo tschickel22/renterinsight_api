@@ -31,7 +31,8 @@ class Company < ApplicationRecord
   has_many :invoices, dependent: :destroy
   
   # Warranty & Service Module Associations
-  has_many :manufacturers, dependent: :destroy
+  has_many :company_manufacturers, dependent: :destroy
+  has_many :manufacturers, through: :company_manufacturers
   has_many :warranty_claims, dependent: :destroy
   has_many :manufacturer_ar_transactions, dependent: :destroy
   has_many :manufacturer_ar_payments, dependent: :destroy
