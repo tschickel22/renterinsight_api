@@ -324,13 +324,36 @@ class WarrantyClaim < ApplicationRecord
   end
   
   def send_manufacturer_notification
-    # This will be implemented in Phase 4 with email workflow
-    # For now, just log it
-    Rails.logger.info("📧 Warranty claim #{claim_number} submitted to #{manufacturer.name}")
+    begin
+      WarrantyNotificationService.notify_manufacturer(self)
+      Rails.logger.info("✅ Email sent: Warranty claim #{claim_number} submitted to #{manufacturer.name}")
+    rescue WarrantyNotificationService::TemplateNotFoundError => e
+      Rails.logger.error("❌ Email failed for claim #{claim_number}: #{e.message}")
+      # Don't fail the submission - just log the error
+    rescue WarrantyNotificationService::MissingRecipientError => e
+      Rails.logger.warn("⚠️ Cannot email manufacturer for claim #{claim_number}: #{e.message}")
+      # Expected when manufacturer has no email - don't fail
+    rescue => e
+      Rails.logger.error("❌ Unexpected error sending manufacturer notification for claim #{claim_number}: #{e.message}")
+      Rails.logger.error(e.backtrace.first(5).join("\n"))
+      # Don't fail the submission
+    end
   end
   
   def notify_company_of_response
-    # This will be implemented in Phase 4 with email workflow
-    Rails.logger.info("📧 Manufacturer responded to claim #{claim_number}")
+    begin
+      WarrantyNotificationService.notify_company_on_response(self)
+      Rails.logger.info("✅ Email sent: Manufacturer responded to claim #{claim_number}")
+    rescue WarrantyNotificationService::TemplateNotFoundError => e
+      Rails.logger.error("❌ Email failed for claim #{claim_number}: #{e.message}")
+      # Don't fail the response processing
+    rescue WarrantyNotificationService::MissingRecipientError => e
+      Rails.logger.warn("⚠️ Cannot email company for claim #{claim_number}: #{e.message}")
+      # Expected when no notification email configured
+    rescue => e
+      Rails.logger.error("❌ Unexpected error sending company notification for claim #{claim_number}: #{e.message}")
+      Rails.logger.error(e.backtrace.first(5).join("\n"))
+      # Don't fail the response
+    end
   end
 end

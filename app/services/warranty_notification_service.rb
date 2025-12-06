@@ -257,21 +257,29 @@ class WarrantyNotificationService
     manufacturer = warranty_claim.manufacturer
     service_ticket = warranty_claim.service_ticket
     
+    # Get dealer code from location or company manufacturer relationship
+    dealer_code = get_dealer_code(warranty_claim)
+    
+    # Get company contact info from settings or location
+    company_phone = get_company_phone(warranty_claim.company, warranty_claim.location)
+    company_email = get_company_email(warranty_claim.company)
+    
     context = {
       'claim_number' => warranty_claim.claim_number,
       'claim_date' => warranty_claim.submitted_at&.strftime('%m/%d/%Y') || Date.today.strftime('%m/%d/%Y'),
       'estimated_amount' => format_currency(warranty_claim.estimated_amount),
       'approved_amount' => format_currency(warranty_claim.approved_amount),
-      'claim_notes' => warranty_claim.description || '',
+      'claim_notes' => warranty_claim.notes_to_manufacturer || '',
       'response_status' => warranty_claim.status&.titleize || 'Pending',
-      'response_date' => warranty_claim.updated_at&.strftime('%m/%d/%Y'),
+      'response_date' => warranty_claim.manufacturer_responded_at&.strftime('%m/%d/%Y') || warranty_claim.updated_at&.strftime('%m/%d/%Y'),
       'manufacturer_name' => manufacturer&.name || 'Manufacturer',
-      'manufacturer_response' => warranty_claim.response_notes || '',
+      'manufacturer_response' => warranty_claim.manufacturer_response || '',
       'denial_reason' => warranty_claim.denial_reason || '',
       'company_name' => company.name,
-      'company_phone' => company.phone || '',
-      'company_email' => company.email || '',
-      'warranty_link' => warranty_claim.public_url || '',
+      'company_phone' => company_phone,
+      'company_email' => company_email,
+      'dealer_code' => dealer_code || 'N/A',
+      'warranty_link' => warranty_claim.public_link || '',
       'claim_admin_link' => admin_claim_url(warranty_claim),
       'portal_link' => client_portal_url(warranty_claim)
     }
@@ -279,9 +287,14 @@ class WarrantyNotificationService
     # Add service ticket info if available
     if service_ticket
       context['ticket_number'] = service_ticket.id.to_s
-      context['ticket_description'] = service_ticket.description || ''
+      context['ticket_description'] = service_ticket.description || service_ticket.title || ''
       context['vehicle_info'] = format_vehicle_info(service_ticket)
       context['customer_name'] = format_customer_name(service_ticket)
+    else
+      context['ticket_number'] = ''
+      context['ticket_description'] = ''
+      context['vehicle_info'] = 'Vehicle'
+      context['customer_name'] = 'Customer'
     end
     
     # Add parts and labor details
@@ -292,12 +305,12 @@ class WarrantyNotificationService
     
     # Conditional sections
     context['approved_amount_section'] = warranty_claim.approved_amount.present? ? 
-      "Approved Amount: #{format_currency(warranty_claim.approved_amount)}" : ''
-    context['client_copay_section'] = warranty_claim.client_copay.to_f > 0 ? 
-      "Your Responsibility: #{format_currency(warranty_claim.client_copay)}" : 
-      "No out-of-pocket cost to you."
+    "Approved Amount: #{format_currency(warranty_claim.approved_amount)}" : ''
+    context['client_copay_section'] = warranty_claim.client_copay_amount.to_f > 0 ? 
+    "Your Responsibility: #{format_currency(warranty_claim.client_copay_amount)}" : 
+    "No out-of-pocket cost to you."
     context['customer_responsibility_section'] = warranty_claim.estimated_amount.present? ? 
-      "Estimated repair cost: #{format_currency(warranty_claim.estimated_amount)}" : ''
+    "Estimated repair cost: #{format_currency(warranty_claim.estimated_amount)}" : ''
     context['next_steps'] = 'We will schedule the repair and keep you updated on progress.'
     
     context
@@ -345,26 +358,26 @@ class WarrantyNotificationService
   
   # Format parts list
   def self.format_parts_list(warranty_claim)
-    return 'No parts listed' if warranty_claim.parts_required.blank?
+    return 'No parts listed' if warranty_claim.parts.blank?
     
-    parts = warranty_claim.parts_required.is_a?(Array) ? 
-      warranty_claim.parts_required : 
-      JSON.parse(warranty_claim.parts_required) rescue []
+    parts = warranty_claim.parts.is_a?(Array) ? 
+      warranty_claim.parts : 
+      JSON.parse(warranty_claim.parts.to_s) rescue []
     
     return 'No parts listed' if parts.empty?
     
     parts.map do |part|
-      "- #{part['description'] || part['part_number']}: Qty #{part['quantity']} @ #{format_currency(part['unit_cost'])}"
+      "- #{part['description'] || part['part_number']}: Qty #{part['quantity']} @ #{format_currency(part['cost'])}"
     end.join("\n")
   end
   
   # Format labor details
   def self.format_labor_details(warranty_claim)
-    return 'No labor listed' if warranty_claim.labor_details.blank?
+    return 'No labor listed' if warranty_claim.labor.blank?
     
-    labor = warranty_claim.labor_details.is_a?(Array) ? 
-      warranty_claim.labor_details : 
-      JSON.parse(warranty_claim.labor_details) rescue []
+    labor = warranty_claim.labor.is_a?(Array) ? 
+      warranty_claim.labor : 
+      JSON.parse(warranty_claim.labor.to_s) rescue []
     
     return 'No labor listed' if labor.empty?
     
@@ -375,13 +388,60 @@ class WarrantyNotificationService
   
   # Generate admin claim URL
   def self.admin_claim_url(warranty_claim)
-    base_url = Rails.application.config.frontend_url || ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    base_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
     "#{base_url}/warranty-claims/#{warranty_claim.id}"
   end
   
   # Generate client portal URL
   def self.client_portal_url(warranty_claim)
-    base_url = Rails.application.config.frontend_url || ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    base_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
     "#{base_url}/portal/service-tickets"
+  end
+  
+  # Get dealer code from location or company manufacturer relationship
+  def self.get_dealer_code(warranty_claim)
+    manufacturer_id = warranty_claim.manufacturer_id
+    
+    # Try location-specific dealer code first
+    if warranty_claim.location_id.present?
+      location_manufacturer = LocationManufacturer.find_by(
+        location_id: warranty_claim.location_id,
+        manufacturer_id: manufacturer_id
+      )
+      return location_manufacturer.dealer_code if location_manufacturer&.dealer_code.present?
+    end
+    
+    # Fall back to company-level dealer code
+    company_manufacturer = CompanyManufacturer.find_by(
+      company_id: warranty_claim.company_id,
+      manufacturer_id: manufacturer_id
+    )
+    return company_manufacturer.dealer_code if company_manufacturer&.dealer_code.present?
+    
+    # No dealer code found
+    nil
+  end
+  
+  # Get company phone from location or communication settings
+  def self.get_company_phone(company, location = nil)
+    # Try location phone first
+    if location&.phone.present?
+      return location.phone
+    end
+    
+    # Try communication settings
+    comm_settings = CommunicationSettingsService.for_company(company)
+    phone = comm_settings.sms_config[:from_number]
+    return phone if phone.present?
+    
+    # Default fallback
+    '(555) 555-5555'
+  end
+  
+  # Get company email from communication settings
+  def self.get_company_email(company)
+    comm_settings = CommunicationSettingsService.for_company(company)
+    email_config = comm_settings.email_config
+    email_config[:from_email] || 'noreply@renterinsight.com'
   end
 end
