@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_05_000000) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_09_215202) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1295,6 +1295,19 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_05_000000) do
     t.index ["warranty_claim_id"], name: "index_manufacturer_ar_transactions_on_warranty_claim_id"
   end
 
+  create_table "manufacturer_claim_views", force: :cascade do |t|
+    t.bigint "warranty_claim_id", null: false
+    t.bigint "company_id", null: false
+    t.string "ip_address"
+    t.string "user_agent"
+    t.datetime "viewed_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_manufacturer_claim_views_on_company_id"
+    t.index ["warranty_claim_id", "viewed_at"], name: "idx_on_warranty_claim_id_viewed_at_560fa437c4"
+    t.index ["warranty_claim_id"], name: "index_manufacturer_claim_views_on_warranty_claim_id"
+  end
+
   create_table "manufacturers", force: :cascade do |t|
     t.string "name", null: false
     t.string "industry_type", null: false
@@ -2206,6 +2219,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_05_000000) do
   add_foreign_key "manufacturer_ar_transactions", "locations", on_delete: :nullify
   add_foreign_key "manufacturer_ar_transactions", "manufacturers", on_delete: :restrict
   add_foreign_key "manufacturer_ar_transactions", "warranty_claims", on_delete: :restrict
+  add_foreign_key "manufacturer_claim_views", "companies"
+  add_foreign_key "manufacturer_claim_views", "warranty_claims"
   add_foreign_key "notes", "users"
   add_foreign_key "nurture_enrollments", "companies"
   add_foreign_key "nurture_enrollments", "leads"

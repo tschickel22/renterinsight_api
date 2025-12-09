@@ -56,7 +56,7 @@ class ManufacturerArPayment < ApplicationRecord
   
   # Serialization
   def as_json(options = {})
-    {
+    base = {
       id: id,
       companyId: company_id,
       manufacturerArTransactionId: manufacturer_ar_transaction_id,
@@ -80,6 +80,21 @@ class ManufacturerArPayment < ApplicationRecord
       # Attachment count
       attachmentsCount: attachments.count
     }
+    
+    # Include attachment details if requested
+    if options[:include_attachments]
+      base[:attachments] = attachments.map do |attachment|
+        {
+          id: attachment.id,
+          filename: attachment.filename.to_s,
+          contentType: attachment.content_type,
+          byteSize: attachment.byte_size,
+          url: Rails.application.routes.url_helpers.url_for(attachment)
+        }
+      end
+    end
+    
+    base
   end
   
   private

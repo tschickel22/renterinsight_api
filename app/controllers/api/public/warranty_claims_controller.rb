@@ -21,7 +21,14 @@ module Api
       def show
         claim = WarrantyClaim.find_by_public_token!(params[:token])
         
-        # Increment view counter
+        # Track manufacturer view
+        ManufacturerClaimView.record_view!(
+          claim,
+          ip_address: request.remote_ip,
+          user_agent: request.user_agent
+        )
+        
+        # Legacy: Still increment the old counter for backwards compatibility
         claim.increment_views!
         
         render json: {

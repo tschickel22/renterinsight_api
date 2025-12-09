@@ -97,7 +97,14 @@ class ManufacturerArTransaction < ApplicationRecord
   # Record Payment
   def record_payment!(amount:, payment_date:, payment_method:, reference_number: nil, notes: nil, recorded_by:)
     raise ArgumentError, 'Payment amount must be greater than 0' if amount <= 0
-    raise ArgumentError, 'Cannot record payment on paid/written-off transaction' if paid? || written_off?
+    raise ArgumentError, 'Cannot record payment on fully paid transaction' if paid?
+    
+    # If written off, we're reopening the transaction
+    if written_off?
+      self.write_off_reason = nil
+      self.amount_outstanding = original_claim_amount - amount_paid_to_date
+      self.notes = [self.notes, "Transaction reopened from written-off status on #{Date.current} by #{recorded_by}"].compact.join("\n\n")
+    end
     
     # Create payment record
     payment = manufacturer_ar_payments.create!(
@@ -194,17 +201,39 @@ class ManufacturerArTransaction < ApplicationRecord
         name: manufacturer.name
       } : nil,
       
-      warrantyClaim: warranty_claim ? {
-        id: warranty_claim.id,
-        claimNumber: warranty_claim.claim_number,
-        status: warranty_claim.status
-      } : nil,
+      warrantyClaim: begin
+        if warranty_claim
+          {
+            id: warranty_claim.id,
+            claimNumber: warranty_claim.claim_number,
+            status: warranty_claim.status,
+            submittedAt: warranty_claim.submitted_at,
+            approvedAt: warranty_claim.approved_at,
+            deniedAt: warranty_claim.denied_at,
+            manufacturerRespondedAt: warranty_claim.manufacturer_responded_at
+          }
+        else
+          nil
+        end
+      rescue => e
+        Rails.logger.error("Error serializing warranty claim: #{e.message}")
+        nil
+      end,
       
       # Calculated values
       daysOutstanding: days_outstanding,
       overdue: overdue?,
       paymentsCount: manufacturer_ar_payments.count,
-      payments: options[:include_payments] ? manufacturer_ar_payments.map(&:as_json) : nil
+      payments: begin
+        if options[:include_payments]
+          manufacturer_ar_payments.map { |p| p.as_json(include_attachments: true) }
+        else
+          nil
+        end
+      rescue => e
+        Rails.logger.error("Error serializing payments: #{e.message}")
+        []
+      end
     }
   end
   

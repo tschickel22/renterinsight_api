@@ -4,7 +4,7 @@ module Api
   module V1
     class WarrantyClaimsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_warranty_claim, only: [:show, :update, :resubmit, :record_payment, :close]
+      before_action :set_warranty_claim, only: [:show, :update, :submit, :resubmit, :reopen, :record_payment, :close]
       
       # GET /api/v1/warranty-claims
       def index
@@ -127,6 +127,29 @@ module Api
         else
           render json: { 
             errors: ['Unable to resubmit warranty claim'] 
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/v1/warranty-claims/:id/reopen
+      def reopen
+        return unless authorize_action!('service', 'update')
+        
+        unless @warranty_claim.closed?
+          return render json: { 
+            errors: ['Only closed warranty claims can be reopened'] 
+          }, status: :unprocessable_entity
+        end
+        
+        # Set status to 'submitted' so manufacturer can review again
+        if @warranty_claim.update(status: 'submitted', closed_at: nil, reopened_at: Time.current)
+          render json: { 
+            data: @warranty_claim.as_json,
+            message: 'Warranty claim reopened successfully'
+          }
+        else
+          render json: { 
+            errors: ['Unable to reopen warranty claim'] 
           }, status: :unprocessable_entity
         end
       end

@@ -56,6 +56,7 @@ class WarrantyClaim < ApplicationRecord
   belongs_to :service_ticket
   belongs_to :manufacturer
   has_one :manufacturer_ar_transaction, dependent: :destroy
+  has_many :manufacturer_claim_views, dependent: :destroy
   
   # Active Storage for attachments (photos, docs, remittance)
   has_many_attached :attachments
@@ -126,7 +127,9 @@ class WarrantyClaim < ApplicationRecord
   end
   
   def can_be_resubmitted?
-    denied?
+    # Allow resubmission for any submitted claim except draft and closed
+    # Use case: Manufacturer says they didn't receive the email
+    !draft? && !closed?
   end
   
   # Status Transitions
@@ -211,6 +214,15 @@ class WarrantyClaim < ApplicationRecord
     increment!(:views_count)
   end
   
+  # New methods for manufacturer view tracking
+  def manufacturer_view_count
+    manufacturer_claim_views.count
+  end
+  
+  def last_viewed_at
+    manufacturer_claim_views.maximum(:viewed_at)
+  end
+  
   # Calculations
   def parts_total
     return 0 unless parts.is_a?(Array)
@@ -263,6 +275,8 @@ class WarrantyClaim < ApplicationRecord
       publicToken: public_token,
       publicLink: public_link,
       viewsCount: views_count,
+      manufacturerViewCount: manufacturer_view_count,
+      lastViewedAt: last_viewed_at,
       submittedBy: submitted_by,
       approvedBy: approved_by,
       createdAt: created_at,

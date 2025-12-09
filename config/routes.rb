@@ -107,6 +107,7 @@ Rails.application.routes.draw do
           post :deny
           post :request_more_info
           post :resubmit
+          post :reopen
           post :close
           post :record_payment
           get :public_link
@@ -128,7 +129,11 @@ Rails.application.routes.draw do
       end
       
       # Manufacturer AR Payments
-      resources :manufacturer_ar_payments, path: 'manufacturer-ar-payments', only: [:index, :show]
+      resources :manufacturer_ar_payments, path: 'manufacturer-ar-payments' do
+        member do
+          post :upload_attachments
+        end
+      end
       
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
