@@ -4,7 +4,7 @@ module Api
   module V1
     class ServiceTicketsController < ApplicationController
       before_action :set_company
-      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :mark_warranty_suspected]
+      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :mark_warranty_suspected, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both]
       
       # GET /api/v1/service-tickets
       def index
@@ -130,6 +130,156 @@ module Api
         end
       end
       
+      # POST /api/v1/service-tickets/:id/set-line-billing
+      # Set billing type (warranty vs customer) for a specific line item
+      def set_line_billing
+        return unless authorize_action!('service', 'update')
+        
+        begin
+          @service_ticket.set_line_billing(
+            index: params[:index].to_i,
+            type: params[:type],
+            billing_type: params[:billing_type],
+            manufacturer_id: params[:manufacturer_id]
+          )
+          
+          render json: {
+            success: true,
+            data: serialize_ticket(@service_ticket),
+            message: "Line item marked as #{params[:billing_type]}"
+          }
+        rescue => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/v1/service-tickets/:id/generate-customer-invoice
+      # Generate invoice for customer-pay items only
+      def generate_customer_invoice
+        return unless authorize_action!('service', 'update')
+        
+        unless @service_ticket.has_customer_items?
+          return render json: { error: 'No customer items to invoice' }, status: :unprocessable_entity
+        end
+        
+        begin
+          service = ServiceTicketInvoiceService.new(@service_ticket)
+          invoice = service.generate_customer_invoice
+          
+          render json: {
+            success: true,
+            invoice: serialize_invoice(invoice),
+            message: 'Customer invoice generated successfully'
+          }, status: :created
+        rescue => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/v1/service-tickets/:id/generate-warranty-claim
+      # Generate warranty claim and invoice for warranty items only
+      def generate_warranty_claim
+        return unless authorize_action!('service', 'update')
+        
+        unless @service_ticket.has_warranty_items?
+          return render json: { error: 'No warranty items selected' }, status: :unprocessable_entity
+        end
+        
+        unless params[:manufacturer_id].present?
+          return render json: { error: 'Manufacturer ID required' }, status: :unprocessable_entity
+        end
+        
+        begin
+          # Create warranty claim
+          claim = WarrantyClaim.create!(
+            company_id: @service_ticket.company_id,
+            location_id: @service_ticket.location_id,
+            service_ticket_id: @service_ticket.id,
+            manufacturer_id: params[:manufacturer_id],
+            parts: @service_ticket.warranty_parts,
+            labor: @service_ticket.warranty_labor,
+            estimated_amount: @service_ticket.warranty_total,
+            notes_to_manufacturer: params[:notes_to_manufacturer],
+            submitted_by: current_user.email,
+            status: 'draft'
+          )
+          
+          # Update service ticket
+          @service_ticket.update!(
+            warranty_claim_id: claim.id,
+            is_warranty_confirmed: true
+          )
+          
+          # Generate warranty invoice
+          service = ServiceTicketInvoiceService.new(@service_ticket)
+          invoice = service.generate_warranty_invoice(claim)
+          
+          render json: {
+            success: true,
+            claim: serialize_warranty_claim(claim),
+            invoice: serialize_invoice(invoice),
+            message: 'Warranty claim and invoice generated successfully'
+          }, status: :created
+        rescue => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/v1/service-tickets/:id/generate-both
+      # Generate both customer invoice and warranty claim (if applicable)
+      def generate_both
+        return unless authorize_action!('service', 'update')
+        
+        result = {}
+        
+        begin
+          # Generate customer invoice if there are customer items
+          if @service_ticket.has_customer_items?
+            service = ServiceTicketInvoiceService.new(@service_ticket)
+            result[:customer_invoice] = service.generate_customer_invoice
+          end
+          
+          # Generate warranty claim if there are warranty items
+          if @service_ticket.has_warranty_items?
+            unless params[:manufacturer_id].present?
+              return render json: { error: 'Manufacturer ID required for warranty items' }, status: :unprocessable_entity
+            end
+            
+            claim = WarrantyClaim.create!(
+              company_id: @service_ticket.company_id,
+              location_id: @service_ticket.location_id,
+              service_ticket_id: @service_ticket.id,
+              manufacturer_id: params[:manufacturer_id],
+              parts: @service_ticket.warranty_parts,
+              labor: @service_ticket.warranty_labor,
+              estimated_amount: @service_ticket.warranty_total,
+              notes_to_manufacturer: params[:notes_to_manufacturer],
+              submitted_by: current_user.email,
+              status: 'draft'
+            )
+            
+            @service_ticket.update!(
+              warranty_claim_id: claim.id,
+              is_warranty_confirmed: true
+            )
+            
+            service = ServiceTicketInvoiceService.new(@service_ticket)
+            result[:warranty_invoice] = service.generate_warranty_invoice(claim)
+            result[:warranty_claim] = claim
+          end
+          
+          render json: {
+            success: true,
+            customer_invoice: result[:customer_invoice] ? serialize_invoice(result[:customer_invoice]) : nil,
+            warranty_invoice: result[:warranty_invoice] ? serialize_invoice(result[:warranty_invoice]) : nil,
+            warranty_claim: result[:warranty_claim] ? serialize_warranty_claim(result[:warranty_claim]) : nil,
+            message: 'Invoices generated successfully'
+          }, status: :created
+        rescue => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+      end
+      
       # GET /api/v1/service-tickets/stats
       def stats
         return unless authorize_action!('service', 'read')
@@ -214,9 +364,13 @@ module Api
           :notes,
           :is_warranty_suspected,
           :is_warranty_confirmed,
+          :portal_user_id,
+          :is_portal_created,
+          :portal_notes,
           parts: [:id, :part_number, :description, :quantity, :unit_cost, :total],
           labor: [:id, :description, :hours, :rate, :total],
-          custom_fields: {}
+          custom_fields: {},
+          line_item_billing: [:index, :type, :billing_type, :manufacturer_id]
         )
       end
       
@@ -224,6 +378,8 @@ module Api
         parts_array = ticket.parts.is_a?(Array) ? ticket.parts : (ticket.parts.present? ? (JSON.parse(ticket.parts) rescue []) : [])
         labor_array = ticket.labor.is_a?(Array) ? ticket.labor : (ticket.labor.present? ? (JSON.parse(ticket.labor) rescue []) : [])
         custom_fields_hash = ticket.custom_fields.is_a?(Hash) ? ticket.custom_fields : (ticket.custom_fields.present? ? (JSON.parse(ticket.custom_fields) rescue {}) : {})
+        
+        line_item_billing_array = ticket.line_item_billing.is_a?(Array) ? ticket.line_item_billing : (ticket.line_item_billing.present? ? (JSON.parse(ticket.line_item_billing) rescue []) : [])
         
         data = {
           id: ticket.id,
@@ -240,9 +396,17 @@ module Api
           parts: parts_array,
           labor: labor_array,
           customFields: custom_fields_hash,
+          lineItemBilling: line_item_billing_array,
+          portalUserId: ticket.portal_user_id,
+          isPortalCreated: ticket.is_portal_created,
+          portalNotes: ticket.portal_notes,
           warrantySuspected: ticket.is_warranty_suspected,
           warrantyConfirmed: ticket.is_warranty_confirmed,
           warrantyClaimId: ticket.warranty_claim_id,
+          hasWarrantyItems: ticket.has_warranty_items?,
+          hasCustomerItems: ticket.has_customer_items?,
+          warrantyTotal: ticket.warranty_total,
+          customerTotal: ticket.customer_total,
           createdAt: ticket.created_at,
           updatedAt: ticket.updated_at,
           account: ticket.account ? {
@@ -285,6 +449,50 @@ module Api
           contentType: attachment.content_type,
           byteSize: attachment.byte_size,
           url: rails_blob_url(attachment, only_path: false)
+        }
+      end
+      
+      def serialize_invoice(invoice)
+        {
+          id: invoice.id,
+          invoiceNumber: invoice.invoice_number,
+          invoiceDate: invoice.invoice_date,
+          dueDate: invoice.due_date,
+          status: invoice.status,
+          billingCategory: invoice.billing_category,
+          subtotal: invoice.subtotal,
+          taxRate: invoice.tax_rate,
+          taxAmount: invoice.tax_amount,
+          total: invoice.total,
+          amountDue: invoice.amount_due,
+          amountPaid: invoice.amount_paid,
+          notes: invoice.notes,
+          sourceType: invoice.source_type,
+          sourceId: invoice.source_id,
+          recipientType: invoice.recipient_type,
+          recipientId: invoice.recipient_id,
+          contactId: invoice.contact_id,
+          createdAt: invoice.created_at,
+          updatedAt: invoice.updated_at
+        }
+      end
+      
+      def serialize_warranty_claim(claim)
+        {
+          id: claim.id,
+          claimNumber: claim.claim_number,
+          status: claim.status,
+          manufacturerId: claim.manufacturer_id,
+          serviceTicketId: claim.service_ticket_id,
+          estimatedAmount: claim.estimated_amount,
+          approvedAmount: claim.approved_amount,
+          parts: claim.parts,
+          labor: claim.labor,
+          notesToManufacturer: claim.notes_to_manufacturer,
+          submittedBy: claim.submitted_by,
+          submittedAt: claim.submitted_at,
+          createdAt: claim.created_at,
+          updatedAt: claim.updated_at
         }
       end
     end

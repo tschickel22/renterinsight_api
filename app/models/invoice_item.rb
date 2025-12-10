@@ -6,7 +6,7 @@ class InvoiceItem < ApplicationRecord
   validates :quantity, numericality: { greater_than: 0 }
   validates :rate, numericality: { greater_than_or_equal_to: 0 }
   validates :item_type, inclusion: { 
-    in: %w[inventory down_payment parts service fee custom],
+    in: %w[inventory down_payment parts service fee custom part labor],
     allow_nil: true
   }
   
@@ -18,7 +18,9 @@ class InvoiceItem < ApplicationRecord
     'parts' => 'Parts',
     'service' => 'Service',
     'fee' => 'Fee',
-    'custom' => 'Custom'
+    'custom' => 'Custom',
+    'part' => 'Part',
+    'labor' => 'Labor'
   }.freeze
   
   private

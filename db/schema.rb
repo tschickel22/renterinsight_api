@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_09_215202) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_09_233700) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -809,7 +809,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_215202) do
   create_table "invoices", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
-    t.bigint "contact_id", null: false
+    t.bigint "contact_id"
     t.bigint "listing_id"
     t.bigint "deal_id"
     t.string "invoice_number", null: false
@@ -832,6 +832,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_215202) do
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "source_type"
+    t.bigint "source_id"
+    t.string "billing_category"
+    t.string "recipient_type"
+    t.bigint "recipient_id"
+    t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
     t.index ["contact_id"], name: "index_invoices_on_contact_id"
@@ -840,6 +846,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_215202) do
     t.index ["listing_id"], name: "index_invoices_on_listing_id"
     t.index ["location_id"], name: "index_invoices_on_location_id"
     t.index ["payment_token"], name: "index_invoices_on_payment_token", unique: true
+    t.index ["recipient_type", "recipient_id"], name: "index_invoices_on_recipient_type_and_recipient_id"
+    t.index ["source_type", "source_id"], name: "index_invoices_on_source_type_and_source_id"
     t.index ["status"], name: "index_invoices_on_status"
   end
 
@@ -1670,6 +1678,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_215202) do
     t.boolean "is_warranty_suspected", default: false, null: false
     t.boolean "is_warranty_confirmed", default: false, null: false
     t.bigint "warranty_claim_id"
+    t.jsonb "line_item_billing", default: []
+    t.bigint "portal_user_id"
+    t.boolean "is_portal_created", default: false
+    t.text "portal_notes"
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
@@ -1678,9 +1690,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_215202) do
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
+    t.index ["is_portal_created"], name: "index_service_tickets_on_is_portal_created"
     t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"
     t.index ["is_warranty_suspected"], name: "index_service_tickets_on_is_warranty_suspected"
     t.index ["location_id"], name: "index_service_tickets_on_location_id"
+    t.index ["portal_user_id"], name: "index_service_tickets_on_portal_user_id"
     t.index ["priority"], name: "index_service_tickets_on_priority"
     t.index ["scheduled_date"], name: "index_service_tickets_on_scheduled_date"
     t.index ["status"], name: "index_service_tickets_on_status"
