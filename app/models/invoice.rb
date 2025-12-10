@@ -1,9 +1,11 @@
 class Invoice < ApplicationRecord
   belongs_to :company
   belongs_to :location, optional: true
-  belongs_to :contact
+  belongs_to :contact, optional: true
   belongs_to :listing, optional: true
   belongs_to :deal, optional: true
+  belongs_to :source, polymorphic: true, optional: true
+  belongs_to :recipient, polymorphic: true, optional: true
   
   has_many :invoice_items, dependent: :destroy
   has_many :payments, as: :payable, dependent: :nullify
@@ -27,6 +29,10 @@ class Invoice < ApplicationRecord
   scope :sent, -> { where.not(sent_at: nil) }
   scope :unpaid, -> { where.not(status: ['paid', 'cancelled']) }
   scope :overdue, -> { where('due_date < ? AND status NOT IN (?)', Date.today, ['paid', 'cancelled']) }
+  scope :customer_invoices, -> { where(billing_category: 'customer') }
+  scope :warranty_invoices, -> { where(billing_category: 'warranty') }
+  scope :for_service_tickets, -> { where(source_type: 'ServiceTicket') }
+  scope :for_warranty_claims, -> { where(source_type: 'WarrantyClaim') }
   
   # Status methods
   def draft?
@@ -43,6 +49,14 @@ class Invoice < ApplicationRecord
   
   def overdue?
     due_date && due_date < Date.today && !paid? && status != 'cancelled'
+  end
+  
+  def is_warranty_invoice?
+    billing_category == 'warranty'
+  end
+  
+  def is_customer_invoice?
+    billing_category == 'customer'
   end
   
   # Payment link

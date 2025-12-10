@@ -90,6 +90,15 @@ Rails.application.routes.draw do
       
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
+        member do
+          post :upload_attachments, path: 'upload-attachments'
+          post :mark_warranty_suspected, path: 'mark-warranty-suspected'
+          post :set_line_billing, path: 'set-line-billing'
+          post :generate_customer_invoice, path: 'generate-customer-invoice'
+          post :generate_warranty_claim, path: 'generate-warranty-claim'
+          post :generate_both, path: 'generate-both'
+        end
+        
         collection do
           get :stats
         end
@@ -322,14 +331,6 @@ Rails.application.routes.draw do
         
         # ==================== LOCATION MANUFACTURERS (Warranty System) ====================
         resources :manufacturers, only: [:index, :create, :update, :destroy], controller: 'locations/manufacturers'
-      end
-      
-      # ==================== SERVICE TICKETS ====================
-      resources :service_tickets, path: 'service-tickets' do
-        collection do
-          get :stats
-          get :export
-        end
       end
       
       # ==================== LAND MANAGEMENT ====================
@@ -978,6 +979,9 @@ Rails.application.routes.draw do
           get :stats
         end
       end
+      
+      # Portal Service Tickets
+      resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
     end
     
     # Admin Impersonation (Testing Only)
