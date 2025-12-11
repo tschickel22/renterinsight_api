@@ -39,6 +39,12 @@ module Api
         @loans = @loans.by_status(params[:status]) if params[:status].present?
         @loans = @loans.where(loan_type: params[:loan_type]) if params[:loan_type].present?
         
+        # Filter by account - join through contacts since loans don't have account_id
+        if params[:account_id].present?
+          @loans = @loans.joins("INNER JOIN contacts ON loans.borrower_type = 'Contact' AND loans.borrower_id = contacts.id")
+                         .where('contacts.account_id = ?', params[:account_id])
+        end
+        
         # Date range filters
         if params[:start_date].present? && params[:end_date].present?
           start_date = Date.parse(params[:start_date])
@@ -103,6 +109,12 @@ module Api
           end
         else
           @company.loans.where(is_deleted: [false, nil])
+        end
+        
+        # Apply account filter if provided - join through contacts since loans don't have account_id
+        if params[:account_id].present?
+          loans = loans.joins("INNER JOIN contacts ON loans.borrower_type = 'Contact' AND loans.borrower_id = contacts.id")
+                       .where('contacts.account_id = ?', params[:account_id])
         end
         
         # Apply location selector filter

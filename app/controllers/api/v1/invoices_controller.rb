@@ -23,6 +23,12 @@ class Api::V1::InvoicesController < ApplicationController
     # Filters
     invoices = invoices.where(status: params[:status]) if params[:status].present?
     invoices = invoices.where(contact_id: params[:contact_id]) if params[:contact_id].present?
+    
+    # Filter by account through contacts
+    if params[:account_id].present?
+      account_contact_ids = @company.contacts.where(account_id: params[:account_id]).pluck(:id)
+      invoices = invoices.where(contact_id: account_contact_ids)
+    end
     invoices = invoices.overdue if params[:overdue] == 'true'
     
     # Search
@@ -148,6 +154,14 @@ class Api::V1::InvoicesController < ApplicationController
     return unless authorize_action!('invoices', 'read')
     
     base_invoices = @company.invoices.not_deleted
+    
+    # Apply account filter if provided - filter through contacts
+    if params[:account_id].present?
+      account_contact_ids = @company.contacts.where(account_id: params[:account_id]).pluck(:id)
+      base_invoices = base_invoices.where(contact_id: account_contact_ids)
+    end
+    
+    # Apply location selector filter
     base_invoices = base_invoices.where(location_id: Current.location_id) if Current.location_filtered?
     
     # Total count
