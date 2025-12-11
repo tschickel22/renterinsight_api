@@ -141,49 +141,130 @@ class ServiceTicket < ApplicationRecord
   
   # Line Item Billing Methods
   def set_line_billing(index:, type:, billing_type:, manufacturer_id: nil)
-    billing_data = line_item_billing || []
+    # Parse line_item_billing if it's a string from DB
+    Rails.logger.info "🛠️ [Model set_line_billing] START - Raw line_item_billing: #{line_item_billing.inspect}"
+    
+    billing_data = line_item_billing.is_a?(Array) ? line_item_billing : (JSON.parse(line_item_billing) rescue [])
+    billing_data ||= []
+    
+    Rails.logger.info "🛠️ [Model set_line_billing] Parsed billing_data: #{billing_data.to_json}"
+    Rails.logger.info "🛠️ [Model set_line_billing] Setting: index=#{index}, type=#{type}, billing_type=#{billing_type}, manufacturer_id=#{manufacturer_id}"
+    
+    # Remove old entry for this index+type
+    Rails.logger.info "🛠️ [Model set_line_billing] BEFORE reject!: #{billing_data.to_json}"
     billing_data.reject! { |item| item['index'] == index && item['type'] == type }
-    billing_data << {
+    Rails.logger.info "🛠️ [Model set_line_billing] AFTER reject!: #{billing_data.to_json}"
+    
+    # Add new entry
+    new_entry = {
       'index' => index,
       'type' => type,
       'billing_type' => billing_type,
       'manufacturer_id' => manufacturer_id
-    }.compact
+    }
+    new_entry.delete('manufacturer_id') if manufacturer_id.nil?
+    
+    Rails.logger.info "🛠️ [Model set_line_billing] New entry: #{new_entry.to_json}"
+    
+    billing_data << new_entry
+    
+    Rails.logger.info "🛠️ [Model set_line_billing] Final billing_data BEFORE update!: #{billing_data.to_json}"
+    
     update!(line_item_billing: billing_data)
   end
   
   def get_line_billing(index:, type:)
     return 'customer' unless line_item_billing.present?
-    item = line_item_billing.find { |i| i['index'] == index && i['type'] == type }
+    
+    # Parse if it's a JSON string
+    billing_data = line_item_billing.is_a?(Array) ? line_item_billing : (JSON.parse(line_item_billing) rescue [])
+    
+    item = billing_data.find { |i| i['index'] == index && i['type'] == type }
     item&.dig('billing_type') || 'customer'
   end
   
   def warranty_parts
-    return [] unless parts.is_a?(Array) && line_item_billing.present?
-    parts.each_with_index.select do |part, index|
-      get_line_billing(index: index, type: 'part') == 'warranty'
+    return [] unless parts.is_a?(Array)
+    
+    # Parse line_item_billing if needed
+    billing_data = line_item_billing.is_a?(Array) ? line_item_billing : (JSON.parse(line_item_billing || '[]') rescue [])
+    
+    Rails.logger.info "🔍 [warranty_parts] line_item_billing: #{billing_data.to_json}"
+    Rails.logger.info "🔍 [warranty_parts] parts count: #{parts.length}"
+    
+    return [] if billing_data.blank?
+    
+    result = parts.each_with_index.select do |part, index|
+      billing_type = get_line_billing(index: index, type: 'part')
+      Rails.logger.info "🔍 [warranty_parts] Part #{index}: billing_type=#{billing_type}"
+      billing_type == 'warranty'
     end.map(&:first)
+    
+    Rails.logger.info "🔍 [warranty_parts] RESULT: #{result.to_json}"
+    result
   end
   
   def customer_parts
-    return parts || [] unless line_item_billing.present?
-    parts.each_with_index.reject do |part, index|
-      get_line_billing(index: index, type: 'part') == 'warranty'
+    return [] unless parts.is_a?(Array)
+    
+    # Parse line_item_billing if needed
+    billing_data = line_item_billing.is_a?(Array) ? line_item_billing : (JSON.parse(line_item_billing || '[]') rescue [])
+    
+    Rails.logger.info "🔍 [customer_parts] line_item_billing: #{billing_data.to_json}"
+    Rails.logger.info "🔍 [customer_parts] parts count: #{parts.length}"
+    
+    return parts if billing_data.blank?
+    
+    result = parts.each_with_index.reject do |part, index|
+      billing_type = get_line_billing(index: index, type: 'part')
+      Rails.logger.info "🔍 [customer_parts] Part #{index}: billing_type=#{billing_type}"
+      billing_type == 'warranty'
     end.map(&:first)
+    
+    Rails.logger.info "🔍 [customer_parts] RESULT: #{result.to_json}"
+    result
   end
   
   def warranty_labor
-    return [] unless labor.is_a?(Array) && line_item_billing.present?
-    labor.each_with_index.select do |item, index|
-      get_line_billing(index: index, type: 'labor') == 'warranty'
+    return [] unless labor.is_a?(Array)
+    
+    # Parse line_item_billing if needed
+    billing_data = line_item_billing.is_a?(Array) ? line_item_billing : (JSON.parse(line_item_billing || '[]') rescue [])
+    
+    Rails.logger.info "🔍 [warranty_labor] line_item_billing: #{billing_data.to_json}"
+    Rails.logger.info "🔍 [warranty_labor] labor count: #{labor.length}"
+    
+    return [] if billing_data.blank?
+    
+    result = labor.each_with_index.select do |item, index|
+      billing_type = get_line_billing(index: index, type: 'labor')
+      Rails.logger.info "🔍 [warranty_labor] Labor #{index}: billing_type=#{billing_type}"
+      billing_type == 'warranty'
     end.map(&:first)
+    
+    Rails.logger.info "🔍 [warranty_labor] RESULT: #{result.to_json}"
+    result
   end
   
   def customer_labor
-    return labor || [] unless line_item_billing.present?
-    labor.each_with_index.reject do |item, index|
-      get_line_billing(index: index, type: 'labor') == 'warranty'
+    return [] unless labor.is_a?(Array)
+    
+    # Parse line_item_billing if needed
+    billing_data = line_item_billing.is_a?(Array) ? line_item_billing : (JSON.parse(line_item_billing || '[]') rescue [])
+    
+    Rails.logger.info "🔍 [customer_labor] line_item_billing: #{billing_data.to_json}"
+    Rails.logger.info "🔍 [customer_labor] labor count: #{labor.length}"
+    
+    return labor if billing_data.blank?
+    
+    result = labor.each_with_index.reject do |item, index|
+      billing_type = get_line_billing(index: index, type: 'labor')
+      Rails.logger.info "🔍 [customer_labor] Labor #{index}: billing_type=#{billing_type}"
+      billing_type == 'warranty'
     end.map(&:first)
+    
+    Rails.logger.info "🔍 [customer_labor] RESULT: #{result.to_json}"
+    result
   end
   
   def has_warranty_items?

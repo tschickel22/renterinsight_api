@@ -38,6 +38,7 @@ module Api
         @service_tickets = @service_tickets.where(priority: params[:priority]) if params[:priority].present?
         @service_tickets = @service_tickets.assigned_to(params[:assigned_to]) if params[:assigned_to].present?
         @service_tickets = @service_tickets.where(account_id: params[:account_id]) if params[:account_id].present?
+        @service_tickets = @service_tickets.where(contact_id: params[:contact_id]) if params[:contact_id].present?
         @service_tickets = @service_tickets.warranty_suspected if params[:warranty_suspected] == 'true'
         @service_tickets = @service_tickets.warranty_confirmed if params[:warranty_confirmed] == 'true'
         
@@ -133,24 +134,32 @@ module Api
       # POST /api/v1/service-tickets/:id/set-line-billing
       # Set billing type (warranty vs customer) for a specific line item
       def set_line_billing
-        return unless authorize_action!('service', 'update')
-        
-        begin
-          @service_ticket.set_line_billing(
-            index: params[:index].to_i,
-            type: params[:type],
-            billing_type: params[:billing_type],
-            manufacturer_id: params[:manufacturer_id]
-          )
-          
-          render json: {
-            success: true,
-            data: serialize_ticket(@service_ticket),
-            message: "Line item marked as #{params[:billing_type]}"
-          }
-        rescue => e
-          render json: { error: e.message }, status: :unprocessable_entity
-        end
+      return unless authorize_action!('service', 'update')
+      
+      Rails.logger.info "🔧 [set_line_billing] Called with params: #{params.slice(:index, :type, :billing_type, :manufacturer_id).to_json}"
+      Rails.logger.info "🔧 [set_line_billing] Current line_item_billing BEFORE: #{@service_ticket.line_item_billing.to_json}"
+
+      begin
+      @service_ticket.set_line_billing(
+        index: params[:index].to_i,
+      type: params[:type],
+      billing_type: params[:billing_type],
+      manufacturer_id: params[:manufacturer_id]
+      )
+      
+      @service_ticket.reload
+      Rails.logger.info "🔧 [set_line_billing] Current line_item_billing AFTER: #{@service_ticket.line_item_billing.to_json}"
+      
+      render json: {
+      success: true,
+      data: serialize_ticket(@service_ticket),
+      message: "Line item marked as #{params[:billing_type]}"
+      }
+      rescue => e
+      Rails.logger.error "❌ [set_line_billing] Error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: e.message }, status: :unprocessable_entity
+      end
       end
       
       # POST /api/v1/service-tickets/:id/generate-customer-invoice
@@ -367,7 +376,7 @@ module Api
           :portal_user_id,
           :is_portal_created,
           :portal_notes,
-          parts: [:id, :part_number, :description, :quantity, :unit_cost, :total],
+          parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total],
           labor: [:id, :description, :hours, :rate, :total],
           custom_fields: {},
           line_item_billing: [:index, :type, :billing_type, :manufacturer_id]
@@ -379,7 +388,9 @@ module Api
         labor_array = ticket.labor.is_a?(Array) ? ticket.labor : (ticket.labor.present? ? (JSON.parse(ticket.labor) rescue []) : [])
         custom_fields_hash = ticket.custom_fields.is_a?(Hash) ? ticket.custom_fields : (ticket.custom_fields.present? ? (JSON.parse(ticket.custom_fields) rescue {}) : {})
         
+        Rails.logger.info "📤 [serialize_ticket] line_item_billing raw: #{ticket.line_item_billing.inspect}"
         line_item_billing_array = ticket.line_item_billing.is_a?(Array) ? ticket.line_item_billing : (ticket.line_item_billing.present? ? (JSON.parse(ticket.line_item_billing) rescue []) : [])
+        Rails.logger.info "📤 [serialize_ticket] lineItemBilling will be sent as: #{line_item_billing_array.to_json}"
         
         data = {
           id: ticket.id,
@@ -439,6 +450,18 @@ module Api
           data[:attachmentsCount] = ticket.attachments.count
         end
         
+        # Load generated invoices for this ticket
+        invoices = Invoice.where(source_type: 'ServiceTicket', source_id: ticket.id)
+        data[:customerInvoice] = invoices.find { |i| i.billing_category == 'customer' }&.then do |inv|
+          serialize_invoice(inv)
+        end
+        data[:warrantyInvoice] = invoices.find { |i| i.billing_category == 'warranty' }&.then do |inv|
+          serialize_invoice(inv)
+        end
+        
+        # Include warranty claim details if present
+        data[:warrantyClaim] = ticket.warranty_claim_owned ? serialize_warranty_claim(ticket.warranty_claim_owned) : nil
+        
         data
       end
       
@@ -453,6 +476,26 @@ module Api
       end
       
       def serialize_invoice(invoice)
+        # Include recipient details based on type
+        recipient_data = if invoice.recipient_type == 'Manufacturer' && invoice.recipient_id.present?
+          manufacturer = Manufacturer.find_by(id: invoice.recipient_id)
+          manufacturer ? {
+            id: manufacturer.id,
+            name: manufacturer.name,
+            type: 'Manufacturer'
+          } : nil
+        elsif invoice.recipient_type == 'Contact' && invoice.contact_id.present?
+          contact = Contact.find_by(id: invoice.contact_id)
+          contact ? {
+            id: contact.id,
+            firstName: contact.first_name,
+            lastName: contact.last_name,
+            type: 'Contact'
+          } : nil
+        else
+          nil
+        end
+        
         {
           id: invoice.id,
           invoiceNumber: invoice.invoice_number,
@@ -471,6 +514,7 @@ module Api
           sourceId: invoice.source_id,
           recipientType: invoice.recipient_type,
           recipientId: invoice.recipient_id,
+          recipient: recipient_data,
           contactId: invoice.contact_id,
           createdAt: invoice.created_at,
           updatedAt: invoice.updated_at
