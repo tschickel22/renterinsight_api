@@ -14,6 +14,7 @@ class Invoice < ApplicationRecord
   
   before_validation :generate_invoice_number, on: :create
   before_validation :generate_payment_token, on: :create
+  before_validation :set_default_status, on: :create
   before_save :calculate_totals
   after_save :update_status_based_on_payments
   
@@ -85,16 +86,18 @@ class Invoice < ApplicationRecord
   end
   
   # Record payment
-  def record_payment!(amount, payment_method, payment_data = {})
+  def record_payment!(amount, gateway_name, payment_data = {})
     Payment.create!(
       company: company,
       location: location,
-      contact: contact,
+      payer_type: contact_id.present? ? 'Contact' : nil,
+      payer_id: contact_id,
       payable: self,
       amount: amount,
-      payment_method: payment_method,
+      gateway_name: gateway_name,
+      payment_type: 'one_time',
       status: 'completed',
-      payment_at: Time.current,
+      payment_date: Time.current,
       external_id: payment_data[:transaction_id],
       notes: payment_data[:notes]
     )
@@ -116,11 +119,20 @@ class Invoice < ApplicationRecord
       next_number = 1000
     end
     
-    self.invoice_number = "#{prefix}-#{next_number.to_s.rjust(6, '0')}"
+    # Handle collisions - keep incrementing until we find an unused number
+    loop do
+      candidate = "#{prefix}-#{next_number.to_s.rjust(6, '0')}"
+      break self.invoice_number = candidate unless company.invoices.exists?(invoice_number: candidate)
+      next_number += 1
+    end
   end
   
   def generate_payment_token
     self.payment_token ||= SecureRandom.urlsafe_base64(32)
+  end
+  
+  def set_default_status
+    self.status ||= 'draft'
   end
   
   def calculate_totals

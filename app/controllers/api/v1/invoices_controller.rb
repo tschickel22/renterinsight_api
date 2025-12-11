@@ -37,13 +37,14 @@ class Api::V1::InvoicesController < ApplicationController
     invoices = invoices.includes(:contact, :location, :invoice_items)
                        .order(invoice_date: :desc)
     
-    render json: invoices, include: [:contact, :location, :invoice_items]
+    # Serialize with recipient information
+    render json: invoices.map { |invoice| serialize_invoice_list_item(invoice) }
   end
   
   def show
     return unless authorize_action!('invoices', 'read')
     
-    render json: @invoice, include: [:contact, :location, :invoice_items, :payments]
+    render json: serialize_invoice(@invoice)
   end
   
   def create
@@ -203,7 +204,7 @@ class Api::V1::InvoicesController < ApplicationController
   private
   
   def set_invoice
-    @invoice = @company.invoices.find(params[:id])
+    @invoice = @company.invoices.includes(:invoice_items, :payments).find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Invoice not found' }, status: :not_found
   end
@@ -214,8 +215,170 @@ class Api::V1::InvoicesController < ApplicationController
       :invoice_date, :due_date, :tax_rate,
       :notes, :terms, :footer_text,
       invoice_items_attributes: [
-        :id, :item_type, :description, :quantity, :rate, :listing_id, :position, :_destroy
+        :id, :item_type, :description, :quantity, :rate, :amount, :listing_id, :position, :_destroy
       ]
     )
+  end
+  
+  def serialize_invoice(invoice)
+    Rails.logger.info "🔍 [serialize_invoice] Starting serialization for invoice #{invoice.id}"
+    
+    # Include recipient details based on type
+    recipient_data = begin
+      if invoice.recipient_type == 'Manufacturer' && invoice.recipient_id.present?
+        Rails.logger.info "🔍 [serialize_invoice] Loading manufacturer #{invoice.recipient_id}"
+        manufacturer = Manufacturer.find_by(id: invoice.recipient_id)
+        manufacturer ? {
+          id: manufacturer.id,
+          name: manufacturer.name,
+          type: 'Manufacturer'
+        } : nil
+      elsif invoice.recipient_type == 'Contact' && invoice.contact_id.present?
+        Rails.logger.info "🔍 [serialize_invoice] Loading contact via recipient_type #{invoice.contact_id}"
+        contact = Contact.find_by(id: invoice.contact_id)
+        contact ? {
+          id: contact.id,
+          first_name: contact.first_name,
+          last_name: contact.last_name,
+          email: contact.email,
+          phone: contact.phone,
+          type: 'Contact'
+        } : nil
+      elsif invoice.contact_id.present?
+        Rails.logger.info "🔍 [serialize_invoice] Loading contact (standard invoice) #{invoice.contact_id}"
+        contact = Contact.find_by(id: invoice.contact_id)
+        contact ? {
+          id: contact.id,
+          first_name: contact.first_name,
+          last_name: contact.last_name,
+          email: contact.email,
+          phone: contact.phone,
+          type: 'Contact'
+        } : nil
+      else
+        Rails.logger.info "🔍 [serialize_invoice] No recipient or contact found"
+        nil
+      end
+    rescue => e
+      Rails.logger.error "❌ [serialize_invoice] Error loading recipient: #{e.message}"
+      nil
+    end
+    
+    Rails.logger.info "🔍 [serialize_invoice] Recipient data: #{recipient_data.inspect}"
+    
+    result = {
+      id: invoice.id,
+      invoice_number: invoice.invoice_number,
+      invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date,
+      paid_at: invoice.paid_at,
+      sent_at: invoice.sent_at,
+      viewed_at: invoice.viewed_at,
+      status: invoice.status,
+      billing_category: invoice.billing_category,
+      payment_token: invoice.payment_token,
+      subtotal: invoice.subtotal,
+      tax_rate: invoice.tax_rate,
+      tax_amount: invoice.tax_amount,
+      total: invoice.total,
+      amount_due: invoice.amount_due,
+      amount_paid: invoice.amount_paid,
+      notes: invoice.notes,
+      terms: invoice.terms,
+      footer_text: invoice.footer_text,
+      source_type: invoice.source_type,
+      source_id: invoice.source_id,
+      recipient_type: invoice.recipient_type,
+      recipient_id: invoice.recipient_id,
+      recipient: recipient_data,
+      contact: recipient_data&.dig(:type) == 'Contact' ? recipient_data : nil,
+      contact_id: invoice.contact_id,
+      location_id: invoice.location_id,
+      invoice_items: begin
+        (invoice.invoice_items || []).map { |item| serialize_invoice_item(item) }
+      rescue => e
+        Rails.logger.error "❌ [serialize_invoice] Error serializing items: #{e.message}"
+        []
+      end,
+      payments: begin
+        invoice.payments.to_a.map { |payment| serialize_payment(payment) }
+      rescue => e
+        Rails.logger.error "❌ [serialize_invoice] Error serializing payments: #{e.message}"
+        []
+      end,
+      created_at: invoice.created_at,
+      updated_at: invoice.updated_at
+    }
+    
+    Rails.logger.info "✅ [serialize_invoice] Completed serialization for invoice #{invoice.id}"
+    result
+  rescue => e
+    Rails.logger.error "❌ [serialize_invoice] Fatal error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    raise
+  end
+  
+  def serialize_invoice_item(item)
+    {
+      id: item.id,
+      item_type: item.item_type,
+      description: item.description,
+      quantity: item.quantity,
+      rate: item.rate,
+      total: item.total,
+      position: item.position
+    }
+  end
+  
+  def serialize_payment(payment)
+    {
+      id: payment.id,
+      amount: payment.amount,
+      payment_method: payment.payment_method,
+      status: payment.status,
+      payment_date: payment.payment_date,
+      created_at: payment.created_at
+    }
+  end
+  
+  def serialize_invoice_list_item(invoice)
+    # Lightweight serialization for list view
+    recipient_data = if invoice.recipient_type == 'Manufacturer' && invoice.recipient_id.present?
+      manufacturer = Manufacturer.find_by(id: invoice.recipient_id)
+      manufacturer ? {
+        id: manufacturer.id,
+        name: manufacturer.name,
+        type: 'Manufacturer'
+      } : nil
+    elsif invoice.contact.present?
+      {
+        id: invoice.contact.id,
+        first_name: invoice.contact.first_name,
+        last_name: invoice.contact.last_name,
+        full_name: "#{invoice.contact.first_name} #{invoice.contact.last_name}",
+        email: invoice.contact.email,
+        type: 'Contact'
+      }
+    else
+      nil
+    end
+    
+    {
+      id: invoice.id,
+      invoice_number: invoice.invoice_number,
+      invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date,
+      paid_at: invoice.paid_at,
+      status: invoice.status,
+      billing_category: invoice.billing_category,
+      total: invoice.total,
+      amount_due: invoice.amount_due,
+      amount_paid: invoice.amount_paid,
+      recipient_type: invoice.recipient_type,
+      recipient: recipient_data,
+      contact: recipient_data&.dig(:type) == 'Contact' ? recipient_data : nil,
+      created_at: invoice.created_at,
+      updated_at: invoice.updated_at
+    }
   end
 end
