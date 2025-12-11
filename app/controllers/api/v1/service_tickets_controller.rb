@@ -291,29 +291,34 @@ module Api
       
       # GET /api/v1/service-tickets/stats
       def stats
-        return unless authorize_action!('service', 'read')
-        
-        tickets = @company.service_tickets
-        
-        # Apply location selector filter for stats
-        if Current.location_filtered?
-          tickets = tickets.where(location_id: Current.location_id)
-        end
-        
-        stats_data = {
-          total: tickets.count,
-          open: tickets.open.count,
-          in_progress: tickets.in_progress.count,
-          waiting_on_manufacturer: tickets.waiting_on_manufacturer.count,
-          completed: tickets.completed.count,
-          overdue: tickets.where('scheduled_date < ? AND status != ?', Date.today, 'completed').count,
-          warranty_suspected: tickets.warranty_suspected.count,
-          warranty_confirmed: tickets.warranty_confirmed.count,
-          total_revenue: tickets.sum { |t| t.total_cost }
-        }
-        
-        render json: { data: stats_data }
+      return unless authorize_action!('service', 'read')
+      
+      tickets = @company.service_tickets
+      
+      # Apply account filter if provided
+      if params[:account_id].present?
+      tickets = tickets.where(account_id: params[:account_id])
       end
+      
+      # Apply location selector filter for stats
+      if Current.location_filtered?
+      tickets = tickets.where(location_id: Current.location_id)
+      end
+      
+      stats_data = {
+      total: tickets.count,
+      open: tickets.open.count,
+      in_progress: tickets.in_progress.count,
+      waiting_on_manufacturer: tickets.waiting_on_manufacturer.count,
+        completed: tickets.completed.count,
+        overdue: tickets.where('scheduled_date < ? AND status != ?', Date.today, 'completed').count,
+        warranty_suspected: tickets.warranty_suspected.count,
+          warranty_confirmed: tickets.warranty_confirmed.count,
+      total_revenue: tickets.sum { |t| t.total_cost }
+    }
+    
+    render json: { data: stats_data }
+  end
       
       private
       

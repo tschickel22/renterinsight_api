@@ -45,12 +45,18 @@ module Api
       end
 
       def create
-        buyer_portal_access = company_scoped_portal_accesses.find_by(id: params[:buyer_id])
-        return render json: { error: 'Client not found in your company' }, status: :not_found unless buyer_portal_access
+        # Accept either direct Contact ID or BuyerPortalAccess ID
+        contact = @company.contacts.find_by(id: params[:buyer_id])
         
-        # Get the actual Contact from the BuyerPortalAccess
-        contact = buyer_portal_access.buyer
-        return render json: { error: 'Client contact not found' }, status: :not_found unless contact.is_a?(::Contact)
+        # Fallback: try BuyerPortalAccess if direct Contact lookup fails
+        unless contact
+          buyer_portal_access = company_scoped_portal_accesses.find_by(id: params[:buyer_id])
+          if buyer_portal_access
+            contact = buyer_portal_access.buyer if buyer_portal_access.buyer.is_a?(::Contact)
+          end
+        end
+        
+        return render json: { error: 'Contact not found in your company' }, status: :not_found unless contact
         
         @document = PortalDocument.new(
           owner: contact,  # Owner is Contact, not BuyerPortalAccess
