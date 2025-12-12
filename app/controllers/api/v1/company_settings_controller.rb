@@ -54,37 +54,59 @@ module Api
 
       # GET /api/v1/company_settings/branding
       def show_branding
-        settings = @company.branding_settings || {}
+      # Get company branding from Settings table (Company -> Platform fallback)
+      company_branding = Setting.get('Company', @company.id, 'branding') || {}
+      platform_defaults = Setting.get('Platform', 0, 'branding') || {}
 
-        render json: {
-          branding_settings: settings,
-          defaults: PlatformDefaults.branding_settings
-        }
+      render json: {
+      branding_settings: company_branding,
+      defaults: platform_defaults
+      }
       end
 
       # PATCH /api/v1/company_settings/branding
       def update_branding
-        settings = params[:branding_settings] || {}
-
-        @company.branding_settings = settings
-
-        if @company.save
-          render json: {
-            branding_settings: @company.branding_settings,
-            message: 'Branding settings updated successfully'
-          }
-        else
-          render json: {
-            errors: @company.errors.full_messages
-          }, status: :unprocessable_entity
-        end
-      rescue => e
-        Rails.logger.error "Error updating branding settings: #{e.message}"
-        Rails.logger.error e.backtrace.join("\n")
-        render json: {
-          errors: [e.message]
-        }, status: :unprocessable_entity
+      Rails.logger.info "🎨 [CompanySettings#update_branding] Received params: #{params.inspect}"
+      Rails.logger.info "🎨 [CompanySettings#update_branding] Company: #{@company.name} (ID: #{@company.id})"
+      
+      # Get branding_settings and convert to hash (permit all nested keys)
+      branding_params = params[:branding_settings]
+    if branding_params.present?
+        # Use to_unsafe_h to convert ActionController::Parameters to hash
+        settings = branding_params.to_unsafe_h
+      else
+      settings = {}
       end
+      
+      Rails.logger.info "🎨 [CompanySettings#update_branding] Branding settings to save: #{settings.inspect}"
+
+    # Clean up empty color strings - convert to nil
+      cleaned_settings = settings.deep_dup
+      ['primaryColor', 'secondaryColor', 'sideMenuColor'].each do |color_key|
+        if cleaned_settings[color_key].present? && cleaned_settings[color_key].to_s.strip.empty?
+          cleaned_settings[color_key] = nil
+        end
+      end
+    Rails.logger.info "✨ [CompanySettings#update_branding] Cleaned settings: #{cleaned_settings.inspect}"
+
+      # Save to Settings table: Setting.set(scope_type, scope_id, key, value)
+      Setting.set('Company', @company.id, 'branding', cleaned_settings)
+      
+        # Retrieve saved settings to confirm
+      saved_settings = Setting.get('Company', @company.id, 'branding')
+      Rails.logger.info "✅ [CompanySettings#update_branding] Settings saved successfully: #{saved_settings.inspect}"
+
+      render json: {
+        branding_settings: saved_settings,
+          message: 'Branding settings updated successfully'
+    }
+  rescue => e
+    Rails.logger.error "❌ [CompanySettings#update_branding] Error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: {
+      errors: [e.message]
+    }, status: :unprocessable_entity
+  end
 
       # GET /api/v1/company_settings/communication
       def show_communication

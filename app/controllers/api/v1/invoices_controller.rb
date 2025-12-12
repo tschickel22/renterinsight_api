@@ -92,13 +92,65 @@ class Api::V1::InvoicesController < ApplicationController
   def send_invoice
     return unless authorize_action!('invoices', 'update')
     
-    # Allow sending regardless of status (user can resend if needed)
-    InvoiceMailer.invoice_email(@invoice).deliver_later
+    # Get send preferences from params (default to email only for backwards compatibility)
+    send_email = params[:send_email].nil? ? true : ActiveModel::Type::Boolean.new.cast(params[:send_email])
+    send_sms = params[:send_sms].nil? ? false : ActiveModel::Type::Boolean.new.cast(params[:send_sms])
     
-    # Only mark as sent if currently draft
-    @invoice.mark_as_sent! if @invoice.draft?
+    sent_methods = []
+    errors = []
     
-    render json: { message: 'Invoice sent successfully', invoice: @invoice }
+    # Send email if requested
+    if send_email
+      begin
+        InvoiceMailer.invoice_email(@invoice).deliver_later
+        sent_methods << 'email'
+        Rails.logger.info "[InvoicesController#send_invoice] Email queued for invoice #{@invoice.id}"
+      rescue => e
+        errors << "email: #{e.message}"
+        Rails.logger.error "[InvoicesController#send_invoice] Email failed: #{e.message}"
+      end
+    end
+    
+    # Send SMS if requested
+    if send_sms
+      begin
+        # Initialize SMS service with location/company for three-tier inheritance
+        sms_service = SmsService.new(
+          location: @invoice.location,
+          company: @invoice.company
+        )
+        
+        # Send SMS notification
+        result = sms_service.send_invoice_notification(@invoice)
+        
+        if result[:success]
+          sent_methods << 'SMS'
+          Rails.logger.info "[InvoicesController#send_invoice] SMS sent - SID: #{result[:message_sid]}"
+        else
+          errors << "SMS: #{result[:error]}"
+          Rails.logger.error "[InvoicesController#send_invoice] SMS failed: #{result[:error]}"
+        end
+      rescue => e
+        errors << "SMS: #{e.message}"
+        Rails.logger.error "[InvoicesController#send_invoice] SMS exception: #{e.message}"
+      end
+    end
+    
+    # Only mark as sent if currently draft and at least one method succeeded
+    if sent_methods.any? && @invoice.draft?
+      @invoice.mark_as_sent!
+    end
+    
+    # Build response message
+    if sent_methods.any?
+      message = "Invoice sent successfully via #{sent_methods.join(' and ')}"
+      message += ". Errors: #{errors.join(', ')}" if errors.any?
+      render json: { message: message, invoice: serialize_invoice(@invoice.reload) }
+    elsif errors.any?
+      render json: { error: "Failed to send invoice: #{errors.join(', ')}" }, status: :unprocessable_entity
+    else
+      render json: { error: 'No delivery method selected' }, status: :unprocessable_entity
+    end
   end
   
   def send_sms

@@ -54,7 +54,12 @@ Rails.application.configure do
   # config.action_mailer.raise_delivery_errors = false
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  # Uses RENDER_EXTERNAL_URL from Render.com or falls back to API_HOST env var
+  api_host = ENV.fetch('RENDER_EXTERNAL_URL', ENV.fetch('API_HOST', 'renterinsight-api-staging.onrender.com')).gsub(/^https?:\/\//, '')
+  config.action_mailer.default_url_options = { host: api_host, protocol: 'https' }
+  
+  # Set default URL options for Active Storage and route helpers
+  config.action_controller.default_url_options = { host: api_host, protocol: 'https' }
 
   # Specify outgoing SMTP server. Remember to add smtp/* credentials via rails credentials:edit.
   # config.action_mailer.smtp_settings = {

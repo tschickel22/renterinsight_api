@@ -37,7 +37,10 @@ Rails.application.configure do
   config.action_mailer.perform_caching = false
 
   # Set mailer default URL for development
-  config.action_mailer.default_url_options = { host: 'localhost', port: 3001 }
+  config.action_mailer.default_url_options = { host: 'localhost', port: 3001, protocol: 'https' }
+  
+  # Set default URL options for Active Storage and route helpers
+  config.action_controller.default_url_options = { host: 'localhost', port: 3001, protocol: 'https' }
 
   # Print deprecation notices to the Rails logger.
   config.active_support.deprecation = :log

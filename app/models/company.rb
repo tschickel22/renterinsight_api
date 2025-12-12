@@ -273,15 +273,15 @@ class Company < ApplicationRecord
   
   # Settings helpers
   def operational_settings
-    @operational_settings ||= Setting.get('operational', 'Company', id)
+    @operational_settings ||= Setting.get('Company', id, 'operational') || {}
   end
   
   def branding_settings
-    @branding_settings ||= Setting.get('branding', 'Company', id)
+    @branding_settings ||= Setting.get('Company', id, 'branding') || {}
   end
   
   def communication_settings
-    @communication_settings ||= Setting.get('communication', 'Company', id)
+    @communication_settings ||= Setting.get('Company', id, 'communication') || {}
   end
   
   # Use the same bank account for deposits and rent collections

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_09_233700) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_11_212051) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -509,6 +509,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_233700) do
     t.boolean "use_rbac_system", default: false, null: false
     t.jsonb "loan_settings", default: {}, null: false
     t.string "external_payments_id"
+    t.jsonb "branding_settings", default: {}
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
@@ -1682,6 +1683,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_233700) do
     t.bigint "portal_user_id"
     t.boolean "is_portal_created", default: false
     t.text "portal_notes"
+    t.text "home_info"
+    t.boolean "portal_visible", default: true, null: false
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
@@ -1695,6 +1698,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_09_233700) do
     t.index ["is_warranty_suspected"], name: "index_service_tickets_on_is_warranty_suspected"
     t.index ["location_id"], name: "index_service_tickets_on_location_id"
     t.index ["portal_user_id"], name: "index_service_tickets_on_portal_user_id"
+    t.index ["portal_visible"], name: "index_service_tickets_on_portal_visible"
     t.index ["priority"], name: "index_service_tickets_on_priority"
     t.index ["scheduled_date"], name: "index_service_tickets_on_scheduled_date"
     t.index ["status"], name: "index_service_tickets_on_status"

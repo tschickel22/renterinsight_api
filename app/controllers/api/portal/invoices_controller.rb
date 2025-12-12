@@ -18,6 +18,10 @@ module Api
 
         invoices = contact.invoices.where(is_deleted: [false, nil])
 
+        # CRITICAL: Exclude draft invoices from portal - only show sent, partial, paid, overdue
+        # Draft invoices are not yet ready to be shared with customers
+        invoices = invoices.where.not(status: 'draft')
+
         # Filter by status if provided
         if params[:status].present?
           invoices = invoices.where(status: params[:status])

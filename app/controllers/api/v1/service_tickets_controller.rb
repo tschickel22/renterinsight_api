@@ -369,6 +369,7 @@ module Api
           :account_id,
           :contact_id,
           :vehicle_id,
+          :home_info,
           :title,
           :description,
           :status,
@@ -381,6 +382,7 @@ module Api
           :portal_user_id,
           :is_portal_created,
           :portal_notes,
+          :portal_visible,  # Allow customer to view this ticket in portal
           parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total],
           labor: [:id, :description, :hours, :rate, :total],
           custom_fields: {},
@@ -402,6 +404,7 @@ module Api
           accountId: ticket.account_id,
           contactId: ticket.contact_id,
           vehicleId: ticket.vehicle_id,
+          homeInfo: ticket.home_info,
           title: ticket.title,
           description: ticket.description,
           status: ticket.status,
@@ -416,6 +419,7 @@ module Api
           portalUserId: ticket.portal_user_id,
           isPortalCreated: ticket.is_portal_created,
           portalNotes: ticket.portal_notes,
+          portalVisible: ticket.portal_visible,  # Allow customer to view checkbox
           warrantySuspected: ticket.is_warranty_suspected,
           warrantyConfirmed: ticket.is_warranty_confirmed,
           warrantyClaimId: ticket.warranty_claim_id,
@@ -432,7 +436,9 @@ module Api
           contact: ticket.contact ? {
             id: ticket.contact.id,
             firstName: ticket.contact.first_name,
-            lastName: ticket.contact.last_name
+            lastName: ticket.contact.last_name,
+            email: ticket.contact.email,
+            phone: ticket.contact.phone
           } : nil,
           vehicle: ticket.vehicle ? {
             id: ticket.vehicle.id,
@@ -476,7 +482,7 @@ module Api
           filename: attachment.filename.to_s,
           contentType: attachment.content_type,
           byteSize: attachment.byte_size,
-          url: rails_blob_url(attachment, only_path: false)
+          url: rails_blob_url(attachment, only_path: true)
         }
       end
       

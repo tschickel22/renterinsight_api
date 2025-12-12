@@ -410,7 +410,29 @@ module Api
           communication_settings: {},
           operational_settings: {},
           integration_settings: {}
-        )
+        ).tap do |whitelisted|
+          # Normalize branding_settings keys to snake_case for consistency
+          if whitelisted[:branding_settings].present?
+            whitelisted[:branding_settings] = normalize_branding_keys(whitelisted[:branding_settings])
+            Rails.logger.info "🔧 [LocationsController] Normalized branding keys: #{whitelisted[:branding_settings].keys}"
+          end
+        end
+      end
+
+      # Normalize branding setting keys from camelCase to snake_case
+      def normalize_branding_keys(settings)
+        key_map = {
+          'primaryColor' => 'primary_color',
+          'secondaryColor' => 'secondary_color',
+          'sideMenuColor' => 'side_menu_color',
+          'fontFamily' => 'font_family',
+          'logoUrl' => 'logo_url',
+          'faviconUrl' => 'favicon_url',
+          'portalName' => 'portal_name',
+          'portalLogo' => 'portal_logo'
+        }
+        
+        settings.transform_keys { |key| key_map[key.to_s] || key.to_s }
       end
 
       def location_json(location, include_settings: false)
