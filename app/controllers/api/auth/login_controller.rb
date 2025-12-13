@@ -38,6 +38,14 @@ module Api
           tokens = JsonWebToken.generate_token_pair(user)
           
           user.update(last_sign_in_at: Time.current)
+          
+          # Track login activity
+          LoginActivity.record_login(
+            user_id: user.id,
+            user_type: 'User',
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent
+          )
 
           set_refresh_token_cookie(tokens[:refresh_token])
 
@@ -218,7 +226,7 @@ module Api
           lastName: user.last_name,
           user_type: determine_user_type(user),
           role: user.role,
-          company_id: user.company_id,
+          company_id: (user.platform_admin? || user.super_admin?) ? nil : user.company_id,
           companyName: company&.name,
           # RBAC information
           rbac_enabled: company&.use_rbac_system || false,

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_11_212051) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -359,12 +359,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_11_212051) do
     t.string "invitation_token"
     t.datetime "invitation_token_expires_at"
     t.datetime "invitation_accepted_at"
+    t.boolean "mfa_enabled", default: false
+    t.string "mfa_method"
     t.index ["buyer_type", "buyer_id", "company_id"], name: "index_buyer_portal_on_buyer_and_company"
     t.index ["buyer_type", "buyer_id"], name: "index_buyer_portal_accesses_on_buyer"
     t.index ["company_id"], name: "index_buyer_portal_accesses_on_company_id"
     t.index ["email"], name: "index_buyer_portal_accesses_on_email", unique: true
     t.index ["invitation_token"], name: "index_buyer_portal_accesses_on_invitation_token", unique: true
     t.index ["login_token"], name: "index_buyer_portal_accesses_on_login_token"
+    t.index ["mfa_enabled"], name: "index_buyer_portal_accesses_on_mfa_enabled"
     t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
   end
@@ -1200,6 +1203,19 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_11_212051) do
     t.index ["external_payments_property_id"], name: "index_locations_on_external_payments_property_id"
   end
 
+  create_table "login_activities", force: :cascade do |t|
+    t.integer "user_id", null: false
+    t.string "user_type", default: "User", null: false
+    t.string "ip_address"
+    t.text "user_agent"
+    t.datetime "logged_in_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["logged_in_at"], name: "index_login_activities_on_logged_in_at"
+    t.index ["user_id", "user_type"], name: "index_login_activities_on_user_id_and_user_type"
+    t.index ["user_id"], name: "index_login_activities_on_user_id"
+  end
+
   create_table "lot_map_history_entries", force: :cascade do |t|
     t.integer "lot_id", null: false
     t.string "action", null: false
@@ -1335,6 +1351,27 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_11_212051) do
     t.index ["active"], name: "index_manufacturers_on_active"
     t.index ["industry_type"], name: "index_manufacturers_on_industry_type"
     t.index ["name"], name: "index_manufacturers_on_name"
+  end
+
+  create_table "mfa_tokens", force: :cascade do |t|
+    t.string "token_digest", null: false
+    t.string "user_type", null: false
+    t.bigint "user_id", null: false
+    t.string "delivery_method", null: false
+    t.string "identifier"
+    t.datetime "expires_at", null: false
+    t.datetime "used_at"
+    t.integer "attempts", default: 0, null: false
+    t.string "ip_address"
+    t.string "user_agent"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_at"], name: "index_mfa_tokens_on_created_at"
+    t.index ["expires_at"], name: "index_mfa_tokens_on_expires_at"
+    t.index ["identifier"], name: "index_mfa_tokens_on_identifier"
+    t.index ["token_digest"], name: "index_mfa_tokens_on_token_digest", unique: true
+    t.index ["user_id", "user_type", "used_at"], name: "index_mfa_tokens_on_user_id_and_user_type_and_used_at"
+    t.index ["user_type", "user_id"], name: "index_mfa_tokens_on_user"
   end
 
   create_table "notes", force: :cascade do |t|

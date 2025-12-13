@@ -42,8 +42,13 @@ class JsonWebToken
       type: 'access'
     }
     
-    # Add company_id if user has one
-    payload[:company_id] = user.company_id if user.respond_to?(:company_id) && user.company_id.present?
+    # Add company_id only for non-platform admins
+    if user.respond_to?(:company_id) && user.company_id.present?
+      # Platform admins should NOT have company_id in their JWT
+      unless user.respond_to?(:platform_admin?) && user.platform_admin?
+        payload[:company_id] = user.company_id
+      end
+    end
     
     encode(payload, STANDARD_EXP.from_now)
   end
@@ -66,6 +71,16 @@ class JsonWebToken
     encode({
       user_id: user.id,
       type: 'mfa_temp'
+    }, 5.minutes.from_now) # Short 5-minute expiry
+  end
+  
+  # Generate a temporary token for portal user MFA verification
+  # @param portal_user [BuyerPortalAccess] The portal user to generate a token for
+  # @return [String] The encoded temporary MFA token
+  def self.generate_mfa_temp_token_portal(portal_user)
+    encode({
+      buyer_portal_access_id: portal_user.id,
+      type: 'mfa_temp_portal'
     }, 5.minutes.from_now) # Short 5-minute expiry
   end
   

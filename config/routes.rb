@@ -88,6 +88,16 @@ Rails.application.routes.draw do
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
+      # ==================== USER SETTINGS ====================
+      scope path: 'user_settings', controller: 'user_settings' do
+        get 'profile'
+        patch 'profile', action: 'update_profile'
+        post 'change_password'
+        get 'security'
+        patch 'security', action: 'update_security'
+        get 'login_activity'
+      end
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do
@@ -541,6 +551,14 @@ Rails.application.routes.draw do
       # Magic Link
       post 'request_magic_link', to: 'magic_link#request_magic_link'
       get 'verify_magic_link', to: 'magic_link#verify_magic_link'
+      
+      # MFA (Multi-Factor Authentication) - Login Flow
+      scope path: 'mfa', controller: 'mfa' do
+        post 'request_code'
+        post 'verify_code'
+        get 'settings'
+        patch 'toggle'
+      end
       
       # Phase 6 - Token Management
       resource :tokens, only: [] do

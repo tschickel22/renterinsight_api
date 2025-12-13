@@ -1,0 +1,381 @@
+# frozen_string_literal: true
+
+module Api
+  module V1
+    class UserSettingsController < ApplicationController
+      skip_before_action :authenticate
+      before_action :authenticate_any_user
+      before_action :set_user
+
+      # GET /api/v1/user_settings/profile
+      def profile
+        render json: {
+          id: @user.id,
+          email: @user.email,
+          first_name: extract_first_name,
+          last_name: extract_last_name,
+          phone: extract_phone,
+          address: extract_address,
+          city: extract_city,
+          state: extract_state,
+          zip: extract_zip,
+          user_type: @user_type
+        }, status: :ok
+      end
+
+      # PATCH /api/v1/user_settings/profile
+      def update_profile
+        profile_params = params.permit(:first_name, :last_name, :phone, :email, :address, :city, :state, :zip)
+
+        begin
+          if @user_type == 'client'
+            # For BuyerPortalAccess, update the user and associated contact
+            updates = {}
+            updates[:email] = profile_params[:email] if profile_params[:email].present?
+            
+            @user.update!(updates) if updates.any?
+            
+            if @user.buyer && @user.buyer.is_a?(Contact)
+              contact = @user.buyer
+              contact_updates = {}
+              contact_updates[:first_name] = profile_params[:first_name] if profile_params[:first_name].present?
+              contact_updates[:last_name] = profile_params[:last_name] if profile_params[:last_name].present?
+              contact_updates[:phone] = profile_params[:phone] if profile_params[:phone].present?
+              contact_updates[:address] = profile_params[:address] if profile_params[:address].present?
+              contact_updates[:city] = profile_params[:city] if profile_params[:city].present?
+              contact_updates[:state] = profile_params[:state] if profile_params[:state].present?
+              contact_updates[:zip] = profile_params[:zip] if profile_params[:zip].present?
+              
+              contact.update!(contact_updates) if contact_updates.any?
+            end
+          else
+            # For User model - only update provided fields
+            updates = {}
+            updates[:first_name] = profile_params[:first_name] if profile_params[:first_name].present?
+            updates[:last_name] = profile_params[:last_name] if profile_params[:last_name].present?
+            updates[:phone] = profile_params[:phone] if profile_params[:phone].present?
+            updates[:email] = profile_params[:email] if profile_params[:email].present?
+            
+            @user.update!(updates) if updates.any?
+          end
+
+          render json: {
+            success: true,
+            message: 'Profile updated successfully'
+          }, status: :ok
+        rescue ActiveRecord::RecordInvalid => e
+          render json: {
+            success: false,
+            error: e.record.errors.full_messages.join(', ')
+          }, status: :unprocessable_entity
+        rescue StandardError => e
+          Rails.logger.error("Profile update error: #{e.message}")
+          render json: {
+            success: false,
+            error: 'Failed to update profile'
+          }, status: :internal_server_error
+        end
+      end
+
+      # POST /api/v1/user_settings/change_password
+      def change_password
+        current_password = params[:current_password]
+        new_password = params[:new_password]
+
+        # Validate parameters
+        if current_password.blank? || new_password.blank?
+          render json: {
+            success: false,
+            error: 'Current password and new password are required'
+          }, status: :bad_request
+          return
+        end
+
+        if new_password.length < 6
+          render json: {
+            success: false,
+            error: 'Password must be at least 6 characters'
+          }, status: :unprocessable_entity
+          return
+        end
+
+        # Verify current password
+        unless @user.authenticate(current_password)
+          render json: {
+            success: false,
+            error: 'Current password is incorrect'
+          }, status: :unprocessable_entity
+          return
+        end
+
+        # Update password
+        begin
+          @user.update!(password: new_password)
+
+          # Log the password change
+          log_password_change
+
+          render json: {
+            success: true,
+            message: 'Password changed successfully'
+          }, status: :ok
+        rescue StandardError => e
+          Rails.logger.error("Password change error: #{e.message}")
+          render json: {
+            success: false,
+            error: 'Failed to change password'
+          }, status: :internal_server_error
+        end
+      end
+
+      # GET /api/v1/user_settings/security
+      def security
+        render json: {
+          mfa_enabled: @user.mfa_enabled || false,
+          mfa_method: @user.mfa_method || 'email',
+          has_email: @user.email.present?,
+          has_phone: extract_phone.present?,
+          email: @user.email,
+          phone: extract_phone
+        }, status: :ok
+      end
+
+      # PATCH /api/v1/user_settings/security
+      def update_security
+        enabled = params[:mfa_enabled]
+        method = params[:mfa_method]
+
+        if enabled.nil?
+          render json: {
+            success: false,
+            error: 'MFA enabled parameter is required'
+          }, status: :bad_request
+          return
+        end
+
+        # Convert to boolean
+        enabled = ActiveModel::Type::Boolean.new.cast(enabled)
+
+        # Validate method if MFA is being enabled
+        if enabled && method.present? && !%w[email sms].include?(method)
+          render json: {
+            success: false,
+            error: 'Invalid MFA method. Must be email or sms'
+          }, status: :bad_request
+          return
+        end
+
+        # Check if user has the required contact info for the method
+        if enabled
+          if method == 'sms' && extract_phone.blank?
+            render json: {
+              success: false,
+              error: 'Phone number is required for SMS verification'
+            }, status: :unprocessable_entity
+            return
+          elsif method == 'email' && @user.email.blank?
+            render json: {
+              success: false,
+              error: 'Email address is required for email verification'
+            }, status: :unprocessable_entity
+            return
+          end
+        end
+
+        begin
+          @user.update!(
+            mfa_enabled: enabled,
+            mfa_method: method || @user.mfa_method || 'email'
+          )
+
+          # Log the MFA change
+          log_mfa_change(enabled)
+
+          render json: {
+            success: true,
+            message: enabled ? 'MFA has been enabled' : 'MFA has been disabled',
+            mfa_enabled: @user.mfa_enabled,
+            mfa_method: @user.mfa_method
+          }, status: :ok
+        rescue StandardError => e
+          Rails.logger.error("Security update error: #{e.message}")
+          render json: {
+            success: false,
+            error: 'Failed to update security settings'
+          }, status: :internal_server_error
+        end
+      end
+
+      # GET /api/v1/user_settings/login_activity
+      def login_activity
+        # Get user's login history (last 3 sessions)
+        recent_sessions = LoginActivity
+          .for_user(@user.id, @user_type == 'client' ? 'BuyerPortalAccess' : 'User')
+          .recent
+          .limit(3)
+          .map do |activity|
+            {
+              device: activity.user_agent || 'Unknown device',
+              ip_address: activity.ip_address,
+              logged_in_at: activity.logged_in_at.iso8601,
+              status: 'completed'
+            }
+          end
+        
+        # Current session info
+        current_session = {
+          device: request.user_agent,
+          ip_address: request.remote_ip,
+          logged_in_at: Time.current.iso8601,
+          status: 'active'
+        }
+
+        render json: {
+          current_session: current_session,
+          recent_sessions: recent_sessions
+        }, status: :ok
+      end
+
+      private
+
+      def authenticate_any_user
+        # Try to get token from Authorization header
+        header = request.headers['Authorization']
+        
+        unless header.present?
+          render json: {
+            success: false,
+            error: 'Unauthorized - Missing authorization header'
+          }, status: :unauthorized
+          return
+        end
+
+        token = header.split(' ').last
+        decoded = JsonWebToken.decode(token)
+
+        unless decoded
+          render json: {
+            success: false,
+            error: 'Unauthorized - Invalid or expired token'
+          }, status: :unauthorized
+          return
+        end
+
+        # Set user ID based on token type
+        if decoded[:user_id]
+          @current_user_id = decoded[:user_id]
+          @current_company_id = decoded[:company_id]
+        elsif decoded[:buyer_portal_access_id]
+          @current_portal_buyer_id = decoded[:buyer_portal_access_id]
+        else
+          render json: {
+            success: false,
+            error: 'Unauthorized - Invalid token format'
+          }, status: :unauthorized
+          return
+        end
+      end
+
+      # Override to use cached ID
+      def current_user
+        return @current_user if @current_user.present?
+        @current_user = @current_user_id ? User.find_by(id: @current_user_id) : nil
+      end
+
+      # Override to use cached ID
+      def current_portal_buyer
+        return @current_portal_buyer if @current_portal_buyer.present?
+        @current_portal_buyer = @current_portal_buyer_id ? BuyerPortalAccess.find_by(id: @current_portal_buyer_id) : nil
+      end
+
+      def set_user
+        # Determine if this is a portal user or company user
+        if current_portal_buyer
+          @user = current_portal_buyer
+          @user_type = 'client'
+        else
+          @user = current_user
+          @user_type = 'admin'
+        end
+
+        unless @user
+          render json: {
+            success: false,
+            error: 'Unauthorized'
+          }, status: :unauthorized
+          return
+        end
+      end
+
+      def extract_first_name
+        if @user_type == 'client' && @user.buyer.respond_to?(:first_name)
+          @user.buyer.first_name
+        elsif @user.respond_to?(:first_name)
+          @user.first_name
+        end
+      end
+
+      def extract_last_name
+        if @user_type == 'client' && @user.buyer.respond_to?(:last_name)
+          @user.buyer.last_name
+        elsif @user.respond_to?(:last_name)
+          @user.last_name
+        end
+      end
+
+      def extract_phone
+        if @user_type == 'client' && @user.buyer.respond_to?(:phone)
+          @user.buyer.phone
+        elsif @user.respond_to?(:phone)
+          @user.phone
+        end
+      end
+
+      def extract_address
+        if @user_type == 'client' && @user.buyer.respond_to?(:address)
+          @user.buyer.address
+        end
+      end
+
+      def extract_city
+        if @user_type == 'client' && @user.buyer.respond_to?(:city)
+          @user.buyer.city
+        end
+      end
+
+      def extract_state
+        if @user_type == 'client' && @user.buyer.respond_to?(:state)
+          @user.buyer.state
+        end
+      end
+
+      def extract_zip
+        if @user_type == 'client' && @user.buyer.respond_to?(:zip)
+          @user.buyer.zip
+        end
+      end
+
+      def log_password_change
+        Rails.logger.info({
+          event: 'password_changed',
+          user_id: @user.id,
+          user_type: @user_type,
+          ip_address: request.remote_ip,
+          timestamp: Time.current
+        }.to_json)
+      end
+
+      def log_mfa_change(enabled)
+        Rails.logger.info({
+          event: 'mfa_settings_changed',
+          user_id: @user.id,
+          user_type: @user_type,
+          mfa_enabled: enabled,
+          mfa_method: @user.mfa_method,
+          ip_address: request.remote_ip,
+          timestamp: Time.current
+        }.to_json)
+      end
+    end
+  end
+end
