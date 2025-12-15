@@ -2,11 +2,13 @@
 
 class Contact < ApplicationRecord
   include LocationAware
+  include NotifiableContact
   
   # Associations
   belongs_to :account, optional: true
   belongs_to :company, optional: true
   belongs_to :location, optional: true
+  belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
   has_many :note_records, class_name: 'Note', as: :entity, dependent: :destroy
@@ -17,6 +19,15 @@ class Contact < ApplicationRecord
   has_many :communications, as: :communicable, dependent: :destroy
   has_many :contact_activities, dependent: :destroy
   has_many :portal_documents, as: :owner, dependent: :destroy
+
+  # Owner helper methods
+  def owner_user
+    owner
+  end
+  
+  def owner_user=(user)
+    self.owner = user
+  end
 
   # Validations
   validates :first_name, presence: true

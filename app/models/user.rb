@@ -14,6 +14,10 @@ class User < ApplicationRecord
   has_many :user_role_assignments, dependent: :destroy
   has_many :roles, through: :user_role_assignments
 
+  # Notification System Associations
+  has_many :notifications, as: :recipient, dependent: :destroy
+  has_many :notification_preferences, dependent: :destroy
+
   validates :email, presence: true, uniqueness: true
   validates :first_name, presence: true, if: -> { name.blank? }
   validates :password, length: { minimum: 6 }, if: -> { password.present? }

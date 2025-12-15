@@ -1,0 +1,50 @@
+<%
+  # Waterfall: Location name first, then Company name, then platform
+  display_name = if @location.present? && @location.name.present?
+    @location.name
+  elsif @company.present?
+    @company.name
+  else
+    'RenterInsight'
+  end
+%>
+<%= display_name %> Notification
+================================================================================
+<% if @location.present? && @company.present? && @location.name != @company.name %>
+<%= @company.name %>
+<% end %>
+
+<%= @notification.category.titleize %> - <%= @notification.priority.upcase %> PRIORITY
+
+<%= @notification.title %>
+--------------------------------------------------------------------------------
+
+<%= @notification.message %>
+
+<% if @action_url.present? %>
+
+ACTION REQUIRED:
+<%= @action_text %>: <%= @action_url %>
+
+<% end %>
+
+--------------------------------------------------------------------------------
+
+You received this notification because you are registered in <%= @company&.name || 'RenterInsight' %>.
+
+<% if @location.present? %>
+<%= @location.name %>
+<% if @location.phone.present? %>Phone: <%= @location.phone %><% end %>
+<% if @location.email.present? %>Email: <%= @location.email %><% end %>
+
+<% end %>
+
+<% 
+  # Use environment-configured frontend URL (automatically correct for local/staging/production)
+  frontend_url = ENV['FRONTEND_URL'] || Rails.application.credentials.dig(:frontend_url) || 'https://app.renterinsight.com'
+%>
+
+View all notifications: <%= frontend_url %>/notifications
+Manage preferences: <%= frontend_url %>/account/settings?tab=notifications
+
+© <%= Time.current.year %> <%= @company&.name || 'RenterInsight' %>. All rights reserved.

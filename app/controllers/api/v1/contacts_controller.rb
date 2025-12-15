@@ -108,6 +108,9 @@ module Api
         # STRICT TENANT ISOLATION: Create contact within current company
         @contact = @company.contacts.new(contact_params)
         
+        # Auto-assign owner to current user if not specified
+        @contact.owner_id ||= current_user&.id
+        
         # Auto-assign location from selector (if user selected a specific location)
         Rails.logger.info "🔍 [ContactsController#create] Before auto-assign - Current.location_id: #{Current.location_id}, location_filtered: #{Current.location_filtered?}"
         @contact.location_id ||= Current.location_id if Current.location_id.present?
@@ -667,6 +670,7 @@ module Api
           :department,
           :is_primary,
           :notes,
+          :owner_id,
           :street,
           :city,
           :state,
@@ -691,6 +695,7 @@ module Api
           :department,
           :is_primary,
           :notes,
+          :owner_id,
           :street,
           :city,
           :state,
@@ -752,6 +757,8 @@ module Api
           department: contact.department,
           isPrimary: contact.is_primary,
           notes: contact.notes,
+          ownerId: contact.owner_id,
+          owner: contact.owner ? { id: contact.owner.id, name: contact.owner.name, email: contact.owner.email } : nil,
           optOutEmail: contact.opt_out_email,
           optOutEmailAt: contact.opt_out_email_at,
           optOutSms: contact.opt_out_sms,

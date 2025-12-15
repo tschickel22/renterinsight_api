@@ -3,6 +3,7 @@ require "ostruct"
 
 class ApplicationController < ActionController::API
   include ActionController::Cookies
+  include NotificationTriggers  # Add notification helper methods
   
   before_action :authenticate
   before_action :set_current_attributes

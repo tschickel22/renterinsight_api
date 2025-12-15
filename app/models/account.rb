@@ -2,6 +2,7 @@
 class Account < ApplicationRecord
   include Communicable
   include LocationAware
+  include NotifiableAccount
   
   # Account Types
   ACCOUNT_TYPES = %w[customer prospect vendor partner competitor converted_lead].freeze
@@ -28,6 +29,15 @@ class Account < ApplicationRecord
   has_many :tags, through: :tag_assignments
   has_many :activities, class_name: 'AccountActivity', dependent: :destroy
   has_many :quotes, dependent: :destroy
+  
+  # Owner helper methods (for consistency with other models)
+  def owner_user
+    owner
+  end
+  
+  def owner_user=(user)
+    self.owner = user
+  end
   
   # Validations
   validates :name, presence: true, uniqueness: { scope: :company_id }

@@ -8,7 +8,7 @@
 module Api
   module V1
     class RolesController < ApplicationController
-      before_action :ensure_rbac_enabled, except: [:system_roles]
+      before_action :ensure_rbac_enabled, except: [:system_roles, :index]
       before_action :set_role, only: [:show, :update, :destroy, :clone, :permissions, :set_permissions]
       before_action :authorize_role_management, except: [:index, :show, :system_roles, :permissions, :toggle_visibility]
       

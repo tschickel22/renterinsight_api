@@ -28,6 +28,7 @@
 
 class ServiceTicket < ApplicationRecord
   include LocationAware
+  include NotifiableServiceTicket
   
   # Associations
   belongs_to :company
@@ -39,6 +40,22 @@ class ServiceTicket < ApplicationRecord
   belongs_to :portal_user, class_name: 'BuyerPortalAccess', optional: true
   has_one :warranty_claim_owned, class_name: 'WarrantyClaim', foreign_key: :service_ticket_id, dependent: :restrict_with_error
   has_many :invoices, as: :source, dependent: :nullify
+  
+  # User assignment (assigned_to stores user_id as string)
+  def assigned_to_user
+    return nil if assigned_to.blank?
+    @assigned_to_user ||= User.find_by(id: assigned_to.to_i)
+  end
+  
+  def assigned_to_user=(user)
+    self.assigned_to = user&.id&.to_s
+    @assigned_to_user = user
+  end
+  
+  # For creator lookup
+  def created_by_user
+    User.find_by(id: created_by) if respond_to?(:created_by) && created_by.present?
+  end
   
   # Active Storage for attachments (photos, videos, documents)
   has_many_attached :attachments
@@ -76,6 +93,7 @@ class ServiceTicket < ApplicationRecord
   
   # Callbacks
   before_validation :set_defaults
+  before_validation :normalize_assigned_to
   
   # Instance methods
   def parts_total
@@ -296,5 +314,18 @@ class ServiceTicket < ApplicationRecord
     self.labor ||= []
     self.custom_fields ||= {}
     self.line_item_billing ||= []
+  end
+  
+  def normalize_assigned_to
+    # Convert integer to string for database storage
+    # assigned_to column is STRING, but frontend may send integer
+    if assigned_to.present? && !assigned_to.is_a?(String)
+      self.assigned_to = assigned_to.to_s
+    end
+    
+    # Don't allow empty string for status - use nil instead (will trigger default)
+    if status.blank?
+      self.status = nil
+    end
   end
 end

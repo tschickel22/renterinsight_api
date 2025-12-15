@@ -112,15 +112,58 @@ module Api
       end
       
       def notify_company_quote_accepted(quote)
+        # Send email notification
         QuoteMailer.client_accepted(quote).deliver_later
+        
+        # Create in-app notification for quote owner
+        if quote.user_id.present?
+          user = User.find_by(id: quote.user_id)
+          if user
+            NotificationService.create(
+              recipient: user,
+              notification_type: :quote_accepted,
+              title: 'Quote Accepted',
+              message: "Quote ##{quote.quote_number} was accepted by #{quote.contact&.full_name || 'client'}.",
+              notifiable: quote,
+              action_url: "/quotes/#{quote.id}",
+              action_text: 'View Quote',
+              priority: 'high',
+              deliver_now: true,
+              company_id: quote.company_id
+            )
+          end
+        end
       rescue => e
-        Rails.logger.error "[Public Quotes] Failed to send acceptance email: #{e.message}"
+        Rails.logger.error "[Public Quotes] Failed to send acceptance notification: #{e.message}"
       end
       
       def notify_company_quote_rejected(quote, reason)
+        # Send email notification
         QuoteMailer.client_rejected(quote, reason).deliver_later
+        
+        # Create in-app notification for quote owner
+        if quote.user_id.present?
+          user = User.find_by(id: quote.user_id)
+          if user
+            message_text = "Quote ##{quote.quote_number} was rejected by #{quote.contact&.full_name || 'client'}."
+            message_text += " Reason: #{reason}" if reason.present?
+            
+            NotificationService.create(
+              recipient: user,
+              notification_type: :quote_rejected,
+              title: 'Quote Rejected',
+              message: message_text,
+              notifiable: quote,
+              action_url: "/quotes/#{quote.id}",
+              action_text: 'View Quote',
+              priority: 'normal',
+              deliver_now: true,
+              company_id: quote.company_id
+            )
+          end
+        end
       rescue => e
-        Rails.logger.error "[Public Quotes] Failed to send rejection email: #{e.message}"
+        Rails.logger.error "[Public Quotes] Failed to send rejection notification: #{e.message}"
       end
     end
   end

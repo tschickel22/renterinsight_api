@@ -164,6 +164,39 @@ module Api
         end
       end
 
+      # GET /api/v1/users/assignable
+      # Returns users filtered by assignment context (service, sales, finance, etc.)
+      def assignable
+        return unless authorize_action!('users', 'read')
+        
+        context = params[:context] || 'general'
+        
+        # Base query: all active users in company
+        users = current_company.users.where(deleted_at: nil, status: 'active')
+        
+        # Apply RBAC location filtering for non-admins
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            users = users.joins(:user_locations)
+                        .where(user_locations: { location_id: location_ids, active: true })
+                        .distinct
+          end
+        end
+        
+        # Smart filtering based on company setting
+        if current_company.filter_assignments_by_role?
+          users = filter_by_context(users, context)
+        end
+        
+        # Order by name
+        users = users.order(:first_name, :last_name)
+        
+        render json: {
+          users: users.map { |u| assignable_user_json(u) }
+        }
+      end
+
       # GET /api/v1/users/:id/locations
       def user_locations
         @user = current_company.users.find(params[:id])
@@ -412,6 +445,85 @@ module Api
           ul.assigned_by = current_user.id.to_s if ul.new_record?
           ul.save!
         end
+      end
+      
+      # Filter users by assignment context using RBAC permissions or role departments
+      def filter_by_context(users, context)
+        case context
+        when 'service'
+          filter_users_by_department(users, 'service', ['service'])
+        when 'sales'
+          filter_users_by_department(users, 'sales', ['sales', 'quotes', 'deals'])
+        when 'finance'
+          filter_users_by_department(users, 'finance', ['payments', 'invoices'])
+        when 'crm'
+          filter_users_by_department(users, 'crm', ['crm', 'contacts', 'leads'])
+        when 'inventory'
+          filter_users_by_department(users, 'operations', ['inventory', 'operations', 'vehicles'])
+        else
+          users # Return all users for 'general' context
+        end
+      end
+      
+      # Helper to filter users by department or RBAC permissions
+      def filter_users_by_department(users, department, resource_keys)
+        if current_company.use_rbac_system
+          # RBAC: Find users with permissions for these resources
+          user_ids = UserRoleAssignment
+            .joins(role: :role_permissions)
+            .joins('INNER JOIN resources ON resources.id = role_permissions.resource_id')
+            .where(user_role_assignments: { company_id: current_company.id })
+            .where(resources: { key: resource_keys })
+            .where(role_permissions: { granted: true })
+            .distinct
+            .pluck(:user_id)
+          
+          # Also include users with roles that have matching department
+          dept_user_ids = UserRoleAssignment
+            .joins(:role)
+            .where(user_role_assignments: { company_id: current_company.id })
+            .where(roles: { department: department })
+            .distinct
+            .pluck(:user_id)
+          
+          combined_ids = (user_ids + dept_user_ids).uniq
+          combined_ids.any? ? users.where(id: combined_ids) : users.none
+        else
+          # Legacy: No RBAC, return all users (small company use case)
+          users
+        end
+      end
+      
+      # JSON serialization for assignable users
+      def assignable_user_json(user)
+        # Get role display name
+        role_display = if current_company.use_rbac_system && user.user_role_assignments.any?
+          primary_assignment = user.user_role_assignments
+            .where(company_id: current_company.id)
+            .joins(:role)
+            .order('roles.tier DESC, roles.created_at ASC')
+            .first
+          primary_assignment&.role&.name || user.role&.titleize || 'User'
+        else
+          user.role&.titleize || 'User'
+        end
+        
+        {
+          id: user.id,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          fullName: user.name,
+          email: user.email,
+          role: user.role,
+          displayRole: role_display,
+          avatarUrl: user.try(:avatar_url),
+          locations: user.user_locations.includes(:location).where(active: true).map do |ul|
+            {
+              id: ul.location_id,
+              name: ul.location.name
+            }
+          end
+        }
       end
     end
   end

@@ -210,8 +210,9 @@ module Api
         
         # STRICT TENANT ISOLATION: Create deal within current company
         deal = @company.deals.new(deal_params)
-        # Don't set user_id if there's no real current_user
-        # deal.user_id ||= current_user&.id
+        
+        # Auto-assign owner to current user if not specified
+        deal.owner_id ||= current_user&.id
         
         # Auto-assign location from selector (if user selected a specific location)
         deal.location_id ||= Current.location_id if Current.location_id.present?
@@ -367,7 +368,7 @@ module Api
           :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
           :win_reason, :loss_reason, :competitor,
-          :customer_name, :source_id, :company_id
+          :customer_name, :source_id, :company_id, :owner_id
         )
       end
 
@@ -396,6 +397,8 @@ module Api
           actualCloseDate: deal.actual_close_date&.iso8601,
           userId: deal.user_id,
           userName: deal.user&.name,
+          ownerId: deal.owner_id,
+          owner: deal.owner ? { id: deal.owner.id, name: deal.owner.name, email: deal.owner.email } : nil,
           assignedTo: deal.assigned_to,
           territoryId: deal.territory_id,
           territoryName: deal.territory&.name,

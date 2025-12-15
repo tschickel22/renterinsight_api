@@ -1,11 +1,13 @@
 class Deal < ApplicationRecord
   include LocationAware
+  include NotifiableDeal
   
   belongs_to :company, optional: true
   belongs_to :location, optional: true
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
   belongs_to :user, optional: true  # FIX: Made optional to prevent 422 errors when user_id not set
+  belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   belongs_to :territory, optional: true
   belongs_to :source, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship
@@ -14,6 +16,15 @@ class Deal < ApplicationRecord
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
+  
+  # Owner helper methods
+  def owner_user
+    owner
+  end
+  
+  def owner_user=(user)
+    self.owner = user
+  end
   
   validates :name, presence: true
   validates :value, numericality: { greater_than_or_equal_to: 0 }

@@ -98,6 +98,31 @@ Rails.application.routes.draw do
         get 'login_activity'
       end
       
+      # ==================== NOTIFICATIONS ====================
+      resources :notifications, only: [:index, :show, :destroy] do
+        collection do
+          get :unread_count
+          patch :mark_all_read
+          post :broadcast
+          post :preview_recipients
+          get :stats
+          post :test  # Test notification endpoint
+        end
+        member do
+          patch :mark_as_read
+          patch :mark_as_unread
+          get 'attachments/:attachment_id', action: :download_attachment, as: :download_attachment
+        end
+      end
+      
+      resources :notification_preferences, path: 'notification-preferences' do
+        collection do
+          patch :bulk_update
+          post :reset_defaults
+          patch 'category/:category', action: :update_category
+        end
+      end
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do
@@ -362,6 +387,7 @@ Rails.application.routes.draw do
         end
         
         collection do
+          get :assignable  # Get users filtered by context (service, sales, finance, etc.)
           post :bulk_activate
           post :bulk_deactivate
         end

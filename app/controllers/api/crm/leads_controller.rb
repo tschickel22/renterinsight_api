@@ -47,6 +47,9 @@ module Api
         # STRICT TENANT ISOLATION: Create lead within current company
         l = @company.leads.new(lead_params)
         
+        # Auto-assign owner to current user if not specified
+        l.owner_id ||= current_user&.id
+        
         # Auto-assign location from selector (if user selected a specific location)
         l.location_id ||= Current.location_id if Current.location_id.present?
         
@@ -315,8 +318,8 @@ module Api
 
       # Merge root + nested (:lead), accept camel & snake, normalize to snake.
       def lead_params
-        allowed = [:first_name, :last_name, :email, :phone, :notes, :source_id, :status, :company_id,
-                   :firstName, :lastName, :sourceId]
+        allowed = [:first_name, :last_name, :email, :phone, :notes, :source_id, :status, :company_id, :owner_id,
+                   :firstName, :lastName, :sourceId, :ownerId]
 
         root = params.permit(*allowed, lead: {})
         nested = params[:lead].is_a?(ActionController::Parameters) ? params.require(:lead).permit(*allowed) : {}
@@ -331,7 +334,8 @@ module Api
           notes:      raw['notes'],
           status:     raw['status'],
           company_id: raw['company_id'],
-          source_id:  (raw['source_id']  || raw['sourceId']).presence&.to_i
+          source_id:  (raw['source_id']  || raw['sourceId']).presence&.to_i,
+          owner_id:   (raw['owner_id']   || raw['ownerId']).presence&.to_i
         }.compact
       end
 
@@ -356,6 +360,8 @@ module Api
           status:    l.status,
           sourceId:  l.source_id,
           source:    (l.source ? { id: l.source.id, name: l.source.name } : nil),
+          ownerId:   l.owner_id,
+          owner:     (l.owner ? { id: l.owner.id, name: l.owner.name, email: l.owner.email } : nil),
           isConverted: l.respond_to?(:is_converted) ? l.is_converted : false,
           convertedAt: l.respond_to?(:converted_at) ? l.converted_at : nil,
           convertedToAccountId: l.respond_to?(:converted_account_id) ? l.converted_account_id : nil,

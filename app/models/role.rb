@@ -159,6 +159,52 @@ class Role < ApplicationRecord
       color: '#10b981'
     )
 
+    # Specialized department roles (location-tier)
+    service_tech = create_system_role!(
+      tier: 'location',
+      key: 'service_tech',
+      name: 'Service Technician',
+      description: 'Service ticket management and field operations',
+      color: '#f59e0b',
+      department: 'service'
+    )
+
+    sales_rep = create_system_role!(
+      tier: 'location',
+      key: 'sales_rep',
+      name: 'Sales Representative',
+      description: 'Quotes, deals, and CRM operations',
+      color: '#ec4899',
+      department: 'sales'
+    )
+
+    finance_staff = create_system_role!(
+      tier: 'location',
+      key: 'finance_staff',
+      name: 'Finance Staff',
+      description: 'Payments, invoices, and financial operations',
+      color: '#14b8a6',
+      department: 'finance'
+    )
+
+    crm_specialist = create_system_role!(
+      tier: 'location',
+      key: 'crm_specialist',
+      name: 'CRM Specialist',
+      description: 'Lead management and customer relations',
+      color: '#8b5cf6',
+      department: 'crm'
+    )
+
+    inventory_manager = create_system_role!(
+      tier: 'location',
+      key: 'inventory_manager',
+      name: 'Inventory Manager',
+      description: 'Inventory and operations management',
+      color: '#6366f1',
+      department: 'operations'
+    )
+
     # Grant permissions to Company Admin (full access to everything)
     grant_full_permissions!(company_admin)
 
@@ -169,6 +215,13 @@ class Role < ApplicationRecord
     grant_location_admin_permissions!(location_admin)
     grant_location_manager_permissions!(location_manager)
     grant_location_staff_permissions!(location_staff)
+    
+    # Grant specialized role permissions
+    grant_service_tech_permissions!(service_tech)
+    grant_sales_rep_permissions!(sales_rep)
+    grant_finance_staff_permissions!(finance_staff)
+    grant_crm_specialist_permissions!(crm_specialist)
+    grant_inventory_manager_permissions!(inventory_manager)
   end
 
   private
@@ -317,6 +370,185 @@ class Role < ApplicationRecord
           role: role,
           resource: resource,
           action: action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+  end
+  
+  def self.grant_service_tech_permissions!(role)
+    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    
+    # Service techs get full access to service tickets
+    service_resource = Resource.find_by(key: 'service')
+    all_actions = Action.all
+    
+    if service_resource
+      all_actions.each do |action|
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: service_resource,
+          action: action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+    
+    # Read access to inventory and contacts
+    read_action = Action.find_by(key: 'read')
+    %w[inventory crm contacts].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      if resource && read_action
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: read_action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+  end
+  
+  def self.grant_sales_rep_permissions!(role)
+    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    operational_actions = Action.where(key: %w[create read update delete export])
+    
+    # Full access to sales resources
+    %w[quotes deals sales crm contacts leads].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      next unless resource
+      
+      operational_actions.each do |action|
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+    
+    # Read access to inventory and finance
+    read_action = Action.find_by(key: 'read')
+    %w[inventory payments invoices].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      if resource && read_action
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: read_action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+  end
+  
+  def self.grant_finance_staff_permissions!(role)
+    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    operational_actions = Action.where(key: %w[create read update delete export])
+    
+    # Full access to finance resources
+    %w[payments invoices finance].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      next unless resource
+      
+      operational_actions.each do |action|
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+    
+    # Read access to contacts, deals, and quotes
+    read_action = Action.find_by(key: 'read')
+    %w[contacts deals quotes crm].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      if resource && read_action
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: read_action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+  end
+  
+  def self.grant_crm_specialist_permissions!(role)
+    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    operational_actions = Action.where(key: %w[create read update delete export])
+    
+    # Full access to CRM resources
+    %w[crm contacts leads accounts].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      next unless resource
+      
+      operational_actions.each do |action|
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+    
+    # Read access to quotes and deals
+    read_action = Action.find_by(key: 'read')
+    %w[quotes deals sales].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      if resource && read_action
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: read_action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+  end
+  
+  def self.grant_inventory_manager_permissions!(role)
+    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    operational_actions = Action.where(key: %w[create read update delete export])
+    
+    # Full access to inventory and operations
+    %w[inventory operations vehicles].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      next unless resource
+      
+      operational_actions.each do |action|
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: action,
+          scope: assigned_locations_scope,
+          granted: true
+        )
+      end
+    end
+    
+    # Read access to service and contacts
+    read_action = Action.find_by(key: 'read')
+    %w[service contacts crm].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      if resource && read_action
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: resource,
+          action: read_action,
           scope: assigned_locations_scope,
           granted: true
         )

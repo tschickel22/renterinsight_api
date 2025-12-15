@@ -3,11 +3,13 @@
 class Lead < ApplicationRecord
   include Communicable
   include LocationAware
+  include NotifiableLead
   
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :converted_account, class_name: "Account", optional: true
   belongs_to :source, class_name: "Source", optional: true
+  belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
 
   # Core CRM associations
   has_many :activities,           dependent: :destroy
@@ -18,6 +20,15 @@ class Lead < ApplicationRecord
 
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
+
+  # Owner helper methods
+  def owner_user
+    owner
+  end
+  
+  def owner_user=(user)
+    self.owner = user
+  end
 
   # Scopes for filtering converted leads
   scope :active, -> { where(is_converted: [false, nil]) }

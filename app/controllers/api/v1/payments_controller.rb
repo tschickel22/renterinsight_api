@@ -514,6 +514,22 @@ module Api
             # Mark as completed
             payment.mark_completed!(external_id: external_id)
             
+            # Notify payment success
+            if payment.payer_type == 'Contact' && payment.payer_id.present?
+              contact = Contact.find_by(id: payment.payer_id)
+              if contact && contact.user_id.present?
+                owner = User.find_by(id: contact.user_id)
+                if owner
+                  trigger_notification(
+                    :payment_received,
+                    recipient: owner,
+                    notifiable: payment,
+                    message: "Payment of $#{payment.amount} received from #{contact.full_name}."
+                  )
+                end
+              end
+            end
+            
             Rails.logger.info "[Payments] Successfully processed payment #{payment.id}: $#{payment.amount}"
             
             render json: {
@@ -532,6 +548,22 @@ module Api
             # Payment failed
             error_message = api.payment_error_message
             payment.mark_failed!(error_message)
+            
+            # Notify payment failure
+            if payment.payer_type == 'Contact' && payment.payer_id.present?
+              contact = Contact.find_by(id: payment.payer_id)
+              if contact && contact.user_id.present?
+                owner = User.find_by(id: contact.user_id)
+                if owner
+                  trigger_notification(
+                    :payment_failed,
+                    recipient: owner,
+                    notifiable: payment,
+                    message: "Payment of $#{payment.amount} from #{contact.full_name} failed: #{error_message}"
+                  )
+                end
+              end
+            end
             
             Rails.logger.error "[Payments] Payment processing failed: #{error_message}"
             

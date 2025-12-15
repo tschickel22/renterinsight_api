@@ -38,6 +38,7 @@
 
 class WarrantyClaim < ApplicationRecord
   include LocationAware
+  include NotifiableWarrantyClaim
   
   STATUSES = %w[
     draft 
@@ -55,6 +56,7 @@ class WarrantyClaim < ApplicationRecord
   belongs_to :location, optional: true
   belongs_to :service_ticket
   belongs_to :manufacturer
+  belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   has_one :manufacturer_ar_transaction, dependent: :destroy
   has_many :manufacturer_claim_views, dependent: :destroy
   
@@ -87,7 +89,17 @@ class WarrantyClaim < ApplicationRecord
   scope :by_manufacturer, ->(manufacturer_id) { where(manufacturer_id: manufacturer_id) }
   scope :for_service_ticket, ->(ticket_id) { where(service_ticket_id: ticket_id) }
   
+  # Owner helper methods
+  def owner_user
+    owner
+  end
+  
+  def owner_user=(user)
+    self.owner = user
+  end
+  
   # Callbacks
+  before_validation :set_owner_from_service_ticket, on: :create
   before_validation :generate_claim_number, on: :create
   before_validation :generate_public_token, on: :create
   after_update :create_ar_transaction_if_approved
@@ -279,6 +291,8 @@ class WarrantyClaim < ApplicationRecord
       lastViewedAt: last_viewed_at,
       submittedBy: submitted_by,
       approvedBy: approved_by,
+      ownerId: owner_id,
+      owner: owner ? { id: owner.id, name: owner.name, email: owner.email } : nil,
       createdAt: created_at,
       updatedAt: updated_at,
       
@@ -306,6 +320,13 @@ class WarrantyClaim < ApplicationRecord
   end
   
   private
+  
+  def set_owner_from_service_ticket
+    # Inherit owner from service ticket if not explicitly set
+    if service_ticket.present? && owner_id.blank?
+      self.owner_id = service_ticket.assigned_to_user&.id
+    end
+  end
   
   def generate_claim_number
     self.claim_number ||= loop do

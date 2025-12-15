@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_14_211505) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -513,9 +513,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.jsonb "loan_settings", default: {}, null: false
     t.string "external_payments_id"
     t.jsonb "branding_settings", default: {}
+    t.boolean "filter_assignments_by_role", default: false
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
+    t.index ["filter_assignments_by_role"], name: "index_companies_on_filter_assignments_by_role"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
@@ -614,12 +616,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.string "state"
     t.string "zip"
     t.string "country"
+    t.integer "owner_id"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
     t.index ["location_id"], name: "index_contacts_on_location_id"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
+    t.index ["owner_id"], name: "index_contacts_on_owner_id"
   end
 
   create_table "custom_fields", force: :cascade do |t|
@@ -700,6 +704,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.string "assigned_to"
     t.integer "company_id"
     t.bigint "location_id"
+    t.integer "owner_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -710,6 +715,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
     t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
+    t.index ["owner_id"], name: "index_deals_on_owner_id"
     t.index ["source_id"], name: "index_deals_on_source_id"
     t.index ["stage"], name: "index_deals_on_stage"
     t.index ["territory_id", "stage"], name: "index_deals_on_territory_id_and_stage"
@@ -977,10 +983,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.boolean "is_converted", default: false
     t.datetime "converted_at"
     t.bigint "location_id"
+    t.integer "owner_id"
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["location_id"], name: "index_leads_on_location_id"
+    t.index ["owner_id"], name: "index_leads_on_owner_id"
     t.index ["source_id"], name: "index_leads_on_source_id"
   end
 
@@ -1387,6 +1395,59 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.index ["user_id"], name: "index_notes_on_user_id"
   end
 
+  create_table "notification_preferences", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "notification_type", null: false
+    t.string "category", null: false
+    t.boolean "in_app_enabled", default: true, null: false
+    t.boolean "email_enabled", default: false, null: false
+    t.boolean "sms_enabled", default: false, null: false
+    t.string "frequency", default: "immediate"
+    t.boolean "respect_quiet_hours", default: false
+    t.time "quiet_hours_start"
+    t.time "quiet_hours_end"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_notification_preferences_on_category"
+    t.index ["user_id", "notification_type"], name: "index_notification_prefs_on_user_and_type", unique: true
+  end
+
+  create_table "notifications", force: :cascade do |t|
+    t.string "recipient_type", null: false
+    t.bigint "recipient_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "notification_type", null: false
+    t.string "category", null: false
+    t.string "priority", default: "normal"
+    t.string "title", null: false
+    t.text "message", null: false
+    t.string "notifiable_type"
+    t.bigint "notifiable_id"
+    t.string "actor_type"
+    t.bigint "actor_id"
+    t.boolean "read", default: false, null: false
+    t.datetime "read_at"
+    t.boolean "email_sent", default: false
+    t.datetime "email_sent_at"
+    t.boolean "sms_sent", default: false
+    t.datetime "sms_sent_at"
+    t.string "action_url"
+    t.string "action_text"
+    t.jsonb "action_data", default: {}
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_notifications_on_category"
+    t.index ["company_id", "created_at"], name: "index_notifications_on_company_id_and_created_at"
+    t.index ["company_id", "notification_type"], name: "index_notifications_on_company_id_and_notification_type"
+    t.index ["location_id"], name: "index_notifications_on_location_id"
+    t.index ["notifiable_type", "notifiable_id"], name: "index_notifications_on_notifiable_type_and_notifiable_id"
+    t.index ["priority"], name: "index_notifications_on_priority"
+    t.index ["recipient_type", "recipient_id", "created_at"], name: "index_notifications_on_recipient_and_created"
+    t.index ["recipient_type", "recipient_id", "read"], name: "index_notifications_on_recipient_and_read"
+  end
+
   create_table "nurture_enrollments", force: :cascade do |t|
     t.integer "lead_id"
     t.integer "nurture_sequence_id", null: false
@@ -1675,9 +1736,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "color"
+    t.string "department"
     t.index ["active"], name: "index_roles_on_active"
     t.index ["company_id", "tier", "key"], name: "index_roles_unique_per_company", unique: true
     t.index ["company_id"], name: "index_roles_on_company_id"
+    t.index ["department"], name: "index_roles_on_department"
     t.index ["is_system_role"], name: "index_roles_on_is_system_role"
     t.index ["tier"], name: "index_roles_on_tier"
   end
@@ -2146,6 +2209,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "owner_id"
     t.index ["company_id", "claim_number"], name: "index_warranty_claims_on_company_id_and_claim_number", unique: true
     t.index ["company_id", "is_deleted"], name: "index_warranty_claims_on_company_id_and_is_deleted"
     t.index ["company_id", "status"], name: "index_warranty_claims_on_company_id_and_status"
@@ -2153,6 +2217,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_13_000427) do
     t.index ["location_id"], name: "index_warranty_claims_on_location_id"
     t.index ["manufacturer_id"], name: "index_warranty_claims_on_manufacturer_id"
     t.index ["manufacturer_responded_at"], name: "index_warranty_claims_on_manufacturer_responded_at"
+    t.index ["owner_id"], name: "index_warranty_claims_on_owner_id"
     t.index ["public_token"], name: "index_warranty_claims_on_public_token", unique: true
     t.index ["service_ticket_id"], name: "index_warranty_claims_on_service_ticket_id"
     t.index ["status"], name: "index_warranty_claims_on_status"
