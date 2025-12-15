@@ -1,5 +1,13 @@
 class JsonWebToken
-  SECRET_KEY = Rails.application.credentials.jwt_secret || ENV['JWT_SECRET'] || Rails.application.secret_key_base
+  # Lazy load secret key to avoid initialization errors
+  def self.secret_key
+    @secret_key ||= begin
+      # Try credentials first (may fail if RAILS_MASTER_KEY not set)
+      Rails.application.credentials.jwt_secret
+    rescue ActiveSupport::MessageEncryptor::InvalidMessage
+      nil
+    end || ENV['JWT_SECRET'] || Rails.application.secret_key_base
+  end
   
   # Extended token expiry: 7 days (for staging/production stability)
   STANDARD_EXP = 7.days
@@ -14,14 +22,14 @@ class JsonWebToken
   def self.encode(payload, exp = STANDARD_EXP.from_now)
     payload[:exp] = exp.to_i
     payload[:iat] = Time.now.to_i # Issued at
-    JWT.encode(payload, SECRET_KEY, 'HS256')
+    JWT.encode(payload, secret_key, 'HS256')
   end
   
   # Decode a JWT token
   # @param token [String] The JWT token to decode
   # @return [HashWithIndifferentAccess, nil] The decoded payload or nil if invalid
   def self.decode(token)
-    body = JWT.decode(token, SECRET_KEY, true, { algorithm: 'HS256' })[0]
+    body = JWT.decode(token, secret_key, true, { algorithm: 'HS256' })[0]
     HashWithIndifferentAccess.new(body)
   rescue JWT::ExpiredSignature => e
     Rails.logger.info("[JsonWebToken] Token expired: #{e.message}")
