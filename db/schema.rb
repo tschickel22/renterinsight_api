@@ -513,11 +513,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_15_165154) do
     t.jsonb "loan_settings", default: {}, null: false
     t.string "external_payments_id"
     t.jsonb "branding_settings", default: {}
-    t.boolean "filter_assignments_by_role", default: false
+    t.boolean "filter_assignments_by_role", default: false, null: false, comment: "When true, users can only be assigned to records within their role department"
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
-    t.index ["filter_assignments_by_role"], name: "index_companies_on_filter_assignments_by_role"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
@@ -1736,7 +1735,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_15_165154) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "color"
-    t.string "department"
+    t.string "department", comment: "Department category for role filtering (service, sales, finance, crm, operations)"
     t.index ["active"], name: "index_roles_on_active"
     t.index ["company_id", "tier", "key"], name: "index_roles_unique_per_company", unique: true
     t.index ["company_id"], name: "index_roles_on_company_id"
