@@ -30,6 +30,13 @@ Rails.application.configure do
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
 
+  # Allow WebSocket connections from frontend domains (ActionCable CORS)
+  config.action_cable.allowed_request_origins = (ENV['CORS_ORIGINS']&.split(',')&.map(&:strip) || []) + [
+    'https://crm.landlordinsight.com',
+    'https://dms.renterinsight.com',
+    'https://staging.crm.landlordinsight.com'
+  ]
+
   # Log to STDOUT with the current request id as a default log tag.
   config.log_tags = [ :request_id ]
   config.logger   = ActiveSupport::TaggedLogging.logger(STDOUT)
