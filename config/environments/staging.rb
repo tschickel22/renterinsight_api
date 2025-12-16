@@ -25,6 +25,14 @@ Rails.application.configure do
   # For staging, we can be less strict about SSL
   config.force_ssl = false
 
+  # Allow WebSocket connections from frontend domains (ActionCable CORS)
+  config.action_cable.allowed_request_origins = (ENV['CORS_ORIGINS']&.split(',')&.map(&:strip) || []) + [
+    'https://staging.crm.landlordinsight.com',
+    'https://staging-dms.renterinsight.com',
+    'https://*.netlify.app',
+    /https:\/\/.*\.netlify\.app/
+  ]
+
   # Log to STDOUT with the current request id as a default log tag.
   config.log_tags = [ :request_id ]
   config.logger   = ActiveSupport::TaggedLogging.logger(STDOUT)
@@ -52,13 +60,6 @@ Rails.application.configure do
 
   # Only use :id for inspections in staging.
   config.active_record.attributes_for_inspect = [ :id ]
-
-  # Allow ActionCable requests from staging frontend domains
-  config.action_cable.allowed_request_origins = [
-    'https://staging.crm.landlordinsight.com',
-    'https://*.netlify.app',
-    /https:\/\/.*\.netlify\.app/
-  ]
 
   # Allow requests from staging domain and localhost for testing
   # config.hosts = [
