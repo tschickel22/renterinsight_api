@@ -42,6 +42,10 @@ class Company < ApplicationRecord
   has_many :company_hidden_roles, dependent: :destroy
   has_many :hidden_roles, through: :company_hidden_roles, source: :role
   
+  # Subscription System Associations
+  has_one :tenant_subscription, dependent: :destroy
+  has_many :tenant_module_overrides, dependent: :destroy
+  
   # Callbacks
   after_create :create_default_location
   
@@ -232,6 +236,15 @@ class Company < ApplicationRecord
     return nil unless subdomain.present?
     base_domain = Rails.application.credentials.dig(:domain, :base) || 'renterinsight.com'
     "#{subdomain}.#{base_domain}"
+  end
+  
+  # Full URL for subdomain access
+  def subdomain_url
+    domain = subdomain_with_base_domain
+    return nil unless domain.present?
+    
+    protocol = Rails.env.production? ? 'https' : 'https'
+    "#{protocol}://#{domain}"
   end
   
   # Check if this company should receive traffic for the given host
@@ -438,6 +451,32 @@ class Company < ApplicationRecord
       'name ILIKE ? OR subdomain ILIKE ? OR custom_domain ILIKE ?',
       "%#{query}%", "%#{query}%", "%#{query}%"
     )
+  end
+  
+  # Module Access Methods
+  def module_access
+    @module_access ||= ModuleAccessService.new(self)
+  end
+  
+  def has_module?(module_key)
+    module_access.has_module?(module_key)
+  end
+  
+  def enabled_modules
+    module_access.enabled_modules
+  end
+  
+  def modules_with_status
+    module_access.modules_with_status
+  end
+  
+  # Get current subscription plan
+  def current_plan
+    tenant_subscription&.subscription_plan
+  end
+  
+  def current_plan_name
+    current_plan&.display_name || subscription_tier&.titleize || 'No Plan'
   end
   
   # Subscription management helpers

@@ -236,7 +236,9 @@ module Api
           user_tier: location_data[:user_tier],
           location_ids: location_data[:location_ids],
           location_role: location_data[:location_role],
-          assigned_locations: location_data[:assigned_locations]
+          assigned_locations: location_data[:assigned_locations],
+          # Company subscription and module access
+          company: build_company_data(user, company)
         }
       end
       
@@ -338,6 +340,35 @@ module Api
           # Check total company locations
           user.company.locations.where(is_deleted: [false, nil], active: true).count > 1
         end
+      end
+      
+      # Build company data including subscription and module access
+      def build_company_data(user, company)
+        return nil if user.platform_admin? || user.super_admin?
+        return nil unless company.present?
+        
+        # Get module access service
+        module_access = company.module_access
+        subscription_status = module_access.subscription_status
+        
+        {
+          id: company.id,
+          name: company.name,
+          # Module access
+          enabled_modules: module_access.enabled_modules,
+          # Subscription status
+          subscription_status: subscription_status[:status],
+          plan_name: subscription_status[:plan_name],
+          plan_display_name: subscription_status[:plan_display_name],
+          is_active: subscription_status[:is_active],
+          is_trial: subscription_status[:is_trial],
+          trial_days_remaining: subscription_status[:trial_days_remaining],
+          in_grace_period: subscription_status[:in_grace_period],
+          # Limits
+          max_users: subscription_status.dig(:limits, :max_users),
+          max_locations: subscription_status.dig(:limits, :max_locations),
+          max_storage_gb: subscription_status.dig(:limits, :max_storage_gb)
+        }
       end
     end
   end

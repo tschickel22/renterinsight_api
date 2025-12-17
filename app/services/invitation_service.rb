@@ -775,6 +775,11 @@ class InvitationService
       Rails.logger.info "✅ Created tenant owner user #{user.id} for company #{company.id} (#{company.name})"
     end
     
+    # CRITICAL: Assign company_admin RBAC role to tenant owner
+    # This ensures they have full access to their company
+    assign_rbac_role_to_user(user, 'company_admin', company.id)
+    Rails.logger.info "✅ Assigned company_admin RBAC role to tenant owner #{user.id}"
+    
     user
   end
 end

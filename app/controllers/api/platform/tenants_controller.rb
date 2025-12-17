@@ -83,9 +83,31 @@ module Api
       # POST /api/platform/tenants
       def create
         begin
-          @tenant = ::Company.new(tenant_params.except(:owner_email, :owner_first_name, :owner_last_name, :owner_phone))
+          # Extract subscription params before creating tenant
+          subscription_plan_id = params.dig(:tenant, :subscription_plan_id)
+          billing_cycle = params.dig(:tenant, :billing_cycle) || 'monthly'
+          start_trial = params.dig(:tenant, :start_trial) == true || params.dig(:tenant, :start_trial) == 'true'
+          
+          @tenant = ::Company.new(tenant_params.except(
+            :owner_email, :owner_first_name, :owner_last_name, :owner_phone,
+            :subscription_plan_id, :billing_cycle, :start_trial
+          ))
           
           if @tenant.save
+            subscription_error = nil
+            
+            # Create subscription if plan provided
+            if subscription_plan_id.present?
+              begin
+                Rails.logger.info "Creating subscription for tenant #{@tenant.id} with plan_id=#{subscription_plan_id}, billing=#{billing_cycle}, trial=#{start_trial}"
+                create_tenant_subscription(@tenant, subscription_plan_id, billing_cycle, start_trial)
+                Rails.logger.info "✅ Subscription created successfully for tenant #{@tenant.id}"
+              rescue => e
+                subscription_error = e.message
+                Rails.logger.error "❌ Failed to create tenant subscription: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+              end
+            end
+            
             # Auto-create tenant owner user if email provided
             if tenant_params[:owner_email].present?
               begin
@@ -96,10 +118,17 @@ module Api
               end
             end
             
-            render json: { 
-              tenant: serialize_tenant(@tenant, detailed: true),
+            response_data = { 
+              tenant: serialize_tenant(@tenant.reload, detailed: true),
               message: 'Tenant created successfully'
-            }, status: :created
+            }
+            
+            # Include subscription warning if there was an error
+            if subscription_error.present?
+              response_data[:subscription_warning] = "Failed to create subscription: #{subscription_error}"
+            end
+            
+            render json: response_data, status: :created
           else
             render json: { errors: @tenant.errors.full_messages }, status: :unprocessable_entity
           end
@@ -114,11 +143,39 @@ module Api
       # PATCH /api/platform/tenants/:id
       def update
         begin
-          if @tenant.update(tenant_params)
-            render json: { 
-              tenant: serialize_tenant(@tenant, detailed: true),
+          # Extract subscription params before updating tenant
+          subscription_plan_id = params.dig(:tenant, :subscription_plan_id)
+          billing_cycle = params.dig(:tenant, :billing_cycle)
+          
+          if @tenant.update(tenant_params.except(
+            :subscription_plan_id, :billing_cycle, :start_trial,
+            :owner_email, :owner_first_name, :owner_last_name, :owner_phone
+          ))
+            subscription_error = nil
+            
+            # Update subscription if plan_id provided
+            if subscription_plan_id.present?
+              begin
+                Rails.logger.info "Updating subscription for tenant #{@tenant.id} with plan_id=#{subscription_plan_id}, billing=#{billing_cycle}"
+                update_tenant_subscription(@tenant, subscription_plan_id, billing_cycle)
+                Rails.logger.info "✅ Subscription updated successfully for tenant #{@tenant.id}"
+              rescue => e
+                subscription_error = e.message
+                Rails.logger.error "❌ Failed to update tenant subscription: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+              end
+            end
+            
+            response_data = { 
+              tenant: serialize_tenant(@tenant.reload, detailed: true),
               message: 'Tenant updated successfully'
             }
+            
+            # Include subscription warning if there was an error
+            if subscription_error.present?
+              response_data[:subscription_warning] = "Failed to update subscription: #{subscription_error}"
+            end
+            
+            render json: response_data
           else
             # Return detailed validation errors
             render json: { 
@@ -400,61 +457,122 @@ module Api
       
       private
       
-      def create_tenant_owner(tenant)
-      # Use InvitationService to create proper invitation
-      invitation_service = InvitationService.new(
-        invited_by: current_user, 
-        company: tenant
-      )
-      
-      # Determine delivery method based on whether phone is provided
-      delivery_method = tenant_params[:owner_phone].present? ? 'both' : 'email'
-      
-      # Build recipient name
-      recipient_name = [
-      tenant_params[:owner_first_name],
-      tenant_params[:owner_last_name]
-      ].compact.join(' ').presence || tenant_params[:owner_email].split('@').first.capitalize
-      
-      # Create and send invitation
-      result = invitation_service.create_invitation(
-        invitation_type: 'tenant',
-        email: tenant_params[:owner_email],
-        phone: tenant_params[:owner_phone],
-        recipient_name: recipient_name,
-          role: 'tenant',
-      permissions: [],
-      delivery_method: delivery_method,
-      message: "You've been invited to set up your company account for #{tenant.name}."
-    )
-    
-    if result[:success]
-      invitation = result[:invitation]
-      Rails.logger.info "✅ Tenant invitation created for #{tenant.name}: ID #{invitation.id}"
-      
-      if Rails.env.development?
-        puts "\n" + "="*80
-        puts "TENANT INVITATION CREATED"
-        puts "="*80
-        puts "Email: #{invitation.email}"
-        puts "Phone: #{invitation.phone || 'Not provided'}"
-        puts "Tenant: #{tenant.name}"
-        puts "Role: Tenant Owner (Full Admin)"
-        puts "Delivery: #{delivery_method.titleize}"
-        puts "Invitation ID: #{invitation.id}"
-        puts "Check invitation URL via: /api/public/invitations/verify?token=XXX"
-        puts "="*80 + "\n"
+      def create_tenant_subscription(tenant, plan_id, billing_cycle, start_trial)
+        plan = SubscriptionPlan.find(plan_id)
+        
+        subscription = TenantSubscription.new(
+          company: tenant,
+          subscription_plan: plan,
+          billing_cycle: billing_cycle,
+          status: start_trial && plan.trial_enabled? ? 'trial' : 'active'
+        )
+        
+        if start_trial && plan.trial_enabled?
+          subscription.trial_ends_at = plan.trial_days.days.from_now
+        end
+        
+        # Set period dates
+        subscription.current_period_start = Time.current
+        subscription.current_period_end = billing_cycle == 'annual' ? 1.year.from_now : 1.month.from_now
+        
+        if subscription.save
+          Rails.logger.info "✅ Created subscription for tenant #{tenant.name}: Plan #{plan.display_name}"
+          
+          # Update tenant's legacy subscription_tier field for backward compatibility
+          tenant.update_columns(subscription_tier: plan.category)
+          
+          subscription
+        else
+          Rails.logger.error "❌ Failed to create subscription: #{subscription.errors.full_messages.join(', ')}"
+          raise StandardError, subscription.errors.full_messages.join(', ')
+        end
       end
-    else
-      error_msg = "Failed to create tenant invitation: #{result[:error]}"
-      Rails.logger.error "❌ #{error_msg}"
-      raise StandardError, result[:error]
-    end
-    
-    invitation
-  end
       
+      def update_tenant_subscription(tenant, plan_id, billing_cycle = nil)
+        plan = SubscriptionPlan.find(plan_id)
+        subscription = tenant.tenant_subscription
+        
+        if subscription.present?
+          # Update existing subscription
+          updates = { subscription_plan_id: plan.id }
+          updates[:billing_cycle] = billing_cycle if billing_cycle.present?
+          
+          # If switching plans, update period end based on new billing cycle
+          if billing_cycle.present? && billing_cycle != subscription.billing_cycle
+            updates[:current_period_end] = billing_cycle == 'annual' ? 1.year.from_now : 1.month.from_now
+          end
+          
+          if subscription.update(updates)
+            Rails.logger.info "✅ Updated subscription for tenant #{tenant.name}: Plan changed to #{plan.display_name}"
+            
+            # Update tenant's legacy subscription_tier field for backward compatibility
+            tenant.update_columns(subscription_tier: plan.category)
+            
+            subscription
+          else
+            Rails.logger.error "❌ Failed to update subscription: #{subscription.errors.full_messages.join(', ')}"
+            raise StandardError, subscription.errors.full_messages.join(', ')
+          end
+        else
+          # No existing subscription - create one
+          Rails.logger.info "No existing subscription found for tenant #{tenant.id}, creating new one"
+          create_tenant_subscription(tenant, plan_id, billing_cycle || 'monthly', false)
+        end
+      end
       
+      def create_tenant_owner(tenant)
+        # Use InvitationService to create proper invitation
+        invitation_service = InvitationService.new(
+          invited_by: current_user, 
+          company: tenant
+        )
+        
+        # Determine delivery method based on whether phone is provided
+        delivery_method = tenant_params[:owner_phone].present? ? 'both' : 'email'
+        
+        # Build recipient name
+        recipient_name = [
+          tenant_params[:owner_first_name],
+          tenant_params[:owner_last_name]
+        ].compact.join(' ').presence || tenant_params[:owner_email].split('@').first.capitalize
+        
+        # Create and send invitation
+        result = invitation_service.create_invitation(
+          invitation_type: 'tenant',
+          email: tenant_params[:owner_email],
+          phone: tenant_params[:owner_phone],
+          recipient_name: recipient_name,
+          role: 'tenant',
+          permissions: [],
+          delivery_method: delivery_method,
+          message: "You've been invited to set up your company account for #{tenant.name}."
+        )
+        
+        if result[:success]
+          invitation = result[:invitation]
+          Rails.logger.info "✅ Tenant invitation created for #{tenant.name}: ID #{invitation.id}"
+          
+          if Rails.env.development?
+            puts "\n" + "="*80
+            puts "TENANT INVITATION CREATED"
+            puts "="*80
+            puts "Email: #{invitation.email}"
+            puts "Phone: #{invitation.phone || 'Not provided'}"
+            puts "Tenant: #{tenant.name}"
+            puts "Role: Tenant Owner (Full Admin)"
+            puts "Delivery: #{delivery_method.titleize}"
+            puts "Invitation ID: #{invitation.id}"
+            puts "Check invitation URL via: /api/public/invitations/verify?token=XXX"
+            puts "="*80 + "\n"
+          end
+        else
+          error_msg = "Failed to create tenant invitation: #{result[:error]}"
+          Rails.logger.error "❌ #{error_msg}"
+          raise StandardError, result[:error]
+        end
+        
+        invitation
+      end
       
       def set_tenant
         @tenant = ::Company.find(params[:id])
@@ -479,7 +597,11 @@ module Api
           :owner_email,
           :owner_first_name,
           :owner_last_name,
-          :owner_phone
+          :owner_phone,
+          # New subscription params (extracted separately in create)
+          :subscription_plan_id,
+          :billing_cycle,
+          :start_trial
         )
       end
       
@@ -492,10 +614,35 @@ module Api
           domain_verified: tenant.domain_verified?,
           status: tenant.status || 'active',
           subscription_tier: tenant.subscription_tier,
-          users_count: tenant.users_count || 0,
+          users_count: tenant.users.count,
           created_at: tenant.created_at,
           updated_at: tenant.updated_at
         }
+        
+        # Include subscription info if tenant has a subscription
+        if tenant.respond_to?(:tenant_subscription) && tenant.tenant_subscription.present?
+          sub = tenant.tenant_subscription
+          plan = sub.subscription_plan
+          
+          base[:subscription] = {
+            plan_id: plan.id,
+            plan_name: plan.name,
+            plan_display_name: plan.display_name,
+            status: sub.status,
+            billing_cycle: sub.billing_cycle,
+            current_period_end: sub.current_period_end,
+            zoho_subscription_id: sub.zoho_subscription_id
+          }
+          
+          base[:limits] = {
+            max_users: plan.max_users,
+            max_storage_gb: plan.max_storage_gb,
+            max_locations: plan.max_locations,
+            current_users: sub.current_users || 0,
+            current_storage_gb: sub.current_storage_gb || 0,
+            current_locations: sub.current_locations || 0
+          }
+        end
         
         if detailed
           base.merge!(
@@ -506,8 +653,8 @@ module Api
             trial_ends_at: tenant.trial_ends_at,
             max_users: tenant.max_users,
             max_storage_gb: tenant.max_storage_gb,
-            users_count: tenant.users_count,
-            users_remaining: tenant.users_remaining,
+            users_count: tenant.users.count,
+            users_remaining: tenant.remaining_user_slots,
             zoho_subscription_id: tenant.zoho_subscription_id,
             zoho_customer_id: tenant.zoho_customer_id,
             external_payments_id: tenant.external_payments_id,
@@ -515,6 +662,11 @@ module Api
             primary_domain: tenant.custom_domain || tenant.subdomain,
             subdomain_url: tenant.subdomain_url
           )
+          
+          # Include module access for detailed view
+          if tenant.respond_to?(:module_access)
+            base[:modules] = tenant.modules_with_status
+          end
         end
         
         base
