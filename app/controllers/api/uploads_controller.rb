@@ -21,7 +21,9 @@ module Api
         return
       end
       
-      full_path = Rails.root.join('public', 'uploads', file_path)
+      # Use persistent disk in production, local path in development
+      upload_base = ENV['UPLOAD_PATH'] || Rails.root.join('public', 'uploads')
+      full_path = File.join(upload_base, file_path)
       
       Rails.logger.info "📁 [UploadsController] Serving file: #{file_path}"
       
@@ -182,9 +184,11 @@ module Api
       
       extension = File.extname(file.original_filename)
       filename = "#{SecureRandom.uuid}#{extension}"
-      path = "uploads/#{@company.id}/#{category}/#{filename}"
-
-      full_path = Rails.root.join('public', path)
+      # Use persistent disk in production, local path in development
+      upload_base = ENV['UPLOAD_PATH'] || Rails.root.join('public', 'uploads')
+      
+      path = "#{@company.id}/#{category}/#{filename}"
+      full_path = File.join(upload_base, path)
       
       begin
         FileUtils.mkdir_p(File.dirname(full_path))
@@ -203,7 +207,7 @@ module Api
       end
 
       {
-        url: "/#{path}",
+        url: "/uploads/#{path}",
         path: full_path.to_s
       }
     end
