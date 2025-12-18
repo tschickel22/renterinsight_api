@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_16_200005) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_18_054106) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -509,7 +509,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_16_200005) do
     t.integer "max_storage_gb"
     t.string "zoho_subscription_id"
     t.string "zoho_customer_id"
-    t.boolean "use_rbac_system", default: false, null: false
+    t.boolean "use_rbac_system", default: true, null: false
     t.jsonb "loan_settings", default: {}, null: false
     t.string "external_payments_id"
     t.jsonb "branding_settings", default: {}

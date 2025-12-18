@@ -311,6 +311,34 @@ module Api
         }
       end
 
+      # GET /api/v1/users/available_roles
+      # Returns all roles (system + custom) that the current user can assign
+      def available_roles
+        # RBAC: Check if user can read users (needed to assign roles)
+        return unless authorize_action!('users', 'read')
+        
+        # Get all active roles for this company
+        roles = current_company.roles.where(active: true)
+        
+        # Format roles for frontend
+        formatted_roles = roles.map do |role|
+          {
+            id: role.id,
+            key: role.key,
+            name: role.name,
+            display_name: role.name,
+            description: role.description,
+            is_system: role.is_system,
+            active: role.active,
+            tier: role.tier
+          }
+        end
+        
+        render json: {
+          roles: formatted_roles
+        }
+      end
+
       private
 
       def set_user

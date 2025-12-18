@@ -586,6 +586,11 @@ Rails.application.routes.draw do
         patch 'toggle'
       end
       
+      # Impersonation (Platform Admin Only)
+      post 'impersonate', to: 'impersonation#create'
+      post 'stop_impersonation', to: 'impersonation#destroy'
+      delete 'impersonation', to: 'impersonation#destroy'
+      
       # Phase 6 - Token Management
       resource :tokens, only: [] do
         post :refresh, on: :collection
@@ -641,6 +646,10 @@ Rails.application.routes.draw do
     # ==================== COMPANIES API ====================
     resources :companies, only: [] do
       resources :users, controller: 'companies/users' do
+        collection do
+          get :available_roles, path: 'available-roles'
+        end
+        
         member do
           post :resend_invitation
         end

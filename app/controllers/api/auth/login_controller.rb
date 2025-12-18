@@ -229,7 +229,7 @@ module Api
           company_id: (user.platform_admin? || user.super_admin?) ? nil : user.company_id,
           companyName: company&.name,
           # RBAC information
-          rbac_enabled: company&.use_rbac_system || false,
+          rbacEnabled: company&.use_rbac_system || false,
           permissions: build_permissions(user, company),
           roles: build_roles(user, company),
           # Location assignments for location-tier users

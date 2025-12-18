@@ -17,6 +17,53 @@ module Api
         }
       end
       
+      # GET /api/companies/:company_id/users/available_roles
+      def available_roles
+        # Get current user's role level
+        current_level = ROLE_HIERARCHY[current_user.role] || 0
+        
+        # Check RBAC roles if the user has them
+        if @company&.use_rbac_system
+          current_user.roles_for_company(@company.id).each do |role|
+            role_level = ROLE_HIERARCHY[role.key] || ROLE_HIERARCHY[role.name] || 0
+            current_level = [current_level, role_level].max
+          end
+        end
+        
+        # Platform admins and super admins can assign any role
+        if current_user.platform_admin? || current_user.super_admin?
+          current_level = 100
+        end
+        
+        # Get all company-tier and location-tier roles from database
+        all_roles = Role.where(tier: ['company', 'location'], active: true).map do |role|
+          {
+            key: role.key,
+            name: role.name,
+            hierarchy_level: ROLE_HIERARCHY[role.key] || ROLE_HIERARCHY[role.name] || 0,
+            active: role.active  # ✅ Include active field
+          }
+        end
+        
+        # Filter roles: user can only assign roles with level < their own level
+        # For system roles (hierarchy_level > 0): check hierarchy
+        # For custom roles (hierarchy_level == 0): include if user is admin-level or higher
+        available = all_roles.select { |role|
+          if role[:hierarchy_level] > 0
+            # System role - check hierarchy
+            current_level > role[:hierarchy_level]
+          else
+            # Custom role - include if user is admin or higher (level >= 40)
+            current_level >= 40
+          end
+        }
+        
+        render json: {
+          success: true,
+          roles: available
+        }
+      end
+      
       # GET /api/companies/:company_id/users/:id
       def show
         render json: {
@@ -27,6 +74,16 @@ module Api
       
       # POST /api/companies/:company_id/users
       def create
+        # SECURITY: Enforce role hierarchy - users can only assign roles at or below their level
+        requested_role = params[:role] || 'staff'
+        unless can_assign_role?(requested_role)
+          Rails.logger.warn "🚫 [SECURITY] User #{current_user.id} (#{current_user.role}) attempted to create user with role '#{requested_role}' without sufficient privileges"
+          return render json: {
+            success: false,
+            error: 'You do not have permission to assign this role.'
+          }, status: :forbidden
+        end
+        
         service = InvitationService.new(
           invited_by: current_user,
           company: @company
@@ -236,17 +293,44 @@ module Api
       # Role hierarchy for permission checking
       # Higher number = higher privilege
       ROLE_HIERARCHY = {
+        # Platform tier (100)
         'platform_admin' => 100,
         'super_admin' => 100,
+        
+        # Company Administrator tier (50)
         'Company Administrator' => 50,
         'company_admin' => 50,
         'admin' => 50,
+        
+        # Manager tier (40) - Operational control
         'Company Manager' => 40,
         'company_manager' => 40,
         'manager' => 40,
+        'Location Administrator' => 40,
+        'location_admin' => 40,
+        
+        # Staff tier (30) - Standard user access
         'Company Staff' => 30,
         'company_staff' => 30,
         'staff' => 30,
+        'Location Manager' => 30,
+        'location_manager' => 30,
+        
+        # Specialist tier (20) - Department-specific access
+        'CRM Specialist' => 20,
+        'crm_specialist' => 20,
+        'Finance Staff' => 20,
+        'finance_staff' => 20,
+        'Inventory Manager' => 20,
+        'inventory_manager' => 20,
+        'Location Staff' => 20,
+        'location_staff' => 20,
+        'Sales Representative' => 20,
+        'sales_rep' => 20,
+        'Service Technician' => 20,
+        'service_tech' => 20,
+        
+        # Read-Only tier (10) - View-only access
         'Read-Only User' => 10,
         'company_read_only' => 10,
         'read_only' => 10
@@ -312,6 +396,21 @@ module Api
       end
       
       def serialize_user(user)
+        # Get last login from login_activities
+        last_login = nil
+        if user.respond_to?(:login_activities)
+          last_login = user.login_activities.order(logged_in_at: :desc).first
+        end
+        
+        # Get MFA status from mfa_enabled field
+        mfa_status = 'none'
+        if user.respond_to?(:mfa_enabled) && user.mfa_enabled
+          mfa_status = 'totp'
+        end
+        
+        # Prefer login_activities over last_sign_in_at for accuracy
+        last_login_time = last_login&.logged_in_at || user.last_sign_in_at
+        
         result = {
           id: user.id,
           email: user.email,
@@ -323,6 +422,18 @@ module Api
           status: user.status || 'pending',
           title: user.title,
           department: user.department,
+          
+          # MFA Status (camelCase for frontend, boolean conversion)
+          mfaEnabled: mfa_status != 'none',
+          
+          # Last Login (camelCase for frontend)
+          lastLoginAt: last_login_time&.iso8601,
+          
+          # RBAC information (camelCase for frontend)
+          rbacEnabled: @company&.use_rbac_system || false,
+          permissions: build_permissions(user, @company),
+          roles: build_roles(user, @company),
+          
           invitationType: 'company_user',
           deliveryMethod: user.phone.present? ? 'both' : 'email',
           sentAt: user.created_at,
@@ -356,6 +467,29 @@ module Api
         result[:deletedAt] = user.deleted_at if user.respond_to?(:deleted_at)
         
         result
+      end
+      
+      # Build permissions array for frontend
+      def build_permissions(user, company)
+        return ['*:*:*'] if user.platform_admin? || user.super_admin?
+        return ['*:*:*'] unless company&.use_rbac_system
+        user.permissions_for_company(company.id)
+      end
+      
+      # Build roles array for frontend
+      def build_roles(user, company)
+        return [{ key: 'platform_admin', name: 'Platform Admin', tier: 'platform' }] if user.platform_admin?
+        return [{ key: 'super_admin', name: 'Super Admin', tier: 'platform' }] if user.super_admin?
+        return [] unless company&.use_rbac_system
+        
+        user.roles_for_company(company.id).map do |role|
+          {
+            key: role.key,
+            name: role.name,
+            tier: role.tier,
+            color: role.color
+          }
+        end
       end
     end
   end
