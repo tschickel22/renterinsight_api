@@ -586,6 +586,11 @@ Rails.application.routes.draw do
         patch 'toggle'
       end
       
+      # Impersonation (Platform Admin Only)
+      post 'impersonate', to: 'impersonation#create'
+      post 'stop_impersonation', to: 'impersonation#destroy'
+      delete 'impersonation', to: 'impersonation#destroy'
+      
       # Phase 6 - Token Management
       resource :tokens, only: [] do
         post :refresh, on: :collection
@@ -641,6 +646,10 @@ Rails.application.routes.draw do
     # ==================== COMPANIES API ====================
     resources :companies, only: [] do
       resources :users, controller: 'companies/users' do
+        collection do
+          get :available_roles, path: 'available-roles'
+        end
+        
         member do
           post :resend_invitation
         end
@@ -900,8 +909,32 @@ Rails.application.routes.draw do
 
     # ==================== PLATFORM SETTINGS ====================
     namespace :platform do
+      # ==================== SUBSCRIPTION PLANS ====================
+      resources :subscription_plans, path: 'subscription-plans' do
+        member do
+          post :set_modules
+        end
+        collection do
+          get :modules
+          get :templates
+        end
+      end
+      
       # ==================== TENANTS (TENANT MANAGEMENT) ====================
       resources :tenants do
+        # Tenant Subscription Management
+        resource :subscription, only: [:show, :create, :update], controller: 'tenant_subscriptions' do
+          post :cancel
+          post :suspend
+          post :activate
+        end
+        
+        # Tenant Module Overrides
+        get :modules, to: 'tenant_subscriptions#modules'
+        post 'modules/override', to: 'tenant_subscriptions#override_module'
+        delete 'modules/override/:module_key', to: 'tenant_subscriptions#remove_override'
+        post 'modules/bulk_override', to: 'tenant_subscriptions#bulk_override'
+        
         member do
           get :check_domain_dns
           post :verify_domain

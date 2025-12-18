@@ -9,6 +9,7 @@ class User < ApplicationRecord
   has_many :reminders, dependent: :destroy
   has_many :user_locations, dependent: :destroy
   has_many :locations, through: :user_locations
+  has_many :login_activities, dependent: :destroy
 
   # RBAC System Associations
   has_many :user_role_assignments, dependent: :destroy

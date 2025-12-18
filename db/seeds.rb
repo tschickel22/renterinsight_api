@@ -23,4 +23,7 @@ load Rails.root.join('db', 'seeds', 'brochure_templates.rb')
 # Load payment settings
 load Rails.root.join('db', 'seeds', 'payment_settings.rb')
 
+# Load subscription plans
+load Rails.root.join('db', 'seeds', 'subscription_plans.rb')
+
 puts "✨ Seed completed!"

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_15_175400) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_18_054106) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -509,7 +509,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_15_175400) do
     t.integer "max_storage_gb"
     t.string "zoho_subscription_id"
     t.string "zoho_customer_id"
-    t.boolean "use_rbac_system", default: false, null: false
+    t.boolean "use_rbac_system", default: true, null: false
     t.jsonb "loan_settings", default: {}, null: false
     t.string "external_payments_id"
     t.jsonb "branding_settings", default: {}
@@ -1829,6 +1829,52 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_15_175400) do
     t.index ["company_id"], name: "index_sources_on_company_id"
   end
 
+  create_table "subscription_plan_modules", force: :cascade do |t|
+    t.bigint "subscription_plan_id", null: false
+    t.string "module_key", null: false
+    t.boolean "is_enabled", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["module_key", "is_enabled"], name: "index_subscription_plan_modules_on_module_key_and_is_enabled"
+    t.index ["module_key"], name: "index_subscription_plan_modules_on_module_key"
+    t.index ["subscription_plan_id", "module_key"], name: "idx_plan_modules_unique", unique: true
+    t.index ["subscription_plan_id"], name: "index_subscription_plan_modules_on_subscription_plan_id"
+  end
+
+  create_table "subscription_plans", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "display_name", null: false
+    t.text "description"
+    t.string "category", default: "professional", null: false
+    t.string "zoho_plan_code"
+    t.string "zoho_product_id"
+    t.decimal "pricing_monthly", precision: 10, scale: 2, default: "0.0"
+    t.decimal "pricing_annual", precision: 10, scale: 2, default: "0.0"
+    t.string "currency", default: "USD"
+    t.string "billing_model", default: "flat"
+    t.integer "max_users", default: 10
+    t.integer "max_storage_gb", default: 50
+    t.integer "max_locations", default: 1
+    t.integer "max_api_calls", default: 10000
+    t.boolean "trial_enabled", default: true
+    t.integer "trial_days", default: 14
+    t.decimal "setup_fee", precision: 10, scale: 2, default: "0.0"
+    t.string "discount_type"
+    t.decimal "discount_value", precision: 10, scale: 2
+    t.string "zoho_coupon_code"
+    t.boolean "is_active", default: true
+    t.boolean "is_popular", default: false
+    t.integer "position", default: 0
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_subscription_plans_on_category"
+    t.index ["is_active", "position"], name: "index_subscription_plans_on_is_active_and_position"
+    t.index ["is_active"], name: "index_subscription_plans_on_is_active"
+    t.index ["name"], name: "index_subscription_plans_on_name", unique: true
+    t.index ["zoho_plan_code"], name: "index_subscription_plans_on_zoho_plan_code", unique: true, where: "(zoho_plan_code IS NOT NULL)"
+  end
+
   create_table "syndication_partners", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -1904,6 +1950,51 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_15_175400) do
     t.bigint "company_id", null: false
     t.index ["company_id"], name: "index_templates_on_company_id"
     t.index ["template_type", "name"], name: "index_templates_on_template_type_and_name"
+  end
+
+  create_table "tenant_module_overrides", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "module_key", null: false
+    t.boolean "is_enabled", null: false
+    t.string "override_reason"
+    t.bigint "overridden_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module_key"], name: "idx_tenant_module_override_unique", unique: true
+    t.index ["company_id"], name: "index_tenant_module_overrides_on_company_id"
+    t.index ["module_key", "is_enabled"], name: "index_tenant_module_overrides_on_module_key_and_is_enabled"
+    t.index ["module_key"], name: "index_tenant_module_overrides_on_module_key"
+    t.index ["overridden_by_id"], name: "index_tenant_module_overrides_on_overridden_by_id"
+  end
+
+  create_table "tenant_subscriptions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "subscription_plan_id", null: false
+    t.string "zoho_subscription_id"
+    t.string "zoho_customer_id"
+    t.string "status", default: "active", null: false
+    t.string "billing_cycle", default: "monthly"
+    t.datetime "current_period_start"
+    t.datetime "current_period_end"
+    t.datetime "trial_ends_at"
+    t.datetime "cancelled_at"
+    t.string "cancellation_reason"
+    t.integer "current_users", default: 0
+    t.integer "current_storage_gb", default: 0
+    t.integer "current_locations", default: 0
+    t.datetime "grace_period_ends_at"
+    t.boolean "in_grace_period", default: false
+    t.jsonb "metadata", default: {}
+    t.jsonb "billing_history", default: []
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "idx_tenant_sub_company_status"
+    t.index ["company_id"], name: "index_tenant_subscriptions_on_company_id"
+    t.index ["current_period_end"], name: "index_tenant_subscriptions_on_current_period_end"
+    t.index ["status"], name: "index_tenant_subscriptions_on_status"
+    t.index ["subscription_plan_id"], name: "index_tenant_subscriptions_on_subscription_plan_id"
+    t.index ["trial_ends_at"], name: "index_tenant_subscriptions_on_trial_ends_at"
+    t.index ["zoho_subscription_id"], name: "index_tenant_subscriptions_on_zoho_subscription_id", unique: true, where: "(zoho_subscription_id IS NOT NULL)"
   end
 
   create_table "territories", force: :cascade do |t|
@@ -2369,9 +2460,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_15_175400) do
   add_foreign_key "service_tickets", "locations"
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "service_tickets", "warranty_claims", on_delete: :nullify
+  add_foreign_key "subscription_plan_modules", "subscription_plans"
   add_foreign_key "syndication_partners", "companies"
   add_foreign_key "tag_assignments", "tags"
   add_foreign_key "templates", "companies"
+  add_foreign_key "tenant_module_overrides", "companies"
+  add_foreign_key "tenant_module_overrides", "users", column: "overridden_by_id"
+  add_foreign_key "tenant_subscriptions", "companies"
+  add_foreign_key "tenant_subscriptions", "subscription_plans"
   add_foreign_key "territories", "users"
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"

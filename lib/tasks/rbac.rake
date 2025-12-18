@@ -1,238 +1,118 @@
 # frozen_string_literal: true
 
-# RBAC Migration Rake Tasks
-#
-# Usage:
-#   bin/rails rbac:migrate:company[1]              # Migrate company ID 1
-#   bin/rails rbac:migrate:test[1]                 # Test migration for company ID 1 (dry run)
-#   bin/rails rbac:migrate:user[user_id]           # Migrate single user
-#   bin/rails rbac:rollback:company[1]             # Rollback RBAC for company ID 1
-#   bin/rails rbac:status                          # Show RBAC status for all companies
-#   bin/rails rbac:seed                            # Seed RBAC system (resources, actions, roles)
-
 namespace :rbac do
-  desc 'Show RBAC status for all companies'
-  task status: :environment do
-    puts "\n=== RBAC System Status ==="
-    puts "\nSystem Roles: #{Role.system_roles.count}"
-    puts "Resources: #{Resource.count}"
-    puts "Actions: #{Action.count}"
-    puts "Scopes: #{Scope.count}"
+  desc 'Reseed all system role permissions (safe to run multiple times)'
+  task reseed_permissions: :environment do
+    puts "🔄 Reseeding RBAC permissions for system roles..."
+    puts "="*80
     
-    puts "\n=== Companies ==="
-    Company.order(:id).each do |company|
-      status = company.use_rbac_system ? '✅ ENABLED' : '❌ DISABLED'
-      users_with_rbac = company.users.joins(:user_role_assignments).distinct.count
-      total_users = company.users.count
-      
-      puts "\nCompany #{company.id}: #{company.name}"
-      puts "  RBAC Status: #{status}"
-      puts "  Users: #{total_users} total, #{users_with_rbac} with RBAC roles"
-      puts "  Custom Roles: #{company.roles.where(is_system_role: false).count}"
+    # Check that resources, actions, and scopes exist
+    if Resource.count.zero? || Action.count.zero? || Scope.count.zero?
+      puts "❌ ERROR: Resources, Actions, or Scopes are missing!"
+      puts "   Run: rails db:seed first"
+      exit 1
     end
-    puts "\n"
+    
+    system_roles = Role.system_roles.order(:tier, :name)
+    
+    if system_roles.empty?
+      puts "❌ ERROR: No system roles found!"
+      puts "   Run: rails db:seed first"
+      exit 1
+    end
+    
+    puts "\n📊 Found #{system_roles.count} system roles:"
+    system_roles.each do |role|
+      puts "   - #{role.name} (#{role.tier})"
+    end
+    
+    puts "\n🔐 Granting permissions..."
+    
+    system_roles.each do |role|
+      # Clear existing permissions for this role
+      old_count = role.role_permissions.count
+      role.role_permissions.destroy_all
+      
+      # Grant permissions based on role key
+      case role.key
+      when 'company_admin'
+        Role.send(:grant_full_permissions!, role)
+      when 'company_manager'
+        Role.send(:grant_manager_permissions!, role)
+      when 'company_staff'
+        Role.send(:grant_staff_permissions!, role)
+      when 'company_read_only'
+        Role.send(:grant_read_only_permissions!, role)
+      when 'location_admin'
+        Role.send(:grant_location_admin_permissions!, role)
+      when 'location_manager'
+        Role.send(:grant_location_manager_permissions!, role)
+      when 'location_staff'
+        Role.send(:grant_location_staff_permissions!, role)
+      when 'service_tech'
+        Role.send(:grant_service_tech_permissions!, role)
+      when 'sales_rep'
+        Role.send(:grant_sales_rep_permissions!, role)
+      when 'finance_staff'
+        Role.send(:grant_finance_staff_permissions!, role)
+      when 'crm_specialist'
+        Role.send(:grant_crm_specialist_permissions!, role)
+      when 'inventory_manager'
+        Role.send(:grant_inventory_manager_permissions!, role)
+      else
+        puts "   ⚠️  Unknown role key: #{role.key} - skipping"
+        next
+      end
+      
+      new_count = role.role_permissions.count
+      puts "   ✅ #{role.name}: #{old_count} → #{new_count} permissions"
+    end
+    
+    puts "\n" + "="*80
+    puts "✨ Permission reseeding complete!"
+    puts "="*80
+    puts "\n📊 Final Summary:"
+    puts "   Total RolePermissions: #{RolePermission.count}"
+    puts "\n🎉 Permissions per role:"
+    Role.system_roles.order(:tier, :name).each do |role|
+      puts "   - #{role.name}: #{role.role_permissions.count} permissions"
+    end
+    puts "="*80
   end
   
-  desc 'Seed RBAC system (resources, actions, scopes, roles)'
-  task seed: :environment do
-    puts "\n=== Seeding RBAC System ==="
-    
-    # Run the seed file
-    load Rails.root.join('db/seeds/rbac_system_seed.rb')
-    
-    puts "\n✅ RBAC system seeded successfully"
+  desc 'Show current RBAC system status'
+  task status: :environment do
+    puts "📊 RBAC System Status"
+    puts "="*80
     puts "Resources: #{Resource.count}"
     puts "Actions: #{Action.count}"
     puts "Scopes: #{Scope.count}"
     puts "System Roles: #{Role.system_roles.count}"
-    puts "\n"
+    puts "Custom Roles: #{Role.custom_roles.count}"
+    puts "Total RolePermissions: #{RolePermission.count}"
+    puts "\n🎭 System Roles:"
+    Role.system_roles.order(:tier, :name).each do |role|
+      puts "   - #{role.name} (#{role.tier}): #{role.role_permissions.count} permissions"
+    end
+    puts "="*80
   end
   
-  namespace :migrate do
-    desc 'Test RBAC migration for a company (dry run)'
-    task :test, [:company_id] => :environment do |t, args|
-      company_id = args[:company_id] || ENV['COMPANY_ID']
-      
-      unless company_id
-        puts "❌ Error: Company ID required"
-        puts "Usage: bin/rails rbac:migrate:test[1]"
-        exit 1
-      end
-      
-      company = Company.find(company_id)
-      service = RbacMigrationService.new(company)
-      
-      puts "\n=== RBAC Migration Test for #{company.name} ==="
-      puts "\n🔍 Analyzing migration plan...\n"
-      
-      plan = service.test_migration
-      
-      puts "\nCompany: #{plan[:company][:name]} (ID: #{plan[:company][:id]})"
-      puts "Current RBAC Status: #{plan[:company][:current_rbac_status] ? 'ENABLED' : 'DISABLED'}"
-      
-      puts "\n=== Migration Summary ==="
-      puts "Total Users: #{plan[:summary][:total_users]}"
-      
-      puts "\nUsers by Legacy Role:"
-      plan[:summary][:by_legacy_role].each do |role, count|
-        puts "  #{role}: #{count}"
-      end
-      
-      puts "\nTarget RBAC Roles:"
-      plan[:summary][:by_target_role].each do |role, count|
-        role_obj = Role.find_by(key: role)
-        puts "  #{role_obj&.name || role}: #{count}"
-      end
-      
-      puts "\n=== User Migration Details ==="
-      plan[:users].each do |user_plan|
-        puts "\nUser: #{user_plan[:name]} (#{user_plan[:email]})"
-        puts "  Current Role: #{user_plan[:legacy_role] || 'none'}"
-        puts "  Target RBAC Roles:"
-        user_plan[:target_roles].each do |role|
-          puts "    - #{role[:role_name]} (#{role[:tier]}) - #{role[:scope]}"
-        end
-      end
-      
-      puts "\n✅ Migration test completed (no changes made)"
-      puts "To perform actual migration, run: bin/rails rbac:migrate:company[#{company_id}]"
-      puts "\n"
-    end
+  desc 'Full RBAC system reset (WARNING: Destructive!)'
+  task reset: :environment do
+    puts "⚠️  WARNING: This will destroy ALL RBAC data and reseed!"
+    puts "Press Ctrl+C to cancel, or press Enter to continue..."
+    STDIN.gets
     
-    desc 'Migrate a company to RBAC system'
-    task :company, [:company_id] => :environment do |t, args|
-      company_id = args[:company_id] || ENV['COMPANY_ID']
-      
-      unless company_id
-        puts "❌ Error: Company ID required"
-        puts "Usage: bin/rails rbac:migrate:company[1]"
-        exit 1
-      end
-      
-      company = Company.find(company_id)
-      
-      if company.use_rbac_system
-        puts "⚠️  Company #{company.name} already using RBAC system"
-        exit 0
-      end
-      
-      puts "\n=== Migrating #{company.name} to RBAC ==="
-      
-      service = RbacMigrationService.new(company)
-      
-      if service.migrate!
-        puts "\n✅ Migration completed successfully!"
-        puts "\nMigration Log:"
-        service.migration_log.each { |msg| puts "  #{msg}" }
-        
-        puts "\n=== Post-Migration Status ==="
-        puts "RBAC Enabled: #{company.reload.use_rbac_system}"
-        puts "Users Migrated: #{company.users.joins(:user_role_assignments).distinct.count}"
-        puts "Total Role Assignments: #{UserRoleAssignment.where(company_id: company.id).count}"
-      else
-        puts "\n❌ Migration failed!"
-        puts "\nErrors:"
-        service.errors.each { |err| puts "  - #{err}" }
-        exit 1
-      end
-      
-      puts "\n"
-    end
+    puts "\n🗑️  Destroying existing data..."
+    RolePermission.destroy_all
+    Role.destroy_all
+    Resource.destroy_all
+    Action.destroy_all
+    Scope.destroy_all
     
-    desc 'Migrate a single user to RBAC'
-    task :user, [:user_id] => :environment do |t, args|
-      user_id = args[:user_id] || ENV['USER_ID']
-      
-      unless user_id
-        puts "❌ Error: User ID required"
-        puts "Usage: bin/rails rbac:migrate:user[123]"
-        exit 1
-      end
-      
-      user = User.find(user_id)
-      company = user.company
-      
-      unless company.use_rbac_system
-        puts "⚠️  Company #{company.name} is not using RBAC system"
-        puts "Enable RBAC first: bin/rails rbac:migrate:company[#{company.id}]"
-        exit 1
-      end
-      
-      puts "\n=== Migrating User to RBAC ==="
-      puts "User: #{user.name} (#{user.email})"
-      puts "Company: #{company.name}"
-      
-      service = RbacMigrationService.new(company)
-      
-      if service.migrate_user!(user)
-        puts "\n✅ User migrated successfully!"
-        puts "\nMigration Log:"
-        service.migration_log.each { |msg| puts "  #{msg}" }
-        
-        puts "\n=== User's RBAC Roles ==="
-        user.reload.user_role_assignments.includes(:role).each do |assignment|
-          puts "  - #{assignment.role.name} (#{assignment.tier})"
-          puts "    Location: #{assignment.location_id}" if assignment.location_id
-          puts "    Region: #{assignment.region_id}" if assignment.region_id
-        end
-      else
-        puts "\n❌ User migration failed!"
-        puts "\nErrors:"
-        service.errors.each { |err| puts "  - #{err}" }
-        exit 1
-      end
-      
-      puts "\n"
-    end
-  end
-  
-  namespace :rollback do
-    desc 'Rollback RBAC migration for a company'
-    task :company, [:company_id] => :environment do |t, args|
-      company_id = args[:company_id] || ENV['COMPANY_ID']
-      
-      unless company_id
-        puts "❌ Error: Company ID required"
-        puts "Usage: bin/rails rbac:rollback:company[1]"
-        exit 1
-      end
-      
-      company = Company.find(company_id)
-      
-      unless company.use_rbac_system
-        puts "⚠️  Company #{company.name} is not using RBAC system"
-        exit 0
-      end
-      
-      puts "\n=== Rolling Back RBAC for #{company.name} ==="
-      puts "\n⚠️  WARNING: This will:"
-      puts "  - Remove all RBAC role assignments for company users"
-      puts "  - Delete all custom company roles"
-      puts "  - Disable RBAC system for company"
-      puts "  - Users will revert to legacy role system"
-      
-      print "\nType 'yes' to confirm rollback: "
-      confirmation = STDIN.gets.chomp
-      
-      unless confirmation.downcase == 'yes'
-        puts "Rollback cancelled"
-        exit 0
-      end
-      
-      service = RbacMigrationService.new(company)
-      
-      if service.rollback!
-        puts "\n✅ Rollback completed successfully!"
-        puts "\nRollback Log:"
-        service.migration_log.each { |msg| puts "  #{msg}" }
-      else
-        puts "\n❌ Rollback failed!"
-        puts "\nErrors:"
-        service.errors.each { |err| puts "  - #{err}" }
-        exit 1
-      end
-      
-      puts "\n"
-    end
+    puts "🌱 Reseeding RBAC system..."
+    load Rails.root.join('db', 'seeds', 'rbac_system_seed.rb')
+    
+    puts "\n✅ RBAC system reset complete!"
   end
 end

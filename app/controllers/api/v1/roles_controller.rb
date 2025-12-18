@@ -380,6 +380,7 @@ module Api
           color: role.color,
           is_system: role.is_system_role,
           is_active: role.active,
+          active: role.active,  # ✅ Add for frontend compatibility
           is_hidden_for_company: role.system_role? && current_company_id ? role.hidden_for_company?(current_company_id) : false,
           company_id: role.company_id,
           users_count: role.user_role_assignments.count,

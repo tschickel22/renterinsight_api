@@ -432,6 +432,10 @@ module Api
 
     # Minimal tenant info for all authenticated users (no sensitive settings)
     def serialize_tenant_basic
+      # Get subscription data using module access service
+      module_access = @company.module_access
+      subscription_status = module_access.subscription_status
+      
       {
         id: @company.id.to_s,
         name: @company.name,
@@ -441,7 +445,19 @@ module Api
         branding: serialize_branding,
         customFields: [],  # Don't expose custom fields to non-admin users
         createdAt: @company.created_at,
-        updatedAt: @company.updated_at
+        updatedAt: @company.updated_at,
+        # Subscription and module access data
+        enabled_modules: module_access.enabled_modules,
+        subscription_status: subscription_status[:status],
+        plan_name: subscription_status[:plan_name],
+        plan_display_name: subscription_status[:plan_display_name],
+        is_active: subscription_status[:is_active],
+        is_trial: subscription_status[:is_trial],
+        trial_days_remaining: subscription_status[:trial_days_remaining],
+        in_grace_period: subscription_status[:in_grace_period],
+        max_users: subscription_status.dig(:limits, :max_users),
+        max_locations: subscription_status.dig(:limits, :max_locations),
+        max_storage_gb: subscription_status.dig(:limits, :max_storage_gb)
       }
     end
 
