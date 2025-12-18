@@ -20,14 +20,24 @@ module Api
         @locations = current_company.locations
                                     .where(is_deleted: false, active: true)
         
-        # RBAC: Location-tier users only see their assigned locations
+        # RBAC: Only location-tier users are restricted to assigned locations
+        # Company-tier users can access all locations
         if current_user.uses_rbac? && !current_user.effective_admin?
-          location_ids = permission_service.accessible_location_ids
-          if location_ids.any?
-            @locations = @locations.where(id: location_ids)
-          else
-            @locations = @locations.none
+          user_assignments = UserRoleAssignment.where(
+            user_id: current_user.id,
+            company_id: current_company.id
+          ).active
+          
+          # Only restrict if user has location-tier role assignments
+          if user_assignments.where(tier: 'location').any?
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              @locations = @locations.where(id: location_ids)
+            else
+              @locations = @locations.none
+            end
           end
+          # Company-tier users see all locations
         end
         
         @locations = @locations.order(:name)
@@ -43,14 +53,20 @@ module Api
         @locations = current_company.locations
                                     .where(is_deleted: false)
         
-        # RBAC: Location-tier users only see their assigned locations
+        # RBAC: Only location-tier users are restricted to assigned locations
+        # Company-tier users can access all locations
         if current_user.uses_rbac? && !current_user.effective_admin?
-          location_ids = permission_service.accessible_location_ids
-          if location_ids.any?
-            @locations = @locations.where(id: location_ids)
+          user_assignments = UserRoleAssignment.where(
+            user_id: current_user.id,
+            company_id: current_company.id
+          ).active
+          
+          # Only restrict if user has location-tier role assignments
+          if user_assignments.where(tier: 'location').any?
+            location_ids = permission_service.accessible_location_ids
+            @locations = @locations.where(id: location_ids) if location_ids.any?
           end
-          # If no location_ids but not admin, they see nothing (empty array)
-          # unless they have no RBAC restrictions (legacy role)
+          # Company-tier users see all locations
         end
         
         @locations = @locations.order(:name)
@@ -304,10 +320,19 @@ module Api
         location_ids = params[:location_ids] || []
         locations = current_company.locations.where(id: location_ids)
         
-        # RBAC: Location-tier users can only bulk operate on their assigned locations
+        # RBAC: Only location-tier users are restricted to assigned locations
         if current_user.uses_rbac? && !current_user.effective_admin?
-          accessible_ids = permission_service.accessible_location_ids
-          locations = locations.where(id: accessible_ids)
+          user_assignments = UserRoleAssignment.where(
+            user_id: current_user.id,
+            company_id: current_company.id
+          ).active
+          
+          # Only restrict if user has location-tier role assignments
+          if user_assignments.where(tier: 'location').any?
+            accessible_ids = permission_service.accessible_location_ids
+            locations = locations.where(id: accessible_ids)
+          end
+          # Company-tier users can bulk operate on all locations
         end
 
         updated_count = 0
@@ -328,10 +353,19 @@ module Api
         location_ids = params[:location_ids] || []
         locations = current_company.locations.where(id: location_ids)
         
-        # RBAC: Location-tier users can only bulk operate on their assigned locations
+        # RBAC: Only location-tier users are restricted to assigned locations
         if current_user.uses_rbac? && !current_user.effective_admin?
-          accessible_ids = permission_service.accessible_location_ids
-          locations = locations.where(id: accessible_ids)
+          user_assignments = UserRoleAssignment.where(
+            user_id: current_user.id,
+            company_id: current_company.id
+          ).active
+          
+          # Only restrict if user has location-tier role assignments
+          if user_assignments.where(tier: 'location').any?
+            accessible_ids = permission_service.accessible_location_ids
+            locations = locations.where(id: accessible_ids)
+          end
+          # Company-tier users can bulk operate on all locations
         end
 
         updated_count = 0
@@ -352,10 +386,19 @@ module Api
         location_ids = params[:location_ids] || []
         locations = current_company.locations.where(id: location_ids)
         
-        # RBAC: Location-tier users can only bulk operate on their assigned locations
+        # RBAC: Only location-tier users are restricted to assigned locations
         if current_user.uses_rbac? && !current_user.effective_admin?
-          accessible_ids = permission_service.accessible_location_ids
-          locations = locations.where(id: accessible_ids)
+          user_assignments = UserRoleAssignment.where(
+            user_id: current_user.id,
+            company_id: current_company.id
+          ).active
+          
+          # Only restrict if user has location-tier role assignments
+          if user_assignments.where(tier: 'location').any?
+            accessible_ids = permission_service.accessible_location_ids
+            locations = locations.where(id: accessible_ids)
+          end
+          # Company-tier users can bulk operate on all locations
         end
 
         deleted_count = 0
@@ -376,14 +419,25 @@ module Api
       def set_location
         @location = current_company.locations.find(params[:id])
         
-        # RBAC: Location-tier users can only access their assigned locations
+        # RBAC: Only location-tier users are restricted to assigned locations
+        # Company-tier users (company_admin, company_manager, company_staff) can access all locations
         if current_user.uses_rbac? && !current_user.effective_admin?
-          location_ids = permission_service.accessible_location_ids
-          unless location_ids.include?(@location.id)
-            Rails.logger.warn "[RBAC] User #{current_user.id} denied access to location #{@location.id}"
-            render json: { error: 'Location not found or access denied' }, status: :not_found
-            return
+          # Check if user has a location-tier role assignment
+          user_assignments = UserRoleAssignment.where(
+            user_id: current_user.id,
+            company_id: current_company.id
+          ).active
+          
+          # If user has any location-tier assignments, restrict to those locations
+          if user_assignments.where(tier: 'location').any?
+            location_ids = permission_service.accessible_location_ids
+            unless location_ids.include?(@location.id)
+              Rails.logger.warn "[RBAC] Location-tier user #{current_user.id} denied access to location #{@location.id}"
+              render json: { error: 'Location not found or access denied' }, status: :not_found
+              return
+            end
           end
+          # Company-tier users (company_staff, company_manager) fall through - they can access all locations
         end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Location not found' }, status: :not_found

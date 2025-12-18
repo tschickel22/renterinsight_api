@@ -57,6 +57,7 @@ module Api
     def logo
       file = params[:file]
       upload_type = params[:type] || 'company'
+      location_id = params[:location_id] # For location-specific logos
 
       unless file.present?
         return render json: { error: 'No file provided' }, status: :unprocessable_entity
@@ -66,7 +67,7 @@ module Api
         return render json: { error: 'Invalid file type. Only images are allowed.' }, status: :unprocessable_entity
       end
 
-      uploaded_file = upload_to_storage(file, "logos/#{upload_type}")
+      uploaded_file = upload_to_storage(file, "logos/#{upload_type}", location_id)
 
       render json: {
         url: uploaded_file[:url],
@@ -83,12 +84,13 @@ module Api
     def create
       file = params[:file]
       category = params[:category] || 'general'
+      location_id = params[:location_id] # For location-specific uploads
 
       unless file.present?
         return render json: { error: 'No file provided' }, status: :unprocessable_entity
       end
 
-      uploaded_file = upload_to_storage(file, category)
+      uploaded_file = upload_to_storage(file, category, location_id)
 
       render json: {
         url: uploaded_file[:url],
@@ -174,7 +176,7 @@ module Api
       allowed_types.include?(file.content_type)
     end
 
-    def upload_to_storage(file, category)
+    def upload_to_storage(file, category, location_id = nil)
       raise StandardError, 'Company not found - authentication required' unless @company
       
       max_size = 10.megabytes
@@ -187,7 +189,11 @@ module Api
       # Use persistent disk in production, local path in development
       upload_base = ENV['UPLOAD_PATH'] || Rails.root.join('public', 'uploads')
       
-      path = "#{@company.id}/#{category}/#{filename}"
+      # Use location_id if provided (for location-specific uploads)
+      # Otherwise use company_id (for company-wide uploads)
+      folder_id = location_id.present? ? location_id : @company.id
+      
+      path = "#{folder_id}/#{category}/#{filename}"
       full_path = File.join(upload_base, path)
       
       begin

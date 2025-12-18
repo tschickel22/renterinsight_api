@@ -186,9 +186,11 @@ module Api
         :sideMenuColor, :portalName, :portalLogo
       )
 
+      # Normalize favicon: if faviconUrl is provided, also set favicon
       if branding_params[:faviconUrl].present?
         branding_params[:favicon] = branding_params[:faviconUrl]
-        branding_params.delete(:faviconUrl)
+      elsif branding_params[:favicon].present?
+        branding_params[:faviconUrl] = branding_params[:favicon]
       end
 
       Setting.set('Company', @company.id, 'branding', branding_params.to_h)
@@ -529,21 +531,48 @@ module Api
       platform_branding_raw = Setting.get('Platform', 0, 'branding', {})
       platform_branding = platform_branding_raw.deep_symbolize_keys
       
+      Rails.logger.info "🎨 [serialize_branding] Platform branding: #{platform_branding.inspect}"
+      
       default_branding = {
         primaryColor: '#3b82f6',
         secondaryColor: '#64748b',
         fontFamily: 'Inter'
       }
 
+      # Waterfall: Platform → Company → Location
+      merged_branding = default_branding.merge(platform_branding)
+      
       if @company.present?
         company_branding_raw = Setting.get('Company', @company.id, 'branding', {})
         company_branding = company_branding_raw.deep_symbolize_keys
         
-        merged_branding = default_branding
-          .merge(platform_branding)
-          .merge(company_branding)
-      else
-        merged_branding = default_branding.merge(platform_branding)
+        Rails.logger.info "🎨 [serialize_branding] Company branding raw: #{company_branding_raw.inspect}"
+        Rails.logger.info "🎨 [serialize_branding] Company branding symbolized: #{company_branding.inspect}"
+        
+        # Normalize company branding: faviconUrl → favicon BEFORE merging
+        if company_branding[:faviconUrl].present?
+          company_branding[:favicon] = company_branding[:faviconUrl]
+          Rails.logger.info "🎨 [serialize_branding] Normalized company favicon: #{company_branding[:favicon]}"
+        end
+        
+        merged_branding = merged_branding.merge(company_branding)
+        
+        Rails.logger.info "🎨 [serialize_branding] After company merge: #{merged_branding.inspect}"
+        
+        # Location-level branding (highest priority)
+        if Current.location_id.present?
+          location_branding_raw = Setting.get('Location', Current.location_id, 'branding', {})
+          location_branding = location_branding_raw.deep_symbolize_keys
+          
+          # Normalize location branding: faviconUrl → favicon BEFORE merging
+          if location_branding[:faviconUrl].present?
+            location_branding[:favicon] = location_branding[:faviconUrl]
+          end
+          
+          merged_branding = merged_branding.merge(location_branding) if location_branding.present?
+          
+          Rails.logger.info "🎨 [serialize_branding] After location merge: #{merged_branding.inspect}"
+        end
       end
       
       if merged_branding[:logo].present?
