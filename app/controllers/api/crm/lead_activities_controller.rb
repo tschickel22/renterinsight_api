@@ -128,7 +128,10 @@ module Api
           return
         end
         
-        activity.update!(reminder_sent: true)
+        # Use ActivityReminderService to send all notifications (bell, popup, email, SMS)
+        # based on user's notification preferences
+        ActivityReminderService.send_reminder(activity)
+        
         render json: activity_json(activity), status: :ok
       rescue => e
         Rails.logger.error "[LeadActivitiesController#mark_reminder_sent] #{e.class}: #{e.message}"

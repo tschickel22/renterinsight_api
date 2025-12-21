@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Activity Reminder</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background-color: #f8f9fa; border-left: 4px solid #4299e1; padding: 20px; margin-bottom: 20px;">
+    <h2 style="margin-top: 0; color: #2d3748;">Activity Reminder</h2>
+    <p style="font-size: 16px; margin-bottom: 10px;"><strong><%= @activity.subject %></strong></p>
+    <% if @activity.description.present? %>
+      <p style="margin-bottom: 10px;"><%= @activity.description %></p>
+    <% end %>
+  </div>
+  
+  <div style="background-color: #fff; padding: 20px; border: 1px solid #e2e8f0; border-radius: 4px;">
+    <h3 style="margin-top: 0;">Details</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Type:</strong></td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><%= @activity.activity_type.titleize %></td>
+      </tr>
+      <% if @entity_name.present? && @entity_name != 'Unknown' %>
+        <tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Related to:</strong></td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><%= @entity_name %></td>
+        </tr>
+      <% end %>
+      <% if @activity.priority.present? %>
+        <tr>
+          <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Priority:</strong></td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><%= @activity.priority.titleize %></td>
+        </tr>
+      <% end %>
+      <% if @activity.due_date.present? || @activity.reminder_time.present? %>
+        <tr>
+          <td style="padding: 8px 0;"><strong>Due:</strong></td>
+          <td style="padding: 8px 0;"><%= (@activity.due_date || @activity.reminder_time).strftime('%B %d, %Y at %I:%M %p') %></td>
+        </tr>
+      <% end %>
+    </table>
+  </div>
+  
+  <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; color: #718096; font-size: 12px;">
+    <p>You're receiving this reminder because you have email notifications enabled for activity reminders.</p>
+    <p>To manage your notification preferences, please visit your account settings.</p>
+  </div>
+</body>
+</html>

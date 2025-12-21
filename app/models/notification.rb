@@ -43,6 +43,7 @@ class Notification < ApplicationRecord
     contact_updated: { category: 'crm', priority: 'low', title: 'Contact Information Updated' },
     task_assigned: { category: 'crm', priority: 'high', title: 'Task Assigned to You' },
     task_due_soon: { category: 'crm', priority: 'high', title: 'Task Due Soon' },
+    activity_reminder: { category: 'crm', priority: 'normal', title: 'Activity Reminder' },
     
     # Sales notifications
     deal_assigned: { category: 'sales', priority: 'high', title: 'Deal Assigned to You' },
@@ -90,11 +91,11 @@ class Notification < ApplicationRecord
     when 'WarrantyClaim'
       "/warranty/claims/#{notifiable_id}"
     when 'Lead'
-      "/crm/leads/#{notifiable_id}"
+      "/crm/leads/#{notifiable_id}?tab=activities"
     when 'Contact'
-      "/contacts/#{notifiable_id}"
+      "/contacts/#{notifiable_id}?tab=activities"
     when 'Account'
-      "/accounts/#{notifiable_id}"
+      "/accounts/#{notifiable_id}?tab=activities"
     when 'Deal'
       "/deals/#{notifiable_id}"
     when 'Quote'

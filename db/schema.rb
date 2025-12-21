@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_18_054106) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2109,6 +2109,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_18_054106) do
     t.string "invitation_token"
     t.datetime "invitation_sent_at"
     t.datetime "invitation_expires_at"
+    t.jsonb "notification_settings", default: {"lead_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "account_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "contact_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "activity_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}}
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
     t.index ["email", "invitation_id"], name: "index_users_on_email_and_invitation_id"
@@ -2118,6 +2119,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_18_054106) do
     t.index ["mfa_enabled"], name: "index_users_on_mfa_enabled"
     t.index ["mfa_method"], name: "index_users_on_mfa_method"
     t.index ["mfa_sms_expires_at"], name: "index_users_on_mfa_sms_expires_at"
+    t.index ["notification_settings"], name: "index_users_on_notification_settings", using: :gin
     t.index ["phone"], name: "index_users_on_phone"
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
   end

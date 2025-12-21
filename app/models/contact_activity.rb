@@ -81,9 +81,8 @@ class ContactActivity < ApplicationRecord
       errors.add(:call_direction, 'is required for calls') if call_direction.blank?
     when 'reminder'
       errors.add(:reminder_time, 'is required for reminders') if reminder_time.blank?
-      if reminder_method.blank? || (reminder_method.is_a?(Array) && reminder_method.empty?)
-        errors.add(:reminder_method, 'must have at least one method')
-      end
+      # Note: reminder_method validation removed - using unified notification system
+      # User preferences in notification_settings control which channels are used
     when 'note'
       # Notes don't require any additional fields
     end
@@ -93,12 +92,16 @@ class ContactActivity < ApplicationRecord
     return unless reminder_time && !reminder_sent
     
     delay = (reminder_time - Time.current).to_i
-    if delay > 0
-      # Schedule the ActivityReminderJob with ContactActivity type
+    
+    # If reminder time is in the past or within next minute, send immediately
+    if delay <= 60
+      Rails.logger.info "[ContactActivity] Reminder time is past or very soon, sending immediately for activity #{id}"
+      ActivityReminderService.send_reminder(self)
+      update_column(:reminder_sent, true)
+    else
+      # Schedule for future
       ActivityReminderJob.set(wait: delay.seconds).perform_later(id, 'ContactActivity')
       Rails.logger.info "[ContactActivity] Scheduled reminder job for activity #{id} in #{delay} seconds (at #{reminder_time})"
-    else
-      Rails.logger.warn "[ContactActivity] Reminder time #{reminder_time} is in the past for activity #{id}"
     end
   rescue => e
     Rails.logger.error "[ContactActivity] Failed to schedule reminder: #{e.message}"

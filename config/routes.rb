@@ -123,6 +123,9 @@ Rails.application.routes.draw do
         end
       end
       
+      # Notification Settings (Unified Reminder System)
+      resource :notification_settings, only: [:show, :update], path: 'notification_settings'
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do

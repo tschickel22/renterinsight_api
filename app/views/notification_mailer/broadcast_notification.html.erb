@@ -217,8 +217,12 @@
       
       <!-- Action Button -->
       <% if @action_url.present? %>
+      <% 
+        base_url = @frontend_url || 'https://localhost:5173'
+        full_url = "#{base_url}#{@action_url}"
+      %>
         <div style="text-align: center;">
-          <a href="<%= @action_url %>" class="action-button">
+          <a href="<%= full_url %>" class="action-button">
             <%= @action_text %>
           </a>
         </div>

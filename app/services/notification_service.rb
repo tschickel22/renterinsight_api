@@ -358,6 +358,15 @@ class NotificationService
     end
   end
   
+  def self.frontend_url
+    # Get frontend URL with environment-based fallback
+    if Rails.env.production?
+      ENV['FRONTEND_URL'] || 'https://app.renterinsight.com'
+    else
+      'https://localhost:5173'
+    end
+  end
+  
   def self.send_sms(notification, user)
     return unless user.phone.present?
     
@@ -372,18 +381,20 @@ class NotificationService
       # Build SMS message body
       message_body = "#{notification.title}\n\n#{notification.message}"
       
-      # Always add link to view full notification in app
-      frontend_url = ENV['FRONTEND_URL'] || Rails.application.credentials.dig(:frontend_url) || 'https://app.renterinsight.com'
-      notification_url = "#{frontend_url}/notifications"
+      # Get frontend URL using helper
+      base_url = frontend_url
       
-      # Customize link text based on content
-      if notification.attachments.attached?
+      if notification.action_url.present?
+        # Use direct link to the entity/action
+        direct_url = "#{base_url}#{notification.action_url}"
+        message_body += "\n\n#{notification.action_text || 'View details'}: #{direct_url}"
+      elsif notification.attachments.attached?
+        # Link to notification center if there are attachments
+        notification_url = "#{base_url}/notifications"
         message_body += "\n\nView with attachments: #{notification_url}"
-      elsif notification.action_url.present?
-        # If there's a specific action URL, include both
-        message_body += "\n\nView details: #{notification_url}"
       else
-        # Generic view link
+        # Generic notification center link
+        notification_url = "#{base_url}/notifications"
         message_body += "\n\nView in app: #{notification_url}"
       end
       
