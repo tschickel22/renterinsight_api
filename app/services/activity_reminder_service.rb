@@ -1,7 +1,7 @@
 # app/services/activity_reminder_service.rb
 class ActivityReminderService
   def self.send_reminder(activity)
-    user = activity.assigned_to || activity.user  # ← FIXED: assigned_to not assigned_user
+    user = activity.assigned_to || activity.user
     return unless user
     
     # Get user's notification preferences
@@ -169,15 +169,29 @@ class ActivityReminderService
         priority: activity.priority,
         entity_name: entity_name,
         entity_type: entity_type
-      }.to_json,
+      },
       read: false
     )
   end
   
   def self.send_popup_notification(activity, user)
+    Rails.logger.info("[ActivityReminderService] START send_popup_notification for #{determine_entity_type(activity)} activity #{activity.id}")
+    
     # Broadcast via ActionCable for real-time toast
     entity_name = get_entity_name(activity)
     entity_type = determine_entity_type(activity)
+    
+    # Determine entity ID based on type
+    entity_id = case entity_type
+    when 'lead'
+      activity.lead_id if activity.respond_to?(:lead_id)
+    when 'contact'
+      activity.contact_id if activity.respond_to?(:contact_id)
+    when 'account'
+      activity.account_id if activity.respond_to?(:account_id)
+    end
+    
+    Rails.logger.info("[ActivityReminderService] Popup data: entity_type=#{entity_type}, entity_id=#{entity_id}, entity_name=#{entity_name}")
     
     # Build the broadcast payload with both old and new formats for compatibility
     broadcast_data = {
@@ -191,11 +205,11 @@ class ActivityReminderService
         due_date: activity.due_date || activity.reminder_time,
         # Old format (for backward compatibility)
         leadName: entity_name,
-        leadId: (entity_type == 'lead' ? (activity.lead_id || activity.contact_id || activity.account_id) : nil),
+        leadId: (entity_type == 'lead' ? entity_id : nil),
         # New format (unified)
         entityName: entity_name,
         entityType: entity_type,
-        entityId: activity.lead_id || activity.contact_id || activity.account_id
+        entityId: entity_id
       },
       settings: {
         isEnabled: true,
@@ -206,14 +220,18 @@ class ActivityReminderService
       }
     }
     
+    Rails.logger.info("[ActivityReminderService] Broadcasting to channel: user_notifications_#{user.id}")
+    Rails.logger.info("[ActivityReminderService] Broadcast data: #{broadcast_data.inspect}")
+    
     ActionCable.server.broadcast(
       "user_notifications_#{user.id}",
       broadcast_data
     )
     
-    Rails.logger.info("[ActivityReminderService] Popup notification broadcast for user #{user.id}")
+    Rails.logger.info("[ActivityReminderService] Popup notification broadcast COMPLETE for user #{user.id}")
   rescue => e
     Rails.logger.error("[ActivityReminderService] Error broadcasting popup: #{e.message}")
+    Rails.logger.error(e.backtrace.join("\n"))
   end
   
   def self.send_email_reminder(notification, user)

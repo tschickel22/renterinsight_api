@@ -890,6 +890,23 @@ Rails.application.routes.draw do
           post :assign_user
         end
       end
+      
+      # ==================== CONTACTS ====================
+      resources :contacts, only: %i[index show create update destroy] do
+        # Contact Activities (unified activities)
+        resources :activities, controller: 'contact_activities', only: %i[index show create update destroy] do
+          member do
+            post :complete
+            post :cancel
+          end
+          collection do
+            get :reminders
+          end
+        end
+        
+        # Contact reminders endpoint (for activity notifications)
+        post 'activities/:id/mark_reminder_sent', to: 'contact_activities#mark_reminder_sent'
+      end
     end
 
     # ==================== COMPANY SETTINGS ====================

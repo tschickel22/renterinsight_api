@@ -8,6 +8,7 @@ module Api
         update_actions: [:update, :complete, :cancel, :mark_reminder_sent],
         delete_actions: [:destroy]
 
+      before_action :set_company_scope
       before_action :set_account, except: [:mark_reminder_sent]
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
 
@@ -115,8 +116,20 @@ module Api
 
       # POST /api/v1/account_activities/:id/mark_reminder_sent
       def mark_reminder_sent
-        activity = AccountActivity.find(params[:id])
-        activity.update!(reminder_sent: true)
+        # STRICT TENANT ISOLATION: Find activity scoped by company through account join
+        activity = AccountActivity.joins(:account)
+                                  .where(accounts: { company_id: @company.id })
+                                  .find_by(id: params[:id])
+        
+        unless activity
+          render json: { error: 'Activity not found or access denied' }, status: :not_found
+          return
+        end
+        
+        # Use ActivityReminderService to send all notifications (bell, popup, email, SMS)
+        # based on user's notification preferences
+        ActivityReminderService.send_reminder(activity)
+        
         render json: activity_json(activity), status: :ok
       rescue => e
         Rails.logger.error "[AccountActivitiesController#mark_reminder_sent] #{e.class}: #{e.message}"
@@ -125,6 +138,27 @@ module Api
 
       private
 
+      def set_company_scope
+        unless current_user
+          render json: { error: 'Authentication required' }, status: :unauthorized
+          return
+        end
+        
+        company_id = current_company_id
+        
+        unless company_id.present?
+          render json: { error: 'No company context' }, status: :forbidden
+          return
+        end
+        
+        @company = ::Company.find_by(id: company_id)
+        
+        if @company.nil?
+          render json: { error: 'Company not found' }, status: :not_found
+          return
+        end
+      end
+
       def set_account
         # STRICT TENANT ISOLATION: Only find accounts within company
         # RBAC: Location-tier users only access accounts in their assigned locations
@@ -132,17 +166,17 @@ module Api
           location_ids = permission_service.accessible_location_ids
           if location_ids.any?
             # Include accounts in assigned locations OR unassigned accounts (NULL location_id)
-            Account.where(company_id: current_company_id)
-                   .where("location_id IN (?) OR location_id IS NULL", location_ids)
-                   .find(params[:account_id])
+            @company.accounts
+                    .where("location_id IN (?) OR location_id IS NULL", location_ids)
+                    .find(params[:account_id])
           else
-            Account.where(company_id: current_company_id).find(params[:account_id])
+            @company.accounts.find(params[:account_id])
           end
         else
-          Account.where(company_id: current_company_id).find(params[:account_id])
+          @company.accounts.find(params[:account_id])
         end
       rescue ActiveRecord::RecordNotFound
-        Rails.logger.error "[AccountActivitiesController] Account not found or access denied: #{params[:account_id]} for company: #{current_company_id}"
+        Rails.logger.error "[AccountActivitiesController] Account not found or access denied: #{params[:account_id]} for company: #{@company&.id}"
         render json: { error: 'Account not found or access denied' }, status: :not_found
       end
 

@@ -4,38 +4,24 @@ module Api
   module Crm
     class ContactActivitiesController < ApplicationController
       include RbacAuthorization
-      rbac_resource :crm, update_actions: [:update, :complete, :cancel]
+      rbac_resource :crm, read_actions: [:index, :show, :reminders], update_actions: [:update, :complete, :cancel, :mark_reminder_sent]
 
       before_action :set_company_scope
-      before_action :set_contact
+      before_action :set_contact, except: [:mark_reminder_sent]
       before_action :set_activity, only: [:show, :update, :complete, :cancel, :destroy]
       
       # GET /api/crm/contacts/:contact_id/activities
       def index
-        # Get activities directly for this contact
         activities = @contact.contact_activities
                              .includes(:user, :assigned_to)
                              .order(Arel.sql('COALESCE(due_date, start_time, created_at) ASC'))
         
-        # If contact is linked to an account, also include account activities
-        # STRICT TENANT ISOLATION: Verify account belongs to same company
-        if @contact.account_id.present?
-          account = @company.accounts.find_by(id: @contact.account_id)
-          if account
-            account_activities = account.account_activities.includes(:user, :assigned_to)
-            # Merge and sort all activities
-            all_activities = (activities.to_a + account_activities.to_a)
-                              .sort_by { |a| a.due_date || a.start_time || a.created_at }
-            activities = all_activities
-          end
-        end
-        
         # Filter by type if provided
-        activities = activities.select { |a| a.activity_type == params[:type] } if params[:type].present?
+        activities = activities.where(activity_type: params[:type]) if params[:type].present?
         # Filter by status
-        activities = activities.select { |a| a.status == params[:status] } if params[:status].present?
+        activities = activities.where(status: params[:status]) if params[:status].present?
         # Filter by assigned user
-        activities = activities.select { |a| a.assigned_to_id.to_s == params[:assigned_to].to_s } if params[:assigned_to].present?
+        activities = activities.where(assigned_to_id: params[:assigned_to]) if params[:assigned_to].present?
         
         render json: activities.map { |a| activity_json(a) }, status: :ok
       rescue => e
@@ -53,8 +39,8 @@ module Api
         Rails.logger.info "[ContactActivitiesController#create] Starting create with params: #{params.inspect}"
         
         @activity = @contact.contact_activities.build(activity_params)
-        @activity.user = current_user_or_first
-        @activity.assigned_to ||= current_user_or_first
+        @activity.user = current_user
+        @activity.assigned_to ||= current_user
         
         Rails.logger.info "[ContactActivitiesController#create] Built activity: #{@activity.attributes.inspect}"
 
@@ -109,6 +95,47 @@ module Api
         Rails.logger.error "[ContactActivitiesController#destroy] #{e.class}: #{e.message}"
         render json: { error: 'Failed to delete activity', message: e.message }, status: :internal_server_error
       end
+
+      # GET /api/crm/contacts/:contact_id/activities/reminders
+      def reminders
+        activities = @contact.contact_activities
+                             .where(status: 'pending')
+                             .where.not(reminder_time: nil)
+                             .where(reminder_sent: [false, nil])
+                             .where('reminder_time <= ?', Time.current + 5.minutes)
+                             .includes(:user, :assigned_to)
+                             .order(reminder_time: :asc)
+        
+        render json: activities.map { |a| activity_json(a) }, status: :ok
+      rescue => e
+        Rails.logger.error "[ContactActivitiesController#reminders] #{e.class}: #{e.message}"
+        render json: { error: 'Failed to load reminders', message: e.message }, status: :internal_server_error
+      end
+
+      # POST /api/crm/contacts/:contact_id/activities/:id/mark_reminder_sent
+      def mark_reminder_sent
+        # STRICT TENANT ISOLATION: Scope through company
+        contact = @company.contacts.find_by(id: params[:contact_id])
+        unless contact
+          render json: { error: 'Contact not found or access denied' }, status: :not_found
+          return
+        end
+        
+        activity = contact.contact_activities.find_by(id: params[:id])
+        unless activity
+          render json: { error: 'Activity not found or access denied' }, status: :not_found
+          return
+        end
+        
+        # Use ActivityReminderService to send all notifications (bell, popup, email, SMS)
+        # based on user's notification preferences
+        ActivityReminderService.send_reminder(activity)
+        
+        render json: activity_json(activity), status: :ok
+      rescue => e
+        Rails.logger.error "[ContactActivitiesController#mark_reminder_sent] #{e.class}: #{e.message}"
+        render json: { error: 'Failed to mark reminder as sent', message: e.message }, status: :internal_server_error
+      end
       
       private
 
@@ -148,11 +175,6 @@ module Api
           render json: { error: 'Activity not found or access denied' }, status: :not_found
           return
         end
-      end
-      
-      def current_user_or_first
-        # Use actual current_user from authentication
-        current_user
       end
       
       def activity_params
