@@ -40,6 +40,14 @@ module Syndication
     
     private
     
+    def listing_contact_email(listing)
+      listing.contact_email.presence || company_email
+    end
+    
+    def listing_contact_phone(listing)
+      listing.contact_phone.presence || company_phone
+    end
+    
     def listing_to_json(listing)
       vehicle = listing.vehicle
       
@@ -110,8 +118,8 @@ module Syndication
         # Contact
         seller: {
           name: listing.seller_name || company.name,
-          phone: format_phone(listing.seller_phone || company_phone),
-          email: listing.seller_email || company_email
+          phone: format_phone(listing_contact_phone(listing)),
+          email: listing_contact_email(listing)
         },
         
         # Metadata
@@ -191,8 +199,8 @@ module Syndication
         # Contact
         xml.Seller do
           xml.Name listing.seller_name || company.name
-          xml.Phone format_phone(listing.seller_phone || company_phone)
-          xml.Email listing.seller_email || company_email
+          xml.Phone format_phone(listing_contact_phone(listing))
+          xml.Email listing_contact_email(listing)
         end
         
         # Metadata
@@ -220,12 +228,12 @@ module Syndication
     # Helper methods
     
     def company_email
-      company.communications_settings&.dig('email_from') || 
-        company.users.first&.email || 
-        'info@example.com'
+      # Company doesn't have email - use first user or default
+      company.users.first&.email || 'info@example.com'
     end
     
     def company_phone
+      # Company doesn't have phone - use first user or default
       company.users.first&.phone || '123-456-7890'
     end
     

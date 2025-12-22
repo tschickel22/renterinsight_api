@@ -86,10 +86,10 @@ module Syndication
         end
         
         xml.Phone(PhoneType: 'office') do
-          xml.PhoneNumber format_phone(listing.seller_phone || company_phone)
+          xml.PhoneNumber format_phone(listing_contact_phone(listing))
         end
         
-        xml.Email listing.seller_email || company_email
+        xml.Email listing_contact_email(listing)
       end
     end
     
@@ -351,20 +351,26 @@ module Syndication
     
     # Helper methods
     
+    def listing_contact_email(listing)
+      listing.contact_email.presence || company_email
+    end
+    
+    def listing_contact_phone(listing)
+      listing.contact_phone.presence || company_phone
+    end
+    
     def company_identifier
       "company-#{company.id}"
     end
     
     def company_phone
-      # Try to get from company settings or users
+      # Company doesn't have phone - use first user or default
       company.users.first&.phone || '123-456-7890'
     end
     
     def company_email
-      # Try to get from communications settings
-      company.communications_settings&.dig('email_from') || 
-        company.users.first&.email || 
-        'info@example.com'
+      # Company doesn't have email - use first user or default
+      company.users.first&.email || 'info@example.com'
     end
     
     def format_phone(phone)

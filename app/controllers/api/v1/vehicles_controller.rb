@@ -819,7 +819,7 @@ module Api
           insulationType: :insulation_type,
           ceilingType: :ceiling_type,
           wallType: :wall_type,
-          squareFeet: :square_feet,
+          squareFootage: :square_feet,  # Frontend sends squareFootage, not squareFeet
           # Boolean amenities
           hasFireplace: :fireplace,
           hasDeck: :deck,
@@ -1007,7 +1007,7 @@ module Api
             length2: vehicle.length2,
             width3: vehicle.width3,
             length3: vehicle.length3,
-            squareFeet: vehicle.square_feet,
+            squareFootage: vehicle.square_feet,  # Changed from squareFeet to match frontend
             roofType: vehicle.roof_type,
             sidingType: vehicle.siding_type,
             lotRent: vehicle.lot_rent&.to_f,
