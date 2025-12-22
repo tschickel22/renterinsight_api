@@ -1,15 +1,9 @@
+# Updated at 2025-12-22 to fix production popups
 development:
   adapter: async
-
 test:
   adapter: test
-
 staging:
   adapter: async
-
 production:
-  adapter: solid_cable
-  connects_to:
-    database:
-      writing: cable
-  polling_interval: 0.1.seconds
+  adapter: async
