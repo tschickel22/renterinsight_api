@@ -20,6 +20,9 @@ Rails.application.routes.draw do
     # Zego payment webhooks
     post 'zego/processed', to: 'zego#processed'
     post 'zego/canceled', to: 'zego#canceled'
+    
+    # QuickBooks webhooks
+    post 'quickbooks/notifications', to: 'quickbooks#notifications'
   end
 
   # ==================== PUBLIC INTAKE FORMS ====================
@@ -540,6 +543,51 @@ Rails.application.routes.draw do
         member do
           get :insights
           get :score
+        end
+      end
+      
+      # ==================== QUICKBOOKS INTEGRATION ====================
+      namespace :integrations do
+        scope path: 'quickbooks' do
+          get 'authorize', to: 'quickbooks_oauth#authorize'
+          get 'callback', to: 'quickbooks_oauth#callback'
+          get 'status', to: 'quickbooks_oauth#status'
+          post 'disconnect', to: 'quickbooks_oauth#disconnect'
+          post 'refresh_token', to: 'quickbooks_oauth#refresh_token'
+          
+          post 'sync/full', to: 'quickbooks_sync#full'
+          post 'sync/incremental', to: 'quickbooks_sync#incremental'
+          post 'sync/entity', to: 'quickbooks_sync#entity'
+          get 'sync/status', to: 'quickbooks_sync#status'
+          get 'sync/logs', to: 'quickbooks_sync#logs'
+          get 'sync/mappings', to: 'quickbooks_sync#mappings'
+          delete 'sync/mappings/:id', to: 'quickbooks_sync#delete_mapping'
+          post 'sync/mappings/:id/retry', to: 'quickbooks_sync#retry_mapping'
+          
+          get 'settings', to: 'quickbooks_settings#show'
+          put 'settings', to: 'quickbooks_settings#update'
+          delete 'settings', to: 'quickbooks_settings#destroy'
+          get 'settings/accounts', to: 'quickbooks_settings#accounts'
+          get 'settings/test', to: 'quickbooks_settings#test_connection'
+          get 'settings/entity/:entity_type', to: 'quickbooks_settings#entity_settings'
+          put 'settings/entity/:entity_type', to: 'quickbooks_settings#update_entity_settings'
+          get 'settings/mappings', to: 'quickbooks_settings#field_mappings'
+          post 'settings/mappings', to: 'quickbooks_settings#create_field_mapping'
+          put 'settings/mappings/:id', to: 'quickbooks_settings#update_field_mapping'
+          delete 'settings/mappings/:id', to: 'quickbooks_settings#delete_field_mapping'
+        end
+      end
+      
+      namespace :platform do
+        resources :quickbooks_settings, only: [] do
+          collection do
+            get '', action: :show
+            put '', action: :update
+            get :stats
+            get :companies
+            get :logs
+            post :sync_all
+          end
         end
       end
       
@@ -1079,32 +1127,6 @@ Rails.application.routes.draw do
       
       # Portal Service Tickets
       resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
-    end
-    
-    # Admin Impersonation (Testing Only)
-    namespace :admin do
-      # Phase 5B - Admin Documents Management
-      resources :documents, only: [:index, :show, :create, :update, :destroy] do
-        member do
-          get :download
-        end
-      end
-      
-      # Admin Buyers List (for dropdown)
-      resources :buyers, only: [:index]
-      
-      # Zego Payment Integration (Platform Admin Only)
-      namespace :zego do
-        post 'check_credentials', to: 'zego#check_credentials'
-        post 'sync_location', to: 'zego#sync_location'
-        get 'transactions', to: 'zego#transactions'
-        get 'properties', to: 'zego#properties'
-        get 'server_status', to: 'zego#server_status'
-      end
-      
-      # Impersonation routes (must be last to avoid conflicts)
-      post 'impersonate', to: 'impersonation#create'
-      get 'impersonate/buyers', to: 'impersonation#buyers'
     end
   end
 

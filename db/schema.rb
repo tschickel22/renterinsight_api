@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_21_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -514,10 +514,18 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.string "external_payments_id"
     t.jsonb "branding_settings", default: {}
     t.boolean "filter_assignments_by_role", default: false, null: false, comment: "When true, users can only be assigned to records within their role department"
+    t.string "quickbooks_realm_id"
+    t.datetime "quickbooks_connected_at"
+    t.text "quickbooks_access_token_encrypted"
+    t.text "quickbooks_refresh_token_encrypted"
+    t.datetime "quickbooks_token_expires_at"
+    t.datetime "quickbooks_last_sync_at"
+    t.boolean "quickbooks_sync_enabled", default: false
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
+    t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
@@ -1201,6 +1209,13 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "external_payments_property_id"
+    t.string "quickbooks_realm_id"
+    t.datetime "quickbooks_connected_at"
+    t.text "quickbooks_access_token_encrypted"
+    t.text "quickbooks_refresh_token_encrypted"
+    t.datetime "quickbooks_token_expires_at"
+    t.datetime "quickbooks_last_sync_at"
+    t.boolean "quickbooks_sync_enabled", default: false
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
@@ -1208,6 +1223,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.index ["company_id"], name: "index_locations_on_company_id"
     t.index ["deleted_at"], name: "index_locations_on_deleted_at"
     t.index ["external_payments_property_id"], name: "index_locations_on_external_payments_property_id"
+    t.index ["quickbooks_realm_id"], name: "index_locations_on_quickbooks_realm_id"
   end
 
   create_table "login_activities", force: :cascade do |t|
@@ -1633,6 +1649,92 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
   end
 
+  create_table "quickbooks_field_mappings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "entity_type", null: false
+    t.string "renter_insight_field", null: false
+    t.string "quickbooks_field", null: false
+    t.string "mapping_type", default: "direct"
+    t.text "transformation_logic"
+    t.boolean "enabled", default: true
+    t.integer "priority", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "entity_type"], name: "index_quickbooks_field_mappings_on_company_id_and_entity_type"
+    t.index ["company_id"], name: "index_quickbooks_field_mappings_on_company_id"
+    t.index ["location_id", "entity_type"], name: "index_quickbooks_field_mappings_on_location_id_and_entity_type"
+    t.index ["location_id"], name: "index_quickbooks_field_mappings_on_location_id"
+  end
+
+  create_table "quickbooks_sync_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "quickbooks_sync_mapping_id"
+    t.string "operation", null: false
+    t.string "entity_type", null: false
+    t.bigint "entity_id"
+    t.string "sync_direction"
+    t.string "status", default: "pending"
+    t.text "error_message"
+    t.jsonb "request_data"
+    t.jsonb "response_data"
+    t.float "duration_ms"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "created_at"], name: "index_quickbooks_sync_logs_on_company_id_and_created_at"
+    t.index ["company_id"], name: "index_quickbooks_sync_logs_on_company_id"
+    t.index ["entity_type"], name: "index_quickbooks_sync_logs_on_entity_type"
+    t.index ["location_id", "created_at"], name: "index_quickbooks_sync_logs_on_location_id_and_created_at"
+    t.index ["location_id"], name: "index_quickbooks_sync_logs_on_location_id"
+    t.index ["quickbooks_sync_mapping_id"], name: "index_quickbooks_sync_logs_on_quickbooks_sync_mapping_id"
+    t.index ["status"], name: "index_quickbooks_sync_logs_on_status"
+  end
+
+  create_table "quickbooks_sync_mappings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "renter_insight_entity_type", null: false
+    t.bigint "renter_insight_entity_id", null: false
+    t.string "quickbooks_entity_type", null: false
+    t.string "quickbooks_entity_id", null: false
+    t.string "sync_direction", default: "bidirectional"
+    t.datetime "last_synced_at"
+    t.jsonb "last_sync_data"
+    t.string "sync_status", default: "active"
+    t.text "sync_error_message"
+    t.integer "sync_error_count", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "quickbooks_entity_type", "quickbooks_entity_id"], name: "idx_qb_sync_qb_entity"
+    t.index ["company_id", "renter_insight_entity_type", "renter_insight_entity_id"], name: "idx_qb_sync_ri_entity"
+    t.index ["company_id"], name: "index_quickbooks_sync_mappings_on_company_id"
+    t.index ["location_id"], name: "index_quickbooks_sync_mappings_on_location_id"
+    t.index ["sync_status"], name: "index_quickbooks_sync_mappings_on_sync_status"
+  end
+
+  create_table "quickbooks_webhooks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "realm_id", null: false
+    t.string "event_name", null: false
+    t.string "entity_name"
+    t.string "entity_id"
+    t.string "operation"
+    t.jsonb "webhook_payload"
+    t.string "status", default: "pending"
+    t.text "processing_error"
+    t.datetime "processed_at"
+    t.integer "retry_count", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "created_at"], name: "idx_on_company_id_status_created_at_0d2da1c8cd"
+    t.index ["company_id"], name: "index_quickbooks_webhooks_on_company_id"
+    t.index ["event_name"], name: "index_quickbooks_webhooks_on_event_name"
+    t.index ["realm_id", "entity_id"], name: "index_quickbooks_webhooks_on_realm_id_and_entity_id"
+  end
+
   create_table "quotes", force: :cascade do |t|
     t.integer "account_id"
     t.integer "contact_id"
@@ -1814,6 +1916,17 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.datetime "updated_at", null: false
     t.index ["scope_type", "scope_id", "key"], name: "idx_settings_scope_key", unique: true
     t.index ["scope_type", "scope_id"], name: "index_settings_on_scope_type_and_scope_id"
+  end
+
+  create_table "solid_cable_messages", force: :cascade do |t|
+    t.binary "channel", null: false
+    t.binary "payload", null: false
+    t.datetime "created_at", null: false
+    t.bigint "channel_hash", null: false
+    t.index ["channel"], name: "index_solid_cable_messages_on_channel"
+    t.index ["channel_hash"], name: "index_solid_cable_messages_on_channel_hash"
+    t.index ["created_at"], name: "index_solid_cable_messages_on_created_at"
+    t.index ["id"], name: "index_solid_cable_messages_on_id", unique: true
   end
 
   create_table "sources", force: :cascade do |t|
@@ -2446,6 +2559,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "quickbooks_field_mappings", "companies"
+  add_foreign_key "quickbooks_field_mappings", "locations"
+  add_foreign_key "quickbooks_sync_logs", "companies"
+  add_foreign_key "quickbooks_sync_logs", "locations"
+  add_foreign_key "quickbooks_sync_logs", "quickbooks_sync_mappings"
+  add_foreign_key "quickbooks_sync_mappings", "companies"
+  add_foreign_key "quickbooks_sync_mappings", "locations"
+  add_foreign_key "quickbooks_webhooks", "companies"
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
   add_foreign_key "quotes", "locations"
