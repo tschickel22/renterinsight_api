@@ -17,8 +17,17 @@ module Syndication
       xml.instruct! :xml, version: '1.0', encoding: 'UTF-8'
       
       xml.PhysicalProperty do
-        add_management_section(xml)
-        add_properties(xml)
+        # Platform-wide feed: Group listings by company
+        if company.nil?
+          listings.group_by(&:company).each do |company, company_listings|
+            add_management_section(xml, company)
+            add_properties(xml, company, company_listings)
+          end
+        else
+          # Single company feed (legacy)
+          add_management_section(xml, company)
+          add_properties(xml, company, listings)
+        end
       end
       
       xml.target!
@@ -26,38 +35,38 @@ module Syndication
     
     private
     
-    def add_management_section(xml)
-      xml.Management(IDValue: company_identifier) do
+    def add_management_section(xml, comp)
+      xml.Management(IDValue: company_identifier(comp)) do
         xml.PropertyContacts do
           xml.Companies do
-            xml.CompanyName company.name
-            xml.WebSite company.custom_domain || company.subdomain_url || ''
+            xml.CompanyName comp.name
+            xml.WebSite comp.custom_domain || comp.subdomain_url || ''
             xml.Phone(PhoneType: 'office') do
-              xml.PhoneNumber format_phone(company_phone)
+              xml.PhoneNumber format_phone(company_phone_for(comp))
             end
-            xml.Email company_email
+            xml.Email company_email_for(comp)
           end
         end
       end
     end
     
-    def add_properties(xml)
-      grouped_listings = listings.group_by(&:mits_property_id)
+    def add_properties(xml, comp, property_listings)
+      grouped_listings = property_listings.group_by(&:mits_property_id)
       
-      grouped_listings.each do |property_id, property_listings|
-        add_property(xml, property_id, property_listings)
+      grouped_listings.each do |property_id, listings_for_property|
+        add_property(xml, comp, property_id, listings_for_property)
       end
     end
     
-    def add_property(xml, property_id, property_listings)
+    def add_property(xml, comp, property_id, property_listings)
       first_listing = property_listings.first
       
       xml.Property(
         IDValue: property_id,
-        OrganizationName: company.name,
+        OrganizationName: comp.name,
         IDType: 'Company'
       ) do
-        add_property_id(xml, first_listing)
+        add_property_id(xml, comp, first_listing)
         add_property_coordinates(xml, first_listing)
         add_property_information(xml, first_listing)
         add_property_amenities(xml, first_listing)
@@ -68,12 +77,12 @@ module Syndication
       end
     end
     
-    def add_property_id(xml, listing)
+    def add_property_id(xml, comp, listing)
       xml.PropertyID do
         xml.Identification(IDValue: listing.mits_property_id, IDRank: 'primary')
         xml.Identification(
-          IDValue: company_identifier,
-          OrganizationName: company.name,
+          IDValue: company_identifier(comp),
+          OrganizationName: comp.name,
           IDType: 'Company'
         )
         xml.MarketingName listing.property_name || listing.display_name
@@ -352,25 +361,49 @@ module Syndication
     # Helper methods
     
     def listing_contact_email(listing)
-      listing.contact_email.presence || company_email
+      # Three-tier fallback: Listing override → Location → Company
+      listing.contact_email.presence || 
+        location_email(listing) || 
+        company_email_for(listing.company)
     end
     
     def listing_contact_phone(listing)
-      listing.contact_phone.presence || company_phone
+      # Three-tier fallback: Listing override → Location → Company
+      listing.contact_phone.presence || 
+        location_phone(listing) || 
+        company_phone_for(listing.company)
     end
     
-    def company_identifier
-      "company-#{company.id}"
+    # Location-level info
+    
+    def location_email(listing)
+      listing.vehicle&.location&.email
+    end
+    
+    def location_phone(listing)
+      listing.vehicle&.location&.phone
+    end
+    
+    def company_identifier(comp)
+      "company-#{comp.id}"
     end
     
     def company_phone
-      # Company doesn't have phone - use first user or default
-      company.users.first&.phone || '123-456-7890'
+      company_phone_for(company)
     end
     
     def company_email
+      company_email_for(company)
+    end
+    
+    def company_phone_for(comp)
+      # Company doesn't have phone - use first user or default
+      comp.users.first&.phone || '123-456-7890'
+    end
+    
+    def company_email_for(comp)
       # Company doesn't have email - use first user or default
-      company.users.first&.email || 'info@example.com'
+      comp.users.first&.email || 'info@example.com'
     end
     
     def format_phone(phone)

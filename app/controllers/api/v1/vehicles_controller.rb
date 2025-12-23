@@ -911,7 +911,15 @@ module Api
 
       def vehicle_json(vehicle, detailed: false)
         # Helper to convert relative image URLs to full URLs
-        base_url = Rails.env.production? ? "https://#{request.host}" : "http://#{request.host}:#{request.port}"
+        protocol = request.ssl? ? 'https' : 'http'
+        base_url = "#{protocol}://#{request.host}:#{request.port}"
+        
+        # Helper to format decimal values (remove unnecessary .0)
+        # 2.0 -> 2, 1.5 -> 1.5, 3.0 -> 3, 2.5 -> 2.5
+        def format_decimal(value)
+          return nil if value.nil?
+          value.to_f % 1 == 0 ? value.to_i : value.to_f
+        end
         
         # Convert image URLs
         full_image_urls = (vehicle.images || []).map do |url|
@@ -993,8 +1001,8 @@ module Api
           json.merge!({
             vin: vehicle.vin,
             serialNumber: vehicle.serial_number,
-            bedrooms: vehicle.bedrooms,
-            bathrooms: vehicle.bathrooms,
+            bedrooms: format_decimal(vehicle.bedrooms),
+            bathrooms: format_decimal(vehicle.bathrooms),
             homeType: vehicle.home_type,
             condition: vehicle.condition,
             availability: vehicle.status,

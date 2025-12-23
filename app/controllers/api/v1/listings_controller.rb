@@ -448,7 +448,7 @@ module Api
             bedrooms: vehicle.bedrooms,
             bathrooms: vehicle.bathrooms,
             squareFeet: vehicle.square_feet,
-            images: vehicle.images || [],
+            images: convert_image_urls_to_https(vehicle.images),
             location: {
               city: vehicle.location_city,
               state: vehicle.location_state,
@@ -465,12 +465,36 @@ module Api
             length: vehicle.length,
             width: vehicle.width,
             condition: vehicle.condition,
-            images: vehicle.images || [],
+            images: convert_image_urls_to_https(vehicle.images),
             features: vehicle.features || []
           })
         end
         
         json
+      end
+
+      # Helper to convert image URLs to HTTPS protocol
+      # Fixes mixed content issues when frontend is served over HTTPS
+      def convert_image_urls_to_https(images)
+        Rails.logger.info "[ListingsController] convert_image_urls_to_https called with: #{images.inspect}"
+        return [] if images.blank?
+        
+        images_array = images.is_a?(String) ? JSON.parse(images) : images
+        return [] unless images_array.is_a?(Array)
+        
+        converted = images_array.map do |url|
+          next url if url.blank? || !url.is_a?(String)
+          # Convert http:// to https:// for external URLs
+          converted_url = url.start_with?('http://') ? url.sub('http://', 'https://') : url
+          Rails.logger.info "[ListingsController] Converted: #{url} -> #{converted_url}"
+          converted_url
+        end.compact
+        
+        Rails.logger.info "[ListingsController] Final images array: #{converted.inspect}"
+        converted
+      rescue JSON::ParserError => e
+        Rails.logger.error "[ListingsController] JSON parse error: #{e.message}"
+        []
       end
     end
   end

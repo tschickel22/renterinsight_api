@@ -11,12 +11,27 @@ module Syndication
     end
     
     def build_json
-      {
-        dealer_id: partner.account_id || company.id,
-        dealer_name: company.name,
-        contact_email: partner.lead_email || company_email,
-        listings: listings.map { |listing| listing_to_json(listing) }
-      }.to_json
+      # Platform-wide feed: Group listings by company
+      if company.nil?
+        dealers = listings.group_by(&:company).map do |company, company_listings|
+          {
+            dealer_id: partner.account_id || company.id,
+            dealer_name: company.name,
+            contact_email: partner.lead_email || company_email_for(company),
+            listings: company_listings.map { |listing| listing_to_json(listing) }
+          }
+        end
+        
+        { dealers: dealers }.to_json
+      else
+        # Single company feed (legacy)
+        {
+          dealer_id: partner.account_id || company.id,
+          dealer_name: company.name,
+          contact_email: partner.lead_email || company_email,
+          listings: listings.map { |listing| listing_to_json(listing) }
+        }.to_json
+      end
     end
     
     def build_xml
@@ -26,12 +41,28 @@ module Syndication
       xml.instruct! :xml, version: '1.0', encoding: 'UTF-8'
       
       xml.Listings do
-        xml.DealerID partner.account_id || company.id
-        xml.DealerName company.name
-        xml.ContactEmail partner.lead_email || company_email
-        
-        listings.each do |listing|
-          add_listing_xml(xml, listing)
+        # Platform-wide feed: Group listings by company
+        if company.nil?
+          listings.group_by(&:company).each do |company, company_listings|
+            xml.Dealer do
+              xml.DealerID partner.account_id || company.id
+              xml.DealerName company.name
+              xml.ContactEmail partner.lead_email || company_email_for(company)
+              
+              company_listings.each do |listing|
+                add_listing_xml(xml, listing)
+              end
+            end
+          end
+        else
+          # Single company feed (legacy)
+          xml.DealerID partner.account_id || company.id
+          xml.DealerName company.name
+          xml.ContactEmail partner.lead_email || company_email
+          
+          listings.each do |listing|
+            add_listing_xml(xml, listing)
+          end
         end
       end
       
@@ -41,11 +72,43 @@ module Syndication
     private
     
     def listing_contact_email(listing)
-      listing.contact_email.presence || company_email
+      # Three-tier fallback: Listing override → Location → Company
+      listing.contact_email.presence || 
+        location_email(listing) || 
+        company_email_for(listing.company)
     end
     
     def listing_contact_phone(listing)
-      listing.contact_phone.presence || company_phone
+      # Three-tier fallback: Listing override → Location → Company
+      listing.contact_phone.presence || 
+        location_phone(listing) || 
+        company_phone_for(listing.company)
+    end
+    
+    def listing_seller_name(listing)
+      # Three-tier fallback: Listing override → Location → Company
+      result = listing.seller_name.presence || 
+        location_name(listing) || 
+        listing.company.name
+      
+      # DEBUG: Log what we're returning
+      Rails.logger.info "[MH Village Feed] Listing ##{listing.id}: seller_name='#{result}' (location_name='#{location_name(listing)}', company='#{listing.company.name}')"
+      
+      result
+    end
+    
+    # Location-level info
+    
+    def location_email(listing)
+      listing.vehicle&.location&.email
+    end
+    
+    def location_phone(listing)
+      listing.vehicle&.location&.phone
+    end
+    
+    def location_name(listing)
+      listing.vehicle&.location&.name
     end
     
     def listing_to_json(listing)
@@ -115,9 +178,9 @@ module Syndication
         delivery_available: listing.delivery_available || 'Yes',
         setup_included: listing.setup_included || 'Contact for details',
         
-        # Contact
+        # Contact (uses Location → Company fallback)
         seller: {
-          name: listing.seller_name || company.name,
+          name: listing_seller_name(listing),
           phone: format_phone(listing_contact_phone(listing)),
           email: listing_contact_email(listing)
         },
@@ -196,9 +259,9 @@ module Syndication
         xml.DeliveryAvailable listing.delivery_available || 'Yes'
         xml.SetupIncluded listing.setup_included || 'Contact for details'
         
-        # Contact
+        # Contact (uses Location → Company fallback)
         xml.Seller do
-          xml.Name listing.seller_name || company.name
+          xml.Name listing_seller_name(listing)
           xml.Phone format_phone(listing_contact_phone(listing))
           xml.Email listing_contact_email(listing)
         end
@@ -228,13 +291,21 @@ module Syndication
     # Helper methods
     
     def company_email
-      # Company doesn't have email - use first user or default
-      company.users.first&.email || 'info@example.com'
+      company_email_for(company)
     end
     
     def company_phone
+      company_phone_for(company)
+    end
+    
+    def company_email_for(comp)
+      # Company doesn't have email - use first user or default
+      comp.users.first&.email || 'info@example.com'
+    end
+    
+    def company_phone_for(comp)
       # Company doesn't have phone - use first user or default
-      company.users.first&.phone || '123-456-7890'
+      comp.users.first&.phone || '123-456-7890'
     end
     
     def format_phone(phone)
