@@ -74,10 +74,18 @@ module Public
         listings = listings.where(offer_type: ['rent', 'both'])
         Rails.logger.info "After MITS rental filter: #{listings.count} listings"
       when 'json', 'xml'
-        # MH Village: Only manufactured homes (no RVs), only sales
-        listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'manufactured_home' })
-        listings = listings.where(offer_type: ['sale', 'both'])
-        Rails.logger.info "After MH Village manufactured_home + sale filter: #{listings.count} listings"
+        # Check partner type to determine filtering
+        if @partner.partner_type == 'rvt'
+          # RVT.com: RVs only, sales only
+          listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'rv' })
+          listings = listings.where(offer_type: ['sale', 'both'])
+          Rails.logger.info "After RVT.com RV + sale filter: #{listings.count} listings"
+        else
+          # MH Village: Only manufactured homes (no RVs), only sales
+          listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'manufactured_home' })
+          listings = listings.where(offer_type: ['sale', 'both'])
+          Rails.logger.info "After MH Village manufactured_home + sale filter: #{listings.count} listings"
+        end
       end
       
       Rails.logger.info "Final listing count: #{listings.count}"
@@ -97,7 +105,13 @@ module Public
 
     def render_json_feed(listings)
       # Platform-wide feed - no single company, listings grouped by company in JSON
-      builder = Syndication::MhVillageFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+      # Support both MH Village and RVT.com feeds
+      if @partner.partner_type == 'rvt'
+        builder = Syndication::RvtFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+      else
+        builder = Syndication::MhVillageFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+      end
+      
       json_data = builder.build_json
 
       render json: json_data, content_type: 'application/json'
@@ -105,8 +119,14 @@ module Public
 
     def render_xml_feed(listings)
       # Platform-wide feed - no single company, listings grouped by company in XML
-      builder = Syndication::MhVillageFeedBuilder.new(company: nil, partner: @partner, listings: listings)
-      xml = builder.build_xml
+      # Support both MH Village and RVT.com feeds
+      if @partner.partner_type == 'rvt'
+        builder = Syndication::RvtFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+        xml = builder.build_xml
+      else
+        builder = Syndication::MhVillageFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+        xml = builder.build_xml
+      end
 
       render xml: xml, content_type: 'application/xml'
     end

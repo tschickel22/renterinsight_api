@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_22_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2369,6 +2369,33 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_22_000001) do
     t.string "virtual_tour"
     t.string "sales_photo"
     t.bigint "location_id"
+    t.string "rv_class", comment: "RV class type (Class A/B/C, Travel Trailer, Fifth Wheel, etc.)"
+    t.string "engine_make", comment: "Engine manufacturer (Ford, Chevy, Cummins, etc.)"
+    t.string "engine_type", comment: "Engine type (V8, V10, I6, etc.)"
+    t.integer "sleeping_capacity", comment: "Number of people it sleeps"
+    t.integer "num_air_conditioners", default: 0, comment: "Number of AC units"
+    t.integer "slideouts", default: 0, comment: "Number of slide-outs"
+    t.integer "awnings", default: 0, comment: "Number of awnings"
+    t.decimal "fresh_water_capacity", precision: 8, scale: 2, comment: "Fresh water tank capacity in gallons"
+    t.decimal "gray_water_capacity", precision: 8, scale: 2, comment: "Gray water tank capacity in gallons"
+    t.decimal "black_water_capacity", precision: 8, scale: 2, comment: "Black water tank capacity in gallons"
+    t.decimal "propane_capacity", precision: 8, scale: 2, comment: "Propane tank capacity in gallons"
+    t.integer "dry_weight", comment: "Dry weight (UVW) in pounds"
+    t.integer "gross_weight", comment: "Gross vehicle weight rating (GVWR) in pounds"
+    t.integer "hitch_weight", comment: "Hitch/tongue weight in pounds"
+    t.integer "cargo_capacity", comment: "Cargo carrying capacity in pounds"
+    t.boolean "leveling_jacks", default: false, comment: "Has automatic leveling jacks"
+    t.boolean "self_contained", default: false, comment: "Fully self-contained (bathroom, kitchen, etc.)"
+    t.boolean "solar_panels", default: false, comment: "Has solar panel system"
+    t.boolean "backup_camera", default: false, comment: "Has backup camera"
+    t.boolean "satellite_tv", default: false, comment: "Has satellite TV capability"
+    t.string "generator_make", comment: "Generator manufacturer"
+    t.integer "generator_hours", comment: "Generator hours used"
+    t.string "generator_fuel_type", comment: "Generator fuel type (Gas, Diesel, Propane)"
+    t.string "video_url", comment: "YouTube or other video URL"
+    t.string "virtual_tour_url", comment: "360° virtual tour URL"
+    t.text "special_features", comment: "Additional special features or upgrades"
+    t.string "overlay_text", comment: "Promotional overlay text for listings"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -2382,7 +2409,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_22_000001) do
     t.index ["is_deleted"], name: "index_vehicles_on_is_deleted"
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
     t.index ["location_id"], name: "index_vehicles_on_location_id"
+    t.index ["mileage", "year"], name: "index_vehicles_on_mileage_and_year"
+    t.index ["rv_class"], name: "index_vehicles_on_rv_class"
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
+    t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"
+    t.index ["slideouts"], name: "index_vehicles_on_slideouts"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
