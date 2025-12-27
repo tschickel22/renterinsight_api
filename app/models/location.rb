@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Location < ApplicationRecord
+  include QuickbooksIntegration
+  
   # Associations
   belongs_to :company
   has_many :user_locations, dependent: :destroy
