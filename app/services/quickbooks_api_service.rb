@@ -1,159 +1,182 @@
 # frozen_string_literal: true
 
+# QuickBooks API Service
+# Handles all API calls to QuickBooks Online API
+# Manages OAuth token refresh and error handling
+
 class QuickbooksApiService
-  attr_reader :entity
+  attr_reader :entity, :access_token, :realm_id
+  
+  BASE_URL = 'https://quickbooks.api.intuit.com/v3/company'
+  SANDBOX_URL = 'https://sandbox-quickbooks.api.intuit.com/v3/company'
   
   def initialize(entity)
-    @entity = entity # Company or Location
+    @entity = entity # Can be Company or Location
+    
+    # Refresh token if expired
+    if entity.quickbooks_token_expired?
+      result = entity.refresh_quickbooks_token!
+      raise "Failed to refresh token: #{result[:error]}" unless result[:success]
+    end
+    
+    @access_token = entity.quickbooks_access_token
+    @realm_id = entity.quickbooks_realm_id
+    
+    raise "QuickBooks not connected" unless @access_token.present? && @realm_id.present?
   end
   
-  # Company Info
+  # GET request to QuickBooks API
+  def get(endpoint, params = {})
+    url = build_url(endpoint)
+    
+    response = HTTParty.get(url, {
+      headers: auth_headers,
+      query: params,
+      timeout: 30
+    })
+    
+    handle_response(response)
+  end
+  
+  # POST request to QuickBooks API
+  def post(endpoint, data)
+    url = build_url(endpoint)
+    
+    response = HTTParty.post(url, {
+      headers: auth_headers.merge('Content-Type' => 'application/json'),
+      body: data.to_json,
+      timeout: 30
+    })
+    
+    handle_response(response)
+  end
+  
+  # POST with sparse update (PATCH equivalent)
+  def update(endpoint, id, data)
+    url = build_url(endpoint)
+    
+    # QuickBooks uses POST with sparse=true for updates
+    response = HTTParty.post(url, {
+      headers: auth_headers.merge('Content-Type' => 'application/json'),
+      body: data.to_json,
+      query: { operation: 'update' },
+      timeout: 30
+    })
+    
+    handle_response(response)
+  end
+  
+  # Query QuickBooks data with SQL-like syntax
+  def query(sql_query)
+    get('query', { query: sql_query })
+  end
+  
+  # Get company info (useful for testing connection)
   def get_company_info
-    get("company/#{entity.quickbooks_realm_id}/companyinfo/#{entity.quickbooks_realm_id}")
+    # CompanyInfo endpoint requires the realm ID as the resource ID
+    get("companyinfo/#{@realm_id}", { minorversion: 65 })
   end
   
-  # Items (Inventory)
-  def create_item(item_data)
-    post('item', { Item: item_data })
+  # Get specific entity by ID
+  def get_entity(entity_type, id)
+    get("#{entity_type}/#{id}", { minorversion: 65 })
   end
   
-  def update_item(qb_id, item_data)
-    post('item', { Item: item_data.merge(Id: qb_id) }, sparse: true)
+  # Create entity
+  def create_entity(entity_type, data)
+    post(entity_type, data)
   end
   
-  def get_item(qb_id)
-    get("item/#{qb_id}")
+  # Update entity
+  def update_entity(entity_type, id, data)
+    update(entity_type, id, data)
   end
   
-  def query_items(query = "SELECT * FROM Item")
-    query(query)
+  # Search for entities
+  def search_entities(entity_type, conditions = {})
+    # Build SQL query
+    sql = "SELECT * FROM #{entity_type}"
+    
+    if conditions.any?
+      where_clauses = conditions.map { |field, value| "#{field} = '#{value}'" }
+      sql += " WHERE #{where_clauses.join(' AND ')}"
+    end
+    
+    query(sql)
   end
   
-  # Customers
-  def create_customer(customer_data)
-    post('customer', { Customer: customer_data })
-  end
-  
-  def update_customer(qb_id, customer_data)
-    post('customer', { Customer: customer_data.merge(Id: qb_id) }, sparse: true)
-  end
-  
-  def get_customer(qb_id)
-    get("customer/#{qb_id}")
-  end
-  
-  def query_customers(query = "SELECT * FROM Customer")
-    query(query)
-  end
-  
-  # Invoices
-  def create_invoice(invoice_data)
-    post('invoice', { Invoice: invoice_data })
-  end
-  
-  def update_invoice(qb_id, invoice_data)
-    post('invoice', { Invoice: invoice_data.merge(Id: qb_id) }, sparse: true)
-  end
-  
-  def get_invoice(qb_id)
-    get("invoice/#{qb_id}")
-  end
-  
-  def query_invoices(query = "SELECT * FROM Invoice")
-    query(query)
-  end
-  
-  # Payments
-  def create_payment(payment_data)
-    post('payment', { Payment: payment_data })
-  end
-  
-  def get_payment(qb_id)
-    get("payment/#{qb_id}")
-  end
-  
-  def query_payments(query = "SELECT * FROM Payment")
-    query(query)
-  end
-  
-  # Accounts (Chart of Accounts)
-  def get_accounts
-    query("SELECT * FROM Account WHERE Active = true")
-  end
-  
-  def get_account(qb_id)
-    get("account/#{qb_id}")
-  end
-  
-  # Change Data Capture (CDC) for incremental sync
-  def get_cdc(entities, changed_since)
-    params = {
-      entities: entities.join(','),
-      changedSince: changed_since.iso8601
-    }
-    get('cdc', params)
+  # Get all entities of a type
+  def get_all_entities(entity_type, max_results: 1000)
+    results = []
+    start_position = 1
+    
+    loop do
+      sql = "SELECT * FROM #{entity_type} STARTPOSITION #{start_position} MAXRESULTS 1000"
+      response = query(sql)
+      
+      entities = response.dig('QueryResponse', entity_type) || []
+      results.concat(entities)
+      
+      break if entities.length < 1000 || results.length >= max_results
+      start_position += 1000
+    end
+    
+    results
   end
   
   private
   
-  def get(path, params = {})
-    url = "#{base_url}/#{path}"
-    url += "?#{URI.encode_www_form(params)}" if params.any?
-    
-    response = HTTP.auth("Bearer #{access_token}")
-      .headers(accept: 'application/json')
-      .get(url)
-    
-    handle_response(response)
+  def build_url(endpoint)
+    base = Rails.env.production? ? BASE_URL : SANDBOX_URL
+    "#{base}/#{@realm_id}/#{endpoint}"
   end
   
-  def post(path, body, sparse: false)
-    url = "#{base_url}/#{path}"
-    url += "?operation=sparse" if sparse
-    
-    response = HTTP.auth("Bearer #{access_token}")
-      .headers(
-        accept: 'application/json',
-        content_type: 'application/json'
-      )
-      .post(url, json: body)
-    
-    handle_response(response)
-  end
-  
-  def query(sql)
-    get('query', { query: sql })
+  def auth_headers
+    {
+      'Authorization' => "Bearer #{@access_token}",
+      'Accept' => 'application/json'
+    }
   end
   
   def handle_response(response)
-    if response.status.success?
-      data = JSON.parse(response.body.to_s)
-      { success: true, data: data }
+    case response.code
+    when 200, 201
+      response.parsed_response
+    when 401
+      # Token expired or invalid
+      raise QuickbooksAuthError, "Authentication failed: #{response.body}"
+    when 400
+      # Bad request
+      error_msg = extract_error_message(response)
+      raise QuickbooksValidationError, "Validation error: #{error_msg}"
+    when 429
+      # Rate limit
+      raise QuickbooksRateLimitError, "Rate limit exceeded"
+    when 500, 502, 503
+      # Server error
+      raise QuickbooksServerError, "QuickBooks server error: #{response.code}"
     else
-      error_data = JSON.parse(response.body.to_s) rescue {}
-      error_message = error_data.dig('Fault', 'Error', 0, 'Message') || 'Unknown error'
-      { success: false, error: error_message, response: error_data }
+      raise QuickbooksApiError, "API request failed: #{response.code} - #{response.body}"
     end
-  rescue => e
-    { success: false, error: e.message }
   end
   
-  def base_url
-    realm_id = entity.quickbooks_realm_id
-    env = sandbox? ? 'sandbox-' : ''
-    "https://#{env}quickbooks.api.intuit.com/v3/company/#{realm_id}"
-  end
-  
-  def access_token
-    crypt = ActiveSupport::MessageEncryptor.new(encryption_key)
-    crypt.decrypt_and_verify(entity.quickbooks_access_token_encrypted)
-  end
-  
-  def encryption_key
-    Rails.application.key_generator.generate_key('quickbooks_tokens', 32)
-  end
-  
-  def sandbox?
-    Rails.application.credentials.dig(:quickbooks, :environment) == 'sandbox'
+  def extract_error_message(response)
+    parsed = response.parsed_response
+    
+    if parsed.is_a?(Hash)
+      fault = parsed.dig('Fault', 'Error', 0)
+      return fault['Message'] if fault
+      
+      return parsed['message'] if parsed['message']
+    end
+    
+    response.body
   end
 end
+
+# Custom exception classes
+class QuickbooksApiError < StandardError; end
+class QuickbooksAuthError < QuickbooksApiError; end
+class QuickbooksValidationError < QuickbooksApiError; end
+class QuickbooksRateLimitError < QuickbooksApiError; end
+class QuickbooksServerError < QuickbooksApiError; end

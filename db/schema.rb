@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_28_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -521,11 +521,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.datetime "quickbooks_token_expires_at"
     t.datetime "quickbooks_last_sync_at"
     t.boolean "quickbooks_sync_enabled", default: false
+    t.string "quickbooks_scope", default: "company", null: false
+    t.jsonb "quickbooks_settings", default: {}
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
+    t.index ["quickbooks_scope"], name: "index_companies_on_quickbooks_scope"
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
@@ -624,6 +627,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.string "zip"
     t.string "country"
     t.integer "owner_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
@@ -631,6 +636,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
+    t.index ["quickbooks_id"], name: "index_contacts_on_quickbooks_id"
   end
 
   create_table "custom_fields", force: :cascade do |t|
@@ -854,6 +860,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.string "billing_category"
     t.string "recipient_type"
     t.bigint "recipient_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -863,6 +871,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.index ["listing_id"], name: "index_invoices_on_listing_id"
     t.index ["location_id"], name: "index_invoices_on_location_id"
     t.index ["payment_token"], name: "index_invoices_on_payment_token", unique: true
+    t.index ["quickbooks_id"], name: "index_invoices_on_quickbooks_id"
     t.index ["recipient_type", "recipient_id"], name: "index_invoices_on_recipient_type_and_recipient_id"
     t.index ["source_type", "source_id"], name: "index_invoices_on_source_type_and_source_id"
     t.index ["status"], name: "index_invoices_on_status"
@@ -1219,6 +1228,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.datetime "quickbooks_token_expires_at"
     t.datetime "quickbooks_last_sync_at"
     t.boolean "quickbooks_sync_enabled", default: false
+    t.jsonb "quickbooks_settings", default: {}
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
@@ -1227,6 +1237,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.index ["deleted_at"], name: "index_locations_on_deleted_at"
     t.index ["external_payments_property_id"], name: "index_locations_on_external_payments_property_id"
     t.index ["quickbooks_realm_id"], name: "index_locations_on_quickbooks_realm_id"
+    t.index ["quickbooks_sync_enabled"], name: "index_locations_on_quickbooks_sync_enabled"
   end
 
   create_table "login_activities", force: :cascade do |t|
@@ -1616,6 +1627,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.datetime "updated_at", null: false
     t.string "payable_type"
     t.bigint "payable_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["company_id", "is_deleted"], name: "index_payments_on_company_id_and_is_deleted"
     t.index ["company_id", "payment_number"], name: "index_payments_on_company_id_and_payment_number", unique: true
     t.index ["company_id", "status"], name: "index_payments_on_company_id_and_status"
@@ -1628,6 +1641,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.index ["payer_type", "payer_id"], name: "index_payments_on_payer"
     t.index ["payment_date"], name: "index_payments_on_payment_date"
     t.index ["payment_method_id"], name: "index_payments_on_payment_method_id"
+    t.index ["quickbooks_id"], name: "index_payments_on_quickbooks_id"
     t.index ["scheduled_at"], name: "index_payments_on_scheduled_at"
     t.index ["status"], name: "index_payments_on_status"
   end
@@ -2396,6 +2410,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.string "virtual_tour_url", comment: "360° virtual tour URL"
     t.text "special_features", comment: "Additional special features or upgrades"
     t.string "overlay_text", comment: "Promotional overlay text for listings"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -2410,6 +2426,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_23_000001) do
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
     t.index ["location_id"], name: "index_vehicles_on_location_id"
     t.index ["mileage", "year"], name: "index_vehicles_on_mileage_and_year"
+    t.index ["quickbooks_id"], name: "index_vehicles_on_quickbooks_id"
     t.index ["rv_class"], name: "index_vehicles_on_rv_class"
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
     t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"

@@ -552,29 +552,37 @@ Rails.application.routes.draw do
           get 'authorize', to: 'quickbooks_oauth#authorize'
           get 'callback', to: 'quickbooks_oauth#callback'
           get 'status', to: 'quickbooks_oauth#status'
-          post 'disconnect', to: 'quickbooks_oauth#disconnect'
+          delete 'disconnect', to: 'quickbooks_oauth#disconnect'
           post 'refresh_token', to: 'quickbooks_oauth#refresh_token'
           
-          post 'sync/full', to: 'quickbooks_sync#full'
-          post 'sync/incremental', to: 'quickbooks_sync#incremental'
-          post 'sync/entity', to: 'quickbooks_sync#entity'
-          get 'sync/status', to: 'quickbooks_sync#status'
-          get 'sync/logs', to: 'quickbooks_sync#logs'
-          get 'sync/mappings', to: 'quickbooks_sync#mappings'
-          delete 'sync/mappings/:id', to: 'quickbooks_sync#delete_mapping'
-          post 'sync/mappings/:id/retry', to: 'quickbooks_sync#retry_mapping'
+          # OLD SYNC ROUTES - Commented out, using new routes below
+          # post 'sync/full', to: 'quickbooks_sync#full'
+          # post 'sync/incremental', to: 'quickbooks_sync#incremental'
+          # post 'sync/entity', to: 'quickbooks_sync#entity'
+          # get 'sync/status', to: 'quickbooks_sync#status'
+          # get 'sync/logs', to: 'quickbooks_sync#logs'
+          # get 'sync/mappings', to: 'quickbooks_sync#mappings'
+          # delete 'sync/mappings/:id', to: 'quickbooks_sync#delete_mapping'
+          # post 'sync/mappings/:id/retry', to: 'quickbooks_sync#retry_mapping'
           
           get 'settings', to: 'quickbooks_settings#show'
           put 'settings', to: 'quickbooks_settings#update'
           delete 'settings', to: 'quickbooks_settings#destroy'
           get 'settings/accounts', to: 'quickbooks_settings#accounts'
-          get 'settings/test', to: 'quickbooks_settings#test_connection'
+          post 'settings/test', to: 'quickbooks_settings#test_connection'
           get 'settings/entity/:entity_type', to: 'quickbooks_settings#entity_settings'
           put 'settings/entity/:entity_type', to: 'quickbooks_settings#update_entity_settings'
           get 'settings/mappings', to: 'quickbooks_settings#field_mappings'
           post 'settings/mappings', to: 'quickbooks_settings#create_field_mapping'
+          post 'settings/mappings/defaults', to: 'quickbooks_settings#create_default_mappings'
           put 'settings/mappings/:id', to: 'quickbooks_settings#update_field_mapping'
           delete 'settings/mappings/:id', to: 'quickbooks_settings#delete_field_mapping'
+          get 'settings/sync_logs', to: 'quickbooks_settings#sync_logs'
+          get 'settings/sync_logs/:id', to: 'quickbooks_settings#sync_log_details'
+          
+          # Phase 4 Sync Endpoints - Manual Sync Operations
+          post 'sync/entity', to: 'quickbooks_settings#sync_entity'
+          post 'sync/all', to: 'quickbooks_settings#sync_all_entities'
         end
       end
       

@@ -48,6 +48,13 @@ class Company < ApplicationRecord
   has_one :tenant_subscription, dependent: :destroy
   has_many :tenant_module_overrides, dependent: :destroy
   
+  # QuickBooks Integration Associations
+  has_many :quickbooks_field_mappings, dependent: :destroy
+  has_many :quickbooks_sync_logs, dependent: :destroy
+  
+  # Enums
+  enum :quickbooks_scope, { company: 'company', location: 'location' }, prefix: true, default: :company
+  
   # Callbacks
   after_create :create_default_location
   

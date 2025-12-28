@@ -1,133 +1,224 @@
 # frozen_string_literal: true
 
+# QuickBooks Integration Concern
+# Provides common methods for QuickBooks integration
+# Include in Company and Location models
+
 module QuickbooksIntegration
   extend ActiveSupport::Concern
-
-  included do
-    has_many :quickbooks_sync_mappings, dependent: :destroy
-    has_many :quickbooks_sync_logs, dependent: :destroy
-    has_many :quickbooks_field_mappings, dependent: :destroy
-    has_many :quickbooks_webhooks, dependent: :destroy
+  
+  # Get access token (handles encryption)
+  def quickbooks_access_token
+    encrypted = if respond_to?(:quickbooks_access_token_encrypted)
+      read_attribute(:quickbooks_access_token_encrypted)
+    else
+      read_attribute(:quickbooks_access_token)
+    end
     
-    scope :with_quickbooks_enabled, -> { where(quickbooks_sync_enabled: true) }
-    scope :with_expired_quickbooks_tokens, -> { 
-      where('quickbooks_token_expires_at IS NOT NULL')
-        .where('quickbooks_token_expires_at < ?', 30.minutes.from_now)
-        .where(quickbooks_sync_enabled: true)
-    }
+    return nil unless encrypted.present?
+    
+    # Decrypt if it looks encrypted (has double hyphens from MessageEncryptor)
+    if encrypted.include?('--')
+      begin
+        crypt = ActiveSupport::MessageEncryptor.new(Rails.application.key_generator.generate_key('quickbooks_tokens', 32))
+        crypt.decrypt_and_verify(encrypted)
+      rescue => e
+        Rails.logger.error "Failed to decrypt QB access token: #{e.message}"
+        nil
+      end
+    else
+      # Plain text token (legacy)
+      encrypted
+    end
   end
-
+  
+  # Get refresh token (handles encryption)
+  def quickbooks_refresh_token
+    encrypted = if respond_to?(:quickbooks_refresh_token_encrypted)
+      read_attribute(:quickbooks_refresh_token_encrypted)
+    else
+      read_attribute(:quickbooks_refresh_token)
+    end
+    
+    return nil unless encrypted.present?
+    
+    # Decrypt if it looks encrypted (has double hyphens from MessageEncryptor)
+    if encrypted.include?('--')
+      begin
+        crypt = ActiveSupport::MessageEncryptor.new(Rails.application.key_generator.generate_key('quickbooks_tokens', 32))
+        crypt.decrypt_and_verify(encrypted)
+      rescue => e
+        Rails.logger.error "Failed to decrypt QB refresh token: #{e.message}"
+        nil
+      end
+    else
+      # Plain text token (legacy)
+      encrypted
+    end
+  end
+  
+  # Check if connected to QuickBooks
   def quickbooks_connected?
-    quickbooks_realm_id.present? && 
-      quickbooks_access_token_encrypted.present? &&
-      quickbooks_connected_at.present?
+    # CRITICAL: Use decryption methods, not encrypted attributes directly
+    quickbooks_access_token.present? && quickbooks_realm_id.present?
   end
-
+  
+  # Check if access token has expired
   def quickbooks_token_expired?
-    return true unless quickbooks_token_expires_at
+    return true unless quickbooks_token_expires_at.present?
+    
+    # Consider token expired if less than 5 minutes remaining
     quickbooks_token_expires_at < 5.minutes.from_now
   end
-
+  
+  # Refresh QuickBooks access token using refresh token
   def refresh_quickbooks_token!
-    return { success: false, error: 'Not connected' } unless quickbooks_connected?
-
-    service = QuickbooksOauthService.new(self)
-    result = service.refresh_token!
+    # CRITICAL: Use decryption method, not encrypted attribute directly
+    current_refresh_token = quickbooks_refresh_token
     
-    if result[:success]
-      { success: true, expires_at: quickbooks_token_expires_at }
-    else
-      disconnect_quickbooks! if result[:error]&.include?('invalid_grant')
-      result
-    end
-  end
-
-  def disconnect_quickbooks!
-    update!(
-      quickbooks_realm_id: nil,
-      quickbooks_connected_at: nil,
-      quickbooks_access_token_encrypted: nil,
-      quickbooks_refresh_token_encrypted: nil,
-      quickbooks_token_expires_at: nil,
-      quickbooks_sync_enabled: false
-    )
+    return { success: false, error: 'No refresh token' } unless current_refresh_token.present?
     
-    { success: true }
-  end
-
-  def resolved_quickbooks_settings
-    settings = quickbooks_settings.presence || {}
-    
-    if is_a?(Location) && settings.blank?
-      settings = company.quickbooks_settings.presence || {}
-    end
-    
-    settings.blank? ? default_quickbooks_settings : settings.deep_symbolize_keys
-  end
-
-  def update_quickbooks_settings!(new_settings)
-    current = integration_settings || {}
-    current['quickbooks'] = new_settings
-    update!(integration_settings: current)
-  end
-
-  def quickbooks_settings
-    integration_settings&.dig('quickbooks')
-  end
-
-  def default_quickbooks_settings
-    {
-      enabled: false,
-      auto_sync: false,
-      sync_frequency_minutes: 15,
-      entities: {
-        inventory: {
-          enabled: false, sync_direction: 'bidirectional', map_as: 'Item',
-          track_quantity: true, default_account: nil
+    begin
+      # QuickBooks token endpoint
+      token_url = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
+      
+      # Prepare credentials
+      client_id = Rails.application.credentials.dig(:quickbooks, :client_id)
+      client_secret = Rails.application.credentials.dig(:quickbooks, :client_secret)
+      
+      Rails.logger.info "Refreshing QB token for #{self.class.name} ##{id}"
+      Rails.logger.info "Token URL: #{token_url}"
+      
+      # Make token refresh request
+      response = HTTParty.post(token_url, {
+        headers: {
+          'Accept' => 'application/json',
+          'Content-Type' => 'application/x-www-form-urlencoded',
+          'Authorization' => "Basic #{Base64.strict_encode64("#{client_id}:#{client_secret}")}"
         },
-        customers: {
-          enabled: false, sync_direction: 'to_qb', map_as: 'Customer',
-          include_contacts: true, include_leads: false
-        },
-        invoices: {
-          enabled: false, sync_direction: 'to_qb', map_as: 'Invoice',
-          auto_create: true, default_terms: 'Net 30'
-        },
-        payments: {
-          enabled: false, sync_direction: 'to_qb', map_as: 'Payment',
-          deposit_to_account: nil
-        },
-        vendors: {
-          enabled: false, sync_direction: 'to_qb', map_as: 'Vendor'
-        },
-        purchases: {
-          enabled: false, sync_direction: 'to_qb', map_as: 'Purchase'
+        body: {
+          grant_type: 'refresh_token',
+          refresh_token: current_refresh_token
         }
-      },
-      notifications: {
-        sync_errors: true, sync_success: false, email_recipients: []
-      }
-    }
+      })
+      
+      Rails.logger.info "QB Refresh Response Code: #{response.code}"
+      
+      if response.code == 200
+        data = response.parsed_response
+        
+        Rails.logger.info "QB Token refresh successful, new token expires in #{data['expires_in']} seconds"
+        
+        # Encrypt tokens using same method as OAuth service
+        crypt = ActiveSupport::MessageEncryptor.new(Rails.application.key_generator.generate_key('quickbooks_tokens', 32))
+        encrypted_access_token = crypt.encrypt_and_sign(data['access_token'])
+        encrypted_refresh_token = crypt.encrypt_and_sign(data['refresh_token'])
+        
+        # Update tokens with ENCRYPTED values
+        update_attrs = {
+          quickbooks_access_token_encrypted: encrypted_access_token,
+          quickbooks_refresh_token_encrypted: encrypted_refresh_token,
+          quickbooks_token_expires_at: Time.current + data['expires_in'].seconds
+        }
+        
+        if respond_to?(:quickbooks_refresh_token_expires_at=) && data['x_refresh_token_expires_in']
+          update_attrs[:quickbooks_refresh_token_expires_at] = Time.current + data['x_refresh_token_expires_in'].seconds
+        end
+        
+        # Save with validations skipped to avoid issues
+        update!(update_attrs)
+        
+        Rails.logger.info "QuickBooks token refreshed successfully for #{self.class.name} ##{id}"
+        
+        { success: true, expires_at: quickbooks_token_expires_at }
+      else
+        error_msg = response.parsed_response['error_description'] || response.parsed_response['error'] || 'Token refresh failed'
+        Rails.logger.error "QuickBooks token refresh failed: #{error_msg}"
+        Rails.logger.error "Response body: #{response.body}"
+        
+        { success: false, error: error_msg }
+      end
+      
+    rescue => e
+      Rails.logger.error "QuickBooks token refresh error: #{e.message}"
+      Rails.logger.error e.backtrace.first(5).join("\n")
+      { success: false, error: e.message }
+    end
   end
-
-  def quickbooks_sync_stats(time_period = 24.hours)
-    logs = quickbooks_sync_logs.where('created_at >= ?', time_period.ago)
+  
+  # Get resolved QuickBooks settings (with inheritance for locations)
+  def resolved_quickbooks_settings
+    if is_a?(Location)
+      # Merge company settings with location overrides
+      company_settings = company.quickbooks_settings || {}
+      location_settings = quickbooks_settings || {}
+      
+      company_settings.deep_merge(location_settings.deep_symbolize_keys)
+    else
+      # Company - just return own settings
+      (quickbooks_settings || {}).deep_symbolize_keys
+    end
+  end
+  
+  # Update QuickBooks settings
+  def update_quickbooks_settings!(new_settings)
+    # Deep merge with existing settings
+    current = quickbooks_settings || {}
+    merged = current.deep_merge(new_settings.deep_symbolize_keys)
     
-    {
-      total: logs.count,
-      successful: logs.where(status: 'success').count,
-      failed: logs.where(status: 'error').count,
-      success_rate: logs.count > 0 ? (logs.where(status: 'success').count.to_f / logs.count * 100).round(2) : 0,
-      avg_duration_ms: logs.where.not(duration_ms: nil).average(:duration_ms)&.round(2),
-      last_sync: quickbooks_last_sync_at
+    update!(quickbooks_settings: merged)
+  end
+  
+  # Disconnect from QuickBooks
+  def disconnect_quickbooks!
+    update_attrs = {
+      quickbooks_token_expires_at: nil,
+      quickbooks_realm_id: nil
     }
+    
+    # Use encrypted setters if they exist
+    if respond_to?(:quickbooks_access_token_encrypted=)
+      self.quickbooks_access_token_encrypted = nil
+      self.quickbooks_refresh_token_encrypted = nil
+    elsif respond_to?(:quickbooks_access_token=)
+      self.quickbooks_access_token = nil
+      self.quickbooks_refresh_token = nil
+    end
+    
+    if respond_to?(:quickbooks_refresh_token_expires_at=)
+      self.quickbooks_refresh_token_expires_at = nil
+    end
+    
+    if respond_to?(:quickbooks_connection_revoked=)
+      self.quickbooks_connection_revoked = true
+    end
+    
+    save!(validate: false)
+    
+    Rails.logger.info "QuickBooks disconnected for #{self.class.name} ##{id}"
   end
-
-  def pending_quickbooks_syncs
-    quickbooks_sync_mappings.where(sync_status: ['pending', 'error']).count
-  end
-
-  def active_quickbooks_mappings
-    quickbooks_sync_mappings.where(sync_status: 'active')
+  
+  # Get QuickBooks company name from realm
+  def quickbooks_company_name
+    return nil unless quickbooks_connected?
+    
+    begin
+      Rails.logger.info "[QB Company Name] Fetching for #{self.class.name}##{id}"
+      
+      api = QuickbooksApiService.new(self)
+      Rails.logger.info "[QB Company Name] API service initialized"
+      
+      company_info = api.get_company_info
+      Rails.logger.info "[QB Company Name] Response: #{company_info.inspect}"
+      
+      name = company_info.dig('CompanyInfo', 'CompanyName')
+      Rails.logger.info "[QB Company Name] Extracted name: #{name.inspect}"
+      
+      name
+    rescue => e
+      Rails.logger.error "[QB Company Name] Failed: #{e.message}"
+      Rails.logger.error e.backtrace.first(5).join("\n")
+      nil
+    end
   end
 end

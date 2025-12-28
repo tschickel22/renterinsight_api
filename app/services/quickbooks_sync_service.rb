@@ -1,196 +1,289 @@
 # frozen_string_literal: true
 
+# QuickBooks Sync Service
+# Main orchestrator for syncing data between Renter Insight and QuickBooks
+# Handles entity mapping, conflict resolution, and sync logging
+
 class QuickbooksSyncService
-  attr_reader :entity, :api_service
+  attr_reader :entity, :api, :settings
   
   def initialize(entity)
-    @entity = entity
-    @api_service = QuickbooksApiService.new(entity)
+    @entity = entity # Company or Location
+    @api = QuickbooksApiService.new(entity)
+    @settings = entity.resolved_quickbooks_settings || {}
   end
   
-  def full_sync
-    results = {
-      vehicles: sync_vehicles,
-      contacts: sync_contacts
-    }
+  # Sync specific entity type (e.g., 'inventory', 'customers')
+  def sync_entity_type(entity_type, direction: nil, entity_ids: nil)
+    # Get entity settings
+    entity_config = @settings.dig(:entities, entity_type.to_sym) || {}
     
-    entity.update!(quickbooks_last_sync_at: Time.current)
-    results
-  end
-  
-  def incremental_sync(since: nil)
-    since ||= entity.quickbooks_last_sync_at || 24.hours.ago
-    
-    entities = ['Item', 'Customer']
-    result = api_service.get_cdc(entities, since)
-    
-    return { success: false, error: result[:error] } unless result[:success]
-    
-    { success: true, message: 'CDC processing implemented' }
-  end
-  
-  def sync_entity(entity_type, entity_id)
-    case entity_type.to_s.downcase
-    when 'vehicle'
-      sync_single_vehicle(entity_id)
-    when 'contact'
-      sync_single_contact(entity_id)
-    else
-      { success: false, error: "Unknown entity type: #{entity_type}" }
+    # Check if sync is enabled
+    unless entity_config[:enabled]
+      return { success: false, message: "Sync disabled for #{entity_type}" }
     end
+    
+    # Use configured direction or override
+    sync_direction = direction || entity_config[:sync_direction] || 'to_qb'
+    
+    # Create sync log
+    log = create_sync_log(entity_type, sync_direction)
+    
+    begin
+      result = case sync_direction
+      when 'to_qb'
+        sync_to_quickbooks(entity_type, entity_ids, entity_config)
+      when 'from_qb'
+        sync_from_quickbooks(entity_type, entity_config)
+      when 'bidirectional'
+        sync_bidirectional(entity_type, entity_ids, entity_config)
+      else
+        raise "Unknown sync direction: #{sync_direction}"
+      end
+      
+      log.mark_success!(result)
+      
+      # Update entity's last sync timestamp
+      @entity.update_column(:quickbooks_last_sync_at, Time.current)
+      
+      { success: true, log: log, result: result }
+      
+    rescue => e
+      Rails.logger.error "QuickBooks sync error (#{entity_type}): #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      
+      log.mark_error!(e.message)
+      
+      { success: false, log: log, error: e.message }
+    end
+  end
+  
+  # Sync all enabled entities
+  def sync_all_entities(direction: nil)
+    results = {}
+    
+    ENTITY_TYPES.each do |entity_type|
+      result = sync_entity_type(entity_type, direction: direction)
+      results[entity_type] = result
+    end
+    
+    results
   end
   
   private
   
-  def sync_vehicles
-    settings = entity.resolved_quickbooks_settings[:entities][:inventory]
-    return { skipped: true, reason: 'Disabled' } unless settings[:enabled]
+  ENTITY_TYPES = %w[inventory customers invoices payments vendors purchases]
+  
+  def sync_to_quickbooks(entity_type, entity_ids, config)
+    handler = get_sync_handler(entity_type)
     
-    vehicles = entity.is_a?(Location) ? entity.vehicles : Company.find(entity.id).vehicles
+    # Get records to sync
+    records = if entity_ids.present?
+      handler.get_records_by_ids(entity_ids)
+    else
+      handler.get_all_syncable_records
+    end
     
-    vehicles.find_each.map do |vehicle|
-      sync_single_vehicle(vehicle.id)
+    synced = 0
+    skipped = 0
+    errors = []
+    
+    records.each do |record|
+      begin
+        # Check if record should be synced (filtering rules)
+        unless should_sync_record?(record, config)
+          skipped += 1
+          next
+        end
+        
+        # Transform to QuickBooks format
+        qb_data = handler.transform_to_quickbooks(record, config)
+        
+        # Check if exists in QuickBooks
+        if record.quickbooks_id.present?
+          # Update existing
+          @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
+        else
+          # Create new
+          response = @api.create_entity(handler.qb_entity_type, qb_data)
+          qb_id = response.dig(handler.qb_entity_type, 'Id')
+          
+          # Save QuickBooks ID back to our record
+          handler.save_quickbooks_id(record, qb_id)
+        end
+        
+        synced += 1
+        
+      rescue => e
+        errors << { record_id: record.id, error: e.message }
+        Rails.logger.error "Failed to sync #{entity_type} ##{record.id}: #{e.message}"
+      end
+    end
+    
+    {
+      synced: synced,
+      skipped: skipped,
+      errors: errors,
+      total: records.count
+    }
+  end
+  
+  def sync_from_quickbooks(entity_type, config)
+    handler = get_sync_handler(entity_type)
+    
+    # Get all entities from QuickBooks
+    qb_entities = @api.get_all_entities(handler.qb_entity_type)
+    
+    synced = 0
+    skipped = 0
+    errors = []
+    
+    qb_entities.each do |qb_entity|
+      begin
+        qb_id = qb_entity['Id']
+        
+        # Find existing record or create new
+        record = handler.find_by_quickbooks_id(qb_id)
+        
+        if record
+          # Update existing - check for conflicts
+          if record_has_local_changes?(record)
+            handle_conflict(record, qb_entity, config)
+          else
+            handler.update_from_quickbooks(record, qb_entity, config)
+          end
+        else
+          # Create new
+          handler.create_from_quickbooks(qb_entity, config)
+        end
+        
+        synced += 1
+        
+      rescue => e
+        errors << { qb_id: qb_entity['Id'], error: e.message }
+        Rails.logger.error "Failed to import #{entity_type} from QB: #{e.message}"
+      end
+    end
+    
+    {
+      synced: synced,
+      skipped: skipped,
+      errors: errors,
+      total: qb_entities.count
+    }
+  end
+  
+  def sync_bidirectional(entity_type, entity_ids, config)
+    # First sync TO QuickBooks
+    to_qb_result = sync_to_quickbooks(entity_type, entity_ids, config)
+    
+    # Then sync FROM QuickBooks
+    from_qb_result = sync_from_quickbooks(entity_type, config)
+    
+    {
+      to_qb: to_qb_result,
+      from_qb: from_qb_result
+    }
+  end
+  
+  def get_sync_handler(entity_type)
+    case entity_type.to_s
+    when 'inventory'
+      QuickbooksInventorySyncHandler.new(@entity, @api)
+    when 'customers'
+      QuickbooksCustomerSyncHandler.new(@entity, @api)
+    when 'invoices'
+      QuickbooksInvoiceSyncHandler.new(@entity, @api)
+    when 'payments'
+      QuickbooksPaymentSyncHandler.new(@entity, @api)
+    when 'vendors'
+      QuickbooksVendorSyncHandler.new(@entity, @api)
+    when 'purchases'
+      QuickbooksPurchaseSyncHandler.new(@entity, @api)
+    else
+      raise "Unknown entity type: #{entity_type}"
     end
   end
   
-  def sync_single_vehicle(vehicle_id)
-    company = entity.is_a?(Company) ? entity : entity.company
-    vehicle = company.vehicles.find(vehicle_id)
-    settings = entity.resolved_quickbooks_settings[:entities][:inventory]
+  def should_sync_record?(record, config)
+    # TODO: Implement filtering rules from config
+    # For now, sync all non-deleted records
+    !record.is_deleted
+  end
+  
+  def record_has_local_changes?(record)
+    # Check if record was modified after last sync
+    return false unless record.respond_to?(:quickbooks_synced_at)
     
-    mapping = QuickbooksSyncMapping.find_for_entity('Vehicle', vehicle.id, company.id, entity.is_a?(Location) ? entity.id : nil)
+    record.updated_at > record.quickbooks_synced_at if record.quickbooks_synced_at.present?
+  end
+  
+  def handle_conflict(record, qb_entity, config)
+    strategy = get_conflict_strategy(record.class.name.underscore.pluralize, config)
     
-    item_data = {
-      Name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".strip,
-      Type: 'Inventory',
-      TrackQtyOnHand: settings[:track_quantity],
-      Active: vehicle.status != 'sold'
-    }
+    case strategy
+    when 'ri_wins'
+      # Keep our version, overwrite QB
+      handler = get_sync_handler(record.class.name.underscore.pluralize)
+      qb_data = handler.transform_to_quickbooks(record, config)
+      @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
+      
+    when 'qb_wins'
+      # Keep QB version, overwrite ours
+      handler = get_sync_handler(record.class.name.underscore.pluralize)
+      handler.update_from_quickbooks(record, qb_entity, config)
+      
+    when 'most_recent'
+      # Compare timestamps
+      qb_updated = Time.parse(qb_entity['MetaData']['LastUpdatedTime'])
+      
+      if record.updated_at > qb_updated
+        # Our version is newer
+        handler = get_sync_handler(record.class.name.underscore.pluralize)
+        qb_data = handler.transform_to_quickbooks(record, config)
+        @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
+      else
+        # QB version is newer
+        handler = get_sync_handler(record.class.name.underscore.pluralize)
+        handler.update_from_quickbooks(record, qb_entity, config)
+      end
+      
+    when 'manual_review'
+      # Create conflict record for manual resolution
+      create_conflict_record(record, qb_entity)
+      
+    else
+      Rails.logger.warn "Unknown conflict strategy: #{strategy}, using ri_wins"
+      handler = get_sync_handler(record.class.name.underscore.pluralize)
+      qb_data = handler.transform_to_quickbooks(record, config)
+      @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
+    end
+  end
+  
+  def get_conflict_strategy(entity_type, config)
+    # Check for entity-specific override
+    conflict_settings = @settings[:conflict_resolution] || {}
+    entity_overrides = conflict_settings[:entity_overrides] || {}
     
-    item_data[:IncomeAccountRef] = { value: settings[:default_account] } if settings[:default_account]
-    item_data[:QtyOnHand] = vehicle.available? ? 1 : 0 if settings[:track_quantity]
+    entity_overrides[entity_type.to_sym] || conflict_settings[:default_strategy] || 'ri_wins'
+  end
+  
+  def create_conflict_record(record, qb_entity)
+    # TODO: Create QuickbooksConflict model to store conflicts for manual review
+    Rails.logger.info "Conflict detected for #{record.class.name} ##{record.id}"
+  end
+  
+  def create_sync_log(entity_type, sync_direction)
+    company = @entity.is_a?(Location) ? @entity.company : @entity
+    location = @entity.is_a?(Location) ? @entity : nil
     
-    log = QuickbooksSyncLog.create!(
-      company: company,
-      location: entity.is_a?(Location) ? entity : nil,
-      operation: mapping ? 'update' : 'create',
-      entity_type: 'Vehicle',
-      entity_id: vehicle.id,
-      sync_direction: 'to_qb',
+    company.quickbooks_sync_logs.create!(
+      location: location,
+      operation: 'entity_sync',
+      entity_type: entity_type,
+      sync_direction: sync_direction,
       status: 'pending',
       started_at: Time.current
     )
-    
-    begin
-      result = if mapping
-        api_service.update_item(mapping.quickbooks_entity_id, item_data)
-      else
-        api_service.create_item(item_data)
-      end
-      
-      if result[:success]
-        qb_item = result[:data]['Item']
-        
-        unless mapping
-          mapping = QuickbooksSyncMapping.create!(
-            company: company,
-            location: entity.is_a?(Location) ? entity : nil,
-            renter_insight_entity_type: 'Vehicle',
-            renter_insight_entity_id: vehicle.id,
-            quickbooks_entity_type: 'Item',
-            quickbooks_entity_id: qb_item['Id'],
-            sync_direction: 'bidirectional'
-          )
-        end
-        
-        mapping.mark_synced!(qb_item)
-        log.mark_success!(result[:data])
-        { success: true, mapping: mapping }
-      else
-        log.mark_error!(result[:error], result[:response])
-        mapping&.mark_error!(result[:error])
-        { success: false, error: result[:error] }
-      end
-    rescue => e
-      log.mark_error!(e.message)
-      mapping&.mark_error!(e.message)
-      { success: false, error: e.message }
-    end
-  end
-  
-  def sync_contacts
-    settings = entity.resolved_quickbooks_settings[:entities][:customers]
-    return { skipped: true, reason: 'Disabled' } unless settings[:enabled]
-    
-    company = entity.is_a?(Company) ? entity : entity.company
-    contacts = company.contacts
-    
-    contacts.find_each.map do |contact|
-      sync_single_contact(contact.id)
-    end
-  end
-  
-  def sync_single_contact(contact_id)
-    company = entity.is_a?(Company) ? entity : entity.company
-    contact = company.contacts.find(contact_id)
-    
-    mapping = QuickbooksSyncMapping.find_for_entity('Contact', contact.id, company.id, entity.is_a?(Location) ? entity.id : nil)
-    
-    customer_data = {
-      DisplayName: contact.full_name || "#{contact.first_name} #{contact.last_name}".strip,
-      GivenName: contact.first_name,
-      FamilyName: contact.last_name,
-      Active: true
-    }
-    
-    customer_data[:PrimaryEmailAddr] = { Address: contact.email } if contact.email.present?
-    customer_data[:PrimaryPhone] = { FreeFormNumber: contact.phone } if contact.phone.present?
-    
-    log = QuickbooksSyncLog.create!(
-      company: company,
-      location: entity.is_a?(Location) ? entity : nil,
-      operation: mapping ? 'update' : 'create',
-      entity_type: 'Contact',
-      entity_id: contact.id,
-      sync_direction: 'to_qb',
-      status: 'pending',
-      started_at: Time.current
-    )
-    
-    begin
-      result = if mapping
-        api_service.update_customer(mapping.quickbooks_entity_id, customer_data)
-      else
-        api_service.create_customer(customer_data)
-      end
-      
-      if result[:success]
-        qb_customer = result[:data]['Customer']
-        
-        unless mapping
-          mapping = QuickbooksSyncMapping.create!(
-            company: company,
-            location: entity.is_a?(Location) ? entity : nil,
-            renter_insight_entity_type: 'Contact',
-            renter_insight_entity_id: contact.id,
-            quickbooks_entity_type: 'Customer',
-            quickbooks_entity_id: qb_customer['Id'],
-            sync_direction: 'bidirectional'
-          )
-        end
-        
-        mapping.mark_synced!(qb_customer)
-        log.mark_success!(result[:data])
-        { success: true, mapping: mapping }
-      else
-        log.mark_error!(result[:error], result[:response])
-        mapping&.mark_error!(result[:error])
-        { success: false, error: result[:error] }
-      end
-    rescue => e
-      log.mark_error!(e.message)
-      mapping&.mark_error!(e.message)
-      { success: false, error: e.message }
-    end
   end
 end

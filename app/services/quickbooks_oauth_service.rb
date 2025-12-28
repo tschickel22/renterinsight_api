@@ -21,19 +21,27 @@ class QuickbooksOauthService
   end
   
   def exchange_code_for_tokens!(code, redirect_uri)
-    response = HTTP.basic_auth(user: client_id, pass: client_secret)
-      .post(token_endpoint, form: {
-        grant_type: 'authorization_code',
-        code: code,
-        redirect_uri: redirect_uri
-      })
+    uri = URI(token_endpoint)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
     
-    if response.status.success?
-      data = JSON.parse(response.body.to_s)
+    request = Net::HTTP::Post.new(uri)
+    request.basic_auth(client_id, client_secret)
+    request.set_form_data({
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: redirect_uri
+    })
+    
+    response = http.request(request)
+    
+    if response.code == '200'
+      data = JSON.parse(response.body)
+      Rails.logger.info "[QuickBooks OAuth] Token response: #{data.inspect}"
       store_tokens(data)
       { success: true, data: data }
     else
-      { success: false, error: parse_error(response) }
+      { success: false, error: parse_error_response(response) }
     end
   rescue => e
     { success: false, error: e.message }
@@ -42,18 +50,25 @@ class QuickbooksOauthService
   def refresh_token!
     return { success: false, error: 'No refresh token' } unless entity.quickbooks_refresh_token_encrypted
     
-    response = HTTP.basic_auth(user: client_id, pass: client_secret)
-      .post(token_endpoint, form: {
-        grant_type: 'refresh_token',
-        refresh_token: decrypt_token(entity.quickbooks_refresh_token_encrypted)
-      })
+    uri = URI(token_endpoint)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
     
-    if response.status.success?
-      data = JSON.parse(response.body.to_s)
+    request = Net::HTTP::Post.new(uri)
+    request.basic_auth(client_id, client_secret)
+    request.set_form_data({
+      grant_type: 'refresh_token',
+      refresh_token: decrypt_token(entity.quickbooks_refresh_token_encrypted)
+    })
+    
+    response = http.request(request)
+    
+    if response.code == '200'
+      data = JSON.parse(response.body)
       store_tokens(data)
       { success: true, data: data }
     else
-      { success: false, error: parse_error(response) }
+      { success: false, error: parse_error_response(response) }
     end
   rescue => e
     { success: false, error: e.message }
@@ -62,10 +77,17 @@ class QuickbooksOauthService
   def revoke_token!
     return { success: false, error: 'Not connected' } unless entity.quickbooks_connected?
     
-    response = HTTP.basic_auth(user: client_id, pass: client_secret)
-      .post(revoke_endpoint, form: {
-        token: decrypt_token(entity.quickbooks_refresh_token_encrypted)
-      })
+    uri = URI(revoke_endpoint)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    
+    request = Net::HTTP::Post.new(uri)
+    request.basic_auth(client_id, client_secret)
+    request.set_form_data({
+      token: decrypt_token(entity.quickbooks_refresh_token_encrypted)
+    })
+    
+    http.request(request)
     
     entity.disconnect_quickbooks!
     { success: true }
@@ -81,12 +103,17 @@ class QuickbooksOauthService
   private
   
   def store_tokens(data)
+    expires_at = data['expires_in'].seconds.from_now
+    Rails.logger.info "[QuickBooks OAuth] Storing tokens: expires_in=#{data['expires_in']}, expires_at=#{expires_at}"
+    
     entity.update!(
       quickbooks_access_token_encrypted: encrypt_token(data['access_token']),
       quickbooks_refresh_token_encrypted: encrypt_token(data['refresh_token']),
-      quickbooks_token_expires_at: data['expires_in'].seconds.from_now,
+      quickbooks_token_expires_at: expires_at,
       quickbooks_connected_at: Time.current
     )
+    
+    Rails.logger.info "[QuickBooks OAuth] Tokens stored successfully. Entity: #{entity.class.name}##{entity.id}"
   end
   
   def encrypt_token(token)
@@ -123,8 +150,8 @@ class QuickbooksOauthService
     'https://developer.api.intuit.com/v2/oauth2/tokens/revoke'
   end
   
-  def parse_error(response)
-    data = JSON.parse(response.body.to_s) rescue {}
+  def parse_error_response(response)
+    data = JSON.parse(response.body) rescue {}
     data['error_description'] || data['error'] || 'Unknown error'
   end
 end
