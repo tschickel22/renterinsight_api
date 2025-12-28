@@ -55,6 +55,18 @@ class QuickbooksOauthService
   def refresh_token!
     return { success: false, error: 'No refresh token' } unless entity.quickbooks_refresh_token_encrypted
     
+    # Log credentials for debugging (masked)
+    Rails.logger.info "[QB Refresh] Refreshing QB token for #{entity.class.name} ##{entity.id}"
+    Rails.logger.info "[QB Refresh] Client ID: #{client_id&.first(10)}..." if client_id
+    Rails.logger.info "[QB Refresh] Has secret: #{client_secret.present?}"
+    Rails.logger.info "[QB Refresh] Token URL: #{token_endpoint}"
+    
+    unless client_id.present? && client_secret.present?
+      error_msg = "QuickBooks credentials not configured. Set QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET environment variables."
+      Rails.logger.error "[QB Refresh] #{error_msg}"
+      return { success: false, error: error_msg }
+    end
+    
     uri = URI(token_endpoint)
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
@@ -68,14 +80,27 @@ class QuickbooksOauthService
     
     response = http.request(request)
     
+    Rails.logger.info "[QB Refresh] QB Refresh Response Code: #{response.code}"
+    
     if response.code == '200'
       data = JSON.parse(response.body)
       store_tokens(data)
       { success: true, data: data }
     else
-      { success: false, error: parse_error_response(response) }
+      error_msg = parse_error_response(response)
+      Rails.logger.error "[QB Refresh] QuickBooks token refresh failed: #{error_msg}"
+      Rails.logger.error "[QB Refresh] Response body: #{response.body}"
+      
+      # Provide helpful error message for invalid_client
+      if error_msg.include?('invalid_client')
+        error_msg = "Invalid QuickBooks credentials. The credentials configured in environment variables don't match the app that issued the original token. Please disconnect and reconnect QuickBooks."
+      end
+      
+      { success: false, error: error_msg }
     end
   rescue => e
+    Rails.logger.error "[QB Refresh] Exception: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
     { success: false, error: e.message }
   end
   
