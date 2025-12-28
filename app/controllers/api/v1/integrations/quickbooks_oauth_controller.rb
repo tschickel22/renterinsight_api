@@ -12,11 +12,18 @@ class Api::V1::Integrations::QuickbooksOauthController < ApplicationController
     return render json: { error: 'Location required for location-scoped QuickBooks' }, status: :bad_request unless entity
     
     oauth_service = QuickbooksOauthService.new(entity)
-    state_token = SecureRandom.hex(32)
-    session[:qb_oauth_state] = state_token
-    session[:qb_company_id] = @company.id
-    session[:qb_location_id] = params[:location_id] if params[:location_id].present?
-    session[:qb_return_url] = params[:return_url] if params[:return_url].present? # Store return URL
+    
+    # Encode company_id, location_id, and return_url in state parameter
+    state_data = {
+      company_id: @company.id,
+      location_id: params[:location_id],
+      return_url: params[:return_url],
+      nonce: SecureRandom.hex(16)
+    }
+    
+    # Encrypt state data to prevent tampering
+    encryptor = ActiveSupport::MessageEncryptor.new(Rails.application.secret_key_base[0, 32])
+    state_token = encryptor.encrypt_and_sign(state_data.to_json)
     
     # Redirect to FRONTEND callback page (not backend)
     frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
@@ -28,19 +35,26 @@ class Api::V1::Integrations::QuickbooksOauthController < ApplicationController
   end
   
   def callback
-    # Validate state token
-    return render json: { error: 'Invalid state' }, status: :bad_request if params[:state] != session[:qb_oauth_state]
+    # Decrypt and validate state token
+    begin
+      encryptor = ActiveSupport::MessageEncryptor.new(Rails.application.secret_key_base[0, 32])
+      state_json = encryptor.decrypt_and_verify(params[:state])
+      state_data = JSON.parse(state_json)
+    rescue => e
+      Rails.logger.error "[QB Callback] State decryption failed: #{e.message}"
+      return render json: { error: 'Invalid state token' }, status: :bad_request
+    end
     
-    # Get company from session (stored in authorize action)
-    company = Company.find_by(id: session[:qb_company_id])
+    # Get company from decrypted state
+    company = Company.find_by(id: state_data['company_id'])
     return render json: { error: 'Company not found' }, status: :not_found unless company
     
-    # Get return URL from session
-    return_url = session[:qb_return_url]
+    # Get return URL from state
+    return_url = state_data['return_url']
     
-    # Determine entity based on session
-    entity = if session[:qb_location_id].present?
-      company.locations.find_by(id: session[:qb_location_id])
+    # Determine entity based on state data
+    entity = if state_data['location_id'].present?
+      company.locations.find_by(id: state_data['location_id'])
     else
       company
     end
@@ -73,12 +87,6 @@ class Api::V1::Integrations::QuickbooksOauthController < ApplicationController
       # Reload again to confirm update
       entity.reload
       Rails.logger.info "[QB Callback] Token expires at FINAL: #{entity.quickbooks_token_expires_at.inspect}"
-      
-      # Clear session variables
-      session.delete(:qb_oauth_state)
-      session.delete(:qb_company_id)
-      session.delete(:qb_location_id)
-      session.delete(:qb_return_url)
       
       # Return success with entity info and return URL
       render json: { 
