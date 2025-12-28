@@ -8,6 +8,11 @@ class QuickbooksOauthService
   end
   
   def authorization_url(redirect_uri, state_token)
+    # Validate credentials are present
+    unless client_id.present? && client_secret.present?
+      raise "QuickBooks credentials not configured. Set QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET environment variables."
+    end
+    
     params = {
       client_id: client_id,
       scope: 'com.intuit.quickbooks.accounting',
@@ -131,15 +136,18 @@ class QuickbooksOauthService
   end
   
   def client_id
-    Rails.application.credentials.dig(:quickbooks, :client_id)
+    # Render/Production: Use ENV vars
+    # Local dev: Use Rails credentials
+    ENV['QUICKBOOKS_CLIENT_ID'] || Rails.application.credentials.dig(:quickbooks, :client_id)
   end
   
   def client_secret
-    Rails.application.credentials.dig(:quickbooks, :client_secret)
+    ENV['QUICKBOOKS_CLIENT_SECRET'] || Rails.application.credentials.dig(:quickbooks, :client_secret)
   end
   
   def sandbox?
-    Rails.application.credentials.dig(:quickbooks, :environment) == 'sandbox'
+    env = ENV['QUICKBOOKS_ENVIRONMENT'] || Rails.application.credentials.dig(:quickbooks, :environment)
+    env == 'sandbox'
   end
   
   def token_endpoint

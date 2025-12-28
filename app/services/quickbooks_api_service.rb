@@ -127,7 +127,9 @@ class QuickbooksApiService
   private
   
   def build_url(endpoint)
-    base = Rails.env.production? ? BASE_URL : SANDBOX_URL
+    # Use ENV var for environment (Render/Production) or Rails.env for local dev
+    is_sandbox = (ENV['QUICKBOOKS_ENVIRONMENT'] || Rails.application.credentials.dig(:quickbooks, :environment)) == 'sandbox'
+    base = is_sandbox ? SANDBOX_URL : BASE_URL
     "#{base}/#{@realm_id}/#{endpoint}"
   end
   
