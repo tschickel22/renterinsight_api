@@ -27,10 +27,11 @@ class QuickbooksSyncLog < ApplicationRecord
   end
   
   def self.average_duration(period = 30.days)
-    logs = where('created_at >= ?', period.ago).where.not(duration_ms: nil)
-    return 0 if logs.count.zero?
+    logs = where('created_at >= ?', period.ago).where.not(duration_ms: nil).where.not(started_at: nil)
+    return nil if logs.count.zero?
     
-    (logs.average(:duration_ms) || 0).round(2)
+    avg = logs.average(:duration_ms)
+    avg ? avg.round(2) : nil
   end
   
   # Instance methods

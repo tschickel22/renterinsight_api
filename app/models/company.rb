@@ -306,6 +306,10 @@ class Company < ApplicationRecord
     @communication_settings ||= Setting.get('Company', id, 'communication') || {}
   end
   
+  def integration_settings
+    @integration_settings ||= Setting.get('Company', id, 'integration') || {}
+  end
+  
   # Use the same bank account for deposits and rent collections
   # If true, all payments go to operating account
   # If false, deposits go to deposit account, rent goes to operating account
