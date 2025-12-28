@@ -2,6 +2,8 @@
 
 class CreateQuickbooksSyncLogs < ActiveRecord::Migration[8.0]
   def change
+    return if table_exists?(:quickbooks_sync_logs)
+
     create_table :quickbooks_sync_logs do |t|
       t.references :company, null: false, foreign_key: true
       t.references :location, null: true, foreign_key: true
@@ -29,9 +31,9 @@ class CreateQuickbooksSyncLogs < ActiveRecord::Migration[8.0]
     end
     
     # Indexes for common queries
-    add_index :quickbooks_sync_logs, [:company_id, :created_at]
-    add_index :quickbooks_sync_logs, [:company_id, :status]
-    add_index :quickbooks_sync_logs, [:company_id, :entity_type]
-    add_index :quickbooks_sync_logs, [:location_id, :created_at]
+    add_index :quickbooks_sync_logs, [:company_id, :created_at] unless index_exists?(:quickbooks_sync_logs, [:company_id, :created_at])
+    add_index :quickbooks_sync_logs, [:company_id, :status] unless index_exists?(:quickbooks_sync_logs, [:company_id, :status])
+    add_index :quickbooks_sync_logs, [:company_id, :entity_type] unless index_exists?(:quickbooks_sync_logs, [:company_id, :entity_type])
+    add_index :quickbooks_sync_logs, [:location_id, :created_at] unless index_exists?(:quickbooks_sync_logs, [:location_id, :created_at])
   end
 end
