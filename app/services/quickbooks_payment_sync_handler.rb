@@ -15,6 +15,11 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
     # Filter by location if needed
     scope = scope.where(location_id: location.id) if location.present?
     
+    # CRITICAL: Only sync payments where the related invoice has been synced to QB
+    # This prevents "Required param missing" errors for unapplied payments
+    scope = scope.joins('LEFT JOIN invoices ON payments.payable_type = \'Invoice\' AND payments.payable_id = invoices.id')
+                 .where('(payments.payable_type != \'Invoice\') OR (invoices.quickbooks_id IS NOT NULL)')
+    
     scope
   end
   
@@ -134,18 +139,26 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
     lines = []
     
     # If payment is linked to an invoice via payable, add that
-    if payment.payable_type == 'Invoice' && payment.payable&.quickbooks_id.present?
-      lines << {
-        Amount: payment.amount,
-        LinkedTxn: [
-          {
-            TxnId: payment.payable.quickbooks_id,
-            TxnType: 'Invoice'
-          }
-        ]
-      }
+    if payment.payable_type == 'Invoice'
+      if payment.payable&.quickbooks_id.present?
+        lines << {
+          Amount: payment.amount,
+          LinkedTxn: [
+            {
+              TxnId: payment.payable.quickbooks_id,
+              TxnType: 'Invoice'
+            }
+          ]
+        }
+      else
+        # Invoice exists but hasn't been synced to QB yet
+        invoice_number = payment.payable&.invoice_number || "##{payment.payable_id}"
+        raise "Payment for Invoice #{invoice_number} cannot sync - invoice must be synced to QuickBooks first"
+      end
     else
-      # Unapplied payment
+      # Non-invoice payment (unapplied)
+      # QuickBooks doesn't support true unapplied payments via API
+      # These payments need to be manually applied in QB
       lines << {
         Amount: payment.amount
       }

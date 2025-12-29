@@ -78,6 +78,10 @@ class Company < ApplicationRecord
   scope :trial, -> { where(status: 'trial') }
   scope :trial_expiring_soon, -> { where(status: 'trial').where('trial_ends_at <= ?', 7.days.from_now) }
   
+  # QuickBooks scopes
+  scope :with_quickbooks_enabled, -> { where("quickbooks_realm_id IS NOT NULL AND (quickbooks_settings->>'enabled')::boolean = true") }
+  scope :with_expired_quickbooks_tokens, -> { where('quickbooks_token_expires_at < ?', Time.current) }
+  
   # Domain verification methods
   def domain_verified?
     domain_verified_at.present?

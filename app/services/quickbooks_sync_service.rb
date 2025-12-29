@@ -70,6 +70,60 @@ class QuickbooksSyncService
     results
   end
   
+  # Incremental sync - only syncs changed/new records for enabled entities
+  # This is the main method used by AutoSyncJob for scheduled syncs
+  def incremental_sync
+    results = {}
+    total_synced = 0
+    total_errors = 0
+    
+    Rails.logger.info "[QB Incremental Sync] Starting for #{@entity.class.name} ##{@entity.id}"
+    
+    ENTITY_TYPES.each do |entity_type|
+      entity_config = @settings.dig(:entities, entity_type.to_sym) || {}
+      
+      # Skip if not enabled
+      unless entity_config[:enabled]
+        Rails.logger.debug "[QB Incremental Sync] Skipping #{entity_type} (disabled)"
+        next
+      end
+      
+      # Sync only changed records (entity_ids: nil means "all changed")
+      # The should_sync_record? method filters to only new/edited records
+      result = sync_entity_type(entity_type)
+      results[entity_type] = result
+      
+      if result[:success]
+        synced = result.dig(:result, :to_qb, :synced) || result.dig(:result, :synced) || 0
+        errors = result.dig(:result, :to_qb, :errors) || result.dig(:result, :errors) || []
+        total_synced += synced
+        total_errors += errors.count
+        
+        Rails.logger.info "[QB Incremental Sync] #{entity_type}: #{synced} synced, #{errors.count} errors"
+      else
+        Rails.logger.error "[QB Incremental Sync] #{entity_type} failed: #{result[:error]}"
+        total_errors += 1
+      end
+    end
+    
+    Rails.logger.info "[QB Incremental Sync] Complete: #{total_synced} records synced, #{total_errors} errors"
+    
+    { 
+      success: true, 
+      results: results,
+      summary: {
+        total_synced: total_synced,
+        total_errors: total_errors,
+        entity_count: results.keys.count
+      }
+    }
+  rescue => e
+    Rails.logger.error "[QB Incremental Sync] Fatal error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    
+    { success: false, error: e.message }
+  end
+  
   private
   
   ENTITY_TYPES = %w[inventory customers invoices payments vendors purchases]
