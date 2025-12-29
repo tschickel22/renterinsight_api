@@ -82,9 +82,9 @@ module QuickbooksIntegration
       # QuickBooks token endpoint
       token_url = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
       
-      # Prepare credentials
-      client_id = Rails.application.credentials.dig(:quickbooks, :client_id)
-      client_secret = Rails.application.credentials.dig(:quickbooks, :client_secret)
+      # Prepare credentials - use ENV vars first (for production), fallback to Rails credentials (for local dev)
+      client_id = ENV['QUICKBOOKS_CLIENT_ID'] || Rails.application.credentials.dig(:quickbooks, :client_id)
+      client_secret = ENV['QUICKBOOKS_CLIENT_SECRET'] || Rails.application.credentials.dig(:quickbooks, :client_secret)
       
       Rails.logger.info "[QB Refresh] Refreshing QB token for #{self.class.name} ##{id}"
       Rails.logger.info "[QB Refresh] Client ID: #{client_id&.first(10)}..." if client_id
