@@ -86,8 +86,16 @@ module QuickbooksIntegration
       client_id = Rails.application.credentials.dig(:quickbooks, :client_id)
       client_secret = Rails.application.credentials.dig(:quickbooks, :client_secret)
       
-      Rails.logger.info "Refreshing QB token for #{self.class.name} ##{id}"
-      Rails.logger.info "Token URL: #{token_url}"
+      Rails.logger.info "[QB Refresh] Refreshing QB token for #{self.class.name} ##{id}"
+      Rails.logger.info "[QB Refresh] Client ID: #{client_id&.first(10)}..." if client_id
+      Rails.logger.info "[QB Refresh] Has secret: #{client_secret.present?}"
+      Rails.logger.info "[QB Refresh] Token URL: #{token_url}"
+      
+      unless client_id.present? && client_secret.present?
+        error_msg = "QuickBooks credentials not configured. Set QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET environment variables."
+        Rails.logger.error "[QB Refresh] #{error_msg}"
+        return { success: false, error: error_msg }
+      end
       
       # Make token refresh request
       response = HTTParty.post(token_url, {
@@ -102,12 +110,12 @@ module QuickbooksIntegration
         }
       })
       
-      Rails.logger.info "QB Refresh Response Code: #{response.code}"
+      Rails.logger.info "[QB Refresh] QB Refresh Response Code: #{response.code}"
       
       if response.code == 200
         data = response.parsed_response
         
-        Rails.logger.info "QB Token refresh successful, new token expires in #{data['expires_in']} seconds"
+        Rails.logger.info "[QB Refresh] QB Token refresh successful, new token expires in #{data['expires_in']} seconds"
         
         # Encrypt tokens using same method as OAuth service
         crypt = ActiveSupport::MessageEncryptor.new(Rails.application.key_generator.generate_key('quickbooks_tokens', 32))
@@ -133,15 +141,20 @@ module QuickbooksIntegration
         { success: true, expires_at: quickbooks_token_expires_at }
       else
         error_msg = response.parsed_response['error_description'] || response.parsed_response['error'] || 'Token refresh failed'
-        Rails.logger.error "QuickBooks token refresh failed: #{error_msg}"
-        Rails.logger.error "Response body: #{response.body}"
+        
+        if error_msg.include?('invalid_client')
+          error_msg = "Invalid QuickBooks credentials. The credentials configured in environment variables don't match the app that issued the original token. Please disconnect and reconnect QuickBooks."
+        end
+        
+        Rails.logger.error "[QB Refresh] QuickBooks token refresh failed: #{error_msg}"
+        Rails.logger.error "[QB Refresh] Response body: #{response.body}"
         
         { success: false, error: error_msg }
       end
       
     rescue => e
-      Rails.logger.error "QuickBooks token refresh error: #{e.message}"
-      Rails.logger.error e.backtrace.first(5).join("\n")
+      Rails.logger.error "[QB Refresh] QuickBooks token refresh error: #{e.message}"
+      Rails.logger.error "[QB Refresh] #{e.backtrace.first(5).join('\n')}"
       { success: false, error: e.message }
     end
   end
