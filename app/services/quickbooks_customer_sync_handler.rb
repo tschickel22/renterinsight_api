@@ -45,16 +45,8 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
       BillAddr: format_address(contact, 'billing'),
       ShipAddr: format_address(contact, 'shipping'),
       Notes: contact.notes,
-      Active: true,  # Contacts don't have a status field
-      # Custom fields
-      CustomField: [
-        {
-          DefinitionId: '1',
-          Name: 'Contact Type',
-          Type: 'StringType',
-          StringValue: contact.contact_type
-        }
-      ].compact
+      Active: true  # Contacts don't have a status field
+      # Custom fields removed - contact_type column doesn't exist
     }.compact
   end
   
