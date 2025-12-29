@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_28_050000) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_28_050100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -629,9 +629,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_28_050000) do
     t.integer "owner_id"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.boolean "is_deleted", default: false, null: false
+    t.string "company_name"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
+    t.index ["is_deleted"], name: "index_contacts_on_is_deleted"
     t.index ["location_id"], name: "index_contacts_on_location_id"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
