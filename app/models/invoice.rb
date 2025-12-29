@@ -4,6 +4,7 @@ class Invoice < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :listing, optional: true
   belongs_to :deal, optional: true
+  belongs_to :loan, optional: true
   belongs_to :source, polymorphic: true, optional: true
   belongs_to :recipient, polymorphic: true, optional: true
   
@@ -14,6 +15,7 @@ class Invoice < ApplicationRecord
   
   before_validation :generate_invoice_number, on: :create
   before_validation :generate_payment_token, on: :create
+  before_validation :generate_public_token, on: :create
   before_validation :set_default_status, on: :create
   before_save :calculate_totals
   after_save :update_status_based_on_payments
@@ -52,6 +54,11 @@ class Invoice < ApplicationRecord
     due_date && due_date < Date.today && !paid? && status != 'cancelled'
   end
   
+  # Alias for API serialization
+  def is_overdue
+    overdue?
+  end
+  
   def is_warranty_invoice?
     billing_category == 'warranty'
   end
@@ -73,6 +80,23 @@ class Invoice < ApplicationRecord
     end
     
     "#{base_url}/pay/invoice/#{payment_token}"
+  end
+  
+  # Public view link for portal
+  def public_url(base_url = nil)
+    return nil unless public_token.present?
+    
+    # Environment-aware base URL
+    base_url ||= if Rails.env.production?
+      'https://crm.landlordinsight.com'
+    elsif Rails.env.staging?
+      'https://staging.crm.landlordinsight.com'
+    else
+      # Local development
+      'https://localhost:5173'
+    end
+    
+    "#{base_url}/invoice/#{public_token}"
   end
   
   # Mark as sent
@@ -129,6 +153,10 @@ class Invoice < ApplicationRecord
   
   def generate_payment_token
     self.payment_token ||= SecureRandom.urlsafe_base64(32)
+  end
+  
+  def generate_public_token
+    self.public_token ||= SecureRandom.urlsafe_base64(32)
   end
   
   def set_default_status

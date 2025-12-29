@@ -819,7 +819,7 @@ module Api
           insulationType: :insulation_type,
           ceilingType: :ceiling_type,
           wallType: :wall_type,
-          squareFeet: :square_feet,
+          squareFootage: :square_feet,  # Frontend sends squareFootage, not squareFeet
           # Boolean amenities
           hasFireplace: :fireplace,
           hasDeck: :deck,
@@ -839,7 +839,35 @@ module Api
           # Media
           photoURL: :photo_url,
           virtualTour: :virtual_tour,
-          salesPhoto: :sales_photo
+          salesPhoto: :sales_photo,
+          # RVT.com Syndication Fields - NEW
+          rvClass: :rv_class,
+          engineMake: :engine_make,
+          engineType: :engine_type,
+          sleepingCapacity: :sleeping_capacity,
+          numAirConditioners: :num_air_conditioners,
+          slideouts: :slideouts,
+          awnings: :awnings,
+          freshWaterCapacity: :fresh_water_capacity,
+          grayWaterCapacity: :gray_water_capacity,
+          blackWaterCapacity: :black_water_capacity,
+          propaneCapacity: :propane_capacity,
+          dryWeight: :dry_weight,
+          grossWeight: :gross_weight,
+          hitchWeight: :hitch_weight,
+          cargoCapacity: :cargo_capacity,
+          levelingJacks: :leveling_jacks,
+          selfContained: :self_contained,
+          solarPanels: :solar_panels,
+          backupCamera: :backup_camera,
+          satelliteTv: :satellite_tv,
+          generatorMake: :generator_make,
+          generatorHours: :generator_hours,
+          generatorFuelType: :generator_fuel_type,
+          videoUrl: :video_url,
+          virtualTourUrl: :virtual_tour_url,
+          specialFeatures: :special_features,
+          overlayText: :overlay_text
         }
         
         # Copy and transform camelCase fields
@@ -905,13 +933,31 @@ module Api
           :utilities, :terms, :repo, :package_type, :sale_pending,
           # Media
           :photo_url, :virtual_tour, :sales_photo,
+          # RVT.com Syndication Fields - NEW
+          :rv_class, :engine_make, :engine_type, :sleeping_capacity, :num_air_conditioners,
+          :slideouts, :awnings, :fresh_water_capacity, :gray_water_capacity, :black_water_capacity,
+          :propane_capacity, :dry_weight, :gross_weight, :hitch_weight, :cargo_capacity,
+          :leveling_jacks, :self_contained, :solar_panels, :backup_camera, :satellite_tv,
+          :generator_make, :generator_hours, :generator_fuel_type,
+          :video_url, :virtual_tour_url, :special_features, :overlay_text,
+          # Location ID
+          :location_id,
+          # Arrays
           features: [], images: [], videos: [], appliances: []
         )
       end
 
       def vehicle_json(vehicle, detailed: false)
         # Helper to convert relative image URLs to full URLs
-        base_url = Rails.env.production? ? "https://#{request.host}" : "http://#{request.host}:#{request.port}"
+        protocol = request.ssl? ? 'https' : 'http'
+        base_url = "#{protocol}://#{request.host}:#{request.port}"
+        
+        # Helper to format decimal values (remove unnecessary .0)
+        # 2.0 -> 2, 1.5 -> 1.5, 3.0 -> 3, 2.5 -> 2.5
+        def format_decimal(value)
+          return nil if value.nil?
+          value.to_f % 1 == 0 ? value.to_i : value.to_f
+        end
         
         # Convert image URLs
         full_image_urls = (vehicle.images || []).map do |url|
@@ -987,14 +1033,42 @@ module Api
             generator: vehicle.generator,
             numberOfDoors: vehicle.number_of_doors,
             seatingCapacity: vehicle.seating_capacity,
-            availability: vehicle.status
+            availability: vehicle.status,
+            # RVT.com Syndication Fields - NEW
+            rvClass: vehicle.rv_class,
+            engineMake: vehicle.engine_make,
+            engineType: vehicle.engine_type,
+            sleepingCapacity: vehicle.sleeping_capacity,
+            numAirConditioners: vehicle.num_air_conditioners,
+            slideouts: vehicle.slideouts,
+            awnings: vehicle.awnings,
+            freshWaterCapacity: vehicle.fresh_water_capacity,
+            grayWaterCapacity: vehicle.gray_water_capacity,
+            blackWaterCapacity: vehicle.black_water_capacity,
+            propaneCapacity: vehicle.propane_capacity,
+            dryWeight: vehicle.dry_weight,
+            grossWeight: vehicle.gross_weight,
+            hitchWeight: vehicle.hitch_weight,
+            cargoCapacity: vehicle.cargo_capacity,
+            levelingJacks: vehicle.leveling_jacks,
+            selfContained: vehicle.self_contained,
+            solarPanels: vehicle.solar_panels,
+            backupCamera: vehicle.backup_camera,
+            satelliteTv: vehicle.satellite_tv,
+            generatorMake: vehicle.generator_make,
+            generatorHours: vehicle.generator_hours,
+            generatorFuelType: vehicle.generator_fuel_type,
+            videoUrl: vehicle.video_url,
+            virtualTourUrl: vehicle.virtual_tour_url,
+            specialFeatures: vehicle.special_features,
+            overlayText: vehicle.overlay_text
           })
         elsif vehicle.is_manufactured_home?
           json.merge!({
             vin: vehicle.vin,
             serialNumber: vehicle.serial_number,
-            bedrooms: vehicle.bedrooms,
-            bathrooms: vehicle.bathrooms,
+            bedrooms: format_decimal(vehicle.bedrooms),
+            bathrooms: format_decimal(vehicle.bathrooms),
             homeType: vehicle.home_type,
             condition: vehicle.condition,
             availability: vehicle.status,
@@ -1007,7 +1081,7 @@ module Api
             length2: vehicle.length2,
             width3: vehicle.width3,
             length3: vehicle.length3,
-            squareFeet: vehicle.square_feet,
+            squareFootage: vehicle.square_feet,  # Changed from squareFeet to match frontend
             roofType: vehicle.roof_type,
             sidingType: vehicle.siding_type,
             lotRent: vehicle.lot_rent&.to_f,

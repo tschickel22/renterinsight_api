@@ -15,6 +15,29 @@ class Vehicle < ApplicationRecord
   TYPES = %w[rv manufactured_home].freeze
   STATUSES = %w[available reserved sold pending service].freeze
   CONDITIONS = %w[new used].freeze
+  
+  # RV Classes for RVT.com syndication
+  RV_CLASSES = [
+    'Class A',
+    'Class B',
+    'Class C',
+    'Travel Trailer',
+    'Fifth Wheel',
+    'Toy Hauler',
+    'Pop-Up Camper',
+    'Truck Camper',
+    'Park Model',
+    'Motorhome',
+    'Camper Van',
+    'Teardrop Trailer',
+    'Hybrid Trailer'
+  ].freeze
+  
+  # Fuel types
+  FUEL_TYPES = %w[Gas Diesel Electric Hybrid Propane].freeze
+  
+  # Engine types
+  ENGINE_TYPES = ['V6', 'V8', 'V10', 'I4', 'I6', 'Diesel', 'Other'].freeze
 
   # Validations
   validates :inventory_id, presence: true, uniqueness: { scope: :company_id }
@@ -102,6 +125,26 @@ class Vehicle < ApplicationRecord
 
   def is_manufactured_home?
     listing_type == 'manufactured_home'
+  end
+  
+  # RV-specific helper methods
+  def total_water_capacity
+    return nil unless is_rv?
+    (fresh_water_capacity.to_f + gray_water_capacity.to_f + black_water_capacity.to_f).round(2)
+  end
+  
+  def has_slideouts?
+    slideouts.to_i > 0
+  end
+  
+  def has_generator?
+    generator == true
+  end
+  
+  def rvt_ready?
+    return false unless is_rv?
+    # RVT.com requires: rv_class, year, make, model, price
+    rv_class.present? && year.present? && make.present? && model.present? && (sale_price.present? || rent_price.present?)
   end
 
   private

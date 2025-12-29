@@ -5,7 +5,7 @@ class SyndicationPartner < ApplicationRecord
   belongs_to :company
   
   # Constants
-  PARTNER_TYPES = %w[mh_village rv_trader zillow apartments_com apartment_list trulia facebook_marketplace other].freeze
+  PARTNER_TYPES = %w[mh_village rv_trader rvt zillow apartments_com apartment_list trulia facebook_marketplace other].freeze
   FORMATS = %w[json xml mits_xml].freeze
   LISTING_TYPES = %w[manufactured_home rv apartment rental both].freeze
   
@@ -22,6 +22,7 @@ class SyndicationPartner < ApplicationRecord
   scope :by_format, ->(format) { where(format: format) }
   scope :mh_village, -> { where(partner_type: 'mh_village') }
   scope :rv_trader, -> { where(partner_type: 'rv_trader') }
+  scope :rvt, -> { where(partner_type: 'rvt') }
   scope :recent, -> { order(created_at: :desc) }
   
   # Callbacks
@@ -153,6 +154,10 @@ class SyndicationPartner < ApplicationRecord
   
   def rv_trader?
     partner_type == 'rv_trader'
+  end
+  
+  def rvt?
+    partner_type == 'rvt'
   end
   
   def zillow?

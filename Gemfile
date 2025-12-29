@@ -86,3 +86,6 @@ gem 'rotp', '~> 6.3'
 
 # XML parsing for payment gateway integration (Zego)
 gem 'xml-simple', '~> 1.1'
+
+# HTTP requests for QuickBooks API integration
+gem 'httparty'

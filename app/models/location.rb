@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Location < ApplicationRecord
+  include QuickbooksIntegration
+  
   # Associations
   belongs_to :company
   has_many :user_locations, dependent: :destroy
@@ -20,6 +22,9 @@ class Location < ApplicationRecord
   # Warranty & Service Module Associations
   has_many :location_manufacturers, dependent: :destroy
   has_many :manufacturers, through: :location_manufacturers
+  
+  # QuickBooks Integration Associations
+  has_many :quickbooks_sync_logs, dependent: :destroy
 
   # Validations
   validates :company_id, presence: true

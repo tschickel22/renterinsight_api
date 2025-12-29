@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -514,10 +514,21 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.string "external_payments_id"
     t.jsonb "branding_settings", default: {}
     t.boolean "filter_assignments_by_role", default: false, null: false, comment: "When true, users can only be assigned to records within their role department"
+    t.string "quickbooks_realm_id"
+    t.datetime "quickbooks_connected_at"
+    t.text "quickbooks_access_token_encrypted"
+    t.text "quickbooks_refresh_token_encrypted"
+    t.datetime "quickbooks_token_expires_at"
+    t.datetime "quickbooks_last_sync_at"
+    t.boolean "quickbooks_sync_enabled", default: false
+    t.string "quickbooks_scope", default: "company", null: false
+    t.jsonb "quickbooks_settings", default: {}
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
+    t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
+    t.index ["quickbooks_scope"], name: "index_companies_on_quickbooks_scope"
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
@@ -616,13 +627,19 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.string "zip"
     t.string "country"
     t.integer "owner_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
+    t.boolean "is_deleted", default: false, null: false
+    t.string "company_name"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
+    t.index ["is_deleted"], name: "index_contacts_on_is_deleted"
     t.index ["location_id"], name: "index_contacts_on_location_id"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
+    t.index ["quickbooks_id"], name: "index_contacts_on_quickbooks_id"
   end
 
   create_table "custom_fields", force: :cascade do |t|
@@ -846,6 +863,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.string "billing_category"
     t.string "recipient_type"
     t.bigint "recipient_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
+    t.integer "loan_id"
+    t.integer "loan_payment_number"
+    t.string "public_token"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -853,8 +875,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.index ["deal_id"], name: "index_invoices_on_deal_id"
     t.index ["due_date"], name: "index_invoices_on_due_date"
     t.index ["listing_id"], name: "index_invoices_on_listing_id"
+    t.index ["loan_id", "loan_payment_number"], name: "index_invoices_on_loan_and_payment_number"
+    t.index ["loan_id"], name: "index_invoices_on_loan_id"
     t.index ["location_id"], name: "index_invoices_on_location_id"
     t.index ["payment_token"], name: "index_invoices_on_payment_token", unique: true
+    t.index ["public_token"], name: "index_invoices_on_public_token", unique: true
+    t.index ["quickbooks_id"], name: "index_invoices_on_quickbooks_id"
     t.index ["recipient_type", "recipient_id"], name: "index_invoices_on_recipient_type_and_recipient_id"
     t.index ["source_type", "source_id"], name: "index_invoices_on_source_type_and_source_id"
     t.index ["status"], name: "index_invoices_on_status"
@@ -1069,12 +1095,15 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.boolean "credit_check_required", default: true
     t.boolean "background_check_required", default: true
     t.bigint "location_id"
+    t.string "contact_email"
+    t.string "contact_phone"
     t.index ["available_date"], name: "index_listings_on_available_date"
     t.index ["company_id", "is_deleted"], name: "index_listings_on_company_id_and_is_deleted"
     t.index ["company_id", "location_id"], name: "index_listings_on_company_id_and_location_id"
     t.index ["company_id", "property_name"], name: "index_listings_on_company_id_and_property_name"
     t.index ["company_id", "status"], name: "index_listings_on_company_id_and_status"
     t.index ["company_id"], name: "index_listings_on_company_id"
+    t.index ["contact_email"], name: "index_listings_on_contact_email"
     t.index ["floor_number"], name: "index_listings_on_floor_number"
     t.index ["immediately_available"], name: "index_listings_on_immediately_available"
     t.index ["location_id"], name: "index_listings_on_location_id"
@@ -1201,6 +1230,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "external_payments_property_id"
+    t.string "quickbooks_realm_id"
+    t.datetime "quickbooks_connected_at"
+    t.text "quickbooks_access_token_encrypted"
+    t.text "quickbooks_refresh_token_encrypted"
+    t.datetime "quickbooks_token_expires_at"
+    t.datetime "quickbooks_last_sync_at"
+    t.boolean "quickbooks_sync_enabled", default: false
+    t.jsonb "quickbooks_settings", default: {}
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
@@ -1208,6 +1245,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.index ["company_id"], name: "index_locations_on_company_id"
     t.index ["deleted_at"], name: "index_locations_on_deleted_at"
     t.index ["external_payments_property_id"], name: "index_locations_on_external_payments_property_id"
+    t.index ["quickbooks_realm_id"], name: "index_locations_on_quickbooks_realm_id"
+    t.index ["quickbooks_sync_enabled"], name: "index_locations_on_quickbooks_sync_enabled"
   end
 
   create_table "login_activities", force: :cascade do |t|
@@ -1597,6 +1636,8 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.datetime "updated_at", null: false
     t.string "payable_type"
     t.bigint "payable_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["company_id", "is_deleted"], name: "index_payments_on_company_id_and_is_deleted"
     t.index ["company_id", "payment_number"], name: "index_payments_on_company_id_and_payment_number", unique: true
     t.index ["company_id", "status"], name: "index_payments_on_company_id_and_status"
@@ -1609,6 +1650,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.index ["payer_type", "payer_id"], name: "index_payments_on_payer"
     t.index ["payment_date"], name: "index_payments_on_payment_date"
     t.index ["payment_method_id"], name: "index_payments_on_payment_method_id"
+    t.index ["quickbooks_id"], name: "index_payments_on_quickbooks_id"
     t.index ["scheduled_at"], name: "index_payments_on_scheduled_at"
     t.index ["status"], name: "index_payments_on_status"
   end
@@ -1631,6 +1673,92 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.index ["owner_type", "owner_id"], name: "index_portal_documents_on_owner"
     t.index ["related_to_type", "related_to_id"], name: "index_portal_documents_on_related_to"
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
+  end
+
+  create_table "quickbooks_field_mappings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "entity_type", null: false
+    t.string "renter_insight_field", null: false
+    t.string "quickbooks_field", null: false
+    t.string "mapping_type", default: "direct"
+    t.text "transformation_logic"
+    t.boolean "enabled", default: true
+    t.integer "priority", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "entity_type"], name: "index_quickbooks_field_mappings_on_company_id_and_entity_type"
+    t.index ["company_id"], name: "index_quickbooks_field_mappings_on_company_id"
+    t.index ["location_id", "entity_type"], name: "index_quickbooks_field_mappings_on_location_id_and_entity_type"
+    t.index ["location_id"], name: "index_quickbooks_field_mappings_on_location_id"
+  end
+
+  create_table "quickbooks_sync_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "quickbooks_sync_mapping_id"
+    t.string "operation", null: false
+    t.string "entity_type", null: false
+    t.bigint "entity_id"
+    t.string "sync_direction"
+    t.string "status", default: "pending"
+    t.text "error_message"
+    t.jsonb "request_data"
+    t.jsonb "response_data"
+    t.float "duration_ms"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "created_at"], name: "index_quickbooks_sync_logs_on_company_id_and_created_at"
+    t.index ["company_id"], name: "index_quickbooks_sync_logs_on_company_id"
+    t.index ["entity_type"], name: "index_quickbooks_sync_logs_on_entity_type"
+    t.index ["location_id", "created_at"], name: "index_quickbooks_sync_logs_on_location_id_and_created_at"
+    t.index ["location_id"], name: "index_quickbooks_sync_logs_on_location_id"
+    t.index ["quickbooks_sync_mapping_id"], name: "index_quickbooks_sync_logs_on_quickbooks_sync_mapping_id"
+    t.index ["status"], name: "index_quickbooks_sync_logs_on_status"
+  end
+
+  create_table "quickbooks_sync_mappings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "renter_insight_entity_type", null: false
+    t.bigint "renter_insight_entity_id", null: false
+    t.string "quickbooks_entity_type", null: false
+    t.string "quickbooks_entity_id", null: false
+    t.string "sync_direction", default: "bidirectional"
+    t.datetime "last_synced_at"
+    t.jsonb "last_sync_data"
+    t.string "sync_status", default: "active"
+    t.text "sync_error_message"
+    t.integer "sync_error_count", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "quickbooks_entity_type", "quickbooks_entity_id"], name: "idx_qb_sync_qb_entity"
+    t.index ["company_id", "renter_insight_entity_type", "renter_insight_entity_id"], name: "idx_qb_sync_ri_entity"
+    t.index ["company_id"], name: "index_quickbooks_sync_mappings_on_company_id"
+    t.index ["location_id"], name: "index_quickbooks_sync_mappings_on_location_id"
+    t.index ["sync_status"], name: "index_quickbooks_sync_mappings_on_sync_status"
+  end
+
+  create_table "quickbooks_webhooks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "realm_id", null: false
+    t.string "event_name", null: false
+    t.string "entity_name"
+    t.string "entity_id"
+    t.string "operation"
+    t.jsonb "webhook_payload"
+    t.string "status", default: "pending"
+    t.text "processing_error"
+    t.datetime "processed_at"
+    t.integer "retry_count", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "created_at"], name: "idx_on_company_id_status_created_at_0d2da1c8cd"
+    t.index ["company_id"], name: "index_quickbooks_webhooks_on_company_id"
+    t.index ["event_name"], name: "index_quickbooks_webhooks_on_event_name"
+    t.index ["realm_id", "entity_id"], name: "index_quickbooks_webhooks_on_realm_id_and_entity_id"
   end
 
   create_table "quotes", force: :cascade do |t|
@@ -1814,6 +1942,17 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.datetime "updated_at", null: false
     t.index ["scope_type", "scope_id", "key"], name: "idx_settings_scope_key", unique: true
     t.index ["scope_type", "scope_id"], name: "index_settings_on_scope_type_and_scope_id"
+  end
+
+  create_table "solid_cable_messages", force: :cascade do |t|
+    t.binary "channel", null: false
+    t.binary "payload", null: false
+    t.datetime "created_at", null: false
+    t.bigint "channel_hash", null: false
+    t.index ["channel"], name: "index_solid_cable_messages_on_channel"
+    t.index ["channel_hash"], name: "index_solid_cable_messages_on_channel_hash"
+    t.index ["created_at"], name: "index_solid_cable_messages_on_created_at"
+    t.index ["id"], name: "index_solid_cable_messages_on_id", unique: true
   end
 
   create_table "sources", force: :cascade do |t|
@@ -2253,6 +2392,35 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.string "virtual_tour"
     t.string "sales_photo"
     t.bigint "location_id"
+    t.string "rv_class", comment: "RV class type (Class A/B/C, Travel Trailer, Fifth Wheel, etc.)"
+    t.string "engine_make", comment: "Engine manufacturer (Ford, Chevy, Cummins, etc.)"
+    t.string "engine_type", comment: "Engine type (V8, V10, I6, etc.)"
+    t.integer "sleeping_capacity", comment: "Number of people it sleeps"
+    t.integer "num_air_conditioners", default: 0, comment: "Number of AC units"
+    t.integer "slideouts", default: 0, comment: "Number of slide-outs"
+    t.integer "awnings", default: 0, comment: "Number of awnings"
+    t.decimal "fresh_water_capacity", precision: 8, scale: 2, comment: "Fresh water tank capacity in gallons"
+    t.decimal "gray_water_capacity", precision: 8, scale: 2, comment: "Gray water tank capacity in gallons"
+    t.decimal "black_water_capacity", precision: 8, scale: 2, comment: "Black water tank capacity in gallons"
+    t.decimal "propane_capacity", precision: 8, scale: 2, comment: "Propane tank capacity in gallons"
+    t.integer "dry_weight", comment: "Dry weight (UVW) in pounds"
+    t.integer "gross_weight", comment: "Gross vehicle weight rating (GVWR) in pounds"
+    t.integer "hitch_weight", comment: "Hitch/tongue weight in pounds"
+    t.integer "cargo_capacity", comment: "Cargo carrying capacity in pounds"
+    t.boolean "leveling_jacks", default: false, comment: "Has automatic leveling jacks"
+    t.boolean "self_contained", default: false, comment: "Fully self-contained (bathroom, kitchen, etc.)"
+    t.boolean "solar_panels", default: false, comment: "Has solar panel system"
+    t.boolean "backup_camera", default: false, comment: "Has backup camera"
+    t.boolean "satellite_tv", default: false, comment: "Has satellite TV capability"
+    t.string "generator_make", comment: "Generator manufacturer"
+    t.integer "generator_hours", comment: "Generator hours used"
+    t.string "generator_fuel_type", comment: "Generator fuel type (Gas, Diesel, Propane)"
+    t.string "video_url", comment: "YouTube or other video URL"
+    t.string "virtual_tour_url", comment: "360° virtual tour URL"
+    t.text "special_features", comment: "Additional special features or upgrades"
+    t.string "overlay_text", comment: "Promotional overlay text for listings"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -2266,7 +2434,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
     t.index ["is_deleted"], name: "index_vehicles_on_is_deleted"
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
     t.index ["location_id"], name: "index_vehicles_on_location_id"
+    t.index ["mileage", "year"], name: "index_vehicles_on_mileage_and_year"
+    t.index ["quickbooks_id"], name: "index_vehicles_on_quickbooks_id"
+    t.index ["rv_class"], name: "index_vehicles_on_rv_class"
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
+    t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"
+    t.index ["slideouts"], name: "index_vehicles_on_slideouts"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
@@ -2446,6 +2619,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_20_000001) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "quickbooks_field_mappings", "companies"
+  add_foreign_key "quickbooks_field_mappings", "locations"
+  add_foreign_key "quickbooks_sync_logs", "companies"
+  add_foreign_key "quickbooks_sync_logs", "locations"
+  add_foreign_key "quickbooks_sync_logs", "quickbooks_sync_mappings"
+  add_foreign_key "quickbooks_sync_mappings", "companies"
+  add_foreign_key "quickbooks_sync_mappings", "locations"
+  add_foreign_key "quickbooks_webhooks", "companies"
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
   add_foreign_key "quotes", "locations"

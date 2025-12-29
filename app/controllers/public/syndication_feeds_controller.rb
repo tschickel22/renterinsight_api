@@ -46,25 +46,24 @@ module Public
     end
 
     def fetch_listings
-      company = @partner.company
-      
+      # PLATFORM-WIDE FEED: Pull listings from ALL companies, not just one
       Rails.logger.info "=== SYNDICATION FEED DEBUG ==="
       Rails.logger.info "Partner: #{@partner.name} (ID: #{@partner.id})"
       Rails.logger.info "Format: #{@partner.format}"
       Rails.logger.info "Listing Types Filter: #{@partner.listing_types.inspect}"
       
-      listings = company.listings.published.includes(:vehicle)
-      Rails.logger.info "After published filter: #{listings.count} listings"
+      # Get ALL published listings across ALL companies
+      listings = Listing.published.includes(:vehicle, :company)
+      Rails.logger.info "After published filter (all companies): #{listings.count} listings"
       
       # Log all listings before filtering
       listings.each do |listing|
-        Rails.logger.info "  - Listing #{listing.id}: offer_type=#{listing.offer_type}, vehicle_type=#{listing.vehicle.listing_type}"
+        Rails.logger.info "  - Listing #{listing.id}: company=#{listing.company.name}, offer_type=#{listing.offer_type}, vehicle_type=#{listing.vehicle.listing_type}"
       end
 
       # Filter by partner's listing types (rv vs manufactured_home)
       if @partner.listing_types.present?
-        vehicle_ids = company.vehicles.where(listing_type: @partner.listing_types).pluck(:id)
-        listings = listings.where(vehicle_id: vehicle_ids)
+        listings = listings.joins(:vehicle).where(vehicles: { listing_type: @partner.listing_types })
         Rails.logger.info "After listing_types filter: #{listings.count} listings"
       end
 
@@ -75,39 +74,59 @@ module Public
         listings = listings.where(offer_type: ['rent', 'both'])
         Rails.logger.info "After MITS rental filter: #{listings.count} listings"
       when 'json', 'xml'
-        # MH Village: Only manufactured homes (no RVs)
-        # Already filtered by listing_types if configured, but enforce it
-        vehicle_ids = company.vehicles.where(listing_type: 'manufactured_home').pluck(:id)
-        listings = listings.where(vehicle_id: vehicle_ids)
-        Rails.logger.info "After MH Village manufactured_home filter: #{listings.count} listings"
+        # Check partner type to determine filtering
+        if @partner.partner_type == 'rvt'
+          # RVT.com: RVs only, sales only
+          listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'rv' })
+          listings = listings.where(offer_type: ['sale', 'both'])
+          Rails.logger.info "After RVT.com RV + sale filter: #{listings.count} listings"
+        else
+          # MH Village: Only manufactured homes (no RVs), only sales
+          listings = listings.joins(:vehicle).where(vehicles: { listing_type: 'manufactured_home' })
+          listings = listings.where(offer_type: ['sale', 'both'])
+          Rails.logger.info "After MH Village manufactured_home + sale filter: #{listings.count} listings"
+        end
       end
       
       Rails.logger.info "Final listing count: #{listings.count}"
+      Rails.logger.info "Companies in feed: #{listings.map { |l| l.company.name }.uniq.join(', ')}"
       Rails.logger.info "=== END DEBUG ==="
 
       listings
     end
 
     def render_mits_feed(listings)
-      company = @partner.company
-      builder = Syndication::MitsFeedBuilder.new(company: company, partner: @partner, listings: listings)
+      # Platform-wide feed - no single company, listings grouped by company in XML
+      builder = Syndication::MitsFeedBuilder.new(company: nil, partner: @partner, listings: listings)
       xml = builder.build_xml
 
       render xml: xml, content_type: 'application/xml'
     end
 
     def render_json_feed(listings)
-      company = @partner.company
-      builder = Syndication::MhVillageFeedBuilder.new(company: company, partner: @partner, listings: listings)
+      # Platform-wide feed - no single company, listings grouped by company in JSON
+      # Support both MH Village and RVT.com feeds
+      if @partner.partner_type == 'rvt'
+        builder = Syndication::RvtFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+      else
+        builder = Syndication::MhVillageFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+      end
+      
       json_data = builder.build_json
 
       render json: json_data, content_type: 'application/json'
     end
 
     def render_xml_feed(listings)
-      company = @partner.company
-      builder = Syndication::MhVillageFeedBuilder.new(company: company, partner: @partner, listings: listings)
-      xml = builder.build_xml
+      # Platform-wide feed - no single company, listings grouped by company in XML
+      # Support both MH Village and RVT.com feeds
+      if @partner.partner_type == 'rvt'
+        builder = Syndication::RvtFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+        xml = builder.build_xml
+      else
+        builder = Syndication::MhVillageFeedBuilder.new(company: nil, partner: @partner, listings: listings)
+        xml = builder.build_xml
+      end
 
       render xml: xml, content_type: 'application/xml'
     end

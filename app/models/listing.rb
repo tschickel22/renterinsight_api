@@ -243,9 +243,11 @@ class Listing < ApplicationRecord
   end
   
   def ensure_published_at
-    # Automatically set published_at when status is active
-    if status == 'active' && published_at.nil?
+    # Auto-publish when status is active, auto-unpublish when draft/inactive
+    if status == 'active'
       self.published_at = Time.current
+    elsif status.in?(%w[draft inactive])
+      self.published_at = nil
     end
   end
 end

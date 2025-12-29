@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Company < ApplicationRecord
+  include QuickbooksIntegration
+  
   has_many :accounts, dependent: :destroy
   has_many :contacts, dependent: :destroy
   has_many :deals, dependent: :destroy
@@ -46,6 +48,13 @@ class Company < ApplicationRecord
   has_one :tenant_subscription, dependent: :destroy
   has_many :tenant_module_overrides, dependent: :destroy
   
+  # QuickBooks Integration Associations
+  has_many :quickbooks_field_mappings, dependent: :destroy
+  has_many :quickbooks_sync_logs, dependent: :destroy
+  
+  # Enums
+  enum :quickbooks_scope, { company: 'company', location: 'location' }, prefix: true, default: :company
+  
   # Callbacks
   after_create :create_default_location
   
@@ -68,6 +77,10 @@ class Company < ApplicationRecord
   scope :active, -> { where(status: 'active') }
   scope :trial, -> { where(status: 'trial') }
   scope :trial_expiring_soon, -> { where(status: 'trial').where('trial_ends_at <= ?', 7.days.from_now) }
+  
+  # QuickBooks scopes
+  scope :with_quickbooks_enabled, -> { where("quickbooks_realm_id IS NOT NULL AND (quickbooks_settings->>'enabled')::boolean = true") }
+  scope :with_expired_quickbooks_tokens, -> { where('quickbooks_token_expires_at < ?', Time.current) }
   
   # Domain verification methods
   def domain_verified?
@@ -295,6 +308,10 @@ class Company < ApplicationRecord
   
   def communication_settings
     @communication_settings ||= Setting.get('Company', id, 'communication') || {}
+  end
+  
+  def integration_settings
+    @integration_settings ||= Setting.get('Company', id, 'integration') || {}
   end
   
   # Use the same bank account for deposits and rent collections

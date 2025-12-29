@@ -20,6 +20,9 @@ Rails.application.routes.draw do
     # Zego payment webhooks
     post 'zego/processed', to: 'zego#processed'
     post 'zego/canceled', to: 'zego#canceled'
+    
+    # QuickBooks webhooks
+    post 'quickbooks/notifications', to: 'quickbooks#notifications'
   end
 
   # ==================== PUBLIC INTAKE FORMS ====================
@@ -44,6 +47,10 @@ Rails.application.routes.draw do
   # ==================== PUBLIC WARRANTY CLAIMS ====================
   get '/w/:token', to: 'api/public/warranty_claims#show', as: :public_warranty_claim
   post '/w/:token/respond', to: 'api/public/warranty_claims#respond', as: :public_warranty_claim_respond
+  
+  # ==================== PUBLIC INVOICES ====================
+  get '/invoice/:token', to: 'public/invoices#show', as: :public_invoice
+  get '/invoice/:token/pdf', to: 'public/invoices#pdf', as: :public_invoice_pdf
   
   # API endpoints for public forms (for frontend)
   namespace :api do
@@ -540,6 +547,59 @@ Rails.application.routes.draw do
         member do
           get :insights
           get :score
+        end
+      end
+      
+      # ==================== QUICKBOOKS INTEGRATION ====================
+      namespace :integrations do
+        scope path: 'quickbooks' do
+          get 'authorize', to: 'quickbooks_oauth#authorize'
+          get 'callback', to: 'quickbooks_oauth#callback'
+          get 'status', to: 'quickbooks_oauth#status'
+          delete 'disconnect', to: 'quickbooks_oauth#disconnect'
+          post 'refresh_token', to: 'quickbooks_oauth#refresh_token'
+          
+          # OLD SYNC ROUTES - Commented out, using new routes below
+          # post 'sync/full', to: 'quickbooks_sync#full'
+          # post 'sync/incremental', to: 'quickbooks_sync#incremental'
+          # post 'sync/entity', to: 'quickbooks_sync#entity'
+          # get 'sync/status', to: 'quickbooks_sync#status'
+          # get 'sync/logs', to: 'quickbooks_sync#logs'
+          # get 'sync/mappings', to: 'quickbooks_sync#mappings'
+          # delete 'sync/mappings/:id', to: 'quickbooks_sync#delete_mapping'
+          # post 'sync/mappings/:id/retry', to: 'quickbooks_sync#retry_mapping'
+          
+          get 'settings', to: 'quickbooks_settings#show'
+          put 'settings', to: 'quickbooks_settings#update'
+          delete 'settings', to: 'quickbooks_settings#destroy'
+          get 'settings/accounts', to: 'quickbooks_settings#accounts'
+          post 'settings/test', to: 'quickbooks_settings#test_connection'
+          get 'settings/entity/:entity_type', to: 'quickbooks_settings#entity_settings'
+          put 'settings/entity/:entity_type', to: 'quickbooks_settings#update_entity_settings'
+          get 'settings/mappings', to: 'quickbooks_settings#field_mappings'
+          post 'settings/mappings', to: 'quickbooks_settings#create_field_mapping'
+          post 'settings/mappings/defaults', to: 'quickbooks_settings#create_default_mappings'
+          put 'settings/mappings/:id', to: 'quickbooks_settings#update_field_mapping'
+          delete 'settings/mappings/:id', to: 'quickbooks_settings#delete_field_mapping'
+          get 'settings/sync_logs', to: 'quickbooks_settings#sync_logs'
+          get 'settings/sync_logs/:id', to: 'quickbooks_settings#sync_log_details'
+          
+          # Phase 4 Sync Endpoints - Manual Sync Operations
+          post 'sync/entity', to: 'quickbooks_settings#sync_entity'
+          post 'sync/all', to: 'quickbooks_settings#sync_all_entities'
+        end
+      end
+      
+      namespace :platform do
+        resources :quickbooks_settings, only: [] do
+          collection do
+            get '', action: :show
+            put '', action: :update
+            get :stats
+            get :companies
+            get :logs
+            post :sync_all
+          end
         end
       end
       
@@ -1079,32 +1139,6 @@ Rails.application.routes.draw do
       
       # Portal Service Tickets
       resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
-    end
-    
-    # Admin Impersonation (Testing Only)
-    namespace :admin do
-      # Phase 5B - Admin Documents Management
-      resources :documents, only: [:index, :show, :create, :update, :destroy] do
-        member do
-          get :download
-        end
-      end
-      
-      # Admin Buyers List (for dropdown)
-      resources :buyers, only: [:index]
-      
-      # Zego Payment Integration (Platform Admin Only)
-      namespace :zego do
-        post 'check_credentials', to: 'zego#check_credentials'
-        post 'sync_location', to: 'zego#sync_location'
-        get 'transactions', to: 'zego#transactions'
-        get 'properties', to: 'zego#properties'
-        get 'server_status', to: 'zego#server_status'
-      end
-      
-      # Impersonation routes (must be last to avoid conflicts)
-      post 'impersonate', to: 'impersonation#create'
-      get 'impersonate/buyers', to: 'impersonation#buyers'
     end
   end
 
