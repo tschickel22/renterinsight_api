@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_28_050100) do
+ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -865,6 +865,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_28_050100) do
     t.bigint "recipient_id"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.integer "loan_id"
+    t.integer "loan_payment_number"
+    t.string "public_token"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -872,8 +875,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_28_050100) do
     t.index ["deal_id"], name: "index_invoices_on_deal_id"
     t.index ["due_date"], name: "index_invoices_on_due_date"
     t.index ["listing_id"], name: "index_invoices_on_listing_id"
+    t.index ["loan_id", "loan_payment_number"], name: "index_invoices_on_loan_and_payment_number"
+    t.index ["loan_id"], name: "index_invoices_on_loan_id"
     t.index ["location_id"], name: "index_invoices_on_location_id"
     t.index ["payment_token"], name: "index_invoices_on_payment_token", unique: true
+    t.index ["public_token"], name: "index_invoices_on_public_token", unique: true
     t.index ["quickbooks_id"], name: "index_invoices_on_quickbooks_id"
     t.index ["recipient_type", "recipient_id"], name: "index_invoices_on_recipient_type_and_recipient_id"
     t.index ["source_type", "source_id"], name: "index_invoices_on_source_type_and_source_id"

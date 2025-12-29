@@ -20,6 +20,16 @@ class Api::V1::InvoicesController < ApplicationController
     # Apply location selector filter
     invoices = invoices.for_current_location
     
+    # IMPORTANT: Exclude future loan invoices by default (unless explicitly requested)
+    # This prevents loan payment schedules from cluttering the invoice list
+    unless params[:include_future_loan_invoices] == 'true'
+      invoices = invoices.where(
+        "(invoices.loan_id IS NULL) OR "\
+        "(invoices.loan_id IS NOT NULL AND (invoices.status != 'draft' OR invoices.due_date <= ?))",
+        Date.current
+      )
+    end
+    
     # Filters
     invoices = invoices.where(status: params[:status]) if params[:status].present?
     invoices = invoices.where(contact_id: params[:contact_id]) if params[:contact_id].present?
@@ -215,6 +225,14 @@ class Api::V1::InvoicesController < ApplicationController
     
     # Apply location selector filter
     base_invoices = base_invoices.where(location_id: Current.location_id) if Current.location_filtered?
+    
+    # CRITICAL: Exclude future loan invoices from stats (don't count draft loan payments not yet due)
+    # This prevents inflated outstanding amounts from future loan payment schedules
+    base_invoices = base_invoices.where(
+      "(invoices.loan_id IS NULL) OR "\
+      "(invoices.loan_id IS NOT NULL AND (invoices.status != 'draft' OR invoices.due_date <= ?))",
+      Date.current
+    )
     
     # Total count
     total_count = base_invoices.count

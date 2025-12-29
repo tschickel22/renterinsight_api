@@ -48,6 +48,10 @@ Rails.application.routes.draw do
   get '/w/:token', to: 'api/public/warranty_claims#show', as: :public_warranty_claim
   post '/w/:token/respond', to: 'api/public/warranty_claims#respond', as: :public_warranty_claim_respond
   
+  # ==================== PUBLIC INVOICES ====================
+  get '/invoice/:token', to: 'public/invoices#show', as: :public_invoice
+  get '/invoice/:token/pdf', to: 'public/invoices#pdf', as: :public_invoice_pdf
+  
   # API endpoints for public forms (for frontend)
   namespace :api do
     # ==================== PUBLIC INVITATIONS (No Auth Required) ====================

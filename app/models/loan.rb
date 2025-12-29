@@ -20,6 +20,7 @@ class Loan < ApplicationRecord
   belongs_to :financed_entity, polymorphic: true, optional: true
   belongs_to :default_payment_method, class_name: 'PaymentMethod', optional: true
   has_many :payments, dependent: :restrict_with_error
+  has_many :invoices, dependent: :destroy
   has_many :documents, as: :owner, class_name: 'PortalDocument', dependent: :destroy
   
   # Validations
@@ -89,6 +90,7 @@ class Loan < ApplicationRecord
   before_validation :calculate_first_payment_date, if: :new_record?
   before_validation :set_initial_balance, if: :new_record?
   after_initialize :set_defaults, if: :new_record?
+  after_save :generate_loan_invoices, if: :should_generate_invoices?
   
   # Instance methods
   def display_name
@@ -231,7 +233,18 @@ class Loan < ApplicationRecord
   
   # Soft delete
   def soft_delete!
-    update!(is_deleted: true, deleted_at: Time.current, status: 'cancelled')
+    transaction do
+      # Delete associated invoices first (hard delete since they're just for this loan)
+      invoice_count = invoices.count
+      if invoice_count > 0
+        Rails.logger.info "[Loan] Deleting #{invoice_count} invoices for loan #{loan_number}"
+        invoices.destroy_all
+      end
+      
+      # Soft delete the loan
+      update!(is_deleted: true, deleted_at: Time.current, status: 'cancelled')
+      Rails.logger.info "[Loan] Soft deleted loan #{loan_number}"
+    end
   end
   
   def restore!
@@ -240,11 +253,85 @@ class Loan < ApplicationRecord
   
   # Activate loan
   def activate!
-    update!(status: 'active')
+    transaction do
+      update!(status: 'active')
+      generate_loan_invoices if invoices.none?
+    end
+    true  # Return true to indicate success
   end
   
   def mark_defaulted!
     update!(status: 'defaulted')
+  end
+  
+  # Generate invoices for each loan payment
+  def generate_loan_invoices
+    return unless term_months.present? && regular_payment_amount.present? && first_payment_date.present?
+    
+    # Check if invoices already exist - if so, delete them first to prevent duplicates
+    if invoices.any?
+      Rails.logger.warn "[Loan] #{loan_number} already has #{invoices.count} invoices, deleting before regeneration"
+      invoices.destroy_all
+    end
+    
+    # Only generate for Contact borrowers (not Accounts)
+    contact_id = borrower_type == 'Contact' ? borrower_id : nil
+    return unless contact_id.present?
+    
+    Rails.logger.info "[Loan] Generating #{term_months} invoices for loan #{loan_number}"
+    Rails.logger.info "[Loan] First payment date: #{first_payment_date}, Monthly payment: $#{regular_payment_amount}"
+    
+    term_months.times do |i|
+      payment_number = i + 1
+      due_date = first_payment_date + i.months
+      invoice_date = due_date - 15.days # Invoice 15 days before due
+      
+      # Calculate principal and interest breakdown
+      monthly_rate = (interest_rate || 0) / 100.0 / 12.0
+      remaining_balance = current_balance - (i * (regular_payment_amount - (current_balance * monthly_rate)))
+      interest_amount = remaining_balance * monthly_rate
+      principal_amount = regular_payment_amount - interest_amount
+      
+      # Build invoice (not saved yet)
+      invoice = invoices.build(
+        company_id: company_id,
+        location_id: location_id,
+        contact_id: contact_id,
+        loan_payment_number: payment_number,
+        invoice_number: generate_loan_invoice_number(payment_number),
+        invoice_date: invoice_date,
+        due_date: due_date,
+        status: determine_initial_invoice_status(due_date),
+        notes: "Loan Payment ##{payment_number} of #{term_months} - #{loan_number}",
+        terms: "Payment #{payment_number} of #{term_months} for #{borrower_name}"
+      )
+      
+      # Add line items (also not saved yet)
+      if interest_amount > 0
+        invoice.invoice_items.build(
+          item_type: 'custom',
+          description: 'Interest',
+          quantity: 1,
+          rate: interest_amount.round(2),
+          amount: interest_amount.round(2)
+        )
+      end
+      
+      invoice.invoice_items.build(
+        item_type: 'custom',
+        description: 'Principal',
+        quantity: 1,
+        rate: principal_amount.round(2),
+        amount: principal_amount.round(2)
+      )
+      
+      # NOW save invoice with line items - calculate_totals callback will run with line items present
+      invoice.save!
+      
+      Rails.logger.info "[Loan] Created invoice #{invoice.invoice_number} for payment ##{payment_number}: $#{invoice.total}"
+    end
+    
+    Rails.logger.info "[Loan] Generated #{invoices.count} invoices for loan #{loan_number}"
   end
   
   # Generate amortization schedule with actual payment data
@@ -496,5 +583,32 @@ class Loan < ApplicationRecord
   def set_initial_balance
     self.current_balance = principal_amount if current_balance.nil? || current_balance == 0
     self.payments_remaining = term_months if term_months.present?
+  end
+  
+  def should_generate_invoices?
+    # Generate invoices when loan is activated AND doesn't have invoices yet
+    saved_change_to_status? && status == 'active' && invoices.none?
+  end
+  
+  def generate_loan_invoice_number(payment_number)
+    # Extract the unique hex suffix from loan_number (last 6 chars)
+    # Example: LN-20251229-DD159C → DD159C
+    hex_suffix = loan_number.split('-').last
+    
+    # Format: LN-{hex}-P{number}
+    # Example: LN-DD159C-P01 (14 chars, well under QB's 21 char limit)
+    # Note: Shortened to keep under QuickBooks 21-character DocNumber limit
+    "LN-#{hex_suffix}-P#{payment_number.to_s.rjust(2, '0')}"
+  end
+  
+  def determine_initial_invoice_status(due_date)
+    # Set appropriate status based on due date
+    if due_date < Date.today
+      'overdue'
+    elsif due_date <= Date.today + 7.days
+      'sent' # Due soon
+    else
+      'draft' # Future invoice
+    end
   end
 end
