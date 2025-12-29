@@ -274,11 +274,25 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   
   def map_qb_status(qb_invoice)
     # Map QuickBooks invoice status to our status
+    total = qb_invoice['TotalAmt'].to_f
     balance = qb_invoice['Balance'].to_f
+    due_date = qb_invoice['DueDate'] ? Date.parse(qb_invoice['DueDate']) : nil
     
-    if balance <= 0
+    # If fully paid
+    if balance <= 0 && total > 0
       'paid'
+    # If partially paid
+    elsif balance > 0 && balance < total
+      'partial'
+    # If unpaid and past due date
+    elsif balance > 0 && due_date && due_date < Date.today
+      'overdue'
+    # If sent via email (and not overdue)
     elsif qb_invoice['EmailStatus'] == 'EmailSent'
+      'sent'
+    # If exists in QB with a doc number, assume it's been issued/sent (and not overdue)
+    # (QB doesn't keep drafts, so if it's in QB it's a real invoice)
+    elsif qb_invoice['DocNumber'].present?
       'sent'
     else
       'draft'
