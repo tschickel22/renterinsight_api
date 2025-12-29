@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 # Public invoice access for contacts via portal
-class Public::InvoicesController < ApplicationController
-  skip_before_action :authenticate
-  skip_before_action :set_company_scope
+class Public::InvoicesController < ActionController::Base
+  # No authentication required - inherits from ActionController::Base, not ApplicationController
   
   # GET /public/invoices/:token
   def show
