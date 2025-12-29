@@ -219,18 +219,20 @@ class QuickbooksSyncService
   end
   
   def handle_conflict(record, qb_entity, config)
-    strategy = get_conflict_strategy(record.class.name.underscore.pluralize, config)
+    # Map model name to entity type (Contact → customers, Vehicle → inventory, etc.)
+    entity_type = model_to_entity_type(record.class.name)
+    strategy = get_conflict_strategy(entity_type, config)
     
     case strategy
     when 'ri_wins'
       # Keep our version, overwrite QB
-      handler = get_sync_handler(record.class.name.underscore.pluralize)
+      handler = get_sync_handler(entity_type)
       qb_data = handler.transform_to_quickbooks(record, config)
       @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
       
     when 'qb_wins'
       # Keep QB version, overwrite ours
-      handler = get_sync_handler(record.class.name.underscore.pluralize)
+      handler = get_sync_handler(entity_type)
       handler.update_from_quickbooks(record, qb_entity, config)
       
     when 'most_recent'
@@ -239,12 +241,12 @@ class QuickbooksSyncService
       
       if record.updated_at > qb_updated
         # Our version is newer
-        handler = get_sync_handler(record.class.name.underscore.pluralize)
+        handler = get_sync_handler(entity_type)
         qb_data = handler.transform_to_quickbooks(record, config)
         @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
       else
         # QB version is newer
-        handler = get_sync_handler(record.class.name.underscore.pluralize)
+        handler = get_sync_handler(entity_type)
         handler.update_from_quickbooks(record, qb_entity, config)
       end
       
@@ -254,9 +256,29 @@ class QuickbooksSyncService
       
     else
       Rails.logger.warn "Unknown conflict strategy: #{strategy}, using ri_wins"
-      handler = get_sync_handler(record.class.name.underscore.pluralize)
+      handler = get_sync_handler(entity_type)
       qb_data = handler.transform_to_quickbooks(record, config)
       @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
+    end
+  end
+  
+  def model_to_entity_type(model_name)
+    # Map model names to sync entity types
+    case model_name
+    when 'Contact'
+      'customers'
+    when 'Vehicle'
+      'inventory'
+    when 'Invoice'
+      'invoices'
+    when 'Payment'
+      'payments'
+    when 'Vendor'
+      'vendors'
+    when 'Purchase'
+      'purchases'
+    else
+      model_name.underscore.pluralize
     end
   end
   

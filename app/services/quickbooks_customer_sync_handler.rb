@@ -10,8 +10,7 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
   
   def get_all_syncable_records
     # Get contacts from company or location
-    # Note: Contact model doesn't have is_deleted field
-    scope = company.contacts
+    scope = company.contacts.where(is_deleted: [false, nil])
     
     # Filter by location if needed
     scope = scope.where(location_id: location.id) if location.present?
@@ -32,22 +31,38 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
     else
       nil
     end
-    
-    # Map contact to QuickBooks Customer format
-    {
+
+    # Base customer data
+    data = {
       DisplayName: contact.display_name || "#{contact.first_name} #{contact.last_name}",
       GivenName: contact.first_name,
       FamilyName: contact.last_name,
       CompanyName: company_name,
       PrimaryPhone: format_phone(contact.phone),
-      Mobile: nil,  # Contact model doesn't have cell_phone field
+      Mobile: nil,
       PrimaryEmailAddr: contact.email ? { Address: contact.email } : nil,
       BillAddr: format_address(contact, 'billing'),
       ShipAddr: format_address(contact, 'shipping'),
       Notes: contact.notes,
-      Active: true  # Contacts don't have a status field
-      # Custom fields removed - contact_type column doesn't exist
+      Active: true
     }.compact
+    
+    # For updates, include Id and fetch SyncToken from QB
+    if contact.quickbooks_id.present?
+      data[:Id] = contact.quickbooks_id
+      
+      # Fetch current customer to get SyncToken
+      begin
+        # Use lowercase 'customer' endpoint (QB API is case-sensitive)
+        qb_customer = @api.get_entity('customer', contact.quickbooks_id)
+        data[:SyncToken] = qb_customer['Customer']['SyncToken']
+      rescue => e
+        Rails.logger.error "[QB Sync] Failed to fetch customer #{contact.quickbooks_id}: #{e.message}"
+        raise "Cannot update QB customer without SyncToken: #{e.message}"
+      end
+    end
+    
+    data
   end
   
   def find_by_quickbooks_id(qb_id)

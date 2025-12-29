@@ -55,11 +55,11 @@ class QuickbooksApiService
   def update(endpoint, id, data)
     url = build_url(endpoint)
     
-    # QuickBooks uses POST with sparse=true for updates
+    # QuickBooks updates use POST with Id and SyncToken in body
+    # NO query parameters - that causes "Unsupported Operation"
     response = HTTParty.post(url, {
       headers: auth_headers.merge('Content-Type' => 'application/json'),
       body: data.to_json,
-      query: { operation: 'update' },
       timeout: 30
     })
     
@@ -79,17 +79,20 @@ class QuickbooksApiService
   
   # Get specific entity by ID
   def get_entity(entity_type, id)
-    get("#{entity_type}/#{id}", { minorversion: 65 })
+    # QuickBooks API endpoints are lowercase
+    get("#{entity_type.downcase}/#{id}", { minorversion: 65 })
   end
   
   # Create entity
   def create_entity(entity_type, data)
-    post(entity_type, data)
+    # QuickBooks API endpoints are lowercase
+    post(entity_type.downcase, data)
   end
   
   # Update entity
   def update_entity(entity_type, id, data)
-    update(entity_type, id, data)
+    # QuickBooks API endpoints are lowercase
+    update(entity_type.downcase, id, data)
   end
   
   # Search for entities
