@@ -143,21 +143,32 @@ class QuickbooksSyncService
         qb_id = qb_entity['Id']
         
         # Find existing record or create new
-        record = handler.find_by_quickbooks_id(qb_id)
+        # Use find_or_initialize_from_quickbooks if handler supports it (prevents duplicates)
+        record = if handler.respond_to?(:find_or_initialize_from_quickbooks)
+          handler.find_or_initialize_from_quickbooks(qb_entity)
+        else
+          handler.find_by_quickbooks_id(qb_id)
+        end
         
         if record
-          # Update existing - check for conflicts
-          if record_has_local_changes?(record)
-            handle_conflict(record, qb_entity, config)
+          # Check if QB entity has changed since last sync
+          if qb_entity_has_changes?(record, qb_entity)
+            # Update existing - check for conflicts
+            if record_has_local_changes?(record)
+              handle_conflict(record, qb_entity, config)
+            else
+              handler.update_from_quickbooks(record, qb_entity, config)
+            end
+            synced += 1
           else
-            handler.update_from_quickbooks(record, qb_entity, config)
+            # No changes in QB since last sync - skip
+            skipped += 1
           end
         else
           # Create new
           handler.create_from_quickbooks(qb_entity, config)
+          synced += 1
         end
-        
-        synced += 1
         
       rescue => e
         errors << { qb_id: qb_entity['Id'], error: e.message }
@@ -206,9 +217,19 @@ class QuickbooksSyncService
   end
   
   def should_sync_record?(record, config)
-    # TODO: Implement filtering rules from config
-    # For now, sync all non-deleted records
-    !record.is_deleted
+    # Skip deleted records
+    return false if record.is_deleted
+    
+    # Sync if no QuickBooks ID (new record)
+    return true if record.quickbooks_id.blank?
+    
+    # Sync if modified after last sync (edited record)
+    if record.respond_to?(:quickbooks_synced_at) && record.quickbooks_synced_at.present?
+      return record.updated_at > record.quickbooks_synced_at
+    end
+    
+    # Default to not syncing if we're not sure
+    false
   end
   
   def record_has_local_changes?(record)
@@ -216,6 +237,25 @@ class QuickbooksSyncService
     return false unless record.respond_to?(:quickbooks_synced_at)
     
     record.updated_at > record.quickbooks_synced_at if record.quickbooks_synced_at.present?
+  end
+  
+  def qb_entity_has_changes?(record, qb_entity)
+    # If record has never been synced, consider it changed
+    return true unless record.respond_to?(:quickbooks_synced_at)
+    return true if record.quickbooks_synced_at.blank?
+    
+    # Compare QB's LastUpdatedTime with our last sync time
+    qb_updated_at = qb_entity.dig('MetaData', 'LastUpdatedTime')
+    return true if qb_updated_at.blank? # If QB doesn't provide timestamp, sync it
+    
+    begin
+      qb_timestamp = Time.parse(qb_updated_at)
+      # QB entity changed if its LastUpdatedTime is after our last sync
+      qb_timestamp > record.quickbooks_synced_at
+    rescue
+      # If timestamp parsing fails, sync it to be safe
+      true
+    end
   end
   
   def handle_conflict(record, qb_entity, config)

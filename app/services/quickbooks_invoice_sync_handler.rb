@@ -52,11 +52,29 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     company.invoices.find_by(quickbooks_id: qb_id)
   end
   
+  def find_or_initialize_from_quickbooks(qb_invoice)
+    # First try to find by QB ID
+    existing = find_by_quickbooks_id(qb_invoice['Id'])
+    return existing if existing
+    
+    # If not found by QB ID, check if an invoice with this number exists
+    # (might have been synced before but QB ID not saved)
+    existing = company.invoices.find_by(invoice_number: qb_invoice['DocNumber'])
+    
+    # If found, update its quickbooks_id to prevent future duplicates
+    if existing
+      existing.update_column(:quickbooks_id, qb_invoice['Id'])
+    end
+    
+    existing
+  end
+  
   def create_from_quickbooks(qb_invoice, config)
     # Extract data from QuickBooks Invoice
     customer_id = qb_invoice.dig('CustomerRef', 'value')
     contact = find_or_create_contact_from_qb(customer_id)
     
+    # Create invoice with basic info first (without financial totals to avoid callback issues)
     invoice_data = {
       company_id: company.id,
       location_id: location&.id,
@@ -65,9 +83,6 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       invoice_number: qb_invoice['DocNumber'],
       invoice_date: qb_invoice['TxnDate'] ? Date.parse(qb_invoice['TxnDate']) : Date.today,
       due_date: qb_invoice['DueDate'] ? Date.parse(qb_invoice['DueDate']) : nil,
-      subtotal: qb_invoice['TxnTaxDetail']&.dig('TotalTax') || 0,
-      tax: qb_invoice['TxnTaxDetail']&.dig('TotalTax') || 0,
-      total: qb_invoice['TotalAmt'] || 0,
       notes: qb_invoice['PrivateNote'],
       status: map_qb_status(qb_invoice),
       quickbooks_synced_at: Time.current
@@ -75,23 +90,63 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     
     invoice = company.invoices.create!(invoice_data)
     
-    # Create line items
+    # Create line items first
     create_line_items_from_qb(invoice, qb_invoice)
+    
+    # Now update financial totals using update_columns to skip callbacks
+    total_amt = qb_invoice['TotalAmt'].to_f
+    tax_amt = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
+    subtotal_amt = total_amt - tax_amt
+    balance_amt = qb_invoice['Balance'].to_f
+    paid_amt = total_amt - balance_amt
+    
+    invoice.update_columns(
+      subtotal: subtotal_amt,
+      tax_amount: tax_amt,
+      tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
+      total: total_amt,
+      amount_paid: paid_amt,
+      amount_due: balance_amt,
+      updated_at: invoice.updated_at  # Prevent circular sync
+    )
     
     invoice
   end
   
   def update_from_quickbooks(invoice, qb_invoice, config)
-    invoice.update!(
+    # Update contact if changed
+    customer_id = qb_invoice.dig('CustomerRef', 'value')
+    if customer_id.present?
+      contact = find_or_create_contact_from_qb(customer_id)
+      invoice.update_column(:contact_id, contact&.id) if contact && invoice.contact_id != contact.id
+    end
+    
+    # Delete existing line items and recreate from QB
+    invoice.invoice_items.destroy_all
+    create_line_items_from_qb(invoice, qb_invoice)
+    
+    # Calculate financial totals
+    total_amt = qb_invoice['TotalAmt'].to_f
+    tax_amt = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
+    subtotal_amt = total_amt - tax_amt
+    balance_amt = qb_invoice['Balance'].to_f
+    paid_amt = total_amt - balance_amt
+    
+    # Update invoice fields without triggering callbacks
+    invoice.update_columns(
       invoice_number: qb_invoice['DocNumber'],
       invoice_date: qb_invoice['TxnDate'] ? Date.parse(qb_invoice['TxnDate']) : invoice.invoice_date,
       due_date: qb_invoice['DueDate'] ? Date.parse(qb_invoice['DueDate']) : invoice.due_date,
-      subtotal: qb_invoice['TxnTaxDetail']&.dig('TotalTax') || 0,
-      tax: qb_invoice['TxnTaxDetail']&.dig('TotalTax') || 0,
-      total: qb_invoice['TotalAmt'] || 0,
+      subtotal: subtotal_amt,
+      tax_amount: tax_amt,
+      tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
+      total: total_amt,
+      amount_paid: paid_amt,
+      amount_due: balance_amt,
       notes: qb_invoice['PrivateNote'],
       status: map_qb_status(qb_invoice),
-      quickbooks_synced_at: Time.current
+      quickbooks_synced_at: Time.current,
+      updated_at: invoice.updated_at  # Prevent circular sync
     )
   end
   
@@ -126,11 +181,11 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       lines << {
         LineNum: index + 1,
         DetailType: 'SalesItemLineDetail',
-        Amount: item.total || (item.quantity * item.unit_price),
+        Amount: item.amount || (item.quantity * item.rate),
         Description: item.description,
         SalesItemLineDetail: {
           Qty: item.quantity || 1,
-          UnitPrice: item.unit_price || 0,
+          UnitPrice: item.rate || 0,
           ItemRef: get_item_ref(item)
         }
       }
@@ -140,9 +195,9 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   end
   
   def get_item_ref(invoice_item)
-    # Try to find matching QB Item
-    if invoice_item.vehicle&.quickbooks_id.present?
-      { value: invoice_item.vehicle.quickbooks_id }
+    # Try to find matching QB Item from listing (Vehicle or MobileHome)
+    if invoice_item.listing&.quickbooks_id.present?
+      { value: invoice_item.listing.quickbooks_id }
     else
       # Use a default service item or create one
       get_or_create_default_item
@@ -211,8 +266,8 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       invoice.invoice_items.create!(
         description: line['Description'],
         quantity: detail['Qty'] || 1,
-        unit_price: detail['UnitPrice'] || 0,
-        total: line['Amount'] || 0
+        rate: detail['UnitPrice'] || 0,
+        amount: line['Amount'] || 0
       )
     end
   end

@@ -391,7 +391,7 @@ class Api::V1::InvoicesController < ApplicationController
       description: item.description,
       quantity: item.quantity,
       rate: item.rate,
-      total: item.total,
+      amount: item.amount,  # Fixed: InvoiceItem uses 'amount' not 'total'
       position: item.position
     }
   end
