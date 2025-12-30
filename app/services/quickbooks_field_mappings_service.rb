@@ -113,7 +113,8 @@ class QuickbooksFieldMappingsService
   end
   
   def self.get_mappings_for_entity(company, entity_type, location_id: nil)
-    mappings = company.quickbooks_field_mappings.for_entity(entity_type).enabled.by_priority
+    # Return ALL mappings (enabled and disabled) so users can toggle them
+    mappings = company.quickbooks_field_mappings.for_entity(entity_type).by_priority
     
     if location_id.present?
       # Get location-specific mappings first, fall back to company-wide
@@ -131,7 +132,9 @@ class QuickbooksFieldMappingsService
   end
   
   def self.apply_mappings(entity, entity_type, company, location_id: nil)
-    mappings = get_mappings_for_entity(company, entity_type, location_id: location_id)
+    # Get ALL mappings but only use enabled ones for actual sync
+    all_mappings = get_mappings_for_entity(company, entity_type, location_id: location_id)
+    mappings = all_mappings.select(&:enabled)
     
     result = {}
     mappings.each do |mapping|

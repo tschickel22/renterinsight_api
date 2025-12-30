@@ -129,62 +129,13 @@ class QuickbooksInventorySyncHandler < QuickbooksSyncHandler
   end
   
   def get_or_create_income_account
-    # Get or create "Sales" income account in QuickBooks
-    # CRITICAL: For Inventory items, must use SalesOfProductIncome subtype
-    
-    Rails.logger.info "[QB Sync] Looking for Income account suitable for Inventory..."
-    
-    # First, try to find existing Income account with correct subtype for products
-    begin
-      result = @api.query("SELECT * FROM Account WHERE AccountType = 'Income' MAXRESULTS 50")
-      accounts = result.dig('QueryResponse', 'Account') || []
-      
-      if accounts.any?
-        # CRITICAL: Look for SalesOfProductIncome or similar product sales accounts
-        # Exclude "Billable Expense Income" - wrong type for inventory!
-        product_account = accounts.find do |a|
-          subtype = a['AccountSubType']
-          # Check for product sales related subtypes
-          subtype && (subtype.include?('Product') || subtype.include?('Sales'))
-        end
-        
-        if product_account
-          Rails.logger.info "[QB Sync] Using existing Income account: #{product_account['Name']} (ID: #{product_account['Id']}, SubType: #{product_account['AccountSubType']})"
-          return { value: product_account['Id'] }
-        else
-          # If no product sales account exists, use first non-expense Income account
-          fallback = accounts.find { |a| !a['Name'].include?('Expense') && !a['Name'].include?('Billable') }
-          
-          if fallback
-            Rails.logger.warn "[QB Sync] Using fallback Income account (not ideal): #{fallback['Name']} (ID: #{fallback['Id']}, SubType: #{fallback['AccountSubType']})"
-            return { value: fallback['Id'] }
-          end
-        end
-      end
-    rescue => e
-      Rails.logger.warn "[QB Sync] Failed to query Income accounts: #{e.message}"
-    end
-    
-    # If no suitable account exists, create one with correct subtype
-    begin
-      Rails.logger.info "[QB Sync] Creating new Income account: Sales of Product Income"
-      
-      account_data = {
-        Name: 'Sales of Product Income',
-        AccountType: 'Income',
-        AccountSubType: 'SalesOfProductIncome'  # CRITICAL: Must be this subtype for Inventory
-      }
-      
-      response = @api.create_entity('account', account_data)
-      account_id = response.dig('Account', 'Id')
-      
-      Rails.logger.info "[QB Sync] Created Income account with ID: #{account_id}"
-      return { value: account_id }
-      
-    rescue => e
-      Rails.logger.error "[QB Sync] Failed to create Income account: #{e.message}"
-      raise "Cannot create Inventory Item without proper Income account: #{e.message}"
-    end
+    # Use account mapping: inventory_sales
+    # Fallback to finding a suitable Income account
+    get_account_from_mapping(
+      :income, 
+      :inventory_sales,
+      "SELECT * FROM Account WHERE AccountType = 'Income' AND AccountSubType LIKE '%Product%' MAXRESULTS 1"
+    )
   end
   
   def get_or_create_asset_account
@@ -252,50 +203,13 @@ class QuickbooksInventorySyncHandler < QuickbooksSyncHandler
   end
   
   def get_or_create_cogs_account
-    # Get or create "Cost of Goods Sold" expense account in QuickBooks
-    # CRITICAL: Required for Inventory items to track cost when sold
-    
-    Rails.logger.info "[QB Sync] Looking for COGS (Cost of Goods Sold) account..."
-    
-    # Try to find existing COGS account
-    begin
-      result = @api.query("SELECT * FROM Account WHERE AccountType = 'Cost of Goods Sold' MAXRESULTS 50")
-      accounts = result.dig('QueryResponse', 'Account') || []
-      
-      Rails.logger.info "[QB Sync] Found #{accounts.count} Cost of Goods Sold accounts"
-      
-      if accounts.any?
-        # Use first COGS account (most companies only have one)
-        cogs_account = accounts.first
-        
-        Rails.logger.info "[QB Sync] Using COGS account: #{cogs_account['Name']} (ID: #{cogs_account['Id']}, SubType: #{cogs_account['AccountSubType']})"
-        return { value: cogs_account['Id'] }
-      end
-    rescue => e
-      Rails.logger.warn "[QB Sync] Failed to query COGS accounts: #{e.message}"
-    end
-    
-    # If no COGS account exists, create one
-    begin
-      Rails.logger.info "[QB Sync] Creating new COGS account"
-      
-      account_data = {
-        Name: 'Cost of Goods Sold',
-        AccountType: 'Cost of Goods Sold',
-        AccountSubType: 'SuppliesMaterialsCogs'  # Standard COGS subtype
-      }
-      
-      response = @api.create_entity('account', account_data)
-      account = response['Account']
-      account_id = account['Id']
-      
-      Rails.logger.info "[QB Sync] Created COGS account: ID=#{account_id}, SubType=#{account['AccountSubType']}"
-      return { value: account_id }
-      
-    rescue => e
-      Rails.logger.error "[QB Sync] Failed to create COGS account: #{e.message}"
-      raise "Cannot create Inventory Item without COGS account: #{e.message}"
-    end
+    # Use account mapping: inventory_cogs
+    # Fallback to finding COGS account
+    get_account_from_mapping(
+      :cogs,
+      :inventory_cogs,
+      "SELECT * FROM Account WHERE AccountType = 'Cost of Goods Sold' MAXRESULTS 1"
+    )
   end
   
   def extract_custom_field(qb_item, field_name)

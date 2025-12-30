@@ -394,6 +394,190 @@ class Api::V1::Integrations::QuickbooksSettingsController < ApplicationControlle
     end
   end
   
+  # GET /api/v1/integrations/quickbooks/settings/chart_of_accounts
+  def chart_of_accounts
+    return unless authorize_action!('settings', 'read')
+    
+    entity = determine_quickbooks_entity
+    return render json: { error: 'Entity not found' }, status: :not_found unless entity
+    return render json: { error: 'Not connected to QuickBooks' }, status: :unprocessable_entity unless entity.quickbooks_connected?
+    
+    force_refresh = params[:force_refresh] == 'true'
+    
+    begin
+      Rails.logger.info "[QB Accounts] Fetching chart of accounts for #{entity.class.name} ##{entity.id}"
+      
+      accounts_service = QuickbooksAccountsService.new(entity)
+      accounts = accounts_service.fetch_chart_of_accounts(force_refresh: force_refresh)
+      
+      Rails.logger.info "[QB Accounts] Found #{accounts[:income].size} income, #{accounts[:asset].size} asset, #{accounts[:liability].size} liability accounts"
+      
+      render json: {
+        success: true,
+        accounts: accounts,
+        cached: !force_refresh
+      }
+    rescue => e
+      Rails.logger.error "Failed to fetch chart of accounts: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: e.message }, status: :unprocessable_entity
+    end
+  end
+  
+  # GET /api/v1/integrations/quickbooks/settings/account_mappings
+  def account_mappings
+    return unless authorize_action!('settings', 'read')
+    
+    entity = determine_quickbooks_entity
+    return render json: { error: 'Entity not found' }, status: :not_found unless entity
+    
+    begin
+      accounts_service = QuickbooksAccountsService.new(entity)
+      mappings = accounts_service.get_account_mappings
+      
+      render json: {
+        success: true,
+        mappings: mappings
+      }
+    rescue => e
+      Rails.logger.error "Failed to get account mappings: #{e.message}"
+      render json: { error: e.message }, status: :unprocessable_entity
+    end
+  end
+  
+  # PUT /api/v1/integrations/quickbooks/settings/account_mappings
+  def update_account_mappings
+    return unless authorize_action!('settings', 'update')
+    
+    entity = determine_quickbooks_entity
+    return render json: { error: 'Entity not found' }, status: :not_found unless entity
+    
+    mappings = params[:mappings].permit!.to_h
+    
+    begin
+      accounts_service = QuickbooksAccountsService.new(entity)
+      accounts_service.update_account_mappings(mappings)
+      
+      render json: {
+        success: true,
+        message: 'Account mappings updated successfully',
+        mappings: accounts_service.get_account_mappings
+      }
+    rescue => e
+      Rails.logger.error "Failed to update account mappings: #{e.message}"
+      render json: { error: e.message }, status: :unprocessable_entity
+    end
+  end
+  
+  # GET /api/v1/integrations/quickbooks/settings/custom_fields
+  def custom_fields
+    return unless authorize_action!('settings', 'read')
+    
+    entity = determine_quickbooks_entity
+    return render json: { error: 'Entity not found' }, status: :not_found unless entity
+    return render json: { error: 'Not connected to QuickBooks' }, status: :unprocessable_entity unless entity.quickbooks_connected?
+    
+    begin
+      custom_field_options = {
+        classes: fetch_qb_classes(entity),
+        locations: fetch_qb_locations(entity),
+        custom_fields: [
+          { id: 'custom1', name: 'Custom Field 1', type: 'text' },
+          { id: 'custom2', name: 'Custom Field 2', type: 'text' },
+          { id: 'custom3', name: 'Custom Field 3', type: 'text' }
+        ]
+      }
+      
+      render json: {
+        success: true,
+        custom_field_options: custom_field_options
+      }
+    rescue => e
+      Rails.logger.error "Failed to fetch custom fields: #{e.message}"
+      render json: { error: e.message }, status: :unprocessable_entity
+    end
+  end
+  
+  # GET /api/v1/integrations/quickbooks/settings/custom_field_mappings
+  def custom_field_mappings
+    return unless authorize_action!('settings', 'read')
+    
+    entity = determine_quickbooks_entity
+    return render json: { error: 'Entity not found' }, status: :not_found unless entity
+    
+    settings = entity.resolved_quickbooks_settings || {}
+    mappings = settings[:custom_field_mappings] || default_custom_field_mappings
+    
+    render json: {
+      success: true,
+      mappings: mappings
+    }
+  end
+  
+  # PUT /api/v1/integrations/quickbooks/settings/custom_field_mappings
+  def update_custom_field_mappings
+    return unless authorize_action!('settings', 'update')
+    
+    entity = determine_quickbooks_entity
+    return render json: { error: 'Entity not found' }, status: :not_found unless entity
+    
+    mappings = params[:mappings].permit!.to_h
+    
+    begin
+      current_settings = entity.resolved_quickbooks_settings.deep_dup || {}
+      current_settings[:custom_field_mappings] = mappings.deep_symbolize_keys
+      entity.update_quickbooks_settings!(current_settings)
+      
+      render json: {
+        success: true,
+        message: 'Custom field mappings updated successfully',
+        mappings: current_settings[:custom_field_mappings]
+      }
+    rescue => e
+      Rails.logger.error "Failed to update custom field mappings: #{e.message}"
+      render json: { error: e.message }, status: :unprocessable_entity
+    end
+  end
+  
+  # GET /api/v1/integrations/quickbooks/settings/quickbooks_fields
+  def quickbooks_fields
+    entity_type = params[:entity_type]
+    
+    unless entity_type.present?
+      return render json: { success: false, error: 'entity_type parameter required' }, status: :bad_request
+    end
+    
+    # QuickBooks field schemas by entity type
+    fields = case entity_type
+    when 'inventory'
+      %w[Name Description Type ItemCategoryRef QtyOnHand InvStartDate AssetAccountRef 
+         IncomeAccountRef ExpenseAccountRef PurchaseCost TrackQtyOnHand Active Sku]
+    when 'customers'
+      %w[GivenName FamilyName FullyQualifiedName CompanyName DisplayName PrimaryEmailAddr 
+         PrimaryPhone Mobile BillAddr ShipAddr Notes Active Balance BalanceWithJobs]
+    when 'invoices'
+      %w[DocNumber TxnDate DueDate CustomerRef Line TotalAmt Balance DepositToAccountRef 
+         EmailStatus BillEmail CustomerMemo SalesTermRef ShipDate TrackingNum ShipAddr BillAddr]
+    when 'payments'
+      %w[TotalAmt CustomerRef TxnDate PaymentRefNum DepositToAccountRef PaymentMethodRef 
+         UnappliedAmt ProcessPayment Line]
+    when 'vendors'
+      %w[GivenName FamilyName DisplayName CompanyName PrimaryEmailAddr PrimaryPhone Mobile 
+         BillAddr Active Balance AcctNum Vendor1099 CurrencyRef]
+    when 'purchases'
+      %w[DocNumber TxnDate VendorRef Line TotalAmt AccountRef PaymentMethodRef PaymentType 
+         EntityRef Credit Memo]
+    else
+      []
+    end
+    
+    render json: {
+      success: true,
+      entity_type: entity_type,
+      fields: fields.sort
+    }
+  end
+  
   private
   
   def determine_quickbooks_entity
@@ -417,5 +601,25 @@ class Api::V1::Integrations::QuickbooksSettingsController < ApplicationControlle
       :enabled,
       :priority
     )
+  end
+  
+  def fetch_qb_classes(entity)
+    api = QuickbooksApiService.new(entity)
+    response = api.query("SELECT * FROM Class WHERE Active = true")
+    (response['QueryResponse']&.dig('Class') || []).map { |c| { id: c['Id'], name: c['Name'] } }
+  end
+  
+  def fetch_qb_locations(entity)
+    api = QuickbooksApiService.new(entity)
+    response = api.query("SELECT * FROM Department WHERE Active = true")
+    (response['QueryResponse']&.dig('Department') || []).map { |d| { id: d['Id'], name: d['Name'] } }
+  end
+  
+  def default_custom_field_mappings
+    {
+      property: { qb_field: nil, qb_field_type: nil },
+      unit: { qb_field: nil, qb_field_type: nil },
+      lease_id: { qb_field: nil, qb_field_type: nil }
+    }
   end
 end

@@ -26,6 +26,13 @@ class QuickbooksSyncHandler
     raise NotImplementedError
   end
   
+  # Batch load records by QuickBooks IDs (performance optimization)
+  # Subclasses can override for custom logic
+  def get_records_by_quickbooks_ids(qb_ids)
+    # Default implementation - override in subclasses for specific models
+    []
+  end
+  
   # Override in subclasses
   def transform_to_quickbooks(record, config)
     raise NotImplementedError
@@ -61,5 +68,45 @@ class QuickbooksSyncHandler
   
   def location
     @entity.is_a?(Location) ? @entity : nil
+  end
+  
+  # Get account mappings from settings
+  def account_mappings
+    @account_mappings ||= begin
+      accounts_service = QuickbooksAccountsService.new(@entity)
+      accounts_service.get_account_mappings
+    end
+  end
+  
+  # Get QB account ID from mapping, with fallback to hardcoded lookup
+  def get_account_from_mapping(category, field, fallback_query = nil)
+    # Try to get from mapping first
+    mapping_value = account_mappings.dig(category, field)
+    
+    if mapping_value.present?
+      Rails.logger.info "[QB Sync] Using mapped #{category}.#{field} account: #{mapping_value}"
+      return { value: mapping_value }
+    end
+    
+    # If no mapping and fallback query provided, try to find account
+    if fallback_query.present?
+      Rails.logger.warn "[QB Sync] No mapping for #{category}.#{field}, using fallback query"
+      begin
+        result = @api.query(fallback_query)
+        accounts = result.dig('QueryResponse', 'Account') || []
+        
+        if accounts.any?
+          account = accounts.first
+          Rails.logger.info "[QB Sync] Found fallback account: #{account['Name']} (ID: #{account['Id']})"
+          return { value: account['Id'] }
+        end
+      rescue => e
+        Rails.logger.error "[QB Sync] Fallback query failed: #{e.message}"
+      end
+    end
+    
+    # If we get here, account is not mapped and fallback failed
+    Rails.logger.error "[QB Sync] CRITICAL: No account mapping for #{category}.#{field} and fallback failed"
+    raise "Account mapping required: Please map #{category}.#{field} in QuickBooks settings"
   end
 end
