@@ -584,6 +584,19 @@ Rails.application.routes.draw do
           get 'settings/sync_logs', to: 'quickbooks_settings#sync_logs'
           get 'settings/sync_logs/:id', to: 'quickbooks_settings#sync_log_details'
           
+          # Chart of Accounts & Account Mapping
+          get 'settings/chart_of_accounts', to: 'quickbooks_settings#chart_of_accounts'
+          get 'settings/account_mappings', to: 'quickbooks_settings#account_mappings'
+          put 'settings/account_mappings', to: 'quickbooks_settings#update_account_mappings'
+          
+          # Custom Fields & Custom Field Mapping
+          get 'settings/custom_fields', to: 'quickbooks_settings#custom_fields'
+          get 'settings/custom_field_mappings', to: 'quickbooks_settings#custom_field_mappings'
+          put 'settings/custom_field_mappings', to: 'quickbooks_settings#update_custom_field_mappings'
+          
+          # QuickBooks Field Schemas (for dropdowns)
+          get 'settings/quickbooks_fields', to: 'quickbooks_settings#quickbooks_fields'
+          
           # Phase 4 Sync Endpoints - Manual Sync Operations
           post 'sync/entity', to: 'quickbooks_settings#sync_entity'
           post 'sync/all', to: 'quickbooks_settings#sync_all_entities'
