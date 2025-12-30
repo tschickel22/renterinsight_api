@@ -117,11 +117,17 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
   end
   
   def get_deposit_account_ref(config)
-    # Use configured deposit account or find default
-    if config[:deposit_to_account]
-      { value: config[:deposit_to_account] }
-    else
-      # Find default "Undeposited Funds" account
+    # Use account mapping: operating_cash
+    # Fallback to Undeposited Funds or first Bank account
+    begin
+      get_account_from_mapping(
+        :assets_liabilities,
+        :operating_cash,
+        "SELECT * FROM Account WHERE AccountType = 'Bank' MAXRESULTS 1"
+      )
+    rescue => e
+      # If mapping fails, try Undeposited Funds as last resort
+      Rails.logger.warn "[QB Sync] Could not use operating_cash mapping, falling back to Undeposited Funds: #{e.message}"
       response = @api.search_entities('Account', { Name: 'Undeposited Funds' })
       
       if response.dig('QueryResponse', 'Account', 0)

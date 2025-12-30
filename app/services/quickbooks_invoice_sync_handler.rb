@@ -199,8 +199,107 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     if invoice_item.listing&.quickbooks_id.present?
       { value: invoice_item.listing.quickbooks_id }
     else
-      # Use a default service item or create one
-      get_or_create_default_item
+      # Get or create item based on charge type
+      get_or_create_item_for_charge(invoice_item)
+    end
+  end
+  
+  def get_or_create_item_for_charge(invoice_item)
+    # Determine charge type and get appropriate income account
+    charge_type = determine_charge_type(invoice_item)
+    income_account_ref = get_income_account_for_charge_type(charge_type)
+    
+    # Look for or create item for this charge type
+    item_name = charge_type.to_s.titleize
+    
+    response = @api.search_entities('Item', { Name: item_name, Type: 'Service' })
+    
+    if response.dig('QueryResponse', 'Item', 0)
+      return { value: response['QueryResponse']['Item'][0]['Id'] }
+    end
+    
+    # Create service item with correct income account
+    item_data = {
+      Name: item_name,
+      Type: 'Service',
+      IncomeAccountRef: income_account_ref
+    }
+    
+    response = @api.create_entity('Item', item_data)
+    { value: response.dig('Item', 'Id') }
+    
+  rescue => e
+    Rails.logger.error "Failed to get/create item for charge type #{charge_type}: #{e.message}"
+    # Fall back to generic services item
+    get_or_create_default_item
+  end
+  
+  def determine_charge_type(invoice_item)
+    # Try to determine charge type from description or other attributes
+    description = invoice_item.description.to_s.downcase
+    
+    # Check for common patterns
+    return :rent if description.include?('rent') && !description.include?('late')
+    return :lot_rent if description.include?('lot rent') || description.include?('space rent')
+    return :late_fees if description.include?('late') || description.include?('fee')
+    return :application_fees if description.include?('application')
+    return :parts_sales if description.include?('part')
+    return :service_labor if description.include?('service') || description.include?('labor')
+    return :warranty_revenue if description.include?('warranty')
+    return :finance_charges if description.include?('finance') || description.include?('interest')
+    return :documentation_fees if description.include?('doc') || description.include?('documentation')
+    
+    # Default to other_charges
+    :other_charges
+  end
+  
+  def get_income_account_for_charge_type(charge_type)
+    # Map charge type to account mapping field
+    mapping_field = case charge_type
+    when :rent then :rent
+    when :lot_rent then :lot_rent
+    when :late_fees then :late_fees
+    when :application_fees then :application_fees
+    when :parts_sales then :parts_sales
+    when :service_labor then :service_labor
+    when :warranty_revenue then :warranty_revenue
+    when :finance_charges then :finance_charges
+    when :documentation_fees then :documentation_fees
+    when :inventory_sales then :inventory_sales
+    else :other_charges  # Default
+    end
+    
+    # Get account from mapping with fallback
+    begin
+      get_account_from_mapping(
+        :income,
+        mapping_field,
+        "SELECT * FROM Account WHERE AccountType = 'Income' MAXRESULTS 1"
+      )
+    rescue => e
+      # If specific mapping fails, try other_charges as fallback
+      if mapping_field != :other_charges
+        Rails.logger.warn "[QB Sync] Mapping for #{mapping_field} failed, trying other_charges: #{e.message}"
+        begin
+          get_account_from_mapping(
+            :income,
+            :other_charges,
+            "SELECT * FROM Account WHERE AccountType = 'Income' MAXRESULTS 1"
+          )
+        rescue
+          # Last resort: just find any income account
+          Rails.logger.error "[QB Sync] All income mappings failed, using first Income account"
+          result = @api.query("SELECT * FROM Account WHERE AccountType = 'Income' MAXRESULTS 1")
+          accounts = result.dig('QueryResponse', 'Account') || []
+          if accounts.any?
+            { value: accounts.first['Id'] }
+          else
+            raise "No income accounts found in QuickBooks"
+          end
+        end
+      else
+        raise
+      end
     end
   end
   
@@ -228,12 +327,16 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   end
   
   def get_income_account_ref
-    # Get default income account
-    response = @api.search_entities('Account', { AccountType: 'Income' })
-    
-    if response.dig('QueryResponse', 'Account', 0)
-      { value: response['QueryResponse']['Account'][0]['Id'] }
-    else
+    # Use account mapping: other_charges as default
+    # Fallback to finding any Income account
+    begin
+      get_account_from_mapping(
+        :income,
+        :other_charges,
+        "SELECT * FROM Account WHERE AccountType = 'Income' MAXRESULTS 1"
+      )
+    rescue => e
+      Rails.logger.error "Failed to get income account: #{e.message}"
       nil
     end
   end
