@@ -26,6 +26,13 @@ class QuickbooksSyncHandler
     raise NotImplementedError
   end
   
+  # Batch load records by QuickBooks IDs (performance optimization)
+  # Subclasses can override for custom logic
+  def get_records_by_quickbooks_ids(qb_ids)
+    # Default implementation - override in subclasses for specific models
+    []
+  end
+  
   # Override in subclasses
   def transform_to_quickbooks(record, config)
     raise NotImplementedError

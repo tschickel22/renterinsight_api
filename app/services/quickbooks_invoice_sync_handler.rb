@@ -22,6 +22,11 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     company.invoices.where(id: ids)
   end
   
+  # PERFORMANCE: Batch load invoices by QuickBooks IDs (1 query instead of N)
+  def get_records_by_quickbooks_ids(qb_ids)
+    company.invoices.where(quickbooks_id: qb_ids)
+  end
+  
   def transform_to_quickbooks(invoice, config)
     # Get or sync customer first
     customer_ref = get_customer_ref(invoice)

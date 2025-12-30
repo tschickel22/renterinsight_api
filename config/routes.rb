@@ -559,15 +559,15 @@ Rails.application.routes.draw do
           delete 'disconnect', to: 'quickbooks_oauth#disconnect'
           post 'refresh_token', to: 'quickbooks_oauth#refresh_token'
           
-          # OLD SYNC ROUTES - Commented out, using new routes below
-          # post 'sync/full', to: 'quickbooks_sync#full'
-          # post 'sync/incremental', to: 'quickbooks_sync#incremental'
-          # post 'sync/entity', to: 'quickbooks_sync#entity'
-          # get 'sync/status', to: 'quickbooks_sync#status'
-          # get 'sync/logs', to: 'quickbooks_sync#logs'
-          # get 'sync/mappings', to: 'quickbooks_sync#mappings'
-          # delete 'sync/mappings/:id', to: 'quickbooks_sync#delete_mapping'
-          # post 'sync/mappings/:id/retry', to: 'quickbooks_sync#retry_mapping'
+          # Sync Routes - Use settings controller for these
+          post 'sync/full', to: 'quickbooks_settings#sync_all_entities'
+          post 'sync/incremental', to: 'quickbooks_sync#incremental'
+          post 'sync/entity', to: 'quickbooks_settings#sync_entity'
+          get 'sync/status', to: 'quickbooks_sync#status'
+          get 'sync/logs', to: 'quickbooks_sync#logs'
+          get 'sync/mappings', to: 'quickbooks_sync#mappings'
+          delete 'sync/mappings/:id', to: 'quickbooks_sync#delete_mapping'
+          post 'sync/mappings/:id/retry', to: 'quickbooks_sync#retry_mapping'
           
           get 'settings', to: 'quickbooks_settings#show'
           put 'settings', to: 'quickbooks_settings#update'

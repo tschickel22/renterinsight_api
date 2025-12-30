@@ -17,8 +17,15 @@ class Api::V1::Integrations::QuickbooksSyncController < ApplicationController
   def incremental
     return unless authorize_action!('settings', 'update')
     
+    # Determine entity (company or location) based on params
+    entity = if params[:location_id].present?
+      @company.locations.find(params[:location_id])
+    else
+      @company
+    end
+    
     since = params[:since]&.to_datetime
-    sync_service = QuickbooksSyncService.new(@company)
+    sync_service = QuickbooksSyncService.new(entity)
     result = sync_service.incremental_sync(since: since)
     
     if result[:success]
@@ -44,12 +51,36 @@ class Api::V1::Integrations::QuickbooksSyncController < ApplicationController
   def status
     return unless authorize_action!('settings', 'read')
     
-    stats = @company.quickbooks_sync_stats
+    # Determine entity (company or location) based on scope and params
+    entity = if params[:location_id].present?
+      @company.locations.find(params[:location_id])
+    elsif @company.quickbooks_scope == 'location'
+      # If scope is location but no specific location requested, return company-level data
+      @company
+    else
+      @company
+    end
+    
+    # Get settings to check if auto_sync is enabled
+    # CRITICAL: Use string keys since quickbooks_settings is stored as JSON
+    settings = entity.quickbooks_settings || {}
+    
+    # Try both string and symbol keys to handle legacy data
+    auto_sync_enabled = settings['auto_sync'] || settings[:auto_sync] || false
+    
+    # Get frequency for next sync calculation (default 15 minutes)
+    auto_sync_frequency = settings['auto_sync_frequency'] || settings[:auto_sync_frequency] || 15
+    
+    Rails.logger.info "[QB Sync Status] Entity: #{entity.class.name} ##{entity.id}"
+    Rails.logger.info "[QB Sync Status] Settings: #{settings.inspect}"
+    Rails.logger.info "[QB Sync Status] Auto-sync enabled: #{auto_sync_enabled}"
+    Rails.logger.info "[QB Sync Status] Last sync: #{entity.quickbooks_last_sync_at}"
     
     render json: {
-      last_sync: @company.quickbooks_last_sync_at,
-      sync_enabled: @company.quickbooks_sync_enabled,
-      stats: stats
+      last_sync: entity.quickbooks_last_sync_at,
+      sync_enabled: auto_sync_enabled,
+      sync_frequency: auto_sync_frequency,
+      stats: entity.respond_to?(:quickbooks_sync_stats) ? entity.quickbooks_sync_stats : {}
     }
   end
   
