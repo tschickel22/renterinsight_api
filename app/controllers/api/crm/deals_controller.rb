@@ -2,7 +2,7 @@ module Api
   module Crm
     class DealsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_deal, only: [:show, :update, :destroy, :move_stage]
+      before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag]
 
       # GET /api/crm/deals
       def index
@@ -305,6 +305,84 @@ module Api
         else
           render json: { errors: @deal.errors.full_messages }, status: :unprocessable_entity
         end
+      end
+
+      # GET /api/crm/deals/:id/tags
+      def tags
+        return unless authorize_action!('deals', 'read')
+        
+        # Get tags through the association
+        tags = @deal.tags.map do |tag|
+          {
+            id: tag.id,
+            name: tag.name,
+            description: tag.description,
+            color: tag.color,
+            category: tag.category,
+            type: tag.try(:tag_type),
+            isSystem: tag.try(:is_system),
+            isActive: tag.try(:is_active),
+            usageCount: tag.usage_count,
+            createdBy: tag.try(:created_by),
+            createdAt: tag.created_at,
+            updatedAt: tag.updated_at
+          }.compact
+        end
+        
+        render json: tags
+      end
+
+      # POST /api/crm/deals/:id/tags
+      def add_tags
+        return unless authorize_action!('deals', 'update')
+        
+        tag_names = params[:tags] || []
+        tag_names = tag_names.split(',') if tag_names.is_a?(String)
+        
+        tag_names.each do |tag_name|
+          # Find or create tag within current company scope
+          tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+            new_tag.color = '#6B7280'
+            new_tag.is_active = true
+            new_tag.created_by = current_user&.id&.to_s || 'system'
+          end
+          
+          # Create tag assignment using polymorphic association
+          TagAssignment.find_or_create_by!(
+            tag: tag,
+            entity_type: 'Deal',
+            entity_id: @deal.id
+          ) do |assignment|
+            assignment.company_id = @company.id
+            assignment.assigned_by = current_user&.id&.to_s || 'system'
+            assignment.assigned_at = Time.current
+          end
+        end
+        
+        # Reload tags association to get updated list
+        @deal.reload
+        render json: deal_json(@deal, detailed: true)
+      end
+
+      # DELETE /api/crm/deals/:id/tags/:tag_name
+      def remove_tag
+        return unless authorize_action!('deals', 'update')
+        
+        # Find tag within company scope
+        tag = @company.tags.find_by(name: params[:tag_name])
+        
+        if tag
+          # Remove tag assignment using polymorphic association
+          TagAssignment.where(
+            tag: tag,
+            entity_type: 'Deal',
+            entity_id: @deal.id
+          ).destroy_all
+        end
+        
+        # Reload tags association to get updated list
+        @deal.reload
+        render json: deal_json(@deal, detailed: true)
       end
 
       # DELETE /api/crm/deals/:id

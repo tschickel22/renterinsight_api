@@ -194,6 +194,9 @@ Rails.application.routes.draw do
         member do
           get :print
           post :clone
+          get :tags
+          post :tags, to: 'vehicles#add_tags'
+          delete 'tags/:tag_name', to: 'vehicles#remove_tag'
         end
         
         collection do
@@ -431,6 +434,9 @@ Rails.application.routes.draw do
           post :accept
           post :reject
           get :pdf
+          get :tags
+          post :tags, to: 'quotes#add_tags'
+          delete 'tags/:tag_name', to: 'quotes#remove_tag'
         end
         
         collection do
@@ -457,6 +463,7 @@ Rails.application.routes.draw do
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
+          get :tags, to: 'contacts#tags'  # Get tags for contact
           post :tags, to: 'contacts#add_tags'
           delete 'tags/:tag_name', to: 'contacts#remove_tag'
           patch :opt_in_email, to: 'contacts#opt_in_email'
@@ -509,6 +516,7 @@ Rails.application.routes.draw do
       resources :accounts do
         member do
           post :convert_to_customer
+          get :tags, to: 'accounts#tags'  # Get tags for account
           post :tags, to: 'accounts#add_tags'
           delete 'tags/:tag_name', to: 'accounts#remove_tag'
           get :deals
@@ -773,6 +781,9 @@ Rails.application.routes.draw do
 
       # ==================== TAGS ====================
       resources :tags, only: %i[index create update destroy] do
+        member do
+          get :analytics
+        end
         collection do
           post :assign
           get 'entity/:entity_type/:entity_id', to: 'tags#entity_tags'
@@ -915,6 +926,9 @@ Rails.application.routes.draw do
         
         member do
           post :move_stage
+          get :tags
+          post :tags, to: 'deals#add_tags'
+          delete 'tags/:tag_name', to: 'deals#remove_tag'
         end
         
         # Nested resources for deals

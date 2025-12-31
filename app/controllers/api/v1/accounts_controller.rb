@@ -4,7 +4,7 @@ module Api
   module V1
     class AccountsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_account, only: %i[show update destroy convert_to_customer add_tags remove_tag activities deals insights score]
+      before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals insights score]
 
       # GET /api/v1/accounts
       def index
@@ -96,11 +96,27 @@ module Api
           if params[:tags].present?
             tag_names = params[:tags].is_a?(Array) ? params[:tags] : params[:tags].split(',')
             tag_names.each do |tag_name|
-              tag = Tag.find_or_create_by!(name: tag_name.strip)
-              @account.tag_assignments.create!(tag: tag, assigned_at: Time.current)
+              # Find or create tag within company scope
+              tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+                new_tag.color = '#6B7280'
+                new_tag.is_active = true
+                new_tag.created_by = current_user&.id&.to_s || 'system'
+              end
+              
+              # Create tag assignment using polymorphic association
+              TagAssignment.find_or_create_by!(
+                tag: tag,
+                entity_type: 'Account',
+                entity_id: @account.id
+              ) do |assignment|
+                assignment.company_id = @company.id
+                assignment.assigned_by = current_user&.id&.to_s || 'system'
+                assignment.assigned_at = Time.current
+              end
             end
           end
           
+          @account.reload
           render json: @account.as_json, status: :created
         else
           render json: { errors: @account.errors.full_messages }, status: :unprocessable_entity
@@ -120,18 +136,33 @@ module Api
           # Handle tags if provided
           if params.key?(:tags)
             # Clear existing tags
-            @account.tag_assignments.destroy_all
+            TagAssignment.where(entity_type: 'Account', entity_id: @account.id).destroy_all
             
             # Add new tags
             if params[:tags].present?
               tag_names = params[:tags].is_a?(Array) ? params[:tags] : params[:tags].split(',')
               tag_names.each do |tag_name|
-                tag = Tag.find_or_create_by!(name: tag_name.strip)
-                @account.tag_assignments.create!(tag: tag, assigned_at: Time.current)
+                # Find or create tag within company scope
+                tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+                  new_tag.color = '#6B7280'
+                  new_tag.is_active = true
+                  new_tag.created_by = current_user&.id&.to_s || 'system'
+                end
+                
+                # Create tag assignment using polymorphic association
+                TagAssignment.create!(
+                  tag: tag,
+                  entity_type: 'Account',
+                  entity_id: @account.id,
+                  company_id: @company.id,
+                  assigned_by: current_user&.id&.to_s || 'system',
+                  assigned_at: Time.current
+                )
               end
             end
           end
           
+          @account.reload
           render json: @account.as_json
         else
           render json: { errors: @account.errors.full_messages }, status: :unprocessable_entity
@@ -162,12 +193,27 @@ module Api
         tag_names = tag_names.split(',') if tag_names.is_a?(String)
         
         tag_names.each do |tag_name|
-          tag = Tag.find_or_create_by!(name: tag_name.strip)
-          @account.tag_assignments.find_or_create_by!(tag: tag) do |assignment|
+          # Find or create tag within current company scope
+          tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+            new_tag.color = '#6B7280'
+            new_tag.is_active = true
+            new_tag.created_by = current_user&.id&.to_s || 'system'
+          end
+          
+          # Create tag assignment using polymorphic association
+          TagAssignment.find_or_create_by!(
+            tag: tag,
+            entity_type: 'Account',
+            entity_id: @account.id
+          ) do |assignment|
+            assignment.company_id = @company.id
+            assignment.assigned_by = current_user&.id&.to_s || 'system'
             assignment.assigned_at = Time.current
           end
         end
         
+        # Reload tags association to get updated list
+        @account.reload
         render json: @account.as_json
       end
 
@@ -175,9 +221,47 @@ module Api
       def remove_tag
         return unless authorize_action!('crm', 'update')
         
-        tag = Tag.find_by(name: params[:tag_name])
-        @account.tag_assignments.where(tag: tag).destroy_all if tag
+        # Find tag within company scope
+        tag = @company.tags.find_by(name: params[:tag_name])
+        
+        if tag
+          # Remove tag assignment using polymorphic association
+          TagAssignment.where(
+            tag: tag,
+            entity_type: 'Account',
+            entity_id: @account.id
+          ).destroy_all
+        end
+        
+        # Reload tags association to get updated list
+        @account.reload
         render json: @account.as_json
+      end
+
+      # GET /api/v1/accounts/:id/tags
+      def tags
+        return unless authorize_action!('crm', 'read')
+        
+        # Get tags through polymorphic association
+        tag_ids = TagAssignment.where(entity_type: 'Account', entity_id: @account.id).pluck(:tag_id)
+        tags = Tag.where(id: tag_ids).map do |tag|
+          {
+            id: tag.id,
+            name: tag.name,
+            description: tag.description,
+            color: tag.color,
+            category: tag.category,
+            type: tag.try(:tag_type),
+            isSystem: tag.try(:is_system),
+            isActive: tag.try(:is_active),
+            usageCount: tag.usage_count,
+            createdBy: tag.try(:created_by),
+            createdAt: tag.created_at,
+            updatedAt: tag.updated_at
+          }.compact
+        end
+        
+        render json: tags
       end
 
       # GET /api/v1/accounts/:id/activities
@@ -340,9 +424,17 @@ module Api
           account.update(location_id: location_ids.first) if location_ids.any?
         end
         
-        # Copy tags
+        # Copy tags using proper company scoping
         lead.tags.each do |tag|
-          account.tag_assignments.create!(tag: tag, assigned_at: Time.current)
+          TagAssignment.find_or_create_by!(
+            tag: tag,
+            entity_type: 'Account',
+            entity_id: account.id
+          ) do |assignment|
+            assignment.company_id = @company.id
+            assignment.assigned_by = current_user&.id&.to_s || 'system'
+            assignment.assigned_at = Time.current
+          end
         end
         
         # Update lead

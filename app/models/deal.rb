@@ -17,6 +17,10 @@ class Deal < ApplicationRecord
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
   
+  # Tags (polymorphic association)
+  has_many :tag_assignments, as: :entity, dependent: :destroy
+  has_many :tags, through: :tag_assignments
+  
   # Owner helper methods
   def owner_user
     owner

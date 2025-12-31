@@ -11,7 +11,7 @@ module Api
         delete_actions: [:destroy, :bulk_delete]
 
       before_action :set_company
-      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone]
+      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone, :tags, :add_tags, :remove_tag]
 
       def index
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
@@ -686,6 +686,78 @@ module Api
         render json: { error: "Invalid CSV format: #{e.message}" }, status: :bad_request
       rescue => e
         render json: { error: "Import failed: #{e.message}" }, status: :internal_server_error
+      end
+
+      # GET /api/v1/vehicles/:id/tags
+      def tags
+        # Get tags through the association
+        tags = @vehicle.tags.map do |tag|
+          {
+            id: tag.id,
+            name: tag.name,
+            description: tag.description,
+            color: tag.color,
+            category: tag.category,
+            type: tag.try(:tag_type),
+            isSystem: tag.try(:is_system),
+            isActive: tag.try(:is_active),
+            usageCount: tag.usage_count,
+            createdBy: tag.try(:created_by),
+            createdAt: tag.created_at,
+            updatedAt: tag.updated_at
+          }.compact
+        end
+        
+        render json: tags
+      end
+
+      # POST /api/v1/vehicles/:id/tags
+      def add_tags
+        tag_names = params[:tags] || []
+        tag_names = tag_names.split(',') if tag_names.is_a?(String)
+        
+        tag_names.each do |tag_name|
+          # Find or create tag within current company scope
+          tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+            new_tag.color = '#6B7280'
+            new_tag.is_active = true
+            new_tag.created_by = current_user&.id&.to_s || 'system'
+          end
+          
+          # Create tag assignment using polymorphic association
+          TagAssignment.find_or_create_by!(
+            tag: tag,
+            entity_type: 'Vehicle',
+            entity_id: @vehicle.id
+          ) do |assignment|
+            assignment.company_id = @company.id
+            assignment.assigned_by = current_user&.id&.to_s || 'system'
+            assignment.assigned_at = Time.current
+          end
+        end
+        
+        # Reload tags association to get updated list
+        @vehicle.reload
+        render json: vehicle_json(@vehicle, detailed: true)
+      end
+
+      # DELETE /api/v1/vehicles/:id/tags/:tag_name
+      def remove_tag
+        # Find tag within company scope
+        tag = @company.tags.find_by(name: params[:tag_name])
+        
+        if tag
+          # Remove tag assignment using polymorphic association
+          TagAssignment.where(
+            tag: tag,
+            entity_type: 'Vehicle',
+            entity_id: @vehicle.id
+          ).destroy_all
+        end
+        
+        # Reload tags association to get updated list
+        @vehicle.reload
+        render json: vehicle_json(@vehicle, detailed: true)
       end
 
       private
