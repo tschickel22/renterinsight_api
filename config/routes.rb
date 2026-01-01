@@ -133,6 +133,18 @@ Rails.application.routes.draw do
       # Notification Settings (Unified Reminder System)
       resource :notification_settings, only: [:show, :update], path: 'notification_settings'
       
+      # ==================== TASKS ====================
+      resources :tasks do
+        member do
+          post :complete
+          post :reopen
+        end
+        
+        collection do
+          get :stats
+        end
+      end
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do
@@ -817,6 +829,13 @@ Rails.application.routes.draw do
       post 'communications/email', to: 'communications#email'
       post 'communications/sms', to: 'communications#sms'
 
+      # ==================== ACTIVITIES (Collection Endpoints) ====================
+      # Collection endpoints for aggregating activities across all entities
+      get 'leads/activities', to: 'activities#lead_activities'
+      get 'accounts/activities', to: 'activities#account_activities'
+      get 'contacts/activities', to: 'activities#contact_activities'
+      get 'deals/activities', to: 'activities#deal_activities'
+
       # ==================== LEADS ====================
       resources :leads, only: %i[index show create update destroy] do
         # Member routes (actions on specific lead)
@@ -930,6 +949,20 @@ Rails.application.routes.draw do
           post :tags, to: 'deals#add_tags'
           delete 'tags/:tag_name', to: 'deals#remove_tag'
         end
+        
+        # Deal Activities (unified activities)
+        resources :deal_activities, only: %i[index show create update destroy] do
+          member do
+            post :complete
+            post :cancel
+          end
+          collection do
+            get :reminders
+          end
+        end
+        
+        # Deal reminders endpoint (for activity notifications)
+        post 'deal_activities/:id/mark_reminder_sent', to: 'deal_activities#mark_reminder_sent'
         
         # Nested resources for deals
         resources :products, only: %i[index show create update destroy], controller: 'deal_products' do

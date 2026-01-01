@@ -32,6 +32,9 @@ class Company < ApplicationRecord
   has_many :loans, dependent: :destroy
   has_many :invoices, dependent: :destroy
   
+  # Tasks Module
+  has_many :tasks, dependent: :destroy
+  
   # Warranty & Service Module Associations
   has_many :company_manufacturers, dependent: :destroy
   has_many :manufacturers, through: :company_manufacturers

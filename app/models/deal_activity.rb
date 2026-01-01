@@ -1,29 +1,30 @@
-# frozen_string_literal: true
-
-class ContactActivity < ApplicationRecord
-  belongs_to :contact
-  belongs_to :account, optional: true
-  belongs_to :user # creator
+class DealActivity < ApplicationRecord
+  belongs_to :deal
+  belongs_to :user, optional: true # creator
   belongs_to :assigned_to, class_name: 'User', optional: true
-  belongs_to :related_activity, class_name: 'ContactActivity', optional: true
-  has_many :follow_up_activities, class_name: 'ContactActivity', foreign_key: :related_activity_id, dependent: :nullify
+  belongs_to :related_activity, class_name: 'DealActivity', optional: true
+  has_many :follow_up_activities, class_name: 'DealActivity', foreign_key: :related_activity_id, dependent: :nullify
   
   # reminder_method is already JSON type in PostgreSQL - no need to serialize
   # serialize :reminder_method, coder: JSON  # REMOVED - PostgreSQL native JSON
   
-  ACTIVITY_TYPES = %w[task meeting call reminder note].freeze
+  ACTIVITY_TYPES = %w[task meeting call reminder email note status_change].freeze
   STATUSES = %w[pending in_progress completed cancelled].freeze
   PRIORITIES = %w[low medium high urgent].freeze
   CALL_DIRECTIONS = %w[inbound outbound].freeze
   CALL_OUTCOMES = %w[answered voicemail no_answer busy].freeze
+  OUTCOMES = %w[positive neutral negative].freeze
   REMINDER_METHODS = %w[email popup sms].freeze
   
   validates :activity_type, presence: true, inclusion: { in: ACTIVITY_TYPES }
-  validates :subject, presence: true
-  validates :status, inclusion: { in: STATUSES }
-  validates :priority, inclusion: { in: PRIORITIES }
-  validates :call_direction, inclusion: { in: CALL_DIRECTIONS }, if: -> { activity_type == 'call' }
+  validates :subject, presence: true, if: -> { %w[task meeting call reminder].include?(activity_type) }
+  validates :description, presence: true, if: -> { %w[email note status_change].include?(activity_type) }
+  validates :status, inclusion: { in: STATUSES }, if: -> { status.present? }
+  validates :priority, inclusion: { in: PRIORITIES }, if: -> { priority.present? }
+  validates :call_direction, inclusion: { in: CALL_DIRECTIONS }, if: -> { activity_type == 'call' && call_direction.present? }
   validates :call_outcome, inclusion: { in: CALL_OUTCOMES }, if: -> { call_outcome.present? }
+  validates :outcome, inclusion: { in: OUTCOMES }, allow_blank: true
+  validates :duration, numericality: { greater_than_or_equal_to: 0 }, allow_blank: true
   
   validate :validate_activity_type_fields
   
@@ -31,18 +32,22 @@ class ContactActivity < ApplicationRecord
   scope :meetings, -> { where(activity_type: 'meeting') }
   scope :calls, -> { where(activity_type: 'call') }
   scope :reminders, -> { where(activity_type: 'reminder') }
+  scope :emails, -> { where(activity_type: 'email') }
+  scope :notes, -> { where(activity_type: 'note') }
   scope :pending, -> { where(status: 'pending') }
   scope :completed, -> { where(status: 'completed') }
   scope :overdue, -> { where('due_date < ? AND status != ?', Time.current, 'completed') }
   scope :upcoming, -> { where('due_date > ? AND status = ?', Time.current, 'pending').order(due_date: :asc) }
   scope :for_user, ->(user_id) { where(assigned_to_id: user_id) }
-  scope :for_account, ->(account_id) { where(account_id: account_id) }
+  scope :recent, -> { order(created_at: :desc) }
+  scope :by_type, ->(type) { where(activity_type: type) }
+  scope :with_outcome, -> { where.not(outcome: nil) }
+  
+  before_validation :ensure_reminder_method_array
+  before_validation :set_defaults
   
   after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
   after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
-  after_update :update_contact_last_activity
-  before_validation :ensure_reminder_method_array
-  before_validation :set_account_from_contact
   
   def complete!
     update!(status: 'completed', completed_at: Time.current)
@@ -58,17 +63,17 @@ class ContactActivity < ApplicationRecord
   
   private
   
-  def set_account_from_contact
-    # Automatically set account_id from contact if not set
-    self.account_id ||= contact.account_id if contact && contact.account_id.present?
-  end
-  
   def ensure_reminder_method_array
     if reminder_method.is_a?(String)
       self.reminder_method = JSON.parse(reminder_method) rescue []
     elsif reminder_method.nil?
       self.reminder_method = []
     end
+  end
+  
+  def set_defaults
+    self.status ||= 'pending' if %w[task meeting call reminder].include?(activity_type)
+    self.priority ||= 'medium' if %w[task meeting call reminder].include?(activity_type)
   end
   
   def validate_activity_type_fields
@@ -81,10 +86,6 @@ class ContactActivity < ApplicationRecord
       errors.add(:call_direction, 'is required for calls') if call_direction.blank?
     when 'reminder'
       errors.add(:reminder_time, 'is required for reminders') if reminder_time.blank?
-      # Note: reminder_method validation removed - using unified notification system
-      # User preferences in notification_settings control which channels are used
-    when 'note'
-      # Notes don't require any additional fields
     end
   end
   
@@ -95,16 +96,16 @@ class ContactActivity < ApplicationRecord
     
     # If reminder time is in the past or within next minute, send immediately
     if delay <= 60
-      Rails.logger.info "[ContactActivity] Reminder time is past or very soon, sending immediately for activity #{id}"
+      Rails.logger.info "[DealActivity] Reminder time is past or very soon, sending immediately for activity #{id}"
       ActivityReminderService.send_reminder(self)
       update_column(:reminder_sent, true)
     else
       # Schedule for future
-      ActivityReminderJob.set(wait: delay.seconds).perform_later(id, 'ContactActivity')
-      Rails.logger.info "[ContactActivity] Scheduled reminder job for activity #{id} in #{delay} seconds (at #{reminder_time})"
+      ActivityReminderJob.set(wait: delay.seconds).perform_later(id, 'DealActivity')
+      Rails.logger.info "[DealActivity] Scheduled reminder job for activity #{id} in #{delay} seconds (at #{reminder_time})"
     end
   rescue => e
-    Rails.logger.error "[ContactActivity] Failed to schedule reminder: #{e.message}"
+    Rails.logger.error "[DealActivity] Failed to schedule reminder: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
   end
   
@@ -112,14 +113,8 @@ class ContactActivity < ApplicationRecord
     # Reset reminder_sent flag when reminder_time changes
     update_column(:reminder_sent, false)
     schedule_reminders
-    Rails.logger.info "[ContactActivity] Rescheduled reminder for activity #{id}"
+    Rails.logger.info "[DealActivity] Rescheduled reminder for activity #{id}"
   rescue => e
-    Rails.logger.error "[ContactActivity] Failed to reschedule reminder: #{e.message}"
-  end
-  
-  def update_contact_last_activity
-    contact.touch(:updated_at) if contact
-  rescue => e
-    Rails.logger.error "[ContactActivity] Failed to touch contact: #{e.message}"
+    Rails.logger.error "[DealActivity] Failed to reschedule reminder: #{e.message}"
   end
 end

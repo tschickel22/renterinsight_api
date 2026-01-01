@@ -18,6 +18,7 @@ class Location < ApplicationRecord
   has_many :quotes, dependent: :nullify
   has_many :brochures, dependent: :nullify
   has_many :location_activities, dependent: :destroy
+  has_many :tasks, dependent: :nullify
   
   # Warranty & Service Module Associations
   has_many :location_manufacturers, dependent: :destroy

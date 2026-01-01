@@ -659,6 +659,44 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["company_id"], name: "index_custom_fields_on_company_id"
   end
 
+  create_table "deal_activities", force: :cascade do |t|
+    t.bigint "deal_id", null: false
+    t.bigint "user_id"
+    t.bigint "assigned_to_id"
+    t.bigint "related_activity_id"
+    t.string "activity_type", null: false
+    t.string "subject"
+    t.text "description"
+    t.string "status"
+    t.string "priority"
+    t.datetime "due_date"
+    t.datetime "start_time"
+    t.datetime "end_time"
+    t.datetime "completed_at"
+    t.string "phone_number"
+    t.string "call_direction"
+    t.string "call_outcome"
+    t.integer "duration"
+    t.string "location"
+    t.string "meeting_link"
+    t.text "attendees"
+    t.string "outcome"
+    t.datetime "reminder_time"
+    t.json "reminder_method"
+    t.boolean "reminder_sent", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["activity_type"], name: "index_deal_activities_on_activity_type"
+    t.index ["assigned_to_id"], name: "index_deal_activities_on_assigned_to_id"
+    t.index ["deal_id"], name: "index_deal_activities_on_deal_id"
+    t.index ["due_date"], name: "index_deal_activities_on_due_date"
+    t.index ["priority"], name: "index_deal_activities_on_priority"
+    t.index ["related_activity_id"], name: "index_deal_activities_on_related_activity_id"
+    t.index ["reminder_time"], name: "index_deal_activities_on_reminder_time"
+    t.index ["status"], name: "index_deal_activities_on_status"
+    t.index ["user_id"], name: "index_deal_activities_on_user_id"
+  end
+
   create_table "deal_products", force: :cascade do |t|
     t.integer "deal_id", null: false
     t.integer "product_id"
@@ -2078,6 +2116,40 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["company_id"], name: "index_tags_on_company_id"
   end
 
+  create_table "tasks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "taskable_type"
+    t.bigint "taskable_id"
+    t.string "title", null: false
+    t.text "description"
+    t.integer "status", default: 0, null: false
+    t.integer "priority", default: 1, null: false
+    t.string "task_module"
+    t.bigint "assigned_to_id"
+    t.datetime "due_date"
+    t.datetime "completed_at"
+    t.string "source_type"
+    t.string "source_id"
+    t.string "link"
+    t.jsonb "tags", default: []
+    t.jsonb "custom_fields", default: {}
+    t.string "created_by"
+    t.string "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assigned_to_id"], name: "index_tasks_on_assigned_to_id"
+    t.index ["company_id", "assigned_to_id"], name: "index_tasks_on_company_and_assigned_to"
+    t.index ["company_id", "location_id"], name: "index_tasks_on_company_and_location"
+    t.index ["company_id", "status"], name: "index_tasks_on_company_and_status"
+    t.index ["company_id", "task_module"], name: "index_tasks_on_company_and_module"
+    t.index ["company_id"], name: "index_tasks_on_company_id"
+    t.index ["due_date"], name: "index_tasks_on_due_date"
+    t.index ["location_id"], name: "index_tasks_on_location_id"
+    t.index ["status", "due_date"], name: "index_tasks_on_status_and_due_date"
+    t.index ["taskable_type", "taskable_id"], name: "index_tasks_on_taskable"
+  end
+
   create_table "templates", force: :cascade do |t|
     t.string "name", null: false
     t.string "template_type", null: false
@@ -2549,6 +2621,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "contacts", "locations"
   add_foreign_key "custom_fields", "companies"
+  add_foreign_key "deal_activities", "deal_activities", column: "related_activity_id"
+  add_foreign_key "deal_activities", "deals"
+  add_foreign_key "deal_activities", "users"
+  add_foreign_key "deal_activities", "users", column: "assigned_to_id"
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
@@ -2646,6 +2722,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
   add_foreign_key "subscription_plan_modules", "subscription_plans"
   add_foreign_key "syndication_partners", "companies"
   add_foreign_key "tag_assignments", "tags"
+  add_foreign_key "tasks", "companies"
+  add_foreign_key "tasks", "locations"
+  add_foreign_key "tasks", "users", column: "assigned_to_id"
   add_foreign_key "templates", "companies"
   add_foreign_key "tenant_module_overrides", "companies"
   add_foreign_key "tenant_module_overrides", "users", column: "overridden_by_id"

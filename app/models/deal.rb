@@ -16,6 +16,7 @@ class Deal < ApplicationRecord
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
+  has_many :activities, class_name: 'DealActivity', dependent: :destroy
   
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
