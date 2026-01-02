@@ -472,6 +472,7 @@ module Api
           status: ticket.status,
           priority: ticket.priority,
           assignedTo: ticket.assigned_to,
+          assignedToUser: ticket.assigned_to.present? ? serialize_assigned_user(ticket.assigned_to) : nil,
           scheduledDate: ticket.scheduled_date,
           notes: ticket.notes,
           parts: parts_array,
@@ -536,6 +537,19 @@ module Api
         data[:warrantyClaim] = ticket.warranty_claim_owned ? serialize_warranty_claim(ticket.warranty_claim_owned) : nil
         
         data
+      end
+      
+      def serialize_assigned_user(user_id)
+        user = User.find_by(id: user_id)
+        return nil unless user
+        
+        {
+          id: user.id,
+          name: user.name,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          email: user.email
+        }
       end
       
       def serialize_attachment(attachment)
