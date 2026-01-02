@@ -33,6 +33,11 @@ class User < ApplicationRecord
     end
   end
   
+  # Alias for consistency with other models
+  def full_name
+    name
+  end
+  
   # Status helpers
   def inactive?
     status == 'inactive'

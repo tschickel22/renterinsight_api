@@ -145,6 +145,13 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== CALENDAR ====================
+      scope path: 'calendar', controller: 'calendar' do
+        get 'events'
+        get 'views', action: :available_views
+        get 'stats'
+      end
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do
