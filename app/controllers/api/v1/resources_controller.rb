@@ -112,6 +112,8 @@ module Api
           display_name: resource.name,
           description: resource.description,
           category: resource.category,
+          permission_ui_type: resource.permission_ui_type,
+          permission_groups: resource.permission_groups,
           active: resource.active,
           created_at: resource.created_at,
           updated_at: resource.updated_at

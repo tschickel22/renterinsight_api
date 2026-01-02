@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_01_223046) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_02_031104) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1869,9 +1869,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_01_223046) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "permission_ui_type", default: "standard_crud", null: false
+    t.jsonb "permission_groups", default: {}, null: false
     t.index ["active"], name: "index_resources_on_active"
     t.index ["category"], name: "index_resources_on_category"
     t.index ["key"], name: "index_resources_on_key", unique: true
+    t.index ["permission_ui_type"], name: "index_resources_on_permission_ui_type"
   end
 
   create_table "role_permissions", force: :cascade do |t|

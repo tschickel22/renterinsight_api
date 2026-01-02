@@ -132,7 +132,7 @@ class CalendarService
     activities = activities.includes(:lead, :assigned_to)
     activities = filter_activities_by_view(activities, view)
     
-    activities.map { |activity| activity_to_event(activity, 'lead') }
+    activities.map { |activity| activity_to_event(activity, 'lead') }.compact
   end
   
   # Load account activities
@@ -141,7 +141,7 @@ class CalendarService
     activities = activities.includes(:account, :assigned_to)
     activities = filter_activities_by_view(activities, view)
     
-    activities.map { |activity| activity_to_event(activity, 'account') }
+    activities.map { |activity| activity_to_event(activity, 'account') }.compact
   end
   
   # Load contact activities
@@ -150,7 +150,7 @@ class CalendarService
     activities = activities.includes(:contact, :assigned_to)
     activities = filter_activities_by_view(activities, view)
     
-    activities.map { |activity| activity_to_event(activity, 'contact') }
+    activities.map { |activity| activity_to_event(activity, 'contact') }.compact
   end
   
   # Load deal activities
@@ -159,7 +159,7 @@ class CalendarService
     activities = activities.includes(:deal, :assigned_to)
     activities = filter_activities_by_view(activities, view)
     
-    activities.map { |activity| activity_to_event(activity, 'deal') }
+    activities.map { |activity| activity_to_event(activity, 'deal') }.compact
   end
   
   # Filter activities by calendar view
@@ -244,7 +244,7 @@ class CalendarService
       tickets.where(assigned_to: user.id.to_s)
     end
     
-    tickets.map { |ticket| service_ticket_to_event(ticket) }
+    tickets.map { |ticket| service_ticket_to_event(ticket) }.compact  # Remove nil values
   end
   
   # Get team user IDs based on user's assigned locations
@@ -284,9 +284,11 @@ class CalendarService
       entity&.name || 'Unknown Deal'
     end
     
-    # Determine start/end times
-    start_time = activity.start_time || activity.due_date&.beginning_of_day
-    end_time = activity.end_time || activity.due_date&.end_of_day
+    # Determine start/end times based on activity type
+    start_time, end_time, all_day = calculate_activity_times(activity)
+    
+    # Return nil if no valid time could be calculated
+    return nil if start_time.nil?
     
     # Color by activity type
     color = activity_color(activity.activity_type)
@@ -295,9 +297,9 @@ class CalendarService
       id: "#{source_type}-activity-#{activity.id}",
       title: activity.subject,
       type: activity.activity_type,
-      start: start_time,
-      end: end_time,
-      all_day: activity.start_time.nil?,
+      start: start_time.iso8601,
+      end: end_time.iso8601,
+      all_day: all_day,
       status: activity.status,
       priority: activity.priority,
       description: activity.description,
@@ -318,37 +320,125 @@ class CalendarService
     }
   end
   
+  # Calculate start/end times based on activity type
+  def calculate_activity_times(activity)
+    # Get duration from either 'estimated_hours' or 'duration' field
+    duration_hours = if activity.respond_to?(:estimated_hours)
+      activity.estimated_hours
+    elsif activity.respond_to?(:duration)
+      activity.duration
+    else
+      nil
+    end
+    duration_hours ||= 1  # Default to 1 hour if not set
+    
+    case activity.activity_type
+    when 'task'
+      # Tasks: Use due_date + duration
+      if activity.due_date.present?
+        # If due_date is already a datetime, use it as-is
+        # Otherwise assume it's at 9:00 AM
+        start_time = activity.due_date.is_a?(DateTime) ? activity.due_date : activity.due_date.to_time.change(hour: 9)
+        end_time = start_time + duration_hours.hours
+        [start_time, end_time, false]
+      else
+        [nil, nil, false]  # No date = don't show on calendar
+      end
+      
+    when 'meeting'
+      # Meetings: Use start_time and end_time
+      if activity.start_time.present? && activity.end_time.present?
+        [activity.start_time, activity.end_time, false]
+      elsif activity.due_date.present?
+        # Fallback: use due_date with 1-hour duration
+        start_time = activity.due_date.is_a?(DateTime) ? activity.due_date : activity.due_date.to_time.change(hour: 9)
+        [start_time, start_time + 1.hour, false]
+      else
+        [nil, nil, false]
+      end
+      
+    when 'call'
+      # Calls: Use due_date (scheduled time) with duration
+      if activity.due_date.present?
+        start_time = activity.due_date.is_a?(DateTime) ? activity.due_date : activity.due_date.to_time.change(hour: 9)
+        end_time = start_time + duration_hours.hours
+        [start_time, end_time, false]
+      else
+        [nil, nil, false]
+      end
+      
+    when 'reminder'
+      # Reminders: Use reminder_time with duration
+      if activity.reminder_time.present?
+        start_time = activity.reminder_time
+        end_time = start_time + duration_hours.hours
+        [start_time, end_time, false]
+      elsif activity.due_date.present?
+        # Fallback to due_date
+        start_time = activity.due_date.is_a?(DateTime) ? activity.due_date : activity.due_date.to_time.change(hour: 9)
+        [start_time, start_time + 1.hour, false]
+      else
+        [nil, nil, false]
+      end
+      
+    else
+      # Other activity types: Try start_time/end_time, fallback to due_date
+      if activity.start_time.present?
+        end_time = activity.end_time || activity.start_time + 1.hour
+        [activity.start_time, end_time, false]
+      elsif activity.due_date.present?
+        start_time = activity.due_date.is_a?(DateTime) ? activity.due_date : activity.due_date.to_time.change(hour: 9)
+        [start_time, start_time + 1.hour, false]
+      else
+        [nil, nil, false]
+      end
+    end
+  end
+  
   # Convert service ticket to unified event format
   def service_ticket_to_event(ticket)
-    {
-      id: "service-ticket-#{ticket.id}",
-      title: ticket.title,
-      type: 'service_ticket',
-      start: ticket.scheduled_date&.beginning_of_day,
-      end: ticket.scheduled_date&.end_of_day,
-      all_day: true,
-      status: ticket.status,
-      priority: ticket.priority,
-      description: ticket.description,
-      assigned_to: ticket.assigned_to_user ? {
-        id: ticket.assigned_to_user.id,
-        name: ticket.assigned_to_user.full_name,
-        email: ticket.assigned_to_user.email
-      } : nil,
-      source: {
+    # Combine scheduled_date + scheduled_time to create start datetime
+    if ticket.scheduled_date.present?
+      scheduled_time = ticket.custom_fields&.dig('scheduledTime') || '09:00'
+      estimated_hours = ticket.custom_fields&.dig('estimatedHours') || 1
+      
+      # Parse the date and time
+      start_datetime = DateTime.parse("#{ticket.scheduled_date} #{scheduled_time}")
+      end_datetime = start_datetime + estimated_hours.hours
+      
+      {
+        id: "service-ticket-#{ticket.id}",
+        title: ticket.title,
         type: 'service_ticket',
-        id: ticket.id,
-        name: ticket.title
-      },
-      color: '#EF4444',  # Red for service tickets
-      entity_name: 'Service Ticket',
-      entity_type: 'service_ticket',
-      entity_id: ticket.id,
-      location_id: ticket.location_id,
-      vehicle_id: ticket.vehicle_id,
-      account_id: ticket.account_id,
-      contact_id: ticket.contact_id
-    }
+        start: start_datetime.iso8601,  # ISO datetime string
+        end: end_datetime.iso8601,      # ISO datetime string
+        all_day: false,                  # CRITICAL: no longer all-day!
+        status: ticket.status,
+        priority: ticket.priority,
+        description: ticket.description,
+        assigned_to: ticket.assigned_to_user ? {
+          id: ticket.assigned_to_user.id,
+          name: ticket.assigned_to_user.full_name,
+          email: ticket.assigned_to_user.email
+        } : nil,
+        source: {
+          type: 'service_ticket',
+          id: ticket.id,
+          name: ticket.title
+        },
+        color: '#EF4444',  # Red for service tickets
+        entity_name: 'Service Ticket',
+        entity_type: 'service_ticket',
+        entity_id: ticket.id,
+        location_id: ticket.location_id,
+        vehicle_id: ticket.vehicle_id,
+        account_id: ticket.account_id,
+        contact_id: ticket.contact_id
+      }
+    else
+      # No scheduled date - don't add to calendar or make it all-day
+      nil
+    end
   end
   
   # Get color for activity type

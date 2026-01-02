@@ -72,7 +72,9 @@ module Api
             name: resource.name,
             display_name: resource.name,
             category: resource.category,
-            description: resource.description
+            description: resource.description,
+            permission_ui_type: resource.permission_ui_type || 'standard_crud',
+            permission_groups: resource.permission_groups || {}
           }
         end
         
