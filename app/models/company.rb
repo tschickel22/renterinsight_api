@@ -24,6 +24,8 @@ class Company < ApplicationRecord
   # Commission Engine Associations
   has_many :commission_rules, dependent: :destroy
   has_many :commissions, dependent: :destroy
+  has_many :commission_components, dependent: :destroy
+  has_many :commission_payments, dependent: :destroy
   has_many :sources, dependent: :destroy
   has_many :tags, dependent: :destroy
   has_many :territories, dependent: :destroy

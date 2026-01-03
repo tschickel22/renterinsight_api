@@ -485,6 +485,34 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== COMMISSION COMPONENTS ====================
+      resources :commission_components, path: 'commission-components' do
+        member do
+          post :toggle
+          post :calculate  # Test calculation with sample deal
+        end
+        
+        collection do
+          get :options  # Get dropdown options for form
+        end
+      end
+      
+      # ==================== COMMISSION PAYMENTS ====================
+      resources :commission_payments, path: 'commission-payments' do
+        member do
+          post :approve
+          post :mark_paid, path: 'mark-paid'
+          post :reverse
+        end
+        
+        collection do
+          get :stats
+          post :bulk_approve, path: 'bulk-approve'
+          post :bulk_mark_paid, path: 'bulk-mark-paid'
+          post :generate_for_deal, path: 'generate-for-deal'
+        end
+      end
+      
       # ==================== COMMISSION RULES ====================
       resources :commission_rules, path: 'commission-rules' do
         member do
@@ -977,6 +1005,7 @@ Rails.application.routes.draw do
           get :tags
           post :tags, to: 'deals#add_tags'
           delete 'tags/:tag_name', to: 'deals#remove_tag'
+          get :commission_breakdown # NEW: Commission economics breakdown
         end
         
         # Deal Activities (unified activities)

@@ -17,6 +17,7 @@ class Deal < ApplicationRecord
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
   has_many :activities, class_name: 'DealActivity', dependent: :destroy
+  has_many :commission_payments, dependent: :destroy
   
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
@@ -49,6 +50,9 @@ class Deal < ApplicationRecord
   
   # Normalize stage to lowercase before validation
   before_validation :normalize_stage
+  
+  # Auto-generate commission payment when deal is delivered
+  after_save :generate_commission_payment, if: :just_delivered?
   
   def normalize_stage
     self.stage = stage&.downcase
@@ -132,5 +136,93 @@ class Deal < ApplicationRecord
   # Vehicle display helper
   def vehicle_display_name
     vehicle&.display_name
+  end
+  
+  # ============================================================================
+  # COMMISSION ECONOMICS CALCULATIONS
+  # ============================================================================
+  
+  # FRONT GROSS (Sale Price - Cost - Trade Difference)
+  def front_gross
+    base_gross = (selling_price || 0) - (unit_cost || 0)
+    trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
+    (base_gross - trade_difference).round(2)
+  end
+  
+  # PACK (dealer holdback/administrative fee)
+  def effective_pack_amount
+    return pack_amount if pack_amount.present?
+    return location.default_pack_amount if location&.default_pack_amount.present?
+    company&.default_pack_amount || 0
+  end
+  
+  # COMMISSIONABLE FRONT GROSS (what most dealers pay on)
+  def commissionable_front_gross
+    (front_gross - effective_pack_amount).round(2)
+  end
+  
+  # BACK GROSS (finance & products)
+  def back_gross
+    ((finance_reserve || 0) + (product_margin || 0)).round(2)
+  end
+  
+  # TOTAL GROSS
+  def total_gross
+    (front_gross + back_gross).round(2)
+  end
+  
+  # ADD-ON GROSS (MH dealers pay separately on these)
+  def addon_gross
+    ((delivery_fee || 0) + (setup_fee || 0) + (skirting_fee || 0) + (accessories_total || 0)).round(2)
+  end
+  
+  # Gross per unit (for multi-unit deals)
+  def gross_per_unit
+    units = (quantity || 1)
+    units > 0 ? (total_gross / units).round(2) : 0
+  end
+  
+  # Helper for checking if deal has trade
+  def has_trade?
+    trade_allowance.present? && trade_allowance > 0
+  end
+  
+  # Validation: warn if trade has negative equity
+  validate :trade_equity_check, if: :has_trade?
+  
+  def trade_equity_check
+    if (trade_payoff || 0) > (trade_allowance || 0)
+      negative_equity = ((trade_payoff || 0) - (trade_allowance || 0)).round(2)
+      # This is just a warning - some deals have negative equity
+      # Don't add error, just log for visibility
+      Rails.logger.warn("Deal #{id}: Negative equity of $#{negative_equity} (Payoff: $#{trade_payoff}, Allowance: $#{trade_allowance})")
+    end
+  end
+  
+  # Helper to check if deal is delivered (for commission generation)
+  def delivered?
+    stage == 'closed_won' && delivery_date.present?
+  end
+  
+  # Check if status just changed to delivered
+  def just_delivered?
+    saved_change_to_stage? && stage == 'closed_won' && delivery_date.present?
+  end
+  
+  # Primary salesperson helper
+  def primary_salesperson
+    User.find_by(id: primary_salesperson_id)
+  end
+  
+  private
+  
+  # Auto-generate commission payment when deal is delivered
+  def generate_commission_payment
+    return unless primary_salesperson_id.present?
+    
+    CommissionPaymentGeneratorService.generate_for_deal(self)
+  rescue StandardError => e
+    Rails.logger.error "[Deal] Failed to generate commission payment for deal #{id}: #{e.message}"
+    # Don't raise - we don't want to block the deal save if commission generation fails
   end
 end
