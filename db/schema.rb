@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_02_031104) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_02_180203) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -370,6 +370,60 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_02_031104) do
     t.index ["mfa_enabled"], name: "index_buyer_portal_accesses_on_mfa_enabled"
     t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
+  end
+
+  create_table "commission_audit_entries", force: :cascade do |t|
+    t.bigint "commission_id", null: false
+    t.bigint "user_id", null: false
+    t.string "action", null: false
+    t.jsonb "previous_value"
+    t.jsonb "new_value"
+    t.text "notes"
+    t.datetime "created_at", precision: nil, null: false
+    t.index ["action"], name: "index_commission_audit_entries_on_action"
+    t.index ["commission_id", "created_at"], name: "index_commission_audit_entries_on_commission_id_and_created_at"
+    t.index ["commission_id"], name: "index_commission_audit_entries_on_commission_id"
+    t.index ["user_id"], name: "index_commission_audit_entries_on_user_id"
+  end
+
+  create_table "commission_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "rule_type", null: false
+    t.decimal "rate", precision: 5, scale: 4
+    t.decimal "amount", precision: 10, scale: 2
+    t.jsonb "tiers", default: []
+    t.boolean "is_active", default: true
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_active"], name: "index_commission_rules_on_company_id_and_is_active"
+    t.index ["company_id"], name: "index_commission_rules_on_company_id"
+    t.index ["rule_type"], name: "index_commission_rules_on_rule_type"
+  end
+
+  create_table "commissions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "deal_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "commission_rule_id"
+    t.bigint "location_id"
+    t.string "commission_type", null: false
+    t.decimal "rate", precision: 5, scale: 4
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.string "status", default: "pending", null: false
+    t.date "paid_date"
+    t.text "notes"
+    t.jsonb "custom_fields", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["commission_rule_id"], name: "index_commissions_on_commission_rule_id"
+    t.index ["commission_type"], name: "index_commissions_on_commission_type"
+    t.index ["company_id", "status"], name: "index_commissions_on_company_id_and_status"
+    t.index ["deal_id"], name: "index_commissions_on_deal_id"
+    t.index ["location_id"], name: "index_commissions_on_location_id"
+    t.index ["paid_date"], name: "index_commissions_on_paid_date"
+    t.index ["user_id", "status"], name: "index_commissions_on_user_id_and_status"
   end
 
   create_table "communication_events", force: :cascade do |t|
@@ -2610,6 +2664,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_02_031104) do
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
   add_foreign_key "brochures", "companies"
+  add_foreign_key "commission_audit_entries", "commissions"
+  add_foreign_key "commission_audit_entries", "users"
+  add_foreign_key "commission_rules", "companies"
+  add_foreign_key "commissions", "commission_rules"
+  add_foreign_key "commissions", "companies"
+  add_foreign_key "commissions", "deals"
+  add_foreign_key "commissions", "locations"
+  add_foreign_key "commissions", "users"
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"

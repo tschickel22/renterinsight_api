@@ -20,6 +20,10 @@ class Company < ApplicationRecord
   has_many :templates, dependent: :destroy
   has_many :locations, dependent: :destroy
   has_many :bank_accounts, dependent: :destroy
+  
+  # Commission Engine Associations
+  has_many :commission_rules, dependent: :destroy
+  has_many :commissions, dependent: :destroy
   has_many :sources, dependent: :destroy
   has_many :tags, dependent: :destroy
   has_many :territories, dependent: :destroy

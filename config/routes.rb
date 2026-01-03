@@ -470,6 +470,28 @@ Rails.application.routes.draw do
       # Contact activity reminders (for marking as sent)
       post 'contact_activities/:id/mark_reminder_sent', to: 'contact_activities#mark_reminder_sent'
       
+      # ==================== COMMISSIONS ====================
+      resources :commissions do
+        member do
+          post :approve
+          post :reject
+          post :mark_paid, path: 'mark-paid'
+          get :audit_trail, path: 'audit-trail'
+        end
+        
+        collection do
+          get :stats
+          post :calculate
+        end
+      end
+      
+      # ==================== COMMISSION RULES ====================
+      resources :commission_rules, path: 'commission-rules' do
+        member do
+          post :calculate
+        end
+      end
+      
       # ==================== PORTAL USERS ====================
       resources :portal_users, path: 'portal_users' do
         collection do
