@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_03_002505) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_03_170001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -645,6 +645,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_03_002505) do
     t.string "quickbooks_scope", default: "company", null: false
     t.jsonb "quickbooks_settings", default: {}
     t.decimal "default_pack_amount", precision: 15, scale: 2, default: "0.0"
+    t.integer "fiscal_year_start_month", default: 1, null: false, comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. Default is 1 (January) for calendar year."
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
@@ -1421,6 +1422,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_03_002505) do
     t.boolean "quickbooks_sync_enabled", default: false
     t.jsonb "quickbooks_settings", default: {}
     t.decimal "default_pack_amount", precision: 15, scale: 2
+    t.integer "fiscal_year_start_month", comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. If NULL, falls back to company.fiscal_year_start_month. If both NULL, defaults to 1 (January) for calendar year."
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
@@ -2470,7 +2472,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_03_002505) do
     t.datetime "invitation_sent_at"
     t.datetime "invitation_expires_at"
     t.jsonb "notification_settings", default: {"lead_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "account_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "contact_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "activity_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}}
+    t.jsonb "custom_permissions", default: []
     t.index ["company_id"], name: "index_users_on_company_id"
+    t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
     t.index ["email", "invitation_id"], name: "index_users_on_email_and_invitation_id"
     t.index ["invitation_id"], name: "index_users_on_invitation_id"

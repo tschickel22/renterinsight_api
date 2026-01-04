@@ -270,6 +270,25 @@ module Api
         render json: { error: 'Deal not found' }, status: :not_found
       end
       
+      # GET /api/v1/commission-payments/preview-for-deal/:deal_id
+      def preview_for_deal
+        return unless authorize_action!('commission_payments', 'read')
+        
+        deal_id = params[:deal_id]
+        
+        unless deal_id.present?
+          render json: { error: 'deal_id required' }, status: :bad_request
+          return
+        end
+        
+        deal = @company.deals.find(deal_id)
+        preview = CommissionPaymentGeneratorService.preview_for_deal(deal)
+        
+        render json: preview
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Deal not found' }, status: :not_found
+      end
+      
       private
       
       def set_payment

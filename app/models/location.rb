@@ -37,6 +37,11 @@ class Location < ApplicationRecord
   validates :zip_code, length: { maximum: 10 }, allow_blank: true
   validates :country, length: { maximum: 2 }, allow_blank: true
   
+  # Fiscal year validation (1-12 for January-December, allow nil to fall back to company)
+  validates :fiscal_year_start_month, 
+            inclusion: { in: 1..12, allow_nil: true }, 
+            numericality: { only_integer: true, greater_than_or_equal_to: 1, less_than_or_equal_to: 12, allow_nil: true }
+  
   # Scopes
   scope :active, -> { where(active: true, is_deleted: false) }
   scope :inactive, -> { where(active: false) }
@@ -201,6 +206,65 @@ class Location < ApplicationRecord
   
   def deposit_bank_account
     bank_accounts.active.deposit.first
+  end
+  
+  # Fiscal Year Helper Methods
+  # Three-tier fallback: Location → Company → Default (1 = January)
+  
+  # Get the resolved fiscal year start month
+  def resolved_fiscal_year_start_month
+    fiscal_year_start_month || company.fiscal_year_start_month || 1
+  end
+  
+  # Returns the fiscal year for a given date
+  def fiscal_year(date = Date.current)
+    start_month = resolved_fiscal_year_start_month
+    if date.month >= start_month
+      date.year
+    else
+      date.year - 1
+    end
+  end
+  
+  # Returns the fiscal quarter (1-4) for a given date
+  def fiscal_quarter(date = Date.current)
+    start_month = resolved_fiscal_year_start_month
+    months_since_fy_start = (date.month - start_month) % 12
+    (months_since_fy_start / 3) + 1
+  end
+  
+  # Returns start and end dates for a fiscal quarter
+  # quarter: 1-4, year: fiscal year
+  def fiscal_quarter_dates(quarter, year = fiscal_year)
+    raise ArgumentError, "Quarter must be 1-4" unless (1..4).include?(quarter)
+    
+    start_month = resolved_fiscal_year_start_month
+    
+    # Calculate start month for this quarter
+    quarter_start_month = start_month + ((quarter - 1) * 3)
+    
+    # Adjust if start_month goes beyond December
+    if quarter_start_month > 12
+      quarter_start_month -= 12
+      start_year = year + 1
+    else
+      start_year = year
+    end
+    
+    start_date = Date.new(start_year, quarter_start_month, 1)
+    end_date = start_date.end_of_month + 2.months
+    
+    { start_date: start_date, end_date: end_date }
+  end
+  
+  # Returns the month name for fiscal_year_start_month
+  def fiscal_year_start_month_name
+    Date::MONTHNAMES[resolved_fiscal_year_start_month]
+  end
+  
+  # Check if location has custom fiscal year (different from company)
+  def has_custom_fiscal_year?
+    fiscal_year_start_month.present?
   end
 
   private

@@ -8,7 +8,7 @@ class CommissionComponent < ApplicationRecord
   COMPONENT_TYPES = %w[
     percent_of_gross
     flat_per_unit
-    monthly_bonus
+    volume_bonus
     addon_commission
   ].freeze
   
@@ -61,17 +61,17 @@ class CommissionComponent < ApplicationRecord
   validates :flat_amount,
     presence: true,
     numericality: { greater_than: 0 },
-    if: -> { component_type.in?(%w[flat_per_unit monthly_bonus]) }
+    if: -> { component_type.in?(%w[flat_per_unit volume_bonus]) }
   
   validates :units_threshold,
     presence: true,
     numericality: { greater_than: 0, only_integer: true },
-    if: -> { component_type == 'monthly_bonus' }
+    if: -> { component_type == 'volume_bonus' }
   
   validates :threshold_period,
     presence: true,
     inclusion: { in: THRESHOLD_PERIODS },
-    if: -> { component_type == 'monthly_bonus' }
+    if: -> { component_type == 'volume_bonus' }
   
   # ============================================================================
   # SCOPES
@@ -84,6 +84,12 @@ class CommissionComponent < ApplicationRecord
   scope :company_wide, -> { where(location_id: nil) }
   scope :location_specific, -> { where.not(location_id: nil) }
   scope :ordered, -> { order(:sequence, :id) }
+
+# Location filtering scope (matches standard pattern)
+scope :for_current_location, -> {
+  Current.location_filtered? ? where(location_id: Current.location_id) : all
+}
+
   
   # ============================================================================
   # INSTANCE METHODS
@@ -107,7 +113,7 @@ class CommissionComponent < ApplicationRecord
       "#{(rate * 100).round(2)}% of #{gross_type.humanize} gross"
     when 'flat_per_unit'
       "$#{flat_amount} per unit"
-    when 'monthly_bonus'
+    when 'volume_bonus'
       "$#{flat_amount} bonus if #{units_threshold}+ units per #{threshold_period}"
     when 'addon_commission'
       "#{(rate * 100).round(2)}% of add-ons (delivery, setup, etc.)"

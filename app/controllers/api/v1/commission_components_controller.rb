@@ -10,7 +10,7 @@ module Api
       def index
         return unless authorize_action!('commission_components', 'read')
         
-        components = @company.commission_components.where(is_deleted: [false, nil])
+        components = @company.commission_components
         
         # Filter by location if specified
         if params[:location_id].present?

@@ -392,43 +392,6 @@ module Api
         @deal.destroy
         head :no_content
       end
-      
-      # GET /api/crm/deals/:id/commission_breakdown
-      def commission_breakdown
-        return unless authorize_action!('deals', 'read')
-        
-        render json: {
-          deal_id: @deal.id,
-          deal_number: @deal.id,  # Or use actual deal_number if you have one
-          customer_name: @deal.customer_display_name,
-          economics: {
-            selling_price: @deal.selling_price,
-            unit_cost: @deal.unit_cost,
-            trade_allowance: @deal.trade_allowance,
-            trade_payoff: @deal.trade_payoff,
-            front_gross: @deal.front_gross,
-            pack_amount: @deal.effective_pack_amount,
-            commissionable_front_gross: @deal.commissionable_front_gross,
-            finance_reserve: @deal.finance_reserve,
-            product_margin: @deal.product_margin,
-            back_gross: @deal.back_gross,
-            total_gross: @deal.total_gross,
-            addon_gross: @deal.addon_gross,
-            delivery_fee: @deal.delivery_fee,
-            setup_fee: @deal.setup_fee,
-            skirting_fee: @deal.skirting_fee,
-            accessories_total: @deal.accessories_total,
-            gross_per_unit: @deal.gross_per_unit
-          },
-          deal_info: {
-            quantity: @deal.quantity || 1,
-            deal_type: @deal.deal_type,
-            vertical: @deal.vertical,
-            delivery_date: @deal.delivery_date,
-            status: @deal.stage
-          }
-        }
-      end
 
       private
 

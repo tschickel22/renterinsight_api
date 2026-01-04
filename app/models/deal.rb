@@ -51,6 +51,9 @@ class Deal < ApplicationRecord
   # Normalize stage to lowercase before validation
   before_validation :normalize_stage
   
+  # Sync vehicle pricing when vehicle is assigned
+  before_validation :sync_vehicle_pricing, if: :will_save_change_to_vehicle_id?
+  
   # Auto-generate commission payment when deal is delivered
   after_save :generate_commission_payment, if: :just_delivered?
   
@@ -224,5 +227,31 @@ class Deal < ApplicationRecord
   rescue StandardError => e
     Rails.logger.error "[Deal] Failed to generate commission payment for deal #{id}: #{e.message}"
     # Don't raise - we don't want to block the deal save if commission generation fails
+  end
+  
+  # Sync vehicle pricing data when vehicle is assigned
+  def sync_vehicle_pricing
+    return unless vehicle_id.present?
+    
+    # Only sync if vehicle exists
+    vehicle = Vehicle.find_by(id: vehicle_id)
+    return unless vehicle
+    
+    # Sync pricing fields from vehicle to deal
+    # Only update if deal field is blank or zero (don't overwrite manual entries > 0)
+    vehicle_price = vehicle.sale_price || vehicle.msrp
+    
+    self.selling_price = vehicle_price if selling_price.nil? || selling_price == 0
+    self.unit_cost = vehicle.cost if unit_cost.nil? || unit_cost == 0
+    self.value = vehicle_price if value.nil? || value == 0
+    
+    # Auto-populate quantity if not set
+    self.quantity ||= 1
+    
+    # Log the sync for debugging
+    Rails.logger.info "[Deal] Synced pricing from vehicle #{vehicle_id}: selling_price=$#{selling_price}, unit_cost=$#{unit_cost}, value=$#{value}"
+  rescue StandardError => e
+    Rails.logger.error "[Deal] Failed to sync vehicle pricing: #{e.message}"
+    # Don't raise - we don't want to block the deal save if vehicle sync fails
   end
 end

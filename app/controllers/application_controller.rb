@@ -4,6 +4,7 @@ require "ostruct"
 class ApplicationController < ActionController::API
   include ActionController::Cookies
   include NotificationTriggers  # Add notification helper methods
+  include CustomAuthorization   # Add custom financial permissions
   
   before_action :authenticate
   before_action :set_current_attributes

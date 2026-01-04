@@ -61,6 +61,7 @@ class CommissionPayment < ApplicationRecord
   scope :not_reversed, -> { where(is_reversed: [false, nil]) }
   scope :for_payee, ->(user_id) { where(payee_user_id: user_id) }
   scope :for_location, ->(location_id) { where('location_id IS NULL OR location_id = ?', location_id) }
+  scope :for_current_location, -> { Current.location_filtered? ? where(location_id: Current.location_id) : all }
   scope :ordered, -> { order(created_at: :desc) }
   
   # Date range scopes

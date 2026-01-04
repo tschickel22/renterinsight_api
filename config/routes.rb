@@ -510,6 +510,7 @@ Rails.application.routes.draw do
           post :bulk_approve, path: 'bulk-approve'
           post :bulk_mark_paid, path: 'bulk-mark-paid'
           post :generate_for_deal, path: 'generate-for-deal'
+          get 'preview-for-deal/:deal_id', action: :preview_for_deal, as: :preview_for_deal
         end
       end
       
@@ -1005,7 +1006,9 @@ Rails.application.routes.draw do
           get :tags
           post :tags, to: 'deals#add_tags'
           delete 'tags/:tag_name', to: 'deals#remove_tag'
-          get :commission_breakdown # NEW: Commission economics breakdown
+          get :commission_breakdown # Commission economics breakdown
+          get :financials # NEW: Get deal financials (permission-gated)
+          patch :financials, to: 'deals#update_financials' # NEW: Update deal financials (permission-gated)
         end
         
         # Deal Activities (unified activities)

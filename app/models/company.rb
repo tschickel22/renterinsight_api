@@ -82,6 +82,12 @@ class Company < ApplicationRecord
   validates :status, inclusion: { in: %w[active trial suspended cancelled], allow_nil: true }
   validates :subscription_tier, inclusion: { in: %w[free starter professional enterprise], allow_nil: true }
   
+  # Fiscal year validation (1-12 for January-December)
+  validates :fiscal_year_start_month, 
+            inclusion: { in: 1..12 }, 
+            numericality: { only_integer: true, greater_than_or_equal_to: 1, less_than_or_equal_to: 12 },
+            allow_nil: false
+  
   # Scopes
   scope :active, -> { where(status: 'active') }
   scope :trial, -> { where(status: 'trial') }
@@ -532,5 +538,48 @@ class Company < ApplicationRecord
     return Float::INFINITY if max_locations.nil?
     
     max_locations - locations_count
+  end
+  
+  # Fiscal Year Helper Methods
+  # Returns the fiscal year for a given date
+  def fiscal_year(date = Date.current)
+    if date.month >= fiscal_year_start_month
+      date.year
+    else
+      date.year - 1
+    end
+  end
+  
+  # Returns the fiscal quarter (1-4) for a given date
+  def fiscal_quarter(date = Date.current)
+    months_since_fy_start = (date.month - fiscal_year_start_month) % 12
+    (months_since_fy_start / 3) + 1
+  end
+  
+  # Returns start and end dates for a fiscal quarter
+  # quarter: 1-4, year: fiscal year
+  def fiscal_quarter_dates(quarter, year = fiscal_year)
+    raise ArgumentError, "Quarter must be 1-4" unless (1..4).include?(quarter)
+    
+    # Calculate start month (Q1 starts at fiscal_year_start_month)
+    start_month = fiscal_year_start_month + ((quarter - 1) * 3)
+    
+    # Adjust if start_month goes beyond December
+    if start_month > 12
+      start_month -= 12
+      start_year = year + 1
+    else
+      start_year = year
+    end
+    
+    start_date = Date.new(start_year, start_month, 1)
+    end_date = start_date.end_of_month + 2.months
+    
+    { start_date: start_date, end_date: end_date }
+  end
+  
+  # Returns the month name for fiscal_year_start_month
+  def fiscal_year_start_month_name
+    Date::MONTHNAMES[fiscal_year_start_month]
   end
 end
