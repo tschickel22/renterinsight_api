@@ -446,7 +446,9 @@ module Api
           :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
           :win_reason, :loss_reason, :competitor,
-          :customer_name, :source_id, :company_id, :owner_id
+          :customer_name, :source_id, :owner_id, :delivery_date
+          # NOTE: company_id is intentionally excluded - it should never change after creation
+          # It's set via @company.deals.build and must remain immutable
         )
       end
 
@@ -473,6 +475,7 @@ module Api
           probability: deal.probability,
           expectedCloseDate: deal.expected_close_date&.iso8601,
           actualCloseDate: deal.actual_close_date&.iso8601,
+          deliveryDate: deal.delivery_date&.iso8601,
           userId: deal.user_id,
           userName: deal.user&.name,
           ownerId: deal.owner_id,
