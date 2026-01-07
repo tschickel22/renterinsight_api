@@ -87,9 +87,10 @@ class CommissionPaymentGeneratorService
       
       line_items_data << {
         componentName: component.name,
-        calculationBasis: component.calculation_basis.humanize,
-        calculationMethod: component.calculation_method.humanize,
+        calculationMethod: component.component_type.humanize,  # Maps to calculation_method
+        calculationBasis: component.gross_type&.humanize || 'N/A',  # Maps to calculation_basis
         rate: component.rate,
+        flatAmount: component.flat_amount,
         basisAmount: get_basis_amount(component).round(2),
         calculatedAmount: amount.round(2)
       }
@@ -174,9 +175,7 @@ class CommissionPaymentGeneratorService
   def get_active_components(plan)
     plan.commission_components
       .active
-      .where('effective_date <= ?', @deal.delivery_date || Date.today)
-      .where('expiration_date IS NULL OR expiration_date >= ?', @deal.delivery_date || Date.today)
-      .order(:display_order)
+      .order(:sequence)
   end
   
   def create_payment(plan, components)
@@ -192,8 +191,8 @@ class CommissionPaymentGeneratorService
       line_items_data << {
         commission_component_id: component.id,
         description: component.name,
-        calculation_basis: component.calculation_basis,
-        calculation_method: component.calculation_method,
+        calculation_method: component.component_type,  # Maps to table column
+        calculation_basis: component.gross_type || 'N/A',  # Maps to table column
         rate: component.rate,
         basis_amount: get_basis_amount(component),
         calculated_amount: amount
@@ -227,105 +226,99 @@ class CommissionPaymentGeneratorService
   def calculate_component(component)
     basis_amount = get_basis_amount(component)
     
-    case component.calculation_method
-    when 'flat_rate'
-      # Fixed dollar amount per deal
-      component.rate || 0
-      
-    when 'percentage'
-      # Percentage of basis amount
-      rate = (component.rate || 0) / 100.0
+    case component.component_type
+    when 'percent_of_gross'
+      # Percentage of gross type
+      rate = component.rate || 0
       (basis_amount * rate).round(2)
       
-    when 'tiered'
-      # Tiered percentage based on amount thresholds
-      calculate_tiered(component, basis_amount)
-      
-    when 'per_unit'
-      # Dollar amount per unit sold
+    when 'flat_per_unit'
+      # Fixed dollar amount per unit
       units = @deal.quantity || 1
-      ((component.rate || 0) * units).round(2)
+      ((component.flat_amount || 0) * units).round(2)
+      
+    when 'volume_bonus'
+      # Bonus if threshold met
+      calculate_volume_bonus(component)
+      
+    when 'addon_commission'
+      # Percentage of add-ons
+      rate = component.rate || 0
+      addon_total = (@deal.delivery_fee || 0) + (@deal.setup_fee || 0) + 
+                    (@deal.skirting_fee || 0) + (@deal.accessories_total || 0)
+      (addon_total * rate).round(2)
       
     else
-      Rails.logger.warn "[CommissionPaymentGenerator] ⚠️  Unknown calculation method: #{component.calculation_method}"
+      Rails.logger.warn "[CommissionPaymentGenerator] ⚠️  Unknown component type: #{component.component_type}"
       0
     end
+  end
+  
+  # Calculate volume bonus (check if units threshold met)
+  def calculate_volume_bonus(component)
+    return 0 unless component.units_threshold.present?
+    
+    # Get unit count for the period
+    period_units = case component.threshold_period
+    when 'monthly'
+      get_monthly_unit_count
+    when 'quarterly'
+      get_quarterly_unit_count
+    else
+      @deal.quantity || 1
+    end
+    
+    # Return bonus if threshold met
+    period_units >= component.units_threshold ? (component.flat_amount || 0) : 0
+  end
+  
+  # Get units sold this month by this salesperson
+  def get_monthly_unit_count
+    delivery_date = @deal.delivery_date || Date.today
+    start_of_month = delivery_date.beginning_of_month
+    end_of_month = delivery_date.end_of_month
+    
+    @company.deals
+      .where(primary_salesperson_id: @salesperson.id)
+      .where(stage: 'closed_won')
+      .where(delivery_date: start_of_month..end_of_month)
+      .sum(:quantity)
+  end
+  
+  # Get units sold this quarter by this salesperson
+  def get_quarterly_unit_count
+    delivery_date = @deal.delivery_date || Date.today
+    start_of_quarter = delivery_date.beginning_of_quarter
+    end_of_quarter = delivery_date.end_of_quarter
+    
+    @company.deals
+      .where(primary_salesperson_id: @salesperson.id)
+      .where(stage: 'closed_won')
+      .where(delivery_date: start_of_quarter..end_of_quarter)
+      .sum(:quantity)
   end
   
   # Get the dollar amount to calculate commission on
   def get_basis_amount(component)
-    case component.calculation_basis
-    when 'front_gross'
+    case component.gross_type
+    when 'front'
       @deal.front_gross
       
-    when 'commissionable_front_gross'
+    when 'commissionable_front'
       @deal.commissionable_front_gross
       
-    when 'back_gross'
+    when 'back'
       @deal.back_gross
       
-    when 'total_gross'
+    when 'total'
       @deal.total_gross
       
-    when 'addon_gross'
+    when 'addon'
       @deal.addon_gross
       
-    when 'selling_price'
-      @deal.selling_price || 0
-      
-    when 'finance_reserve'
-      @deal.finance_reserve || 0
-      
-    when 'product_margin'
-      @deal.product_margin || 0
-      
-    when 'accessories'
-      @deal.accessories_total || 0
-      
-    when 'delivery_setup'
-      (@deal.delivery_fee || 0) + (@deal.setup_fee || 0)
-      
     else
-      Rails.logger.warn "[CommissionPaymentGenerator] ⚠️  Unknown basis: #{component.calculation_basis}"
-      0
+      # Default to commissionable front gross
+      @deal.commissionable_front_gross
     end
-  end
-  
-  # Calculate tiered commission
-  # Tiers stored as JSON: [{"min": 0, "max": 5000, "rate": 5}, {"min": 5001, "max": null, "rate": 8}]
-  def calculate_tiered(component, basis_amount)
-    return 0 unless component.tier_structure.present?
-    
-    tiers = if component.tier_structure.is_a?(String)
-      JSON.parse(component.tier_structure)
-    else
-      component.tier_structure
-    end
-    
-    return 0 unless tiers.is_a?(Array)
-    
-    total = 0
-    
-    tiers.each do |tier|
-      min = tier['min'] || 0
-      max = tier['max']
-      rate = (tier['rate'] || 0) / 100.0
-      
-      # Amount falls within this tier?
-      next if basis_amount < min
-      
-      if max.present?
-        # Tier has a ceiling
-        tier_amount = [basis_amount, max].min - min + 1
-        total += (tier_amount * rate).round(2)
-      else
-        # Open-ended tier
-        tier_amount = basis_amount - min + 1
-        total += (tier_amount * rate).round(2)
-        break # Last tier
-      end
-    end
-    
-    total
   end
 end

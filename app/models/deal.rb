@@ -51,6 +51,9 @@ class Deal < ApplicationRecord
   # Normalize stage to lowercase before validation
   before_validation :normalize_stage
   
+  # Sync primary_salesperson_id with owner_id for commission system
+  before_validation :sync_primary_salesperson
+  
   # Sync vehicle pricing when vehicle is assigned
   before_validation :sync_vehicle_pricing, if: :will_save_change_to_vehicle_id?
   
@@ -142,6 +145,17 @@ class Deal < ApplicationRecord
   end
   
   # ============================================================================
+  # VALUE CALCULATIONS
+  # ============================================================================
+  
+  # Calculate total deal value including selling price and all products
+  def calculated_value
+    base_value = selling_price || 0
+    products_total = deal_products.sum(:total)
+    (base_value + products_total).round(2)
+  end
+  
+  # ============================================================================
   # COMMISSION ECONOMICS CALCULATIONS
   # ============================================================================
   
@@ -218,6 +232,12 @@ class Deal < ApplicationRecord
   end
   
   private
+  
+  # Sync primary_salesperson_id with owner_id (for commission system)
+  def sync_primary_salesperson
+    # Always keep primary_salesperson_id in sync with owner_id
+    self.primary_salesperson_id = owner_id
+  end
   
   # Auto-generate commission payment when deal is delivered
   def generate_commission_payment

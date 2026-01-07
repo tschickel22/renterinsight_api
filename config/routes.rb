@@ -1011,6 +1011,13 @@ Rails.application.routes.draw do
           patch :financials, to: 'deals#update_financials' # NEW: Update deal financials (permission-gated)
         end
         
+        # Commission Payments (nested under deals)
+        resources :commission_payments, only: [:index], controller: 'commission_payments', path: 'commissions' do
+          collection do
+            post :preview
+          end
+        end
+        
         # Deal Activities (unified activities)
         resources :deal_activities, only: %i[index show create update destroy] do
           member do

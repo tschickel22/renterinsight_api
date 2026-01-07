@@ -3,6 +3,7 @@
 class CommissionComponent < ApplicationRecord
   belongs_to :company
   belongs_to :location, optional: true
+  belongs_to :commission_plan, optional: true
   
   # Component Types
   COMPONENT_TYPES = %w[

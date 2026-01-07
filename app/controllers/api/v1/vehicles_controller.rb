@@ -939,7 +939,16 @@ module Api
           videoUrl: :video_url,
           virtualTourUrl: :virtual_tour_url,
           specialFeatures: :special_features,
-          overlayText: :overlay_text
+          overlayText: :overlay_text,
+          # RBAC Cost Detail Fields - NEW
+          dealerCost: :dealer_cost,
+          freightCost: :freight_cost,
+          pdiCost: :pdi_cost,
+          totalCost: :total_cost,
+          holdbackAmount: :holdback_amount,
+          floorPlanRate: :floor_plan_rate,
+          targetGross: :target_gross,
+          minimumPrice: :minimum_price
         }
         
         # Copy and transform camelCase fields
@@ -1012,6 +1021,9 @@ module Api
           :leveling_jacks, :self_contained, :solar_panels, :backup_camera, :satellite_tv,
           :generator_make, :generator_hours, :generator_fuel_type,
           :video_url, :virtual_tour_url, :special_features, :overlay_text,
+          # RBAC Cost Detail Fields - NEW
+          :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
+          :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
           # Location ID
           :location_id,
           # Arrays
@@ -1133,7 +1145,16 @@ module Api
             videoUrl: vehicle.video_url,
             virtualTourUrl: vehicle.virtual_tour_url,
             specialFeatures: vehicle.special_features,
-            overlayText: vehicle.overlay_text
+            overlayText: vehicle.overlay_text,
+            # RBAC Cost Detail Fields - NEW
+            dealerCost: vehicle.dealer_cost&.to_f,
+            freightCost: vehicle.freight_cost&.to_f,
+            pdiCost: vehicle.pdi_cost&.to_f,
+            totalCost: vehicle.total_cost&.to_f,
+            holdbackAmount: vehicle.holdback_amount&.to_f,
+            floorPlanRate: vehicle.floor_plan_rate&.to_f,
+            targetGross: vehicle.target_gross&.to_f,
+            minimumPrice: vehicle.minimum_price&.to_f
           })
         elsif vehicle.is_manufactured_home?
           json.merge!({

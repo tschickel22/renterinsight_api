@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_07_000005) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_08_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -404,12 +404,34 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_07_000005) do
     t.text "description"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "commission_plan_id"
     t.index ["applies_to_role"], name: "index_commission_components_on_role"
+    t.index ["commission_plan_id"], name: "index_commission_components_on_commission_plan_id"
     t.index ["company_id", "is_active"], name: "index_commission_components_on_company_and_active"
     t.index ["company_id", "location_id", "is_active", "sequence"], name: "index_commission_components_lookup"
     t.index ["company_id"], name: "index_commission_components_on_company_id"
     t.index ["component_type"], name: "index_commission_components_on_type"
     t.index ["location_id"], name: "index_commission_components_on_location_id"
+  end
+
+  create_table "commission_payment_line_items", force: :cascade do |t|
+    t.bigint "commission_payment_id", null: false
+    t.bigint "commission_component_id"
+    t.string "description", null: false, comment: "Display name of commission component"
+    t.string "calculation_basis", null: false, comment: "What amount was used as basis (front_gross, back_gross, etc.)"
+    t.string "calculation_method", null: false, comment: "How it was calculated (flat_rate, percentage, tiered, per_unit)"
+    t.decimal "rate", precision: 8, scale: 4, comment: "Rate used (percentage or per-unit amount)"
+    t.decimal "basis_amount", precision: 15, scale: 2, default: "0.0", null: false, comment: "Dollar amount commission was calculated on"
+    t.decimal "calculated_amount", precision: 15, scale: 2, null: false, comment: "Commission earned from this component"
+    t.integer "display_order", default: 0
+    t.jsonb "calculation_details", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["calculation_basis"], name: "index_commission_payment_line_items_on_calculation_basis"
+    t.index ["calculation_method"], name: "index_commission_payment_line_items_on_calculation_method"
+    t.index ["commission_component_id"], name: "index_commission_payment_line_items_on_commission_component_id"
+    t.index ["commission_payment_id", "display_order"], name: "index_comm_line_items_on_payment_and_order"
+    t.index ["commission_payment_id"], name: "index_comm_line_items_on_payment_id"
   end
 
   create_table "commission_payments", force: :cascade do |t|
@@ -437,13 +459,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_07_000005) do
     t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "commission_plan_id"
+    t.date "earned_date"
     t.index ["approved_at"], name: "index_commission_payments_approved_at"
     t.index ["approved_by_user_id"], name: "index_commission_payments_on_approved_by_user_id"
+    t.index ["commission_plan_id"], name: "index_commission_payments_on_commission_plan_id"
     t.index ["company_id", "payment_number"], name: "index_commission_payments_unique_number", unique: true
     t.index ["company_id", "status"], name: "index_commission_payments_status"
     t.index ["company_id"], name: "index_commission_payments_on_company_id"
     t.index ["deal_id"], name: "index_commission_payments_deal"
     t.index ["deal_id"], name: "index_commission_payments_on_deal_id"
+    t.index ["earned_date"], name: "index_commission_payments_on_earned_date"
     t.index ["is_deleted"], name: "index_commission_payments_deleted"
     t.index ["location_id"], name: "index_commission_payments_on_location_id"
     t.index ["paid_at"], name: "index_commission_payments_paid_at"
@@ -451,6 +477,30 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_07_000005) do
     t.index ["payee_user_id", "status"], name: "index_commission_payments_payee_status"
     t.index ["payee_user_id"], name: "index_commission_payments_on_payee_user_id"
     t.index ["reversed_by_user_id"], name: "index_commission_payments_on_reversed_by_user_id"
+  end
+
+  create_table "commission_plans", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "name", null: false
+    t.text "description"
+    t.bigint "assigned_user_id", comment: "If set, plan only applies to this specific user"
+    t.string "assigned_role", comment: "If set, plan applies to users with this role"
+    t.date "effective_date", default: -> { "CURRENT_DATE" }, null: false
+    t.date "expiration_date", comment: "NULL = no expiration"
+    t.boolean "is_active", default: true, null: false
+    t.boolean "is_default", default: false, null: false, comment: "Company-wide default plan (no user/role filter)"
+    t.integer "display_order", default: 0
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assigned_role"], name: "index_commission_plans_on_assigned_role", where: "(assigned_role IS NOT NULL)"
+    t.index ["assigned_user_id"], name: "index_commission_plans_on_assigned_user_id", where: "(assigned_user_id IS NOT NULL)"
+    t.index ["company_id", "is_active"], name: "index_commission_plans_on_company_id_and_is_active"
+    t.index ["company_id", "is_default"], name: "index_commission_plans_on_company_id_and_is_default"
+    t.index ["company_id"], name: "index_commission_plans_on_company_id"
+    t.index ["effective_date", "expiration_date"], name: "index_commission_plans_on_effective_date_and_expiration_date"
+    t.index ["location_id"], name: "index_commission_plans_on_location_id"
   end
 
   create_table "commission_rules", force: :cascade do |t|
@@ -2772,8 +2822,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_07_000005) do
   add_foreign_key "brochures", "companies"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
+  add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
   add_foreign_key "commission_components", "companies"
   add_foreign_key "commission_components", "locations"
+  add_foreign_key "commission_payment_line_items", "commission_components", on_delete: :nullify
+  add_foreign_key "commission_payment_line_items", "commission_payments", on_delete: :cascade
+  add_foreign_key "commission_payments", "commission_plans", on_delete: :nullify
   add_foreign_key "commission_payments", "companies"
   add_foreign_key "commission_payments", "deals"
   add_foreign_key "commission_payments", "locations"
@@ -2781,6 +2835,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_07_000005) do
   add_foreign_key "commission_payments", "users", column: "paid_by_user_id"
   add_foreign_key "commission_payments", "users", column: "payee_user_id"
   add_foreign_key "commission_payments", "users", column: "reversed_by_user_id"
+  add_foreign_key "commission_plans", "companies", on_delete: :cascade
+  add_foreign_key "commission_plans", "locations", on_delete: :nullify
+  add_foreign_key "commission_plans", "users", column: "assigned_user_id", on_delete: :nullify
   add_foreign_key "commission_rules", "companies"
   add_foreign_key "commissions", "commission_rules"
   add_foreign_key "commissions", "companies"

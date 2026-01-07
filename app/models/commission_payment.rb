@@ -5,9 +5,12 @@ class CommissionPayment < ApplicationRecord
   belongs_to :location, optional: true
   belongs_to :deal
   belongs_to :payee_user, class_name: 'User'
+  belongs_to :commission_plan, optional: true
   belongs_to :approved_by_user, class_name: 'User', optional: true
   belongs_to :paid_by_user, class_name: 'User', optional: true
   belongs_to :reversed_by_user, class_name: 'User', optional: true
+  
+  has_many :commission_payment_line_items, dependent: :destroy
   
   # Status values
   STATUSES = %w[

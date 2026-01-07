@@ -446,7 +446,7 @@ module Api
           :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
           :win_reason, :loss_reason, :competitor,
-          :customer_name, :source_id, :owner_id, :delivery_date,
+          :customer_name, :source_id, :owner_id, :primary_salesperson_id, :delivery_date,
           # Economics fields
           :selling_price, :unit_cost, :pack_amount,
           :trade_allowance, :trade_payoff,
@@ -467,7 +467,7 @@ module Api
 
       def deal_json(deal, detailed: false)
         # Check if user has permission to view cost details
-        can_view_costs = current_user.has_permission?('deals', 'read', scope: 'view_cost_details')
+        can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
         
         base = {
           id: deal.id,
@@ -480,7 +480,7 @@ module Api
           vehicleName: deal.vehicle&.display_name,
           vehicleInventoryId: deal.vehicle&.inventory_id,
           customerName: deal.customer_display_name,
-          value: deal.value,
+          value: deal.calculated_value,  # Calculated: selling_price + deal_products total
           stage: deal.stage,
           probability: deal.probability,
           expectedCloseDate: deal.expected_close_date&.iso8601,
@@ -490,6 +490,7 @@ module Api
           userName: deal.user&.name,
           ownerId: deal.owner_id,
           owner: deal.owner ? { id: deal.owner.id, name: deal.owner.name, email: deal.owner.email } : nil,
+          primarySalespersonId: deal.primary_salesperson_id,
           assignedTo: deal.assigned_to,
           territoryId: deal.territory_id,
           territoryName: deal.territory&.name,
@@ -538,8 +539,29 @@ module Api
         end
         
         if detailed
+          products_array = []
+          
+          # Add primary vehicle from selling_price if present
+          if deal.selling_price.present? && deal.selling_price > 0
+            products_array << {
+              id: 'primary-vehicle',
+              productId: deal.vehicle_id,
+              productName: deal.vehicle_display_name || 'Primary Vehicle',
+              productSku: deal.vehicle&.inventory_id,
+              quantity: deal.quantity || 1,
+              unitPrice: deal.selling_price,
+              discount: 0,
+              tax: 0,
+              total: deal.selling_price,
+              notes: 'Primary vehicle from deal'
+            }
+          end
+          
+          # Add all deal_products
+          products_array.concat(deal.deal_products.map { |dp| deal_product_json(dp) })
+          
           base.merge!(
-            products: deal.deal_products.map { |dp| deal_product_json(dp) },
+            products: products_array,
             stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) }
           )
         end

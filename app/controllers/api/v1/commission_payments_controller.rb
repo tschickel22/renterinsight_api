@@ -7,10 +7,16 @@ module Api
       before_action :set_payment, only: [:show, :update, :destroy, :approve, :mark_paid, :reverse]
       
       # GET /api/v1/commission-payments
+      # GET /api/v1/deals/:deal_id/commissions
       def index
         return unless authorize_action!('commission_payments', 'read')
         
         payments = @company.commission_payments.active
+        
+        # Filter by deal if nested route
+        if params[:deal_id].present?
+          payments = payments.where(deal_id: params[:deal_id])
+        end
         
         # Filter by status
         if params[:status].present?
@@ -271,6 +277,7 @@ module Api
       end
       
       # GET /api/v1/commission-payments/preview-for-deal/:deal_id
+      # POST /api/v1/deals/:deal_id/commissions/preview
       def preview_for_deal
         return unless authorize_action!('commission_payments', 'read')
         
@@ -288,6 +295,9 @@ module Api
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Deal not found' }, status: :not_found
       end
+      
+      # Alias for nested route
+      alias_method :preview, :preview_for_deal
       
       private
       
