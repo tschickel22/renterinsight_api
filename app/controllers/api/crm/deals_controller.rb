@@ -446,7 +446,14 @@ module Api
           :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
           :win_reason, :loss_reason, :competitor,
-          :customer_name, :source_id, :owner_id, :delivery_date
+          :customer_name, :source_id, :owner_id, :delivery_date,
+          # Economics fields
+          :selling_price, :unit_cost, :pack_amount,
+          :trade_allowance, :trade_payoff,
+          :finance_reserve, :product_margin,
+          :accessories_total, :doc_fee,
+          :delivery_fee, :setup_fee, :skirting_fee,
+          :deal_type, :vertical, :quantity
           # NOTE: company_id is intentionally excluded - it should never change after creation
           # It's set via @company.deals.build and must remain immutable
         )
@@ -459,6 +466,9 @@ module Api
       end
 
       def deal_json(deal, detailed: false)
+        # Check if user has permission to view cost details
+        can_view_costs = current_user.has_permission?('deals', 'read', scope: 'view_cost_details')
+        
         base = {
           id: deal.id,
           name: deal.name,
@@ -494,8 +504,38 @@ module Api
           lossReason: deal.loss_reason,
           competitor: deal.competitor,
           createdAt: deal.created_at&.iso8601,
-          updatedAt: deal.updated_at&.iso8601
+          updatedAt: deal.updated_at&.iso8601,
+          
+          # Public economics fields (everyone can see)
+          sellingPrice: deal.selling_price,
+          tradeAllowance: deal.trade_allowance,
+          tradePayoff: deal.trade_payoff,
+          accessoriesTotal: deal.accessories_total,
+          docFee: deal.doc_fee,
+          deliveryFee: deal.delivery_fee,
+          setupFee: deal.setup_fee,
+          skirtingFee: deal.skirting_fee,
+          dealType: deal.deal_type,
+          vertical: deal.vertical,
+          quantity: deal.quantity
         }
+        
+        # Private economics fields (finance only)
+        if can_view_costs
+          base.merge!({
+            unitCost: deal.unit_cost,
+            packAmount: deal.pack_amount,
+            financeReserve: deal.finance_reserve,
+            productMargin: deal.product_margin,
+            
+            # Calculated grosses (also finance only)
+            frontGross: deal.front_gross,
+            backGross: deal.back_gross,
+            totalGross: deal.total_gross,
+            commissionableFrontGross: deal.commissionable_front_gross,
+            effectivePackAmount: deal.effective_pack_amount
+          })
+        end
         
         if detailed
           base.merge!(

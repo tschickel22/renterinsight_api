@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_03_170001) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_07_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2646,6 +2646,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_03_170001) do
     t.string "overlay_text", comment: "Promotional overlay text for listings"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.decimal "dealer_cost", precision: 10, scale: 2, comment: "Base invoice cost from manufacturer"
+    t.decimal "freight_cost", precision: 10, scale: 2, comment: "Transportation/shipping cost to dealership"
+    t.decimal "pdi_cost", precision: 10, scale: 2, comment: "Pre-delivery inspection and setup cost"
+    t.decimal "total_cost", precision: 10, scale: 2, comment: "Total dealer cost (dealer_cost + freight + pdi)"
+    t.decimal "holdback_amount", precision: 10, scale: 2, comment: "Manufacturer holdback/rebate amount"
+    t.decimal "floor_plan_rate", precision: 5, scale: 3, comment: "Monthly floor plan interest rate (if financed)"
+    t.decimal "target_gross", precision: 10, scale: 2, comment: "Target gross profit for this unit"
+    t.decimal "minimum_price", precision: 10, scale: 2, comment: "Minimum acceptable selling price"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -2653,6 +2661,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_03_170001) do
     t.index ["company_id", "vin"], name: "index_vehicles_on_company_id_and_vin", unique: true, where: "(vin IS NOT NULL)"
     t.index ["company_id"], name: "index_vehicles_on_company_id"
     t.index ["condition"], name: "index_vehicles_on_condition"
+    t.index ["dealer_cost"], name: "index_vehicles_on_dealer_cost"
     t.index ["dwelling_type"], name: "index_vehicles_on_dwelling_type"
     t.index ["exterior_color"], name: "index_vehicles_on_exterior_color"
     t.index ["home_type"], name: "index_vehicles_on_home_type"
@@ -2666,6 +2675,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_03_170001) do
     t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
     t.index ["status"], name: "index_vehicles_on_status"
+    t.index ["total_cost"], name: "index_vehicles_on_total_cost"
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 
