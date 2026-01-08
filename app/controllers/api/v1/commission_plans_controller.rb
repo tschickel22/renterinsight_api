@@ -94,12 +94,14 @@ module Api
           return
         end
         
-        # Check if plan has components
+        # Unlink components from plan (don't delete the components themselves)
+        # This allows components to remain in the system and be reusable
         if @plan.commission_components.any?
-          render json: {
-            error: 'Cannot delete plan with associated components. Remove components first or deactivate plan.'
-          }, status: :unprocessable_entity
-          return
+          @plan.commission_components.update_all(
+            commission_plan_id: nil,
+            sequence: 0,
+            updated_at: Time.current
+          )
         end
         
         @plan.destroy
