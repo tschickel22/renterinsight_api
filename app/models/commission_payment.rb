@@ -17,6 +17,7 @@ class CommissionPayment < ApplicationRecord
     pending
     approved
     paid
+    partially_paid
     reversed
     cancelled
   ].freeze
@@ -24,6 +25,7 @@ class CommissionPayment < ApplicationRecord
   # Payment methods
   PAYMENT_METHODS = %w[
     check
+    ach
     direct_deposit
     cash
     wire_transfer
@@ -42,7 +44,7 @@ class CommissionPayment < ApplicationRecord
   # Status transition validations
   validate :validate_status_transition, on: :update, if: -> { status_changed? }
   validate :validate_approval_fields, if: -> { status == 'approved' }
-  validate :validate_payment_fields, if: -> { status == 'paid' }
+  validate :validate_payment_fields, if: -> { status.in?(%w[paid partially_paid]) }
   validate :validate_reversal_fields, if: -> { is_reversed? }
   
   # ============================================================================
@@ -60,6 +62,7 @@ class CommissionPayment < ApplicationRecord
   scope :pending, -> { where(status: 'pending') }
   scope :approved, -> { where(status: 'approved') }
   scope :paid, -> { where(status: 'paid') }
+  scope :partially_paid, -> { where(status: 'partially_paid') }
   scope :reversed, -> { where(is_reversed: true) }
   scope :not_reversed, -> { where(is_reversed: [false, nil]) }
   scope :for_payee, ->(user_id) { where(payee_user_id: user_id) }
@@ -90,14 +93,24 @@ class CommissionPayment < ApplicationRecord
     )
   end
   
-  # Mark as paid
-  def mark_paid!(paid_by:, payment_method:, payment_reference: nil)
+  # Mark as paid (full or partial)
+  def mark_paid!(paid_by:, payment_method:, payment_reference: nil, amount_paid: nil, paid_date: nil)
     return false unless status == 'approved'
     
+    # Default to full payment if amount not specified
+    actual_amount_paid = amount_paid || self.amount
+    remaining = self.amount - actual_amount_paid
+    
+    # Determine status based on whether it's a full or partial payment
+    new_status = remaining > 0.01 ? 'partially_paid' : 'paid'  # Use 0.01 for floating point comparison
+    
     update!(
-      status: 'paid',
+      status: new_status,
+      amount_paid: actual_amount_paid,
+      remaining_balance: remaining,
       paid_by_user: paid_by,
       paid_at: Time.current,
+      paid_date: paid_date || Date.today,
       payment_method: payment_method,
       payment_reference: payment_reference
     )
@@ -125,7 +138,7 @@ class CommissionPayment < ApplicationRecord
   
   # Can this payment be reversed?
   def can_reverse?
-    status.in?(%w[approved paid]) && !is_reversed?
+    status.in?(%w[approved paid partially_paid]) && !is_reversed?
   end
   
   # Can this payment be approved?
@@ -187,8 +200,9 @@ class CommissionPayment < ApplicationRecord
     
     valid_transitions = {
       'pending' => %w[approved cancelled],
-      'approved' => %w[paid reversed],
+      'approved' => %w[paid partially_paid reversed],
       'paid' => %w[reversed],
+      'partially_paid' => %w[paid reversed],  # Can go from partial to full paid or reversed
       'reversed' => [],
       'cancelled' => []
     }
@@ -212,6 +226,8 @@ class CommissionPayment < ApplicationRecord
     errors.add(:payment_method, 'is required when marking as paid') if payment_method.nil?
     errors.add(:paid_by_user_id, 'is required when marking as paid') if paid_by_user_id.nil?
     errors.add(:paid_at, 'is required when marking as paid') if paid_at.nil?
+    errors.add(:amount_paid, 'is required when marking as paid') if amount_paid.nil?
+    errors.add(:paid_date, 'is required when marking as paid') if paid_date.nil?
   end
   
   # Validate reversal fields

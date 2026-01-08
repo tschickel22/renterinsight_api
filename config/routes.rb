@@ -526,6 +526,7 @@ Rails.application.routes.draw do
           get :stats
           post :bulk_approve, path: 'bulk-approve'
           post :bulk_mark_paid, path: 'bulk-mark-paid'
+          post :bulk_mark_paid_detailed, path: 'bulk-mark-paid-detailed'
           post :generate_for_deal, path: 'generate-for-deal'
           get 'preview-for-deal/:deal_id', action: :preview_for_deal, as: :preview_for_deal
         end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_08_000010) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_08_045249) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -461,6 +461,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_08_000010) do
     t.datetime "updated_at", null: false
     t.bigint "commission_plan_id"
     t.date "earned_date"
+    t.decimal "amount_paid", precision: 10, scale: 2
+    t.decimal "remaining_balance", precision: 10, scale: 2
+    t.date "paid_date"
     t.index ["approved_at"], name: "index_commission_payments_approved_at"
     t.index ["approved_by_user_id"], name: "index_commission_payments_on_approved_by_user_id"
     t.index ["commission_plan_id"], name: "index_commission_payments_on_commission_plan_id"

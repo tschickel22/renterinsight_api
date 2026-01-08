@@ -91,6 +91,12 @@ module Api
             count: base_payments.paid.count,
             amount: base_payments.paid.sum(:amount).round(2)
           },
+          partially_paid: {
+            count: base_payments.partially_paid.count,
+            amount: base_payments.partially_paid.sum(:amount).round(2),
+            amount_paid: base_payments.partially_paid.sum(:amount_paid).round(2),
+            remaining: base_payments.partially_paid.sum(:remaining_balance).round(2)
+          },
           total: {
             count: base_payments.count,
             amount: base_payments.sum(:amount).round(2)
@@ -164,10 +170,15 @@ module Api
           return
         end
         
+        # Parse paid_date if provided
+        paid_date = params[:paid_date].present? ? Date.parse(params[:paid_date]) : Date.today
+        
         if @payment.mark_paid!(
           paid_by: current_user,
           payment_method: params[:payment_method],
-          payment_reference: params[:payment_reference]
+          payment_reference: params[:payment_reference],
+          amount_paid: params[:amount_paid],
+          paid_date: paid_date
         )
           render json: { payment: payment_json(@payment, detailed: true) }
         else
@@ -222,12 +233,14 @@ module Api
       end
       
       # POST /api/v1/commission-payments/bulk-mark-paid
+      # Quick bulk payment - applies same details to all selected payments
       def bulk_mark_paid
         return unless authorize_action!('commission_payments', 'mark_paid')
         
         payment_ids = params[:payment_ids] || []
         payment_method = params[:payment_method]
         payment_reference = params[:payment_reference]
+        paid_date = params[:paid_date].present? ? Date.parse(params[:paid_date]) : Date.today
         
         if payment_ids.empty? || payment_method.blank?
           render json: { error: 'payment_ids and payment_method required' }, status: :bad_request
@@ -240,7 +253,13 @@ module Api
         errors = []
         
         payments.each do |payment|
-          if payment.mark_paid!(paid_by: current_user, payment_method: payment_method, payment_reference: payment_reference)
+          if payment.mark_paid!(
+            paid_by: current_user, 
+            payment_method: payment_method, 
+            payment_reference: payment_reference,
+            paid_date: paid_date,
+            amount_paid: payment.amount  # Full payment
+          )
             paid_count += 1
           else
             errors << "Payment #{payment.payment_number}: #{payment.errors.full_messages.join(', ')}"
@@ -249,6 +268,63 @@ module Api
         
         render json: {
           paid_count: paid_count,
+          errors: errors
+        }
+      end
+      
+      # POST /api/v1/commission-payments/bulk-mark-paid-detailed
+      # Detailed bulk payment - individual details per payment (supports partial payments)
+      # Body: { payments: [{ id: 1, amount_paid: 1200, payment_method: 'ach', payment_reference: 'TXN-123', paid_date: '2026-01-08' }] }
+      def bulk_mark_paid_detailed
+        return unless authorize_action!('commission_payments', 'mark_paid')
+        
+        payments_data = params[:payments] || []
+        
+        if payments_data.empty?
+          render json: { error: 'payments array required' }, status: :bad_request
+          return
+        end
+        
+        paid_count = 0
+        partial_count = 0
+        errors = []
+        
+        payments_data.each do |payment_data|
+          payment = @company.commission_payments.find_by(id: payment_data[:id], status: 'approved')
+          
+          unless payment
+            errors << "Payment ID #{payment_data[:id]}: Not found or not approved"
+            next
+          end
+          
+          amount_paid = payment_data[:amount_paid].to_f
+          paid_date = payment_data[:paid_date].present? ? Date.parse(payment_data[:paid_date]) : Date.today
+          
+          # Skip if amount_paid is 0 or negative
+          if amount_paid <= 0
+            errors << "Payment #{payment.payment_number}: Invalid amount_paid (#{amount_paid})"
+            next
+          end
+          
+          is_partial = amount_paid < payment.amount
+          
+          if payment.mark_paid!(
+            paid_by: current_user,
+            payment_method: payment_data[:payment_method],
+            payment_reference: payment_data[:payment_reference],
+            amount_paid: amount_paid,
+            paid_date: paid_date
+          )
+            is_partial ? partial_count += 1 : paid_count += 1
+          else
+            errors << "Payment #{payment.payment_number}: #{payment.errors.full_messages.join(', ')}"
+          end
+        end
+        
+        render json: {
+          paid_count: paid_count,
+          partial_count: partial_count,
+          total_processed: paid_count + partial_count,
           errors: errors
         }
       end
@@ -327,6 +403,8 @@ module Api
           status: payment.status,
           displayStatus: payment.display_status,
           amount: payment.amount,
+          amountPaid: payment.amount_paid,
+          remainingBalance: payment.remaining_balance,
           
           # Relationships
           dealId: payment.deal_id,
@@ -340,6 +418,7 @@ module Api
           approvedAt: payment.approved_at&.iso8601,
           approvedBy: payment.approved_by_user&.name,
           paidAt: payment.paid_at&.iso8601,
+          paidDate: payment.paid_date&.iso8601,
           paidBy: payment.paid_by_user&.name,
           paymentMethod: payment.payment_method,
           paymentReference: payment.payment_reference,
