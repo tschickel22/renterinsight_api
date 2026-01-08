@@ -521,10 +521,15 @@ Rails.application.routes.draw do
           post :mark_paid, path: 'mark-paid'
           post :reverse
           post :undo_reversal, path: 'undo-reversal'
+          get :statement
         end
         
         collection do
+          get :my_commissions, path: 'my-commissions'
           get :stats
+          get :dashboard
+          get :reports_data, path: 'reports-data'
+          post :export
           post :bulk_approve, path: 'bulk-approve'
           post :bulk_mark_paid, path: 'bulk-mark-paid'
           post :bulk_mark_paid_detailed, path: 'bulk-mark-paid-detailed'

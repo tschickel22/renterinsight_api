@@ -1,324 +1,207 @@
 # frozen_string_literal: true
 
-# Service to generate commission payments from deals
-# Reads deal economics + salesperson's active commission components
-# Calculates each component, creates payment with line-item breakdown
 class CommissionPaymentGeneratorService
-  
-  # Generate commission payment for a delivered deal
-  # @param deal [Deal] The delivered deal
-  # @return [CommissionPayment, nil] The created payment or nil if skipped
   def self.generate_for_deal(deal)
     new(deal).generate
   end
   
-  # Preview commission calculation without creating payment
-  # @param deal [Deal] The deal to preview
-  # @return [Hash] Preview data with line items and totals
   def self.preview_for_deal(deal)
     new(deal).preview
   end
   
   def initialize(deal)
     @deal = deal
-    @company = deal.company
-    @salesperson = deal.primary_salesperson
-    @errors = []
   end
   
-  # Main generation method
   def generate
-    Rails.logger.info "[CommissionPaymentGenerator] 🎯 Starting generation for Deal ##{@deal.id}"
+    # Don't generate if payment already exists
+    return nil if CommissionPayment.exists?(deal_id: @deal.id, is_deleted: [false, nil])
     
-    # Validation checks
-    return skip_generation("No company") unless @company.present?
-    return skip_generation("No salesperson assigned") unless @salesperson.present?
-    return skip_generation("Deal not delivered") unless @deal.delivered?
-    return skip_generation("Payment already exists") if payment_already_exists?
+    # Don't generate if deal not closed won
+    return nil unless @deal.stage == 'closed_won'
     
-    # Get active commission plan for salesperson
-    active_plan = get_active_commission_plan
-    return skip_generation("No active commission plan") unless active_plan.present?
+    # Don't generate if no salesperson
+    return nil unless @deal.primary_salesperson_id.present?
     
-    # Get active components
-    components = get_active_components(active_plan)
-    return skip_generation("No active commission components") if components.empty?
+    # Don't generate if deal has no commission plan
+    return nil unless @deal.commission_plan.present?
     
-    # Calculate payment
-    payment = create_payment(active_plan, components)
+    # Calculate commission amount
+    commission_amount = calculate_commission_amount
     
-    if payment.persisted?
-      Rails.logger.info "[CommissionPaymentGenerator] ✅ Payment ##{payment.id} created for Deal ##{@deal.id}: $#{payment.amount}"
-      payment
-    else
-      Rails.logger.error "[CommissionPaymentGenerator] ❌ Failed to create payment: #{payment.errors.full_messages.join(', ')}"
-      nil
-    end
-  rescue StandardError => e
-    Rails.logger.error "[CommissionPaymentGenerator] ❌ Error: #{e.message}"
-    Rails.logger.error e.backtrace.first(5).join("\n")
-    nil
+    return nil if commission_amount <= 0
+    
+    # Build complete calculation details with line items and deal economics
+    calculation_data = build_calculation_details
+    calculation_data[:line_items] = build_line_items
+    calculation_data[:deal_economics] = build_deal_economics
+    
+    # Create the payment
+    payment = @deal.company.commission_payments.create!(
+      deal_id: @deal.id,
+      payee_user_id: @deal.primary_salesperson_id,
+      amount: commission_amount,
+      status: 'pending',
+      location_id: @deal.location_id,
+      calculation_details: calculation_data
+    )
+    
+    payment
   end
   
-  # Preview commission calculation without creating payment
   def preview
-    Rails.logger.info "[CommissionPaymentGenerator] 🔍 Previewing for Deal ##{@deal.id}"
+    commission_amount = calculate_commission_amount
     
-    # Return error structure if validations fail
-    return preview_error("No company") unless @company.present?
-    return preview_error("No salesperson assigned") unless @salesperson.present?
-    
-    # Get active commission plan
-    active_plan = get_active_commission_plan
-    return preview_error("No active commission plan for #{@salesperson.name}") unless active_plan.present?
-    
-    # Get active components
-    components = get_active_components(active_plan)
-    return preview_error("No active commission components in plan '#{active_plan.name}'") if components.empty?
-    
-    # Calculate line items
-    line_items_data = []
-    total_amount = 0
-    
-    components.each do |component|
-      amount = calculate_component(component)
-      
-      next if amount <= 0
-      
-      line_items_data << {
-        componentName: component.name,
-        calculationMethod: component.component_type.humanize,  # Maps to calculation_method
-        calculationBasis: component.gross_type&.humanize || 'N/A',  # Maps to calculation_basis
-        rate: component.rate,
-        flatAmount: component.flat_amount,
-        basisAmount: get_basis_amount(component).round(2),
-        calculatedAmount: amount.round(2)
-      }
-      
-      total_amount += amount
-    end
-    
-    # Return preview structure
     {
-      canGenerate: @deal.delivered?,
-      dealId: @deal.id,
-      dealName: @deal.name,
-      salespersonId: @salesperson.id,
-      salespersonName: @salesperson.name,
-      planId: active_plan.id,
-      planName: active_plan.name,
-      lineItems: line_items_data,
-      totalAmount: total_amount.round(2),
-      dealEconomics: {
-        sellingPrice: @deal.selling_price || 0,
-        unitCost: @deal.unit_cost || 0,
-        frontGross: @deal.front_gross,
-        backGross: @deal.back_gross,
-        totalGross: @deal.total_gross,
-        addonGross: @deal.addon_gross,
-        commissionableFrontGross: @deal.commissionable_front_gross
-      },
-      paymentExists: payment_already_exists?,
-      isDelivered: @deal.delivered?
-    }
-  rescue StandardError => e
-    Rails.logger.error "[CommissionPaymentGenerator] ❌ Preview Error: #{e.message}"
-    preview_error(e.message)
-  end
-  
-  def preview_error(message)
-    {
-      canGenerate: false,
-      error: message,
-      lineItems: [],
-      totalAmount: 0
+      can_generate: can_generate?,
+      reasons: generation_reasons,
+      estimated_amount: commission_amount,
+      salesperson: @deal.primary_salesperson&.name,
+      commission_plan: @deal.commission_plan&.name,
+      calculation_details: build_calculation_details,
+      line_items: build_line_items,
+      deal_economics: build_deal_economics
     }
   end
   
   private
   
-  def skip_generation(reason)
-    Rails.logger.info "[CommissionPaymentGenerator] ⏭️  Skipping: #{reason}"
-    nil
+  def can_generate?
+    @deal.stage == 'closed_won' &&
+    @deal.primary_salesperson_id.present? &&
+    @deal.commission_plan.present? &&
+    !CommissionPayment.exists?(deal_id: @deal.id, is_deleted: [false, nil])
   end
   
-  def payment_already_exists?
-    @company.commission_payments
-      .where(deal_id: @deal.id, payee_user_id: @salesperson.id)
-      .where.not(is_reversed: true)
-      .exists?
+  def generation_reasons
+    reasons = []
+    reasons << "Deal must be closed won" unless @deal.stage == 'closed_won'
+    reasons << "Deal must have a salesperson assigned" unless @deal.primary_salesperson_id.present?
+    reasons << "Deal must have a commission plan" unless @deal.commission_plan.present?
+    reasons << "Payment already exists for this deal" if CommissionPayment.exists?(deal_id: @deal.id, is_deleted: [false, nil])
+    reasons
   end
   
-  def get_active_commission_plan
-    # Find active plan for this salesperson
-    # Plans can be:
-    # 1. User-specific (assigned_user_id matches)
-    # 2. Role-based (applies to user's role)
-    # 3. Company-wide default (no assignment filters)
+  def calculate_commission_amount
+    plan = @deal.commission_plan
+    return 0 unless plan
     
-    plans = @company.commission_plans
-      .active
-      .where('effective_date <= ?', @deal.delivery_date || Date.today)
-      .where('expiration_date IS NULL OR expiration_date >= ?', @deal.delivery_date || Date.today)
+    # Get all active components for this plan
+    components = plan.commission_components
+                     .where(is_active: true)
     
-    # Priority: User-specific > Role-based > Company default
-    user_plan = plans.where(assigned_user_id: @salesperson.id).first
-    return user_plan if user_plan.present?
+    total_commission = 0.0
     
-    role_plan = plans.where(assigned_role: @salesperson.role).first
-    return role_plan if role_plan.present?
-    
-    # Company default (no filters)
-    plans.where(assigned_user_id: nil, assigned_role: nil).first
-  end
-  
-  def get_active_components(plan)
-    plan.commission_components
-      .active
-      .order(:sequence)
-  end
-  
-  def create_payment(plan, components)
-    line_items_data = []
-    total_amount = 0
-    
-    # Calculate each component
     components.each do |component|
-      amount = calculate_component(component)
+      amount = calculate_component_amount(component)
+      total_commission += amount if amount > 0
+    end
+    
+    total_commission.round(2)
+  end
+  
+  def calculate_component_amount(component)
+    # Volume bonuses don't need a base amount
+    if component.component_type == 'volume_bonus'
+      # Return flat bonus amount (TODO: check if threshold met)
+      return (component.flat_amount || 0).round(2)
+    end
+    
+    # Get the base amount from the deal based on gross_type
+    base_amount = case component.gross_type
+                  when 'front_gross'
+                    @deal.front_gross || 0
+                  when 'commissionable_front'
+                    @deal.commissionable_front_gross || 0
+                  when 'back_gross'
+                    @deal.back_gross || 0
+                  when 'total_gross'
+                    @deal.total_gross || 0
+                  when 'addon_gross'
+                    @deal.addon_gross || 0
+                  when 'selling_price'
+                    @deal.selling_price || 0
+                  else
+                    0
+                  end
+    
+    return 0 if base_amount <= 0
+    
+    # Calculate based on component_type
+    amount = case component.component_type
+             when 'percentage'
+               # Percentage of gross
+               base_amount * (component.rate || 0)
+             when 'flat_fee'
+               # Fixed amount per deal
+               component.flat_amount || 0
+             else
+               0
+             end
+    
+    amount.round(2)
+  end
+  
+  def build_calculation_details
+    plan = @deal.commission_plan
+    return {} unless plan
+    
+    components = plan.commission_components
+                     .where(is_active: true)
+    
+    {
+      plan_name: plan.name,
+      plan_id: plan.id,
+      components: components.map do |component|
+        amount = calculate_component_amount(component)
+        
+        {
+          name: component.name,
+          type: component.component_type,
+          gross_type: component.gross_type,
+          rate: component.rate,
+          flat_amount: component.flat_amount,
+          amount: amount
+        }
+      end
+    }
+  end
+  
+  def build_line_items
+    plan = @deal.commission_plan
+    return [] unless plan
+    
+    components = plan.commission_components
+                     .where(is_active: true)
+    
+    components.map do |component|
+      amount = calculate_component_amount(component)
       
-      next if amount <= 0 # Skip zero amounts
-      
-      line_items_data << {
-        commission_component_id: component.id,
+      {
         description: component.name,
-        calculation_method: component.component_type,  # Maps to table column
-        calculation_basis: component.gross_type || 'N/A',  # Maps to table column
+        component_type: component.component_type,
+        gross_type: component.gross_type,
         rate: component.rate,
-        basis_amount: get_basis_amount(component),
-        calculated_amount: amount
+        flat_amount: component.flat_amount,
+        amount: amount
       }
-      
-      total_amount += amount
-    end
-    
-    # Create payment with line items
-    payment = @company.commission_payments.build(
-      deal_id: @deal.id,
-      payee_user_id: @salesperson.id,
-      commission_plan_id: plan.id,
-      amount: total_amount.round(2),
-      status: 'pending',
-      earned_date: @deal.delivery_date || Date.today,
-      location_id: @deal.location_id,
-      notes: "Auto-generated from Deal ##{@deal.id} - #{@deal.name}"
-    )
-    
-    # Build line items
-    line_items_data.each do |line_data|
-      payment.commission_payment_line_items.build(line_data)
-    end
-    
-    payment.save
-    payment
-  end
-  
-  # Calculate commission for a single component
-  def calculate_component(component)
-    basis_amount = get_basis_amount(component)
-    
-    case component.component_type
-    when 'percent_of_gross'
-      # Percentage of gross type
-      rate = component.rate || 0
-      (basis_amount * rate).round(2)
-      
-    when 'flat_per_unit'
-      # Fixed dollar amount per unit
-      units = @deal.quantity || 1
-      ((component.flat_amount || 0) * units).round(2)
-      
-    when 'volume_bonus'
-      # Bonus if threshold met
-      calculate_volume_bonus(component)
-      
-    when 'addon_commission'
-      # Percentage of add-ons
-      rate = component.rate || 0
-      addon_total = (@deal.delivery_fee || 0) + (@deal.setup_fee || 0) + 
-                    (@deal.skirting_fee || 0) + (@deal.accessories_total || 0)
-      (addon_total * rate).round(2)
-      
-    else
-      Rails.logger.warn "[CommissionPaymentGenerator] ⚠️  Unknown component type: #{component.component_type}"
-      0
     end
   end
   
-  # Calculate volume bonus (check if units threshold met)
-  def calculate_volume_bonus(component)
-    return 0 unless component.units_threshold.present?
-    
-    # Get unit count for the period
-    period_units = case component.threshold_period
-    when 'monthly'
-      get_monthly_unit_count
-    when 'quarterly'
-      get_quarterly_unit_count
-    else
-      @deal.quantity || 1
-    end
-    
-    # Return bonus if threshold met
-    period_units >= component.units_threshold ? (component.flat_amount || 0) : 0
-  end
-  
-  # Get units sold this month by this salesperson
-  def get_monthly_unit_count
-    delivery_date = @deal.delivery_date || Date.today
-    start_of_month = delivery_date.beginning_of_month
-    end_of_month = delivery_date.end_of_month
-    
-    @company.deals
-      .where(primary_salesperson_id: @salesperson.id)
-      .where(stage: 'closed_won')
-      .where(delivery_date: start_of_month..end_of_month)
-      .sum(:quantity)
-  end
-  
-  # Get units sold this quarter by this salesperson
-  def get_quarterly_unit_count
-    delivery_date = @deal.delivery_date || Date.today
-    start_of_quarter = delivery_date.beginning_of_quarter
-    end_of_quarter = delivery_date.end_of_quarter
-    
-    @company.deals
-      .where(primary_salesperson_id: @salesperson.id)
-      .where(stage: 'closed_won')
-      .where(delivery_date: start_of_quarter..end_of_quarter)
-      .sum(:quantity)
-  end
-  
-  # Get the dollar amount to calculate commission on
-  def get_basis_amount(component)
-    case component.gross_type
-    when 'front'
-      @deal.front_gross
-      
-    when 'commissionable_front'
-      @deal.commissionable_front_gross
-      
-    when 'back'
-      @deal.back_gross
-      
-    when 'total'
-      @deal.total_gross
-      
-    when 'addon'
-      @deal.addon_gross
-      
-    else
-      # Default to commissionable front gross
-      @deal.commissionable_front_gross
-    end
+  def build_deal_economics
+    {
+      selling_price: @deal.selling_price,
+      unit_cost: @deal.unit_cost,
+      front_gross: @deal.front_gross,
+      commissionable_front_gross: @deal.commissionable_front_gross,
+      back_gross: @deal.back_gross,
+      total_gross: @deal.total_gross,
+      addon_gross: @deal.addon_gross,
+      pack_amount: @deal.effective_pack_amount,
+      trade_allowance: @deal.trade_allowance,
+      trade_payoff: @deal.trade_payoff,
+      finance_reserve: @deal.finance_reserve,
+      product_margin: @deal.product_margin
+    }
   end
 end

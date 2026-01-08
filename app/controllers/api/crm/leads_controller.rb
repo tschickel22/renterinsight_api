@@ -27,9 +27,27 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         leads = leads.for_current_location
         
+        # Count total before pagination
+        total_count = leads.count
+        
         leads = leads.includes(:source).order(created_at: :desc)
         
-        render json: leads.map { |l| lead_json(l) }
+        # Pagination
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min # Max 200 per page
+        
+        leads = leads.offset((page - 1) * per_page).limit(per_page)
+        
+        render json: {
+          leads: leads.map { |l| lead_json(l) },
+          meta: {
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
+          }
+        }
       end
 
       def show

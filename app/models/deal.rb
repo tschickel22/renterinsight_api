@@ -61,8 +61,8 @@ class Deal < ApplicationRecord
   # Sync vehicle pricing when vehicle is assigned
   before_validation :sync_vehicle_pricing, if: :will_save_change_to_vehicle_id?
   
-  # Auto-generate commission payment when deal is delivered
-  after_save :generate_commission_payment, if: :just_delivered?
+  # Auto-generate commission payment when deal is marked closed_won
+  after_save :generate_commission_payment, if: :just_closed_won?
   
   def normalize_stage
     self.stage = stage&.downcase
@@ -225,7 +225,12 @@ class Deal < ApplicationRecord
     stage == 'closed_won' && delivery_date.present?
   end
   
-  # Check if status just changed to delivered
+  # Check if status just changed to closed_won (triggers commission payment generation)
+  def just_closed_won?
+    saved_change_to_stage? && stage == 'closed_won'
+  end
+  
+  # Check if status just changed to delivered (legacy check)
   def just_delivered?
     saved_change_to_stage? && stage == 'closed_won' && delivery_date.present?
   end
