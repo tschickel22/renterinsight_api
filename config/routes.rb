@@ -520,6 +520,7 @@ Rails.application.routes.draw do
           post :approve
           post :mark_paid, path: 'mark-paid'
           post :reverse
+          post :undo_reversal, path: 'undo-reversal'
         end
         
         collection do

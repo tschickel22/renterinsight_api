@@ -4,7 +4,7 @@ module Api
   module V1
     class CommissionPaymentsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_payment, only: [:show, :update, :destroy, :approve, :mark_paid, :reverse]
+      before_action :set_payment, only: [:show, :update, :destroy, :approve, :mark_paid, :reverse, :undo_reversal]
       
       # GET /api/v1/commission-payments
       # GET /api/v1/deals/:deal_id/commissions
@@ -199,6 +199,17 @@ module Api
           render json: { payment: payment_json(@payment, detailed: true) }
         else
           render json: { error: 'Cannot reverse payment' }, status: :unprocessable_entity
+        end
+      end
+      
+      # POST /api/v1/commission-payments/:id/undo-reversal
+      def undo_reversal
+        return unless authorize_action!('commission_payments', 'reverse')
+        
+        if @payment.undo_reversal!
+          render json: { payment: payment_json(@payment, detailed: true) }
+        else
+          render json: { error: 'Cannot undo reversal' }, status: :unprocessable_entity
         end
       end
       
@@ -433,6 +444,7 @@ module Api
           canApprove: payment.can_approve?,
           canMarkPaid: payment.can_mark_paid?,
           canReverse: payment.can_reverse?,
+          canUndoReversal: payment.can_undo_reversal?,
           
           createdAt: payment.created_at&.iso8601,
           updatedAt: payment.updated_at&.iso8601

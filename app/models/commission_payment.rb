@@ -129,6 +129,27 @@ class CommissionPayment < ApplicationRecord
     )
   end
   
+  # Undo reversal - restore payment to previous state
+  def undo_reversal!
+    return false unless can_undo_reversal?
+    
+    # Restore to paid/partially_paid status based on amount_paid
+    restored_status = if amount_paid.present?
+      remaining = amount - amount_paid
+      remaining > 0.01 ? 'partially_paid' : 'paid'
+    else
+      'approved'
+    end
+    
+    update!(
+      is_reversed: false,
+      reversed_by_user_id: nil,
+      reversed_at: nil,
+      reversal_reason: nil,
+      status: restored_status
+    )
+  end
+  
   # Cancel the payment (only if pending)
   def cancel!
     return false unless status == 'pending'
@@ -149,6 +170,11 @@ class CommissionPayment < ApplicationRecord
   # Can this payment be marked as paid?
   def can_mark_paid?
     status == 'approved' && !is_reversed?
+  end
+  
+  # Can this reversal be undone?
+  def can_undo_reversal?
+    is_reversed?
   end
   
   # Display status with reversal indicator
@@ -203,7 +229,7 @@ class CommissionPayment < ApplicationRecord
       'approved' => %w[paid partially_paid reversed],
       'paid' => %w[reversed],
       'partially_paid' => %w[paid reversed],  # Can go from partial to full paid or reversed
-      'reversed' => [],
+      'reversed' => %w[approved paid partially_paid],  # Undo reversal - restore to previous state
       'cancelled' => []
     }
     
