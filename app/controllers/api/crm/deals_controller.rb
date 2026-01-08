@@ -28,7 +28,7 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         deals = deals.for_current_location
         
-        deals = deals.includes(:account, :contact, :territory, :user, :deal_products)
+        deals = deals.includes(:account, :contact, :territory, :user, :deal_products, :commission_plan)
                     .order(created_at: :desc)
         
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
@@ -453,7 +453,9 @@ module Api
           :finance_reserve, :product_margin,
           :accessories_total, :doc_fee,
           :delivery_fee, :setup_fee, :skirting_fee,
-          :deal_type, :vertical, :quantity
+          :deal_type, :vertical, :quantity,
+          # Commission plan
+          :commission_plan_id
           # NOTE: company_id is intentionally excluded - it should never change after creation
           # It's set via @company.deals.build and must remain immutable
         )
@@ -518,7 +520,11 @@ module Api
           skirtingFee: deal.skirting_fee,
           dealType: deal.deal_type,
           vertical: deal.vertical,
-          quantity: deal.quantity
+          quantity: deal.quantity,
+          
+          # Commission plan info
+          commissionPlanId: deal.commission_plan_id,
+          commissionPlanName: deal.commission_plan&.name
         }
         
         # Private economics fields (finance only)

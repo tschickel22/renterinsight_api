@@ -11,6 +11,7 @@ class Deal < ApplicationRecord
   belongs_to :territory, optional: true
   belongs_to :source, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship
+  belongs_to :commission_plan, optional: true  # Commission plan for this deal
   
   has_many :deal_products, dependent: :destroy
   has_many :deal_stage_histories, dependent: :destroy
@@ -53,6 +54,9 @@ class Deal < ApplicationRecord
   
   # Sync primary_salesperson_id with owner_id for commission system
   before_validation :sync_primary_salesperson
+  
+  # Auto-assign commission plan based on salesperson/role/company default
+  before_validation :auto_assign_commission_plan, if: -> { commission_plan_id.nil? && primary_salesperson_id.present? }
   
   # Sync vehicle pricing when vehicle is assigned
   before_validation :sync_vehicle_pricing, if: :will_save_change_to_vehicle_id?
@@ -232,6 +236,43 @@ class Deal < ApplicationRecord
   end
   
   private
+  
+  # Determine which commission plan applies to this deal
+  def determine_commission_plan
+    return commission_plan if commission_plan_id.present?
+    
+    salesperson = primary_salesperson || owner
+    return nil unless salesperson && company
+    
+    # Priority 1: User-specific plan
+    user_plan = company.commission_plans
+      .active
+      .current
+      .where(assigned_user_id: salesperson.id)
+      .first
+    
+    return user_plan if user_plan
+    
+    # Priority 2: Role-based plan
+    if salesperson.role.present?
+      role_plan = company.commission_plans
+        .active
+        .current
+        .where(assigned_role: salesperson.role)
+        .first
+      
+      return role_plan if role_plan
+    end
+    
+    # Priority 3: Company default plan
+    company.commission_plans.active.current.defaults.first
+  end
+  
+  # Auto-assign commission plan before save
+  def auto_assign_commission_plan
+    plan = determine_commission_plan
+    self.commission_plan = plan if plan.present?
+  end
   
   # Sync primary_salesperson_id with owner_id (for commission system)
   def sync_primary_salesperson

@@ -485,6 +485,23 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== COMMISSION PLANS ====================
+      resources :commission_plans, path: 'commission-plans' do
+        member do
+          post :activate
+          post :deactivate
+          get :components
+          get :available_components, path: 'available-components'
+          post :add_component, path: 'add-component'
+          delete 'remove-component/:component_id', to: 'commission_plans#remove_component'
+          patch :reorder_components, path: 'reorder-components'
+        end
+        
+        collection do
+          get :stats
+        end
+      end
+      
       # ==================== COMMISSION COMPONENTS ====================
       resources :commission_components, path: 'commission-components' do
         member do
@@ -1058,6 +1075,51 @@ Rails.application.routes.draw do
         collection do
           get :summary
           get :trends
+        end
+      end
+      
+      # ==================== COMMISSIONS ====================
+      # Commission Plans
+      resources :commission_plans, path: 'commission-plans', only: %i[index show create update destroy] do
+        collection do
+          get :stats
+        end
+        
+        member do
+          post :activate
+          post :deactivate
+          get :components
+          get :available_components, path: 'available-components'
+          post :add_component, path: 'add-component'
+          delete 'remove-component/:component_id', to: 'commission_plans#remove_component'
+          patch :reorder_components, path: 'reorder-components'
+        end
+      end
+      
+      # Commission Components
+      resources :commission_components, path: 'commission-components', only: %i[index show create update destroy] do
+        collection do
+          get :stats
+        end
+        
+        member do
+          post :activate
+          post :deactivate
+        end
+      end
+      
+      # Commission Payments (top-level routes)
+      resources :commission_payments, path: 'commission-payments', only: %i[index show create update destroy] do
+        collection do
+          get :stats
+          post :bulk_approve
+          post :bulk_pay
+        end
+        
+        member do
+          post :approve
+          post :pay
+          post :reverse
         end
       end
       

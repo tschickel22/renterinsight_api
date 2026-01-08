@@ -15,6 +15,11 @@ class CommissionPlan < ApplicationRecord
   scope :defaults, -> { where(is_default: true) }
   scope :current, -> { where('(effective_date IS NULL OR effective_date <= ?) AND (expiration_date IS NULL OR expiration_date >= ?)', Date.today, Date.today) }
   
+  # Location filtering scope (standard pattern)
+  scope :for_current_location, -> {
+    Current.location_filtered? ? where(location_id: Current.location_id) : all
+  }
+  
   # Find the applicable plan for a user
   def self.for_salesperson(user, company)
     # Priority: User-specific > Role-based > Company default

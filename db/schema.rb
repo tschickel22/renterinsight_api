@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_08_000003) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_08_000010) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -950,9 +950,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_08_000003) do
     t.integer "quantity", default: 1
     t.date "delivery_date"
     t.bigint "primary_salesperson_id"
+    t.bigint "commission_plan_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
+    t.index ["commission_plan_id", "delivery_date"], name: "index_deals_on_plan_and_delivery"
+    t.index ["commission_plan_id"], name: "index_deals_on_commission_plan_id"
     t.index ["company_id", "delivery_date"], name: "index_deals_on_company_and_delivery"
     t.index ["company_id", "location_id"], name: "index_deals_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_deals_on_company_id"
@@ -2866,6 +2869,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_08_000003) do
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
   add_foreign_key "deals", "accounts"
+  add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
   add_foreign_key "deals", "locations"
