@@ -42,8 +42,21 @@ module Api
         @service_tickets = @service_tickets.warranty_suspected if params[:warranty_suspected] == 'true'
         @service_tickets = @service_tickets.warranty_confirmed if params[:warranty_confirmed] == 'true'
         
+        # Pagination
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        total = @service_tickets.count
+        @service_tickets = @service_tickets.offset((page - 1) * per_page).limit(per_page)
+        
         render json: {
-          data: @service_tickets.map { |ticket| serialize_ticket(ticket) }
+          data: @service_tickets.map { |ticket| serialize_ticket(ticket) },
+          meta: {
+            total: total,
+            page: page,
+            per_page: per_page,
+            total_pages: (total.to_f / per_page).ceil
+          }
         }
       end
       

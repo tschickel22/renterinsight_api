@@ -37,8 +37,21 @@ module Api
         @warranty_claims = @warranty_claims.by_status(params[:status]) if params[:status].present?
         @warranty_claims = @warranty_claims.by_manufacturer(params[:manufacturer_id]) if params[:manufacturer_id].present?
         
+        # Pagination
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        total = @warranty_claims.count
+        @warranty_claims = @warranty_claims.offset((page - 1) * per_page).limit(per_page)
+        
         render json: {
-          data: @warranty_claims.map { |claim| claim.as_json }
+          data: @warranty_claims.map { |claim| claim.as_json },
+          meta: {
+            total: total,
+            page: page,
+            per_page: per_page,
+            total_pages: (total.to_f / per_page).ceil
+          }
         }
       end
       
