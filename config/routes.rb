@@ -718,16 +718,6 @@ Rails.application.routes.draw do
           end
         end
       end
-      
-      # ==================== ADMIN NAMESPACE (Platform Admin Only) ====================
-      namespace :admin do
-        resources :manufacturers do
-          member do
-            post :activate
-            post :deactivate
-          end
-        end
-      end
     end
   end
 
@@ -1182,6 +1172,26 @@ Rails.application.routes.draw do
         get 'settings', to: 'security_settings#show'
         patch 'settings', to: 'security_settings#update'
         get 'mfa_stats', to: 'security_settings#mfa_stats'
+      end
+    end
+
+    # ==================== ADMIN NAMESPACE (Platform Admin Only) ====================
+    namespace :admin do
+      # Admin Buyers (Portal Users for Admin View)
+      resources :buyers, only: [:index]
+      
+      # Admin Documents (Documents across all clients)
+      resources :documents, only: [:index, :show, :create, :update, :destroy] do
+        member do
+          get :download
+        end
+      end
+      
+      resources :manufacturers do
+        member do
+          post :activate
+          post :deactivate
+        end
       end
     end
 
