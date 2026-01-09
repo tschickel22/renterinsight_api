@@ -285,6 +285,7 @@ Rails.application.routes.draw do
           post :send_sms
           post :mark_paid
           post :cancel
+          get :pdf
         end
         
         collection do

@@ -48,24 +48,22 @@ module Api
         # Apply sorting
         @contacts = apply_sorting(@contacts)
 
-        # Pagination
-        page = params[:page]&.to_i || 1
-        per_page = params[:per_page]&.to_i || 50
-        per_page = [per_page, 100].min # Cap at 100
-        
+        # Count BEFORE pagination
         total_count = @contacts.count
-        total_pages = (total_count.to_f / per_page).ceil
-        offset = (page - 1) * per_page
         
-        @contacts = @contacts.limit(per_page).offset(offset)
+        # Paginate
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        @contacts = @contacts.offset((page - 1) * per_page).limit(per_page)
 
         render json: {
-          contacts: @contacts.map { |contact| contact_json(contact) },
+          items: @contacts.map { |contact| contact_json(contact) },
           meta: {
-            current_page: page,
-            total_pages: total_pages,
-            total_count: total_count,
-            per_page: per_page
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
           }
         }
       rescue => e

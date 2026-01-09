@@ -49,21 +49,22 @@ module Api
         sort_order = params[:sort_order] || 'desc'
         @quotes = @quotes.order("#{sort_by} #{sort_order}")
         
-        # Simple pagination
-        page = (params[:page] || 1).to_i
-        per_page = (params[:per_page] || 25).to_i
-        offset = (page - 1) * per_page
-        
+        # Count BEFORE pagination
         total_count = @quotes.count
-        @quotes = @quotes.limit(per_page).offset(offset)
+        
+        # Paginate
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        @quotes = @quotes.offset((page - 1) * per_page).limit(per_page)
         
         render json: {
           quotes: @quotes.as_json(include_account: true, include_contact: true),
           meta: {
-            current_page: page,
-            total_pages: (total_count.to_f / per_page).ceil,
-            total_count: total_count,
-            per_page: per_page
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
           }
         }
       end

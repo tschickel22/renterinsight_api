@@ -61,7 +61,24 @@ module Api
           deals = deals.lost
         end
         
-        render json: { deals: deals.map { |d| deal_json(d) } }
+        # Count BEFORE pagination
+        total_count = deals.count
+        
+        # Paginate
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        deals = deals.offset((page - 1) * per_page).limit(per_page)
+        
+        render json: {
+          deals: deals.map { |d| deal_json(d) },
+          meta: {
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
+          }
+        }
       end
 
       # GET /api/crm/deals/by_stage
