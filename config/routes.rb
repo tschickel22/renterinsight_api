@@ -152,6 +152,15 @@ Rails.application.routes.draw do
         get 'stats'
       end
       
+      # ==================== DASHBOARD ====================
+      scope path: 'dashboard', controller: 'dashboard' do
+        get 'presets', action: :presets
+        get 'layout/:preset_id', action: :layout
+        post 'layout/:preset_id', action: :save_layout
+        delete 'layout/:preset_id', action: :reset_layout
+        get 'metrics/:card_type', action: :metrics
+      end
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do

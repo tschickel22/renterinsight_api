@@ -1,0 +1,889 @@
+# frozen_string_literal: true
+
+# Dashboard Metrics Service
+# Calculates data for all dashboard cards
+# Each method returns data for a specific card type
+
+class DashboardMetricsService
+  attr_reader :company, :current_user, :date_range
+
+  def initialize(company, current_user, date_range = {})
+    @company = company
+    @current_user = current_user
+    @date_range = parse_date_range(date_range)
+  end
+
+  # ==================== REVENUE SUMMARY CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url }
+  def revenue_summary
+    # Get revenue for current period
+    current_revenue = calculate_revenue(@date_range[:start_date], @date_range[:end_date])
+    
+    # Get revenue for previous period (for trend calculation)
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    previous_revenue = calculate_revenue(previous_start, previous_end)
+    
+    # Calculate trend
+    trend = calculate_trend(current_revenue, previous_revenue)
+    
+    # Generate sparkline data (last 30 days)
+    sparkline_data = generate_revenue_sparkline
+    
+    {
+      value: current_revenue,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/finance/payments',
+      formatted_value: format_currency(current_revenue)
+    }
+  end
+
+  # ==================== DEALS COUNT CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url, by_stage }
+  def deals_count
+    # Get deals for current period (exclude closed_won and closed_lost)
+    current_deals = @company.deals
+      .where(created_at: @date_range[:start_date]..@date_range[:end_date])
+      .where.not(stage: ['closed_lost', 'closed_won'])
+    
+    current_count = current_deals.count
+    
+    # Get deals for previous period
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    previous_count = @company.deals
+      .where(created_at: previous_start..previous_end)
+      .where.not(stage: ['closed_lost', 'closed_won'])
+      .count
+    
+    # Calculate trend
+    trend = calculate_trend(current_count, previous_count)
+    
+    # Generate sparkline (deals created per day, last 30 days)
+    sparkline_data = generate_deals_sparkline
+    
+    # Breakdown by stage
+    by_stage = current_deals.group(:stage).count
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/deals',
+      by_stage: by_stage
+    }
+  end
+
+  # ==================== LEADS COUNT CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url }
+  def leads_count
+    # Note: Lead model doesn't exist yet, return zero data
+    # When Lead model is created, update this method
+    {
+      value: 0,
+      trend_percentage: 0,
+      trend_direction: 'neutral',
+      sparkline_data: generate_empty_sparkline,
+      drill_down_url: '/crm'
+    }
+  end
+
+  # ==================== SERVICE TICKETS COUNT CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url, by_status }
+  def service_tickets_count
+    # Get tickets for current period (exclude completed and cancelled)
+    current_tickets = @company.service_tickets
+      .where(created_at: @date_range[:start_date]..@date_range[:end_date])
+      .where.not(status: ['completed', 'cancelled'])
+    
+    current_count = current_tickets.count
+    
+    # Get tickets for previous period
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    previous_count = @company.service_tickets
+      .where(created_at: previous_start..previous_end)
+      .where.not(status: ['completed', 'cancelled'])
+      .count
+    
+    # Calculate trend
+    trend = calculate_trend(current_count, previous_count)
+    
+    # Generate sparkline (tickets created per day, last 30 days)
+    sparkline_data = generate_service_tickets_sparkline
+    
+    # Breakdown by status
+    by_status = current_tickets.group(:status).count
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/service',
+      by_status: by_status
+    }
+  end
+
+  # ==================== PIPELINE FUNNEL CHART ====================
+  # Returns: { stages, drill_down_url }
+  # Each stage: { name, count, value, conversion_rate }
+  def pipeline_funnel
+    # Define standard deal stages in order
+    stage_order = ['prospecting', 'qualification', 'needs_analysis', 'proposal', 'negotiation', 'closing']
+    
+    # Get all active deals grouped by stage
+    deals_by_stage = @company.deals
+      .where.not(stage: ['closed_won', 'closed_lost'])
+      .group(:stage)
+      .select('stage, COUNT(*) as count, SUM(value) as total_value')
+    
+    # Convert to hash for easier lookup
+    stage_data = {}
+    deals_by_stage.each do |record|
+      stage_data[record.stage] = {
+        count: record.count,
+        value: record.total_value || 0
+      }
+    end
+    
+    # Build stages array in order
+    stages = []
+    total_deals = deals_by_stage.sum(&:count)
+    
+    stage_order.each_with_index do |stage, index|
+      data = stage_data[stage] || { count: 0, value: 0 }
+      
+      # Calculate conversion rate (percentage of total deals)
+      conversion_rate = total_deals > 0 ? (data[:count].to_f / total_deals * 100).round(1) : 0
+      
+      stages << {
+        name: stage.titleize,
+        stage_key: stage,
+        count: data[:count],
+        value: data[:value],
+        formatted_value: format_currency(data[:value]),
+        conversion_rate: conversion_rate,
+        order: index
+      }
+    end
+    
+    {
+      stages: stages,
+      total_deals: total_deals,
+      drill_down_url: '/deals'
+    }
+  end
+
+  # ==================== REVENUE TREND CHART ====================
+  # Returns: { months, drill_down_url }
+  # Each month: { month, current_year, previous_year }
+  def revenue_trend
+    # Get last 12 months
+    end_date = Date.today.end_of_month
+    start_date = (end_date - 11.months).beginning_of_month
+    
+    # Get all payments for current year
+    current_payments = @company.payments
+      .where(status: 'completed')
+      .where(payment_date: start_date..end_date)
+      .select('payment_date, amount')
+    
+    # Get all payments for previous year
+    previous_start = start_date - 1.year
+    previous_end = end_date - 1.year
+    previous_payments = @company.payments
+      .where(status: 'completed')
+      .where(payment_date: previous_start..previous_end)
+      .select('payment_date, amount')
+    
+    # Group by month manually (database-agnostic)
+    current_revenue = {}
+    current_payments.each do |payment|
+      month_key = payment.payment_date.beginning_of_month
+      current_revenue[month_key] ||= 0
+      current_revenue[month_key] += payment.amount
+    end
+    
+    previous_revenue = {}
+    previous_payments.each do |payment|
+      month_key = payment.payment_date.beginning_of_month
+      previous_revenue[month_key] ||= 0
+      previous_revenue[month_key] += payment.amount
+    end
+    
+    # Build months array
+    months = []
+    (start_date..end_date).select { |d| d.day == 1 }.each do |month_start|
+      current = current_revenue[month_start] || 0
+      previous = previous_revenue[month_start - 1.year] || 0
+      
+      months << {
+        month: month_start.strftime('%b %Y'),
+        month_short: month_start.strftime('%b'),
+        current_year: current,
+        previous_year: previous,
+        current_formatted: format_currency(current),
+        previous_formatted: format_currency(previous)
+      }
+    end
+    
+    {
+      months: months,
+      drill_down_url: '/finance/payments'
+    }
+  end
+
+  # ==================== TOP PERFORMERS CHART ====================
+  # Returns: { performers, metric, drill_down_url }
+  # Each performer: { name, value, formatted_value }
+  def top_performers
+    Rails.logger.info "[Top Performers] Starting query for company #{@company.id}"
+    
+    # Get all closed won deals first
+    closed_deals = @company.deals.where(stage: 'closed_won')
+    Rails.logger.info "[Top Performers] Total closed_won deals: #{closed_deals.count}"
+    
+    if closed_deals.count == 0
+      Rails.logger.info "[Top Performers] No closed won deals found"
+      return {
+        performers: [],
+        metric: 'revenue',
+        metric_label: 'Revenue',
+        drill_down_url: '/deals'
+      }
+    end
+    
+    # Check available columns
+    available_columns = @company.deals.column_names
+    Rails.logger.info "[Top Performers] Deal columns: #{available_columns.join(', ')}"
+    
+    # Find owner field
+    owner_field = ['assigned_to_id', 'owner_id', 'user_id', 'salesperson_id', 'created_by_id']
+      .find { |field| available_columns.include?(field) }
+    
+    Rails.logger.info "[Top Performers] Using owner field: #{owner_field}"
+    
+    if owner_field.nil?
+      Rails.logger.warn "[Top Performers] No owner field found"
+      return {
+        performers: [],
+        metric: 'revenue',
+        metric_label: 'Revenue',
+        drill_down_url: '/deals'
+      }
+    end
+    
+    # Check how many deals have owners
+    deals_with_owners = closed_deals.where.not(owner_field => nil).count
+    Rails.logger.info "[Top Performers] Deals with #{owner_field}: #{deals_with_owners}"
+    
+    if deals_with_owners == 0
+      Rails.logger.warn "[Top Performers] No deals have #{owner_field} assigned"
+      return {
+        performers: [],
+        metric: 'revenue',
+        metric_label: 'Revenue',
+        drill_down_url: '/deals'
+      }
+    end
+    
+    # Simple aggregation query - don't filter by date for now
+    query = <<-SQL
+      SELECT 
+        users.id as user_id,
+        users.first_name,
+        users.last_name,
+        users.email,
+        COUNT(deals.id) as deals_count,
+        SUM(deals.value) as total_value
+      FROM deals
+      INNER JOIN users ON deals.#{owner_field} = users.id
+      WHERE deals.company_id = #{@company.id}
+        AND deals.stage = 'closed_won'
+        AND deals.#{owner_field} IS NOT NULL
+      GROUP BY users.id, users.first_name, users.last_name, users.email
+      ORDER BY total_value DESC
+      LIMIT 5
+    SQL
+    
+    results = ActiveRecord::Base.connection.exec_query(query)
+    Rails.logger.info "[Top Performers] Query returned #{results.count} performers"
+    
+    performers = results.map do |row|
+      name = "#{row['first_name']} #{row['last_name']}".strip
+      name = row['email'] if name.blank?
+      
+      {
+        user_id: row['user_id'],
+        name: name,
+        deals_count: row['deals_count'],
+        value: row['total_value'] || 0,
+        formatted_value: format_currency(row['total_value'] || 0)
+      }
+    end
+    
+    Rails.logger.info "[Top Performers] Returning #{performers.length} performers: #{performers.map { |p| p[:name] }.join(', ')}"
+    
+    {
+      performers: performers,
+      metric: 'revenue',
+      metric_label: 'Revenue',
+      drill_down_url: '/deals'
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Top Performers] Error: #{e.class.name} - #{e.message}"
+    Rails.logger.error e.backtrace.first(10).join("\n")
+    
+    {
+      performers: [],
+      metric: 'revenue',
+      metric_label: 'Revenue',
+      drill_down_url: '/deals'
+    }
+  end
+
+  # ==================== SERVICE STATUS CHART ====================
+  # Returns: { statuses, total, drill_down_url }
+  # Each status: { name, count, percentage }
+  def service_status_chart
+    # Get all service tickets grouped by status
+    tickets_by_status = @company.service_tickets
+      .where.not(status: 'cancelled')
+      .group(:status)
+      .count
+    
+    total = tickets_by_status.values.sum
+    
+    # Build statuses array
+    statuses = tickets_by_status.map do |status, count|
+      percentage = total > 0 ? (count.to_f / total * 100).round(1) : 0
+      
+      {
+        name: status.titleize.gsub('_', ' '),
+        status_key: status,
+        count: count,
+        percentage: percentage
+      }
+    end.sort_by { |s| -s[:count] } # Sort by count descending
+    
+    {
+      statuses: statuses,
+      total: total,
+      drill_down_url: '/service'
+    }
+  end
+
+  # ==================== RECENT ACTIVITY CARD ====================
+  # Returns: { activities, drill_down_url }
+  # Shows recently created/updated entities across modules
+  def recent_activities
+    Rails.logger.info "[Recent Activities] Starting for company #{@company.id}"
+    activities = []
+    
+    # Get recent deals (NO DATE FILTER - show all recent)
+    begin
+      recent_deals = @company.deals
+        .order('created_at DESC')
+        .limit(5)
+      
+      Rails.logger.info "[Recent Activities] Found #{recent_deals.count} deals"
+      
+      recent_deals.each do |deal|
+        activities << {
+          id: deal.id,
+          type: 'deal',
+          subject: deal.name || deal.customer_name || "Deal ##{deal.id}",
+          entity_type: 'deal',
+          entity_id: deal.id,
+          entity_name: deal.name || deal.customer_name,
+          user_name: @current_user&.full_name || 'System',
+          created_at: deal.created_at,
+          formatted_time: time_ago_in_words(deal.created_at)
+        }
+      end
+    rescue => e
+      Rails.logger.error "[Recent Activities] Deals error: #{e.message}"
+    end
+    
+    # Get recent tasks (NO DATE FILTER)
+    begin
+      if defined?(Task) && @company.respond_to?(:tasks)
+        recent_tasks = @company.tasks
+          .order('created_at DESC')
+          .limit(5)
+        
+        Rails.logger.info "[Recent Activities] Found #{recent_tasks.count} tasks"
+        
+        recent_tasks.each do |task|
+          activities << {
+            id: task.id,
+            type: 'task',
+            subject: task.title,
+            entity_type: 'task',
+            entity_id: task.id,
+            entity_name: task.title,
+            user_name: @current_user&.full_name || 'System',
+            created_at: task.created_at,
+            formatted_time: time_ago_in_words(task.created_at)
+          }
+        end
+      else
+        Rails.logger.info "[Recent Activities] Task model not available"
+      end
+    rescue => e
+      Rails.logger.error "[Recent Activities] Tasks error: #{e.message}"
+    end
+    
+    # Get recent service tickets (NO DATE FILTER)
+    begin
+      recent_tickets = @company.service_tickets
+        .order('created_at DESC')
+        .limit(5)
+      
+      Rails.logger.info "[Recent Activities] Found #{recent_tickets.count} tickets"
+      
+      recent_tickets.each do |ticket|
+        activities << {
+          id: ticket.id,
+          type: 'service_ticket',
+          subject: ticket.subject || ticket.title || "Ticket ##{ticket.id}",
+          entity_type: 'service_ticket',
+          entity_id: ticket.id,
+          entity_name: ticket.subject || ticket.title,
+          user_name: @current_user&.full_name || 'System',
+          created_at: ticket.created_at,
+          formatted_time: time_ago_in_words(ticket.created_at)
+        }
+      end
+    rescue => e
+      Rails.logger.error "[Recent Activities] Tickets error: #{e.message}"
+    end
+    
+    # Get recent brochures (NO DATE FILTER)
+    begin
+      if defined?(Brochure) && @company.respond_to?(:brochures)
+        recent_brochures = @company.brochures
+          .order('created_at DESC')
+          .limit(3)
+        
+        Rails.logger.info "[Recent Activities] Found #{recent_brochures.count} brochures"
+        
+        recent_brochures.each do |brochure|
+          activities << {
+            id: brochure.id,
+            type: 'brochure',
+            subject: brochure.name || "Brochure ##{brochure.id}",
+            entity_type: 'brochure',
+            entity_id: brochure.id,
+            entity_name: brochure.name,
+            user_name: @current_user&.full_name || 'System',
+            created_at: brochure.created_at,
+            formatted_time: time_ago_in_words(brochure.created_at)
+          }
+        end
+      else
+        Rails.logger.info "[Recent Activities] Brochure model not available"
+      end
+    rescue => e
+      Rails.logger.error "[Recent Activities] Brochures error: #{e.message}"
+    end
+    
+    # Sort all activities by time and take top 10
+    activities = activities.sort_by { |a| a[:created_at] }.reverse.take(10)
+    
+    Rails.logger.info "[Recent Activities] Returning #{activities.count} total activities"
+    
+    {
+      activities: activities,
+      drill_down_url: '/activities'
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Recent Activities] Fatal error: #{e.message}"
+    Rails.logger.error e.backtrace.first(10).join("\n")
+    {
+      activities: [],
+      drill_down_url: '/activities'
+    }
+  end
+
+  # ==================== UPCOMING TASKS CARD ====================
+  # Returns: { tasks, drill_down_url }
+  # Each task: { id, title, due_date, priority, assigned_to, entity_type, entity_id }
+  def upcoming_tasks
+    tasks_data = []
+    
+    # Get incomplete tasks - include overdue tasks
+    if defined?(Task) && @company.respond_to?(:tasks)
+      # Get all incomplete tasks (not just upcoming - include overdue)
+      # Note: Database uses completed_at (datetime) not completed (boolean)
+      tasks = @company.tasks
+        .where(completed_at: nil)
+        .where.not(due_date: nil)
+        .order('due_date ASC')
+        .limit(10)
+      
+      tasks_data = tasks.map do |task|
+        assigned_user = task.respond_to?(:assigned_to) ? User.find_by(id: task.assigned_to) : nil
+        
+        {
+          id: task.id,
+          title: task.title,
+          due_date: task.due_date,
+          formatted_due_date: task.due_date.strftime('%b %d'),
+          priority: task.priority || 'medium',
+          assigned_to: assigned_user ? "#{assigned_user.first_name} #{assigned_user.last_name}" : nil,
+          entity_type: task.respond_to?(:taskable_type) ? task.taskable_type : nil,
+          entity_id: task.respond_to?(:taskable_id) ? task.taskable_id : nil,
+          overdue: task.due_date < Date.today
+        }
+      end
+    end
+    
+    {
+      tasks: tasks_data,
+      drill_down_url: '/tasks'
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Upcoming Tasks] Error: #{e.message}"
+    {
+      tasks: [],
+      drill_down_url: '/tasks'
+    }
+  end
+
+  # ==================== UNREAD MESSAGES CARD ====================
+  # Returns: { messages, total, drill_down_url }
+  # Each message: { id, from, subject, preview, created_at }
+  def unread_messages
+    messages_data = []
+    
+    # Check if Message or Notification model exists
+    if defined?(Notification)
+      # Note: Database uses recipient_id/recipient_type (polymorphic) not user_id
+      notifications = Notification
+        .where(recipient_id: @current_user.id, recipient_type: 'User')
+        .where(read: [false, nil])
+        .order('created_at DESC')
+        .limit(10)
+      
+      messages_data = notifications.map do |notif|
+        {
+          id: notif.id,
+          from: notif.respond_to?(:from_user) ? notif.from_user&.full_name : 'System',
+          subject: notif.title || notif.message,
+          preview: notif.message&.truncate(100),
+          created_at: notif.created_at,
+          formatted_time: time_ago_in_words(notif.created_at),
+          priority: notif.respond_to?(:priority) ? notif.priority : 'normal'
+        }
+      end
+    end
+    
+    {
+      messages: messages_data,
+      total: messages_data.count,
+      drill_down_url: '/notifications'
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Unread Messages] Error: #{e.message}"
+    {
+      messages: [],
+      total: 0,
+      drill_down_url: '/notifications'
+    }
+  end
+
+  # ==================== WEEK CALENDAR CARD ====================
+  # Returns: { events, week_start, week_end }
+  # Each event: { id, title, date, time, type, entity_type, entity_id }
+  def week_calendar
+    events_data = []
+    
+    # Get current week boundaries
+    week_start = Date.today.beginning_of_week
+    week_end = Date.today.end_of_week
+    
+    Rails.logger.info "[Week Calendar] Fetching tasks for week: #{week_start} to #{week_end}"
+    
+    # Get tasks due this week (using status enum, not completed_at)
+    if defined?(Task) && @company.respond_to?(:tasks)
+      # Task model uses status enum: pending, in_progress, on_hold, completed, cancelled
+      tasks = @company.tasks
+        .where.not(status: [:completed, :cancelled])
+        .where(due_date: week_start..week_end)
+        .order('due_date ASC, created_at ASC')
+        .limit(50)
+      
+      Rails.logger.info "[Week Calendar] Found #{tasks.count} active tasks"
+      
+      tasks.each do |task|
+        # Format time if available, otherwise show "All Day"
+        time_str = if task.respond_to?(:due_time) && task.due_time.present?
+          task.due_time.strftime('%I:%M %p')
+        else
+          'All Day'
+        end
+        
+        events_data << {
+          id: task.id,
+          title: task.title,
+          date: task.due_date.to_date.strftime('%Y-%m-%d'),  # Force YYYY-MM-DD format
+          time: time_str,
+          type: 'task',
+          entity_type: task.taskable_type || 'Task',
+          entity_id: task.taskable_id || task.id
+        }
+      end
+    else
+      Rails.logger.warn "[Week Calendar] Task model not available or company doesn't have tasks"
+    end
+    
+    Rails.logger.info "[Week Calendar] Returning #{events_data.count} events"
+    
+    {
+      events: events_data,
+      week_start: week_start.to_s,
+      week_end: week_end.to_s
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Week Calendar] Error: #{e.message}"
+    Rails.logger.error e.backtrace.first(5).join("\n")
+    {
+      events: [],
+      week_start: Date.today.beginning_of_week.to_s,
+      week_end: Date.today.end_of_week.to_s
+    }
+  end
+
+  # ==================== QUICK ACTIONS CARD ====================
+  # Returns: { actions }
+  # Quick actions are permission-based and rendered on frontend
+  # This endpoint can return empty data or custom actions
+  def quick_actions
+    {
+      actions: []  # Frontend will use DEFAULT_ACTIONS based on permissions
+    }
+  end
+
+  private
+
+  # Calculate total revenue from payments
+  def calculate_revenue(start_date, end_date)
+    @company.payments
+      .where(status: 'completed')
+      .where(payment_date: start_date..end_date)
+      .sum(:amount)
+  end
+
+  # Generate sparkline data for revenue (last 30 days)
+  def generate_revenue_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Group by date and sum revenue
+    daily_revenue = @company.payments
+      .where(status: 'completed')
+      .where(payment_date: start_date..end_date)
+      .group("DATE(payment_date)")
+      .sum(:amount)
+    
+    # Fill in missing dates with 0
+    sparkline = []
+    (start_date..end_date).each do |date|
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: daily_revenue[date] || 0
+      }
+    end
+    
+    sparkline
+  end
+
+  # Generate sparkline data for deals (last 30 days)
+  def generate_deals_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Group by date and count deals
+    daily_deals = @company.deals
+      .where(created_at: start_date..end_date)
+      .where.not(stage: ['closed_lost', 'closed_won'])
+      .group("DATE(created_at)")
+      .count
+    
+    # Fill in missing dates with 0
+    sparkline = []
+    (start_date..end_date).each do |date|
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: daily_deals[date] || 0
+      }
+    end
+    
+    sparkline
+  end
+
+  # Generate sparkline data for service tickets (last 30 days)
+  def generate_service_tickets_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Group by date and count tickets
+    daily_tickets = @company.service_tickets
+      .where(created_at: start_date..end_date)
+      .where.not(status: ['completed', 'cancelled'])
+      .group("DATE(created_at)")
+      .count
+    
+    # Fill in missing dates with 0
+    sparkline = []
+    (start_date..end_date).each do |date|
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: daily_tickets[date] || 0
+      }
+    end
+    
+    sparkline
+  end
+
+  # Generate empty sparkline (for leads or when no data)
+  def generate_empty_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    sparkline = []
+    (start_date..end_date).each do |date|
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: 0
+      }
+    end
+    
+    sparkline
+  end
+
+  # Calculate trend percentage and direction
+  def calculate_trend(current_value, previous_value)
+    return { percentage: 0, direction: 'neutral' } if previous_value.zero?
+    
+    percentage = ((current_value - previous_value) / previous_value.to_f * 100).round(1)
+    direction = if percentage > 0
+                  'up'
+                elsif percentage < 0
+                  'down'
+                else
+                  'neutral'
+                end
+    
+    {
+      percentage: percentage.abs,
+      direction: direction
+    }
+  end
+
+  # Parse date range options
+  def parse_date_range(range_params)
+    option = range_params[:option] || 'this_month'
+    
+    case option
+    when 'today'
+      {
+        start_date: Date.today,
+        end_date: Date.today
+      }
+    when 'yesterday'
+      {
+        start_date: Date.yesterday,
+        end_date: Date.yesterday
+      }
+    when 'this_week'
+      {
+        start_date: Date.today.beginning_of_week,
+        end_date: Date.today.end_of_week
+      }
+    when 'last_week'
+      {
+        start_date: Date.today.last_week.beginning_of_week,
+        end_date: Date.today.last_week.end_of_week
+      }
+    when 'this_month'
+      {
+        start_date: Date.today.beginning_of_month,
+        end_date: Date.today.end_of_month
+      }
+    when 'last_month'
+      {
+        start_date: Date.today.last_month.beginning_of_month,
+        end_date: Date.today.last_month.end_of_month
+      }
+    when 'this_quarter'
+      {
+        start_date: Date.today.beginning_of_quarter,
+        end_date: Date.today.end_of_quarter
+      }
+    when 'last_quarter'
+      {
+        start_date: (Date.today - 3.months).beginning_of_quarter,
+        end_date: (Date.today - 3.months).end_of_quarter
+      }
+    when 'this_year'
+      {
+        start_date: Date.today.beginning_of_year,
+        end_date: Date.today.end_of_year
+      }
+    when 'last_year'
+      {
+        start_date: Date.today.last_year.beginning_of_year,
+        end_date: Date.today.last_year.end_of_year
+      }
+    when 'custom'
+      {
+        start_date: Date.parse(range_params[:start_date]),
+        end_date: Date.parse(range_params[:end_date])
+      }
+    else
+      # Default to this month
+      {
+        start_date: Date.today.beginning_of_month,
+        end_date: Date.today.end_of_month
+      }
+    end
+  rescue ArgumentError => e
+    # If date parsing fails, default to this month
+    {
+      start_date: Date.today.beginning_of_month,
+      end_date: Date.today.end_of_month
+    }
+  end
+
+  # Format currency
+  def format_currency(amount)
+    ActionController::Base.helpers.number_to_currency(amount)
+  end
+  
+  # Time ago helper
+  def time_ago_in_words(time)
+    seconds = (Time.now - time).to_i
+    
+    case seconds
+    when 0..59
+      "#{seconds}s ago"
+    when 60..3599
+      "#{seconds / 60}m ago"
+    when 3600..86399
+      "#{seconds / 3600}h ago"
+    when 86400..604799
+      "#{seconds / 86400}d ago"
+    else
+      time.strftime('%b %d')
+    end
+  end
+end
