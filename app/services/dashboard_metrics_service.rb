@@ -1033,26 +1033,68 @@ class DashboardMetricsService
   end
 
   # ==================== MY ACTIVITY COUNT ====================
+  # Aggregates activities across all entity types (deals, leads, contacts, accounts, locations)
+  # Returns: { value, trend_percentage, trend_direction, drill_down_url }
   def my_activity_count
     current_count = 0
-    if defined?(Activity) && @company.respond_to?(:activities)
-      current_count = @company.activities
-        .where(user_id: @current_user.id)
-        .where(created_at: @date_range[:start_date]..@date_range[:end_date])
-        .count
-    end
+    previous_count = 0
     
+    # Calculate date ranges
     previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
     previous_start = @date_range[:start_date] - previous_period_days.days
     previous_end = @date_range[:start_date] - 1.day
     
-    previous_count = 0
-    if defined?(Activity) && @company.respond_to?(:activities)
-      previous_count = @company.activities
-        .where(user_id: @current_user.id)
-        .where(created_at: previous_start..previous_end)
-        .count
+    # Count activities from all entity types
+    activity_models = [
+      { model: DealActivity, company_join: :deal },
+      { model: LeadActivity, company_join: :lead },
+      { model: ContactActivity, company_join: :contact },
+      { model: AccountActivity, company_join: :account },
+      { model: LocationActivity, company_join: :location }
+    ]
+    
+    activity_models.each do |config|
+      model = config[:model]
+      next unless defined?(model)
+      
+      begin
+        # Check if model has assigned_to_id column
+        has_assigned_to = model.column_names.include?('assigned_to_id')
+        
+        # Build where clause based on available columns
+        if has_assigned_to
+          # Activities where user is either creator OR assignee
+          where_clause = model.arel_table[:user_id].eq(@current_user.id)
+            .or(model.arel_table[:assigned_to_id].eq(@current_user.id))
+        else
+          # Activities where user is only the creator
+          where_clause = model.arel_table[:user_id].eq(@current_user.id)
+        end
+        
+        # Current period count
+        current_count += model
+          .joins(config[:company_join])
+          .where("#{config[:company_join].to_s.pluralize}.company_id = ?", @company.id)
+          .where(created_at: @date_range[:start_date]..@date_range[:end_date])
+          .where(where_clause)
+          .count
+        
+        # Previous period count
+        previous_count += model
+          .joins(config[:company_join])
+          .where("#{config[:company_join].to_s.pluralize}.company_id = ?", @company.id)
+          .where(created_at: previous_start..previous_end)
+          .where(where_clause)
+          .count
+          
+        Rails.logger.info "[My Activity Count] #{model.name}: #{current_count} activities"
+      rescue StandardError => model_error
+        Rails.logger.error "[My Activity Count] Error with #{model.name}: #{model_error.message}"
+        # Continue to next model instead of failing entirely
+      end
     end
+    
+    Rails.logger.info "[My Activity Count] User #{@current_user.id}: #{current_count} current, #{previous_count} previous"
     
     trend = calculate_trend(current_count, previous_count)
     
@@ -1060,7 +1102,17 @@ class DashboardMetricsService
       value: current_count,
       trend_percentage: trend[:percentage],
       trend_direction: trend[:direction],
-      drill_down_url: '/deals'  # No standalone activities page - link to deals instead
+      drill_down_url: '/tasks?assigned_to_me=true'  # Link to user's tasks
+    }
+  rescue StandardError => e
+    Rails.logger.error "[My Activity Count] Fatal error: #{e.message}"
+    Rails.logger.error e.backtrace.first(5).join("\n")
+    
+    {
+      value: 0,
+      trend_percentage: 0,
+      trend_direction: 'neutral',
+      drill_down_url: '/tasks?assigned_to_me=true'
     }
   end
 
@@ -1114,61 +1166,138 @@ class DashboardMetricsService
   def my_recent_activities
     activities = []
     
-    if defined?(Activity) && @company.respond_to?(:activities)
-      recent_activities = @company.activities
-        .where(user_id: @current_user.id)
-        .order('created_at DESC')
-        .limit(10)
+    # Activity models with their entity associations
+    activity_models = [
+      { model: DealActivity, entity_type: 'deal', company_join: :deal },
+      { model: LeadActivity, entity_type: 'lead', company_join: :lead },
+      { model: ContactActivity, entity_type: 'contact', company_join: :contact },
+      { model: AccountActivity, entity_type: 'account', company_join: :account }
+    ]
+    
+    activity_models.each do |config|
+      model = config[:model]
+      next unless defined?(model)
       
-      activities = recent_activities.map do |activity|
-        {
-          id: activity.id,
-          type: activity.activity_type,
-          subject: activity.subject,
-          entity_type: activity.respond_to?(:entity_type) ? activity.entity_type : nil,
-          entity_id: activity.respond_to?(:entity_id) ? activity.entity_id : nil,
-          created_at: activity.created_at,
-          formatted_time: time_ago_in_words(activity.created_at)
-        }
+      begin
+        # Get recent activities from this entity type
+        entity_activities = model
+          .joins(config[:company_join])
+          .where("#{config[:company_join].to_s.pluralize}.company_id = ?", @company.id)
+          .where(user_id: @current_user.id)
+          .order('created_at DESC')
+          .limit(10)
+        
+        # Transform to common format
+        entity_activities.each do |activity|
+          entity = activity.send(config[:company_join])
+          
+          activities << {
+            id: activity.id,
+            type: activity.activity_type,
+            subject: activity.subject || activity.notes&.truncate(50),
+            entity_type: config[:entity_type],
+            entity_id: entity.id,
+            entity_name: get_entity_name(entity, config[:entity_type]),
+            user_name: activity.user&.full_name || 'Unknown',
+            created_at: activity.created_at,
+            formatted_time: time_ago_in_words(activity.created_at)
+          }
+        end
+      rescue StandardError => model_error
+        Rails.logger.error "[My Recent Activities] Error with #{model.name}: #{model_error.message}"
       end
     end
     
+    # Sort all activities by created_at DESC and limit to 10 most recent
+    activities.sort_by! { |a| a[:created_at] }
+    activities.reverse!
+    activities = activities.first(10)
+    
     {
       activities: activities,
-      drill_down_url: '/deals'  # No standalone activities page
+      drill_down_url: '/tasks'
     }
+  end
+  
+  # Helper to get entity display name
+  def get_entity_name(entity, entity_type)
+    case entity_type
+    when 'deal'
+      entity.name || entity.customer_name || "Deal ##{entity.id}"
+    when 'lead'
+      "#{entity.first_name} #{entity.last_name}".strip.presence || "Lead ##{entity.id}"
+    when 'contact'
+      entity.full_name || "Contact ##{entity.id}"
+    when 'account'
+      entity.name || "Account ##{entity.id}"
+    else
+      "#{entity_type.titleize} ##{entity.id}"
+    end
   end
 
   # ==================== MY TASKS ====================
   def my_tasks
     tasks_data = []
     
-    if defined?(Task) && @company.respond_to?(:tasks)
-      assignment_field = ['assigned_to', 'user_id', 'assignee_id']
-        .find { |field| Task.column_names.include?(field) }
+    # Activity models with their entity associations
+    activity_models = [
+      { model: DealActivity, entity_type: 'deal', company_join: :deal },
+      { model: LeadActivity, entity_type: 'lead', company_join: :lead },
+      { model: ContactActivity, entity_type: 'contact', company_join: :contact },
+      { model: AccountActivity, entity_type: 'account', company_join: :account }
+    ]
+    
+    activity_models.each do |config|
+      model = config[:model]
+      next unless defined?(model)
       
-      if assignment_field
-        tasks = @company.tasks
-          .where(assignment_field => @current_user.id)
-          .where(completed_at: nil)
+      begin
+        # Check if model has assigned_to_id column
+        has_assigned_to = model.column_names.include?('assigned_to_id')
+        
+        # Build where clause for assignment
+        if has_assigned_to
+          where_clause = model.arel_table[:user_id].eq(@current_user.id)
+            .or(model.arel_table[:assigned_to_id].eq(@current_user.id))
+        else
+          where_clause = model.arel_table[:user_id].eq(@current_user.id)
+        end
+        
+        # Get upcoming and overdue tasks (activity_type = 'task', not completed)
+        tasks = model
+          .joins(config[:company_join])
+          .where("#{config[:company_join].to_s.pluralize}.company_id = ?", @company.id)
+          .where(activity_type: 'task')
+          .where(where_clause)
           .where.not(due_date: nil)
+          .where('completed_at IS NULL')
           .order('due_date ASC')
           .limit(10)
         
-        tasks_data = tasks.map do |task|
-          {
+        # Transform to common format
+        tasks.each do |task|
+          entity = task.send(config[:company_join])
+          
+          tasks_data << {
             id: task.id,
-            title: task.title,
+            title: task.subject || 'Untitled Task',
             due_date: task.due_date,
             formatted_due_date: task.due_date.strftime('%b %d'),
             priority: task.priority || 'medium',
-            entity_type: task.respond_to?(:taskable_type) ? task.taskable_type : nil,
-            entity_id: task.respond_to?(:taskable_id) ? task.taskable_id : nil,
+            entity_type: config[:entity_type],
+            entity_id: entity.id,
+            entity_name: get_entity_name(entity, config[:entity_type]),
             overdue: task.due_date < Date.today
           }
         end
+      rescue StandardError => model_error
+        Rails.logger.error "[My Tasks] Error with #{model.name}: #{model_error.message}"
       end
     end
+    
+    # Sort by due_date ASC and limit to 10 most urgent
+    tasks_data.sort_by! { |t| t[:due_date] }
+    tasks_data = tasks_data.first(10)
     
     {
       tasks: tasks_data,
@@ -1181,35 +1310,69 @@ class DashboardMetricsService
     events_data = []
     today = Date.today
     
-    if defined?(Task) && @company.respond_to?(:tasks)
-      assignment_field = ['assigned_to', 'user_id', 'assignee_id']
-        .find { |field| Task.column_names.include?(field) }
+    # Activity models with their entity associations
+    activity_models = [
+      { model: DealActivity, entity_type: 'deal', company_join: :deal },
+      { model: LeadActivity, entity_type: 'lead', company_join: :lead },
+      { model: ContactActivity, entity_type: 'contact', company_join: :contact },
+      { model: AccountActivity, entity_type: 'account', company_join: :account }
+    ]
+    
+    activity_models.each do |config|
+      model = config[:model]
+      next unless defined?(model)
       
-      if assignment_field
-        tasks = @company.tasks
-          .where(assignment_field => @current_user.id)
-          .where.not(status: [:completed, :cancelled])
-          .where(due_date: today)
-          .order('created_at ASC')
+      begin
+        # Check if model has assigned_to_id column
+        has_assigned_to = model.column_names.include?('assigned_to_id')
         
-        tasks.each do |task|
-          time_str = if task.respond_to?(:due_time) && task.due_time.present?
-            task.due_time.strftime('%I:%M %p')
+        # Build where clause for assignment
+        if has_assigned_to
+          where_clause = model.arel_table[:user_id].eq(@current_user.id)
+            .or(model.arel_table[:assigned_to_id].eq(@current_user.id))
+        else
+          where_clause = model.arel_table[:user_id].eq(@current_user.id)
+        end
+        
+        # Get today's events (tasks and meetings due today)
+        activities = model
+          .joins(config[:company_join])
+          .where("#{config[:company_join].to_s.pluralize}.company_id = ?", @company.id)
+          .where(activity_type: ['task', 'meeting'])
+          .where(where_clause)
+          .where('DATE(due_date) = ?', today)
+          .where('completed_at IS NULL')
+          .order('due_date ASC')
+        
+        # Transform to common format
+        activities.each do |activity|
+          entity = activity.send(config[:company_join])
+          
+          # Extract time from due_date timestamp
+          time_str = if activity.due_date.present?
+            activity.due_date.strftime('%I:%M %p')
           else
             'All Day'
           end
           
           events_data << {
-            id: task.id,
-            title: task.title,
+            id: activity.id,
+            title: activity.subject || 'Untitled Event',
+            date: activity.due_date.to_date.to_s,  # Add date field for each event
             time: time_str,
-            type: 'task',
-            entity_type: task.taskable_type || 'Task',
-            entity_id: task.taskable_id || task.id
+            type: activity.activity_type,
+            entity_type: config[:entity_type],
+            entity_id: entity.id,
+            entity_name: get_entity_name(entity, config[:entity_type])
           }
         end
+      rescue StandardError => model_error
+        Rails.logger.error "[My Calendar] Error with #{model.name}: #{model_error.message}"
       end
     end
+    
+    # Sort by time (All Day events first, then by time)
+    events_data.sort_by! { |e| e[:time] == 'All Day' ? '00:00 AM' : e[:time] }
     
     {
       events: events_data,
@@ -1233,13 +1396,13 @@ class DashboardMetricsService
       deals_data = recent_deals.map do |deal|
         {
           id: deal.id,
-          name: deal.name || deal.customer_name || "Deal ##{deal.id}",
-          stage: deal.stage,
-          value: deal.value,
-          formatted_value: format_currency(deal.value || 0),
-          customer_name: deal.customer_name,
-          updated_at: deal.updated_at,
-          formatted_time: time_ago_in_words(deal.updated_at)
+          title: deal.name || deal.customer_name || "Deal ##{deal.id}",
+          stage: deal.stage&.titleize || 'Unknown',
+          value: deal.value || 0,
+          expected_close_date: deal.respond_to?(:expected_close_date) ? deal.expected_close_date : deal.updated_at,
+          owner_name: @current_user.full_name,
+          company_name: deal.customer_name,
+          probability: deal.respond_to?(:probability) ? deal.probability : nil
         }
       end
     end
