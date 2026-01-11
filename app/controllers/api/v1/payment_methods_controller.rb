@@ -8,7 +8,7 @@ module Api
 
       # GET /api/v1/payment-methods
       def index
-        return unless authorize_action!('payment_methods', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # STRICT TENANT ISOLATION: Only show payment methods from current company
         # RBAC: Location-tier users only see their assigned locations
@@ -71,7 +71,7 @@ module Api
 
       # GET /api/v1/payment-methods/:id
       def show
-        return unless authorize_action!('payment_methods', 'read')
+        return unless authorize_action!('finance', 'read')
         
         render json: @payment_method.as_json(
           include: {
@@ -85,7 +85,7 @@ module Api
 
       # GET /api/v1/payment-methods/stats
       def stats
-        return unless authorize_action!('payment_methods', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # STRICT TENANT ISOLATION: Only stats for current company
         base_payment_methods = @company.payment_methods.where(is_deleted: [false, nil])
@@ -112,7 +112,7 @@ module Api
 
       # POST /api/v1/payment-methods
       def create
-        return unless authorize_action!('payment_methods', 'create')
+        return unless authorize_action!('finance', 'create')
         
         # STRICT TENANT ISOLATION: Create payment method within current company
         @payment_method = @company.payment_methods.new(payment_method_params)
@@ -201,7 +201,7 @@ module Api
 
       # PATCH/PUT /api/v1/payment-methods/:id
       def update
-        return unless authorize_action!('payment_methods', 'update')
+        return unless authorize_action!('finance', 'update')
         
         # Note: Zego requires remove + create to update payment methods
         # We'll handle this by removing the old account and creating a new one
@@ -269,7 +269,7 @@ module Api
 
       # DELETE /api/v1/payment-methods/:id
       def destroy
-        return unless authorize_action!('payment_methods', 'delete')
+        return unless authorize_action!('finance', 'delete')
         
         # Check if payment method is being used by any active payments
         if @payment_method.payments.where(status: ['pending', 'processing']).exists?
@@ -307,7 +307,7 @@ module Api
 
       # PATCH /api/v1/payment-methods/:id/set_default
       def set_default
-        return unless authorize_action!('payment_methods', 'update')
+        return unless authorize_action!('finance', 'update')
         
         begin
           # Mark this payment method as default (this will unmark others via callback)
@@ -334,7 +334,7 @@ module Api
 
       # POST /api/v1/payment-methods/:id/verify
       def verify
-        return unless authorize_action!('payment_methods', 'update')
+        return unless authorize_action!('finance', 'update')
         
         # Only ACH accounts can be verified via micro-deposits
         unless @payment_method.ach?
