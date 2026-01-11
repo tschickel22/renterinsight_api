@@ -184,6 +184,35 @@ class Api::V1::DashboardController < ApplicationController
     when 'quick_actions'
       # Quick actions (permission-based on frontend)
       service.quick_actions
+    # My Sales Dashboard Cards
+    when 'my_pipeline_value'
+      # Personal pipeline value
+      return unless authorize_action!('deals', 'read')
+      service.my_pipeline_value
+    when 'my_closed_deals'
+      # Personal closed deals this month
+      return unless authorize_action!('deals', 'read')
+      service.my_closed_deals
+    when 'my_activity_count'
+      # Personal activity count
+      service.my_activity_count
+    when 'my_pipeline_funnel'
+      # Personal pipeline funnel
+      return unless authorize_action!('deals', 'read')
+      service.my_pipeline_funnel
+    when 'my_recent_activities'
+      # Personal recent activities
+      service.my_recent_activities
+    when 'my_tasks'
+      # Personal tasks
+      service.my_tasks
+    when 'my_calendar'
+      # Personal today's schedule
+      service.my_calendar
+    when 'my_recent_deals'
+      # Personal recent deals
+      return unless authorize_action!('deals', 'read')
+      service.my_recent_deals
     else
       # Unknown card type
       { error: "Unknown card type: #{card_type}" }

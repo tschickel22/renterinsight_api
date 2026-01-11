@@ -956,6 +956,361 @@ class DashboardMetricsService
     }
   end
 
+  # ==================== MY SALES DASHBOARD CARDS ====================
+  # These cards filter data to show only the current user's personal data
+
+  # ==================== MY PIPELINE VALUE ====================
+  def my_pipeline_value
+    owner_field = find_owner_field
+    return empty_metric_response if owner_field.nil?
+    
+    current_deals = @company.deals
+      .where(owner_field => @current_user.id)
+      .where.not(stage: ['closed_lost', 'closed_won'])
+    
+    current_value = current_deals.sum(:value) || 0
+    
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_value = @company.deals
+      .where(owner_field => @current_user.id)
+      .where(created_at: previous_start..previous_end)
+      .where.not(stage: ['closed_lost', 'closed_won'])
+      .sum(:value) || 0
+    
+    trend = calculate_trend(current_value, previous_value)
+    sparkline_data = generate_my_pipeline_sparkline(owner_field)
+    
+    {
+      value: current_value,
+      formatted_value: format_currency(current_value),
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/deals?assigned_to_me=true'
+    }
+  end
+
+  # ==================== MY CLOSED DEALS THIS MONTH ====================
+  def my_closed_deals
+    owner_field = find_owner_field
+    return empty_metric_response if owner_field.nil?
+    
+    current_month_start = Date.today.beginning_of_month
+    current_month_end = Date.today.end_of_month
+    
+    current_deals = @company.deals
+      .where(owner_field => @current_user.id)
+      .where(stage: 'closed_won')
+      .where(updated_at: current_month_start..current_month_end)
+    
+    current_value = current_deals.sum(:value) || 0
+    current_count = current_deals.count
+    
+    previous_month_start = (Date.today - 1.month).beginning_of_month
+    previous_month_end = (Date.today - 1.month).end_of_month
+    
+    previous_value = @company.deals
+      .where(owner_field => @current_user.id)
+      .where(stage: 'closed_won')
+      .where(updated_at: previous_month_start..previous_month_end)
+      .sum(:value) || 0
+    
+    trend = calculate_trend(current_value, previous_value)
+    sparkline_data = generate_my_closed_deals_sparkline(owner_field)
+    
+    {
+      value: current_value,
+      formatted_value: format_currency(current_value),
+      count: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/deals?assigned_to_me=true&stage=closed_won'
+    }
+  end
+
+  # ==================== MY ACTIVITY COUNT ====================
+  def my_activity_count
+    current_count = 0
+    if defined?(Activity) && @company.respond_to?(:activities)
+      current_count = @company.activities
+        .where(user_id: @current_user.id)
+        .where(created_at: @date_range[:start_date]..@date_range[:end_date])
+        .count
+    end
+    
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_count = 0
+    if defined?(Activity) && @company.respond_to?(:activities)
+      previous_count = @company.activities
+        .where(user_id: @current_user.id)
+        .where(created_at: previous_start..previous_end)
+        .count
+    end
+    
+    trend = calculate_trend(current_count, previous_count)
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/deals'  # No standalone activities page - link to deals instead
+    }
+  end
+
+  # ==================== MY PIPELINE FUNNEL ====================
+  def my_pipeline_funnel
+    owner_field = find_owner_field
+    return { stages: [], drill_down_url: '/deals' } if owner_field.nil?
+    
+    stage_order = ['prospecting', 'qualification', 'needs_analysis', 'proposal', 'negotiation', 'closing']
+    
+    deals_by_stage = @company.deals
+      .where(owner_field => @current_user.id)
+      .where.not(stage: ['closed_won', 'closed_lost'])
+      .group(:stage)
+      .select('stage, COUNT(*) as count, SUM(value) as total_value')
+    
+    stage_data = {}
+    deals_by_stage.each do |record|
+      stage_data[record.stage] = {
+        count: record.count,
+        value: record.total_value || 0
+      }
+    end
+    
+    stages = []
+    total_deals = deals_by_stage.sum(&:count)
+    
+    stage_order.each_with_index do |stage, index|
+      data = stage_data[stage] || { count: 0, value: 0 }
+      conversion_rate = total_deals > 0 ? (data[:count].to_f / total_deals * 100).round(1) : 0
+      
+      stages << {
+        name: stage.titleize,
+        stage_key: stage,
+        count: data[:count],
+        value: data[:value],
+        formatted_value: format_currency(data[:value]),
+        conversion_rate: conversion_rate,
+        order: index
+      }
+    end
+    
+    {
+      stages: stages,
+      total_deals: total_deals,
+      drill_down_url: '/deals?assigned_to_me=true'
+    }
+  end
+
+  # ==================== MY RECENT ACTIVITIES ====================
+  def my_recent_activities
+    activities = []
+    
+    if defined?(Activity) && @company.respond_to?(:activities)
+      recent_activities = @company.activities
+        .where(user_id: @current_user.id)
+        .order('created_at DESC')
+        .limit(10)
+      
+      activities = recent_activities.map do |activity|
+        {
+          id: activity.id,
+          type: activity.activity_type,
+          subject: activity.subject,
+          entity_type: activity.respond_to?(:entity_type) ? activity.entity_type : nil,
+          entity_id: activity.respond_to?(:entity_id) ? activity.entity_id : nil,
+          created_at: activity.created_at,
+          formatted_time: time_ago_in_words(activity.created_at)
+        }
+      end
+    end
+    
+    {
+      activities: activities,
+      drill_down_url: '/deals'  # No standalone activities page
+    }
+  end
+
+  # ==================== MY TASKS ====================
+  def my_tasks
+    tasks_data = []
+    
+    if defined?(Task) && @company.respond_to?(:tasks)
+      assignment_field = ['assigned_to', 'user_id', 'assignee_id']
+        .find { |field| Task.column_names.include?(field) }
+      
+      if assignment_field
+        tasks = @company.tasks
+          .where(assignment_field => @current_user.id)
+          .where(completed_at: nil)
+          .where.not(due_date: nil)
+          .order('due_date ASC')
+          .limit(10)
+        
+        tasks_data = tasks.map do |task|
+          {
+            id: task.id,
+            title: task.title,
+            due_date: task.due_date,
+            formatted_due_date: task.due_date.strftime('%b %d'),
+            priority: task.priority || 'medium',
+            entity_type: task.respond_to?(:taskable_type) ? task.taskable_type : nil,
+            entity_id: task.respond_to?(:taskable_id) ? task.taskable_id : nil,
+            overdue: task.due_date < Date.today
+          }
+        end
+      end
+    end
+    
+    {
+      tasks: tasks_data,
+      drill_down_url: '/tasks?assigned_to_me=true'
+    }
+  end
+
+  # ==================== MY CALENDAR ====================
+  def my_calendar
+    events_data = []
+    today = Date.today
+    
+    if defined?(Task) && @company.respond_to?(:tasks)
+      assignment_field = ['assigned_to', 'user_id', 'assignee_id']
+        .find { |field| Task.column_names.include?(field) }
+      
+      if assignment_field
+        tasks = @company.tasks
+          .where(assignment_field => @current_user.id)
+          .where.not(status: [:completed, :cancelled])
+          .where(due_date: today)
+          .order('created_at ASC')
+        
+        tasks.each do |task|
+          time_str = if task.respond_to?(:due_time) && task.due_time.present?
+            task.due_time.strftime('%I:%M %p')
+          else
+            'All Day'
+          end
+          
+          events_data << {
+            id: task.id,
+            title: task.title,
+            time: time_str,
+            type: 'task',
+            entity_type: task.taskable_type || 'Task',
+            entity_id: task.taskable_id || task.id
+          }
+        end
+      end
+    end
+    
+    {
+      events: events_data,
+      date: today.to_s,
+      formatted_date: today.strftime('%A, %B %d'),
+      drill_down_url: '/tasks?assigned_to_me=true&date=' + today.to_s
+    }
+  end
+
+  # ==================== MY RECENT DEALS ====================
+  def my_recent_deals
+    deals_data = []
+    owner_field = find_owner_field
+    
+    if owner_field
+      recent_deals = @company.deals
+        .where(owner_field => @current_user.id)
+        .order('updated_at DESC')
+        .limit(10)
+      
+      deals_data = recent_deals.map do |deal|
+        {
+          id: deal.id,
+          name: deal.name || deal.customer_name || "Deal ##{deal.id}",
+          stage: deal.stage,
+          value: deal.value,
+          formatted_value: format_currency(deal.value || 0),
+          customer_name: deal.customer_name,
+          updated_at: deal.updated_at,
+          formatted_time: time_ago_in_words(deal.updated_at)
+        }
+      end
+    end
+    
+    {
+      deals: deals_data,
+      drill_down_url: '/deals?assigned_to_me=true'
+    }
+  end
+
+  # Helper methods for My Sales cards
+  def find_owner_field
+    return @owner_field if defined?(@owner_field)
+    available_columns = @company.deals.column_names
+    @owner_field = ['assigned_to_id', 'owner_id', 'user_id', 'salesperson_id', 'created_by_id']
+      .find { |field| available_columns.include?(field) }
+  end
+
+  def empty_metric_response
+    {
+      value: 0,
+      formatted_value: format_currency(0),
+      trend_percentage: 0,
+      trend_direction: 'neutral',
+      sparkline_data: generate_empty_sparkline,
+      drill_down_url: '/deals'
+    }
+  end
+
+  def generate_my_pipeline_sparkline(owner_field)
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    sparkline = []
+    (start_date..end_date).each do |date|
+      value = @company.deals
+        .where(owner_field => @current_user.id)
+        .where('created_at <= ?', date)
+        .where.not(stage: ['closed_lost', 'closed_won'])
+        .sum(:value) || 0
+      
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: value
+      }
+    end
+    
+    sparkline
+  end
+
+  def generate_my_closed_deals_sparkline(owner_field)
+    current_month_start = Date.today.beginning_of_month
+    current_month_end = Date.today.end_of_month
+    
+    sparkline = []
+    (current_month_start..current_month_end).each do |date|
+      count = @company.deals
+        .where(owner_field => @current_user.id)
+        .where(stage: 'closed_won')
+        .where('DATE(updated_at) = ?', date)
+        .count
+      
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: count
+      }
+    end
+    
+    sparkline
+  end
+
   private
 
   # Calculate total revenue from payments
