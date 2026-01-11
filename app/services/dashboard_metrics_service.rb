@@ -82,14 +82,32 @@ class DashboardMetricsService
   # ==================== LEADS COUNT CARD ====================
   # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url }
   def leads_count
-    # Note: Lead model doesn't exist yet, return zero data
-    # When Lead model is created, update this method
+    # Get leads for current period
+    current_leads = @company.leads
+      .where(created_at: @date_range[:start_date]..@date_range[:end_date])
+    
+    current_count = current_leads.count
+    
+    # Get leads for previous period
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    previous_count = @company.leads
+      .where(created_at: previous_start..previous_end)
+      .count
+    
+    # Calculate trend
+    trend = calculate_trend(current_count, previous_count)
+    
+    # Generate sparkline (leads created per day, last 30 days)
+    sparkline_data = generate_leads_sparkline
+    
     {
-      value: 0,
-      trend_percentage: 0,
-      trend_direction: 'neutral',
-      sparkline_data: generate_empty_sparkline,
-      drill_down_url: '/crm'
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/crm/leads'
     }
   end
 
@@ -128,6 +146,237 @@ class DashboardMetricsService
       sparkline_data: sparkline_data,
       drill_down_url: '/service',
       by_status: by_status
+    }
+  end
+
+  # ==================== ACCOUNTS RECEIVABLE CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url, formatted_value }
+  def accounts_receivable
+    # Get current A/R (all unpaid invoices)
+    current_ar = @company.invoices
+      .where.not(status: ['paid', 'cancelled'])
+      .sum(:amount_due)
+    
+    # Get A/R from previous period (same time last month/year)
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_date = @date_range[:start_date] - previous_period_days.days
+    
+    previous_ar = @company.invoices
+      .where('invoice_date < ?', previous_date)
+      .where.not(status: ['paid', 'cancelled'])
+      .sum(:amount_due)
+    
+    # Calculate trend
+    trend = calculate_trend(current_ar, previous_ar)
+    
+    # Generate sparkline (last 30 days of A/R balance)
+    sparkline_data = generate_ar_sparkline
+    
+    {
+      value: current_ar,
+      formatted_value: format_currency(current_ar),
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/finance/invoices'
+    }
+  end
+
+  # ==================== ACCOUNTS PAYABLE CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url, formatted_value }
+  def accounts_payable
+    # Get current A/P (pending/processing payments)
+    current_ap = @company.payments
+      .where(status: ['pending', 'processing'])
+      .sum(:amount)
+    
+    # Get A/P from previous period
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_date = @date_range[:start_date] - previous_period_days.days
+    
+    previous_ap = @company.payments
+      .where('created_at < ?', previous_date)
+      .where(status: ['pending', 'processing'])
+      .sum(:amount)
+    
+    # Calculate trend
+    trend = calculate_trend(current_ap, previous_ap)
+    
+    # Generate sparkline (last 30 days of A/P balance)
+    sparkline_data = generate_ap_sparkline
+    
+    {
+      value: current_ap,
+      formatted_value: format_currency(current_ap),
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/finance/payments'
+    }
+  end
+
+  # ==================== PAYMENTS COUNT CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url }
+  def payments_count
+    # Get completed payments for current period
+    current_count = @company.payments
+      .where(status: 'completed')
+      .where(payment_date: @date_range[:start_date]..@date_range[:end_date])
+      .count
+    
+    # Get payments for previous period
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    previous_count = @company.payments
+      .where(status: 'completed')
+      .where(payment_date: previous_start..previous_end)
+      .count
+    
+    # Calculate trend
+    trend = calculate_trend(current_count, previous_count)
+    
+    # Generate sparkline (payments per day, last 30 days)
+    sparkline_data = generate_payments_sparkline
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/finance/payments'
+    }
+  end
+
+  # ==================== A/R AGING CHART ====================
+  # Returns: { buckets, total, drill_down_url }
+  # Each bucket: { label, amount, count, percentage }
+  def ar_aging_chart
+    today = Date.today
+    
+    # Get all unpaid invoices
+    unpaid_invoices = @company.invoices
+      .where.not(status: ['paid', 'cancelled'])
+      .select(:id, :invoice_date, :amount_due)
+    
+    # Categorize by aging buckets
+    buckets = {
+      current: { label: 'Current (0-30 days)', amount: 0, count: 0 },
+      days_30: { label: '31-60 days', amount: 0, count: 0 },
+      days_60: { label: '61-90 days', amount: 0, count: 0 },
+      days_90: { label: '90+ days', amount: 0, count: 0 }
+    }
+    
+    unpaid_invoices.each do |invoice|
+      days_old = (today - invoice.invoice_date).to_i
+      
+      if days_old <= 30
+        buckets[:current][:amount] += invoice.amount_due
+        buckets[:current][:count] += 1
+      elsif days_old <= 60
+        buckets[:days_30][:amount] += invoice.amount_due
+        buckets[:days_30][:count] += 1
+      elsif days_old <= 90
+        buckets[:days_60][:amount] += invoice.amount_due
+        buckets[:days_60][:count] += 1
+      else
+        buckets[:days_90][:amount] += invoice.amount_due
+        buckets[:days_90][:count] += 1
+      end
+    end
+    
+    # Calculate total and percentages
+    total_amount = buckets.values.sum { |b| b[:amount] }
+    
+    buckets_array = buckets.map do |key, bucket|
+      percentage = total_amount > 0 ? (bucket[:amount] / total_amount * 100).round(1) : 0
+      
+      {
+        key: key.to_s,
+        label: bucket[:label],
+        amount: bucket[:amount],
+        formatted_amount: format_currency(bucket[:amount]),
+        count: bucket[:count],
+        percentage: percentage
+      }
+    end
+    
+    {
+      buckets: buckets_array,
+      total: total_amount,
+      formatted_total: format_currency(total_amount),
+      drill_down_url: '/finance/invoices'
+    }
+  end
+
+  # ==================== PAYMENT METHODS BREAKDOWN ====================
+  # Returns: { methods, total, drill_down_url }
+  # Each method: { name, amount, count, percentage }
+  def payment_methods_breakdown
+    # Get all completed payments in date range
+    payments = @company.payments
+      .where(status: 'completed')
+      .where(payment_date: @date_range[:start_date]..@date_range[:end_date])
+    
+    # Group by gateway_name (zego, stripe, manual)
+    methods_data = payments.group(:gateway_name).select(
+      "gateway_name, COUNT(*) as payment_count, SUM(amount) as total_sum"
+    )
+    
+    total_amount = payments.sum(:amount)
+    
+    methods_array = methods_data.map do |method_data|
+      # Access SQL results directly, not model methods
+      method_total = method_data.read_attribute(:total_sum)
+      method_count = method_data.read_attribute(:payment_count)
+      method_name = method_data.gateway_name || 'Manual'
+      
+      percentage = total_amount > 0 ? (method_total / total_amount * 100).round(1) : 0
+      
+      {
+        name: method_name.to_s.titleize,
+        method_key: method_name,
+        amount: method_total,
+        formatted_amount: format_currency(method_total),
+        count: method_count,
+        percentage: percentage
+      }
+    end.sort_by { |m| -m[:amount] } # Sort by amount descending
+    
+    {
+      methods: methods_array,
+      total: total_amount,
+      formatted_total: format_currency(total_amount),
+      drill_down_url: '/finance/payments'
+    }
+  end
+
+  # ==================== RECENT TRANSACTIONS ====================
+  # Returns: { transactions, drill_down_url }
+  # Each transaction: { id, date, amount, method, status, customer }
+  def recent_transactions
+    # Get recent completed payments (last 10)
+    payments = @company.payments
+      .where(status: 'completed')
+      .order('payment_date DESC')
+      .limit(10)
+    
+    transactions = payments.map do |payment|
+      {
+        id: payment.id,
+        date: payment.payment_date,
+        formatted_date: payment.payment_date.strftime('%b %d, %Y'),
+        amount: payment.amount,
+        formatted_amount: format_currency(payment.amount),
+        method: payment.gateway_name&.titleize || 'Manual',
+        status: payment.status,
+        customer: payment.payer_name
+      }
+    end
+    
+    {
+      transactions: transactions,
+      drill_down_url: '/finance/payments'
     }
   end
 
@@ -730,6 +979,29 @@ class DashboardMetricsService
     sparkline
   end
 
+  # Generate sparkline data for leads (last 30 days)
+  def generate_leads_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Group by date and count leads
+    daily_leads = @company.leads
+      .where(created_at: start_date..end_date)
+      .group("DATE(created_at)")
+      .count
+    
+    # Fill in missing dates with 0
+    sparkline = []
+    (start_date..end_date).each do |date|
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: daily_leads[date] || 0
+      }
+    end
+    
+    sparkline
+  end
+
   # Generate sparkline data for service tickets (last 30 days)
   def generate_service_tickets_sparkline
     end_date = @date_range[:end_date]
@@ -748,6 +1020,76 @@ class DashboardMetricsService
       sparkline << {
         date: date.strftime('%Y-%m-%d'),
         value: daily_tickets[date] || 0
+      }
+    end
+    
+    sparkline
+  end
+
+  # Generate sparkline data for A/R (last 30 days)
+  def generate_ar_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Calculate A/R balance for each day
+    sparkline = []
+    (start_date..end_date).each do |date|
+      # Get all unpaid invoices as of this date
+      ar_balance = @company.invoices
+        .where('invoice_date <= ?', date)
+        .where.not(status: ['paid', 'cancelled'])
+        .sum(:amount_due)
+      
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: ar_balance
+      }
+    end
+    
+    sparkline
+  end
+
+  # Generate sparkline data for A/P (last 30 days)
+  def generate_ap_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Calculate A/P balance for each day
+    sparkline = []
+    (start_date..end_date).each do |date|
+      # Get all pending payments as of this date
+      ap_balance = @company.payments
+        .where('created_at <= ?', date)
+        .where(status: ['pending', 'processing'])
+        .sum(:amount)
+      
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: ap_balance
+      }
+    end
+    
+    sparkline
+  end
+
+  # Generate sparkline data for payments count (last 30 days)
+  def generate_payments_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Group by date and count payments
+    daily_payments = @company.payments
+      .where(status: 'completed')
+      .where(payment_date: start_date..end_date)
+      .group("DATE(payment_date)")
+      .count
+    
+    # Fill in missing dates with 0
+    sparkline = []
+    (start_date..end_date).each do |date|
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: daily_payments[date] || 0
       }
     end
     

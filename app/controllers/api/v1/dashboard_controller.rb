@@ -125,6 +125,30 @@ class Api::V1::DashboardController < ApplicationController
       # Check service tickets permission
       return unless authorize_action!('service', 'read')
       service.service_tickets_count
+    when 'accounts_receivable'
+      # Check finance permission for A/R data
+      return unless authorize_action!('dashboard_finance', 'read')
+      service.accounts_receivable
+    when 'accounts_payable'
+      # Check finance permission for A/P data
+      return unless authorize_action!('dashboard_finance', 'read')
+      service.accounts_payable
+    when 'payments_count'
+      # Check finance permission for payments data
+      return unless authorize_action!('dashboard_finance', 'read')
+      service.payments_count
+    when 'ar_aging_chart'
+      # Check finance permission for A/R aging data
+      return unless authorize_action!('dashboard_finance', 'read')
+      service.ar_aging_chart
+    when 'payment_methods_breakdown'
+      # Check finance permission for payment methods data
+      return unless authorize_action!('dashboard_finance', 'read')
+      service.payment_methods_breakdown
+    when 'recent_transactions'
+      # Check finance permission for recent transactions
+      return unless authorize_action!('dashboard_finance', 'read')
+      service.recent_transactions
     when 'pipeline_funnel'
       # Check CRM deals permission for pipeline view
       return unless authorize_action!('deals', 'read')
