@@ -1820,7 +1820,7 @@ class DashboardMetricsService
     current_revenue = @company.service_tickets
       .where(status: 'completed')
       .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
-      .sum(:billed_amount rescue 0) || 0
+      .sum(:billed_amount) || 0
     
     previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
     previous_start = @date_range[:start_date] - previous_period_days.days
@@ -1829,7 +1829,7 @@ class DashboardMetricsService
     previous_revenue = @company.service_tickets
       .where(status: 'completed')
       .where(completed_at: previous_start..previous_end)
-      .sum(:billed_amount rescue 0) || 0
+      .sum(:billed_amount) || 0
     
     trend = calculate_trend(current_revenue, previous_revenue)
     
@@ -1851,7 +1851,7 @@ class DashboardMetricsService
     current_cost = @company.service_tickets
       .where(status: 'completed')
       .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
-      .sum(:labor_cost rescue 0) || 0
+      .sum(:labor_cost) || 0
     
     previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
     previous_start = @date_range[:start_date] - previous_period_days.days
@@ -1860,7 +1860,7 @@ class DashboardMetricsService
     previous_cost = @company.service_tickets
       .where(status: 'completed')
       .where(completed_at: previous_start..previous_end)
-      .sum(:labor_cost rescue 0) || 0
+      .sum(:labor_cost) || 0
     
     trend = calculate_trend(current_cost, previous_cost)
     
@@ -1882,7 +1882,7 @@ class DashboardMetricsService
     current_cost = @company.service_tickets
       .where(status: 'completed')
       .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
-      .sum(:parts_cost rescue 0) || 0
+      .sum(:parts_cost) || 0
     
     previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
     previous_start = @date_range[:start_date] - previous_period_days.days
@@ -1891,7 +1891,7 @@ class DashboardMetricsService
     previous_cost = @company.service_tickets
       .where(status: 'completed')
       .where(completed_at: previous_start..previous_end)
-      .sum(:parts_cost rescue 0) || 0
+      .sum(:parts_cost) || 0
     
     trend = calculate_trend(current_cost, previous_cost)
     
@@ -1914,9 +1914,9 @@ class DashboardMetricsService
       .where(status: 'completed')
       .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
     
-    revenue = tickets.sum(:billed_amount rescue 0) || 0
-    labor_cost = tickets.sum(:labor_cost rescue 0) || 0
-    parts_cost = tickets.sum(:parts_cost rescue 0) || 0
+    revenue = tickets.sum(:billed_amount) || 0
+    labor_cost = tickets.sum(:labor_cost) || 0
+    parts_cost = tickets.sum(:parts_cost) || 0
     total_cost = labor_cost + parts_cost
     
     # Calculate margin percentage
@@ -1931,9 +1931,9 @@ class DashboardMetricsService
       .where(status: 'completed')
       .where(completed_at: previous_start..previous_end)
     
-    previous_revenue = previous_tickets.sum(:billed_amount rescue 0) || 0
-    previous_labor = previous_tickets.sum(:labor_cost rescue 0) || 0
-    previous_parts = previous_tickets.sum(:parts_cost rescue 0) || 0
+    previous_revenue = previous_tickets.sum(:billed_amount) || 0
+    previous_labor = previous_tickets.sum(:labor_cost) || 0
+    previous_parts = previous_tickets.sum(:parts_cost) || 0
     previous_total_cost = previous_labor + previous_parts
     previous_margin = previous_revenue > 0 ? ((previous_revenue - previous_total_cost) / previous_revenue * 100).round(1) : 0
     
