@@ -146,36 +146,36 @@ module Api
       def activity_json(activity)
         {
           id: activity.id,
-          deal_id: activity.deal_id,
-          user_id: activity.user_id,
-          assigned_to_id: activity.assigned_to_id,
-          assigned_to: activity.assigned_to ? {
+          dealId: activity.deal_id,
+          userId: activity.user_id,
+          assignedToId: activity.assigned_to_id,
+          assignedTo: activity.assigned_to ? {
             id: activity.assigned_to.id,
             name: activity.assigned_to.name,
             email: activity.assigned_to.email
           } : nil,
-          activity_type: activity.activity_type,
+          activityType: activity.activity_type,
           subject: activity.subject,
           description: activity.description,
           status: activity.status,
           priority: activity.priority,
-          due_date: activity.due_date&.iso8601,
-          start_time: activity.start_time&.iso8601,
-          end_time: activity.end_time&.iso8601,
-          completed_at: activity.completed_at&.iso8601,
-          phone_number: activity.phone_number,
-          call_direction: activity.call_direction,
-          call_outcome: activity.call_outcome,
+          dueDate: activity.due_date&.iso8601,
+          startTime: activity.start_time&.iso8601,
+          endTime: activity.end_time&.iso8601,
+          completedAt: activity.completed_at&.iso8601,
+          phoneNumber: activity.phone_number,
+          callDirection: activity.call_direction,
+          callOutcome: activity.call_outcome,
           duration: activity.duration,
-          location: activity.location,
-          meeting_link: activity.meeting_link,
-          attendees: activity.attendees,
-          outcome: activity.outcome,
-          reminder_time: activity.reminder_time&.iso8601,
-          reminder_method: activity.reminder_method,
-          reminder_sent: activity.reminder_sent,
-          created_at: activity.created_at&.iso8601,
-          updated_at: activity.updated_at&.iso8601
+          meetingLocation: activity.location,
+          meetingLink: activity.meeting_link,
+          meetingAttendees: activity.attendees,
+          outcomeNotes: activity.outcome,
+          reminderTime: activity.reminder_time&.iso8601,
+          reminderMethod: activity.reminder_method,
+          reminderSent: activity.reminder_sent,
+          createdAt: activity.created_at&.iso8601,
+          updatedAt: activity.updated_at&.iso8601
         }
       end
     end
