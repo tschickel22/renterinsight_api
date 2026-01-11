@@ -248,6 +248,41 @@ class DashboardMetricsService
     }
   end
 
+  # ==================== INVENTORY UNITS CARD ====================
+  # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url }
+  def inventory_count
+    # Get current inventory count (available vehicles)
+    current_count = @company.vehicles
+      .where(is_deleted: [false, nil])
+      .where(status: 'available')
+      .count
+    
+    # Get inventory from 30 days ago for trend
+    previous_date = 30.days.ago
+    
+    # Count vehicles that were available 30 days ago
+    # (created before then, and either still available or sold/reserved after that date)
+    previous_count = @company.vehicles
+      .where(is_deleted: [false, nil])
+      .where('created_at <= ?', previous_date)
+      .where(status: 'available')
+      .count
+    
+    # Calculate trend
+    trend = calculate_trend(current_count, previous_count)
+    
+    # Generate sparkline (inventory count per day, last 30 days)
+    sparkline_data = generate_inventory_sparkline
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      sparkline_data: sparkline_data,
+      drill_down_url: '/inventory'
+    }
+  end
+
   # ==================== A/R AGING CHART ====================
   # Returns: { buckets, total, drill_down_url }
   # Each bucket: { label, amount, count, percentage }
@@ -1090,6 +1125,30 @@ class DashboardMetricsService
       sparkline << {
         date: date.strftime('%Y-%m-%d'),
         value: daily_payments[date] || 0
+      }
+    end
+    
+    sparkline
+  end
+
+  # Generate sparkline data for inventory count (last 30 days)
+  def generate_inventory_sparkline
+    end_date = @date_range[:end_date]
+    start_date = end_date - 29.days
+    
+    # Calculate inventory count for each day
+    sparkline = []
+    (start_date..end_date).each do |date|
+      # Count available vehicles as of this date
+      count = @company.vehicles
+        .where(is_deleted: [false, nil])
+        .where('created_at <= ?', date)
+        .where(status: 'available')
+        .count
+      
+      sparkline << {
+        date: date.strftime('%Y-%m-%d'),
+        value: count
       }
     end
     

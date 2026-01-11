@@ -137,6 +137,10 @@ class Api::V1::DashboardController < ApplicationController
       # Check finance permission for payments data
       return unless authorize_action!('dashboard_finance', 'read')
       service.payments_count
+    when 'inventory_count'
+      # Check inventory permission
+      return unless authorize_action!('inventory', 'read')
+      service.inventory_count
     when 'ar_aging_chart'
       # Check finance permission for A/R aging data
       return unless authorize_action!('dashboard_finance', 'read')
