@@ -8,7 +8,7 @@ module Api
 
       # GET /api/v1/loans
       def index
-        return unless authorize_action!('loans', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # STRICT TENANT ISOLATION: Only show loans from current company
         # RBAC: Location-tier users only see their assigned locations
@@ -92,7 +92,7 @@ module Api
 
       # GET /api/v1/loans/stats
       def stats
-        return unless authorize_action!('loans', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # MUST filter stats by location context
         loans = if current_user.uses_rbac?
@@ -162,7 +162,7 @@ module Api
 
       # GET /api/v1/loans/:id
       def show
-        return unless authorize_action!('loans', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # Include payment history with payment methods
         payments = @loan.payments.includes(:payment_method).order(created_at: :desc).limit(50)
@@ -201,7 +201,7 @@ module Api
 
       # POST /api/v1/loans
       def create
-        return unless authorize_action!('loans', 'create')
+        return unless authorize_action!('finance', 'create')
         
         @loan = @company.loans.new(loan_params)
         
@@ -284,7 +284,7 @@ module Api
 
       # PATCH /api/v1/loans/:id
       def update
-        return unless authorize_action!('loans', 'update')
+        return unless authorize_action!('finance', 'update')
         
         # Protect certain fields for active loans
         if @loan.active? && update_params_contain_protected_fields?
@@ -316,7 +316,7 @@ module Api
 
       # DELETE /api/v1/loans/:id
       def destroy
-        return unless authorize_action!('loans', 'delete')
+        return unless authorize_action!('finance', 'delete')
         
         # Prevent deletion if there are payments
         if @loan.payments.exists?
@@ -337,7 +337,7 @@ module Api
       # GET /api/v1/loans/search-borrowers
       # Search for potential borrowers (Accounts or Contacts)
       def search_borrowers
-        return unless authorize_action!('loans', 'read')
+        return unless authorize_action!('finance', 'read')
         
         borrower_type = params[:borrower_type]
         query = params[:query]&.strip
@@ -405,7 +405,7 @@ module Api
       # POST /api/v1/loans/calculate-schedule
       # Calculate amortization schedule without creating a loan
       def calculate_schedule
-        return unless authorize_action!('loans', 'read')
+        return unless authorize_action!('finance', 'read')
         
         principal = params[:principal_amount].to_f
         rate = params[:interest_rate].to_f
@@ -464,7 +464,7 @@ module Api
       # POST /api/v1/loans/:id/record-payment
       # Process a payment through the payment gateway
       def record_payment
-        return unless authorize_action!('payments', 'create')
+        return unless authorize_action!('finance', 'create')
         
         unless @loan.active?
           render json: { error: 'Can only record payments for active loans' }, status: :unprocessable_entity
@@ -571,7 +571,7 @@ module Api
       # POST /api/v1/loans/:id/record-manual-payment
       # Record an in-person payment (cash, check, money order)
       def record_manual_payment
-        return unless authorize_action!('payments', 'create')
+        return unless authorize_action!('finance', 'create')
         
         unless @loan.active?
           render json: { error: 'Can only record payments for active loans' }, status: :unprocessable_entity
@@ -649,7 +649,7 @@ module Api
 
       # POST /api/v1/loans/:id/activate
       def activate
-        return unless authorize_action!('loans', 'update')
+        return unless authorize_action!('finance', 'update')
         
         unless @loan.status == 'pending'
           render json: { error: 'Only pending loans can be activated' }, status: :unprocessable_entity
@@ -668,7 +668,7 @@ module Api
 
       # POST /api/v1/loans/:id/mark-defaulted
       def mark_defaulted
-        return unless authorize_action!('loans', 'update')
+        return unless authorize_action!('finance', 'update')
         
         unless @loan.active?
           render json: { error: 'Only active loans can be marked as defaulted' }, status: :unprocessable_entity
@@ -687,7 +687,7 @@ module Api
 
       # GET /api/v1/loans/:id/documents
       def documents
-        return unless authorize_action!('loans', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # Use service to get ALL Contact-owned documents
         service = LoanDocumentService.new(@loan, current_user)
@@ -713,7 +713,7 @@ module Api
 
       # POST /api/v1/loans/:id/documents
       def upload_documents
-        return unless authorize_action!('loans', 'update')
+        return unless authorize_action!('finance', 'update')
         
         uploaded_count = 0
         errors = []
@@ -749,7 +749,7 @@ module Api
 
       # DELETE /api/v1/loans/:id/documents/:document_id
       def destroy_document
-        return unless authorize_action!('loans', 'update')
+        return unless authorize_action!('finance', 'update')
         
         # Use service to delete Contact-owned documents
         service = LoanDocumentService.new(@loan, current_user)
@@ -768,7 +768,7 @@ module Api
       # GET /api/v1/loans/:id/amortization-data
       # Get the amortization schedule with actual vs scheduled comparison
       def amortization_data
-        return unless authorize_action!('loans', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # Use loan's actual values
         principal = @loan.principal_amount.to_f

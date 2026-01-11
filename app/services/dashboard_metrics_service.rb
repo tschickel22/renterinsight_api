@@ -1805,4 +1805,171 @@ class DashboardMetricsService
       time.strftime('%b %d')
     end
   end
+
+  # ==================== SERVICE FINANCIAL METRICS ====================
+  # These metrics require service_tickets table to have financial columns:
+  # - labor_cost (decimal)
+  # - parts_cost (decimal)
+  # - total_cost (decimal)  
+  # - billed_amount (decimal)
+  # TODO: Add these columns to service_tickets table
+
+  # ==================== SERVICE REVENUE ====================
+  def service_revenue
+    # Get total billed amount from service tickets
+    current_revenue = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
+      .sum(:billed_amount rescue 0) || 0
+    
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_revenue = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: previous_start..previous_end)
+      .sum(:billed_amount rescue 0) || 0
+    
+    trend = calculate_trend(current_revenue, previous_revenue)
+    
+    {
+      value: current_revenue,
+      formatted_value: format_currency(current_revenue),
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?status=completed'
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Service Revenue] Error: #{e.message}"
+    empty_metric_response
+  end
+
+  # ==================== SERVICE LABOR COST ====================
+  def service_labor_cost
+    # Get total labor cost from completed service tickets
+    current_cost = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
+      .sum(:labor_cost rescue 0) || 0
+    
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_cost = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: previous_start..previous_end)
+      .sum(:labor_cost rescue 0) || 0
+    
+    trend = calculate_trend(current_cost, previous_cost)
+    
+    {
+      value: current_cost,
+      formatted_value: format_currency(current_cost),
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?status=completed'
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Service Labor Cost] Error: #{e.message}"
+    empty_metric_response
+  end
+
+  # ==================== SERVICE PARTS COST ====================
+  def service_parts_cost
+    # Get total parts cost from completed service tickets
+    current_cost = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
+      .sum(:parts_cost rescue 0) || 0
+    
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_cost = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: previous_start..previous_end)
+      .sum(:parts_cost rescue 0) || 0
+    
+    trend = calculate_trend(current_cost, previous_cost)
+    
+    {
+      value: current_cost,
+      formatted_value: format_currency(current_cost),
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?status=completed'
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Service Parts Cost] Error: #{e.message}"
+    empty_metric_response
+  end
+
+  # ==================== SERVICE PROFIT MARGIN ====================
+  def service_profit_margin
+    # Calculate profit margin: (Revenue - Total Cost) / Revenue * 100
+    tickets = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: @date_range[:start_date]..@date_range[:end_date])
+    
+    revenue = tickets.sum(:billed_amount rescue 0) || 0
+    labor_cost = tickets.sum(:labor_cost rescue 0) || 0
+    parts_cost = tickets.sum(:parts_cost rescue 0) || 0
+    total_cost = labor_cost + parts_cost
+    
+    # Calculate margin percentage
+    margin_percentage = revenue > 0 ? ((revenue - total_cost) / revenue * 100).round(1) : 0
+    
+    # Get previous period for trend
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_tickets = @company.service_tickets
+      .where(status: 'completed')
+      .where(completed_at: previous_start..previous_end)
+    
+    previous_revenue = previous_tickets.sum(:billed_amount rescue 0) || 0
+    previous_labor = previous_tickets.sum(:labor_cost rescue 0) || 0
+    previous_parts = previous_tickets.sum(:parts_cost rescue 0) || 0
+    previous_total_cost = previous_labor + previous_parts
+    previous_margin = previous_revenue > 0 ? ((previous_revenue - previous_total_cost) / previous_revenue * 100).round(1) : 0
+    
+    trend = calculate_trend(margin_percentage, previous_margin)
+    
+    {
+      value: margin_percentage,
+      formatted_value: "#{margin_percentage}%",
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?status=completed',
+      breakdown: {
+        revenue: revenue,
+        formatted_revenue: format_currency(revenue),
+        total_cost: total_cost,
+        formatted_total_cost: format_currency(total_cost),
+        profit: revenue - total_cost,
+        formatted_profit: format_currency(revenue - total_cost)
+      }
+    }
+  rescue StandardError => e
+    Rails.logger.error "[Service Profit Margin] Error: #{e.message}"
+    {
+      value: 0,
+      formatted_value: "0%",
+      trend_percentage: 0,
+      trend_direction: 'neutral',
+      drill_down_url: '/service?status=completed',
+      breakdown: {
+        revenue: 0,
+        formatted_revenue: format_currency(0),
+        total_cost: 0,
+        formatted_total_cost: format_currency(0),
+        profit: 0,
+        formatted_profit: format_currency(0)
+      }
+    }
+  end
 end

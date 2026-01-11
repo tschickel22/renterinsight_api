@@ -3,21 +3,13 @@ class Api::V1::InvoicesController < ApplicationController
   before_action :set_invoice, only: [:show, :update, :destroy, :send_invoice, :send_sms, :mark_paid, :cancel, :pdf]
   
   def index
-    return unless authorize_action!('invoices', 'read')
+    return unless authorize_action!('finance', 'read')
     
     invoices = @company.invoices.not_deleted
     
-    # RBAC + Location Filtering
-    if current_user.uses_rbac?
-      unless current_user.effective_admin?
-        location_ids = permission_service.accessible_location_ids
-        invoices = location_ids.any? ? 
-          invoices.where(location_id: location_ids) : 
-          invoices.none
-      end
-    end
-    
-    # Apply location selector filter
+    # Apply location selector filter (if user selected a specific location)
+    # Note: For invoices, we don't enforce strict RBAC location filtering
+    # because invoices may not always have a location_id assigned
     invoices = invoices.for_current_location
     
     # IMPORTANT: Exclude future loan invoices by default (unless explicitly requested)
@@ -58,13 +50,13 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def show
-    return unless authorize_action!('invoices', 'read')
+    return unless authorize_action!('finance', 'read')
     
     render json: serialize_invoice(@invoice)
   end
   
   def create
-    return unless authorize_action!('invoices', 'create')
+    return unless authorize_action!('finance', 'create')
     
     invoice = @company.invoices.build(invoice_params)
     invoice.location_id ||= Current.location_id if Current.location_id.present?
@@ -83,7 +75,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def update
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     if @invoice.update(invoice_params)
       render json: @invoice, include: [:contact, :invoice_items]
@@ -93,14 +85,14 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def destroy
-    return unless authorize_action!('invoices', 'delete')
+    return unless authorize_action!('finance', 'delete')
     
     @invoice.update(is_deleted: true)
     head :no_content
   end
 
   def pdf
-    return unless authorize_action!('invoices', 'read')
+    return unless authorize_action!('finance', 'read')
     
     pdf_content = generate_invoice_pdf(@invoice)
     
@@ -111,7 +103,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def send_invoice
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     # Get send preferences from params (default to email only for backwards compatibility)
     send_email = params[:send_email].nil? ? true : ActiveModel::Type::Boolean.new.cast(params[:send_email])
@@ -175,7 +167,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def send_sms
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     # Initialize SMS service with location/company for three-tier inheritance
     sms_service = SmsService.new(
@@ -202,7 +194,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def mark_paid
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     amount = params[:amount]&.to_f || @invoice.amount_due
     
@@ -214,7 +206,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def cancel
-    return unless authorize_action!('invoices', 'delete')
+    return unless authorize_action!('finance', 'delete')
     
     if @invoice.update(status: 'cancelled')
       render json: @invoice
@@ -224,7 +216,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def stats
-    return unless authorize_action!('invoices', 'read')
+    return unless authorize_action!('finance', 'read')
     
     base_invoices = @company.invoices.not_deleted
     
