@@ -118,8 +118,8 @@ module Api
             # Notify the account/contact owner if exists
             if @service_ticket.contact_id.present?
               contact = Contact.find_by(id: @service_ticket.contact_id)
-              if contact && contact.user_id.present?
-                owner = User.find_by(id: contact.user_id)
+              if contact && contact.owner_id.present?
+                owner = User.find_by(id: contact.owner_id)
                 if owner
                   trigger_notification(
                     :service_ticket_completed,

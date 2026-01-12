@@ -4,10 +4,10 @@ module Api
   module Admin
     class BuyersController < ApplicationController
       before_action :authenticate_user!
-      before_action :require_admin_access!
       before_action :set_company_scope
 
       def index
+        return unless authorize_action!('documents', 'read')
         portal_accesses = company_scoped_portal_accesses.order(:email)
         
         if params[:search].present?
@@ -23,14 +23,6 @@ module Api
       end
 
       private
-
-      def require_admin_access!
-        unless current_user&.admin? || current_user&.platform_admin? || current_user&.super_admin?
-          render json: { error: 'Forbidden - Admin access required' }, status: :forbidden
-          return false
-        end
-        true
-      end
 
       def company_scoped_portal_accesses
         lead_ids = @company.leads.pluck(:id)

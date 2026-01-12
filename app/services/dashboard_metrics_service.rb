@@ -894,7 +894,7 @@ class DashboardMetricsService
     week_start = Date.today.beginning_of_week
     week_end = Date.today.end_of_week
     
-    Rails.logger.info "[Week Calendar] Fetching tasks for week: #{week_start} to #{week_end}"
+    Rails.logger.info "[Week Calendar] Fetching events for week: #{week_start} to #{week_end}"
     
     # Get tasks due this week (using status enum, not completed_at)
     if defined?(Task) && @company.respond_to?(:tasks)
@@ -929,7 +929,29 @@ class DashboardMetricsService
       Rails.logger.warn "[Week Calendar] Task model not available or company doesn't have tasks"
     end
     
-    Rails.logger.info "[Week Calendar] Returning #{events_data.count} events"
+    # Get service tickets scheduled this week
+    service_tickets = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where.not(status: ['completed', 'cancelled'])
+      .where(scheduled_date: week_start..week_end)
+      .order('scheduled_date ASC')
+      .limit(50)
+    
+    Rails.logger.info "[Week Calendar] Found #{service_tickets.count} scheduled service tickets"
+    
+    service_tickets.each do |ticket|
+      events_data << {
+        id: ticket.id,
+        title: ticket.title || "Service Ticket ##{ticket.id}",
+        date: ticket.scheduled_date.strftime('%Y-%m-%d'),
+        time: 'All Day',  # Service tickets don't have specific times
+        type: 'service_ticket',
+        entity_type: 'ServiceTicket',
+        entity_id: ticket.id
+      }
+    end
+    
+    Rails.logger.info "[Week Calendar] Returning #{events_data.count} total events"
     
     {
       events: events_data,
@@ -1474,6 +1496,200 @@ class DashboardMetricsService
     sparkline
   end
 
+  # ==================== MY SERVICE DASHBOARD CARDS ====================
+  # Personal service technician dashboard cards
+
+  # ==================== MY OPEN TICKETS ====================
+  def my_open_tickets
+    # Get tickets assigned to current user with status='open'
+    current_tickets = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where(status: 'open')  # Only 'open' status, not all non-completed
+    
+    current_count = current_tickets.count
+    
+    # Get count from previous period for trend
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_count = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where(created_at: previous_start..previous_end)
+      .where(status: 'open')
+      .count
+    
+    trend = calculate_trend(current_count, previous_count)
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?assigned_to_me=true&status=open'
+    }
+  end
+
+  # ==================== TODAY TICKETS ====================
+  def today_tickets
+    # Get tickets assigned to current user that are scheduled today
+    today = Date.today
+    
+    current_count = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where(scheduled_date: today)
+      .where.not(status: ['completed', 'cancelled'])
+      .count
+    
+    # Get yesterday's count for trend
+    yesterday = Date.yesterday
+    previous_count = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where(scheduled_date: yesterday)
+      .where.not(status: ['completed', 'cancelled'])
+      .count
+    
+    trend = calculate_trend(current_count, previous_count)
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?assigned_to_me=true&due=today'
+    }
+  end
+
+  # ==================== OVERDUE TICKETS ====================
+  def overdue_tickets
+    # Get tickets assigned to current user that are overdue
+    today = Date.today
+    
+    current_count = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where('scheduled_date < ?', today)
+      .where.not(status: ['completed', 'cancelled'])
+      .count
+    
+    # Get count from a week ago for trend
+    week_ago = 7.days.ago.to_date
+    previous_count = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where('scheduled_date < ?', week_ago)
+      .where.not(status: ['completed', 'cancelled'])
+      .count
+    
+    trend = calculate_trend(current_count, previous_count)
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?assigned_to_me=true&status=overdue'
+    }
+  end
+
+  # ==================== COMPLETED TICKETS ====================
+  def completed_tickets
+    # Get tickets assigned to current user completed in date range (use updated_at as proxy for completion)
+    current_count = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where(status: 'completed')
+      .where(updated_at: @date_range[:start_date]..@date_range[:end_date])
+      .count
+    
+    # Get count from previous period for trend
+    previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    previous_start = @date_range[:start_date] - previous_period_days.days
+    previous_end = @date_range[:start_date] - 1.day
+    
+    previous_count = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where(status: 'completed')
+      .where(updated_at: previous_start..previous_end)
+      .count
+    
+    trend = calculate_trend(current_count, previous_count)
+    
+    {
+      value: current_count,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/service?assigned_to_me=true&status=completed'
+    }
+  end
+
+  # ==================== PRIORITY TICKET LIST ====================
+  def priority_ticket_list
+    # Get high priority tickets assigned to current user
+    tickets = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where.not(status: ['completed', 'cancelled'])
+      .where(priority: ['high', 'urgent'])
+      .order('scheduled_date ASC NULLS LAST, created_at ASC')
+      .limit(10)
+    
+    tickets_data = tickets.map do |ticket|
+      # Get customer name from contact or account
+      customer_name = if ticket.contact.present?
+        ticket.contact.full_name
+      elsif ticket.account.present?
+        ticket.account.name
+      else
+        'N/A'
+      end
+      
+      {
+        id: ticket.id,
+        title: ticket.title || "Ticket ##{ticket.id}",
+        priority: ticket.priority,
+        status: ticket.status,
+        due_date: ticket.scheduled_date,
+        formatted_due_date: ticket.scheduled_date ? ticket.scheduled_date.strftime('%b %d') : 'No due date',
+        customer_name: customer_name,
+        overdue: ticket.scheduled_date && ticket.scheduled_date < Date.today
+      }
+    end
+    
+    {
+      tickets: tickets_data,
+      drill_down_url: '/service?assigned_to_me=true&priority=high'
+    }
+  end
+
+  # ==================== RECENT COMPLETIONS ====================
+  def recent_completions
+    # Get recently completed tickets assigned to current user (use updated_at as proxy for completion)
+    tickets = @company.service_tickets
+      .where(assigned_to: @current_user.id.to_s)
+      .where(status: 'completed')
+      .order('updated_at DESC')
+      .limit(10)
+    
+    tickets_data = tickets.map do |ticket|
+      # Get customer name from contact or account
+      customer_name = if ticket.contact.present?
+        ticket.contact.full_name
+      elsif ticket.account.present?
+        ticket.account.name
+      else
+        'N/A'
+      end
+      
+      {
+        id: ticket.id,
+        title: ticket.title || "Ticket ##{ticket.id}",
+        completed_at: ticket.updated_at,
+        formatted_completed_at: ticket.updated_at.strftime('%b %d, %I:%M %p'),
+        customer_name: customer_name,
+        resolution: ticket.notes&.truncate(100) || 'No notes'
+      }
+    end
+    
+    {
+      tickets: tickets_data,
+      drill_down_url: '/service?assigned_to_me=true&status=completed'
+    }
+  end
+
   private
 
   # Calculate total revenue from payments
@@ -1972,4 +2188,5 @@ class DashboardMetricsService
       }
     }
   end
+
 end
