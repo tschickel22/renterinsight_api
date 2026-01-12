@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_09_000000) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_12_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -699,10 +699,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_09_000000) do
     t.jsonb "quickbooks_settings", default: {}
     t.decimal "default_pack_amount", precision: 15, scale: 2, default: "0.0"
     t.integer "fiscal_year_start_month", default: 1, null: false, comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. Default is 1 (January) for calendar year."
+    t.boolean "is_demo", default: false, null: false
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
+    t.index ["is_demo"], name: "index_companies_on_is_demo"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
     t.index ["quickbooks_scope"], name: "index_companies_on_quickbooks_scope"

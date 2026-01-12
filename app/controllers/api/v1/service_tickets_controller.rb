@@ -520,7 +520,7 @@ module Api
             id: ticket.vehicle.id,
             year: ticket.vehicle.year,
             make: ticket.vehicle.make,
-            model: ticket.model
+            model: ticket.vehicle.model
           } : nil,
           warrantyClaim: ticket.warranty_claim_owned ? {
             id: ticket.warranty_claim_owned.id,
