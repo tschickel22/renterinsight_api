@@ -213,6 +213,31 @@ class Api::V1::DashboardController < ApplicationController
       # Personal recent deals
       return unless authorize_action!('deals', 'read')
       service.my_recent_deals
+    # My Service Dashboard Cards
+    when 'my_open_tickets'
+      # Personal open service tickets
+      return unless authorize_action!('service', 'read')
+      service.my_open_tickets
+    when 'today_tickets'
+      # Service tickets due today
+      return unless authorize_action!('service', 'read')
+      service.today_tickets
+    when 'overdue_tickets'
+      # Overdue service tickets
+      return unless authorize_action!('service', 'read')
+      service.overdue_tickets
+    when 'completed_tickets'
+      # Completed service tickets
+      return unless authorize_action!('service', 'read')
+      service.completed_tickets
+    when 'priority_ticket_list'
+      # Priority tickets list
+      return unless authorize_action!('service', 'read')
+      service.priority_ticket_list
+    when 'recent_completions'
+      # Recently completed tickets
+      return unless authorize_action!('service', 'read')
+      service.recent_completions
     else
       # Unknown card type
       { error: "Unknown card type: #{card_type}" }

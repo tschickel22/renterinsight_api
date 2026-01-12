@@ -4,11 +4,12 @@ module Api
   module Admin
     class DocumentsController < ApplicationController
       before_action :authenticate_user!
-      before_action :require_admin_access!
       before_action :set_company_scope
       before_action :set_document, only: [:show, :update, :destroy, :download]
 
       def index
+        return unless authorize_action!('documents', 'read')
+        
         documents = company_scoped_documents.includes(:owner).order(created_at: :desc)
         
         if params[:search].present?
@@ -44,10 +45,13 @@ module Api
       end
 
       def show
+        return unless authorize_action!('documents', 'read')
+        
         render json: { document: document_json(@document) }
       end
 
       def create
+        return unless authorize_action!('documents', 'create')
         # Accept either direct Contact ID or BuyerPortalAccess ID
         contact = @company.contacts.find_by(id: params[:buyer_id])
         
@@ -81,6 +85,8 @@ module Api
       end
 
       def update
+        return unless authorize_action!('documents', 'update')
+        
         if @document.update(update_params)
           render json: { document: document_json(@document) }
         else
@@ -89,11 +95,14 @@ module Api
       end
 
       def destroy
+        return unless authorize_action!('documents', 'delete')
+        
         @document.destroy
         head :no_content
       end
 
       def download
+        return unless authorize_action!('documents', 'read')
         if @document.file.attached?
           send_data @document.file.download,
                     filename: @document.file.filename.to_s,
@@ -105,14 +114,6 @@ module Api
       end
 
       private
-
-      def require_admin_access!
-        unless current_user&.admin? || current_user&.platform_admin? || current_user&.super_admin?
-          render json: { error: 'Forbidden - Admin access required' }, status: :forbidden
-          return false
-        end
-        true
-      end
 
       def set_document
         @document = company_scoped_documents.find_by(id: params[:id])
