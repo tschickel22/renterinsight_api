@@ -2,6 +2,9 @@
 
 class AddCommissionPlansToRbac < ActiveRecord::Migration[8.0]
   def up
+    # Reload Resource model to pick up permission_ui_type column from previous migration
+    Resource.reset_column_information
+    
     # Create commission_plans resource
     commission_plans_resource = Resource.find_or_create_by!(key: 'commission_plans') do |r|
       r.name = 'Commission Plans'
