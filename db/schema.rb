@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_12_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -372,6 +372,180 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
   end
 
+  create_table "commission_audit_entries", force: :cascade do |t|
+    t.bigint "commission_id", null: false
+    t.bigint "user_id", null: false
+    t.string "action", null: false
+    t.jsonb "previous_value"
+    t.jsonb "new_value"
+    t.text "notes"
+    t.datetime "created_at", precision: nil, null: false
+    t.index ["action"], name: "index_commission_audit_entries_on_action"
+    t.index ["commission_id", "created_at"], name: "index_commission_audit_entries_on_commission_id_and_created_at"
+    t.index ["commission_id"], name: "index_commission_audit_entries_on_commission_id"
+    t.index ["user_id"], name: "index_commission_audit_entries_on_user_id"
+  end
+
+  create_table "commission_components", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "name", null: false
+    t.string "component_type", null: false
+    t.string "applies_to_role"
+    t.boolean "is_active", default: true
+    t.string "gross_type"
+    t.decimal "rate", precision: 8, scale: 6
+    t.decimal "flat_amount", precision: 15, scale: 2
+    t.integer "units_threshold"
+    t.string "threshold_period"
+    t.string "deal_type"
+    t.string "vertical"
+    t.integer "sequence", default: 0
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "commission_plan_id"
+    t.index ["applies_to_role"], name: "index_commission_components_on_role"
+    t.index ["commission_plan_id"], name: "index_commission_components_on_commission_plan_id"
+    t.index ["company_id", "is_active"], name: "index_commission_components_on_company_and_active"
+    t.index ["company_id", "location_id", "is_active", "sequence"], name: "index_commission_components_lookup"
+    t.index ["company_id"], name: "index_commission_components_on_company_id"
+    t.index ["component_type"], name: "index_commission_components_on_type"
+    t.index ["location_id"], name: "index_commission_components_on_location_id"
+  end
+
+  create_table "commission_payment_line_items", force: :cascade do |t|
+    t.bigint "commission_payment_id", null: false
+    t.bigint "commission_component_id"
+    t.string "description", null: false, comment: "Display name of commission component"
+    t.string "calculation_basis", null: false, comment: "What amount was used as basis (front_gross, back_gross, etc.)"
+    t.string "calculation_method", null: false, comment: "How it was calculated (flat_rate, percentage, tiered, per_unit)"
+    t.decimal "rate", precision: 8, scale: 4, comment: "Rate used (percentage or per-unit amount)"
+    t.decimal "basis_amount", precision: 15, scale: 2, default: "0.0", null: false, comment: "Dollar amount commission was calculated on"
+    t.decimal "calculated_amount", precision: 15, scale: 2, null: false, comment: "Commission earned from this component"
+    t.integer "display_order", default: 0
+    t.jsonb "calculation_details", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["calculation_basis"], name: "index_commission_payment_line_items_on_calculation_basis"
+    t.index ["calculation_method"], name: "index_commission_payment_line_items_on_calculation_method"
+    t.index ["commission_component_id"], name: "index_commission_payment_line_items_on_commission_component_id"
+    t.index ["commission_payment_id", "display_order"], name: "index_comm_line_items_on_payment_and_order"
+    t.index ["commission_payment_id"], name: "index_comm_line_items_on_payment_id"
+  end
+
+  create_table "commission_payments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "deal_id", null: false
+    t.bigint "payee_user_id", null: false
+    t.string "payment_number", null: false
+    t.string "status", default: "pending", null: false
+    t.decimal "amount", precision: 15, scale: 2, null: false
+    t.jsonb "calculation_details", default: {}
+    t.bigint "approved_by_user_id"
+    t.datetime "approved_at"
+    t.bigint "paid_by_user_id"
+    t.datetime "paid_at"
+    t.string "payment_method"
+    t.string "payment_reference"
+    t.boolean "is_reversed", default: false
+    t.bigint "reversed_by_user_id"
+    t.datetime "reversed_at"
+    t.text "reversal_reason"
+    t.text "notes"
+    t.jsonb "metadata", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "commission_plan_id"
+    t.date "earned_date"
+    t.decimal "amount_paid", precision: 10, scale: 2
+    t.decimal "remaining_balance", precision: 10, scale: 2
+    t.date "paid_date"
+    t.index ["approved_at"], name: "index_commission_payments_approved_at"
+    t.index ["approved_by_user_id"], name: "index_commission_payments_on_approved_by_user_id"
+    t.index ["commission_plan_id"], name: "index_commission_payments_on_commission_plan_id"
+    t.index ["company_id", "payment_number"], name: "index_commission_payments_unique_number", unique: true
+    t.index ["company_id", "status"], name: "index_commission_payments_status"
+    t.index ["company_id"], name: "index_commission_payments_on_company_id"
+    t.index ["deal_id"], name: "index_commission_payments_deal"
+    t.index ["deal_id"], name: "index_commission_payments_on_deal_id"
+    t.index ["earned_date"], name: "index_commission_payments_on_earned_date"
+    t.index ["is_deleted"], name: "index_commission_payments_deleted"
+    t.index ["location_id"], name: "index_commission_payments_on_location_id"
+    t.index ["paid_at"], name: "index_commission_payments_paid_at"
+    t.index ["paid_by_user_id"], name: "index_commission_payments_on_paid_by_user_id"
+    t.index ["payee_user_id", "status"], name: "index_commission_payments_payee_status"
+    t.index ["payee_user_id"], name: "index_commission_payments_on_payee_user_id"
+    t.index ["reversed_by_user_id"], name: "index_commission_payments_on_reversed_by_user_id"
+  end
+
+  create_table "commission_plans", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "name", null: false
+    t.text "description"
+    t.bigint "assigned_user_id", comment: "If set, plan only applies to this specific user"
+    t.string "assigned_role", comment: "If set, plan applies to users with this role"
+    t.date "effective_date", default: -> { "CURRENT_DATE" }, null: false
+    t.date "expiration_date", comment: "NULL = no expiration"
+    t.boolean "is_active", default: true, null: false
+    t.boolean "is_default", default: false, null: false, comment: "Company-wide default plan (no user/role filter)"
+    t.integer "display_order", default: 0
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assigned_role"], name: "index_commission_plans_on_assigned_role", where: "(assigned_role IS NOT NULL)"
+    t.index ["assigned_user_id"], name: "index_commission_plans_on_assigned_user_id", where: "(assigned_user_id IS NOT NULL)"
+    t.index ["company_id", "is_active"], name: "index_commission_plans_on_company_id_and_is_active"
+    t.index ["company_id", "is_default"], name: "index_commission_plans_on_company_id_and_is_default"
+    t.index ["company_id"], name: "index_commission_plans_on_company_id"
+    t.index ["effective_date", "expiration_date"], name: "index_commission_plans_on_effective_date_and_expiration_date"
+    t.index ["location_id"], name: "index_commission_plans_on_location_id"
+  end
+
+  create_table "commission_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "rule_type", null: false
+    t.decimal "rate", precision: 5, scale: 4
+    t.decimal "amount", precision: 10, scale: 2
+    t.jsonb "tiers", default: []
+    t.boolean "is_active", default: true
+    t.text "description"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_active"], name: "index_commission_rules_on_company_id_and_is_active"
+    t.index ["company_id"], name: "index_commission_rules_on_company_id"
+    t.index ["rule_type"], name: "index_commission_rules_on_rule_type"
+  end
+
+  create_table "commissions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "deal_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "commission_rule_id"
+    t.bigint "location_id"
+    t.string "commission_type", null: false
+    t.decimal "rate", precision: 5, scale: 4
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.string "status", default: "pending", null: false
+    t.date "paid_date"
+    t.text "notes"
+    t.jsonb "custom_fields", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["commission_rule_id"], name: "index_commissions_on_commission_rule_id"
+    t.index ["commission_type"], name: "index_commissions_on_commission_type"
+    t.index ["company_id", "status"], name: "index_commissions_on_company_id_and_status"
+    t.index ["deal_id"], name: "index_commissions_on_deal_id"
+    t.index ["location_id"], name: "index_commissions_on_location_id"
+    t.index ["paid_date"], name: "index_commissions_on_paid_date"
+    t.index ["user_id", "status"], name: "index_commissions_on_user_id_and_status"
+  end
+
   create_table "communication_events", force: :cascade do |t|
     t.integer "communication_id", null: false
     t.string "event_type", null: false
@@ -523,9 +697,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.boolean "quickbooks_sync_enabled", default: false
     t.string "quickbooks_scope", default: "company", null: false
     t.jsonb "quickbooks_settings", default: {}
+    t.decimal "default_pack_amount", precision: 15, scale: 2, default: "0.0"
+    t.integer "fiscal_year_start_month", default: 1, null: false, comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. Default is 1 (January) for calendar year."
+    t.boolean "is_demo", default: false, null: false
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
+    t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
+    t.index ["is_demo"], name: "index_companies_on_is_demo"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
     t.index ["quickbooks_scope"], name: "index_companies_on_quickbooks_scope"
@@ -659,6 +838,56 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["company_id"], name: "index_custom_fields_on_company_id"
   end
 
+  create_table "dashboard_layouts", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "preset_id", null: false
+    t.jsonb "layout_data", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_dashboard_layouts_on_company_id"
+    t.index ["user_id", "company_id", "preset_id"], name: "index_dashboard_layouts_on_user_company_preset", unique: true
+    t.index ["user_id"], name: "index_dashboard_layouts_on_user_id"
+  end
+
+  create_table "deal_activities", force: :cascade do |t|
+    t.bigint "deal_id", null: false
+    t.bigint "user_id"
+    t.bigint "assigned_to_id"
+    t.bigint "related_activity_id"
+    t.string "activity_type", null: false
+    t.string "subject"
+    t.text "description"
+    t.string "status"
+    t.string "priority"
+    t.datetime "due_date"
+    t.datetime "start_time"
+    t.datetime "end_time"
+    t.datetime "completed_at"
+    t.string "phone_number"
+    t.string "call_direction"
+    t.string "call_outcome"
+    t.integer "duration"
+    t.string "location"
+    t.string "meeting_link"
+    t.text "attendees"
+    t.string "outcome"
+    t.datetime "reminder_time"
+    t.json "reminder_method"
+    t.boolean "reminder_sent", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["activity_type"], name: "index_deal_activities_on_activity_type"
+    t.index ["assigned_to_id"], name: "index_deal_activities_on_assigned_to_id"
+    t.index ["deal_id"], name: "index_deal_activities_on_deal_id"
+    t.index ["due_date"], name: "index_deal_activities_on_due_date"
+    t.index ["priority"], name: "index_deal_activities_on_priority"
+    t.index ["related_activity_id"], name: "index_deal_activities_on_related_activity_id"
+    t.index ["reminder_time"], name: "index_deal_activities_on_reminder_time"
+    t.index ["status"], name: "index_deal_activities_on_status"
+    t.index ["user_id"], name: "index_deal_activities_on_user_id"
+  end
+
   create_table "deal_products", force: :cascade do |t|
     t.integer "deal_id", null: false
     t.integer "product_id"
@@ -721,17 +950,40 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.integer "company_id"
     t.bigint "location_id"
     t.integer "owner_id"
+    t.decimal "selling_price", precision: 15, scale: 2
+    t.decimal "unit_cost", precision: 15, scale: 2
+    t.decimal "trade_allowance", precision: 15, scale: 2, default: "0.0"
+    t.decimal "trade_payoff", precision: 15, scale: 2, default: "0.0"
+    t.decimal "pack_amount", precision: 15, scale: 2
+    t.decimal "finance_reserve", precision: 15, scale: 2, default: "0.0"
+    t.decimal "product_margin", precision: 15, scale: 2, default: "0.0"
+    t.decimal "accessories_total", precision: 15, scale: 2, default: "0.0"
+    t.decimal "doc_fee", precision: 15, scale: 2, default: "0.0"
+    t.decimal "delivery_fee", precision: 15, scale: 2, default: "0.0"
+    t.decimal "setup_fee", precision: 15, scale: 2, default: "0.0"
+    t.decimal "skirting_fee", precision: 15, scale: 2, default: "0.0"
+    t.string "deal_type"
+    t.string "vertical"
+    t.integer "quantity", default: 1
+    t.date "delivery_date"
+    t.bigint "primary_salesperson_id"
+    t.bigint "commission_plan_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
+    t.index ["commission_plan_id", "delivery_date"], name: "index_deals_on_plan_and_delivery"
+    t.index ["commission_plan_id"], name: "index_deals_on_commission_plan_id"
+    t.index ["company_id", "delivery_date"], name: "index_deals_on_company_and_delivery"
     t.index ["company_id", "location_id"], name: "index_deals_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_deals_on_company_id"
     t.index ["contact_id"], name: "index_deals_on_contact_id"
+    t.index ["deal_type"], name: "index_deals_on_deal_type"
     t.index ["deleted_at"], name: "index_deals_on_deleted_at"
     t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
     t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["owner_id"], name: "index_deals_on_owner_id"
+    t.index ["primary_salesperson_id", "delivery_date"], name: "index_deals_on_salesperson_and_delivery"
     t.index ["source_id"], name: "index_deals_on_source_id"
     t.index ["stage"], name: "index_deals_on_stage"
     t.index ["territory_id", "stage"], name: "index_deals_on_territory_id_and_stage"
@@ -739,6 +991,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["user_id", "stage"], name: "index_deals_on_user_id_and_stage"
     t.index ["user_id"], name: "index_deals_on_user_id"
     t.index ["vehicle_id"], name: "index_deals_on_vehicle_id"
+    t.index ["vertical"], name: "index_deals_on_vertical"
     t.index ["won_at"], name: "index_deals_on_won_at"
   end
 
@@ -1238,11 +1491,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.datetime "quickbooks_last_sync_at"
     t.boolean "quickbooks_sync_enabled", default: false
     t.jsonb "quickbooks_settings", default: {}
+    t.decimal "default_pack_amount", precision: 15, scale: 2
+    t.integer "fiscal_year_start_month", comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. If NULL, falls back to company.fiscal_year_start_month. If both NULL, defaults to 1 (January) for calendar year."
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
     t.index ["company_id", "is_deleted"], name: "index_locations_on_company_id_and_is_deleted"
     t.index ["company_id"], name: "index_locations_on_company_id"
+    t.index ["default_pack_amount"], name: "index_locations_on_default_pack_amount"
     t.index ["deleted_at"], name: "index_locations_on_deleted_at"
     t.index ["external_payments_property_id"], name: "index_locations_on_external_payments_property_id"
     t.index ["quickbooks_realm_id"], name: "index_locations_on_quickbooks_realm_id"
@@ -1831,9 +2087,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "permission_ui_type", default: "standard_crud", null: false
+    t.jsonb "permission_groups", default: {}, null: false
     t.index ["active"], name: "index_resources_on_active"
     t.index ["category"], name: "index_resources_on_category"
     t.index ["key"], name: "index_resources_on_key", unique: true
+    t.index ["permission_ui_type"], name: "index_resources_on_permission_ui_type"
   end
 
   create_table "role_permissions", force: :cascade do |t|
@@ -2078,6 +2337,40 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["company_id"], name: "index_tags_on_company_id"
   end
 
+  create_table "tasks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "taskable_type"
+    t.bigint "taskable_id"
+    t.string "title", null: false
+    t.text "description"
+    t.integer "status", default: 0, null: false
+    t.integer "priority", default: 1, null: false
+    t.string "task_module"
+    t.bigint "assigned_to_id"
+    t.datetime "due_date"
+    t.datetime "completed_at"
+    t.string "source_type"
+    t.string "source_id"
+    t.string "link"
+    t.jsonb "tags", default: []
+    t.jsonb "custom_fields", default: {}
+    t.string "created_by"
+    t.string "updated_by"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assigned_to_id"], name: "index_tasks_on_assigned_to_id"
+    t.index ["company_id", "assigned_to_id"], name: "index_tasks_on_company_and_assigned_to"
+    t.index ["company_id", "location_id"], name: "index_tasks_on_company_and_location"
+    t.index ["company_id", "status"], name: "index_tasks_on_company_and_status"
+    t.index ["company_id", "task_module"], name: "index_tasks_on_company_and_module"
+    t.index ["company_id"], name: "index_tasks_on_company_id"
+    t.index ["due_date"], name: "index_tasks_on_due_date"
+    t.index ["location_id"], name: "index_tasks_on_location_id"
+    t.index ["status", "due_date"], name: "index_tasks_on_status_and_due_date"
+    t.index ["taskable_type", "taskable_id"], name: "index_tasks_on_taskable"
+  end
+
   create_table "templates", force: :cascade do |t|
     t.string "name", null: false
     t.string "template_type", null: false
@@ -2249,7 +2542,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.datetime "invitation_sent_at"
     t.datetime "invitation_expires_at"
     t.jsonb "notification_settings", default: {"lead_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "account_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "contact_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "activity_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}}
+    t.jsonb "custom_permissions", default: []
     t.index ["company_id"], name: "index_users_on_company_id"
+    t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
     t.index ["email", "invitation_id"], name: "index_users_on_email_and_invitation_id"
     t.index ["invitation_id"], name: "index_users_on_invitation_id"
@@ -2421,6 +2716,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.string "overlay_text", comment: "Promotional overlay text for listings"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.decimal "dealer_cost", precision: 10, scale: 2, comment: "Base invoice cost from manufacturer"
+    t.decimal "freight_cost", precision: 10, scale: 2, comment: "Transportation/shipping cost to dealership"
+    t.decimal "pdi_cost", precision: 10, scale: 2, comment: "Pre-delivery inspection and setup cost"
+    t.decimal "total_cost", precision: 10, scale: 2, comment: "Total dealer cost (dealer_cost + freight + pdi)"
+    t.decimal "holdback_amount", precision: 10, scale: 2, comment: "Manufacturer holdback/rebate amount"
+    t.decimal "floor_plan_rate", precision: 5, scale: 3, comment: "Monthly floor plan interest rate (if financed)"
+    t.decimal "target_gross", precision: 10, scale: 2, comment: "Target gross profit for this unit"
+    t.decimal "minimum_price", precision: 10, scale: 2, comment: "Minimum acceptable selling price"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -2428,6 +2731,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["company_id", "vin"], name: "index_vehicles_on_company_id_and_vin", unique: true, where: "(vin IS NOT NULL)"
     t.index ["company_id"], name: "index_vehicles_on_company_id"
     t.index ["condition"], name: "index_vehicles_on_condition"
+    t.index ["dealer_cost"], name: "index_vehicles_on_dealer_cost"
     t.index ["dwelling_type"], name: "index_vehicles_on_dwelling_type"
     t.index ["exterior_color"], name: "index_vehicles_on_exterior_color"
     t.index ["home_type"], name: "index_vehicles_on_home_type"
@@ -2441,6 +2745,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
     t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
     t.index ["status"], name: "index_vehicles_on_status"
+    t.index ["total_cost"], name: "index_vehicles_on_total_cost"
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 
@@ -2535,6 +2840,30 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
   add_foreign_key "brochures", "companies"
+  add_foreign_key "commission_audit_entries", "commissions"
+  add_foreign_key "commission_audit_entries", "users"
+  add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
+  add_foreign_key "commission_components", "companies"
+  add_foreign_key "commission_components", "locations"
+  add_foreign_key "commission_payment_line_items", "commission_components", on_delete: :nullify
+  add_foreign_key "commission_payment_line_items", "commission_payments", on_delete: :cascade
+  add_foreign_key "commission_payments", "commission_plans", on_delete: :nullify
+  add_foreign_key "commission_payments", "companies"
+  add_foreign_key "commission_payments", "deals"
+  add_foreign_key "commission_payments", "locations"
+  add_foreign_key "commission_payments", "users", column: "approved_by_user_id"
+  add_foreign_key "commission_payments", "users", column: "paid_by_user_id"
+  add_foreign_key "commission_payments", "users", column: "payee_user_id"
+  add_foreign_key "commission_payments", "users", column: "reversed_by_user_id"
+  add_foreign_key "commission_plans", "companies", on_delete: :cascade
+  add_foreign_key "commission_plans", "locations", on_delete: :nullify
+  add_foreign_key "commission_plans", "users", column: "assigned_user_id", on_delete: :nullify
+  add_foreign_key "commission_rules", "companies"
+  add_foreign_key "commissions", "commission_rules"
+  add_foreign_key "commissions", "companies"
+  add_foreign_key "commissions", "deals"
+  add_foreign_key "commissions", "locations"
+  add_foreign_key "commissions", "users"
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
@@ -2549,15 +2878,23 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "contacts", "locations"
   add_foreign_key "custom_fields", "companies"
+  add_foreign_key "dashboard_layouts", "companies"
+  add_foreign_key "dashboard_layouts", "users"
+  add_foreign_key "deal_activities", "deal_activities", column: "related_activity_id"
+  add_foreign_key "deal_activities", "deals"
+  add_foreign_key "deal_activities", "users"
+  add_foreign_key "deal_activities", "users", column: "assigned_to_id"
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
   add_foreign_key "deals", "accounts"
+  add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
   add_foreign_key "deals", "locations"
   add_foreign_key "deals", "sources"
   add_foreign_key "deals", "users"
+  add_foreign_key "deals", "users", column: "primary_salesperson_id"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_submissions", "leads"
@@ -2646,6 +2983,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_29_190001) do
   add_foreign_key "subscription_plan_modules", "subscription_plans"
   add_foreign_key "syndication_partners", "companies"
   add_foreign_key "tag_assignments", "tags"
+  add_foreign_key "tasks", "companies"
+  add_foreign_key "tasks", "locations"
+  add_foreign_key "tasks", "users", column: "assigned_to_id"
   add_foreign_key "templates", "companies"
   add_foreign_key "tenant_module_overrides", "companies"
   add_foreign_key "tenant_module_overrides", "users", column: "overridden_by_id"

@@ -133,6 +133,34 @@ Rails.application.routes.draw do
       # Notification Settings (Unified Reminder System)
       resource :notification_settings, only: [:show, :update], path: 'notification_settings'
       
+      # ==================== TASKS ====================
+      resources :tasks do
+        member do
+          post :complete
+          post :reopen
+        end
+        
+        collection do
+          get :stats
+        end
+      end
+      
+      # ==================== CALENDAR ====================
+      scope path: 'calendar', controller: 'calendar' do
+        get 'events'
+        get 'views', action: :available_views
+        get 'stats'
+      end
+      
+      # ==================== DASHBOARD ====================
+      scope path: 'dashboard', controller: 'dashboard' do
+        get 'presets', action: :presets
+        get 'layout/:preset_id', action: :layout
+        post 'layout/:preset_id', action: :save_layout
+        delete 'layout/:preset_id', action: :reset_layout
+        get 'metrics/:card_type', action: :metrics
+      end
+      
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do
@@ -194,6 +222,9 @@ Rails.application.routes.draw do
         member do
           get :print
           post :clone
+          get :tags
+          post :tags, to: 'vehicles#add_tags'
+          delete 'tags/:tag_name', to: 'vehicles#remove_tag'
         end
         
         collection do
@@ -263,6 +294,7 @@ Rails.application.routes.draw do
           post :send_sms
           post :mark_paid
           post :cancel
+          get :pdf
         end
         
         collection do
@@ -431,6 +463,9 @@ Rails.application.routes.draw do
           post :accept
           post :reject
           get :pdf
+          get :tags
+          post :tags, to: 'quotes#add_tags'
+          delete 'tags/:tag_name', to: 'quotes#remove_tag'
         end
         
         collection do
@@ -445,6 +480,81 @@ Rails.application.routes.draw do
       # Contact activity reminders (for marking as sent)
       post 'contact_activities/:id/mark_reminder_sent', to: 'contact_activities#mark_reminder_sent'
       
+      # ==================== COMMISSIONS ====================
+      resources :commissions do
+        member do
+          post :approve
+          post :reject
+          post :mark_paid, path: 'mark-paid'
+          get :audit_trail, path: 'audit-trail'
+        end
+        
+        collection do
+          get :stats
+          post :calculate
+        end
+      end
+      
+      # ==================== COMMISSION PLANS ====================
+      resources :commission_plans, path: 'commission-plans' do
+        member do
+          post :activate
+          post :deactivate
+          get :components
+          get :available_components, path: 'available-components'
+          post :add_component, path: 'add-component'
+          delete 'remove-component/:component_id', to: 'commission_plans#remove_component'
+          patch :reorder_components, path: 'reorder-components'
+        end
+        
+        collection do
+          get :stats
+        end
+      end
+      
+      # ==================== COMMISSION COMPONENTS ====================
+      resources :commission_components, path: 'commission-components' do
+        member do
+          post :toggle
+          post :calculate  # Test calculation with sample deal
+        end
+        
+        collection do
+          get :options  # Get dropdown options for form
+        end
+      end
+      
+      # ==================== COMMISSION PAYMENTS ====================
+      resources :commission_payments, path: 'commission-payments' do
+        member do
+          post :approve
+          post :mark_paid, path: 'mark-paid'
+          post :reverse
+          post :undo_reversal, path: 'undo-reversal'
+          get :statement
+        end
+        
+        collection do
+          get :my_commissions, path: 'my-commissions'
+          get :stats
+          get :dashboard
+          get :reports_data, path: 'reports-data'
+          post :export
+          post :bulk_approve, path: 'bulk-approve'
+          post :bulk_mark_paid, path: 'bulk-mark-paid'
+          post :bulk_mark_paid_detailed, path: 'bulk-mark-paid-detailed'
+          post :generate_for_deal, path: 'generate-for-deal'
+          get 'preview-for-deal/:deal_id', action: :preview_for_deal, as: :preview_for_deal
+        end
+      end
+      
+      # ==================== COMMISSION RULES ====================
+      resources :commission_rules, path: 'commission-rules' do
+        member do
+          post :calculate
+        end
+      end
+      
       # ==================== PORTAL USERS ====================
       resources :portal_users, path: 'portal_users' do
         collection do
@@ -457,6 +567,7 @@ Rails.application.routes.draw do
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
+          get :tags, to: 'contacts#tags'  # Get tags for contact
           post :tags, to: 'contacts#add_tags'
           delete 'tags/:tag_name', to: 'contacts#remove_tag'
           patch :opt_in_email, to: 'contacts#opt_in_email'
@@ -509,6 +620,7 @@ Rails.application.routes.draw do
       resources :accounts do
         member do
           post :convert_to_customer
+          get :tags, to: 'accounts#tags'  # Get tags for account
           post :tags, to: 'accounts#add_tags'
           delete 'tags/:tag_name', to: 'accounts#remove_tag'
           get :deals
@@ -612,16 +724,6 @@ Rails.application.routes.draw do
             get :companies
             get :logs
             post :sync_all
-          end
-        end
-      end
-      
-      # ==================== ADMIN NAMESPACE (Platform Admin Only) ====================
-      namespace :admin do
-        resources :manufacturers do
-          member do
-            post :activate
-            post :deactivate
           end
         end
       end
@@ -773,6 +875,9 @@ Rails.application.routes.draw do
 
       # ==================== TAGS ====================
       resources :tags, only: %i[index create update destroy] do
+        member do
+          get :analytics
+        end
         collection do
           post :assign
           get 'entity/:entity_type/:entity_id', to: 'tags#entity_tags'
@@ -805,6 +910,13 @@ Rails.application.routes.draw do
       # These routes accept lead_id in the request body
       post 'communications/email', to: 'communications#email'
       post 'communications/sms', to: 'communications#sms'
+
+      # ==================== ACTIVITIES (Collection Endpoints) ====================
+      # Collection endpoints for aggregating activities across all entities
+      get 'leads/activities', to: 'activities#lead_activities'
+      get 'accounts/activities', to: 'activities#account_activities'
+      get 'contacts/activities', to: 'activities#contact_activities'
+      get 'deals/activities', to: 'activities#deal_activities'
 
       # ==================== LEADS ====================
       resources :leads, only: %i[index show create update destroy] do
@@ -915,7 +1027,34 @@ Rails.application.routes.draw do
         
         member do
           post :move_stage
+          get :tags
+          post :tags, to: 'deals#add_tags'
+          delete 'tags/:tag_name', to: 'deals#remove_tag'
+          get :commission_breakdown # Commission economics breakdown
+          get :financials # NEW: Get deal financials (permission-gated)
+          patch :financials, to: 'deals#update_financials' # NEW: Update deal financials (permission-gated)
         end
+        
+        # Commission Payments (nested under deals)
+        resources :commission_payments, only: [:index], controller: 'commission_payments', path: 'commissions' do
+          collection do
+            post :preview
+          end
+        end
+        
+        # Deal Activities (unified activities)
+        resources :deal_activities, only: %i[index show create update destroy] do
+          member do
+            post :complete
+            post :cancel
+          end
+          collection do
+            get :reminders
+          end
+        end
+        
+        # Deal reminders endpoint (for activity notifications)
+        post 'deal_activities/:id/mark_reminder_sent', to: 'deal_activities#mark_reminder_sent'
         
         # Nested resources for deals
         resources :products, only: %i[index show create update destroy], controller: 'deal_products' do
@@ -943,6 +1082,51 @@ Rails.application.routes.draw do
         collection do
           get :summary
           get :trends
+        end
+      end
+      
+      # ==================== COMMISSIONS ====================
+      # Commission Plans
+      resources :commission_plans, path: 'commission-plans', only: %i[index show create update destroy] do
+        collection do
+          get :stats
+        end
+        
+        member do
+          post :activate
+          post :deactivate
+          get :components
+          get :available_components, path: 'available-components'
+          post :add_component, path: 'add-component'
+          delete 'remove-component/:component_id', to: 'commission_plans#remove_component'
+          patch :reorder_components, path: 'reorder-components'
+        end
+      end
+      
+      # Commission Components
+      resources :commission_components, path: 'commission-components', only: %i[index show create update destroy] do
+        collection do
+          get :stats
+        end
+        
+        member do
+          post :activate
+          post :deactivate
+        end
+      end
+      
+      # Commission Payments (top-level routes)
+      resources :commission_payments, path: 'commission-payments', only: %i[index show create update destroy] do
+        collection do
+          get :stats
+          post :bulk_approve
+          post :bulk_pay
+        end
+        
+        member do
+          post :approve
+          post :pay
+          post :reverse
         end
       end
       
@@ -997,6 +1181,26 @@ Rails.application.routes.draw do
         get 'settings', to: 'security_settings#show'
         patch 'settings', to: 'security_settings#update'
         get 'mfa_stats', to: 'security_settings#mfa_stats'
+      end
+    end
+
+    # ==================== ADMIN NAMESPACE (Platform Admin Only) ====================
+    namespace :admin do
+      # Admin Buyers (Portal Users for Admin View)
+      resources :buyers, only: [:index]
+      
+      # Admin Documents (Documents across all clients)
+      resources :documents, only: [:index, :show, :create, :update, :destroy] do
+        member do
+          get :download
+        end
+      end
+      
+      resources :manufacturers do
+        member do
+          post :activate
+          post :deactivate
+        end
       end
     end
 

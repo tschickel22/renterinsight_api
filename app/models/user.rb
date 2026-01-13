@@ -10,6 +10,13 @@ class User < ApplicationRecord
   has_many :user_locations, dependent: :destroy
   has_many :locations, through: :user_locations
   has_many :login_activities, dependent: :destroy
+  has_many :assigned_tasks, class_name: 'Task', foreign_key: 'assigned_to_id', dependent: :nullify
+
+  # Commission Payment Associations
+  has_many :commission_payments, foreign_key: 'payee_user_id', dependent: :nullify
+  has_many :approved_payments, class_name: 'CommissionPayment', foreign_key: 'approved_by_user_id', dependent: :nullify
+  has_many :paid_payments, class_name: 'CommissionPayment', foreign_key: 'paid_by_user_id', dependent: :nullify
+  has_many :reversed_payments, class_name: 'CommissionPayment', foreign_key: 'reversed_by_user_id', dependent: :nullify
 
   # RBAC System Associations
   has_many :user_role_assignments, dependent: :destroy
@@ -30,6 +37,11 @@ class User < ApplicationRecord
     else
       read_attribute(:name) || first_name || last_name || email
     end
+  end
+  
+  # Alias for consistency with other models
+  def full_name
+    name
   end
   
   # Status helpers

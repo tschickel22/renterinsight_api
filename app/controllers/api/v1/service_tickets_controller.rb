@@ -42,8 +42,21 @@ module Api
         @service_tickets = @service_tickets.warranty_suspected if params[:warranty_suspected] == 'true'
         @service_tickets = @service_tickets.warranty_confirmed if params[:warranty_confirmed] == 'true'
         
+        # Pagination
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        total = @service_tickets.count
+        @service_tickets = @service_tickets.offset((page - 1) * per_page).limit(per_page)
+        
         render json: {
-          data: @service_tickets.map { |ticket| serialize_ticket(ticket) }
+          data: @service_tickets.map { |ticket| serialize_ticket(ticket) },
+          meta: {
+            total: total,
+            page: page,
+            per_page: per_page,
+            total_pages: (total.to_f / per_page).ceil
+          }
         }
       end
       
@@ -105,8 +118,8 @@ module Api
             # Notify the account/contact owner if exists
             if @service_ticket.contact_id.present?
               contact = Contact.find_by(id: @service_ticket.contact_id)
-              if contact && contact.user_id.present?
-                owner = User.find_by(id: contact.user_id)
+              if contact && contact.owner_id.present?
+                owner = User.find_by(id: contact.owner_id)
                 if owner
                   trigger_notification(
                     :service_ticket_completed,
@@ -472,6 +485,7 @@ module Api
           status: ticket.status,
           priority: ticket.priority,
           assignedTo: ticket.assigned_to,
+          assignedToUser: ticket.assigned_to.present? ? serialize_assigned_user(ticket.assigned_to) : nil,
           scheduledDate: ticket.scheduled_date,
           notes: ticket.notes,
           parts: parts_array,
@@ -506,7 +520,7 @@ module Api
             id: ticket.vehicle.id,
             year: ticket.vehicle.year,
             make: ticket.vehicle.make,
-            model: ticket.model
+            model: ticket.vehicle.model
           } : nil,
           warrantyClaim: ticket.warranty_claim_owned ? {
             id: ticket.warranty_claim_owned.id,
@@ -536,6 +550,19 @@ module Api
         data[:warrantyClaim] = ticket.warranty_claim_owned ? serialize_warranty_claim(ticket.warranty_claim_owned) : nil
         
         data
+      end
+      
+      def serialize_assigned_user(user_id)
+        user = User.find_by(id: user_id)
+        return nil unless user
+        
+        {
+          id: user.id,
+          name: user.name,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          email: user.email
+        }
       end
       
       def serialize_attachment(attachment)

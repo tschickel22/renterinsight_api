@@ -42,6 +42,8 @@ class Resource < ApplicationRecord
       { key: 'communications', name: 'Communications', category: 'operations', description: 'Send and manage emails/SMS' },
       { key: 'listings', name: 'Property Listings', category: 'operations', description: 'Manage property listings and syndication' },
       { key: 'products', name: 'Products', category: 'operations', description: 'Manage product catalog and pricing' },
+      { key: 'tasks', name: 'Tasks', category: 'operations', description: 'Manage tasks and to-do items across all modules' },
+      { key: 'documents', name: 'Documents', category: 'operations', description: 'Manage client documents and file uploads' },
       # Warranty Resources
       { key: 'warranty_claims', name: 'Warranty Claims', category: 'operations', description: 'Manage warranty claims and submissions to manufacturers' },
       { key: 'manufacturer_ar', name: 'Manufacturer AR', category: 'operations', description: 'Track and manage manufacturer accounts receivable' },

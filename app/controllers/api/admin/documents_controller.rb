@@ -4,11 +4,12 @@ module Api
   module Admin
     class DocumentsController < ApplicationController
       before_action :authenticate_user!
-      before_action :require_admin_access!
       before_action :set_company_scope
       before_action :set_document, only: [:show, :update, :destroy, :download]
 
       def index
+        return unless authorize_action!('documents', 'read')
+        
         documents = company_scoped_documents.includes(:owner).order(created_at: :desc)
         
         if params[:search].present?
@@ -27,8 +28,10 @@ module Api
         documents = documents.where(category: params[:category]) if params[:category].present?
         documents = documents.where(owner_id: params[:buyer_id]) if params[:buyer_id].present?
         
+        # Pagination
         page = (params[:page] || 1).to_i
         per_page = (params[:per_page] || 20).to_i
+        per_page = [per_page, 200].min  # Cap at 200
         total = documents.count
         documents = documents.offset((page - 1) * per_page).limit(per_page)
         
@@ -36,15 +39,19 @@ module Api
           documents: documents.map { |doc| document_json(doc) },
           total: total,
           page: page,
-          per_page: per_page
+          per_page: per_page,
+          total_pages: (total.to_f / per_page).ceil
         }
       end
 
       def show
+        return unless authorize_action!('documents', 'read')
+        
         render json: { document: document_json(@document) }
       end
 
       def create
+        return unless authorize_action!('documents', 'create')
         # Accept either direct Contact ID or BuyerPortalAccess ID
         contact = @company.contacts.find_by(id: params[:buyer_id])
         
@@ -78,6 +85,8 @@ module Api
       end
 
       def update
+        return unless authorize_action!('documents', 'update')
+        
         if @document.update(update_params)
           render json: { document: document_json(@document) }
         else
@@ -86,11 +95,14 @@ module Api
       end
 
       def destroy
+        return unless authorize_action!('documents', 'delete')
+        
         @document.destroy
         head :no_content
       end
 
       def download
+        return unless authorize_action!('documents', 'read')
         if @document.file.attached?
           send_data @document.file.download,
                     filename: @document.file.filename.to_s,
@@ -102,14 +114,6 @@ module Api
       end
 
       private
-
-      def require_admin_access!
-        unless current_user&.admin? || current_user&.platform_admin? || current_user&.super_admin?
-          render json: { error: 'Forbidden - Admin access required' }, status: :forbidden
-          return false
-        end
-        true
-      end
 
       def set_document
         @document = company_scoped_documents.find_by(id: params[:id])

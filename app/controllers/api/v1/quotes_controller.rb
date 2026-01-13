@@ -6,7 +6,7 @@ module Api
   module V1
     class QuotesController < ApplicationController
       before_action :set_company_scope
-      before_action :set_quote, only: %i[show update destroy send_quote pdf]
+      before_action :set_quote, only: %i[show update destroy send_quote pdf tags add_tags remove_tag]
 
       # GET /api/v1/quotes
       def index
@@ -49,21 +49,22 @@ module Api
         sort_order = params[:sort_order] || 'desc'
         @quotes = @quotes.order("#{sort_by} #{sort_order}")
         
-        # Simple pagination
-        page = (params[:page] || 1).to_i
-        per_page = (params[:per_page] || 25).to_i
-        offset = (page - 1) * per_page
-        
+        # Count BEFORE pagination
         total_count = @quotes.count
-        @quotes = @quotes.limit(per_page).offset(offset)
+        
+        # Paginate
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        @quotes = @quotes.offset((page - 1) * per_page).limit(per_page)
         
         render json: {
           quotes: @quotes.as_json(include_account: true, include_contact: true),
           meta: {
-            current_page: page,
-            total_pages: (total_count.to_f / per_page).ceil,
-            total_count: total_count,
-            per_page: per_page
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
           }
         }
       end
@@ -314,6 +315,84 @@ module Api
         Rails.logger.error "Error generating PDF: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
         render json: { error: 'Failed to generate PDF', message: e.message }, status: :internal_server_error
+      end
+
+      # GET /api/v1/quotes/:id/tags
+      def tags
+        return unless authorize_action!('finance', 'read')
+        
+        # Get tags through the association
+        tags = @quote.tags.map do |tag|
+          {
+            id: tag.id,
+            name: tag.name,
+            description: tag.description,
+            color: tag.color,
+            category: tag.category,
+            type: tag.try(:tag_type),
+            isSystem: tag.try(:is_system),
+            isActive: tag.try(:is_active),
+            usageCount: tag.usage_count,
+            createdBy: tag.try(:created_by),
+            createdAt: tag.created_at,
+            updatedAt: tag.updated_at
+          }.compact
+        end
+        
+        render json: tags
+      end
+
+      # POST /api/v1/quotes/:id/tags
+      def add_tags
+        return unless authorize_action!('finance', 'update')
+        
+        tag_names = params[:tags] || []
+        tag_names = tag_names.split(',') if tag_names.is_a?(String)
+        
+        tag_names.each do |tag_name|
+          # Find or create tag within current company scope
+          tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+            new_tag.color = '#6B7280'
+            new_tag.is_active = true
+            new_tag.created_by = current_user&.id&.to_s || 'system'
+          end
+          
+          # Create tag assignment using polymorphic association
+          TagAssignment.find_or_create_by!(
+            tag: tag,
+            entity_type: 'Quote',
+            entity_id: @quote.id
+          ) do |assignment|
+            assignment.company_id = @company.id
+            assignment.assigned_by = current_user&.id&.to_s || 'system'
+            assignment.assigned_at = Time.current
+          end
+        end
+        
+        # Reload tags association to get updated list
+        @quote.reload
+        render json: @quote.as_json(include_account: true, include_contact: true)
+      end
+
+      # DELETE /api/v1/quotes/:id/tags/:tag_name
+      def remove_tag
+        return unless authorize_action!('finance', 'update')
+        
+        # Find tag within company scope
+        tag = @company.tags.find_by(name: params[:tag_name])
+        
+        if tag
+          # Remove tag assignment using polymorphic association
+          TagAssignment.where(
+            tag: tag,
+            entity_type: 'Quote',
+            entity_id: @quote.id
+          ).destroy_all
+        end
+        
+        # Reload tags association to get updated list
+        @quote.reload
+        render json: @quote.as_json(include_account: true, include_contact: true)
       end
 
       # GET /api/v1/quotes/export

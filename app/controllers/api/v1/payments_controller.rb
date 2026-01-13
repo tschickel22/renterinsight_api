@@ -10,7 +10,7 @@ module Api
 
       # GET /api/v1/payments
       def index
-        return unless authorize_action!('payments', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # STRICT TENANT ISOLATION: Only show payments from current company
         # RBAC: Location-tier users only see their assigned locations
@@ -84,7 +84,7 @@ module Api
 
       # GET /api/v1/payments/:id
       def show
-        return unless authorize_action!('payments', 'read')
+        return unless authorize_action!('finance', 'read')
         
         render json: @payment.as_json(
           include: {
@@ -102,7 +102,7 @@ module Api
 
       # GET /api/v1/payments/stats
       def stats
-        return unless authorize_action!('payments', 'read')
+        return unless authorize_action!('finance', 'read')
         
         # STRICT TENANT ISOLATION: Only stats for current company
         base_payments = @company.payments.where(is_deleted: [false, nil])
@@ -162,7 +162,7 @@ module Api
 
       # POST /api/v1/payments
       def create
-        return unless authorize_action!('payments', 'create')
+        return unless authorize_action!('finance', 'create')
         
         # STRICT TENANT ISOLATION: Create payment within current company
         @payment = @company.payments.new(payment_params)
@@ -216,7 +216,7 @@ module Api
 
       # PATCH /api/v1/payments/:id
       def update
-        return unless authorize_action!('payments', 'update')
+        return unless authorize_action!('finance', 'update')
         
         # Only allow updates for manual payments (no external_id)
         if @payment.external_id.present?
@@ -245,7 +245,7 @@ module Api
 
       # DELETE /api/v1/payments/:id
       def destroy
-        return unless authorize_action!('payments', 'delete')
+        return unless authorize_action!('finance', 'delete')
         
         # Only allow deletion for manual payments (no external_id)
         if @payment.external_id.present?
@@ -266,7 +266,7 @@ module Api
 
       # POST /api/v1/payments/:id/cancel
       def cancel
-        return unless authorize_action!('payments', 'delete')
+        return unless authorize_action!('finance', 'delete')
         
         unless @payment.pending?
           render json: { error: 'Only pending payments can be cancelled' }, status: :unprocessable_entity
@@ -293,7 +293,7 @@ module Api
 
       # POST /api/v1/payments/:id/refund
       def refund
-        return unless authorize_action!('payments', 'update')
+        return unless authorize_action!('finance', 'update')
         
         unless @payment.can_refund?
           render json: { error: 'This payment cannot be refunded' }, status: :unprocessable_entity
@@ -340,7 +340,7 @@ module Api
 
       # POST /api/v1/payments/:id/void
       def void
-        return unless authorize_action!('payments', 'update')
+        return unless authorize_action!('finance', 'update')
         
         unless @payment.can_void?
           render json: { error: 'This payment cannot be voided' }, status: :unprocessable_entity
@@ -384,7 +384,7 @@ module Api
 
       # GET /api/v1/payments/export
       def export
-        return unless authorize_action!('payments', 'export')
+        return unless authorize_action!('finance', 'export')
         
         # Use same filtering logic as index
         @payments = if current_user.uses_rbac?

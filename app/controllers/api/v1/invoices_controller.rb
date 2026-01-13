@@ -1,23 +1,15 @@
 class Api::V1::InvoicesController < ApplicationController
   before_action :set_company_scope
-  before_action :set_invoice, only: [:show, :update, :destroy, :send_invoice, :send_sms, :mark_paid, :cancel]
+  before_action :set_invoice, only: [:show, :update, :destroy, :send_invoice, :send_sms, :mark_paid, :cancel, :pdf]
   
   def index
-    return unless authorize_action!('invoices', 'read')
+    return unless authorize_action!('finance', 'read')
     
     invoices = @company.invoices.not_deleted
     
-    # RBAC + Location Filtering
-    if current_user.uses_rbac?
-      unless current_user.effective_admin?
-        location_ids = permission_service.accessible_location_ids
-        invoices = location_ids.any? ? 
-          invoices.where(location_id: location_ids) : 
-          invoices.none
-      end
-    end
-    
-    # Apply location selector filter
+    # Apply location selector filter (if user selected a specific location)
+    # Note: For invoices, we don't enforce strict RBAC location filtering
+    # because invoices may not always have a location_id assigned
     invoices = invoices.for_current_location
     
     # IMPORTANT: Exclude future loan invoices by default (unless explicitly requested)
@@ -58,13 +50,13 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def show
-    return unless authorize_action!('invoices', 'read')
+    return unless authorize_action!('finance', 'read')
     
     render json: serialize_invoice(@invoice)
   end
   
   def create
-    return unless authorize_action!('invoices', 'create')
+    return unless authorize_action!('finance', 'create')
     
     invoice = @company.invoices.build(invoice_params)
     invoice.location_id ||= Current.location_id if Current.location_id.present?
@@ -83,7 +75,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def update
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     if @invoice.update(invoice_params)
       render json: @invoice, include: [:contact, :invoice_items]
@@ -93,14 +85,25 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def destroy
-    return unless authorize_action!('invoices', 'delete')
+    return unless authorize_action!('finance', 'delete')
     
     @invoice.update(is_deleted: true)
     head :no_content
   end
+
+  def pdf
+    return unless authorize_action!('finance', 'read')
+    
+    pdf_content = generate_invoice_pdf(@invoice)
+    
+    send_data pdf_content,
+      filename: "Invoice-#{@invoice.invoice_number}.pdf",
+      type: 'application/pdf',
+      disposition: 'attachment'
+  end
   
   def send_invoice
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     # Get send preferences from params (default to email only for backwards compatibility)
     send_email = params[:send_email].nil? ? true : ActiveModel::Type::Boolean.new.cast(params[:send_email])
@@ -164,7 +167,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def send_sms
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     # Initialize SMS service with location/company for three-tier inheritance
     sms_service = SmsService.new(
@@ -191,7 +194,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def mark_paid
-    return unless authorize_action!('invoices', 'update')
+    return unless authorize_action!('finance', 'update')
     
     amount = params[:amount]&.to_f || @invoice.amount_due
     
@@ -203,7 +206,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def cancel
-    return unless authorize_action!('invoices', 'delete')
+    return unless authorize_action!('finance', 'delete')
     
     if @invoice.update(status: 'cancelled')
       render json: @invoice
@@ -213,7 +216,7 @@ class Api::V1::InvoicesController < ApplicationController
   end
   
   def stats
-    return unless authorize_action!('invoices', 'read')
+    return unless authorize_action!('finance', 'read')
     
     base_invoices = @company.invoices.not_deleted
     
@@ -464,5 +467,133 @@ class Api::V1::InvoicesController < ApplicationController
       created_at: invoice.created_at,
       updated_at: invoice.updated_at
     }
+  end
+
+  def generate_invoice_pdf(invoice)
+    require 'prawn'
+    require 'prawn/table'
+    
+    Prawn::Document.new(page_size: 'LETTER', margin: 50) do |pdf|
+      # Company/Location Header
+      company = invoice.company
+      location = invoice.location
+      
+      pdf.text company.name, size: 20, style: :bold
+      if location
+        pdf.text location.name, size: 12
+        pdf.text "#{location.address_line1}, #{location.city}, #{location.state} #{location.zip_code}", size: 10 if location.address_line1
+        pdf.text "Phone: #{location.phone}", size: 10 if location.phone
+        pdf.text "Email: #{location.email}", size: 10 if location.email
+      end
+      
+      pdf.move_down 30
+      
+      # Invoice Title
+      pdf.text "INVOICE ##{invoice.invoice_number}", size: 24, style: :bold, align: :center
+      pdf.move_down 20
+      
+      # Invoice Details Grid
+      details_data = [
+        ['Invoice Date:', invoice.invoice_date.strftime('%m/%d/%Y'), 'Due Date:', invoice.due_date&.strftime('%m/%d/%Y') || 'N/A'],
+        ['Status:', invoice.status.titleize, 'Amount Due:', ActionController::Base.helpers.number_to_currency(invoice.amount_due)]
+      ]
+      
+      pdf.table(details_data, cell_style: { borders: [], padding: 5 }, column_widths: [100, 150, 100, 150]) do
+        cells.style do |c|
+          c.font_style = :bold if c.column.even?
+        end
+      end
+      
+      pdf.move_down 20
+      
+      # Bill To Section
+      pdf.text 'Bill To:', size: 14, style: :bold
+      pdf.move_down 5
+      
+      if invoice.contact
+        pdf.text "#{invoice.contact.first_name} #{invoice.contact.last_name}", size: 12
+        pdf.text invoice.contact.email, size: 10 if invoice.contact.email
+        pdf.text invoice.contact.phone, size: 10 if invoice.contact.phone
+        if invoice.contact.respond_to?(:address_line1) && invoice.contact.address_line1
+          pdf.text "#{invoice.contact.address_line1}", size: 10
+          pdf.text "#{invoice.contact.city}, #{invoice.contact.state} #{invoice.contact.zip_code}", size: 10 if invoice.contact.city
+        end
+      elsif invoice.recipient_type == 'Manufacturer'
+        manufacturer = Manufacturer.find_by(id: invoice.recipient_id)
+        if manufacturer
+          pdf.text manufacturer.name, size: 12
+        end
+      end
+      
+      pdf.move_down 20
+      
+      # Line Items Table
+      items_data = [['Description', 'Qty', 'Rate', 'Amount']]
+      
+      invoice.invoice_items.each do |item|
+        items_data << [
+          item.description,
+          item.quantity.to_s,
+          ActionController::Base.helpers.number_to_currency(item.rate),
+          ActionController::Base.helpers.number_to_currency(item.amount)
+        ]
+      end
+      
+      pdf.table(items_data, header: true,
+                cell_style: { padding: 8 }) do
+        row(0).font_style = :bold
+        row(0).background_color = 'EEEEEE'
+        columns(1..3).align = :right
+      end
+      
+      pdf.move_down 20
+      
+      # Totals Section
+      totals_x = pdf.bounds.right - 250
+      
+      pdf.bounding_box([totals_x, pdf.cursor], width: 250) do
+        totals_data = [
+          ['Subtotal:', ActionController::Base.helpers.number_to_currency(invoice.subtotal)],
+          ["Tax (#{invoice.tax_rate}%):", ActionController::Base.helpers.number_to_currency(invoice.tax_amount)],
+          ['Total:', ActionController::Base.helpers.number_to_currency(invoice.total)]
+        ]
+        
+        if invoice.amount_paid > 0
+          totals_data << ['Amount Paid:', "(#{ActionController::Base.helpers.number_to_currency(invoice.amount_paid)})"]
+          totals_data << ['Amount Due:', ActionController::Base.helpers.number_to_currency(invoice.amount_due)]
+        end
+        
+        pdf.table(totals_data, cell_style: { borders: [], padding: 5 }, column_widths: [150, 100]) do
+          columns(1).align = :right
+          row(-1).font_style = :bold if invoice.amount_paid > 0
+          row(-3).font_style = :bold unless invoice.amount_paid > 0
+        end
+      end
+      
+      pdf.move_down 30
+      
+      # Notes
+      if invoice.notes.present?
+        pdf.text 'Notes:', size: 12, style: :bold
+        pdf.text invoice.notes, size: 10
+        pdf.move_down 10
+      end
+      
+      # Terms
+      if invoice.terms.present?
+        pdf.text 'Payment Terms:', size: 12, style: :bold
+        pdf.text invoice.terms, size: 10
+        pdf.move_down 10
+      end
+      
+      # Footer
+      if invoice.footer_text.present?
+        pdf.move_down 20
+        pdf.text invoice.footer_text, size: 9, align: :center, color: '666666'
+      end
+      
+      # Page numbers
+      pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, 0], align: :right, size: 9
+    end.render
   end
 end

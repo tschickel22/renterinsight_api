@@ -4,7 +4,7 @@ module Api
   module V1
     class ContactsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_contact, only: [:show, :update, :destroy, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status, :documents, :upload_documents]
+      before_action :set_contact, only: [:show, :update, :destroy, :tags, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status, :documents, :upload_documents]
       before_action :set_account, only: [:index]
 
       # GET /api/v1/contacts
@@ -48,24 +48,22 @@ module Api
         # Apply sorting
         @contacts = apply_sorting(@contacts)
 
-        # Pagination
-        page = params[:page]&.to_i || 1
-        per_page = params[:per_page]&.to_i || 50
-        per_page = [per_page, 100].min # Cap at 100
-        
+        # Count BEFORE pagination
         total_count = @contacts.count
-        total_pages = (total_count.to_f / per_page).ceil
-        offset = (page - 1) * per_page
         
-        @contacts = @contacts.limit(per_page).offset(offset)
+        # Paginate
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        @contacts = @contacts.offset((page - 1) * per_page).limit(per_page)
 
         render json: {
-          contacts: @contacts.map { |contact| contact_json(contact) },
+          items: @contacts.map { |contact| contact_json(contact) },
           meta: {
-            current_page: page,
-            total_pages: total_pages,
-            total_count: total_count,
-            per_page: per_page
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
           }
         }
       rescue => e
@@ -341,34 +339,77 @@ module Api
         return unless authorize_action!('crm', 'update')
         
         tag_names = params[:tags] || []
-        added_tags = []
-
+        tag_names = tag_names.split(',') if tag_names.is_a?(String)
+        
         tag_names.each do |tag_name|
-          tag = Tag.find_or_create_by(name: tag_name.strip)
-          unless @contact.tags.include?(tag)
-            @contact.tags << tag
-            added_tags << tag
+          # Find or create tag within current company scope
+          tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+            new_tag.color = '#6B7280'
+            new_tag.is_active = true
+            new_tag.created_by = current_user&.id&.to_s || 'system'
+          end
+          
+          # Create tag assignment using polymorphic association
+          TagAssignment.find_or_create_by!(
+            tag: tag,
+            entity_type: 'Contact',
+            entity_id: @contact.id
+          ) do |assignment|
+            assignment.company_id = @company.id
+            assignment.assigned_by = current_user&.id&.to_s || 'system'
+            assignment.assigned_at = Time.current
           end
         end
-
-        render json: {
-          contact: contact_json(@contact, detailed: true),
-          added_tags: added_tags.map { |t| { id: t.id, name: t.name } }
-        }
+        
+        # Reload tags association to get updated list
+        @contact.reload
+        render json: contact_json(@contact, detailed: true)
       end
 
       # DELETE /api/v1/contacts/:id/tags/:tag_name
       def remove_tag
         return unless authorize_action!('crm', 'update')
         
-        tag = @contact.tags.find_by(name: params[:tag_name])
-
+        # Find tag within company scope
+        tag = @company.tags.find_by(name: params[:tag_name])
+        
         if tag
-          @contact.tags.delete(tag)
-          render json: { message: 'Tag removed successfully' }
-        else
-          render json: { error: 'Tag not found' }, status: :not_found
+          # Remove tag assignment using polymorphic association
+          TagAssignment.where(
+            tag: tag,
+            entity_type: 'Contact',
+            entity_id: @contact.id
+          ).destroy_all
         end
+        
+        # Reload tags association to get updated list
+        @contact.reload
+        render json: contact_json(@contact, detailed: true)
+      end
+
+      # GET /api/v1/contacts/:id/tags
+      def tags
+        return unless authorize_action!('crm', 'read')
+        
+        # Get tags through the association
+        tags = @contact.tags.map do |tag|
+          {
+            id: tag.id,
+            name: tag.name,
+            description: tag.description,
+            color: tag.color,
+            category: tag.category,
+            type: tag.try(:tag_type),
+            isSystem: tag.try(:is_system),
+            isActive: tag.try(:is_active),
+            usageCount: tag.usage_count,
+            createdBy: tag.try(:created_by),
+            createdAt: tag.created_at,
+            updatedAt: tag.updated_at
+          }.compact
+        end
+        
+        render json: tags
       end
 
       # PATCH /api/v1/contacts/:id/opt_in_email

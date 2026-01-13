@@ -10,6 +10,10 @@ class Vehicle < ApplicationRecord
   has_many :quotes, dependent: :nullify
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
+  
+  # Tags (polymorphic association)
+  has_many :tag_assignments, as: :entity, dependent: :destroy
+  has_many :tags, through: :tag_assignments
 
   # Vehicle types
   TYPES = %w[rv manufactured_home].freeze

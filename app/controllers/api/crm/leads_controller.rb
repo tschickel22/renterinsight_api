@@ -9,15 +9,27 @@ module Api
         
         # STRICT TENANT ISOLATION: Only show non-converted leads from current company
         # RBAC: Location-tier users only see their assigned locations
+        # BUT: Users with :all scope see ALL locations (company-wide)
         leads = if current_user.uses_rbac?
           if current_user.effective_admin?  # Use RBAC-aware admin check
             @company.leads.where(is_converted: [false, nil])
           else
-            location_ids = permission_service.accessible_location_ids
-            if location_ids.any?
-              @company.leads.where(is_converted: [false, nil], location_id: location_ids)
-            else
+            # Check if user has company-wide scope (:all) for leads
+            has_all_scope = permission_service.can?('leads', 'read', 'all')
+            
+            if has_all_scope
+              # User has company-wide access - show all leads
+              Rails.logger.info "[LeadsController#index] User has leads:read:all - showing all company leads"
               @company.leads.where(is_converted: [false, nil])
+            else
+              # User is location-restricted - filter by accessible locations
+              location_ids = permission_service.accessible_location_ids
+              Rails.logger.info "[LeadsController#index] User has location scope - accessible_location_ids: #{location_ids.inspect}"
+              if location_ids.any?
+                @company.leads.where(is_converted: [false, nil], location_id: location_ids)
+              else
+                @company.leads.where(is_converted: [false, nil])
+              end
             end
           end
         else
@@ -27,9 +39,27 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         leads = leads.for_current_location
         
+        # Count total before pagination
+        total_count = leads.count
+        
         leads = leads.includes(:source).order(created_at: :desc)
         
-        render json: leads.map { |l| lead_json(l) }
+        # Pagination
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min # Max 200 per page
+        
+        leads = leads.offset((page - 1) * per_page).limit(per_page)
+        
+        render json: {
+          leads: leads.map { |l| lead_json(l) },
+          meta: {
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
+          }
+        }
       end
 
       def show
@@ -90,7 +120,15 @@ module Api
       def update
         return unless authorize_action!('leads', 'update')
         
+        Rails.logger.info "🔍 [LeadUpdate] BEFORE: lead_id=#{@lead.id}, owner_id=#{@lead.owner_id}, location_id=#{@lead.location_id}, is_converted=#{@lead.is_converted}"
+        Rails.logger.info "🔍 [LeadUpdate] PARAMS: #{lead_params.inspect}"
+        Rails.logger.info "🔍 [LeadUpdate] User: #{current_user.email}, RBAC locations: #{permission_service.accessible_location_ids.inspect}"
+        
         @lead.update!(lead_params)
+        
+        Rails.logger.info "🔍 [LeadUpdate] AFTER: lead_id=#{@lead.id}, owner_id=#{@lead.owner_id}, location_id=#{@lead.location_id}, is_converted=#{@lead.is_converted}"
+        Rails.logger.info "🔍 [LeadUpdate] Will user see this lead? RBAC=#{current_user.uses_rbac?}, Admin=#{current_user.effective_admin?}"
+        
         render json: lead_json(@lead)
       end
 
@@ -301,12 +339,24 @@ module Api
       def set_lead
         # STRICT TENANT ISOLATION: Only access leads in same company
         # RBAC: Location-tier users only access their assigned locations
+        # BUT: Users with :all scope access ALL leads (company-wide)
         @lead = if current_user.uses_rbac? && !current_user.effective_admin?
-          location_ids = permission_service.accessible_location_ids
-          if location_ids.any?
-            @company.leads.where(location_id: location_ids).find(params[:id])
-          else
+          # Check if user has company-wide scope (:all) for leads
+          has_all_scope = permission_service.can?('leads', 'read', 'all')
+          
+          if has_all_scope
+            # User has company-wide access
+            Rails.logger.info "[LeadsController#set_lead] User has leads:read:all - accessing any company lead"
             @company.leads.find(params[:id])
+          else
+            # User is location-restricted
+            location_ids = permission_service.accessible_location_ids
+            Rails.logger.info "[LeadsController#set_lead] User has location scope - accessible_location_ids: #{location_ids.inspect}"
+            if location_ids.any?
+              @company.leads.where(location_id: location_ids).find(params[:id])
+            else
+              @company.leads.find(params[:id])
+            end
           end
         else
           @company.leads.find(params[:id])
@@ -318,7 +368,9 @@ module Api
 
       # Merge root + nested (:lead), accept camel & snake, normalize to snake.
       def lead_params
-        allowed = [:first_name, :last_name, :email, :phone, :notes, :source_id, :status, :company_id, :owner_id,
+        # CRITICAL: company_id is NEVER updatable - it's set at creation from @company.id
+        # Allowing company_id in params breaks tenant isolation!
+        allowed = [:first_name, :last_name, :email, :phone, :notes, :source_id, :status, :owner_id,
                    :firstName, :lastName, :sourceId, :ownerId]
 
         root = params.permit(*allowed, lead: {})
@@ -333,7 +385,7 @@ module Api
           phone:      raw['phone'],
           notes:      raw['notes'],
           status:     raw['status'],
-          company_id: raw['company_id'],
+          # company_id is EXCLUDED - never updatable!
           source_id:  (raw['source_id']  || raw['sourceId']).presence&.to_i,
           owner_id:   (raw['owner_id']   || raw['ownerId']).presence&.to_i
         }.compact

@@ -232,6 +232,8 @@ module Api
           rbacEnabled: company&.use_rbac_system || false,
           permissions: build_permissions(user, company),
           roles: build_roles(user, company),
+          # Custom field-level permissions
+          custom_permissions: user.custom_permissions || [],
           # Location assignments for location-tier users
           user_tier: location_data[:user_tier],
           location_ids: location_data[:location_ids],

@@ -33,8 +33,28 @@ class PermissionService
   # @param context [Hash] Additional context for scope validation
   # @return [Boolean] true if user has permission, false otherwise
   def can?(resource_key, action_key, scope_key = 'all', context = {})
-    return false unless user.uses_rbac?
-    return false if user.inactive? || user.suspended?
+    Rails.logger.info "[PermissionService#can?] Checking: resource=#{resource_key}, action=#{action_key}, scope=#{scope_key}, user=#{user.id}"
+    
+    # Platform admins and super admins have all permissions
+    if user.platform_admin?
+      Rails.logger.info "[PermissionService#can?] User is platform admin - returning true"
+      return true
+    end
+    
+    if user.super_admin?
+      Rails.logger.info "[PermissionService#can?] User is super admin - returning true"
+      return true
+    end
+    
+    unless user.uses_rbac?
+      Rails.logger.info "[PermissionService#can?] User doesn't use RBAC (uses_rbac? = false) - returning false"
+      return false
+    end
+    
+    if user.inactive? || user.suspended?
+      Rails.logger.info "[PermissionService#can?] User is inactive or suspended - returning false"
+      return false
+    end
     
     cache_key = permission_cache_key(resource_key, action_key, scope_key)
     
@@ -42,10 +62,16 @@ class PermissionService
       check_permission(resource_key, action_key, scope_key)
     end
     
+    Rails.logger.info "[PermissionService#can?] check_permission returned: #{has_permission}"
+    
     return false unless has_permission
     
     # If permission exists, validate scope constraints
-    validate_scope(scope_key, context)
+    scope_valid = validate_scope(scope_key, context)
+    Rails.logger.info "[PermissionService#can?] validate_scope(#{scope_key}) returned: #{scope_valid}"
+    Rails.logger.info "[PermissionService#can?] Final result: #{scope_valid}"
+    
+    scope_valid
   end
   
   # Check if user has any of the specified permissions
@@ -166,18 +192,28 @@ class PermissionService
   # @param context [Hash] Context with location_id, region_id, owner_id, etc.
   # @return [Boolean] true if scope constraints are satisfied
   def validate_scope(scope_key, context)
-    case scope_key
+    Rails.logger.info "[validate_scope] scope_key: #{scope_key}, context: #{context.inspect}"
+    
+    result = case scope_key
     when 'all'
+      Rails.logger.info "[validate_scope] Scope is 'all' - returning true"
       true
     when 'assigned_regions'
+      Rails.logger.info "[validate_scope] Scope is 'assigned_regions' - validating region"
       validate_region_scope(context)
     when 'assigned_locations'
+      Rails.logger.info "[validate_scope] Scope is 'assigned_locations' - validating location"
       validate_location_scope(context)
     when 'own'
+      Rails.logger.info "[validate_scope] Scope is 'own' - validating owner"
       validate_owner_scope(context)
     else
+      Rails.logger.info "[validate_scope] Unknown scope '#{scope_key}' - returning false"
       false
     end
+    
+    Rails.logger.info "[validate_scope] Final result: #{result}"
+    result
   end
   
   # Validate region scope
@@ -211,10 +247,19 @@ class PermissionService
   # @param context [Hash] Must include :owner_id or :user_id
   # @return [Boolean] true if user is the owner
   def validate_owner_scope(context)
-    owner_id = context[:owner_id] || context[:user_id]
-    return true unless owner_id
+    Rails.logger.info "[validate_owner_scope] context: #{context.inspect}, user.id: #{user.id}"
     
-    user.id == owner_id.to_i
+    owner_id = context[:owner_id] || context[:user_id]
+    Rails.logger.info "[validate_owner_scope] owner_id from context: #{owner_id.inspect}"
+    
+    if owner_id.nil?
+      Rails.logger.info "[validate_owner_scope] No owner_id in context, returning true (user is viewing their own data)"
+      return true  # If no owner_id provided, assume user is accessing own data
+    end
+    
+    result = user.id == owner_id.to_i
+    Rails.logger.info "[validate_owner_scope] Comparing user.id (#{user.id}) == owner_id (#{owner_id.to_i}): #{result}"
+    result
   end
   
   # Generate cache key for permission

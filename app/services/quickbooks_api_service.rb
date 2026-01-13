@@ -144,23 +144,33 @@ class QuickbooksApiService
   end
   
   def handle_response(response)
+    # CRITICAL: Capture intuit_tid for debugging (required by QuickBooks)
+    intuit_tid = response.headers['intuit_tid']
+    
     case response.code
     when 200, 201
+      # Log successful request with intuit_tid
+      Rails.logger.info "[QB API Success] intuit_tid: #{intuit_tid}" if intuit_tid.present?
       response.parsed_response
     when 401
       # Token expired or invalid
+      Rails.logger.error "[QB API Error 401] intuit_tid: #{intuit_tid}" if intuit_tid.present?
       raise QuickbooksAuthError, "Authentication failed: #{response.body}"
     when 400
       # Bad request
+      Rails.logger.error "[QB API Error 400] intuit_tid: #{intuit_tid}" if intuit_tid.present?
       error_msg = extract_error_message(response)
       raise QuickbooksValidationError, "Validation error: #{error_msg}"
     when 429
       # Rate limit
+      Rails.logger.error "[QB API Error 429] intuit_tid: #{intuit_tid}" if intuit_tid.present?
       raise QuickbooksRateLimitError, "Rate limit exceeded"
     when 500, 502, 503
       # Server error
+      Rails.logger.error "[QB API Error #{response.code}] intuit_tid: #{intuit_tid}" if intuit_tid.present?
       raise QuickbooksServerError, "QuickBooks server error: #{response.code}"
     else
+      Rails.logger.error "[QB API Error #{response.code}] intuit_tid: #{intuit_tid}" if intuit_tid.present?
       raise QuickbooksApiError, "API request failed: #{response.code} - #{response.body}"
     end
   end

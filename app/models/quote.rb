@@ -14,6 +14,10 @@ class Quote < ApplicationRecord
   belongs_to :vehicle, optional: true  # Added vehicle relationship
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   
+  # Tags (polymorphic association)
+  has_many :tag_assignments, as: :entity, dependent: :destroy
+  has_many :tags, through: :tag_assignments
+  
   # Validations
   validates :quote_number, presence: true, uniqueness: true
   validates :status, presence: true, inclusion: { in: STATUSES }

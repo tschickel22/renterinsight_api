@@ -8,8 +8,8 @@ class ContactActivity < ApplicationRecord
   belongs_to :related_activity, class_name: 'ContactActivity', optional: true
   has_many :follow_up_activities, class_name: 'ContactActivity', foreign_key: :related_activity_id, dependent: :nullify
   
-  # Serialize reminder_method as JSON array for SQLite compatibility
-  serialize :reminder_method, coder: JSON
+  # reminder_method is already JSON type in PostgreSQL - no need to serialize
+  # serialize :reminder_method, coder: JSON  # REMOVED - PostgreSQL native JSON
   
   ACTIVITY_TYPES = %w[task meeting call reminder note].freeze
   STATUSES = %w[pending in_progress completed cancelled].freeze

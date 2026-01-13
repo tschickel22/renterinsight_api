@@ -2,7 +2,7 @@ module Api
   module Crm
     class DealsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_deal, only: [:show, :update, :destroy, :move_stage]
+      before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag]
 
       # GET /api/crm/deals
       def index
@@ -28,7 +28,7 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         deals = deals.for_current_location
         
-        deals = deals.includes(:account, :contact, :territory, :user, :deal_products)
+        deals = deals.includes(:account, :contact, :territory, :user, :deal_products, :commission_plan)
                     .order(created_at: :desc)
         
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
@@ -61,7 +61,24 @@ module Api
           deals = deals.lost
         end
         
-        render json: { deals: deals.map { |d| deal_json(d) } }
+        # Count BEFORE pagination
+        total_count = deals.count
+        
+        # Paginate
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min  # Cap at 200
+        deals = deals.offset((page - 1) * per_page).limit(per_page)
+        
+        render json: {
+          deals: deals.map { |d| deal_json(d) },
+          meta: {
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
+          }
+        }
       end
 
       # GET /api/crm/deals/by_stage
@@ -307,6 +324,84 @@ module Api
         end
       end
 
+      # GET /api/crm/deals/:id/tags
+      def tags
+        return unless authorize_action!('deals', 'read')
+        
+        # Get tags through the association
+        tags = @deal.tags.map do |tag|
+          {
+            id: tag.id,
+            name: tag.name,
+            description: tag.description,
+            color: tag.color,
+            category: tag.category,
+            type: tag.try(:tag_type),
+            isSystem: tag.try(:is_system),
+            isActive: tag.try(:is_active),
+            usageCount: tag.usage_count,
+            createdBy: tag.try(:created_by),
+            createdAt: tag.created_at,
+            updatedAt: tag.updated_at
+          }.compact
+        end
+        
+        render json: tags
+      end
+
+      # POST /api/crm/deals/:id/tags
+      def add_tags
+        return unless authorize_action!('deals', 'update')
+        
+        tag_names = params[:tags] || []
+        tag_names = tag_names.split(',') if tag_names.is_a?(String)
+        
+        tag_names.each do |tag_name|
+          # Find or create tag within current company scope
+          tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+            new_tag.color = '#6B7280'
+            new_tag.is_active = true
+            new_tag.created_by = current_user&.id&.to_s || 'system'
+          end
+          
+          # Create tag assignment using polymorphic association
+          TagAssignment.find_or_create_by!(
+            tag: tag,
+            entity_type: 'Deal',
+            entity_id: @deal.id
+          ) do |assignment|
+            assignment.company_id = @company.id
+            assignment.assigned_by = current_user&.id&.to_s || 'system'
+            assignment.assigned_at = Time.current
+          end
+        end
+        
+        # Reload tags association to get updated list
+        @deal.reload
+        render json: deal_json(@deal, detailed: true)
+      end
+
+      # DELETE /api/crm/deals/:id/tags/:tag_name
+      def remove_tag
+        return unless authorize_action!('deals', 'update')
+        
+        # Find tag within company scope
+        tag = @company.tags.find_by(name: params[:tag_name])
+        
+        if tag
+          # Remove tag assignment using polymorphic association
+          TagAssignment.where(
+            tag: tag,
+            entity_type: 'Deal',
+            entity_id: @deal.id
+          ).destroy_all
+        end
+        
+        # Reload tags association to get updated list
+        @deal.reload
+        render json: deal_json(@deal, detailed: true)
+      end
+
       # DELETE /api/crm/deals/:id
       def destroy
         return unless authorize_action!('deals', 'delete')
@@ -368,7 +463,18 @@ module Api
           :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
           :win_reason, :loss_reason, :competitor,
-          :customer_name, :source_id, :company_id, :owner_id
+          :customer_name, :source_id, :owner_id, :primary_salesperson_id, :delivery_date,
+          # Economics fields
+          :selling_price, :unit_cost, :pack_amount,
+          :trade_allowance, :trade_payoff,
+          :finance_reserve, :product_margin,
+          :accessories_total, :doc_fee,
+          :delivery_fee, :setup_fee, :skirting_fee,
+          :deal_type, :vertical, :quantity,
+          # Commission plan
+          :commission_plan_id
+          # NOTE: company_id is intentionally excluded - it should never change after creation
+          # It's set via @company.deals.build and must remain immutable
         )
       end
 
@@ -379,6 +485,9 @@ module Api
       end
 
       def deal_json(deal, detailed: false)
+        # Check if user has permission to view cost details
+        can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
+        
         base = {
           id: deal.id,
           name: deal.name,
@@ -390,15 +499,17 @@ module Api
           vehicleName: deal.vehicle&.display_name,
           vehicleInventoryId: deal.vehicle&.inventory_id,
           customerName: deal.customer_display_name,
-          value: deal.value,
+          value: deal.calculated_value,  # Calculated: selling_price + deal_products total
           stage: deal.stage,
           probability: deal.probability,
           expectedCloseDate: deal.expected_close_date&.iso8601,
           actualCloseDate: deal.actual_close_date&.iso8601,
+          deliveryDate: deal.delivery_date&.iso8601,
           userId: deal.user_id,
           userName: deal.user&.name,
           ownerId: deal.owner_id,
           owner: deal.owner ? { id: deal.owner.id, name: deal.owner.name, email: deal.owner.email } : nil,
+          primarySalespersonId: deal.primary_salesperson_id,
           assignedTo: deal.assigned_to,
           territoryId: deal.territory_id,
           territoryName: deal.territory&.name,
@@ -413,12 +524,67 @@ module Api
           lossReason: deal.loss_reason,
           competitor: deal.competitor,
           createdAt: deal.created_at&.iso8601,
-          updatedAt: deal.updated_at&.iso8601
+          updatedAt: deal.updated_at&.iso8601,
+          
+          # Public economics fields (everyone can see)
+          sellingPrice: deal.selling_price,
+          tradeAllowance: deal.trade_allowance,
+          tradePayoff: deal.trade_payoff,
+          accessoriesTotal: deal.accessories_total,
+          docFee: deal.doc_fee,
+          deliveryFee: deal.delivery_fee,
+          setupFee: deal.setup_fee,
+          skirtingFee: deal.skirting_fee,
+          dealType: deal.deal_type,
+          vertical: deal.vertical,
+          quantity: deal.quantity,
+          
+          # Commission plan info
+          commissionPlanId: deal.commission_plan_id,
+          commissionPlanName: deal.commission_plan&.name
         }
         
+        # Private economics fields (finance only)
+        if can_view_costs
+          base.merge!({
+            unitCost: deal.unit_cost,
+            packAmount: deal.pack_amount,
+            financeReserve: deal.finance_reserve,
+            productMargin: deal.product_margin,
+            
+            # Calculated grosses (also finance only)
+            frontGross: deal.front_gross,
+            backGross: deal.back_gross,
+            totalGross: deal.total_gross,
+            commissionableFrontGross: deal.commissionable_front_gross,
+            effectivePackAmount: deal.effective_pack_amount
+          })
+        end
+        
         if detailed
+          products_array = []
+          
+          # Add primary vehicle from selling_price if present
+          if deal.selling_price.present? && deal.selling_price > 0
+            products_array << {
+              id: 'primary-vehicle',
+              productId: deal.vehicle_id,
+              productName: deal.vehicle_display_name || 'Primary Vehicle',
+              productSku: deal.vehicle&.inventory_id,
+              quantity: deal.quantity || 1,
+              unitPrice: deal.selling_price,
+              discount: 0,
+              tax: 0,
+              total: deal.selling_price,
+              notes: 'Primary vehicle from deal'
+            }
+          end
+          
+          # Add all deal_products
+          products_array.concat(deal.deal_products.map { |dp| deal_product_json(dp) })
+          
           base.merge!(
-            products: deal.deal_products.map { |dp| deal_product_json(dp) },
+            products: products_array,
             stageHistory: deal.deal_stage_histories.order(created_at: :desc).limit(10).map { |sh| stage_history_json(sh) }
           )
         end

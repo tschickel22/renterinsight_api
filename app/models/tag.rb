@@ -8,4 +8,9 @@ class Tag < ApplicationRecord
   scope :for_company, ->(company_id) { where(company_id: [company_id, nil]) }
   scope :system_tags, -> { where(is_system: true) }
   scope :custom_tags, -> { where(is_system: [false, nil]) }
+  
+  # Calculate actual usage count from tag assignments
+  def usage_count
+    tag_assignments.count
+  end
 end
