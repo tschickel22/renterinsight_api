@@ -472,7 +472,9 @@ module Api
           :delivery_fee, :setup_fee, :skirting_fee,
           :deal_type, :vertical, :quantity,
           # Commission plan
-          :commission_plan_id
+          :commission_plan_id,
+          # Deal Participants (for commission calculation)
+          :sales_manager_id, :finance_manager_id, :desk_manager_id, :secondary_salesperson_id
           # NOTE: company_id is intentionally excluded - it should never change after creation
           # It's set via @company.deals.build and must remain immutable
         )
@@ -510,6 +512,13 @@ module Api
           ownerId: deal.owner_id,
           owner: deal.owner ? { id: deal.owner.id, name: deal.owner.name, email: deal.owner.email } : nil,
           primarySalespersonId: deal.primary_salesperson_id,
+          
+          # Deal Participants (for commission calculation)
+          salesManagerId: deal.sales_manager_id,
+          financeManagerId: deal.finance_manager_id,
+          deskManagerId: deal.desk_manager_id,
+          secondarySalespersonId: deal.secondary_salesperson_id,
+          
           assignedTo: deal.assigned_to,
           territoryId: deal.territory_id,
           territoryName: deal.territory&.name,

@@ -13,6 +13,13 @@ class Deal < ApplicationRecord
   belongs_to :vehicle, optional: true  # Added vehicle relationship
   belongs_to :commission_plan, optional: true  # Commission plan for this deal
   
+  # Deal participants for commission calculation
+  belongs_to :primary_salesperson, class_name: 'User', foreign_key: 'primary_salesperson_id', optional: true
+  belongs_to :sales_manager, class_name: 'User', foreign_key: 'sales_manager_id', optional: true
+  belongs_to :finance_manager, class_name: 'User', foreign_key: 'finance_manager_id', optional: true
+  belongs_to :desk_manager, class_name: 'User', foreign_key: 'desk_manager_id', optional: true
+  belongs_to :secondary_salesperson, class_name: 'User', foreign_key: 'secondary_salesperson_id', optional: true
+  
   has_many :deal_products, dependent: :destroy
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
@@ -235,9 +242,20 @@ class Deal < ApplicationRecord
     saved_change_to_stage? && stage == 'closed_won' && delivery_date.present?
   end
   
-  # Primary salesperson helper
+  # Primary salesperson helper (deprecated - use association)
   def primary_salesperson
     User.find_by(id: primary_salesperson_id)
+  end
+  
+  # Get all deal participants for commission calculation
+  def all_participants
+    participants = []
+    participants << { user: primary_salesperson, role: 'primary_salesperson' } if primary_salesperson_id.present?
+    participants << { user: sales_manager, role: 'sales_manager' } if sales_manager_id.present?
+    participants << { user: finance_manager, role: 'finance_manager' } if finance_manager_id.present?
+    participants << { user: desk_manager, role: 'desk_manager' } if desk_manager_id.present?
+    participants << { user: secondary_salesperson, role: 'secondary_salesperson' } if secondary_salesperson_id.present?
+    participants.compact
   end
   
   private

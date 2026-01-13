@@ -35,6 +35,7 @@ class CommissionCalculationService
     
     {
       deal_id: @deal.id,
+      deal_identifier: @deal.name || "Deal ##{@deal.id}",
       payee_user_id: @user.id,
       payee_name: @user.name,
       total_commission: line_items.sum { |item| item[:amount] }.round(2),
@@ -47,14 +48,24 @@ class CommissionCalculationService
   
   # Get components that apply to this deal and user
   def applicable_components
-    # Get active components for company/location
+    # UPDATED: Use applies_to_role field to match deal positions, not user.role (job title)
+    # The user passed in should be the person in a specific deal position
+    # For the calculator, we use primary_salesperson position
+    
+    # Get active components
     components = @company.commission_components
       .active
-      .for_role(@user.role || 'salesperson')
       .for_location(@deal.location_id)
       .ordered
     
-    # Filter by deal-specific criteria
+    # Filter by deal position - default to primary_salesperson for calculator
+    # This matches components where applies_to_role is 'primary_salesperson' or 'all_participants'
+    components = components.where(
+      "applies_to_role IN (?) OR applies_to_role IS NULL",
+      ['primary_salesperson', 'all_participants']
+    )
+    
+    # Filter by deal-specific criteria (deal_type, vertical)
     components.select do |component|
       component.applies_to_deal?(@deal)
     end
@@ -67,7 +78,7 @@ class CommissionCalculationService
       calculate_percent_of_gross(component)
     when 'flat_per_unit'
       calculate_flat_per_unit(component)
-    when 'monthly_bonus'
+    when 'monthly_bonus', 'volume_bonus'
       calculate_monthly_bonus(component)
     when 'addon_commission'
       calculate_addon_commission(component)
@@ -81,6 +92,8 @@ class CommissionCalculationService
       component_id: component.id,
       component_name: component.name,
       component_type: component.component_type,
+      gross_type: component.gross_type,
+      rate: component.rate,
       amount: amount.round(2),
       calculation_notes: build_calculation_notes(component, amount)
     }
@@ -89,13 +102,15 @@ class CommissionCalculationService
   # Calculate percentage of gross
   def calculate_percent_of_gross(component)
     gross_amount = case component.gross_type
-    when 'front' then @deal.front_gross
-    when 'back' then @deal.back_gross
-    when 'total' then @deal.total_gross
-    when 'commissionable_front' then @deal.commissionable_front_gross
-    when 'addon' then @deal.addon_gross
+    when 'front', 'front_gross' then @deal.front_gross
+    when 'back', 'back_gross' then @deal.back_gross
+    when 'total', 'total_gross' then @deal.total_gross
+    when 'commissionable_front', 'commissionable_front_gross' then @deal.commissionable_front_gross
+    when 'addon', 'addon_gross' then @deal.addon_gross
     else 0
     end
+    
+    return 0 if gross_amount.nil? || gross_amount <= 0
     
     (gross_amount * component.rate).round(2)
   end
@@ -133,15 +148,16 @@ class CommissionCalculationService
   def build_calculation_notes(component, amount)
     case component.component_type
     when 'percent_of_gross'
-      gross = @deal.send("#{component.gross_type}_gross")
-      "#{(component.rate * 100).round(2)}% of $#{gross.round(2)} #{component.gross_type.humanize} gross"
+      gross_key = component.gross_type&.gsub('_gross', '') || 'front'
+      gross = @deal.send("#{gross_key}_gross") rescue 0
+      "#{(component.rate * 100).round(2)}% of $#{gross.to_f.round(2)} #{component.gross_type&.humanize || 'gross'}"
     when 'flat_per_unit'
-      "$#{component.flat_amount} × #{@deal.quantity || 1} units"
-    when 'monthly_bonus'
+      "$#{component.flat_amount.to_f} × #{@deal.quantity || 1} units"
+    when 'monthly_bonus', 'volume_bonus'
       units = calculate_units_this_month
       "Monthly bonus (#{units} units ≥ #{component.units_threshold} threshold)"
     when 'addon_commission'
-      "#{(component.rate * 100).round(2)}% of $#{@deal.addon_gross.round(2)} add-ons"
+      "#{(component.rate * 100).round(2)}% of $#{(@deal.addon_gross || 0).round(2)} add-ons"
     else
       "#{component.component_type.humanize}: $#{amount.round(2)}"
     end
@@ -164,13 +180,13 @@ class CommissionCalculationService
   def deal_economics_summary
     {
       selling_price: @deal.selling_price,
-      unit_cost: @deal.unit_cost,
-      front_gross: @deal.front_gross,
-      pack: @deal.effective_pack_amount,
-      commissionable_front_gross: @deal.commissionable_front_gross,
-      back_gross: @deal.back_gross,
-      total_gross: @deal.total_gross,
-      addon_gross: @deal.addon_gross,
+      cost: @deal.unit_cost,
+      front_gross: (@deal.front_gross || 0).to_s,
+      pack: (@deal.effective_pack_amount || 0).to_s,
+      commissionable_front_gross: (@deal.commissionable_front_gross || 0).to_s,
+      back_gross: (@deal.back_gross || 0).to_s,
+      total_gross: (@deal.total_gross || 0).to_s,
+      addon_gross: (@deal.addon_gross || 0).to_s,
       quantity: @deal.quantity || 1
     }
   end

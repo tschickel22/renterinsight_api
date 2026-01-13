@@ -198,29 +198,62 @@ module Api
         last_month_total = last_month_payments.sum(:amount)
         expense_change_pct = last_month_total > 0 ? (((this_month_total - last_month_total) / last_month_total) * 100).round(1) : 0
         
-        # Top Earners (Top 10 salespeople by total commission)
-        top_earners = base_payments
-          .joins(:payee_user)
-          .where.not(payee_user_id: nil)
-          .group('users.id', 'users.name')
-          .select(
-            'users.id as user_id',
-            'users.name as user_name',
-            'COUNT(commission_payments.id) as deal_count',
-            'COALESCE(SUM(commission_payments.amount), 0) as total_earned',
-            'COALESCE(AVG(commission_payments.amount), 0) as avg_per_deal'
-          )
-          .order('total_earned DESC')
-          .limit(10)
-          .map do |earner|
+        # Top Earners (Top 10 employees by total commission)
+        # Note: User.name is a computed method (first_name + last_name), so we must construct it in SQL
+        top_earners_sql = <<-SQL
+          SELECT 
+            commission_payments.payee_user_id,
+            COALESCE(
+              NULLIF(TRIM(CONCAT(users.first_name, ' ', users.last_name)), ''),
+              users.email,
+              'Unknown Employee'
+            ) as user_name,
+            COUNT(commission_payments.id) as deal_count,
+            COALESCE(SUM(commission_payments.amount), 0) as total_earned,
+            COALESCE(AVG(commission_payments.amount), 0) as avg_per_deal
+          FROM commission_payments
+          LEFT JOIN users ON users.id = commission_payments.payee_user_id
+          WHERE commission_payments.company_id = #{@company.id}
+            AND commission_payments.payee_user_id IS NOT NULL
+            AND (commission_payments.is_deleted IS NULL OR commission_payments.is_deleted = false)
+        SQL
+        
+        # Add location filter if needed
+        if Current.location_filtered?
+          top_earners_sql += " AND commission_payments.location_id = #{Current.location_id}"
+        end
+        
+        # Add RBAC filter if needed
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            top_earners_sql += " AND commission_payments.location_id IN (#{location_ids.join(',')})"
+          else
+            # No accessible locations - return empty array
+            top_earners = []
+            top_earners_sql = nil
+          end
+        end
+        
+        if top_earners_sql
+          top_earners_sql += <<-SQL
+            GROUP BY commission_payments.payee_user_id, users.first_name, users.last_name, users.email
+            ORDER BY total_earned DESC
+            LIMIT 10
+          SQL
+          
+          results = ActiveRecord::Base.connection.execute(top_earners_sql)
+          
+          top_earners = results.map do |row|
             {
-              userId: earner.user_id,
-              userName: earner.user_name,
-              dealCount: earner.deal_count,
-              totalEarned: earner.total_earned.round(2),
-              avgPerDeal: earner.avg_per_deal.round(2)
+              userId: row['payee_user_id'],
+              userName: row['user_name'],
+              dealCount: row['deal_count'].to_i,
+              totalEarned: row['total_earned'].to_f.round(2),
+              avgPerDeal: row['avg_per_deal'].to_f.round(2)
             }
           end
+        end
         
         # Status Breakdown (for pie/donut chart)
         status_breakdown = {

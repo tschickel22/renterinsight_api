@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_12_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -391,7 +391,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_12_000001) do
     t.bigint "location_id"
     t.string "name", null: false
     t.string "component_type", null: false
-    t.string "applies_to_role"
+    t.string "applies_to_role", null: false
     t.boolean "is_active", default: true
     t.string "gross_type"
     t.decimal "rate", precision: 8, scale: 6
@@ -968,6 +968,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_12_000001) do
     t.date "delivery_date"
     t.bigint "primary_salesperson_id"
     t.bigint "commission_plan_id"
+    t.bigint "sales_manager_id"
+    t.bigint "finance_manager_id"
+    t.bigint "desk_manager_id"
+    t.bigint "secondary_salesperson_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -979,11 +983,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_12_000001) do
     t.index ["contact_id"], name: "index_deals_on_contact_id"
     t.index ["deal_type"], name: "index_deals_on_deal_type"
     t.index ["deleted_at"], name: "index_deals_on_deleted_at"
+    t.index ["desk_manager_id"], name: "index_deals_on_desk_manager_id"
     t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
+    t.index ["finance_manager_id"], name: "index_deals_on_finance_manager_id"
     t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["owner_id"], name: "index_deals_on_owner_id"
     t.index ["primary_salesperson_id", "delivery_date"], name: "index_deals_on_salesperson_and_delivery"
+    t.index ["sales_manager_id"], name: "index_deals_on_sales_manager_id"
+    t.index ["secondary_salesperson_id"], name: "index_deals_on_secondary_salesperson_id"
     t.index ["source_id"], name: "index_deals_on_source_id"
     t.index ["stage"], name: "index_deals_on_stage"
     t.index ["territory_id", "stage"], name: "index_deals_on_territory_id_and_stage"
@@ -2894,7 +2902,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_12_000001) do
   add_foreign_key "deals", "locations"
   add_foreign_key "deals", "sources"
   add_foreign_key "deals", "users"
+  add_foreign_key "deals", "users", column: "desk_manager_id"
+  add_foreign_key "deals", "users", column: "finance_manager_id"
   add_foreign_key "deals", "users", column: "primary_salesperson_id"
+  add_foreign_key "deals", "users", column: "sales_manager_id"
+  add_foreign_key "deals", "users", column: "secondary_salesperson_id"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_submissions", "leads"
