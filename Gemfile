@@ -76,7 +76,7 @@ gem 'bcrypt', '~> 3.1.7'
 gem 'jwt'
 
 # SMS/Twilio for password reset
-gem 'twilio-ruby', '~> 7.3'
+gem 'twilio-ruby', '~> 7.8'
 
 # PDF Generation
 gem 'prawn', '~> 2.4'
