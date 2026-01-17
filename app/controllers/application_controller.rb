@@ -356,17 +356,21 @@ class ApplicationController < ActionController::API
   # @param context [Hash] Context for scope validation
   # @return [Boolean] true if authorized, renders error and returns false if not
   def authorize_action!(resource_key, action_key, scope_key = 'all', context = {})
-    unless can?(resource_key, action_key, scope_key, context)
-      Rails.logger.warn(
-        "[Authorization] User #{current_user&.id} denied: #{resource_key}:#{action_key}:#{scope_key}"
-      )
+    Rails.logger.info "🔐 [authorize_action!] Checking: #{resource_key}:#{action_key}:#{scope_key} for user #{current_user&.email}"
+    
+    result = can?(resource_key, action_key, scope_key, context)
+    
+    if result
+      Rails.logger.info "✅ [authorize_action!] GRANTED: #{resource_key}:#{action_key}:#{scope_key}"
+    else
+      Rails.logger.warn "❌ [Authorization] DENIED for user #{current_user&.id}: #{resource_key}:#{action_key}:#{scope_key}"
       render json: { 
         error: 'Forbidden - Insufficient permissions',
         required_permission: "#{resource_key}:#{action_key}:#{scope_key}"
       }, status: :forbidden
-      return false
     end
-    true
+    
+    result
   end
   
   # Check if current user can access a specific location (RBAC-aware)

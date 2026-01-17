@@ -7,7 +7,9 @@ module Api
       before_action :set_part, only: [:show, :update, :destroy, :stock_by_location, :transaction_history]
 
       def index
+        Rails.logger.info "🔧 [PartsController#index] Request from user: #{current_user&.email}, company: #{@company&.id}"
         return unless authorize_action!('inventory', 'read')
+        Rails.logger.info "✅ [PartsController#index] Authorization passed"
 
         parts = @company.parts.where(is_deleted: [false, nil])
 
@@ -154,7 +156,9 @@ module Api
       end
 
       def stats
+        Rails.logger.info "📊 [PartsController#stats] Request from user: #{current_user&.email}, company: #{@company&.id}"
         return unless authorize_action!('inventory', 'read')
+        Rails.logger.info "✅ [PartsController#stats] Authorization passed"
 
         base_parts = @company.parts.where(is_deleted: [false, nil])
 
