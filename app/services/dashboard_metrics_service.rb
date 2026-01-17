@@ -737,10 +737,10 @@ class DashboardMetricsService
         activities << {
           id: ticket.id,
           type: 'service_ticket',
-          subject: ticket.subject || ticket.title || "Ticket ##{ticket.id}",
+          subject: ticket.title || "Ticket ##{ticket.id}",
           entity_type: 'service_ticket',
           entity_id: ticket.id,
-          entity_name: ticket.subject || ticket.title,
+          entity_name: ticket.title,
           user_name: @current_user&.full_name || 'System',
           created_at: ticket.created_at,
           formatted_time: time_ago_in_words(ticket.created_at)
@@ -763,10 +763,10 @@ class DashboardMetricsService
           activities << {
             id: brochure.id,
             type: 'brochure',
-            subject: brochure.name || "Brochure ##{brochure.id}",
+            subject: brochure.title || "Brochure ##{brochure.id}",
             entity_type: 'brochure',
             entity_id: brochure.id,
-            entity_name: brochure.name,
+            entity_name: brochure.title,
             user_name: @current_user&.full_name || 'System',
             created_at: brochure.created_at,
             formatted_time: time_ago_in_words(brochure.created_at)
