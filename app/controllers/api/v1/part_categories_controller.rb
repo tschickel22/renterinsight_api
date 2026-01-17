@@ -7,7 +7,7 @@ module Api
       before_action :set_category, only: [:show, :update, :destroy]
 
       def index
-        return unless authorize_action!('part_categories', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         categories = @company.part_categories.where(is_deleted: [false, nil])
 
@@ -30,7 +30,7 @@ module Api
       end
 
       def show
-        return unless authorize_action!('part_categories', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         render json: @category.as_json(
           methods: [:full_path],
@@ -43,7 +43,7 @@ module Api
       end
 
       def create
-        return unless authorize_action!('part_categories', 'create')
+        return unless authorize_action!('inventory', 'create')
 
         category = @company.part_categories.build(category_params)
         category.created_by = current_user
@@ -56,7 +56,7 @@ module Api
       end
 
       def update
-        return unless authorize_action!('part_categories', 'update')
+        return unless authorize_action!('inventory', 'update')
 
         @category.updated_by = current_user
         
@@ -68,7 +68,7 @@ module Api
       end
 
       def destroy
-        return unless authorize_action!('part_categories', 'delete')
+        return unless authorize_action!('inventory', 'delete')
 
         unless @category.can_delete?
           return render json: { 
@@ -81,7 +81,7 @@ module Api
       end
 
       def tree
-        return unless authorize_action!('part_categories', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         categories = @company.part_categories
                             .where(is_deleted: [false, nil], active: true)

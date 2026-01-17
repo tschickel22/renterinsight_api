@@ -7,7 +7,7 @@ module Api
       before_action :set_part, only: [:show, :update, :destroy, :stock_by_location, :transaction_history]
 
       def index
-        return unless authorize_action!('parts', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         parts = @company.parts.where(is_deleted: [false, nil])
 
@@ -63,7 +63,7 @@ module Api
       end
 
       def show
-        return unless authorize_action!('parts', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         render json: @part.as_json(
           methods: [:total_on_hand, :total_available, :total_reserved, :inventory_value],
@@ -80,7 +80,7 @@ module Api
       end
 
       def create
-        return unless authorize_action!('parts', 'create')
+        return unless authorize_action!('inventory', 'create')
 
         part = @company.parts.build(part_params)
         part.created_by = current_user
@@ -93,7 +93,7 @@ module Api
       end
 
       def update
-        return unless authorize_action!('parts', 'update')
+        return unless authorize_action!('inventory', 'update')
 
         @part.updated_by = current_user
         
@@ -109,7 +109,7 @@ module Api
       end
 
       def destroy
-        return unless authorize_action!('parts', 'delete')
+        return unless authorize_action!('inventory', 'delete')
 
         begin
           @part.soft_delete!
@@ -120,7 +120,7 @@ module Api
       end
 
       def stock_by_location
-        return unless authorize_action!('parts', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         stock_data = @part.stock_balances.includes(:location, :bin).map do |balance|
           {
@@ -139,7 +139,7 @@ module Api
       end
 
       def transaction_history
-        return unless authorize_action!('parts', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         transactions = @part.inventory_transactions
                            .includes(:location, :bin, :created_by)
@@ -154,7 +154,7 @@ module Api
       end
 
       def stats
-        return unless authorize_action!('parts', 'read')
+        return unless authorize_action!('inventory', 'read')
 
         base_parts = @company.parts.where(is_deleted: [false, nil])
 
