@@ -100,6 +100,10 @@ module Api
         if @part.update(part_params)
           render json: @part
         else
+          # Log validation errors for debugging
+          Rails.logger.error "❌ Part validation failed: #{@part.errors.full_messages.join(', ')}"
+          Rails.logger.error "Part attributes: #{@part.attributes.inspect}"
+          
           render json: { errors: @part.errors.full_messages }, status: :unprocessable_entity
         end
       end

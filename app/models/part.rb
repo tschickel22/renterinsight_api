@@ -151,7 +151,9 @@ class Part < ApplicationRecord
     super(options.merge(
       only: [:id, :sku, :name, :description, :category_id, :uom, :barcode, :manufacturer_part_no, 
              :manufacturer_name, :default_cost, :average_cost, :last_cost, :list_price, :sale_price, 
-             :taxable, :active, :created_at, :updated_at],
+             :taxable, :active, :created_at, :updated_at,
+             :inventory_method, :is_serialized, :is_lot_tracked,
+             :weight_lbs, :length_inches, :width_inches, :height_inches],
       methods: [:display_name, :total_on_hand, :total_available, :inventory_value, 
                 :preferred_supplier, :margin_percent]
     ))
