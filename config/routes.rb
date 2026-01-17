@@ -564,6 +564,66 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== PARTS & INVENTORY MODULE ====================
+      # Part Categories
+      resources :part_categories, path: 'part-categories' do
+        collection do
+          get :tree
+        end
+      end
+      
+      # Parts
+      resources :parts do
+        member do
+          get :stock_by_location, path: 'stock-by-location'
+          get :transaction_history, path: 'transaction-history'
+        end
+        collection do
+          get :stats
+        end
+      end
+      
+      # Suppliers
+      resources :suppliers do
+        member do
+          get :parts
+        end
+      end
+      
+      # Bins
+      resources :bins
+      
+      # Inventory Transactions
+      resources :inventory_transactions, path: 'inventory-transactions', only: [:index, :show] do
+        collection do
+          post :receive
+          post :transfer
+          post :adjust
+          post :consume
+          post :return, action: :return_inventory
+        end
+      end
+      
+      # Stock Balances
+      resources :stock_balances, path: 'stock-balances', only: [:index] do
+        collection do
+          get :summary
+          get 'by_part/:part_id', action: :by_part, as: :by_part
+          get 'by_location/:location_id', action: :by_location, as: :by_location
+        end
+        member do
+          post :reserve
+          post :release
+        end
+      end
+      
+      # Reorder Rules
+      resources :reorder_rules, path: 'reorder-rules' do
+        collection do
+          get :needs_reorder, path: 'needs-reorder'
+        end
+      end
+      
       # ==================== CONTACTS ====================
       resources :contacts do
         member do
