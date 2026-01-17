@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_17_000022) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -287,6 +287,27 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.index ["is_deleted"], name: "index_bank_accounts_on_is_deleted"
     t.index ["location_id", "account_purpose"], name: "index_bank_accounts_on_location_id_and_account_purpose"
     t.index ["location_id"], name: "index_bank_accounts_on_location_id"
+  end
+
+  create_table "bins", force: :cascade do |t|
+    t.bigint "location_id", null: false
+    t.string "bin_code", null: false
+    t.string "label"
+    t.string "bin_type", default: "standard"
+    t.decimal "capacity_cubic_feet", precision: 10, scale: 2
+    t.text "notes"
+    t.boolean "is_default", default: false
+    t.boolean "active", default: true
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.jsonb "custom_fields", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bin_type"], name: "index_bins_on_bin_type"
+    t.index ["location_id", "active"], name: "index_bins_on_location_id_and_active"
+    t.index ["location_id", "bin_code"], name: "index_bins_on_location_id_and_bin_code", unique: true, where: "(is_deleted = false)"
+    t.index ["location_id", "is_default"], name: "index_bins_on_location_id_and_is_default"
+    t.index ["location_id"], name: "index_bins_on_location_id"
   end
 
   create_table "brochure_templates", force: :cascade do |t|
@@ -821,6 +842,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.index ["quickbooks_id"], name: "index_contacts_on_quickbooks_id"
   end
 
+  create_table "custom_field_permissions", force: :cascade do |t|
+    t.bigint "custom_field_id", null: false
+    t.bigint "role_id", null: false
+    t.string "permission_level", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["custom_field_id", "role_id"], name: "index_custom_field_permissions_on_custom_field_id_and_role_id", unique: true
+    t.index ["custom_field_id"], name: "index_custom_field_permissions_on_custom_field_id"
+    t.index ["role_id"], name: "index_custom_field_permissions_on_role_id"
+  end
+
   create_table "custom_fields", force: :cascade do |t|
     t.integer "company_id", null: false
     t.string "module", null: false
@@ -833,9 +865,59 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.integer "display_order", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "field_key", null: false
+    t.text "description"
+    t.string "placeholder"
+    t.jsonb "validation_rules", default: {}
+    t.boolean "is_active", default: true
+    t.boolean "is_system_field", default: false
+    t.string "section"
+    t.bigint "created_by_id"
+    t.bigint "updated_by_id"
+    t.index ["company_id", "module", "field_key"], name: "index_custom_fields_on_company_module_field_key", unique: true
+    t.index ["company_id", "module", "is_active"], name: "index_custom_fields_on_company_id_and_module_and_is_active"
     t.index ["company_id", "module", "name"], name: "index_custom_fields_on_company_module_name", unique: true
+    t.index ["company_id", "module", "section"], name: "index_custom_fields_on_company_id_and_module_and_section"
     t.index ["company_id", "module"], name: "index_custom_fields_on_company_id_and_module"
     t.index ["company_id"], name: "index_custom_fields_on_company_id"
+    t.index ["created_by_id"], name: "index_custom_fields_on_created_by_id"
+    t.index ["field_key"], name: "index_custom_fields_on_field_key"
+    t.index ["updated_by_id"], name: "index_custom_fields_on_updated_by_id"
+  end
+
+  create_table "custom_view_columns", force: :cascade do |t|
+    t.bigint "custom_view_id", null: false
+    t.string "field_key", null: false
+    t.boolean "is_custom_field", default: false
+    t.integer "display_order", default: 0
+    t.integer "width_pixels"
+    t.boolean "is_visible", default: true
+    t.boolean "is_sortable", default: true
+    t.boolean "is_filterable", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["custom_view_id", "display_order"], name: "index_custom_view_columns_on_custom_view_id_and_display_order"
+    t.index ["custom_view_id", "field_key"], name: "index_custom_view_columns_on_custom_view_id_and_field_key", unique: true
+    t.index ["custom_view_id"], name: "index_custom_view_columns_on_custom_view_id"
+  end
+
+  create_table "custom_views", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "module", null: false
+    t.string "view_type", default: "table"
+    t.boolean "is_default", default: false
+    t.boolean "is_shared", default: false
+    t.jsonb "filters", default: {}
+    t.jsonb "sort_config", default: {}
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module", "is_default"], name: "index_custom_views_on_company_id_and_module_and_is_default"
+    t.index ["company_id", "module"], name: "index_custom_views_on_company_id_and_module"
+    t.index ["company_id"], name: "index_custom_views_on_company_id"
+    t.index ["created_by_id", "module"], name: "index_custom_views_on_created_by_id_and_module"
+    t.index ["created_by_id"], name: "index_custom_views_on_created_by_id"
   end
 
   create_table "dashboard_layouts", force: :cascade do |t|
@@ -1035,6 +1117,44 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.boolean "lead_created", default: false
     t.bigint "lead_id"
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
+  end
+
+  create_table "inventory_transactions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "part_id", null: false
+    t.bigint "location_id", null: false
+    t.bigint "bin_id"
+    t.string "transaction_type", null: false
+    t.decimal "quantity", precision: 10, scale: 3, null: false
+    t.decimal "unit_cost", precision: 10, scale: 2
+    t.bigint "source_transaction_id"
+    t.string "serial_number"
+    t.string "lot_number"
+    t.date "lot_expiration_date"
+    t.bigint "purchase_order_line_id"
+    t.bigint "job_id"
+    t.string "reference_type"
+    t.bigint "reference_id"
+    t.text "notes"
+    t.string "transaction_number"
+    t.bigint "created_by_id"
+    t.datetime "transaction_date", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bin_id"], name: "index_inventory_transactions_on_bin_id"
+    t.index ["company_id", "location_id"], name: "index_inventory_transactions_on_company_id_and_location_id"
+    t.index ["company_id", "part_id"], name: "index_inventory_transactions_on_company_id_and_part_id"
+    t.index ["company_id", "transaction_date"], name: "idx_on_company_id_transaction_date_85f55614ae"
+    t.index ["company_id", "transaction_type"], name: "idx_on_company_id_transaction_type_49752ad940"
+    t.index ["company_id"], name: "index_inventory_transactions_on_company_id"
+    t.index ["created_by_id"], name: "index_inventory_transactions_on_created_by_id"
+    t.index ["location_id"], name: "index_inventory_transactions_on_location_id"
+    t.index ["lot_number"], name: "index_inventory_transactions_on_lot_number"
+    t.index ["part_id"], name: "index_inventory_transactions_on_part_id"
+    t.index ["reference_type", "reference_id"], name: "idx_on_reference_type_reference_id_30e938d718"
+    t.index ["serial_number"], name: "index_inventory_transactions_on_serial_number"
+    t.index ["source_transaction_id"], name: "index_inventory_transactions_on_source_transaction_id"
+    t.index ["transaction_number"], name: "index_inventory_transactions_on_transaction_number", unique: true
   end
 
   create_table "invitations", force: :cascade do |t|
@@ -1793,6 +1913,75 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
   end
 
+  create_table "part_categories", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.bigint "parent_id"
+    t.boolean "active", default: true
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.jsonb "custom_fields", default: {}
+    t.bigint "created_by_id"
+    t.bigint "updated_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "active"], name: "index_part_categories_on_company_id_and_active"
+    t.index ["company_id", "name"], name: "index_part_categories_on_company_id_and_name", unique: true, where: "(is_deleted = false)"
+    t.index ["company_id"], name: "index_part_categories_on_company_id"
+    t.index ["created_by_id"], name: "index_part_categories_on_created_by_id"
+    t.index ["parent_id"], name: "index_part_categories_on_parent_id"
+    t.index ["updated_by_id"], name: "index_part_categories_on_updated_by_id"
+  end
+
+  create_table "parts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "sku", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.bigint "category_id"
+    t.string "uom", default: "each"
+    t.string "barcode"
+    t.string "manufacturer_part_no"
+    t.string "manufacturer_name"
+    t.decimal "default_cost", precision: 10, scale: 2
+    t.decimal "average_cost", precision: 10, scale: 2
+    t.decimal "last_cost", precision: 10, scale: 2
+    t.decimal "list_price", precision: 10, scale: 2
+    t.decimal "sale_price", precision: 10, scale: 2
+    t.boolean "taxable", default: true
+    t.boolean "is_serialized", default: false
+    t.boolean "is_lot_tracked", default: false
+    t.string "inventory_method", default: "average_cost"
+    t.decimal "weight_lbs", precision: 8, scale: 2
+    t.decimal "length_inches", precision: 8, scale: 2
+    t.decimal "width_inches", precision: 8, scale: 2
+    t.decimal "height_inches", precision: 8, scale: 2
+    t.string "qb_item_id"
+    t.string "qb_income_account"
+    t.string "qb_expense_account"
+    t.string "qb_asset_account"
+    t.boolean "active", default: true
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.jsonb "custom_fields", default: {}
+    t.bigint "created_by_id"
+    t.bigint "updated_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["barcode"], name: "index_parts_on_barcode"
+    t.index ["category_id"], name: "index_parts_on_category_id"
+    t.index ["company_id", "active"], name: "index_parts_on_company_id_and_active"
+    t.index ["company_id", "category_id"], name: "index_parts_on_company_id_and_category_id"
+    t.index ["company_id", "name"], name: "index_parts_on_company_id_and_name", where: "(is_deleted = false)"
+    t.index ["company_id", "sku"], name: "index_parts_on_company_id_and_sku", unique: true, where: "(is_deleted = false)"
+    t.index ["company_id"], name: "index_parts_on_company_id"
+    t.index ["created_by_id"], name: "index_parts_on_created_by_id"
+    t.index ["manufacturer_part_no"], name: "index_parts_on_manufacturer_part_no"
+    t.index ["qb_item_id"], name: "index_parts_on_qb_item_id"
+    t.index ["updated_by_id"], name: "index_parts_on_updated_by_id"
+  end
+
   create_table "password_reset_tokens", force: :cascade do |t|
     t.string "token_digest", null: false
     t.string "identifier", null: false
@@ -2087,6 +2276,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.index ["user_id"], name: "index_reminders_on_user_id"
   end
 
+  create_table "reorder_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "part_id", null: false
+    t.bigint "location_id", null: false
+    t.decimal "reorder_point", precision: 10, scale: 3, null: false
+    t.decimal "reorder_quantity", precision: 10, scale: 3
+    t.decimal "maximum_stock", precision: 10, scale: 3
+    t.boolean "active", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "active"], name: "index_reorder_rules_on_company_id_and_active"
+    t.index ["company_id", "part_id", "location_id"], name: "index_reorder_rules_on_company_id_and_part_id_and_location_id", unique: true
+    t.index ["company_id"], name: "index_reorder_rules_on_company_id"
+    t.index ["location_id"], name: "index_reorder_rules_on_location_id"
+    t.index ["part_id"], name: "index_reorder_rules_on_part_id"
+  end
+
   create_table "resources", force: :cascade do |t|
     t.string "key", limit: 100, null: false
     t.string "name", null: false
@@ -2235,6 +2441,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.index ["company_id"], name: "index_sources_on_company_id"
   end
 
+  create_table "stock_balances", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "part_id", null: false
+    t.bigint "location_id", null: false
+    t.bigint "bin_id"
+    t.decimal "on_hand", precision: 10, scale: 3, default: "0.0", null: false
+    t.decimal "reserved", precision: 10, scale: 3, default: "0.0", null: false
+    t.decimal "available", precision: 10, scale: 3, default: "0.0", null: false
+    t.string "serial_number"
+    t.string "lot_number"
+    t.date "lot_expiration_date"
+    t.datetime "last_transaction_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bin_id"], name: "index_stock_balances_on_bin_id"
+    t.index ["company_id", "location_id"], name: "index_stock_balances_on_company_id_and_location_id"
+    t.index ["company_id", "part_id", "location_id", "bin_id", "serial_number", "lot_number"], name: "index_stock_balances_uniqueness", unique: true
+    t.index ["company_id", "part_id"], name: "index_stock_balances_on_company_id_and_part_id"
+    t.index ["company_id"], name: "index_stock_balances_on_company_id"
+    t.index ["location_id"], name: "index_stock_balances_on_location_id"
+    t.index ["lot_number"], name: "index_stock_balances_on_lot_number"
+    t.index ["part_id", "location_id"], name: "index_stock_balances_on_part_id_and_location_id"
+    t.index ["part_id"], name: "index_stock_balances_on_part_id"
+    t.index ["serial_number"], name: "index_stock_balances_on_serial_number"
+  end
+
   create_table "subscription_plan_modules", force: :cascade do |t|
     t.bigint "subscription_plan_id", null: false
     t.string "module_key", null: false
@@ -2279,6 +2511,60 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.index ["is_active"], name: "index_subscription_plans_on_is_active"
     t.index ["name"], name: "index_subscription_plans_on_name", unique: true
     t.index ["zoho_plan_code"], name: "index_subscription_plans_on_zoho_plan_code", unique: true, where: "(zoho_plan_code IS NOT NULL)"
+  end
+
+  create_table "supplier_parts", force: :cascade do |t|
+    t.bigint "supplier_id", null: false
+    t.bigint "part_id", null: false
+    t.string "supplier_sku"
+    t.decimal "last_cost", precision: 10, scale: 2
+    t.integer "lead_time_days"
+    t.decimal "minimum_order_quantity", precision: 10, scale: 3
+    t.boolean "preferred", default: false
+    t.jsonb "custom_fields", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["part_id", "preferred"], name: "index_supplier_parts_on_part_id_and_preferred"
+    t.index ["part_id"], name: "index_supplier_parts_on_part_id"
+    t.index ["supplier_id", "part_id"], name: "index_supplier_parts_on_supplier_id_and_part_id", unique: true
+    t.index ["supplier_id"], name: "index_supplier_parts_on_supplier_id"
+    t.index ["supplier_sku"], name: "index_supplier_parts_on_supplier_sku"
+  end
+
+  create_table "suppliers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "code"
+    t.string "contact_name"
+    t.string "email"
+    t.string "phone"
+    t.string "website"
+    t.string "address_line1"
+    t.string "address_line2"
+    t.string "city"
+    t.string "state"
+    t.string "zip_code"
+    t.string "country", default: "US"
+    t.string "tax_id"
+    t.text "notes"
+    t.string "payment_terms"
+    t.integer "default_lead_time_days"
+    t.string "qb_vendor_id"
+    t.boolean "active", default: true
+    t.boolean "is_deleted", default: false
+    t.datetime "deleted_at"
+    t.jsonb "custom_fields", default: {}
+    t.bigint "created_by_id"
+    t.bigint "updated_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "active"], name: "index_suppliers_on_company_id_and_active"
+    t.index ["company_id", "code"], name: "index_suppliers_on_company_id_and_code", unique: true, where: "((code IS NOT NULL) AND (is_deleted = false))"
+    t.index ["company_id", "name"], name: "index_suppliers_on_company_id_and_name", where: "(is_deleted = false)"
+    t.index ["company_id"], name: "index_suppliers_on_company_id"
+    t.index ["created_by_id"], name: "index_suppliers_on_created_by_id"
+    t.index ["qb_vendor_id"], name: "index_suppliers_on_qb_vendor_id"
+    t.index ["updated_by_id"], name: "index_suppliers_on_updated_by_id"
   end
 
   create_table "syndication_partners", force: :cascade do |t|
@@ -2515,6 +2801,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
     t.index ["user_id", "role_id", "tier", "region_id", "location_id"], name: "index_user_role_assignments_unique", unique: true
     t.index ["user_id"], name: "index_user_role_assignments_on_user_id"
     t.check_constraint "tier::text = 'company'::text AND region_id IS NULL AND location_id IS NULL OR tier::text = 'region'::text AND region_id IS NOT NULL AND location_id IS NULL OR tier::text = 'location'::text AND location_id IS NOT NULL", name: "check_tier_assignment"
+  end
+
+  create_table "user_view_preferences", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "module", null: false
+    t.bigint "active_view_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active_view_id"], name: "index_user_view_preferences_on_active_view_id"
+    t.index ["company_id"], name: "index_user_view_preferences_on_company_id"
+    t.index ["user_id", "company_id", "module"], name: "idx_on_user_id_company_id_module_d4616a2f73", unique: true
+    t.index ["user_id"], name: "index_user_view_preferences_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -2847,6 +3146,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   add_foreign_key "approval_workflows", "users", column: "requested_by_id"
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
+  add_foreign_key "bins", "locations"
   add_foreign_key "brochures", "companies"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
@@ -2885,7 +3185,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   add_foreign_key "contact_activities", "users"
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "contacts", "locations"
+  add_foreign_key "custom_field_permissions", "custom_fields"
+  add_foreign_key "custom_field_permissions", "roles"
   add_foreign_key "custom_fields", "companies"
+  add_foreign_key "custom_fields", "users", column: "created_by_id"
+  add_foreign_key "custom_fields", "users", column: "updated_by_id"
+  add_foreign_key "custom_view_columns", "custom_views"
+  add_foreign_key "custom_views", "companies"
+  add_foreign_key "custom_views", "users", column: "created_by_id"
   add_foreign_key "dashboard_layouts", "companies"
   add_foreign_key "dashboard_layouts", "users"
   add_foreign_key "deal_activities", "deal_activities", column: "related_activity_id"
@@ -2910,6 +3217,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_submissions", "leads"
+  add_foreign_key "inventory_transactions", "bins"
+  add_foreign_key "inventory_transactions", "companies"
+  add_foreign_key "inventory_transactions", "inventory_transactions", column: "source_transaction_id"
+  add_foreign_key "inventory_transactions", "locations"
+  add_foreign_key "inventory_transactions", "parts"
+  add_foreign_key "inventory_transactions", "users", column: "created_by_id"
   add_foreign_key "invitations", "companies"
   add_foreign_key "invitations", "users", column: "invited_by_id"
   add_foreign_key "invoice_items", "invoices"
@@ -2962,6 +3275,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   add_foreign_key "nurture_sequences", "companies"
   add_foreign_key "nurture_steps", "nurture_sequences"
   add_foreign_key "nurture_steps", "templates"
+  add_foreign_key "part_categories", "companies"
+  add_foreign_key "part_categories", "part_categories", column: "parent_id"
+  add_foreign_key "part_categories", "users", column: "created_by_id"
+  add_foreign_key "part_categories", "users", column: "updated_by_id"
+  add_foreign_key "parts", "companies"
+  add_foreign_key "parts", "part_categories", column: "category_id"
+  add_foreign_key "parts", "users", column: "created_by_id"
+  add_foreign_key "parts", "users", column: "updated_by_id"
   add_foreign_key "payment_methods", "companies"
   add_foreign_key "payment_methods", "locations"
   add_foreign_key "payments", "companies"
@@ -2981,6 +3302,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   add_foreign_key "quotes", "locations"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
+  add_foreign_key "reorder_rules", "companies"
+  add_foreign_key "reorder_rules", "locations"
+  add_foreign_key "reorder_rules", "parts"
   add_foreign_key "role_permissions", "actions", on_delete: :cascade
   add_foreign_key "role_permissions", "resources", on_delete: :cascade
   add_foreign_key "role_permissions", "roles", on_delete: :cascade
@@ -2992,7 +3316,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   add_foreign_key "service_tickets", "locations"
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "service_tickets", "warranty_claims", on_delete: :nullify
+  add_foreign_key "stock_balances", "bins"
+  add_foreign_key "stock_balances", "companies"
+  add_foreign_key "stock_balances", "locations"
+  add_foreign_key "stock_balances", "parts"
   add_foreign_key "subscription_plan_modules", "subscription_plans"
+  add_foreign_key "supplier_parts", "parts"
+  add_foreign_key "supplier_parts", "suppliers"
+  add_foreign_key "suppliers", "companies"
+  add_foreign_key "suppliers", "users", column: "created_by_id"
+  add_foreign_key "suppliers", "users", column: "updated_by_id"
   add_foreign_key "syndication_partners", "companies"
   add_foreign_key "tag_assignments", "tags"
   add_foreign_key "tasks", "companies"
@@ -3014,6 +3347,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_13_032200) do
   add_foreign_key "user_role_assignments", "roles", on_delete: :cascade
   add_foreign_key "user_role_assignments", "users", column: "assigned_by_id", on_delete: :nullify
   add_foreign_key "user_role_assignments", "users", on_delete: :cascade
+  add_foreign_key "user_view_preferences", "companies"
+  add_foreign_key "user_view_preferences", "custom_views", column: "active_view_id"
+  add_foreign_key "user_view_preferences", "users"
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
