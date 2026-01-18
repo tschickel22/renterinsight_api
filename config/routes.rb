@@ -565,6 +565,17 @@ Rails.application.routes.draw do
       end
       
       # ==================== PARTS & INVENTORY MODULE ====================
+      # Manufacturers
+      resources :manufacturers do
+        member do
+          get :parts
+        end
+        collection do
+          get :stats
+          get :autocomplete
+        end
+      end
+      
       # Part Categories
       resources :part_categories, path: 'part-categories' do
         collection do
@@ -580,6 +591,13 @@ Rails.application.routes.draw do
         end
         collection do
           get :stats
+          get :autocomplete  # Autocomplete suggestions
+          get :find_by_identifier  # Get full part details by SKU/Barcode
+          get :manufacturer_names  # List all manufacturer names with counts
+          post :rename_manufacturer  # Rename manufacturer across all parts
+          delete :delete_manufacturer  # Delete if unused
+          post :rename_part_name  # Rename part name across all parts
+          delete :delete_part_name  # Delete if unused
         end
       end
       

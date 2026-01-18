@@ -6,6 +6,7 @@ class Part < ApplicationRecord
   # Associations
   belongs_to :company
   belongs_to :category, class_name: 'PartCategory', optional: true
+  # Note: manufacturer_name is a text field, no association needed
   belongs_to :created_by, class_name: 'User', optional: true
   belongs_to :updated_by, class_name: 'User', optional: true
   
@@ -98,15 +99,15 @@ class Part < ApplicationRecord
     stock_balances.sum(:reserved)
   end
   
-  # Total value (on_hand * average_cost)
+  # Total value (on_hand * average_cost or default_cost)
   def inventory_value
-    return 0 if average_cost.nil?
-    total_on_hand * average_cost
+  cost = average_cost || default_cost || 0
+  total_on_hand * cost
   end
-  
+
   def inventory_value_at(location_id)
-    return 0 if average_cost.nil?
-    on_hand_at(location_id) * average_cost
+  cost = average_cost || default_cost || 0
+  on_hand_at(location_id) * cost
   end
   
   # Supplier helpers

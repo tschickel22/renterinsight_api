@@ -193,6 +193,162 @@ module Api
         }
       end
 
+      # Get part details by SKU or Barcode for auto-filling form
+      def find_by_identifier
+        return unless authorize_action!('inventory', 'read')
+
+        identifier = params[:identifier]&.strip
+        field = params[:field] || 'sku'  # 'sku' or 'barcode'
+
+        if identifier.blank?
+          return render json: { error: 'Identifier is required' }, status: :bad_request
+        end
+
+        part = if field == 'barcode'
+          @company.parts.where(is_deleted: [false, nil]).find_by('barcode ILIKE ?', identifier)
+        else
+          @company.parts.where(is_deleted: [false, nil]).find_by('sku ILIKE ?', identifier)
+        end
+
+        if part
+          render json: part.as_json(
+            only: [:id, :sku, :name, :description, :category_id, :manufacturer_name, :barcode, :manufacturer_part_no,
+                   :uom, :default_cost, :list_price, :sale_price, :taxable, :active],
+            include: {
+              category: { only: [:id, :name] },
+              suppliers: { only: [:id, :name] }
+            }
+          )
+        else
+          render json: { error: 'Part not found' }, status: :not_found
+        end
+      end
+
+      # Autocomplete suggestions from existing parts
+      def autocomplete
+        return unless authorize_action!('inventory', 'read')
+
+        field = params[:field] || 'manufacturer_name'
+        query = params[:query] || ''
+
+        # Only allow specific fields
+        allowed_fields = %w[manufacturer_name sku name barcode manufacturer_part_no]
+        return render(json: { error: 'Invalid field' }, status: :bad_request) unless allowed_fields.include?(field)
+
+        # Get distinct values for the field that match the query
+        values = @company.parts
+                        .where(is_deleted: [false, nil])
+                        .where("#{field} IS NOT NULL AND #{field} != ''")
+                        .where("#{field} ILIKE ?", "%#{query}%")
+                        .select(field)
+                        .distinct
+                        .limit(20)
+                        .pluck(field)
+                        .compact
+                        .sort
+
+        render json: { suggestions: values }
+      end
+
+      # Get all manufacturer names with part counts for management
+      def manufacturer_names
+        return unless authorize_action!('inventory', 'read')
+
+        manufacturers = @company.parts
+                               .where(is_deleted: [false, nil])
+                               .where("manufacturer_name IS NOT NULL AND manufacturer_name != ''")
+                               .group(:manufacturer_name)
+                               .count
+                               .map { |name, count| { name: name, part_count: count } }
+                               .sort_by { |m| m[:name].downcase }
+
+        render json: { manufacturers: manufacturers }
+      end
+
+      # Rename a manufacturer name (updates all parts)
+      def rename_manufacturer
+        return unless authorize_action!('inventory', 'update')
+
+        old_name = params[:old_name]
+        new_name = params[:new_name]&.strip
+
+        if old_name.blank? || new_name.blank?
+          return render json: { error: 'Both old and new names are required' }, status: :unprocessable_entity
+        end
+
+        # Update all parts with this manufacturer name
+        count = @company.parts
+                       .where(is_deleted: [false, nil])
+                       .where('manufacturer_name ILIKE ?', old_name)
+                       .update_all(manufacturer_name: new_name, updated_at: Time.current)
+
+        render json: { message: "Updated #{count} parts", count: count }
+      end
+
+      # Delete a manufacturer name (only if no parts use it)
+      def delete_manufacturer
+        return unless authorize_action!('inventory', 'update')
+
+        name = params[:name]
+
+        if name.blank?
+          return render json: { error: 'Name is required' }, status: :unprocessable_entity
+        end
+
+        # Check if any parts use this manufacturer
+        count = @company.parts.where('manufacturer_name ILIKE ?', name).where(is_deleted: [false, nil]).count
+
+        if count > 0
+          return render json: { error: "Cannot delete: #{count} parts still use this manufacturer" }, status: :unprocessable_entity
+        end
+
+        # Clear manufacturer_name from any deleted parts too
+        @company.parts.where('manufacturer_name ILIKE ?', name).update_all(manufacturer_name: nil)
+
+        render json: { message: 'Manufacturer name deleted' }
+      end
+
+      # Rename a part name (updates all parts with matching name)
+      def rename_part_name
+        return unless authorize_action!('inventory', 'update')
+
+        old_name = params[:old_name]
+        new_name = params[:new_name]&.strip
+
+        if old_name.blank? || new_name.blank?
+          return render json: { error: 'Both old and new names are required' }, status: :unprocessable_entity
+        end
+
+        # Update all parts with this name
+        count = @company.parts
+                       .where(is_deleted: [false, nil])
+                       .where('name ILIKE ?', old_name)
+                       .update_all(name: new_name, updated_at: Time.current)
+
+        render json: { message: "Updated #{count} parts", count: count }
+      end
+
+      # Delete a part name (only if no parts use it)
+      def delete_part_name
+        return unless authorize_action!('inventory', 'update')
+
+        name = params[:name]
+
+        if name.blank?
+          return render json: { error: 'Name is required' }, status: :unprocessable_entity
+        end
+
+        # Check if any parts use this name
+        count = @company.parts.where('name ILIKE ?', name).where(is_deleted: [false, nil]).count
+
+        if count > 0
+          return render json: { error: "Cannot delete: #{count} parts still use this name" }, status: :unprocessable_entity
+        end
+
+        # This shouldn't happen (parts require names), but just in case
+        render json: { message: 'Part name deleted' }
+      end
+
       private
 
       def set_part
@@ -203,8 +359,8 @@ module Api
 
       def part_params
         params.require(:part).permit(
-          :sku, :name, :description, :category_id, :uom, :barcode,
-          :manufacturer_part_no, :manufacturer_name,
+          :sku, :name, :description, :category_id, :manufacturer_name, :uom, :barcode,
+          :manufacturer_part_no,
           :default_cost, :list_price, :sale_price, :taxable,
           :is_serialized, :is_lot_tracked, :inventory_method,
           :weight_lbs, :length_inches, :width_inches, :height_inches,
