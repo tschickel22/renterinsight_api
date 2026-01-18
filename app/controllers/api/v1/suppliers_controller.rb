@@ -142,7 +142,7 @@ module Api
 
       def supplier_params
         params.require(:supplier).permit(
-          :name, :code, :contact_name, :email, :phone, :website,
+          :name, :code, :account_number, :contact_name, :email, :phone, :website,
           :address_line1, :address_line2, :city, :state, :zip_code, :country,
           :payment_terms, :default_lead_time_days, :tax_id, :notes,
           :active

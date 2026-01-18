@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_18_174935) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_18_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1766,7 +1766,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_18_174935) do
 
   create_table "manufacturers", force: :cascade do |t|
     t.string "name", null: false
-    t.string "industry_type"
+    t.string "industry_type", null: false
     t.string "contact_email"
     t.string "contact_phone"
     t.string "website"
@@ -1778,24 +1778,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_18_174935) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
-    t.string "code"
-    t.string "contact_name"
-    t.string "address_line1"
-    t.string "address_line2"
-    t.string "city"
-    t.string "state"
-    t.string "zip_code"
-    t.string "country"
-    t.integer "created_by_id"
-    t.integer "updated_by_id"
-    t.boolean "is_deleted", default: false
-    t.datetime "deleted_at"
     t.index ["active", "industry_type"], name: "index_manufacturers_on_active_and_industry_type"
     t.index ["active"], name: "index_manufacturers_on_active"
-    t.index ["company_id", "code"], name: "idx_manufacturers_company_code_unique", unique: true, where: "((company_id IS NOT NULL) AND (code IS NOT NULL) AND (is_deleted = false))"
-    t.index ["company_id", "name"], name: "idx_manufacturers_company_name_unique", unique: true, where: "((company_id IS NOT NULL) AND (is_deleted = false))"
-    t.index ["company_id"], name: "index_manufacturers_on_company_id"
     t.index ["industry_type"], name: "index_manufacturers_on_industry_type"
     t.index ["name"], name: "index_manufacturers_on_name"
   end
@@ -2162,6 +2146,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_18_174935) do
     t.jsonb "custom_fields", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "discount_percent", precision: 5, scale: 2, default: "0.0"
     t.index ["part_id"], name: "index_purchase_order_lines_on_part_id"
     t.index ["purchase_order_id", "line_number"], name: "idx_on_purchase_order_id_line_number_052fcfc9be", unique: true
     t.index ["purchase_order_id", "part_id"], name: "index_purchase_order_lines_on_purchase_order_id_and_part_id"
@@ -2648,6 +2633,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_18_174935) do
     t.bigint "updated_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "account_number"
     t.index ["company_id", "active"], name: "index_suppliers_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_suppliers_on_company_id_and_code", unique: true, where: "((code IS NOT NULL) AND (is_deleted = false))"
     t.index ["company_id", "name"], name: "index_suppliers_on_company_id_and_name", where: "(is_deleted = false)"
@@ -3359,7 +3345,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_18_174935) do
   add_foreign_key "manufacturer_ar_transactions", "warranty_claims", on_delete: :restrict
   add_foreign_key "manufacturer_claim_views", "companies"
   add_foreign_key "manufacturer_claim_views", "warranty_claims"
-  add_foreign_key "manufacturers", "companies"
   add_foreign_key "notes", "users"
   add_foreign_key "nurture_enrollments", "companies"
   add_foreign_key "nurture_enrollments", "leads"

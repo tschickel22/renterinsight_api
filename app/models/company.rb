@@ -339,6 +339,11 @@ class Company < ApplicationRecord
     @integration_settings ||= Setting.get('Company', id, 'integration') || {}
   end
   
+  # Branding helpers - extract logo from settings
+  def logo
+    branding_settings&.dig('logo')
+  end
+  
   # Use the same bank account for deposits and rent collections
   # If true, all payments go to operating account
   # If false, deposits go to deposit account, rent goes to operating account

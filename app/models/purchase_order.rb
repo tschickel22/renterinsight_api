@@ -111,8 +111,18 @@ class PurchaseOrder < ApplicationRecord
   end
   
   def calculate_totals
+    # Ensure all lines have their line_total calculated first
+    lines.each do |line|
+      next if line.marked_for_destruction?
+      if line.line_total.nil? || line.changed?
+        subtotal = line.quantity_ordered * line.unit_cost
+        discount = subtotal * ((line.discount_percent || 0) / 100.0)
+        line.line_total = subtotal - discount
+      end
+    end
+    
     # Subtotal from line items
-    self.subtotal = lines.reject(&:marked_for_destruction?).sum(&:line_total)
+    self.subtotal = lines.reject(&:marked_for_destruction?).sum { |l| l.line_total || 0 }
     
     # Total = subtotal + tax + shipping
     self.total_amount = subtotal + tax_amount + shipping_cost

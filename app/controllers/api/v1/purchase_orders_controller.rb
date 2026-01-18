@@ -86,9 +86,17 @@ class Api::V1::PurchaseOrdersController < ApplicationController
     return unless authorize_action!('inventory', 'read')
 
     render json: @purchase_order.as_json(
+      methods: [:supplier_name, :location_name, :created_by_name],
       include: {
-        supplier: { only: [:id, :name, :code, :email, :phone] },
-        location: { only: [:id, :name] },
+        supplier: { only: [:id, :name, :code, :account_number, :email, :phone] },
+        location: { 
+          only: [:id, :name, :address_line1, :city, :state, :zip, :phone, :email],
+          methods: [:logo]
+        },
+        company: { 
+          only: [:id, :name, :address, :city, :state, :zip, :phone, :email],
+          methods: [:logo]
+        },
         created_by: { only: [:id, :first_name, :last_name, :email] },
         approved_by: { only: [:id, :first_name, :last_name, :email] },
         lines: {
@@ -266,6 +274,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         :line_number,
         :quantity_ordered,
         :unit_cost,
+        :discount_percent,
         :description,
         :notes,
         :expected_date,
