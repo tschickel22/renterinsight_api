@@ -17,6 +17,11 @@ module Api
         parts = parts.where(category_id: params[:category_id]) if params[:category_id].present?
         parts = parts.where(active: params[:active]) if params[:active].present?
         
+        # Filter parts with stock
+        if params[:with_stock].present? && params[:with_stock] == 'true'
+          parts = parts.joins(:stock_balances).where('stock_balances.on_hand > 0').distinct
+        end
+        
         if params[:search].present?
           parts = parts.where('sku ILIKE ? OR name ILIKE ?', "%#{params[:search]}%", "%#{params[:search]}%")
         end
@@ -71,6 +76,7 @@ module Api
           methods: [:total_on_hand, :total_available, :total_reserved, :inventory_value],
           include: {
             category: { only: [:id, :name] },
+            suppliers: { only: [:id, :name, :code] },
             stock_balances: {
               include: {
                 location: { only: [:id, :name, :code] },
@@ -84,10 +90,16 @@ module Api
       def create
         return unless authorize_action!('inventory', 'create')
 
-        part = @company.parts.build(part_params)
+        part = @company.parts.build(part_params.except(:supplier_ids))
         part.created_by = current_user
 
         if part.save
+          # Handle supplier associations
+          if params[:part][:supplier_ids].present?
+            supplier_ids = params[:part][:supplier_ids].reject(&:blank?).map(&:to_i)
+            part.supplier_ids = supplier_ids
+          end
+          
           render json: part, status: :created
         else
           render json: { errors: part.errors.full_messages }, status: :unprocessable_entity
@@ -99,7 +111,16 @@ module Api
 
         @part.updated_by = current_user
         
-        if @part.update(part_params)
+        if @part.update(part_params.except(:supplier_ids))
+          # Handle supplier associations
+          if params[:part][:supplier_ids].present?
+            supplier_ids = params[:part][:supplier_ids].reject(&:blank?).map(&:to_i)
+            @part.supplier_ids = supplier_ids
+          elsif params[:part].key?(:supplier_ids)
+            # If supplier_ids key exists but is empty, clear all suppliers
+            @part.supplier_ids = []
+          end
+          
           render json: @part
         else
           # Log validation errors for debugging
@@ -187,7 +208,8 @@ module Api
           :default_cost, :list_price, :sale_price, :taxable,
           :is_serialized, :is_lot_tracked, :inventory_method,
           :weight_lbs, :length_inches, :width_inches, :height_inches,
-          :active
+          :active,
+          supplier_ids: []
         )
         # Note: company_id NOT permitted (tenant isolation)
       end

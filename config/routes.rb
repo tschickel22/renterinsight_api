@@ -596,9 +596,9 @@ Rails.application.routes.draw do
       # Purchase Orders
       resources :purchase_orders, path: 'purchase-orders' do
         member do
-          post :mark_sent, path: 'mark-sent'
+          post :send_to_supplier, path: 'send'
           post :cancel
-          post :close
+          get :receiving_history, path: 'receiving-history'
         end
         collection do
           get :stats

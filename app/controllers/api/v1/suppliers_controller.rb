@@ -14,6 +14,14 @@ module Api
         # Filters
         suppliers = suppliers.where(active: params[:active]) if params[:active].present?
         
+        # Filter suppliers with parts - show suppliers where we have inventory on hand
+        if params[:with_parts].present? && params[:with_parts] == 'true'
+          suppliers = suppliers.joins(parts: :stock_balances)
+                              .where('stock_balances.on_hand > 0')
+                              .where('parts.is_deleted = ? OR parts.is_deleted IS NULL', false)
+                              .distinct
+        end
+        
         if params[:search].present?
           suppliers = suppliers.where(
             'name ILIKE ? OR code ILIKE ? OR contact_name ILIKE ?',
@@ -110,10 +118,17 @@ module Api
 
         suppliers = @company.suppliers.where(is_deleted: [false, nil])
 
+        # Count suppliers where we have actual inventory on hand from them
+        suppliers_with_stock = suppliers.joins(parts: :stock_balances)
+                                       .where('stock_balances.on_hand > 0')
+                                       .where('parts.is_deleted = ? OR parts.is_deleted IS NULL', false)
+                                       .distinct
+                                       .count
+
         render json: {
           total_suppliers: suppliers.count,
           active_suppliers: suppliers.where(active: true).count,
-          suppliers_with_parts: suppliers.joins(:supplier_parts).distinct.count
+          suppliers_with_parts: suppliers_with_stock
         }
       end
 
