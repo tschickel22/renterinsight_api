@@ -122,6 +122,11 @@ class Location < ApplicationRecord
     false
   end
 
+  # Branding helpers - extract logo from settings
+  def logo
+    resolved_branding_settings&.dig('logo') || branding_settings&.dig('logo')
+  end
+
   # Display helpers
   def display_name
     code.present? ? "#{name} (#{code})" : name
