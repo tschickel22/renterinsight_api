@@ -72,7 +72,7 @@ class PartCategory < ApplicationRecord
   def as_json(options = {})
     super(options.merge(
       only: [:id, :name, :description, :parent_id, :active, :created_at, :updated_at],
-      methods: [:full_path, :has_parts, :has_children]
+      methods: [:full_path, :has_parts?, :has_children?]
     ))
   end
   

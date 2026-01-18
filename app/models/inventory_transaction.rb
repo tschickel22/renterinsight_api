@@ -6,6 +6,7 @@ class InventoryTransaction < ApplicationRecord
   belongs_to :location
   belongs_to :bin, optional: true
   belongs_to :source_transaction, class_name: 'InventoryTransaction', optional: true
+  belongs_to :purchase_order_line, optional: true
   belongs_to :created_by, class_name: 'User', optional: true
   
   TYPES = %w[receive transfer_in transfer_out adjustment consume return sale waste].freeze
@@ -93,18 +94,32 @@ class InventoryTransaction < ApplicationRecord
   def generate_transaction_number
     return if transaction_number.present?
     
-    last_txn = company.inventory_transactions.order(:transaction_number).last
+    # Find the highest transaction number by extracting numeric part
+    last_txn = company.inventory_transactions
+                      .where("transaction_number IS NOT NULL")
+                      .order(Arel.sql("CAST(SUBSTRING(transaction_number FROM '[0-9]+') AS INTEGER) DESC"))
+                      .first
+    
+    Rails.logger.info("[generate_transaction_number] last_txn: #{last_txn.inspect}")
+    Rails.logger.info("[generate_transaction_number] last_txn.transaction_number: #{last_txn&.transaction_number.inspect}")
     
     if last_txn&.transaction_number.present?
       last_num = last_txn.transaction_number.split('-').last.to_i
-      self.transaction_number = "TXN-#{(last_num + 1).to_s.rjust(5, '0')}"
+      new_num = last_num + 1
+      self.transaction_number = "TXN-#{new_num.to_s.rjust(5, '0')}"
+      Rails.logger.info("[generate_transaction_number] Generated: #{self.transaction_number} (from #{last_txn.transaction_number})")
     else
       self.transaction_number = "TXN-00001"
+      Rails.logger.info("[generate_transaction_number] No previous transactions, using TXN-00001")
     end
   end
   
   def update_stock_balance
     StockBalance.update_from_transaction(self)
+  rescue StandardError => e
+    Rails.logger.error("[InventoryTransaction#update_stock_balance] Failed for transaction #{id}: #{e.message}")
+    Rails.logger.error(e.backtrace.join("\n"))
+    raise e  # Re-raise to trigger rollback
   end
   
   def prevent_changes

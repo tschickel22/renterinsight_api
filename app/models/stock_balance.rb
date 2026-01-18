@@ -23,6 +23,8 @@ class StockBalance < ApplicationRecord
   }
   
   def self.update_from_transaction(transaction)
+    Rails.logger.info("[StockBalance.update_from_transaction] Starting for transaction #{transaction.id}")
+    
     balance = find_or_initialize_by(
       company_id: transaction.company_id,
       part_id: transaction.part_id,
@@ -32,12 +34,26 @@ class StockBalance < ApplicationRecord
       lot_number: transaction.lot_number
     )
     
-    balance.on_hand = (balance.on_hand || 0) + transaction.quantity
+    Rails.logger.info("[StockBalance.update_from_transaction] Balance #{balance.new_record? ? 'new' : 'existing'}, current on_hand: #{balance.on_hand}, reserved: #{balance.reserved}")
+    
+    # Set defaults for new records
+    balance.on_hand ||= 0
+    balance.reserved ||= 0
+    
+    balance.on_hand = balance.on_hand + transaction.quantity
     balance.lot_expiration_date = transaction.lot_expiration_date if transaction.lot_expiration_date.present?
     balance.last_transaction_at = transaction.transaction_date
     
+    Rails.logger.info("[StockBalance.update_from_transaction] New on_hand: #{balance.on_hand}, available will be: #{balance.on_hand - balance.reserved}")
+    
     balance.save!
+    
+    Rails.logger.info("[StockBalance.update_from_transaction] Successfully saved")
     balance
+  rescue StandardError => e
+    Rails.logger.error("[StockBalance.update_from_transaction] ERROR: #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace.join("\n"))
+    raise e
   end
   
   def recalculate!
@@ -115,6 +131,8 @@ class StockBalance < ApplicationRecord
   private
   
   def calculate_available
+    self.on_hand ||= 0
+    self.reserved ||= 0
     self.available = on_hand - reserved
   end
 end

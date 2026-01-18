@@ -53,6 +53,7 @@ class Company < ApplicationRecord
   has_many :part_categories, dependent: :destroy
   has_many :parts, dependent: :destroy
   has_many :suppliers, dependent: :destroy
+  has_many :purchase_orders, dependent: :destroy
   has_many :inventory_transactions, dependent: :destroy
   has_many :stock_balances, dependent: :destroy
   has_many :reorder_rules, dependent: :destroy

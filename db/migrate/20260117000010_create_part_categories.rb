@@ -2,8 +2,7 @@
 
 class CreatePartCategories < ActiveRecord::Migration[8.0]
   def up
-    # Clean up any orphaned objects
-    execute "DROP TABLE IF EXISTS part_categories CASCADE" rescue nil
+    return if table_exists?(:part_categories)
     
     create_table :part_categories do |t|
       t.bigint :company_id, null: false

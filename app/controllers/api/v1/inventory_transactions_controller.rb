@@ -97,7 +97,8 @@ module Api
         if transaction
           render json: transaction, status: :created
         else
-          render json: { errors: ['Failed to create adjustment'] }, status: :unprocessable_entity
+          Rails.logger.error("[InventoryTransactions#adjust] Errors: #{service.errors.inspect}")
+          render json: { errors: service.errors.presence || ['Failed to create adjustment'] }, status: :unprocessable_entity
         end
       end
 

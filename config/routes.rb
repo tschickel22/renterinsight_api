@@ -588,6 +588,21 @@ Rails.application.routes.draw do
         member do
           get :parts
         end
+        collection do
+          get :stats
+        end
+      end
+      
+      # Purchase Orders
+      resources :purchase_orders, path: 'purchase-orders' do
+        member do
+          post :mark_sent, path: 'mark-sent'
+          post :cancel
+          post :close
+        end
+        collection do
+          get :stats
+        end
       end
       
       # Bins

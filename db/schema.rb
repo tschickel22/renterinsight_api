@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_17_000022) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_17_000024) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1131,7 +1131,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_17_000022) do
     t.string "serial_number"
     t.string "lot_number"
     t.date "lot_expiration_date"
-    t.bigint "purchase_order_line_id"
     t.bigint "job_id"
     t.string "reference_type"
     t.bigint "reference_id"
@@ -1141,20 +1140,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_17_000022) do
     t.datetime "transaction_date", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "purchase_order_line_id"
     t.index ["bin_id"], name: "index_inventory_transactions_on_bin_id"
     t.index ["company_id", "location_id"], name: "index_inventory_transactions_on_company_id_and_location_id"
     t.index ["company_id", "part_id"], name: "index_inventory_transactions_on_company_id_and_part_id"
     t.index ["company_id", "transaction_date"], name: "idx_on_company_id_transaction_date_85f55614ae"
+    t.index ["company_id", "transaction_number"], name: "index_inventory_transactions_on_company_and_number", unique: true
     t.index ["company_id", "transaction_type"], name: "idx_on_company_id_transaction_type_49752ad940"
     t.index ["company_id"], name: "index_inventory_transactions_on_company_id"
     t.index ["created_by_id"], name: "index_inventory_transactions_on_created_by_id"
     t.index ["location_id"], name: "index_inventory_transactions_on_location_id"
     t.index ["lot_number"], name: "index_inventory_transactions_on_lot_number"
     t.index ["part_id"], name: "index_inventory_transactions_on_part_id"
+    t.index ["purchase_order_line_id"], name: "index_inventory_transactions_on_purchase_order_line_id"
     t.index ["reference_type", "reference_id"], name: "idx_on_reference_type_reference_id_30e938d718"
     t.index ["serial_number"], name: "index_inventory_transactions_on_serial_number"
     t.index ["source_transaction_id"], name: "index_inventory_transactions_on_source_transaction_id"
-    t.index ["transaction_number"], name: "index_inventory_transactions_on_transaction_number", unique: true
   end
 
   create_table "invitations", force: :cascade do |t|
@@ -2126,6 +2127,77 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_17_000022) do
     t.index ["owner_type", "owner_id"], name: "index_portal_documents_on_owner"
     t.index ["related_to_type", "related_to_id"], name: "index_portal_documents_on_related_to"
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
+  end
+
+  create_table "purchase_order_lines", force: :cascade do |t|
+    t.bigint "purchase_order_id", null: false
+    t.bigint "part_id", null: false
+    t.integer "line_number", null: false
+    t.decimal "quantity_ordered", precision: 10, scale: 3, null: false
+    t.decimal "quantity_received", precision: 10, scale: 3, default: "0.0", null: false
+    t.decimal "unit_cost", precision: 10, scale: 2, null: false
+    t.decimal "line_total", precision: 10, scale: 2, null: false
+    t.text "description"
+    t.text "notes"
+    t.date "expected_date"
+    t.string "manufacturer_part_no"
+    t.jsonb "custom_fields", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["part_id"], name: "index_purchase_order_lines_on_part_id"
+    t.index ["purchase_order_id", "line_number"], name: "idx_on_purchase_order_id_line_number_052fcfc9be", unique: true
+    t.index ["purchase_order_id", "part_id"], name: "index_purchase_order_lines_on_purchase_order_id_and_part_id"
+    t.index ["purchase_order_id"], name: "index_purchase_order_lines_on_purchase_order_id"
+  end
+
+  create_table "purchase_orders", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "supplier_id", null: false
+    t.bigint "created_by_id"
+    t.bigint "approved_by_id"
+    t.string "po_number", null: false
+    t.string "status", default: "draft", null: false
+    t.date "order_date", null: false
+    t.date "expected_delivery_date"
+    t.date "delivery_date"
+    t.decimal "subtotal", precision: 10, scale: 2, default: "0.0"
+    t.decimal "tax_amount", precision: 10, scale: 2, default: "0.0"
+    t.decimal "shipping_cost", precision: 10, scale: 2, default: "0.0"
+    t.decimal "total_amount", precision: 10, scale: 2, default: "0.0"
+    t.string "shipping_method"
+    t.string "tracking_number"
+    t.text "notes"
+    t.text "terms"
+    t.string "ship_to_name"
+    t.string "ship_to_address1"
+    t.string "ship_to_address2"
+    t.string "ship_to_city"
+    t.string "ship_to_state"
+    t.string "ship_to_zip"
+    t.string "ship_to_country", default: "US"
+    t.datetime "sent_at"
+    t.datetime "approved_at"
+    t.datetime "cancelled_at"
+    t.string "cancelled_reason"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.jsonb "custom_fields", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
+    t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
+    t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
+    t.index ["company_id", "status"], name: "index_purchase_orders_on_company_id_and_status"
+    t.index ["company_id", "supplier_id"], name: "index_purchase_orders_on_company_id_and_supplier_id"
+    t.index ["company_id"], name: "index_purchase_orders_on_company_id"
+    t.index ["created_by_id"], name: "index_purchase_orders_on_created_by_id"
+    t.index ["expected_delivery_date"], name: "index_purchase_orders_on_expected_delivery_date"
+    t.index ["is_deleted"], name: "index_purchase_orders_on_is_deleted"
+    t.index ["location_id"], name: "index_purchase_orders_on_location_id"
+    t.index ["order_date"], name: "index_purchase_orders_on_order_date"
+    t.index ["status"], name: "index_purchase_orders_on_status"
+    t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
   end
 
   create_table "quickbooks_field_mappings", force: :cascade do |t|
@@ -3222,6 +3294,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_17_000022) do
   add_foreign_key "inventory_transactions", "inventory_transactions", column: "source_transaction_id"
   add_foreign_key "inventory_transactions", "locations"
   add_foreign_key "inventory_transactions", "parts"
+  add_foreign_key "inventory_transactions", "purchase_order_lines"
   add_foreign_key "inventory_transactions", "users", column: "created_by_id"
   add_foreign_key "invitations", "companies"
   add_foreign_key "invitations", "users", column: "invited_by_id"
@@ -3289,6 +3362,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_17_000022) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "purchase_order_lines", "parts"
+  add_foreign_key "purchase_order_lines", "purchase_orders"
+  add_foreign_key "purchase_orders", "companies"
+  add_foreign_key "purchase_orders", "locations"
+  add_foreign_key "purchase_orders", "suppliers"
+  add_foreign_key "purchase_orders", "users", column: "approved_by_id"
+  add_foreign_key "purchase_orders", "users", column: "created_by_id"
   add_foreign_key "quickbooks_field_mappings", "companies"
   add_foreign_key "quickbooks_field_mappings", "locations"
   add_foreign_key "quickbooks_sync_logs", "companies"
