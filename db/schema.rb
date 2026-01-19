@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_18_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_19_013500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2289,6 +2289,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_18_230000) do
     t.index ["realm_id", "entity_id"], name: "index_quickbooks_webhooks_on_realm_id_and_entity_id"
   end
 
+  create_table "quote_inventory_usages", force: :cascade do |t|
+    t.bigint "quote_id", null: false
+    t.bigint "part_id", null: false
+    t.bigint "location_id"
+    t.decimal "quantity", precision: 10, scale: 2, null: false
+    t.decimal "unit_cost", precision: 10, scale: 2
+    t.decimal "unit_price", precision: 10, scale: 2
+    t.integer "item_index", comment: "Index in the quote.items JSONB array"
+    t.boolean "used", default: false, null: false
+    t.datetime "used_at"
+    t.bigint "used_by_id"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["location_id"], name: "index_quote_inventory_usages_on_location_id"
+    t.index ["part_id"], name: "index_quote_inventory_usages_on_part_id"
+    t.index ["quote_id", "part_id"], name: "index_quote_inventory_usages_on_quote_id_and_part_id"
+    t.index ["quote_id"], name: "index_quote_inventory_usages_on_quote_id"
+    t.index ["used"], name: "index_quote_inventory_usages_on_used"
+    t.index ["used_by_id"], name: "index_quote_inventory_usages_on_used_by_id"
+  end
+
   create_table "quotes", force: :cascade do |t|
     t.integer "account_id"
     t.integer "contact_id"
@@ -3382,6 +3404,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_18_230000) do
   add_foreign_key "quickbooks_sync_mappings", "companies"
   add_foreign_key "quickbooks_sync_mappings", "locations"
   add_foreign_key "quickbooks_webhooks", "companies"
+  add_foreign_key "quote_inventory_usages", "locations"
+  add_foreign_key "quote_inventory_usages", "parts"
+  add_foreign_key "quote_inventory_usages", "quotes"
+  add_foreign_key "quote_inventory_usages", "users", column: "used_by_id"
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
   add_foreign_key "quotes", "locations"

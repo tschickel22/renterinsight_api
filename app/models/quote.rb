@@ -13,6 +13,7 @@ class Quote < ApplicationRecord
   belongs_to :contact, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
+  has_many :quote_inventory_usages, dependent: :destroy
   
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
@@ -225,6 +226,28 @@ class Quote < ApplicationRecord
       }
     end
     
+    # Include inventory usage if requested
+    if options[:include_inventory]
+      json['inventoryUsages'] = quote_inventory_usages.map do |usage|
+        {
+          id: usage.id,
+          partId: usage.part_id,
+          partNumber: usage.part&.part_number,
+          partName: usage.part&.name,
+          quantity: usage.quantity,
+          unitCost: usage.unit_cost,
+          unitPrice: usage.unit_price,
+          itemIndex: usage.item_index,
+          used: usage.used,
+          usedAt: usage.used_at,
+          usedByName: usage.used_by&.name,
+          stockLevel: usage.stock_level,
+          stockAvailable: usage.stock_available?,
+          locationName: usage.location&.name
+        }
+      end
+    end
+    
     json
   end
   
@@ -235,6 +258,33 @@ class Quote < ApplicationRecord
   
   def primary_phone
     contact&.phone || account&.phone
+  end
+  
+  # Inventory management methods
+  def has_inventory_items?
+    quote_inventory_usages.any?
+  end
+  
+  def inventory_items_used?
+    quote_inventory_usages.any? && quote_inventory_usages.all?(&:used?)
+  end
+  
+  def inventory_items_partially_used?
+    quote_inventory_usages.used.any? && quote_inventory_usages.not_used.any?
+  end
+  
+  def mark_all_inventory_used!(user)
+    results = { success: [], failed: [] }
+    
+    quote_inventory_usages.not_used.each do |usage|
+      if usage.mark_as_used!(user)
+        results[:success] << usage.id
+      else
+        results[:failed] << { id: usage.id, part_id: usage.part_id, error: 'Failed to mark as used' }
+      end
+    end
+    
+    results
   end
   
   private
