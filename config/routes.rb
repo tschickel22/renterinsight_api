@@ -295,10 +295,12 @@ Rails.application.routes.draw do
           post :mark_paid
           post :cancel
           get :pdf
+          post :mark_inventory_used, path: 'mark-inventory-used'  # Manual inventory override
         end
         
         collection do
           get :stats
+          post :convert_from_quote, path: 'convert-from-quote'  # Quote → Invoice conversion
         end
       end
       

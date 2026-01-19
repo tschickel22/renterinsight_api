@@ -23,8 +23,26 @@ class Api::V1::InvoicesController < ApplicationController
     end
     
     # Filters
-    invoices = invoices.where(status: params[:status]) if params[:status].present?
+    if params[:status].present?
+      if params[:status] == 'open'
+        # Open invoices = all except paid and cancelled
+        invoices = invoices.where.not(status: ['paid', 'cancelled'])
+      else
+        # Specific status filter
+        invoices = invoices.where(status: params[:status])
+      end
+    end
     invoices = invoices.where(contact_id: params[:contact_id]) if params[:contact_id].present?
+    
+    # Date range filter
+    if params[:start_date].present?
+      start_date = Date.parse(params[:start_date])
+      invoices = invoices.where('invoice_date >= ?', start_date)
+    end
+    if params[:end_date].present?
+      end_date = Date.parse(params[:end_date])
+      invoices = invoices.where('invoice_date <= ?', end_date)
+    end
     
     # Filter by account through contacts
     if params[:account_id].present?
@@ -58,6 +76,9 @@ class Api::V1::InvoicesController < ApplicationController
   def create
     return unless authorize_action!('finance', 'create')
     
+    Rails.logger.info "📝 [Invoices#create] Received params: #{params.inspect}"
+    Rails.logger.info "📝 [Invoices#create] Invoice items count: #{invoice_params[:invoice_items_attributes]&.length || 0}"
+    
     invoice = @company.invoices.build(invoice_params)
     invoice.location_id ||= Current.location_id if Current.location_id.present?
     
@@ -68,6 +89,10 @@ class Api::V1::InvoicesController < ApplicationController
     end
     
     if invoice.save
+      Rails.logger.info "✅ [Invoices#create] Invoice saved with #{invoice.invoice_items.count} items"
+      invoice.invoice_items.each_with_index do |item, idx|
+        Rails.logger.info "   Item #{idx + 1}: #{item.description} - Qty: #{item.quantity} - Rate: #{item.rate}"
+      end
       render json: invoice, include: [:contact, :invoice_items], status: :created
     else
       render json: { errors: invoice.errors }, status: :unprocessable_entity
@@ -288,6 +313,72 @@ class Api::V1::InvoicesController < ApplicationController
     }
   end
   
+  # Convert a quote to an invoice
+  def convert_from_quote
+    return unless authorize_action!('finance', 'create')
+    
+    quote = @company.quotes.find(params[:quote_id])
+    
+    # Check if quote already converted
+    if quote.invoices.any?
+      return render json: { 
+        error: 'Quote already converted to invoice',
+        existing_invoice_id: quote.invoices.first.id
+      }, status: :unprocessable_entity
+    end
+    
+    # Create invoice from quote
+    invoice = @company.invoices.build(
+      quote_id: quote.id,
+      contact_id: quote.contact_id,
+      location_id: quote.location_id || Current.location_id,
+      sales_rep_id: params[:sales_rep_id] || current_user.id, # Default to current user
+      invoice_date: Date.current,
+      due_date: Date.current + 30.days, # Default 30 days
+      tax_rate: quote.tax || @company.settings.dig('quotes', 'defaultTaxRate') || 0,
+      notes: quote.notes,
+      terms: params[:terms] || @company.settings.dig('quotes', 'defaultTermsConditions')
+    )
+    
+    # Copy line items from quote
+    quote.items.each do |quote_item|
+      invoice.invoice_items.build(
+        description: quote_item[:description] || quote_item['description'],
+        quantity: quote_item[:quantity] || quote_item['quantity'] || 1,
+        rate: quote_item[:unitPrice] || quote_item['unitPrice'] || quote_item[:unit_price] || 0,
+        item_type: quote_item[:itemType] || quote_item['itemType'] || 'custom',
+        itemable_type: quote_item[:itemable_type] || quote_item['itemable_type'],
+        itemable_id: quote_item[:itemable_id] || quote_item['itemable_id'],
+        commission_type: 'full_commission' # Default
+      )
+    end
+    
+    if invoice.save
+      render json: serialize_invoice(invoice), status: :created
+    else
+      render json: { errors: invoice.errors }, status: :unprocessable_entity
+    end
+  end
+  
+  # Manual override to mark inventory as used
+  def mark_inventory_used
+    return unless authorize_action!('finance', 'update')
+    
+    invoice = @company.invoices.find(params[:id])
+    
+    begin
+      invoice.force_mark_inventory_as_used!(current_user)
+      render json: { 
+        message: 'Inventory marked as used', 
+        invoice: serialize_invoice(invoice.reload) 
+      }
+    rescue => e
+      render json: { 
+        error: "Failed to mark inventory as used: #{e.message}" 
+      }, status: :unprocessable_entity
+    end
+  end
+  
   private
   
   def set_invoice
@@ -298,11 +389,12 @@ class Api::V1::InvoicesController < ApplicationController
   
   def invoice_params
     params.require(:invoice).permit(
-      :contact_id, :location_id, :listing_id, :deal_id,
+      :contact_id, :location_id, :listing_id, :deal_id, :quote_id, :sales_rep_id,
       :invoice_date, :due_date, :tax_rate,
       :notes, :terms, :footer_text,
       invoice_items_attributes: [
-        :id, :item_type, :description, :quantity, :rate, :amount, :listing_id, :position, :_destroy
+        :id, :item_type, :description, :quantity, :rate, :amount, :listing_id, :position,
+        :itemable_type, :itemable_id, :commission_type, :_destroy
       ]
     )
   end
@@ -381,6 +473,8 @@ class Api::V1::InvoicesController < ApplicationController
       contact: recipient_data&.dig(:type) == 'Contact' ? recipient_data : nil,
       contact_id: invoice.contact_id,
       location_id: invoice.location_id,
+      sales_rep_id: invoice.sales_rep_id,  # CRITICAL: Include sales_rep_id so it persists on edit
+      quote_id: invoice.quote_id,
       invoice_items: begin
         (invoice.invoice_items || []).map { |item| serialize_invoice_item(item) }
       rescue => e
@@ -413,7 +507,10 @@ class Api::V1::InvoicesController < ApplicationController
       quantity: item.quantity,
       rate: item.rate,
       amount: item.amount,  # Fixed: InvoiceItem uses 'amount' not 'total'
-      position: item.position
+      position: item.position,
+      itemable_type: item.itemable_type,  # CRITICAL: Include for inventory items
+      itemable_id: item.itemable_id,      # CRITICAL: Include for inventory items
+      commission_type: item.commission_type  # CRITICAL: Include for sales rep commission
     }
   end
   
