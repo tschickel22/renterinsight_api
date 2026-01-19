@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_19_013500) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_19_234600) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1198,6 +1198,26 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_19_013500) do
     t.index ["token_digest"], name: "index_invitations_on_token_digest", unique: true
   end
 
+  create_table "invoice_inventory_usages", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "invoice_id", null: false
+    t.bigint "invoice_item_id", null: false
+    t.string "itemable_type", null: false
+    t.integer "itemable_id", null: false
+    t.integer "quantity_used", default: 1, null: false
+    t.datetime "marked_used_at"
+    t.bigint "marked_by_id"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_invoice_inventory_usages_on_company_id"
+    t.index ["invoice_id"], name: "index_invoice_inventory_usages_on_invoice_id"
+    t.index ["invoice_item_id"], name: "index_invoice_inventory_usages_on_invoice_item_id"
+    t.index ["itemable_type", "itemable_id"], name: "idx_on_itemable_type_itemable_id_3830e51cc8"
+    t.index ["marked_by_id"], name: "index_invoice_inventory_usages_on_marked_by_id"
+    t.index ["marked_used_at"], name: "index_invoice_inventory_usages_on_marked_used_at"
+  end
+
   create_table "invoice_items", force: :cascade do |t|
     t.bigint "invoice_id", null: false
     t.string "item_type"
@@ -1209,8 +1229,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_19_013500) do
     t.integer "position", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "itemable_type"
+    t.integer "itemable_id"
+    t.string "commission_type", default: "full_commission"
     t.index ["invoice_id", "position"], name: "index_invoice_items_on_invoice_id_and_position"
     t.index ["invoice_id"], name: "index_invoice_items_on_invoice_id"
+    t.index ["itemable_type", "itemable_id"], name: "index_invoice_items_on_itemable_type_and_itemable_id"
     t.index ["listing_id"], name: "index_invoice_items_on_listing_id"
   end
 
@@ -1250,6 +1274,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_19_013500) do
     t.integer "loan_id"
     t.integer "loan_payment_number"
     t.string "public_token"
+    t.integer "sales_rep_id"
+    t.integer "quote_id"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -1263,7 +1289,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_19_013500) do
     t.index ["payment_token"], name: "index_invoices_on_payment_token", unique: true
     t.index ["public_token"], name: "index_invoices_on_public_token", unique: true
     t.index ["quickbooks_id"], name: "index_invoices_on_quickbooks_id"
+    t.index ["quote_id"], name: "index_invoices_on_quote_id"
     t.index ["recipient_type", "recipient_id"], name: "index_invoices_on_recipient_type_and_recipient_id"
+    t.index ["sales_rep_id"], name: "index_invoices_on_sales_rep_id"
     t.index ["source_type", "source_id"], name: "index_invoices_on_source_type_and_source_id"
     t.index ["status"], name: "index_invoices_on_status"
   end
@@ -3324,6 +3352,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_19_013500) do
   add_foreign_key "inventory_transactions", "users", column: "created_by_id"
   add_foreign_key "invitations", "companies"
   add_foreign_key "invitations", "users", column: "invited_by_id"
+  add_foreign_key "invoice_inventory_usages", "companies"
+  add_foreign_key "invoice_inventory_usages", "invoice_items"
+  add_foreign_key "invoice_inventory_usages", "invoices"
+  add_foreign_key "invoice_inventory_usages", "users", column: "marked_by_id"
   add_foreign_key "invoice_items", "invoices"
   add_foreign_key "invoice_items", "listings"
   add_foreign_key "invoices", "companies"

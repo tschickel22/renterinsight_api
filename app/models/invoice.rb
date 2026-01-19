@@ -5,11 +5,14 @@ class Invoice < ApplicationRecord
   belongs_to :listing, optional: true
   belongs_to :deal, optional: true
   belongs_to :loan, optional: true
+  belongs_to :quote, optional: true
   belongs_to :source, polymorphic: true, optional: true
   belongs_to :recipient, polymorphic: true, optional: true
+  belongs_to :sales_rep, class_name: 'User', optional: true
   
   has_many :invoice_items, dependent: :destroy
   has_many :payments, as: :payable, dependent: :nullify
+  has_many :invoice_inventory_usages, dependent: :destroy
   
   accepts_nested_attributes_for :invoice_items, allow_destroy: true
   
@@ -111,7 +114,7 @@ class Invoice < ApplicationRecord
   
   # Record payment
   def record_payment!(amount, gateway_name, payment_data = {})
-    Payment.create!(
+    payment = Payment.create!(
       company: company,
       location: location,
       payer_type: contact_id.present? ? 'Contact' : nil,
@@ -125,6 +128,39 @@ class Invoice < ApplicationRecord
       external_id: payment_data[:transaction_id],
       notes: payment_data[:notes]
     )
+    
+    # Auto-deduct inventory when invoice becomes paid
+    reload # Refresh status
+    mark_inventory_as_used!(payment_data[:user]) if paid?
+    
+    payment
+  end
+  
+  # Auto-deduct inventory when invoice is marked as paid
+  def mark_inventory_as_used!(user)
+    return unless status == 'paid' # Only process paid invoices
+    
+    invoice_items.where(itemable_type: ['Part', 'Vehicle', 'LandParcel']).find_each do |item|
+      next if item.itemable.nil? # Skip if item was deleted
+      
+      # Check if already marked as used
+      usage = invoice_inventory_usages.find_or_initialize_by(
+        company: company,
+        invoice_item: item,
+        itemable: item.itemable
+      )
+      
+      next if usage.marked? # Skip if already processed
+      
+      usage.quantity_used = item.quantity || 1
+      usage.save!
+      usage.mark_as_used!(user) rescue nil # Continue even if stock deduction fails
+    end
+  end
+  
+  # Manual override to mark inventory as used
+  def force_mark_inventory_as_used!(user)
+    mark_inventory_as_used!(user)
   end
   
   private
