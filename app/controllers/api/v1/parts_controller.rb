@@ -49,13 +49,40 @@ module Api
 
         # Include stock levels
         parts_data = parts.includes(:category, :stock_balances).map do |part|
-          part.as_json(
-            only: [:id, :sku, :name, :description, :uom, :active, :default_cost, :list_price, :sale_price, :created_at, :updated_at],
-            methods: [:total_on_hand, :total_available, :inventory_value],
+          part_json = part.as_json(
+            only: [:id, :sku, :name, :description, :uom, :active, :default_cost, :default_price, :list_price, :sale_price, :created_at, :updated_at],
             include: {
               category: { only: [:id, :name] }
             }
           )
+          
+          # Add location-specific stock if location is set
+          if Current.location_id.present?
+            part_json[:location_stock] = {
+              on_hand: part.on_hand_at(Current.location_id),
+              available: part.available_at(Current.location_id),
+              reserved: part.reserved_at(Current.location_id)
+            }
+            part_json[:location_id] = Current.location_id
+          end
+          
+          # Always include company-wide totals for reference
+          part_json[:total_on_hand] = part.total_on_hand
+          part_json[:total_available] = part.total_available
+          part_json[:inventory_value] = part.inventory_value
+          
+          # Include stock at ALL locations (for transfer suggestions)
+          part_json[:stock_by_location] = part.stock_balances.includes(:location).map do |balance|
+            {
+              location_id: balance.location_id,
+              location_name: balance.location.name,
+              on_hand: balance.on_hand,
+              available: balance.available,
+              reserved: balance.reserved
+            }
+          end
+          
+          part_json
         end
 
         render json: {

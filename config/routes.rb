@@ -466,11 +466,20 @@ Rails.application.routes.draw do
           get :tags
           post :tags, to: 'quotes#add_tags'
           delete 'tags/:tag_name', to: 'quotes#remove_tag'
+          post :mark_parts_used, path: 'mark-parts-used'
         end
         
         collection do
           get :stats
           get :export
+          get :search_parts, path: 'search-parts'
+        end
+        
+        # Quote Inventory Usages (Parts tracking)
+        resources :quote_inventory_usages, only: [:index, :create, :destroy], path: 'inventory-usages' do
+          member do
+            post :mark_used, path: 'mark-used'
+          end
         end
       end
       
