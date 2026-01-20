@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'csv'
+
 module Api
   module V1
     class PartsController < ApplicationController
@@ -215,8 +217,8 @@ module Api
           active_parts: base_parts.where(active: true).count,
           parts_with_stock: base_parts.joins(:stock_balances).where('stock_balances.on_hand > 0').distinct.count,
           total_inventory_value: StockBalance.joins(:part)
-                                            .where(parts: { company_id: @company.id })
-                                            .sum('stock_balances.on_hand * COALESCE(parts.average_cost, 0)')
+                                            .where(parts: { company_id: @company.id, is_deleted: [false, nil] })
+                                            .sum('stock_balances.on_hand * COALESCE(parts.average_cost, parts.default_cost, 0)')
         }
       end
 
@@ -376,12 +378,240 @@ module Api
         render json: { message: 'Part name deleted' }
       end
 
+      # Export parts to CSV
+      def export
+        return unless authorize_action!('inventory', 'read')
+
+        parts = @company.parts.where(is_deleted: [false, nil])
+
+        # Apply same filters as index
+        parts = parts.where(category_id: params[:category_id]) if params[:category_id].present?
+        parts = parts.where(active: params[:active]) if params[:active].present?
+        
+        if params[:with_stock].present? && params[:with_stock] == 'true'
+          parts = parts.joins(:stock_balances).where('stock_balances.on_hand > 0').distinct
+        end
+        
+        if params[:search].present?
+          parts = parts.where('sku ILIKE ? OR name ILIKE ?', "%#{params[:search]}%", "%#{params[:search]}%")
+        end
+
+        # RBAC + Location Filtering
+        if current_user.uses_rbac?
+          unless current_user.effective_admin?
+            location_ids = permission_service.accessible_location_ids
+            if location_ids.any?
+              parts = parts.joins(:stock_balances)
+                          .where(stock_balances: { location_id: location_ids })
+                          .distinct
+            else
+              parts = parts.none
+            end
+          end
+        end
+
+        # Include necessary associations
+        parts = parts.includes(:category, stock_balances: :location)
+
+        export_type = params[:export_type] || 'all_locations'
+
+        # Generate CSV based on export type
+        csv_data = if export_type == 'current_location'
+          generate_current_location_csv(parts)
+        else
+          generate_all_locations_csv(parts)
+        end
+
+        filename = export_type == 'current_location' ? 
+          "parts-export-current-location-#{Date.today}.csv" : 
+          "parts-export-all-locations-#{Date.today}.csv"
+
+        send_data csv_data, 
+                  filename: filename,
+                  type: 'text/csv',
+                  disposition: 'attachment'
+      end
+
       private
 
       def set_part
         @part = @company.parts.find(params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Part not found' }, status: :not_found
+      end
+
+      def generate_current_location_csv(parts)
+        current_location = Current.location_id ? Location.find_by(id: Current.location_id) : nil
+        
+        CSV.generate(headers: true) do |csv|
+          # Add location header info if location is selected
+          if current_location
+            csv << ['Location:', current_location.name]
+            csv << ['Code:', current_location.code] if current_location.code.present?
+            
+            # Build address line
+            address_parts = []
+            address_parts << current_location.address if current_location.respond_to?(:address) && current_location.address.present?
+            address_parts << current_location.street if current_location.respond_to?(:street) && current_location.street.present?
+            csv << ['Address:', address_parts.join(', ')] if address_parts.any?
+            
+            # Build city/state/zip line
+            location_parts = []
+            location_parts << current_location.city if current_location.respond_to?(:city) && current_location.city.present?
+            location_parts << current_location.state if current_location.respond_to?(:state) && current_location.state.present?
+            location_parts << current_location.zip_code if current_location.respond_to?(:zip_code) && current_location.zip_code.present?
+            csv << ['City/State/Zip:', location_parts.join(', ')] if location_parts.any?
+            
+            csv << ['Phone:', current_location.phone] if current_location.phone.present?
+            csv << [] # Blank row separator
+          end
+          
+          # Column headers
+          csv << [
+            'SKU',
+            'Name',
+            'Description',
+            'Category',
+            'Manufacturer',
+            'Manufacturer Part #',
+            'Barcode',
+            'UOM',
+            'Default Cost',
+            'List Price',
+            'Sale Price',
+            'On Hand',
+            'Available',
+            'Reserved',
+            'Inventory Value',
+            'Active',
+            'Created At'
+          ]
+
+          parts.each do |part|
+            if current_location
+              on_hand = part.on_hand_at(current_location.id)
+              available = part.available_at(current_location.id)
+              reserved = part.reserved_at(current_location.id)
+              cost = part.average_cost || part.default_cost || 0
+              value = on_hand * cost
+            else
+              on_hand = part.total_on_hand
+              available = part.total_available
+              reserved = part.total_reserved
+              value = part.inventory_value
+            end
+
+            csv << [
+              part.sku,
+              part.name,
+              part.description,
+              part.category&.name,
+              part.manufacturer_name,
+              part.manufacturer_part_no,
+              part.barcode,
+              part.uom,
+              part.default_cost,
+              part.list_price,
+              part.sale_price,
+              on_hand,
+              available,
+              reserved,
+              value,
+              part.active ? 'Yes' : 'No',
+              part.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            ]
+          end
+        end
+      end
+
+      def generate_all_locations_csv(parts)
+        CSV.generate(headers: true) do |csv|
+          csv << [
+            'SKU',
+            'Name',
+            'Description',
+            'Category',
+            'Manufacturer',
+            'Manufacturer Part #',
+            'Barcode',
+            'UOM',
+            'Default Cost',
+            'List Price',
+            'Sale Price',
+            'Location',
+            'Location Code',
+            'On Hand',
+            'Available',
+            'Reserved',
+            'Location Value',
+            'Total On Hand (All Locations)',
+            'Total Available (All Locations)',
+            'Total Value (All Locations)',
+            'Active',
+            'Created At'
+          ]
+
+          parts.each do |part|
+            # If part has stock balances, create a row for each location
+            if part.stock_balances.any?
+              part.stock_balances.each do |balance|
+                cost = part.average_cost || part.default_cost || 0
+                location_value = balance.on_hand * cost
+
+                csv << [
+                  part.sku,
+                  part.name,
+                  part.description,
+                  part.category&.name,
+                  part.manufacturer_name,
+                  part.manufacturer_part_no,
+                  part.barcode,
+                  part.uom,
+                  part.default_cost,
+                  part.list_price,
+                  part.sale_price,
+                  balance.location.name,
+                  balance.location.code,
+                  balance.on_hand,
+                  balance.available,
+                  balance.reserved,
+                  location_value,
+                  part.total_on_hand,
+                  part.total_available,
+                  part.inventory_value,
+                  part.active ? 'Yes' : 'No',
+                  part.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                ]
+              end
+            else
+              # Part has no stock anywhere - single row with zeros
+              csv << [
+                part.sku,
+                part.name,
+                part.description,
+                part.category&.name,
+                part.manufacturer_name,
+                part.manufacturer_part_no,
+                part.barcode,
+                part.uom,
+                part.default_cost,
+                part.list_price,
+                part.sale_price,
+                'No Stock',
+                '',
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                part.active ? 'Yes' : 'No',
+                part.created_at.strftime('%Y-%m-%d %H:%M:%S')
+              ]
+            end
+          end
+        end
       end
 
       def part_params
