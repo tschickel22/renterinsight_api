@@ -17,7 +17,7 @@ class Vehicle < ApplicationRecord
 
   # Vehicle types
   TYPES = %w[rv manufactured_home].freeze
-  STATUSES = %w[available reserved sold pending service].freeze
+  STATUSES = %w[available reserved sold pending service available_to_order].freeze
   CONDITIONS = %w[new used].freeze
   
   # RV Classes for RVT.com syndication
@@ -69,6 +69,8 @@ class Vehicle < ApplicationRecord
   scope :reserved, -> { active.where(status: 'reserved') }
   scope :sold, -> { active.where(status: 'sold') }
   scope :pending, -> { active.where(status: 'pending') }
+  scope :available_to_order, -> { active.where(status: 'available_to_order') }
+  scope :in_inventory, -> { active.where.not(status: 'available_to_order') }  # Exclude catalog items from inventory counts
   scope :by_type, ->(type) { where(listing_type: type) }
   scope :by_status, ->(status) { where(status: status) }
   scope :by_year, ->(year) { where(year: year) }
