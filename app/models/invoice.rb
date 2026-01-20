@@ -22,6 +22,7 @@ class Invoice < ApplicationRecord
   before_validation :set_default_status, on: :create
   before_save :calculate_totals
   after_save :update_status_based_on_payments
+  after_update :mark_inventory_as_used_on_payment, if: -> { saved_change_to_status? && status == 'paid' }
   
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
   validates :invoice_date, presence: true
@@ -39,6 +40,34 @@ class Invoice < ApplicationRecord
   scope :warranty_invoices, -> { where(billing_category: 'warranty') }
   scope :for_service_tickets, -> { where(source_type: 'ServiceTicket') }
   scope :for_warranty_claims, -> { where(source_type: 'WarrantyClaim') }
+  
+  # Record a manual payment for this invoice
+  def record_payment!(amount, payment_type = 'manual', metadata = {})
+    # Create payment record linked to this invoice
+    payment = company.payments.build(
+      payable_type: 'Invoice',      # CRITICAL: Links payment to invoice
+      payable_id: id,                # CRITICAL: Invoice ID
+      payer_type: 'Contact',
+      payer_id: contact_id,
+      amount: amount,
+      payment_type: 'one_time',      # FIXED: Use valid payment_type instead of 'manual'
+      payment_date: Date.current,    # FIXED: Use payment_date (not payment_at)
+      status: 'completed',           # Manual payments are immediately completed
+      gateway_name: payment_type,    # Keep 'manual' as gateway_name
+      location_id: location_id,
+      metadata: metadata.merge(recorded_by: Current.user&.id)  # FIXED: Use Current.user&.id instead of Current.user_id
+    )
+    
+    payment.save!
+    
+    # Trigger status update (which will call mark_inventory_as_used if status becomes 'paid')
+    update_status_based_on_payments
+    
+    true
+  rescue => e
+    Rails.logger.error "[Invoice] Failed to record payment: #{e.message}"
+    false
+  end
   
   # Status methods
   def draft?
@@ -112,29 +141,7 @@ class Invoice < ApplicationRecord
     update(viewed_at: Time.current, status: 'viewed') if status == 'sent'
   end
   
-  # Record payment
-  def record_payment!(amount, gateway_name, payment_data = {})
-    payment = Payment.create!(
-      company: company,
-      location: location,
-      payer_type: contact_id.present? ? 'Contact' : nil,
-      payer_id: contact_id,
-      payable: self,
-      amount: amount,
-      gateway_name: gateway_name,
-      payment_type: 'one_time',
-      status: 'completed',
-      payment_date: Time.current,
-      external_id: payment_data[:transaction_id],
-      notes: payment_data[:notes]
-    )
-    
-    # Auto-deduct inventory when invoice becomes paid
-    reload # Refresh status
-    mark_inventory_as_used!(payment_data[:user]) if paid?
-    
-    payment
-  end
+  # REMOVED: Old broken record_payment! method - replaced with new version at line 44 that properly sets payable_type/payable_id
   
   # Auto-deduct inventory when invoice is marked as paid
   def mark_inventory_as_used!(user)
@@ -212,31 +219,49 @@ class Invoice < ApplicationRecord
     total_paid = payments.where(status: 'completed').sum(:amount)
     calculated_amount_due = total - total_paid
     
-    if total_paid >= total && total > 0
-      update_columns(
-        status: 'paid',
-        paid_at: (paid_at || Time.current),
-        amount_paid: total_paid,
-        amount_due: 0
-      )
+    # Determine new status
+    new_status = if total_paid >= total && total > 0
+      'paid'
     elsif total_paid > 0 && total_paid < total
-      update_columns(
-        status: 'partial',
-        amount_paid: total_paid,
-        amount_due: calculated_amount_due
-      )
+      'partial'
     elsif overdue?
-      update_columns(
-        status: 'overdue',
+      'overdue'
+    else
+      status # Keep current status if no payment logic applies
+    end
+    
+    # Only update if status would change (to avoid infinite loops)
+    if new_status != status
+      # Use update! instead of update_columns to trigger callbacks
+      # This will trigger mark_inventory_as_used_on_payment when status becomes 'paid'
+      update!(
+        status: new_status,
+        paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
         amount_paid: total_paid,
-        amount_due: calculated_amount_due
+        amount_due: new_status == 'paid' ? 0 : calculated_amount_due
       )
     else
-      # For other statuses, just update the amounts
+      # Just update amounts without changing status
       update_columns(
         amount_paid: total_paid,
         amount_due: calculated_amount_due
       )
     end
+  end
+  
+  def mark_inventory_as_used_on_payment
+    # Find the user who recorded the payment
+    last_payment = payments.where(status: 'completed').order(created_at: :desc).first
+    
+    # Try to get user from metadata first (manual payments store this)
+    user_id = last_payment&.metadata&.dig('recorded_by') if last_payment&.metadata.is_a?(Hash)
+    user = User.find_by(id: user_id) if user_id
+    
+    # Fallback to current user or first user as system user
+    user ||= Current.user if defined?(Current.user)
+    user ||= User.first # Fallback to any user
+    
+    Rails.logger.info "[Invoice] Invoice #{id} marked as paid, deducting inventory (user: #{user&.id || 'nil'})"
+    mark_inventory_as_used!(user) if user
   end
 end

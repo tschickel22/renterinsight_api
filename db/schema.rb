@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_19_234600) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1204,18 +1204,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_19_234600) do
     t.bigint "invoice_item_id", null: false
     t.string "itemable_type", null: false
     t.integer "itemable_id", null: false
-    t.integer "quantity_used", default: 1, null: false
-    t.datetime "marked_used_at"
+    t.decimal "quantity_used", precision: 10, scale: 2, default: "1.0", null: false
+    t.datetime "marked_at"
     t.bigint "marked_by_id"
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "marked", default: false, null: false
     t.index ["company_id"], name: "index_invoice_inventory_usages_on_company_id"
     t.index ["invoice_id"], name: "index_invoice_inventory_usages_on_invoice_id"
+    t.index ["invoice_item_id", "itemable_type", "itemable_id"], name: "index_invoice_inv_usages_on_item_and_itemable", unique: true
     t.index ["invoice_item_id"], name: "index_invoice_inventory_usages_on_invoice_item_id"
     t.index ["itemable_type", "itemable_id"], name: "idx_on_itemable_type_itemable_id_3830e51cc8"
+    t.index ["marked_at"], name: "index_invoice_inventory_usages_on_marked_at"
     t.index ["marked_by_id"], name: "index_invoice_inventory_usages_on_marked_by_id"
-    t.index ["marked_used_at"], name: "index_invoice_inventory_usages_on_marked_used_at"
   end
 
   create_table "invoice_items", force: :cascade do |t|
