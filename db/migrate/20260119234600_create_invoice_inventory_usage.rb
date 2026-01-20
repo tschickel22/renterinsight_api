@@ -9,8 +9,9 @@ class CreateInvoiceInventoryUsage < ActiveRecord::Migration[8.0]
       t.string :itemable_type, null: false
       t.integer :itemable_id, null: false
       
-      t.integer :quantity_used, null: false, default: 1
-      t.datetime :marked_used_at
+      t.decimal :quantity_used, precision: 10, scale: 2, null: false, default: 1.0
+      t.boolean :marked, default: false, null: false
+      t.datetime :marked_at
       t.references :marked_by, foreign_key: { to_table: :users }
       
       t.boolean :is_deleted, default: false
@@ -18,6 +19,8 @@ class CreateInvoiceInventoryUsage < ActiveRecord::Migration[8.0]
     end
     
     add_index :invoice_inventory_usages, [:itemable_type, :itemable_id]
-    add_index :invoice_inventory_usages, :marked_used_at
+    add_index :invoice_inventory_usages, :marked_at
+    add_index :invoice_inventory_usages, [:invoice_item_id, :itemable_type, :itemable_id], 
+              name: 'index_invoice_inv_usages_on_item_and_itemable', unique: true
   end
 end
