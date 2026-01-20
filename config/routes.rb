@@ -602,6 +602,7 @@ Rails.application.routes.draw do
         end
         collection do
           get :stats
+          get :export  # Export parts to CSV
           get :autocomplete  # Autocomplete suggestions
           get :find_by_identifier  # Get full part details by SKU/Barcode
           get :manufacturer_names  # List all manufacturer names with counts
