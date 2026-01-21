@@ -90,6 +90,8 @@ Rails.application.routes.draw do
         patch 'rbac', action: :update_rbac
         get 'loan', action: :show_loan
         patch 'loan', action: :update_loan
+        get 'portal_modules', action: :show_portal_modules
+        patch 'portal_modules', action: :update_portal_modules
       end
       
       # ==================== NOTES ====================
@@ -1434,8 +1436,9 @@ Rails.application.routes.draw do
       patch 'preferences', to: 'preferences#update'
       get 'preferences/history', to: 'preferences#history'
       
-      # Portal Settings (Branding)
+      # Portal Settings (Branding & Modules)
       get 'settings/branding', to: 'settings#branding'
+      get 'settings/modules', to: 'settings#modules'
       
       # Phase 4F - Loans with Payment Processing
       resources :loans, only: [:index, :show] do
