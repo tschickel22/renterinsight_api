@@ -7,7 +7,7 @@ module Api
     class PortalUsersController < ApplicationController
       include RbacAuthorization
       rbac_resource :portal,
-        read_actions: [:index, :show, :stats],
+        read_actions: [:index, :show, :stats, :generate_proxy_token],
         create_actions: [:create, :invite],
         update_actions: [:update, :password_reset],
         delete_actions: [:destroy]
@@ -309,6 +309,62 @@ module Api
           inactive: portal_users.where(status: 'Inactive').count,
           pending: portal_users.where(status: 'Pending').count,
           by_role: portal_users.group(:role).count
+        }
+      end
+
+      # POST /api/v1/portal_users/:id/generate_proxy_token
+      # Generate a temporary token for admin to view portal as this client
+      def generate_proxy_token
+        # Find the portal user within the current company
+        portal_user = BuyerPortalAccess.find_by(id: params[:id], company_id: current_company_id)
+        
+        unless portal_user
+          return render json: { error: 'Portal user not found' }, status: :not_found
+        end
+        
+        unless portal_user.status == 'Active' || portal_user.portal_enabled
+          return render json: { error: 'Portal user is not active' }, status: :unprocessable_entity
+        end
+        
+        # Build admin display name from first_name/last_name or fallback to email
+        admin_display_name = [current_user.first_name, current_user.last_name].compact.join(' ').presence || current_user.email
+        
+        # Generate proxy token with short expiry (1 hour)
+        # Include proxy flag and admin info for potential "viewing as" banner
+        proxy_token = JsonWebToken.encode(
+          {
+            buyer_portal_access_id: portal_user.id,
+            proxy: true,
+            proxy_admin_id: current_user.id,
+            proxy_admin_name: admin_display_name
+          },
+          1.hour.from_now
+        )
+        
+        # Build the buyer profile for immediate use
+        contact = portal_user.contact
+        buyer_data = {
+          id: portal_user.id,
+          account_id: portal_user.buyer_id || 1,
+          first_name: contact&.first_name || '',
+          last_name: contact&.last_name || '',
+          email: portal_user.email,
+          phone: contact&.phone,
+          status: portal_user.portal_enabled ? 'active' : 'inactive',
+          user_type: 'client',
+          role: 'client',
+          created_at: portal_user.created_at&.iso8601,
+          updated_at: portal_user.updated_at&.iso8601,
+          is_proxy: true,
+          proxy_admin_name: admin_display_name
+        }
+        
+        Rails.logger.info("[PROXY] Admin #{current_user.id} (#{current_user.email}) generated proxy token for portal user #{portal_user.id}")
+        
+        render json: {
+          token: proxy_token,
+          user: buyer_data,
+          expires_at: 1.hour.from_now.iso8601
         }
       end
 

@@ -568,6 +568,9 @@ Rails.application.routes.draw do
       
       # ==================== PORTAL USERS ====================
       resources :portal_users, path: 'portal_users' do
+        member do
+          post :generate_proxy_token
+        end
         collection do
           get :stats
           post :password_reset

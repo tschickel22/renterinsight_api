@@ -20,29 +20,34 @@ class Manufacturer < ApplicationRecord
   validates :contact_phone, length: { maximum: 20 }, allow_blank: true
   
   # Company-scoped manufacturers must have unique name/code
-  validates :code, uniqueness: { scope: :company_id, conditions: -> { where(is_deleted: false) }, allow_nil: true }, if: :company_id?
-  validates :name, uniqueness: { scope: :company_id, conditions: -> { where(is_deleted: false) } }, if: :company_id?
+  validates :code, uniqueness: { scope: :company_id, allow_nil: true }, if: :company_id?
+  validates :name, uniqueness: { scope: :company_id }, if: :company_id?
   
   # Scopes
-  scope :active, -> { where(active: true).where('is_deleted = ? OR is_deleted IS NULL', false) }
-  scope :for_company, ->(company_id) { where(company_id: company_id).where('is_deleted = ? OR is_deleted IS NULL', false) }
-  scope :global_warranty, -> { where(company_id: nil).where('is_deleted IS NULL OR is_deleted = ?', false) }
+  scope :active, -> { where(active: true) }
+  scope :for_company, ->(company_id) { where(company_id: company_id) }
+  scope :global_warranty, -> { where(company_id: nil) }
   scope :by_name, -> { order(:name) }
+  scope :alphabetical, -> { order(:name) }
   
   # Callbacks
   before_validation :normalize_fields
   
-  # Soft delete
+  # Soft delete (deactivate since we don't have is_deleted column)
   def soft_delete!
     if parts.where('is_deleted = ? OR is_deleted IS NULL', false).exists?
       errors.add(:base, 'Cannot delete manufacturer with associated parts')
       raise ActiveRecord::RecordInvalid, self
     end
-    update!(is_deleted: true, deleted_at: Time.current, active: false)
+    update!(active: false)
   end
   
-  def restore!
-    update!(is_deleted: false, deleted_at: nil)
+  def deactivate!
+    update!(active: false)
+  end
+  
+  def activate!
+    update!(active: true)
   end
   
   # Display helpers
