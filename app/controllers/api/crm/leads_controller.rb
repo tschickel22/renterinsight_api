@@ -42,7 +42,7 @@ module Api
         # Count total before pagination
         total_count = leads.count
         
-        leads = leads.includes(:source).order(created_at: :desc)
+        leads = leads.includes(:source, :owner).order(created_at: :desc)
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -347,19 +347,19 @@ module Api
           if has_all_scope
             # User has company-wide access
             Rails.logger.info "[LeadsController#set_lead] User has leads:read:all - accessing any company lead"
-            @company.leads.find(params[:id])
+            @company.leads.includes(:source, :owner).find(params[:id])
           else
             # User is location-restricted
             location_ids = permission_service.accessible_location_ids
             Rails.logger.info "[LeadsController#set_lead] User has location scope - accessible_location_ids: #{location_ids.inspect}"
             if location_ids.any?
-              @company.leads.where(location_id: location_ids).find(params[:id])
+              @company.leads.includes(:source, :owner).where(location_id: location_ids).find(params[:id])
             else
-              @company.leads.find(params[:id])
+              @company.leads.includes(:source, :owner).find(params[:id])
             end
           end
         else
-          @company.leads.find(params[:id])
+          @company.leads.includes(:source, :owner).find(params[:id])
         end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Lead not found or access denied' }, status: :not_found
@@ -402,6 +402,16 @@ module Api
       end
 
       def lead_json(l)
+        owner_data = if l.owner
+          {
+            id: l.owner.id,
+            name: "#{l.owner.first_name} #{l.owner.last_name}".strip,
+            email: l.owner.email
+          }
+        else
+          nil
+        end
+        
         {
           id:        l.id,
           firstName: l.first_name,
@@ -413,7 +423,7 @@ module Api
           sourceId:  l.source_id,
           source:    (l.source ? { id: l.source.id, name: l.source.name } : nil),
           ownerId:   l.owner_id,
-          owner:     (l.owner ? { id: l.owner.id, name: l.owner.name, email: l.owner.email } : nil),
+          owner:     owner_data,
           isConverted: l.respond_to?(:is_converted) ? l.is_converted : false,
           convertedAt: l.respond_to?(:converted_at) ? l.converted_at : nil,
           convertedToAccountId: l.respond_to?(:converted_account_id) ? l.converted_account_id : nil,

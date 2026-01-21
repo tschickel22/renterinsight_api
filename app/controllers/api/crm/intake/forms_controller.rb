@@ -12,6 +12,25 @@ module Api
           @forms = @company.intake_forms.order(updated_at: :desc)
           render json: @forms.map(&:as_json)
         end
+        
+        # Get available CRM lead fields for mapping
+        def lead_fields
+          fields = [
+            { name: 'first_name', label: 'First Name', type: 'text', required: true, group: 'Basic Info' },
+            { name: 'last_name', label: 'Last Name', type: 'text', required: false, group: 'Basic Info' },
+            { name: 'email', label: 'Email', type: 'email', required: false, group: 'Contact Info' },
+            { name: 'phone', label: 'Phone', type: 'phone', required: false, group: 'Contact Info' },
+            { name: 'company', label: 'Company', type: 'text', required: false, group: 'Basic Info' },
+            { name: 'job_title', label: 'Job Title', type: 'text', required: false, group: 'Basic Info' },
+            { name: 'street', label: 'Street Address', type: 'text', required: false, group: 'Address' },
+            { name: 'city', label: 'City', type: 'text', required: false, group: 'Address' },
+            { name: 'state', label: 'State', type: 'text', required: false, group: 'Address' },
+            { name: 'zip', label: 'ZIP Code', type: 'text', required: false, group: 'Address' },
+            { name: 'notes', label: 'Notes', type: 'textarea', required: false, group: 'Additional Info' }
+          ]
+          
+          render json: { fields: fields }
+        end
 
         def show
           render json: @form.as_json
@@ -114,7 +133,9 @@ module Api
           params.require(:intake_form).permit(
             :name, :description, :source_id, :is_active, :isActive,
             :thank_you_message, :redirect_url, :submit_button_text,
-            fields: [:id, :name, :label, :type, :required, :placeholder, :order, :isActive, options: []]
+            :notified_user_id, :auto_create_lead, :auto_create_activity,
+            field_mappings: {},
+            fields: [:id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField, options: []]
           ).tap do |p|
             # Normalize isActive to is_active for Rails
             if p.key?(:isActive)
@@ -123,6 +144,20 @@ module Api
             
             # Ensure fields is set (will be saved to schema column via model)
             p[:fields] ||= []
+            
+            # Build field_mappings from fields if not provided
+            if p[:field_mappings].blank? && p[:fields].present?
+              mappings = {}
+              p[:fields].each do |field|
+                if field[:leadField].present?
+                  mappings[field[:name]] = field[:leadField]
+                end
+              end
+              p[:field_mappings] = mappings
+            end
+            
+            # CRITICAL: Permit the constructed field_mappings hash
+            p[:field_mappings] = p[:field_mappings].permit! if p[:field_mappings].is_a?(ActionController::Parameters)
             
             # Log for debugging
             Rails.logger.info "Form params: #{p.inspect}"

@@ -969,11 +969,16 @@ module Api
           :awning, :generator, :utilities, :terms,
           :repo, :refrigerator, :microwave, :oven, :dishwasher,
           :thermopane, :gutters, :shutters, :skylight, :pantry,
-          :basement
+          :basement,
+          # CRITICAL: Location fields must be in direct_fields to be copied to transformed
+          :location_id, :use_location_address,
+          # CRITICAL: Allow snake_case location fields from frontend (MH form sends these directly)
+          :location_city, :location_state, :location_zip
         ]
         
         direct_fields.each do |field|
-          if raw_params[field].present?
+          # Use key? check instead of present? to handle boolean false and 0 values
+          if raw_params.key?(field) && !raw_params[field].nil?
             transformed[field] = raw_params[field]
           end
         end
@@ -1024,8 +1029,9 @@ module Api
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
           :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
-          # Location ID
+          # Location ID and address override
           :location_id,
+          :use_location_address,
           # Arrays
           features: [], images: [], videos: [], appliances: []
         )
@@ -1073,6 +1079,9 @@ module Api
             state: vehicle.location_state,
             zip: vehicle.location_zip
           },
+          # Location fields for form
+          locationId: vehicle.location_id,
+          useLocationAddress: vehicle.use_location_address || false,
           displayName: vehicle.display_name,
           identifier: vehicle.identifier,
           dateInStock: vehicle.date_in_stock,
@@ -1118,6 +1127,12 @@ module Api
             numberOfDoors: vehicle.number_of_doors,
             seatingCapacity: vehicle.seating_capacity,
             availability: vehicle.status,
+            # CRITICAL: Address fields at top level for form compatibility (same as MH)
+            address1: vehicle.address1,
+            address2: vehicle.address2,
+            city: vehicle.location_city,
+            state: vehicle.location_state,
+            zipCode: vehicle.location_zip,
             # RVT.com Syndication Fields - NEW
             rvClass: vehicle.rv_class,
             engineMake: vehicle.engine_make,

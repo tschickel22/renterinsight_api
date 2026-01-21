@@ -1114,7 +1114,10 @@ Rails.application.routes.draw do
       # ==================== INTAKE ====================
       namespace :intake do
         resources :forms do
-          collection { post :bulk }
+          collection do
+            post :bulk
+            get :lead_fields
+          end
         end
 
         resources :submissions, only: %i[index create] do
