@@ -49,7 +49,11 @@ class Resource < ApplicationRecord
       # Warranty Resources
       { key: 'warranty_claims', name: 'Warranty Claims', category: 'operations', description: 'Manage warranty claims and submissions to manufacturers' },
       { key: 'manufacturer_ar', name: 'Manufacturer AR', category: 'operations', description: 'Track and manage manufacturer accounts receivable' },
-      { key: 'manufacturers', name: 'Manufacturers', category: 'operations', description: 'View and manage manufacturer information' }
+      { key: 'manufacturers', name: 'Manufacturers', category: 'operations', description: 'View and manage manufacturer information' },
+      # Dashboard Resources
+      { key: 'dashboard', name: 'Dashboard', category: 'core', description: 'View and customize dashboard' },
+      { key: 'dashboard_company_wide', name: 'Company-wide Dashboard', category: 'core', description: 'View company-wide metrics and analytics' },
+      { key: 'dashboard_finance', name: 'Finance Dashboard', category: 'core', description: 'View financial dashboards and metrics' }
     ].each do |resource_data|
       find_or_create_by!(key: resource_data[:key]) do |resource|
         resource.name = resource_data[:name]
