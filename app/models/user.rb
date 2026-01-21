@@ -139,18 +139,30 @@ class User < ApplicationRecord
     @rbac_permissions_cache ||= {}
     return @rbac_permissions_cache[company_id] if @rbac_permissions_cache.key?(company_id)
     
+    # DEBUG: Log all role assignments for this user to diagnose permission issues
+    all_assignments = user_role_assignments.includes(:role)
+    Rails.logger.info "🔍 [RBAC DEBUG] User #{id} (#{email}) has #{all_assignments.count} total role assignments"
+    all_assignments.each do |a|
+      Rails.logger.info "  - Assignment ID: #{a.id}, Role: #{a.role&.name} (#{a.role&.key}), company_id: #{a.company_id.inspect}, tier: #{a.tier}, expires_at: #{a.expires_at.inspect}"
+    end
+    
     # Single optimized query with all eager loading
+    # BUG FIX: Also include assignments where company_id matches OR company_id is NULL (legacy)
     role_assignments = user_role_assignments
                        .joins(:role)
                        .includes(role: { role_permissions: [:resource, :action, :scope] })
-                       .where(company_id: company_id)
+                       .where('user_role_assignments.company_id = ? OR user_role_assignments.company_id IS NULL', company_id)
                        .active
+    
+    Rails.logger.info "🔍 [RBAC DEBUG] Found #{role_assignments.count} active role assignments for company #{company_id}"
     
     permissions = []
     
     role_assignments.each do |assignment|
       role = assignment.role
       next unless role&.active
+      
+      Rails.logger.info "🔍 [RBAC DEBUG] Processing role: #{role.name} (#{role.key}) with #{role.role_permissions.count} permissions"
       
       # Use .select on loaded association to avoid new queries
       role.role_permissions.select(&:granted).each do |permission|
@@ -162,6 +174,8 @@ class User < ApplicationRecord
         }
       end
     end
+    
+    Rails.logger.info "🔍 [RBAC DEBUG] Final permission count: #{permissions.count}"
     
     @rbac_permissions_cache[company_id] = permissions
   end
