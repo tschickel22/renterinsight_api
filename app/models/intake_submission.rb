@@ -26,51 +26,114 @@ class IntakeSubmission < ApplicationRecord
     return if lead_created? || lead.present?
     
     form = intake_form
+    return unless form.auto_create_lead  # Skip if auto-create is disabled
+    
     submission_data = data || {}
     
-    # Map common field variations
-    first_name = extract_field(submission_data, ['firstName', 'first_name', 'firstname', 'fname', 'name'])
-    last_name = extract_field(submission_data, ['lastName', 'last_name', 'lastname', 'lname'])
-    email = extract_field(submission_data, ['email', 'emailAddress', 'email_address', 'contact_email'])
-    phone = extract_field(submission_data, ['phone', 'phoneNumber', 'phone_number', 'telephone', 'mobile'])
+    # Use explicit field mappings if available
+    field_mappings = form.field_mappings || {}
     
-    # If we only have a single 'name' field, try to split it
-    if first_name && !last_name && first_name.include?(' ')
-      parts = first_name.split(' ', 2)
-      first_name = parts[0]
-      last_name = parts[1]
+    # Get or create default "Web Form" source if form doesn't have one
+    source_id = form.source_id
+    if source_id.nil?
+      default_source = Source.find_or_create_by(
+        company_id: form.company_id,
+        name: 'Web Form'
+      ) do |s|
+        s.is_active = true
+        s.description = 'Leads captured via intake forms'
+      end
+      source_id = default_source.id
+      Rails.logger.info "[IntakeSubmission] Using default Web Form source: #{source_id}"
     end
     
-    # Build notes from all form data
-    notes = build_notes(submission_data, form)
-    
-    # Skip if no contact info
-    return unless email.present? || phone.present? || first_name.present?
-    
-    lead_data = {
-      company_id: form.company_id,
-      source_id: form.source_id,
-      first_name: first_name,
-      last_name: last_name,
-      email: email,
-      phone: phone,
-      notes: notes,
+    lead_data = { 
+      company_id: form.company_id, 
+      source_id: source_id, 
       status: 'new'
     }
     
+    # Only set owner_id if notified_user exists
+    if form.notified_user_id.present?
+      lead_data[:owner_id] = form.notified_user_id
+    end
+    
+    unmapped_data = {}
+    
+    # Map fields using explicit mappings
+    form.fields.each do |field|
+      field_name = field['name'] || field[:name]
+      lead_field = field['leadField'] || field[:leadField]
+      value = submission_data[field_name] || submission_data[field_name.to_sym]
+      
+      if lead_field.present? && value.present?
+        lead_data[lead_field.to_sym] = value
+      elsif value.present?
+        unmapped_data[field_name] = value
+      end
+    end
+    
+    # Skip if no contact info
+    return unless lead_data[:email].present? || lead_data[:phone].present? || lead_data[:first_name].present?
+    
+    Rails.logger.info "[IntakeSubmission] Creating lead with data: #{lead_data.inspect}"
     new_lead = Lead.create!(lead_data)
+    Rails.logger.info "[IntakeSubmission] Lead created successfully: #{new_lead.id}"
+    
     update_columns(lead_id: new_lead.id, lead_created: true)
     
     Rails.logger.info "Created lead #{new_lead.id} from intake submission #{id}"
     
-    # Broadcast notification to all users in the company
-    broadcast_new_lead_notification(new_lead, form)
+    # Create note with unmapped fields (using Note model, not lead.notes column)
+    if unmapped_data.present?
+      begin
+        note_content = build_notes(unmapped_data, form)
+        Note.create!(
+          entity_type: 'lead',
+          entity_id: new_lead.id,
+          content: note_content,
+          created_by_name: 'System (Intake Form)'
+        )
+        Rails.logger.info "Created note for lead #{new_lead.id} with unmapped form data"
+      rescue => note_error
+        Rails.logger.error "Failed to create note for lead #{new_lead.id}: #{note_error.message}"
+        # Don't fail the entire lead creation if note creation fails
+      end
+    end
+    
+    # Create activity and send notification if enabled
+    create_activity_and_notify(new_lead, form) if form.auto_create_activity
     
     new_lead
   rescue => e
     Rails.logger.error "Failed to create lead from submission #{id}: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
     nil
+  end
+  
+  def create_activity_and_notify(lead, form)
+    return unless form.notified_user_id.present?
+    
+    # Create activity for the notified user
+    activity = LeadActivity.create!(
+      lead_id: lead.id,
+      user_id: form.notified_user_id,
+      activity_type: 'reminder',
+      subject: "New Lead from Intake Form: #{lead.first_name} #{lead.last_name}",
+      description: "Lead captured via intake form '#{form.name}'. Contact: #{lead.email || lead.phone || 'N/A'}",
+      priority: 'high',
+      status: 'pending',
+      reminder_time: Time.current,  # Fixed: use reminder_time instead of due_at
+      reminder_sent: false
+    )
+    
+    # Send immediate popup notification
+    ActivityReminderService.send_popup_notification(activity)
+    
+    Rails.logger.info "Created activity #{activity.id} and sent notification for lead #{lead.id}"
+  rescue => e
+    Rails.logger.error "Failed to create activity/notification for lead #{lead.id}: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
   end
   
   private

@@ -1099,7 +1099,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
     t.string "submit_button_text", default: "Submit"
     t.integer "submission_count", default: 0
     t.bigint "source_id"
+    t.bigint "notified_user_id"
+    t.json "field_mappings", default: {}
+    t.boolean "auto_create_lead", default: true
+    t.boolean "auto_create_activity", default: true
     t.index ["company_id"], name: "index_intake_forms_on_company_id"
+    t.index ["notified_user_id"], name: "index_intake_forms_on_notified_user_id"
     t.index ["public_id"], name: "index_intake_forms_on_public_id", unique: true
     t.index ["source_id"], name: "index_intake_forms_on_source_id"
   end
@@ -3159,6 +3164,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
     t.decimal "floor_plan_rate", precision: 5, scale: 3, comment: "Monthly floor plan interest rate (if financed)"
     t.decimal "target_gross", precision: 10, scale: 2, comment: "Target gross profit for this unit"
     t.decimal "minimum_price", precision: 10, scale: 2, comment: "Minimum acceptable selling price"
+    t.boolean "use_location_address", default: false
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -3181,6 +3187,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["total_cost"], name: "index_vehicles_on_total_cost"
+    t.index ["use_location_address"], name: "index_vehicles_on_use_location_address"
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 
@@ -3344,6 +3351,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
   add_foreign_key "deals", "users", column: "secondary_salesperson_id"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
+  add_foreign_key "intake_forms", "users", column: "notified_user_id"
   add_foreign_key "intake_submissions", "leads"
   add_foreign_key "inventory_transactions", "bins"
   add_foreign_key "inventory_transactions", "companies"
