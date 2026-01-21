@@ -60,21 +60,75 @@ class IntakeSubmission < ApplicationRecord
     
     unmapped_data = {}
     
+    Rails.logger.info "[IntakeSubmission] Form fields: #{form.fields.inspect}"
+    Rails.logger.info "[IntakeSubmission] Submission data: #{submission_data.inspect}"
+    
     # Map fields using explicit mappings
     form.fields.each do |field|
       field_name = field['name'] || field[:name]
       lead_field = field['leadField'] || field[:leadField]
       value = submission_data[field_name] || submission_data[field_name.to_sym]
       
+      Rails.logger.info "[IntakeSubmission] Processing field: #{field_name}, leadField: #{lead_field}, value: #{value}"
+      
       if lead_field.present? && value.present?
         lead_data[lead_field.to_sym] = value
+        Rails.logger.info "[IntakeSubmission] Mapped #{field_name} -> #{lead_field} = #{value}"
       elsif value.present?
         unmapped_data[field_name] = value
       end
     end
     
+    # Smart field detection: If no explicit mappings found contact info,
+    # try to auto-detect from common field naming patterns
+    if lead_data[:email].blank? && lead_data[:phone].blank? && lead_data[:first_name].blank?
+      Rails.logger.info "[IntakeSubmission] No contact info from mappings, trying smart detection..."
+      
+      submission_data.each do |key, value|
+        next if value.blank?
+        key_lower = key.to_s.downcase
+        
+        # Email detection
+        if lead_data[:email].blank? && (key_lower.include?('email') || value.to_s.match?(/\A[\w+\-.]+@[a-z\d\-.]+\.[a-z]+\z/i))
+          lead_data[:email] = value
+          Rails.logger.info "[IntakeSubmission] Auto-detected email: #{value}"
+        end
+        
+        # Phone detection
+        if lead_data[:phone].blank? && (key_lower.include?('phone') || key_lower.include?('mobile') || key_lower.include?('cell'))
+          lead_data[:phone] = value
+          Rails.logger.info "[IntakeSubmission] Auto-detected phone: #{value}"
+        end
+        
+        # First name detection
+        if lead_data[:first_name].blank? && (key_lower == 'first_name' || key_lower == 'firstname' || key_lower == 'first')
+          lead_data[:first_name] = value
+          Rails.logger.info "[IntakeSubmission] Auto-detected first_name: #{value}"
+        end
+        
+        # Last name detection
+        if lead_data[:last_name].blank? && (key_lower == 'last_name' || key_lower == 'lastname' || key_lower == 'last')
+          lead_data[:last_name] = value
+          Rails.logger.info "[IntakeSubmission] Auto-detected last_name: #{value}"
+        end
+        
+        # Full name detection (split into first/last)
+        if lead_data[:first_name].blank? && (key_lower == 'name' || key_lower == 'full_name' || key_lower == 'fullname')
+          parts = value.to_s.split(' ', 2)
+          lead_data[:first_name] = parts[0] if parts[0].present?
+          lead_data[:last_name] = parts[1] if parts[1].present?
+          Rails.logger.info "[IntakeSubmission] Auto-detected name: first=#{parts[0]}, last=#{parts[1]}"
+        end
+      end
+    end
+    
+    Rails.logger.info "[IntakeSubmission] Final lead_data before validation: #{lead_data.inspect}"
+    
     # Skip if no contact info
-    return unless lead_data[:email].present? || lead_data[:phone].present? || lead_data[:first_name].present?
+    unless lead_data[:email].present? || lead_data[:phone].present? || lead_data[:first_name].present?
+      Rails.logger.warn "[IntakeSubmission] Skipping lead creation - no contact info found"
+      return
+    end
     
     Rails.logger.info "[IntakeSubmission] Creating lead with data: #{lead_data.inspect}"
     new_lead = Lead.create!(lead_data)

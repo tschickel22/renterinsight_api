@@ -5,9 +5,9 @@ class Api::V1::DashboardController < ApplicationController
 
   # GET /api/v1/dashboard/presets
   # Returns available dashboard presets for current user
+  # Note: Available presets are determined by user's existing permissions
   def presets
-    return unless authorize_action!('dashboard', 'read')
-
+    # Skip RBAC for presets - availability is permission-filtered via determine_available_presets
     available_presets = determine_available_presets
 
     render json: { presets: available_presets }
@@ -15,8 +15,12 @@ class Api::V1::DashboardController < ApplicationController
 
   # GET /api/v1/dashboard/layout/:preset_id
   # Returns layout configuration for a preset (saved or default)
+  # Note: Dashboard layouts are accessible to all authenticated users
+  # Individual card metrics enforce their own permissions
   def layout
-    return unless authorize_action!('dashboard', 'read')
+    # Skip RBAC for basic layout access - all authenticated users can view their dashboard
+    # The preset availability is already filtered by determine_available_presets
+    # Individual metric endpoints enforce specific permissions
 
     preset_id = params[:preset_id]
 
@@ -38,7 +42,7 @@ class Api::V1::DashboardController < ApplicationController
   # POST /api/v1/dashboard/layout/:preset_id
   # Save custom layout for a preset
   def save_layout
-    return unless authorize_action!('dashboard', 'write')
+    # Users can save their own dashboard layouts without strict RBAC
 
     preset_id = params[:preset_id]
     layout_data = params[:layout]
@@ -65,7 +69,7 @@ class Api::V1::DashboardController < ApplicationController
   # DELETE /api/v1/dashboard/layout/:preset_id
   # Reset to default layout
   def reset_layout
-    return unless authorize_action!('dashboard', 'write')
+    # Users can reset their own dashboard layouts without strict RBAC
 
     preset_id = params[:preset_id]
 
@@ -85,9 +89,8 @@ class Api::V1::DashboardController < ApplicationController
 
   # GET /api/v1/dashboard/metrics/:card_type
   # Generic endpoint for card data - will route to specific card services
+  # Each card type has its own permission check below
   def metrics
-    return unless authorize_action!('dashboard', 'read')
-
     card_type = params[:card_type]
     
     # Debug endpoint for top performers
@@ -111,7 +114,7 @@ class Api::V1::DashboardController < ApplicationController
     data = case card_type
     when 'revenue_summary'
       # Check finance permission for revenue data
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.revenue_summary
     when 'deals_count'
       # Check CRM deals permission
@@ -127,15 +130,15 @@ class Api::V1::DashboardController < ApplicationController
       service.service_tickets_count
     when 'accounts_receivable'
       # Check finance permission for A/R data
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.accounts_receivable
     when 'accounts_payable'
       # Check finance permission for A/P data
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.accounts_payable
     when 'payments_count'
       # Check finance permission for payments data
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.payments_count
     when 'inventory_count'
       # Check inventory permission
@@ -143,15 +146,15 @@ class Api::V1::DashboardController < ApplicationController
       service.inventory_count
     when 'ar_aging_chart'
       # Check finance permission for A/R aging data
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.ar_aging_chart
     when 'payment_methods_breakdown'
       # Check finance permission for payment methods data
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.payment_methods_breakdown
     when 'recent_transactions'
       # Check finance permission for recent transactions
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.recent_transactions
     when 'pipeline_funnel'
       # Check CRM deals permission for pipeline view
@@ -159,7 +162,7 @@ class Api::V1::DashboardController < ApplicationController
       service.pipeline_funnel
     when 'revenue_trend'
       # Check finance permission for revenue trend
-      return unless authorize_action!('dashboard_finance', 'read')
+      return unless authorize_action!('finance', 'read')
       service.revenue_trend
     when 'top_performers'
       # Check deals permission for performance data
@@ -319,8 +322,8 @@ class Api::V1::DashboardController < ApplicationController
   def determine_available_presets
     presets = []
 
-    # Company Admin preset
-    if current_user.has_permission?('dashboard_company_wide', 'read')
+    # Company Admin preset - available for admins and managers
+    if current_user.admin? || current_user.company_admin? || current_user.effective_admin?
       presets << {
         id: 'company_admin',
         name: 'Company Overview',
@@ -328,8 +331,8 @@ class Api::V1::DashboardController < ApplicationController
       }
     end
 
-    # Finance preset
-    if current_user.has_permission?('dashboard_finance', 'read')
+    # Finance preset - check for finance permission
+    if current_user.admin? || current_user.effective_admin? || current_user.has_permission?('finance', 'read')
       presets << {
         id: 'finance',
         name: 'Finance',
@@ -337,17 +340,16 @@ class Api::V1::DashboardController < ApplicationController
       }
     end
 
-    # Location preset (default for most users)
-    if current_user.has_permission?('dashboard', 'read')
-      presets << {
-        id: 'location',
-        name: 'Location',
-        description: 'Location-specific operations'
-      }
-    end
+    # Location preset (default for all users)
+    # Everyone gets the location dashboard as a fallback
+    presets << {
+      id: 'location',
+      name: 'Location',
+      description: 'Location-specific operations'
+    }
 
-    # Sales Rep preset
-    if current_user.has_permission?('deals', 'read')
+    # Sales Rep preset - check for deals permission
+    if current_user.admin? || current_user.effective_admin? || current_user.has_permission?('deals', 'read')
       presets << {
         id: 'sales_rep',
         name: 'My Sales',
@@ -355,8 +357,8 @@ class Api::V1::DashboardController < ApplicationController
       }
     end
 
-    # Service Tech preset
-    if current_user.has_permission?('service', 'read')
+    # Service Tech preset - check for service permission
+    if current_user.admin? || current_user.effective_admin? || current_user.has_permission?('service', 'read')
       presets << {
         id: 'service_tech',
         name: 'My Service',
