@@ -198,7 +198,18 @@ class User < ApplicationRecord
   def accessible_locations
     return company.locations if platform_admin? || admin? || company_admin?
     
-    # Direct location assignments only (regions not implemented yet)
+    # Company-tier roles get access to ALL company locations
+    has_company_tier_role = user_role_assignments
+      .where(tier: 'company')
+      .where(company_id: company_id)
+      .active
+      .exists?
+    
+    if has_company_tier_role
+      return company.locations
+    end
+    
+    # Location-tier roles only get their assigned locations
     direct_location_ids = user_role_assignments
       .where(tier: 'location')
       .pluck(:location_id)
