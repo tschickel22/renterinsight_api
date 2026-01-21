@@ -1,174 +1,101 @@
 # frozen_string_literal: true
 
 namespace :rbac do
-  desc "Fix NULL company_id on user_role_assignments by backfilling from user's company"
-  task fix_company_ids: :environment do
-    puts "🔍 Finding user_role_assignments with NULL company_id..."
-    
-    null_assignments = UserRoleAssignment.where(company_id: nil)
-    count = null_assignments.count
-    
-    if count == 0
-      puts "✅ No user_role_assignments with NULL company_id found. All good!"
-      exit
-    end
-    
-    puts "⚠️  Found #{count} assignments with NULL company_id"
-    
-    fixed = 0
-    errors = 0
-    
-    null_assignments.find_each do |assignment|
-      user = assignment.user
-      
-      if user.nil?
-        puts "  ❌ Assignment #{assignment.id}: User not found"
-        errors += 1
-        next
-      end
-      
-      if user.company_id.nil?
-        puts "  ❌ Assignment #{assignment.id}: User #{user.id} (#{user.email}) has no company_id"
-        errors += 1
-        next
-      end
-      
-      puts "  🔄 Fixing assignment #{assignment.id} for user #{user.email}: setting company_id to #{user.company_id}"
-      assignment.update!(company_id: user.company_id)
-      fixed += 1
-    end
-    
-    puts ""
-    puts "=" * 50
-    puts "✅ Fixed: #{fixed}"
-    puts "❌ Errors: #{errors}"
-    puts "=" * 50
-  end
-  
-  desc "Debug RBAC permissions for a user"
-  task :debug_user, [:email] => :environment do |t, args|
-    email = args[:email]
-    
-    if email.blank?
-      puts "Usage: rake rbac:debug_user[user@example.com]"
-      exit 1
-    end
-    
-    user = User.find_by(email: email)
-    
-    if user.nil?
-      puts "❌ User not found: #{email}"
-      exit 1
-    end
-    
-    company = user.company
-    
+  desc "Fix resources: add documents, rename listings to Property Listings & Brochures"
+  task fix_resources: :environment do
     puts "=" * 60
-    puts "User: #{user.email} (ID: #{user.id})"
-    puts "Company: #{company&.name} (ID: #{company&.id})"
-    puts "Legacy Role: #{user.role}"
-    puts "Uses RBAC: #{user.uses_rbac?}"
-    puts "Company Admin: #{user.company_admin?}"
-    puts "Effective Admin: #{user.effective_admin?}"
+    puts "Fixing RBAC Resources"
     puts "=" * 60
-    puts ""
     
-    puts "📋 User Role Assignments:"
-    puts "-" * 60
-    
-    user.user_role_assignments.includes(:role).each do |assignment|
-      status = assignment.active? ? "✅" : "❌"
-      puts "  #{status} Role: #{assignment.role&.name} (#{assignment.role&.key})"
-      puts "     - Assignment ID: #{assignment.id}"
-      puts "     - Company ID: #{assignment.company_id.inspect}"
-      puts "     - Tier: #{assignment.tier}"
-      puts "     - Location ID: #{assignment.location_id.inspect}"
-      puts "     - Expires At: #{assignment.expires_at.inspect}"
-      puts ""
-    end
-    
-    puts "🔐 Permissions via RBAC:"
-    puts "-" * 60
-    
-    if company
-      permissions = user.rbac_permissions_cache(company.id)
-      
-      if permissions.empty?
-        puts "  ⚠️  No permissions found!"
-      else
-        # Group by resource
-        by_resource = permissions.group_by { |p| p[:resource] }
-        by_resource.sort.each do |resource, perms|
-          actions = perms.map { |p| p[:action] }.uniq.sort.join(", ")
-          puts "  #{resource}: #{actions}"
-        end
-      end
+    # 1. Create documents resource if it doesn't exist
+    docs = Resource.find_by(key: 'documents')
+    if docs
+      puts "Documents resource already exists (ID: #{docs.id})"
     else
-      puts "  ⚠️  User has no company!"
-    end
-    
-    puts ""
-    puts "=" * 60
-  end
-  
-  desc "Assign company_admin role to a user"
-  task :make_company_admin, [:email] => :environment do |t, args|
-    email = args[:email]
-    
-    if email.blank?
-      puts "Usage: rake rbac:make_company_admin[user@example.com]"
-      exit 1
-    end
-    
-    user = User.find_by(email: email)
-    
-    if user.nil?
-      puts "❌ User not found: #{email}"
-      exit 1
-    end
-    
-    company = user.company
-    
-    unless company
-      puts "❌ User has no company!"
-      exit 1
-    end
-    
-    role = Role.find_by(key: 'company_admin')
-    
-    unless role
-      puts "❌ company_admin role not found! Creating..."
-      role = Role.create!(
-        key: 'company_admin',
-        name: 'Company Administrator',
-        tier: 'company',
-        description: 'Full access to all company data and settings',
-        is_system_role: true,
+      docs = Resource.create(
+        key: 'documents',
+        name: 'Documents',
+        category: 'operations',
+        description: 'Manage client documents and file uploads',
         active: true
       )
-      puts "✅ Created company_admin role"
+      puts "Created documents resource (ID: #{docs.id})"
     end
     
-    existing = user.user_role_assignments.find_by(role_id: role.id, company_id: company.id)
+    # 2. Add documents permissions to all roles that have other permissions
+    puts ""
+    puts "Adding documents permissions to existing roles..."
+    all_scope = Scope.find_by(key: 'all')
     
-    if existing
-      puts "⚠️  User already has company_admin role for this company"
-      puts "  Assignment ID: #{existing.id}"
-      puts "  Company ID: #{existing.company_id}"
-      puts "  Active: #{existing.active?}"
-      exit 0
+    Role.where(active: true).each do |role|
+      # If role has any permissions, give it documents permissions too
+      if role.role_permissions.granted.any?
+        Action.all.each do |action|
+          perm = RolePermission.find_or_initialize_by(
+            role: role,
+            resource: docs,
+            action: action,
+            scope: all_scope
+          )
+          perm.granted = true
+          if perm.new_record?
+            perm.save
+            puts "  Added documents:#{action.key} to #{role.name}"
+          end
+        end
+      end
     end
     
-    assignment = UserRoleAssignment.create!(
-      user: user,
-      role: role,
-      company_id: company.id,
-      tier: 'company',
-      assigned_at: Time.current
-    )
+    # 3. Rename listings resource
+    listings = Resource.find_by(key: 'listings')
+    if listings
+      old_name = listings.name
+      listings.update(name: 'Property Listings & Brochures')
+      puts ""
+      puts "Renamed '#{old_name}' to '#{listings.name}'"
+    else
+      puts ""
+      puts "WARNING: listings resource not found"
+    end
     
-    puts "✅ Assigned company_admin role to #{email}"
-    puts "  Assignment ID: #{assignment.id}"
-    puts "  Company: #{company.name} (ID: #{company.id})"
+    puts ""
+    puts "=" * 60
+    puts "Done"
+    puts "=" * 60
+  end
+  
+  desc "Debug user permissions"
+  task :debug, [:email] => :environment do |t, args|
+    email = args[:email]
+    unless email
+      puts "Usage: rake rbac:debug[email@example.com]"
+      exit 1
+    end
+    
+    u = User.find_by(email: email)
+    unless u
+      puts "User not found: #{email}"
+      exit 1
+    end
+    
+    puts "=" * 60
+    puts "User: #{u.email} (ID: #{u.id})"
+    puts "Company ID: #{u.company_id}"
+    puts "Legacy Role: #{u.role}"
+    puts "Uses RBAC: #{u.uses_rbac?}"
+    puts "Effective Admin: #{u.effective_admin?}"
+    puts "=" * 60
+    puts ""
+    puts "Role Assignments:"
+    u.user_role_assignments.includes(:role).each do |a|
+      puts "  - #{a.role&.name} (#{a.role&.key}), company_id: #{a.company_id}, tier: #{a.tier}"
+    end
+    puts ""
+    puts "Key Permissions:"
+    %w[documents listings branding inventory crm].each do |resource|
+      result = u.has_permission?(resource, 'read', 'all', u.company_id)
+      status = result ? "YES" : "NO"
+      puts "  #{resource}:read = #{status}"
+    end
   end
 end
