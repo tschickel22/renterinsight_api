@@ -105,6 +105,8 @@ Rails.application.routes.draw do
         get 'security'
         patch 'security', action: 'update_security'
         get 'login_activity'
+        get 'notifications'
+        patch 'notifications', action: 'update_notifications'
       end
       
       # ==================== NOTIFICATIONS ====================
