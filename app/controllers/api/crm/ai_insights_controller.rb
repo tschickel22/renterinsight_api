@@ -31,29 +31,8 @@ module Api
       private
 
       def set_company_scope
-        unless current_user
-          Rails.logger.error "🚫 [AiInsightsController] No authenticated user found"
-          render json: { error: 'Authentication required' }, status: :unauthorized
-          return
-        end
-        
-        company_id = current_company_id
-        
-        unless company_id.present?
-          Rails.logger.error "🚫 [AiInsightsController] No company context available"
-          render json: { error: 'No company context' }, status: :forbidden
-          return
-        end
-        
-        @company = ::Company.find_by(id: company_id)
-        
-        if @company.nil?
-          Rails.logger.error "🚫 [AiInsightsController] Company #{company_id} not found"
-          render json: { error: 'Company not found' }, status: :not_found
-          return
-        end
-        
-        Rails.logger.info "✅ [AiInsightsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+        # Use ApplicationController's standard company context (handles platform admin switching)
+        super
       end
 
       def set_lead
