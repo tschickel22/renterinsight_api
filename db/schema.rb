@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_21_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2517,10 +2517,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
     t.text "portal_notes"
     t.text "home_info"
     t.boolean "portal_visible", default: true, null: false
+    t.string "ticket_number"
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
     t.index ["company_id", "location_id"], name: "index_service_tickets_on_company_id_and_location_id"
+    t.index ["company_id", "ticket_number"], name: "index_service_tickets_on_company_id_and_ticket_number"
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
@@ -2534,6 +2536,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_20_004200) do
     t.index ["priority"], name: "index_service_tickets_on_priority"
     t.index ["scheduled_date"], name: "index_service_tickets_on_scheduled_date"
     t.index ["status"], name: "index_service_tickets_on_status"
+    t.index ["ticket_number"], name: "index_service_tickets_on_ticket_number", unique: true
     t.index ["vehicle_id"], name: "index_service_tickets_on_vehicle_id"
     t.index ["warranty_claim_id"], name: "index_service_tickets_on_warranty_claim_id"
   end

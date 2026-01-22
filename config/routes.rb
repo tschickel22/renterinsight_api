@@ -94,6 +94,9 @@ Rails.application.routes.draw do
         patch 'portal_modules', action: :update_portal_modules
       end
       
+      # ==================== GLOBAL SEARCH ====================
+      get 'search/global', to: 'search#global'
+      
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       

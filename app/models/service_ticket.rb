@@ -67,6 +67,7 @@ class ServiceTicket < ApplicationRecord
   attribute :line_item_billing, :json, default: []
   
   # Validations
+  validates :ticket_number, presence: true, uniqueness: { scope: :company_id }
   validates :title, presence: true
   validates :description, presence: true
   validates :status, presence: true, inclusion: { 
@@ -92,6 +93,7 @@ class ServiceTicket < ApplicationRecord
   scope :portal_created, -> { where(is_portal_created: true) }
   
   # Callbacks
+  before_validation :generate_ticket_number, on: :create
   before_validation :set_defaults
   before_validation :normalize_assigned_to
   
@@ -306,6 +308,28 @@ class ServiceTicket < ApplicationRecord
   end
   
   private
+  
+  def generate_ticket_number
+    return if ticket_number.present?
+    
+    # Generate ticket number format: ST-YYYYMMDD-NNNN
+    # Example: ST-20260121-0001
+    date_part = Date.today.strftime('%Y%m%d')
+    
+    # Find the highest ticket number for today
+    last_ticket = company.service_tickets
+                         .where("ticket_number LIKE ?", "ST-#{date_part}-%")
+                         .order(ticket_number: :desc)
+                         .first
+    
+    if last_ticket && last_ticket.ticket_number =~ /ST-\d{8}-(\d{4})$/
+      sequence = $1.to_i + 1
+    else
+      sequence = 1
+    end
+    
+    self.ticket_number = "ST-#{date_part}-#{sequence.to_s.rjust(4, '0')}"
+  end
   
   def set_defaults
     self.status ||= 'open'
