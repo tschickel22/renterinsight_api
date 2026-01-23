@@ -371,7 +371,10 @@ module Api
         # CRITICAL: company_id is NEVER updatable - it's set at creation from @company.id
         # Allowing company_id in params breaks tenant isolation!
         allowed = [:first_name, :last_name, :email, :phone, :notes, :source_id, :status, :owner_id,
-                   :firstName, :lastName, :sourceId, :ownerId]
+                   :firstName, :lastName, :sourceId, :ownerId,
+                   :budget_range, :budgetRange, :purchase_timeframe, :purchaseTimeframe,
+                   :rv_experience, :rvExperience, :preferred_contact_method, :preferredContactMethod,
+                   :interests_requirements, :interestsRequirements]
 
         root = params.permit(*allowed, lead: {})
         nested = params[:lead].is_a?(ActionController::Parameters) ? params.require(:lead).permit(*allowed) : {}
@@ -387,7 +390,13 @@ module Api
           status:     raw['status'],
           # company_id is EXCLUDED - never updatable!
           source_id:  (raw['source_id']  || raw['sourceId']).presence&.to_i,
-          owner_id:   (raw['owner_id']   || raw['ownerId']).presence&.to_i
+          owner_id:   (raw['owner_id']   || raw['ownerId']).presence&.to_i,
+          # NEW FIELDS for lead qualification
+          budget_range: raw['budget_range'] || raw['budgetRange'],
+          purchase_timeframe: raw['purchase_timeframe'] || raw['purchaseTimeframe'],
+          rv_experience: raw['rv_experience'] || raw['rvExperience'],
+          preferred_contact_method: raw['preferred_contact_method'] || raw['preferredContactMethod'],
+          interests_requirements: raw['interests_requirements'] || raw['interestsRequirements']
         }.compact
       end
 
@@ -427,6 +436,12 @@ module Api
           isConverted: l.respond_to?(:is_converted) ? l.is_converted : false,
           convertedAt: l.respond_to?(:converted_at) ? l.converted_at : nil,
           convertedToAccountId: l.respond_to?(:converted_account_id) ? l.converted_account_id : nil,
+          # NEW FIELDS
+          budgetRange: l.respond_to?(:budget_range) ? l.budget_range : nil,
+          purchaseTimeframe: l.respond_to?(:purchase_timeframe) ? l.purchase_timeframe : nil,
+          rvExperience: l.respond_to?(:rv_experience) ? l.rv_experience : nil,
+          preferredContactMethod: l.respond_to?(:preferred_contact_method) ? l.preferred_contact_method : nil,
+          interestsRequirements: l.respond_to?(:interests_requirements) ? l.interests_requirements : nil,
           createdAt: l.created_at,
           updatedAt: l.updated_at
         }

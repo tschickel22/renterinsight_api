@@ -1288,6 +1288,7 @@ Rails.application.routes.draw do
     namespace :company do
       resource :settings, only: %i[show update] do
         post :test_email, on: :collection
+        post :send_test_email, on: :collection
         post :test_sms, on: :collection
       end
       

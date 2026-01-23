@@ -33,13 +33,57 @@ class LocationSettingsResolver
   end
 
   def resolved_communication_settings
-    platform_communication = Setting.get('Platform', 0, 'communication') || {}
-    company_communication = Setting.get('Company', @company.id, 'communication') || {}
+    platform_communication = Setting.get('Platform', 0, 'communications') || {}
+    company_communication = Setting.get('Company', @company.id, 'communications') || {}
     location_communication = @location.communication_settings || {}
 
     Rails.logger.debug "📞 [LocationSettingsResolver] Resolving communication for Location #{@location.id}"
+    Rails.logger.debug "  Platform: #{platform_communication.inspect}"
+    Rails.logger.debug "  Company: #{company_communication.inspect}"
+    Rails.logger.debug "  Location: #{location_communication.inspect}"
     
-    platform_communication.deep_merge(company_communication).deep_merge(location_communication)
+    # Merge settings with cascade
+    resolved = platform_communication.deep_merge(company_communication).deep_merge(location_communication)
+    
+    # Add metadata about where each setting comes from
+    resolved['_sources'] = {
+      'email' => determine_email_source(location_communication, company_communication, platform_communication),
+      'sms' => determine_sms_source(location_communication, company_communication, platform_communication)
+    }
+    
+    resolved
+  end
+  
+  private
+  
+  def determine_email_source(location, company, platform)
+    # Check if location has email configured
+    if location.dig('email', 'isEnabled') == true || location.dig('email', 'fromEmail').present?
+      'location'
+    # Check if company has email configured  
+    elsif company.dig('email', 'isEnabled') == true || company.dig('email', 'fromEmail').present?
+      'company'
+    # Fall back to platform
+    elsif platform.dig('email', 'isEnabled') == true || platform.dig('email', 'fromEmail').present?
+      'platform'
+    else
+      'none'
+    end
+  end
+  
+  def determine_sms_source(location, company, platform)
+    # Check if location has SMS configured
+    if location.dig('sms', 'isEnabled') == true || location.dig('sms', 'fromNumber').present?
+      'location'
+    # Check if company has SMS configured
+    elsif company.dig('sms', 'isEnabled') == true || company.dig('sms', 'fromNumber').present?
+      'company'
+    # Fall back to platform
+    elsif platform.dig('sms', 'isEnabled') == true || platform.dig('sms', 'fromNumber').present?
+      'platform'
+    else
+      'none'
+    end
   end
 
   def resolved_operational_settings

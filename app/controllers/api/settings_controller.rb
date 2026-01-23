@@ -106,10 +106,21 @@ module Api
         key = params[:key]
         value = params[:value]
         
+        # Security: Validate scope access
         if scope_type == 'Company' && scope_id.to_s != @company.id.to_s
           Rails.logger.error "🚫 [SettingsController] Unauthorized: User trying to access company #{scope_id} but authenticated for company #{@company.id}"
           render json: { error: 'Unauthorized' }, status: :forbidden
           return
+        end
+        
+        # Security: Validate location belongs to current company
+        if scope_type == 'Location'
+          location = @company.locations.find_by(id: scope_id)
+          unless location
+            Rails.logger.error "🚫 [SettingsController] Unauthorized: Location #{scope_id} not found or doesn't belong to company #{@company.id}"
+            render json: { error: 'Unauthorized: Location not found or access denied' }, status: :forbidden
+            return
+          end
         end
         
         Rails.logger.info "✅ [SettingsController] Updating setting: scope=#{scope_type}:#{scope_id}, key=#{key}"
@@ -147,6 +158,8 @@ module Api
     # DELETE /api/settings
     def destroy
       key = params[:key]
+      scope_type = params[:scope_type] || 'Company'
+      scope_id = params[:scope_id] || @company.id
       
       unless key.present?
         render json: { error: 'Key parameter is required' }, status: :unprocessable_entity
@@ -159,17 +172,36 @@ module Api
         return
       end
       
+      # Security: Validate scope access
+      if scope_type == 'Company' && scope_id.to_s != @company.id.to_s
+        Rails.logger.error "🚫 [SettingsController] Unauthorized: User trying to delete company #{scope_id} settings but authenticated for company #{@company.id}"
+        render json: { error: 'Unauthorized' }, status: :forbidden
+        return
+      end
+      
+      # Security: Validate location belongs to current company
+      if scope_type == 'Location'
+        location = @company.locations.find_by(id: scope_id)
+        unless location
+          Rails.logger.error "🚫 [SettingsController] Unauthorized: Location #{scope_id} not found or doesn't belong to company #{@company.id}"
+          render json: { error: 'Unauthorized: Location not found or access denied' }, status: :forbidden
+          return
+        end
+      end
+      
       deleted_count = Setting.where(
-        scope_type: 'Company',
-        scope_id: @company.id,
+        scope_type: scope_type,
+        scope_id: scope_id,
         key: key
       ).delete_all
       
-      Rails.logger.info "✅ [SettingsController] Reset #{key} for company #{@company.id}: deleted #{deleted_count} setting(s)"
+      Rails.logger.info "✅ [SettingsController] Reset #{key} for #{scope_type} #{scope_id}: deleted #{deleted_count} setting(s)"
       
       render json: {
-        message: "Settings for '#{key}' have been reset to platform defaults",
+        message: "Settings for '#{key}' have been reset to #{scope_type == 'Location' ? 'company or platform' : 'platform'} defaults",
         key: key,
+        scope_type: scope_type,
+        scope_id: scope_id,
         deleted_count: deleted_count
       }
     rescue => e
@@ -486,6 +518,7 @@ module Api
     end
 
     def serialize_settings
+      # Start with hardcoded defaults
       base_settings = {
         timezone: 'America/New_York',
         currency: 'USD',
@@ -496,9 +529,27 @@ module Api
         }
       }
 
+      # Layer 1: Load ALL platform-level settings (communications, operational, integrations, etc.)
+      platform_settings = Setting.where(scope_type: 'Platform', scope_id: 0)
+        .where.not(key: ['branding', 'quotes'])
+        .pluck(:key, :value)
+        .to_h
+
+      platform_settings.each do |key, value|
+        begin
+          parsed_value = JSON.parse(value)
+          base_settings[key.to_sym] = parsed_value
+          Rails.logger.info "📋 [serialize_settings] Loaded platform #{key}: #{parsed_value.inspect}"
+        rescue JSON::ParserError
+          base_settings[key.to_sym] = value
+        end
+      end
+
+      # Extract platformName from platform general settings
       platform_general = Setting.get('Platform', 0, 'general', {})
       base_settings[:platformName] = platform_general['platformName'] || platform_general[:platformName] || ''
 
+      # Layer 2: Merge company operational settings (legacy field-based approach)
       if @company.operational_settings.present?
         operational = @company.operational_settings.deep_symbolize_keys
         base_settings[:timezone] = operational[:timezone] if operational[:timezone].present?
@@ -508,21 +559,43 @@ module Api
         base_settings[:requireAppointment] = operational[:require_appointment] if operational.key?(:require_appointment)
       end
 
-      custom_settings = Setting.where(scope_type: 'Company', scope_id: @company.id)
+      # Layer 3: Merge company-level settings (overrides platform)
+      company_settings = Setting.where(scope_type: 'Company', scope_id: @company.id)
         .where.not(key: ['branding', 'quotes'])
         .pluck(:key, :value)
         .to_h
 
-      custom_settings.each do |key, value|
+      company_settings.each do |key, value|
         begin
-          base_settings[key.to_sym] = JSON.parse(value)
+          parsed_value = JSON.parse(value)
+          base_settings[key.to_sym] = parsed_value
+          Rails.logger.info "🏢 [serialize_settings] Company override for #{key}: #{parsed_value.inspect}"
         rescue JSON::ParserError
           base_settings[key.to_sym] = value
         end
       end
 
+      # Layer 4: Add quotes settings (company-level)
       quotes_setting = Setting.get('Company', @company.id, 'quotes', {})
       base_settings[:quotes] = quotes_setting.deep_symbolize_keys if quotes_setting.present?
+
+      # Layer 5: Location-level settings (highest priority - overrides company)
+      if Current.location_id.present?
+        location_settings = Setting.where(scope_type: 'Location', scope_id: Current.location_id)
+          .where.not(key: ['branding', 'quotes'])
+          .pluck(:key, :value)
+          .to_h
+
+        location_settings.each do |key, value|
+          begin
+            parsed_value = JSON.parse(value)
+            base_settings[key.to_sym] = parsed_value
+            Rails.logger.info "📍 [serialize_settings] Location override for #{key}: #{parsed_value.inspect}"
+          rescue JSON::ParserError
+            base_settings[key.to_sym] = value
+          end
+        end
+      end
 
       base_settings
     end

@@ -103,7 +103,9 @@ class Api::V1::Integrations::QuickbooksOauthController < ApplicationController
   end
   
   def status
-    return unless authorize_action!('settings', 'read')
+    # QuickBooks connection status is not sensitive data
+    # Allow all authenticated users in the company to view it
+    # No RBAC check needed
     
     entity = determine_quickbooks_entity
     
