@@ -212,6 +212,32 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # POST /api/crm/nurture/enrollments/:id/trigger_step
+        # Manually trigger the next step (for testing)
+        def trigger_step
+          enrollment = NurtureEnrollment.for_company(@company.id).find_by(id: params[:id])
+          unless enrollment
+            render json: { error: 'Enrollment not found' }, status: :not_found
+            return
+          end
+
+          unless enrollment.status == 'running'
+            render json: { error: 'Enrollment must be running to trigger steps' }, status: :unprocessable_entity
+            return
+          end
+
+          # Trigger the job immediately (bypass wait delay)
+          if defined?(ProcessNurtureStepJob)
+            ProcessNurtureStepJob.perform_now(enrollment.id)
+            render json: { message: 'Step triggered', enrollment: enrollment_json(enrollment) }, status: :ok
+          else
+            render json: { error: 'Job processor not available' }, status: :internal_server_error
+          end
+        rescue => e
+          Rails.logger.error "Failed to trigger step: #{e.message}\n#{e.backtrace.join("\n")}"
+          render json: { error: e.message }, status: :internal_server_error
+        end
+
         private
 
         def set_company_scope

@@ -1114,6 +1114,7 @@ Rails.application.routes.draw do
 
         resources :enrollments, only: %i[index create update destroy] do
           collection { post :bulk }
+          member { post :trigger_step }
         end
 
         resources :templates, only: %i[index create update destroy] do

@@ -1084,7 +1084,7 @@ module Api
           status:       params[:status].presence || 'sent',
           sent_at:      parse_time(params[:sent_at] || params[:sentAt]) || Time.current,
           delivered_at: parse_time(params[:delivered_at] || params[:deliveredAt]),
-          opened_at:    parse_time(params[:opened_at] || params[:openedAt]),
+          read_at:      parse_time(params[:read_at] || params[:readAt] || params[:opened_at] || params[:openedAt]),
           to_address:   params[:to] || @lead&.email,
           from_address: params[:from],
           metadata:     extract_metadata
@@ -1102,6 +1102,32 @@ module Api
 
       # Consistent JSON serialization for communication logs
       def comm_log_json(comm)
+        # Handle metadata - could be Hash, String (from text column), or nil
+        metadata_obj = {}
+        
+        if comm.metadata.present?
+          if comm.metadata.is_a?(Hash)
+            metadata_obj = comm.metadata
+          elsif comm.metadata.is_a?(String)
+            # Try to parse as JSON first
+            begin
+              metadata_obj = JSON.parse(comm.metadata)
+            rescue JSON::ParserError
+              # If JSON parse fails, try to eval Ruby hash string (from older records)
+              begin
+                # Replace Ruby syntax with JSON syntax
+                json_str = comm.metadata.gsub(/:(\w+)=>/, '"\1":')  # :key=> to "key":
+                                        .gsub(/=>/, ':')                 # => to :
+                                        .gsub(/nil/, 'null')            # nil to null
+                metadata_obj = JSON.parse(json_str)
+              rescue => e
+                Rails.logger.warn "Failed to parse metadata for communication #{comm.id}: #{e.message}"
+                metadata_obj = {}
+              end
+            end
+          end
+        end
+        
         {
           id:          comm.id,
           leadId:      comm.communicable_id,
@@ -1113,8 +1139,8 @@ module Api
           status:      comm.status,
           sentAt:      comm.sent_at&.iso8601,
           deliveredAt: comm.delivered_at&.iso8601,
-          openedAt:    comm.opened_at&.iso8601,
-          metadata:    comm.metadata || {},
+          readAt:      comm.read_at&.iso8601,
+          metadata:    metadata_obj,
           createdAt:   comm.created_at&.iso8601,
           updatedAt:   comm.updated_at&.iso8601
         }.compact

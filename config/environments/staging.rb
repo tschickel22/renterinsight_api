@@ -45,6 +45,9 @@ Rails.application.configure do
 
   # Show deprecations in staging to catch issues before production.
   config.active_support.report_deprecations = true
+  
+  # Use async adapter for background jobs (processes in background threads)
+  config.active_job.queue_adapter = :async
 
   # Set host for mailer templates
   config.action_mailer.default_url_options = { 

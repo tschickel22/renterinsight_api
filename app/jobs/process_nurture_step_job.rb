@@ -67,27 +67,34 @@ class ProcessNurtureStepJob < ApplicationJob
       return
     end
 
+    # Ensure we have non-blank subject and body (with defaults)
+    subject = step.subject.presence || "Follow-up from #{lead.company&.name || 'us'}"
+    body = step.body.presence || "This is an automated follow-up message."
+
     # Create communication log
-    log = CommunicationLog.create!(
-      lead: lead,
-      comm_type: 'email',
+    log = Communication.create!(
+      communicable: lead,
+      channel: 'email',
       direction: 'outbound',
-      subject: step.subject || 'Nurture Email',
-      content: step.body || '',
-      status: 'sent',
+      subject: subject,
+      body: body,
+      status: 'sent',  # Valid status value
       sent_at: Time.current,
+      to_address: lead.email,
+      from_address: email_config[:fromEmail] || 'noreply@renterinsight.com',
       metadata: {
         provider: email_config[:provider] || 'smtp',
         from_email: email_config[:fromEmail],
         from_name: email_config[:fromName],
         nurture_step_id: step.id,
-        nurture_sequence_id: step.nurture_sequence_id
+        nurture_sequence_id: step.nurture_sequence_id,
+        note: 'Email logged but not sent (nurture system in development)'
       }
     )
 
     # TODO: Actually send email via configured provider (SMTP, SendGrid, etc.)
     # For now, just log it
-    Rails.logger.info "[Nurture] Email sent to #{lead.email}: #{step.subject} (log_id: #{log.id})"
+    Rails.logger.info "[Nurture] Email logged for #{lead.email}: #{subject} (log_id: #{log.id})"
   end
 
   def send_sms(lead, step)
@@ -102,25 +109,31 @@ class ProcessNurtureStepJob < ApplicationJob
       return
     end
 
+    # Ensure we have non-blank body (with default)
+    body = step.body.presence || "This is an automated follow-up message."
+
     # Create communication log
-    log = CommunicationLog.create!(
-      lead: lead,
-      comm_type: 'sms',
+    log = Communication.create!(
+      communicable: lead,
+      channel: 'sms',
       direction: 'outbound',
-      content: step.body || '',
-      status: 'sent',
+      body: body,
+      status: 'sent',  # Valid status value
       sent_at: Time.current,
+      to_address: lead.phone,
+      from_address: sms_config[:fromNumber] || '+10000000000',
       metadata: {
         provider: sms_config[:provider] || 'twilio',
         from_number: sms_config[:fromNumber],
         nurture_step_id: step.id,
-        nurture_sequence_id: step.nurture_sequence_id
+        nurture_sequence_id: step.nurture_sequence_id,
+        note: 'SMS logged but not sent (nurture system in development)'
       }
     )
 
     # TODO: Actually send SMS via configured provider (Twilio, etc.)
     # For now, just log it
-    Rails.logger.info "[Nurture] SMS sent to #{lead.phone}: #{step.body[0..50]}... (log_id: #{log.id})"
+    Rails.logger.info "[Nurture] SMS logged for #{lead.phone}: #{body[0..50]}... (log_id: #{log.id})"
   end
 
   def create_call_reminder(lead, step)
