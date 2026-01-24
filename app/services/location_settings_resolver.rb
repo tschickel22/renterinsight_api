@@ -35,7 +35,7 @@ class LocationSettingsResolver
   def resolved_communication_settings
     platform_communication = Setting.get('Platform', 0, 'communications') || {}
     company_communication = Setting.get('Company', @company.id, 'communications') || {}
-    location_communication = @location.communication_settings || {}
+    location_communication = Setting.get('Location', @location.id, 'communications') || {}
 
     Rails.logger.debug "📞 [LocationSettingsResolver] Resolving communication for Location #{@location.id}"
     Rails.logger.debug "  Platform: #{platform_communication.inspect}"
@@ -88,8 +88,8 @@ class LocationSettingsResolver
 
   def resolved_operational_settings
     platform_operational = Setting.get('Platform', 0, 'operational') || {}
-    company_operational = @company.operational_settings || {}
-    location_operational = @location.operational_settings || {}
+    company_operational = Setting.get('Company', @company.id, 'operational') || {}
+    location_operational = Setting.get('Location', @location.id, 'operational') || {}
 
     Rails.logger.debug "⚙️ [LocationSettingsResolver] Resolving operational for Location #{@location.id}"
     
@@ -106,8 +106,8 @@ class LocationSettingsResolver
 
   def resolved_integration_settings
     platform_integration = Setting.get('Platform', 0, 'integration') || {}
-    company_integration = @company.integration_settings || {}
-    location_integration = @location.integration_settings || {}
+    company_integration = Setting.get('Company', @company.id, 'integration') || {}
+    location_integration = Setting.get('Location', @location.id, 'integration') || {}
 
     Rails.logger.debug "🔌 [LocationSettingsResolver] Resolving integration for Location #{@location.id}"
     

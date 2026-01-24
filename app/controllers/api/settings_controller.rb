@@ -397,9 +397,9 @@ module Api
     # ============================================
 
     def set_company
-      selected_company_id = request.headers['X-Company-ID']
+      selected_company_id = (request.headers['X-Company-ID'] || request.headers['X-Company-Context'])&.to_i
       
-      if (current_user.admin? || current_user.super_admin?) && selected_company_id.present?
+      if (current_user.platform_admin? || current_user.admin? || current_user.super_admin?) && selected_company_id.present? && selected_company_id > 0
         @company = ::Company.find_by(id: selected_company_id)
         
         if @company.nil?
@@ -528,6 +528,9 @@ module Api
           workflowAutomation: true
         }
       }
+      
+      # Track sources for nested settings (communications.email, communications.sms, etc.)
+      sources = {}
 
       # Layer 1: Load ALL platform-level settings (communications, operational, integrations, etc.)
       platform_settings = Setting.where(scope_type: 'Platform', scope_id: 0)
@@ -539,6 +542,15 @@ module Api
         begin
           parsed_value = JSON.parse(value)
           base_settings[key.to_sym] = parsed_value
+          
+          # Track source for nested keys (e.g., communications.email, communications.sms)
+          if parsed_value.is_a?(Hash)
+            sources[key.to_sym] ||= {}
+            parsed_value.keys.each do |nested_key|
+              sources[key.to_sym][nested_key.to_sym] = 'platform'
+            end
+          end
+          
           Rails.logger.info "📋 [serialize_settings] Loaded platform #{key}: #{parsed_value.inspect}"
         rescue JSON::ParserError
           base_settings[key.to_sym] = value
@@ -569,6 +581,15 @@ module Api
         begin
           parsed_value = JSON.parse(value)
           base_settings[key.to_sym] = parsed_value
+          
+          # Update source tracking for company overrides
+          if parsed_value.is_a?(Hash)
+            sources[key.to_sym] ||= {}
+            parsed_value.keys.each do |nested_key|
+              sources[key.to_sym][nested_key.to_sym] = 'company'
+            end
+          end
+          
           Rails.logger.info "🏢 [serialize_settings] Company override for #{key}: #{parsed_value.inspect}"
         rescue JSON::ParserError
           base_settings[key.to_sym] = value
@@ -590,11 +611,36 @@ module Api
           begin
             parsed_value = JSON.parse(value)
             base_settings[key.to_sym] = parsed_value
+            
+            # Update source tracking for location overrides
+            if parsed_value.is_a?(Hash)
+              sources[key.to_sym] ||= {}
+              parsed_value.keys.each do |nested_key|
+                sources[key.to_sym][nested_key.to_sym] = 'location'
+              end
+            end
+            
             Rails.logger.info "📍 [serialize_settings] Location override for #{key}: #{parsed_value.inspect}"
           rescue JSON::ParserError
             base_settings[key.to_sym] = value
           end
         end
+      end
+      
+      # Add _sources metadata to nested settings
+      Rails.logger.info "🔍 [serialize_settings] Sources hash: #{sources.inspect}"
+      sources.each do |key, nested_sources|
+        if base_settings[key].is_a?(Hash)
+          base_settings[key][:_sources] = nested_sources
+          Rails.logger.info "✅ [serialize_settings] Added _sources to #{key}: #{nested_sources.inspect}"
+        else
+          Rails.logger.info "⚠️ [serialize_settings] Skipped _sources for #{key} (not a Hash)"
+        end
+      end
+
+      Rails.logger.info "🎯 [serialize_settings] Final settings keys: #{base_settings.keys}"
+      if base_settings[:communications].is_a?(Hash)
+        Rails.logger.info "📡 [serialize_settings] communications._sources: #{base_settings[:communications][:_sources].inspect}"
       end
 
       base_settings
