@@ -22,11 +22,14 @@ class CommissionComponent < ApplicationRecord
     addon
   ].freeze
   
-  # Roles
+  # Roles (applies_to_role values)
   ROLES = %w[
-    salesperson
-    manager
-    f_and_i
+    primary_salesperson
+    secondary_salesperson
+    sales_manager
+    finance_manager
+    desk_manager
+    all_participants
   ].freeze
   
   # Deal Types
@@ -44,7 +47,9 @@ class CommissionComponent < ApplicationRecord
   
   validates :name, presence: true, length: { maximum: 255 }
   validates :component_type, presence: true, inclusion: { in: COMPONENT_TYPES }
-  validates :applies_to_role, inclusion: { in: ROLES, allow_nil: true }
+  # TEMPORARY: Allow nil for backward compatibility with existing data
+  # After running data migration, change to: validates :applies_to_role, presence: true, inclusion: { in: ROLES }
+  validates :applies_to_role, inclusion: { in: ROLES, allow_nil: true }  # TODO: Remove allow_nil after data migration
   validates :deal_type, inclusion: { in: DEAL_TYPES, allow_nil: true }
   validates :vertical, inclusion: { in: VERTICALS, allow_nil: true }
   

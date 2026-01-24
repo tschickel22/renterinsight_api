@@ -476,6 +476,7 @@ module Api
         
         data = {
           id: ticket.id,
+          ticketNumber: ticket.ticket_number,  # Add ticket number to API response
           accountId: ticket.account_id,
           contactId: ticket.contact_id,
           vehicleId: ticket.vehicle_id,

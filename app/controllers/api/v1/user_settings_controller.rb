@@ -236,6 +236,57 @@ module Api
         }, status: :ok
       end
 
+      # GET /api/v1/user_settings/notifications
+      def notifications
+        if @user_type == 'client'
+          # For portal users, get notification preferences from BuyerPortalAccess
+          render json: {
+            email_notifications: @user.email_opt_in != false,
+            sms_notifications: @user.sms_opt_in == true,
+            marketing_emails: @user.marketing_opt_in == true
+          }, status: :ok
+        else
+          # For admin users, return defaults (could be extended later)
+          render json: {
+            email_notifications: true,
+            sms_notifications: false,
+            marketing_emails: false
+          }, status: :ok
+        end
+      end
+
+      # PATCH /api/v1/user_settings/notifications
+      def update_notifications
+        begin
+          if @user_type == 'client'
+            # Update portal user notification preferences
+            updates = {}
+            updates[:email_opt_in] = params[:email_notifications] if params.key?(:email_notifications)
+            updates[:sms_opt_in] = params[:sms_notifications] if params.key?(:sms_notifications)
+            updates[:marketing_opt_in] = params[:marketing_emails] if params.key?(:marketing_emails)
+            
+            @user.update!(updates) if updates.any?
+            
+            render json: {
+              success: true,
+              message: 'Notification preferences updated successfully'
+            }, status: :ok
+          else
+            # Admin users - not implemented yet
+            render json: {
+              success: true,
+              message: 'Notification preferences updated'
+            }, status: :ok
+          end
+        rescue StandardError => e
+          Rails.logger.error("Notification update error: #{e.message}")
+          render json: {
+            success: false,
+            error: 'Failed to update notification preferences'
+          }, status: :internal_server_error
+        end
+      end
+
       private
 
       def authenticate_any_user

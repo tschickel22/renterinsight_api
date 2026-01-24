@@ -4,7 +4,7 @@ module Api
   module V1
     class AccountsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals insights score]
+      before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals insights score communications_rollup]
 
       # GET /api/v1/accounts
       def index
@@ -551,6 +551,85 @@ module Api
         }
         
         render json: score_data
+      end
+
+      # GET /api/v1/accounts/:id/communications/rollup
+      def communications_rollup
+        return unless authorize_action!('crm', 'read')
+        
+        # Get all contacts for this account (tenant-isolated)
+        contact_ids = @company.contacts.where(account_id: @account.id, is_deleted: [false, nil]).pluck(:id)
+        
+        # Get all communications for those contacts using correct column names
+        # Note: Communications table uses polymorphic association (communicable_type, communicable_id)
+        # and 'channel' not 'communication_type'
+        communications = Communication.where(
+          communicable_type: 'Contact',
+          communicable_id: contact_ids
+        ).order(sent_at: :desc)
+        
+        # Calculate stats using correct column name 'channel'
+        total_emails = communications.where(channel: 'email').count
+        total_sms = communications.where(channel: 'sms').count
+        
+        # Calculate open rate from communication_events table
+        opened_email_ids = CommunicationEvent.where(
+          communication_id: communications.where(channel: 'email').pluck(:id),
+          event_type: 'opened'
+        ).distinct.pluck(:communication_id)
+        opened_emails = opened_email_ids.count
+        
+        # Calculate open rate
+        open_rate = total_emails > 0 ? ((opened_emails.to_f / total_emails) * 100).round(1) : 0
+        
+        # Paginate communications
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min
+        
+        total_count = communications.count
+        paginated_comms = communications.offset((page - 1) * per_page).limit(per_page)
+        
+        # Enrich communications with contact name and event data
+        enriched_comms = paginated_comms.map do |comm|
+          contact = Contact.find_by(id: comm.communicable_id)
+          
+          # Get event timestamps from communication_events
+          events = comm.communication_events
+          opened_event = events.find_by(event_type: 'opened')
+          clicked_event = events.find_by(event_type: 'clicked')
+          
+          {
+            id: comm.id,
+            type: comm.channel,  # 'email' or 'sms'
+            status: comm.status,
+            subject: comm.subject,
+            content: comm.body,
+            sent_at: comm.sent_at,
+            delivered_at: comm.delivered_at,
+            opened_at: opened_event&.occurred_at,
+            clicked_at: clicked_event&.occurred_at,
+            contact_name: contact ? "#{contact.first_name} #{contact.last_name}" : 'Unknown Contact',
+            contact_id: comm.communicable_id
+          }
+        end
+        
+        render json: {
+          stats: {
+            total_emails: total_emails,
+            total_sms: total_sms,
+            total_communications: total_count,
+            open_rate: open_rate,
+            contacts_count: contact_ids.count
+          },
+          communications: enriched_comms,
+          meta: {
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
+          }
+        }
       end
 
       private

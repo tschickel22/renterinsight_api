@@ -203,21 +203,31 @@ module Api
       
       # POST /api/companies/:company_id/users/:id/resend_invitation
       def resend_invitation
-        invitation = @company.invitations.find_by(email: @user.email, status: 'pending')
-        
-        unless invitation
-          return render json: { 
-            success: false,
-            error: 'No pending invitation found for this user' 
-          }, status: :not_found
-        end
+        # For users with 'invited' status, create a new invitation
+        # (old invitation was already used to create placeholder user)
         
         service = InvitationService.new(
           invited_by: current_user,
           company: @company
         )
         
-        result = service.resend_invitation(invitation.id)
+        # Get user's location assignments to preserve in new invitation
+        location_ids = @user.user_locations.where(active: true).pluck(:location_id)
+        location_role = @user.user_locations.where(active: true).first&.location_role
+        
+        # Create a new invitation (the old one was consumed when placeholder user was created)
+        result = service.create_invitation(
+          invitation_type: 'company_user',
+          email: @user.email,
+          phone: @user.phone,
+          recipient_name: @user.name || [@user.first_name, @user.last_name].compact.join(' '),
+          role: @user.role,
+          permissions: @user.permissions || [],
+          delivery_method: params[:deliveryMethod] || 'email',
+          message: params[:message],
+          location_ids: location_ids,
+          location_role: location_role
+        )
         
         if result[:success]
           render json: { 

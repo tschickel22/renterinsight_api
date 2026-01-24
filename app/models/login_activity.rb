@@ -7,7 +7,11 @@ class LoginActivity < ApplicationRecord
 
   # Scopes
   scope :recent, -> { order(logged_in_at: :desc) }
-  scope :for_user, ->(user_id) { where(user_id: user_id) }
+  scope :for_user, ->(user_id, user_type = nil) { 
+    query = where(user_id: user_id)
+    query = query.where(user_type: user_type) if user_type.present?
+    query
+  }
 
   # Record a login activity
   def self.record_login(user_id:, user_type:, ip_address: nil, user_agent: nil)

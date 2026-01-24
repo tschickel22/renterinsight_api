@@ -7,6 +7,52 @@ module Api
       skip_before_action :authenticate
       before_action :authenticate_portal_buyer!
 
+      # GET /api/portal/settings/modules
+      # Returns portal module visibility settings for the current buyer's company
+      def modules
+        buyer_access = current_portal_buyer
+        
+        unless buyer_access
+          return render json: { error: 'Authentication required' }, status: :unauthorized
+        end
+
+        contact = buyer_access.buyer
+        company = contact&.company
+        
+        unless company
+          return render json: { error: 'Company not found' }, status: :not_found
+        end
+
+        # Get portal settings from company settings
+        portal_settings = Setting.get('Company', company.id, 'portal_modules', {})
+        
+        # Default settings if none saved
+        default_settings = {
+          'dashboard' => true,
+          'loanManagement' => true,
+          'invoices' => true,
+          'quotes' => true,
+          'documents' => true,
+          'agreementSigning' => true,
+          'financeApplications' => true,
+          'serviceRequests' => false,
+          'settings' => true
+        }
+        
+        # Merge defaults with saved settings
+        merged_settings = default_settings.merge(portal_settings.stringify_keys)
+        
+        Rails.logger.info "🔧 [Portal] Loaded portal modules for company #{company.id}: #{merged_settings.inspect}"
+        
+        render json: { settings: merged_settings }
+      rescue => e
+        Rails.logger.error "Portal modules error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+        render json: { 
+          error: 'Failed to load portal settings',
+          details: Rails.env.development? ? e.message : nil
+        }, status: :internal_server_error
+      end
+
       # GET /api/portal/settings/branding
       def branding
         buyer_access = current_portal_buyer

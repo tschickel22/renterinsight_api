@@ -74,9 +74,36 @@ module Api
             
             Rails.logger.info "[INVITATION BRANDING] Company ID: #{invitation.company.id}, Branding: #{branding.inspect}"
             
+            # Convert relative logo URLs to absolute URLs for public pages
+            frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
+            logo_value = branding['logo']
+            portal_logo_value = branding['portalLogo']
+            
+            # Convert logo to absolute URL if it's a relative path
+            logo_url = if logo_value.present?
+              if logo_value.start_with?('http://', 'https://')
+                logo_value
+              else
+                "#{frontend_url}#{logo_value.start_with?('/') ? logo_value : '/' + logo_value}"
+              end
+            else
+              nil
+            end
+            
+            # Convert portal logo to absolute URL if it's a relative path
+            portal_logo_url = if portal_logo_value.present?
+              if portal_logo_value.start_with?('http://', 'https://')
+                portal_logo_value
+              else
+                "#{frontend_url}#{portal_logo_value.start_with?('/') ? portal_logo_value : '/' + portal_logo_value}"
+              end
+            else
+              nil
+            end
+            
             company_branding = {
-              logo: branding['logo'],
-              portalLogo: branding['portalLogo'],
+              logo: logo_url,
+              portalLogo: portal_logo_url,
               primaryColor: branding['primaryColor'] || '#3b82f6',
               secondaryColor: branding['secondaryColor'] || '#8b5cf6',
               fontFamily: branding['fontFamily'] || 'Inter',

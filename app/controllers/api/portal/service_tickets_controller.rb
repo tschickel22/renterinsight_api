@@ -201,7 +201,6 @@ module Api
           status: ticket.status,
           priority: ticket.priority,
           scheduledDate: ticket.scheduled_date,
-          completedDate: ticket.completed_date,
           portalNotes: ticket.portal_notes,
           homeInfo: ticket.home_info,
           notes: ticket.notes, # Staff customer notes - always visible to portal

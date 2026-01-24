@@ -57,6 +57,7 @@ class Payment < ApplicationRecord
   before_validation :set_payment_date, if: -> { payment_date.nil? && status == 'completed' }
   after_initialize :set_defaults, if: :new_record?
   after_commit :update_loan_after_completion, if: -> { saved_change_to_status? && status == 'completed' && !try(:skip_loan_processing?) }
+  after_commit :update_invoice_after_completion, if: -> { saved_change_to_status? && status == 'completed' && payable_type == 'Invoice' }
   
   # Instance methods
   def display_name
@@ -264,5 +265,16 @@ class Payment < ApplicationRecord
     return unless loan.present?
     
     loan.process_payment!(self)
+  end
+  
+  def update_invoice_after_completion
+    return unless payable_type == 'Invoice' && payable.present?
+    
+    # Trigger invoice's after_save callback by touching the record
+    # This will run update_status_based_on_payments which:
+    # 1. Calculates total paid from all completed payments
+    # 2. Updates status to 'paid' if total_paid >= total
+    # 3. Triggers mark_inventory_as_used! if status becomes 'paid'
+    payable.touch
   end
 end

@@ -90,7 +90,12 @@ Rails.application.routes.draw do
         patch 'rbac', action: :update_rbac
         get 'loan', action: :show_loan
         patch 'loan', action: :update_loan
+        get 'portal_modules', action: :show_portal_modules
+        patch 'portal_modules', action: :update_portal_modules
       end
+      
+      # ==================== GLOBAL SEARCH ====================
+      get 'search/global', to: 'search#global'
       
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
@@ -103,6 +108,8 @@ Rails.application.routes.draw do
         get 'security'
         patch 'security', action: 'update_security'
         get 'login_activity'
+        get 'notifications'
+        patch 'notifications', action: 'update_notifications'
       end
       
       # ==================== NOTIFICATIONS ====================
@@ -295,10 +302,12 @@ Rails.application.routes.draw do
           post :mark_paid
           post :cancel
           get :pdf
+          post :mark_inventory_used, path: 'mark-inventory-used'  # Manual inventory override
         end
         
         collection do
           get :stats
+          post :convert_from_quote, path: 'convert-from-quote'  # Quote → Invoice conversion
         end
       end
       
@@ -466,11 +475,20 @@ Rails.application.routes.draw do
           get :tags
           post :tags, to: 'quotes#add_tags'
           delete 'tags/:tag_name', to: 'quotes#remove_tag'
+          post :mark_parts_used, path: 'mark-parts-used'
         end
         
         collection do
           get :stats
           get :export
+          get :search_parts, path: 'search-parts'
+        end
+        
+        # Quote Inventory Usages (Parts tracking)
+        resources :quote_inventory_usages, only: [:index, :create, :destroy], path: 'inventory-usages' do
+          member do
+            post :mark_used, path: 'mark-used'
+          end
         end
       end
       
@@ -557,10 +575,107 @@ Rails.application.routes.draw do
       
       # ==================== PORTAL USERS ====================
       resources :portal_users, path: 'portal_users' do
+        member do
+          post :generate_proxy_token
+        end
         collection do
           get :stats
           post :password_reset
           post :invite
+        end
+      end
+      
+      # ==================== PARTS & INVENTORY MODULE ====================
+      # Manufacturers
+      resources :manufacturers do
+        member do
+          get :parts
+        end
+        collection do
+          get :stats
+          get :autocomplete
+        end
+      end
+      
+      # Part Categories
+      resources :part_categories, path: 'part-categories' do
+        collection do
+          get :tree
+        end
+      end
+      
+      # Parts
+      resources :parts do
+        member do
+          get :stock_by_location, path: 'stock-by-location'
+          get :transaction_history, path: 'transaction-history'
+        end
+        collection do
+          get :stats
+          get :export  # Export parts to CSV
+          get :autocomplete  # Autocomplete suggestions
+          get :find_by_identifier  # Get full part details by SKU/Barcode
+          get :manufacturer_names  # List all manufacturer names with counts
+          post :rename_manufacturer  # Rename manufacturer across all parts
+          delete :delete_manufacturer  # Delete if unused
+          post :rename_part_name  # Rename part name across all parts
+          delete :delete_part_name  # Delete if unused
+        end
+      end
+      
+      # Suppliers
+      resources :suppliers do
+        member do
+          get :parts
+        end
+        collection do
+          get :stats
+        end
+      end
+      
+      # Purchase Orders
+      resources :purchase_orders, path: 'purchase-orders' do
+        member do
+          post :send_to_supplier, path: 'send'
+          post :cancel
+          get :receiving_history, path: 'receiving-history'
+        end
+        collection do
+          get :stats
+        end
+      end
+      
+      # Bins
+      resources :bins
+      
+      # Inventory Transactions
+      resources :inventory_transactions, path: 'inventory-transactions', only: [:index, :show] do
+        collection do
+          post :receive
+          post :transfer
+          post :adjust
+          post :consume
+          post :return, action: :return_inventory
+        end
+      end
+      
+      # Stock Balances
+      resources :stock_balances, path: 'stock-balances', only: [:index] do
+        collection do
+          get :summary
+          get 'by_part/:part_id', action: :by_part, as: :by_part
+          get 'by_location/:location_id', action: :by_location, as: :by_location
+        end
+        member do
+          post :reserve
+          post :release
+        end
+      end
+      
+      # Reorder Rules
+      resources :reorder_rules, path: 'reorder-rules' do
+        collection do
+          get :needs_reorder, path: 'needs-reorder'
         end
       end
       
@@ -624,6 +739,7 @@ Rails.application.routes.draw do
           post :tags, to: 'accounts#add_tags'
           delete 'tags/:tag_name', to: 'accounts#remove_tag'
           get :deals
+          get 'communications/rollup', to: 'accounts#communications_rollup'  # Communication rollup across all contacts
         end
         
         collection do
@@ -1009,7 +1125,10 @@ Rails.application.routes.draw do
       # ==================== INTAKE ====================
       namespace :intake do
         resources :forms do
-          collection { post :bulk }
+          collection do
+            post :bulk
+            get :lead_fields
+          end
         end
 
         resources :submissions, only: %i[index create] do
@@ -1170,6 +1289,7 @@ Rails.application.routes.draw do
     namespace :company do
       resource :settings, only: %i[show update] do
         post :test_email, on: :collection
+        post :send_test_email, on: :collection
         post :test_sms, on: :collection
       end
       
@@ -1323,8 +1443,9 @@ Rails.application.routes.draw do
       patch 'preferences', to: 'preferences#update'
       get 'preferences/history', to: 'preferences#history'
       
-      # Portal Settings (Branding)
+      # Portal Settings (Branding & Modules)
       get 'settings/branding', to: 'settings#branding'
+      get 'settings/modules', to: 'settings#modules'
       
       # Phase 4F - Loans with Payment Processing
       resources :loans, only: [:index, :show] do

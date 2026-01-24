@@ -49,6 +49,15 @@ class Company < ApplicationRecord
   has_many :manufacturer_ar_transactions, dependent: :destroy
   has_many :manufacturer_ar_payments, dependent: :destroy
   
+  # Parts & Inventory Module Associations
+  has_many :part_categories, dependent: :destroy
+  has_many :parts, dependent: :destroy
+  has_many :suppliers, dependent: :destroy
+  has_many :purchase_orders, dependent: :destroy
+  has_many :inventory_transactions, dependent: :destroy
+  has_many :stock_balances, dependent: :destroy
+  has_many :reorder_rules, dependent: :destroy
+  
   # RBAC System Associations
   has_many :roles, dependent: :destroy
   has_many :company_hidden_roles, dependent: :destroy
@@ -328,6 +337,11 @@ class Company < ApplicationRecord
   
   def integration_settings
     @integration_settings ||= Setting.get('Company', id, 'integration') || {}
+  end
+  
+  # Branding helpers - extract logo from settings
+  def logo
+    branding_settings&.dig('logo')
   end
   
   # Use the same bank account for deposits and rent collections

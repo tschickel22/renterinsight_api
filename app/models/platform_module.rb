@@ -14,6 +14,7 @@ class PlatformModule
     
     # Inventory & Operations
     'inventory.vehicles' => { name: 'Inventory Management', category: 'Inventory & Operations', icon: 'Package', description: 'Vehicle and unit inventory tracking' },
+    'inventory.parts' => { name: 'Parts Management', category: 'Inventory & Operations', icon: 'Box', description: 'Parts inventory and stock management' },
     'inventory.land' => { name: 'Land Management', category: 'Inventory & Operations', icon: 'Map', description: 'Land and lot inventory management' },
     'inventory.lot_map' => { name: 'Lot Map', category: 'Inventory & Operations', icon: 'MapPin', description: 'Visual lot mapping and assignment' },
     'inventory.pdi' => { name: 'PDI Checklist', category: 'Inventory & Operations', icon: 'ClipboardCheck', description: 'Pre-delivery inspection management' },
@@ -74,7 +75,7 @@ class PlatformModule
     ],
     professional: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes
-      inventory.vehicles inventory.land inventory.lot_map inventory.pdi inventory.delivery
+      inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures
       finance.loans finance.agreements finance.invoices finance.applications
       service.operations service.portal
@@ -83,7 +84,7 @@ class PlatformModule
     ],
     enterprise: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes
-      inventory.vehicles inventory.land inventory.lot_map inventory.pdi inventory.delivery
+      inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures marketing.website marketing.syndication
       finance.loans finance.agreements finance.invoices finance.applications
       service.operations service.portal service.warranty

@@ -13,6 +13,13 @@ class Deal < ApplicationRecord
   belongs_to :vehicle, optional: true  # Added vehicle relationship
   belongs_to :commission_plan, optional: true  # Commission plan for this deal
   
+  # Deal participants for commission calculation
+  belongs_to :primary_salesperson, class_name: 'User', foreign_key: 'primary_salesperson_id', optional: true
+  belongs_to :sales_manager, class_name: 'User', foreign_key: 'sales_manager_id', optional: true
+  belongs_to :finance_manager, class_name: 'User', foreign_key: 'finance_manager_id', optional: true
+  belongs_to :desk_manager, class_name: 'User', foreign_key: 'desk_manager_id', optional: true
+  belongs_to :secondary_salesperson, class_name: 'User', foreign_key: 'secondary_salesperson_id', optional: true
+  
   has_many :deal_products, dependent: :destroy
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
@@ -165,9 +172,18 @@ class Deal < ApplicationRecord
   
   # FRONT GROSS (Sale Price - Cost - Trade Difference)
   def front_gross
+    # Primary home gross (with cost tracking)
     base_gross = (selling_price || 0) - (unit_cost || 0)
     trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
-    (base_gross - trade_difference).round(2)
+    primary_gross = base_gross - trade_difference
+    
+    # Add gross from all deal_products (additional homes/land/parts)
+    # NOTE: deal_products don't have individual cost tracking, so we treat the 'total'
+    # as the gross profit. For accessories/parts this is acceptable (high margins).
+    # For additional homes, cost should be added to deal.unit_cost or tracked separately.
+    products_gross = deal_products.sum(:total)
+    
+    (primary_gross + products_gross).round(2)
   end
   
   # PACK (dealer holdback/administrative fee)
@@ -235,14 +251,23 @@ class Deal < ApplicationRecord
     saved_change_to_stage? && stage == 'closed_won' && delivery_date.present?
   end
   
-  # Primary salesperson helper
+  # Primary salesperson helper (deprecated - use association)
   def primary_salesperson
     User.find_by(id: primary_salesperson_id)
   end
   
-  private
+  # Get all deal participants for commission calculation
+  def all_participants
+    participants = []
+    participants << { user: primary_salesperson, role: 'primary_salesperson' } if primary_salesperson_id.present?
+    participants << { user: sales_manager, role: 'sales_manager' } if sales_manager_id.present?
+    participants << { user: finance_manager, role: 'finance_manager' } if finance_manager_id.present?
+    participants << { user: desk_manager, role: 'desk_manager' } if desk_manager_id.present?
+    participants << { user: secondary_salesperson, role: 'secondary_salesperson' } if secondary_salesperson_id.present?
+    participants.compact
+  end
   
-  # Determine which commission plan applies to this deal
+  # Determine which commission plan applies to this deal (PUBLIC - called from controller)
   def determine_commission_plan
     return commission_plan if commission_plan_id.present?
     
@@ -272,6 +297,8 @@ class Deal < ApplicationRecord
     # Priority 3: Company default plan
     company.commission_plans.active.current.defaults.first
   end
+  
+  private
   
   # Auto-assign commission plan before save
   def auto_assign_commission_plan

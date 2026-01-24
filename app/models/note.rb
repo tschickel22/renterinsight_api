@@ -13,6 +13,7 @@ class Note < ApplicationRecord
   private
   
   def set_created_by_name
-    self.created_by_name ||= user&.name || 'Unknown User'
+    # Only set from user if created_by_name isn't already set
+    self.created_by_name = user&.name || 'Unknown User' if created_by_name.blank?
   end
 end

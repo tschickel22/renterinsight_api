@@ -73,7 +73,7 @@ module Api
       def show
         return unless authorize_action!('finance', 'read')
         
-        render json: @quote.as_json(include_account: true, include_contact: true)
+        render json: @quote.as_json(include_account: true, include_contact: true, include_inventory: true)
       end
 
       # POST /api/v1/quotes
@@ -393,6 +393,75 @@ module Api
         # Reload tags association to get updated list
         @quote.reload
         render json: @quote.as_json(include_account: true, include_contact: true)
+      end
+
+      # GET /api/v1/quotes/search_parts
+      def search_parts
+        return unless authorize_action!('parts', 'read')
+        
+        query = params[:query] || ''
+        location_id = params[:location_id] || Current.location_id
+        
+        parts = @company.parts
+                        .where(is_deleted: [false, nil], active: true)
+                        .where('name ILIKE ? OR part_number ILIKE ? OR manufacturer_name ILIKE ?', 
+                               "%#{query}%", "%#{query}%", "%#{query}%")
+                        .limit(20)
+        
+        # Include stock levels for the specified location
+        parts_with_stock = parts.map do |part|
+          stock = part.stock_balances.find_by(location_id: location_id)
+          
+          {
+            id: part.id,
+            part_number: part.part_number,
+            name: part.name,
+            manufacturer_name: part.manufacturer_name,
+            default_cost: part.default_cost,
+            list_price: part.list_price,
+            sale_price: part.sale_price,
+            stock_level: stock&.available || 0,
+            location_name: stock&.location&.name
+          }
+        end
+        
+        render json: parts_with_stock
+      end
+      
+      # POST /api/v1/quotes/:id/mark_parts_used
+      def mark_parts_used
+        return unless authorize_action!('parts', 'update')
+        
+        usage_ids = params[:usage_ids]
+        mark_all = params[:mark_all] == true || usage_ids.nil?
+        
+        if mark_all
+          results = @quote.mark_all_inventory_used!(current_user)
+        else
+          results = { success: [], failed: [] }
+          
+          @quote.quote_inventory_usages.where(id: usage_ids).not_used.each do |usage|
+            if usage.mark_as_used!(current_user)
+              results[:success] << usage.id
+            else
+              results[:failed] << { id: usage.id, error: 'Insufficient stock or already used' }
+            end
+          end
+        end
+        
+        if results[:failed].empty?
+          render json: { 
+            message: "Successfully marked #{results[:success].count} parts as used",
+            results: results,
+            quote: @quote.as_json(include_account: true, include_contact: true)
+          }
+        else
+          render json: { 
+            message: "Marked #{results[:success].count} parts as used, #{results[:failed].count} failed",
+            results: results,
+            quote: @quote.as_json(include_account: true, include_contact: true)
+          }, status: :unprocessable_entity
+        end
       end
 
       # GET /api/v1/quotes/export

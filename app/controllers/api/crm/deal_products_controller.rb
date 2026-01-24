@@ -134,6 +134,7 @@ module Api
           :quantity,
           :unit_price,
           :discount,
+          :discount_type,
           :tax,
           :notes
         )
@@ -146,7 +147,8 @@ module Api
           product_sku: build_sku(item_params),
           quantity: item_params[:quantity] || 1,
           unit_price: item_params[:unitPrice] || item_params[:salePrice] || item_params[:unit_price] || 0,
-          discount: calculate_discount_amount(item_params),
+          discount: item_params[:discount] || 0,
+          discount_type: item_params[:discountType] || item_params[:discount_type] || 'fixed',
           tax: item_params[:taxAmount] || item_params[:tax] || 0,
           notes: build_notes(item_params)
         }
@@ -202,6 +204,7 @@ module Api
           quantity: product.quantity,
           unitPrice: product.unit_price,
           discount: product.discount,
+          discountType: product.discount_type,
           tax: product.tax,
           total: product.total,
           notes: product.notes,

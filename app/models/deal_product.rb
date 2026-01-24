@@ -5,6 +5,7 @@ class DealProduct < ApplicationRecord
   validates :product_name, presence: true
   validates :quantity, numericality: { greater_than: 0 }
   validates :unit_price, numericality: { greater_than_or_equal_to: 0 }
+  validates :discount_type, inclusion: { in: %w[fixed percentage], message: "%{value} is not a valid discount type" }, allow_nil: false
   
   before_save :calculate_total
   after_save :update_deal_value
@@ -13,8 +14,18 @@ class DealProduct < ApplicationRecord
   private
   
   def calculate_total
-    subtotal = (quantity * unit_price) - discount
-    self.total = subtotal + tax
+    # Calculate subtotal
+    subtotal = quantity * unit_price
+    
+    # Apply discount based on type
+    discount_amount = if discount_type == 'percentage'
+      subtotal * (discount / 100.0)
+    else
+      discount
+    end
+    
+    # Calculate final total
+    self.total = subtotal - discount_amount + tax
   end
   
   def update_deal_value

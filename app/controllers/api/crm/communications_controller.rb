@@ -8,9 +8,6 @@ module Api
         create_actions: [:create, :create_log, :email, :sms, :send_email, :send_sms],
         update_actions: [],
         delete_actions: []
-
-      # Skip authentication for test endpoints
-      skip_before_action :authenticate, only: [:email, :sms]
       
       before_action :set_company_scope
       before_action :set_lead, except: [:create_log, :email, :sms]
@@ -330,11 +327,24 @@ module Api
       end
 
       def fetch_company_settings
-        # Make internal request to company settings
-        response = Faraday.get("#{request.base_url}/api/company/settings") rescue nil
-        return {} unless response&.success?
+        return {} unless @company
         
-        JSON.parse(response.body, symbolize_names: true) rescue {}
+        # Fetch directly from database using same cascade as company settings controller
+        # Layer 1: Try location settings first (if location context exists)
+        if Current.location_id.present?
+          location_settings = Setting.get('Location', Current.location_id, 'communications')
+          Rails.logger.info "[fetch_company_settings] Location settings (#{Current.location_id}): #{location_settings.inspect}"
+          return { communications: location_settings } if location_settings.present?
+        end
+        
+        # Layer 2: Fall back to company settings
+        company_settings = Setting.get('Company', @company.id, 'communications')
+        Rails.logger.info "[fetch_company_settings] Company settings (#{@company.id}): #{company_settings.inspect}"
+        return { communications: company_settings } if company_settings.present?
+        
+        # No company/location override
+        Rails.logger.info "[fetch_company_settings] No company or location settings found"
+        {}
       rescue => e
         Rails.logger.warn("[CommunicationsController] Could not fetch company settings: #{e.message}")
         {}

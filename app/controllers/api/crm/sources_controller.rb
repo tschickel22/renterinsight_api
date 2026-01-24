@@ -70,15 +70,17 @@ module Api
       # GET /api/crm/sources/:id/stats
       def stats
         # STRICT TENANT ISOLATION: Only count leads from current company
-        leads_count = @company.leads.where(source_id: @source.id).count
-        deals_count = @company.deals.where(source_id: @source.id).count
+        leads_count = @company.leads.where(source_id: @source.id, is_deleted: [false, nil]).count
+        deals_count = @company.deals.where(source_id: @source.id, is_deleted: [false, nil]).count
         
+        # Calculate conversion rate: deals / leads * 100 (or 0 if no leads)
+        conversion_rate = leads_count > 0 ? (deals_count.to_f / leads_count * 100).round(1) : 0.0
+        
+        # FIXED: Use field names that match frontend expectations
         render json: {
-          sourceId: @source.id,
-          sourceName: @source.name,
-          leadsCount: leads_count,
-          conversionRate: @source.try(:conversion_rate) || 0.0,
-          dealsCount: deals_count
+          leads: leads_count,
+          deals: deals_count,
+          conversionRate: conversion_rate
         }, status: :ok
       end
 

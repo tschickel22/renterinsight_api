@@ -55,12 +55,9 @@ module Api
         end
 
         # Scope communication logs to this lead
-        email_opens  = CommunicationLog.where(lead_id: @lead.id, comm_type: 'email', status: 'opened').count
-        email_clicks = CommunicationLog.where(lead_id: @lead.id, comm_type: 'email', status: 'clicked').count
-        if email_clicks > 0
-          total += 15
-          factors << { factor: 'email_clicks', points: 15, reason: "Clicked #{email_clicks} email(s)" }
-        elsif email_opens > 0
+        email_opens  = Communication.where(communicable_type: 'Lead', communicable_id: @lead.id, channel: 'email').where.not(read_at: nil).count
+        
+        if email_opens > 0
           total += 10
           factors << { factor: 'email_opens', points: 10, reason: "Opened #{email_opens} email(s)" }
         end
@@ -75,29 +72,8 @@ module Api
       private
 
       def set_company_scope
-        unless current_user
-          Rails.logger.error "🚫 [LeadScoresController] No authenticated user found"
-          render json: { error: 'Authentication required' }, status: :unauthorized
-          return
-        end
-        
-        company_id = current_company_id
-        
-        unless company_id.present?
-          Rails.logger.error "🚫 [LeadScoresController] No company context available"
-          render json: { error: 'No company context' }, status: :forbidden
-          return
-        end
-        
-        @company = ::Company.find_by(id: company_id)
-        
-        if @company.nil?
-          Rails.logger.error "🚫 [LeadScoresController] Company #{company_id} not found"
-          render json: { error: 'Company not found' }, status: :not_found
-          return
-        end
-        
-        Rails.logger.info "✅ [LeadScoresController] Company scope set: #{@company.name} (ID: #{@company.id})"
+        # Use ApplicationController's standard company context (handles platform admin switching)
+        super
       end
 
       def set_lead

@@ -1,84 +1,45 @@
 # frozen_string_literal: true
 
-# == Schema Information
-#
-# Table name: manufacturers
-#
-#  id                  :bigint           not null, primary key
-#  name                :string           not null
-#  industry_type       :string           not null
-#  contact_email       :string
-#  contact_phone       :string
-#  website             :string
-#  oem_codes           :jsonb            default({})
-#  has_portal_access   :boolean          default(FALSE), not null
-#  portal_url          :string
-#  active              :boolean          default(TRUE), not null
-#  notes               :text
-#  metadata            :jsonb            default({})
-#  created_at          :datetime         not null
-#  updated_at          :datetime         not null
-#
-
 class Manufacturer < ApplicationRecord
-  # This is a PLATFORM-LEVEL table (no company_id)
-  # All companies share the same manufacturer list
-  
-  INDUSTRY_TYPES = %w[rv manufactured_home both].freeze
+  # Note: Removed Customizable concern - not needed for manufacturers yet
   
   # Associations
-  has_many :warranty_claims, dependent: :restrict_with_error
-  has_many :manufacturer_ar_transactions, dependent: :restrict_with_error
+  belongs_to :company, optional: true  # Optional for global warranty manufacturers
+  belongs_to :created_by, class_name: 'User', optional: true
+  belongs_to :updated_by, class_name: 'User', optional: true
   
-  # Company Associations (through join table)
-  has_many :company_manufacturers, dependent: :destroy
-  has_many :companies, through: :company_manufacturers
-  
-  # Location Associations (through join table)
-  has_many :location_manufacturers, dependent: :destroy
-  has_many :locations, through: :location_manufacturers
+  has_many :parts, dependent: :restrict_with_error
+  has_many :warranty_claims
+  has_many :manufacturer_ar_transactions
+  has_many :location_manufacturers
+  has_many :company_manufacturers
   
   # Validations
-  validates :name, presence: true, uniqueness: { case_sensitive: false }
-  validates :industry_type, presence: true, inclusion: { in: INDUSTRY_TYPES }
-  validates :contact_email, format: { with: URI::MailTo::EMAIL_REGEXP }, allow_blank: true
-  # Website validation - accept domains with or without protocol
-  validates :website, format: { 
-    with: /\A(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&\/\/=]*)\z/
-  }, allow_blank: true
+  validates :name, presence: true, length: { maximum: 255 }
+  validates :contact_email, format: { with: URI::MailTo::EMAIL_REGEXP, allow_blank: true }
+  validates :contact_phone, length: { maximum: 20 }, allow_blank: true
   
-  # Serialize JSONB columns
-  attribute :oem_codes, :json, default: {}
-  attribute :metadata, :json, default: {}
+  # Company-scoped manufacturers must have unique name/code
+  validates :code, uniqueness: { scope: :company_id, allow_nil: true }, if: :company_id?
+  validates :name, uniqueness: { scope: :company_id }, if: :company_id?
   
   # Scopes
   scope :active, -> { where(active: true) }
-  scope :inactive, -> { where(active: false) }
-  scope :for_industry, ->(industry_type) { where(industry_type: industry_type) }
-  scope :rv_manufacturers, -> { where(industry_type: ['rv', 'both']) }
-  scope :mh_manufacturers, -> { where(industry_type: ['manufactured_home', 'both']) }
-  scope :with_portal, -> { where(has_portal_access: true) }
+  scope :for_company, ->(company_id) { where(company_id: company_id) }
+  scope :global_warranty, -> { where(company_id: nil) }
+  scope :by_name, -> { order(:name) }
   scope :alphabetical, -> { order(:name) }
-  scope :search, ->(query) do
-    where('name ILIKE ? OR contact_email ILIKE ?', "%#{query}%", "%#{query}%")
-  end
   
   # Callbacks
-  before_save :normalize_name
-  before_save :normalize_website
+  before_validation :normalize_fields
   
-  # Instance Methods
-  
-  def display_name
-    name
-  end
-  
-  def supports_rv?
-    ['rv', 'both'].include?(industry_type)
-  end
-  
-  def supports_manufactured_homes?
-    ['manufactured_home', 'both'].include?(industry_type)
+  # Soft delete (deactivate since we don't have is_deleted column)
+  def soft_delete!
+    if parts.where('is_deleted = ? OR is_deleted IS NULL', false).exists?
+      errors.add(:base, 'Cannot delete manufacturer with associated parts')
+      raise ActiveRecord::RecordInvalid, self
+    end
+    update!(active: false)
   end
   
   def deactivate!
@@ -89,52 +50,35 @@ class Manufacturer < ApplicationRecord
     update!(active: true)
   end
   
-  # Get dealer code for a specific company (if stored in oem_codes)
-  def dealer_code_for(company)
-    return nil unless oem_codes.is_a?(Hash)
-    oem_codes.dig(company.id.to_s, 'dealer_code')
+  # Display helpers
+  def display_name
+    code.present? ? "#{name} (#{code})" : name
   end
   
-  # Set dealer code for a specific company
-  def set_dealer_code_for(company, code)
-    self.oem_codes ||= {}
-    self.oem_codes[company.id.to_s] ||= {}
-    self.oem_codes[company.id.to_s]['dealer_code'] = code
-    save
+  def full_address
+    parts = [address_line1, address_line2, city, state, zip_code, country].compact.reject(&:blank?)
+    parts.any? ? parts.join(', ') : nil
   end
   
-  # Statistics
-  def total_claims_count
-    warranty_claims.count
-  end
-  
-  def active_claims_count
-    warranty_claims.where(status: ['submitted', 'under_review']).count
-  end
-  
-  def approved_claims_count
-    warranty_claims.where(status: 'approved').count
-  end
-  
-  def total_ar_outstanding
-    manufacturer_ar_transactions.where(status: ['open', 'partial']).sum(:amount_outstanding)
+  def as_json(options = {})
+    super(options.merge(
+      only: [:id, :name, :code, :contact_name, :contact_email, :contact_phone, :website, 
+             :active, :created_at, :updated_at, :company_id],
+      methods: [:display_name, :full_address]
+    ))
   end
   
   private
   
-  def normalize_name
-    self.name = name.strip if name.present?
-  end
-  
-  def normalize_website
-    return if website.blank?
-    
-    # Strip whitespace
-    self.website = website.strip
-    
-    # Add https:// if no protocol specified
-    unless website.match?(/\Ahttps?:\/\//i)
-      self.website = "https://#{website}"
-    end
+  def normalize_fields
+    self.name = name&.strip
+    self.code = code&.strip&.upcase if code.present?
+    self.contact_email = contact_email&.strip&.downcase if contact_email.present?
+    self.contact_phone = contact_phone&.strip if contact_phone.present?
+    self.contact_name = contact_name&.strip if contact_name.present?
+    self.city = city&.strip&.titleize if city.present?
+    self.state = state&.strip&.upcase if state.present?
+    self.zip_code = zip_code&.strip if zip_code.present?
+    self.country = country&.strip&.upcase if country.present?
   end
 end

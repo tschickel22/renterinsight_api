@@ -11,6 +11,7 @@ module Api
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
       before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
+      before_action :authorize_settings_update!, only: [:show_portal_modules, :update_portal_modules]
 
       # GET /api/v1/company_settings/operational
       def show_operational
@@ -169,6 +170,65 @@ module Api
         end
       rescue => e
         Rails.logger.error "Error updating RBAC setting: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: {
+          errors: [e.message]
+        }, status: :unprocessable_entity
+      end
+
+      # GET /api/v1/company_settings/portal_modules
+      def show_portal_modules
+        settings = Setting.get('Company', @company.id, 'portal_modules', {})
+        
+        # Default settings if none saved
+        default_settings = {
+          'dashboard' => true,
+          'loanManagement' => true,
+          'invoices' => true,
+          'quotes' => true,
+          'documents' => true,
+          'agreementSigning' => true,
+          'financeApplications' => true,
+          'serviceRequests' => false,
+          'settings' => true
+        }
+        
+        # Merge defaults with saved settings
+        merged_settings = default_settings.merge(settings.stringify_keys)
+        
+        Rails.logger.info "🔧 [CompanySettings#show_portal_modules] Portal modules for company #{@company.id}: #{merged_settings.inspect}"
+        
+        render json: {
+          portal_modules: merged_settings,
+          defaults: default_settings
+        }
+      end
+
+      # PATCH /api/v1/company_settings/portal_modules
+      def update_portal_modules
+        Rails.logger.info "🔧 [CompanySettings#update_portal_modules] Received params: #{params.inspect}"
+        Rails.logger.info "🔧 [CompanySettings#update_portal_modules] Company: #{@company&.name} (ID: #{@company&.id})"
+
+        settings = params[:portal_modules] || {}
+        
+        # Convert ActionController::Parameters to hash if needed
+        settings = settings.to_unsafe_h if settings.respond_to?(:to_unsafe_h)
+        
+        Rails.logger.info "📊 [CompanySettings#update_portal_modules] Portal modules to save: #{settings.inspect}"
+
+        # Save to Settings table
+        Setting.set('Company', @company.id, 'portal_modules', settings)
+        
+        # Retrieve saved settings to confirm
+        saved_settings = Setting.get('Company', @company.id, 'portal_modules', {})
+        Rails.logger.info "✅ [CompanySettings#update_portal_modules] Settings saved successfully: #{saved_settings.inspect}"
+
+        render json: {
+          portal_modules: saved_settings,
+          message: 'Portal module settings updated successfully'
+        }
+      rescue => e
+        Rails.logger.error "❌ [CompanySettings#update_portal_modules] Error: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
         render json: {
           errors: [e.message]
