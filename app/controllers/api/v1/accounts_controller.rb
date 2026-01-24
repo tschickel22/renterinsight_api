@@ -560,12 +560,18 @@ module Api
         # Get all contacts for this account (tenant-isolated)
         contact_ids = @company.contacts.where(account_id: @account.id, is_deleted: [false, nil]).pluck(:id)
         
-        # Get all communications for those contacts using correct column names
+        # Get all leads that were CONVERTED TO this account (historical communications)
+        # Note: Leads don't have account_id - they have converted_account_id after conversion
+        # Note: Leads table doesn't have is_deleted column - uses status field instead
+        lead_ids = @company.leads.where(converted_account_id: @account.id).pluck(:id)
+        
+        # Get all communications for contacts AND converted leads
         # Note: Communications table uses polymorphic association (communicable_type, communicable_id)
         # and 'channel' not 'communication_type'
         communications = Communication.where(
-          communicable_type: 'Contact',
-          communicable_id: contact_ids
+          "(communicable_type = 'Contact' AND communicable_id IN (?)) OR (communicable_type = 'Lead' AND communicable_id IN (?))",
+          contact_ids.any? ? contact_ids : [0],
+          lead_ids.any? ? lead_ids : [0]
         ).order(sent_at: :desc)
         
         # Calculate stats using correct column name 'channel'
@@ -590,9 +596,16 @@ module Api
         total_count = communications.count
         paginated_comms = communications.offset((page - 1) * per_page).limit(per_page)
         
-        # Enrich communications with contact name and event data
+        # Enrich communications with contact/lead name and event data
         enriched_comms = paginated_comms.map do |comm|
-          contact = Contact.find_by(id: comm.communicable_id)
+          # Handle both Contact and Lead communicable types
+          if comm.communicable_type == 'Contact'
+            entity = Contact.find_by(id: comm.communicable_id)
+            entity_name = entity ? "#{entity.first_name} #{entity.last_name}" : 'Unknown Contact'
+          else # Lead
+            entity = Lead.find_by(id: comm.communicable_id)
+            entity_name = entity ? "#{entity.first_name} #{entity.last_name}" : 'Unknown Lead'
+          end
           
           # Get event timestamps from communication_events
           events = comm.communication_events
@@ -609,7 +622,7 @@ module Api
             delivered_at: comm.delivered_at,
             opened_at: opened_event&.occurred_at,
             clicked_at: clicked_event&.occurred_at,
-            contact_name: contact ? "#{contact.first_name} #{contact.last_name}" : 'Unknown Contact',
+            contact_name: entity_name,  # Works for both Contact and Lead
             contact_id: comm.communicable_id
           }
         end
