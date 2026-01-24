@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_22_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_24_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -983,8 +983,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_22_000001) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "discount_type", default: "fixed", null: false
     t.index ["deal_id", "product_id"], name: "index_deal_products_on_deal_id_and_product_id"
     t.index ["deal_id"], name: "index_deal_products_on_deal_id"
+    t.index ["discount_type"], name: "index_deal_products_on_discount_type"
     t.index ["product_id"], name: "index_deal_products_on_product_id"
   end
 

@@ -739,6 +739,7 @@ Rails.application.routes.draw do
           post :tags, to: 'accounts#add_tags'
           delete 'tags/:tag_name', to: 'accounts#remove_tag'
           get :deals
+          get 'communications/rollup', to: 'accounts#communications_rollup'  # Communication rollup across all contacts
         end
         
         collection do

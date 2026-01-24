@@ -28,6 +28,16 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         deals = deals.for_current_location
         
+        # DEFAULT VIEW SCOPING: Sales reps see only their own deals unless explicitly requesting broader view
+        # Admins and users with 'read_all' permission can expand to see all deals
+        view_scope = params[:view] # 'my', 'team', 'all'
+        
+        unless current_user.effective_admin? || view_scope == 'all'
+          # Default to "My Deals" for non-admin users
+          deals = deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?', 
+                             current_user.id, current_user.id, current_user.email)
+        end
+        
         deals = deals.includes(:account, :contact, :territory, :user, :deal_products, :commission_plan)
                     .order(created_at: :desc)
         
@@ -115,6 +125,15 @@ module Api
         # Apply strict location filter - only deals explicitly assigned to selected location
         if Current.location_filtered?
           company_deals = company_deals.where(location_id: Current.location_id)
+        end
+        
+        # DEFAULT VIEW SCOPING: Apply same scoping as index action
+        view_scope = params[:view] # 'my', 'team', 'all'
+        
+        unless current_user.effective_admin? || view_scope == 'all'
+          # Default to "My Deals" for non-admin users
+          company_deals = company_deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?', 
+                                             current_user.id, current_user.id, current_user.email)
         end
         
         # Overall metrics
@@ -610,6 +629,7 @@ module Api
           quantity: dp.quantity,
           unitPrice: dp.unit_price,
           discount: dp.discount,
+          discountType: dp.discount_type,
           tax: dp.tax,
           total: dp.total,
           notes: dp.notes

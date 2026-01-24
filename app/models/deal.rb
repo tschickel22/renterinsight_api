@@ -172,9 +172,18 @@ class Deal < ApplicationRecord
   
   # FRONT GROSS (Sale Price - Cost - Trade Difference)
   def front_gross
+    # Primary home gross (with cost tracking)
     base_gross = (selling_price || 0) - (unit_cost || 0)
     trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
-    (base_gross - trade_difference).round(2)
+    primary_gross = base_gross - trade_difference
+    
+    # Add gross from all deal_products (additional homes/land/parts)
+    # NOTE: deal_products don't have individual cost tracking, so we treat the 'total'
+    # as the gross profit. For accessories/parts this is acceptable (high margins).
+    # For additional homes, cost should be added to deal.unit_cost or tracked separately.
+    products_gross = deal_products.sum(:total)
+    
+    (primary_gross + products_gross).round(2)
   end
   
   # PACK (dealer holdback/administrative fee)
