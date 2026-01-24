@@ -8,7 +8,7 @@ module Api
       
       # Require platform admin for all tenant management actions
       before_action :require_platform_admin!, except: [:check_subdomain_available, :check_domain_available]
-      before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :generate_email_dns_records, :verify_email_domain, :check_domain_dns, :check_email_dns]
+      before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :generate_email_dns_records, :verify_email_domain, :check_domain_dns, :check_email_dns, :send_owner_invitation, :update_owner_invitation]
       
       # GET /api/platform/tenants
       def index
@@ -89,7 +89,7 @@ module Api
           start_trial = params.dig(:tenant, :start_trial) == true || params.dig(:tenant, :start_trial) == 'true'
           
           @tenant = ::Company.new(tenant_params.except(
-            :owner_email, :owner_first_name, :owner_last_name, :owner_phone,
+            :owner_email, :owner_first_name, :owner_last_name, :owner_phone, :send_invitation,
             :subscription_plan_id, :billing_cycle, :start_trial
           ))
           
@@ -108,13 +108,17 @@ module Api
               end
             end
             
-            # Auto-create tenant owner user if email provided
+            # Auto-create tenant owner invitation if email provided
             if tenant_params[:owner_email].present?
               begin
-                create_tenant_owner(@tenant)
+                # Get send_invitation param (default: false for delayed sending)
+                send_now = params.dig(:tenant, :send_invitation) == true || 
+                           params.dig(:tenant, :send_invitation) == 'true'
+                
+                create_tenant_owner(@tenant, send_now: send_now)
               rescue => e
-                Rails.logger.error "Failed to create tenant owner: #{e.message}"
-                # Don't fail the whole request if user creation fails
+                Rails.logger.error "Failed to create tenant owner invitation: #{e.message}"
+                # Don't fail the whole request if invitation creation fails
               end
             end
             
@@ -455,6 +459,111 @@ module Api
         end
       end
       
+      # POST /api/platform/tenants/:id/send_owner_invitation
+      # Send the tenant owner invitation (for delayed invitations)
+      def send_owner_invitation
+        begin
+          # Find the pending tenant invitation
+          invitation = @tenant.invitations
+                              .where(invitation_type: 'tenant')
+                              .where(status: 'pending')
+                              .order(created_at: :desc)
+                              .first
+          
+          unless invitation
+            return render json: { 
+              error: 'No pending invitation found for this tenant' 
+            }, status: :not_found
+          end
+          
+          # Use InvitationService to resend (generates new token and sends)
+          invitation_service = InvitationService.new(
+            invited_by: current_user,
+            company: @tenant
+          )
+          
+          # Resend will regenerate token and send the invitation
+          result = invitation_service.resend_invitation(invitation.id)
+          
+          if result[:success]
+            # Reload to get updated sent_at timestamp
+            invitation.reload
+            
+            render json: {
+              success: true,
+              invitation: {
+                id: invitation.id,
+                email: invitation.email,
+                status: invitation.status,
+                sent_at: invitation.sent_at || invitation.last_sent_at
+              },
+              message: 'Tenant owner invitation sent successfully'
+            }
+          else
+            render json: {
+              success: false,
+              error: result[:error]
+            }, status: :unprocessable_entity
+          end
+        rescue => e
+          Rails.logger.error "Send owner invitation error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            error: Rails.env.development? ? e.message : 'Failed to send invitation'
+          }, status: :unprocessable_entity
+        end
+      end
+      
+      # PATCH /api/platform/tenants/:id/update_owner_invitation
+      # Update the tenant owner invitation details (email, phone, name)
+      def update_owner_invitation
+        begin
+          # Find the most recent tenant invitation (accepted or pending)
+          invitation = @tenant.invitations
+                              .where(invitation_type: 'tenant')
+                              .order(created_at: :desc)
+                              .first
+          
+          unless invitation
+            return render json: { 
+              error: 'No invitation found for this tenant' 
+            }, status: :not_found
+          end
+          
+          # Build full name from first and last
+          recipient_name = [params[:first_name], params[:last_name]].compact.join(' ').strip
+          recipient_name = nil if recipient_name.empty?
+          
+          # Prepare update parameters
+          update_params = {}
+          update_params[:email] = params[:email] if params[:email].present?
+          update_params[:phone] = params[:phone] if params[:phone].present?
+          update_params[:recipient_name] = recipient_name if recipient_name.present?
+          
+          if update_params.empty?
+            return render json: { 
+              error: 'No update parameters provided' 
+            }, status: :unprocessable_entity
+          end
+          
+          if invitation.update(update_params)
+            render json: {
+              success: true,
+              invitation: tenant_owner_invitation_status(@tenant),
+              message: 'Owner invitation updated successfully'
+            }
+          else
+            render json: { 
+              error: invitation.errors.full_messages.join(', ') 
+            }, status: :unprocessable_entity
+          end
+        rescue => e
+          Rails.logger.error "Update owner invitation error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
+          render json: { 
+            error: Rails.env.development? ? e.message : 'Failed to update invitation'
+          }, status: :unprocessable_entity
+        end
+      end
+      
       private
       
       def create_tenant_subscription(tenant, plan_id, billing_cycle, start_trial)
@@ -520,7 +629,7 @@ module Api
         end
       end
       
-      def create_tenant_owner(tenant)
+      def create_tenant_owner(tenant, send_now: false)
         # Use InvitationService to create proper invitation
         invitation_service = InvitationService.new(
           invited_by: current_user, 
@@ -536,7 +645,7 @@ module Api
           tenant_params[:owner_last_name]
         ].compact.join(' ').presence || tenant_params[:owner_email].split('@').first.capitalize
         
-        # Create and send invitation
+        # Create invitation (send immediately only if send_now is true)
         result = invitation_service.create_invitation(
           invitation_type: 'tenant',
           email: tenant_params[:owner_email],
@@ -545,7 +654,8 @@ module Api
           role: 'tenant',
           permissions: [],
           delivery_method: delivery_method,
-          message: "You've been invited to set up your company account for #{tenant.name}."
+          message: "You've been invited to set up your company account for #{tenant.name}.",
+          skip_send: !send_now  # NEW: Skip sending unless send_now is true
         )
         
         if result[:success]
@@ -598,6 +708,7 @@ module Api
           :owner_first_name,
           :owner_last_name,
           :owner_phone,
+          :send_invitation,  # NEW: Allow sending invitation immediately
           # New subscription params (extracted separately in create)
           :subscription_plan_id,
           :billing_cycle,
@@ -660,7 +771,8 @@ module Api
             external_payments_id: tenant.external_payments_id,
             domain_verification_token: tenant.domain_verification_token,
             primary_domain: tenant.custom_domain || tenant.subdomain,
-            subdomain_url: tenant.subdomain_url
+            subdomain_url: tenant.subdomain_url,
+            owner_invitation: tenant_owner_invitation_status(tenant)  # NEW: Add invitation status
           )
           
           # Include module access for detailed view
@@ -683,6 +795,33 @@ module Api
           users_count: 0,
           created_at: Time.current,
           updated_at: Time.current
+        }
+      end
+      
+      def tenant_owner_invitation_status(tenant)
+        invitation = tenant.invitations
+                           .where(invitation_type: 'tenant')
+                           .order(created_at: :desc)
+                           .first
+        
+        return nil unless invitation
+        
+        # Parse recipient_name into first and last name
+        name_parts = (invitation.recipient_name || '').split(' ', 2)
+        first_name = name_parts[0] || ''
+        last_name = name_parts[1] || ''
+        
+        {
+          id: invitation.id,
+          email: invitation.email,
+          phone: invitation.phone,
+          recipient_name: invitation.recipient_name,
+          first_name: first_name,
+          last_name: last_name,
+          status: invitation.status,
+          sent_at: invitation.sent_at,
+          accepted_at: invitation.accepted_at,
+          can_send: invitation.status == 'pending' && invitation.sent_at.nil?
         }
       end
     end

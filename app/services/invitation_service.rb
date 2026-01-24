@@ -25,7 +25,8 @@ class InvitationService
     delivery_method: 'email',
     message: nil,
     location_ids: [],
-    location_role: nil
+    location_role: nil,
+    skip_send: false  # NEW: Allow creating invitation without sending
   )
     # Validate invitation type
     unless Invitation::INVITATION_TYPES.include?(invitation_type)
@@ -83,13 +84,15 @@ class InvitationService
       create_invited_user_placeholder(invitation, recipient_name)
     end
     
-    # Send the invitation
-    send_invitation(invitation, raw_token)
+    # Send the invitation (unless skip_send is true)
+    unless skip_send
+      send_invitation(invitation, raw_token)
+    end
     
     {
       success: true,
       invitation: invitation,
-      message: 'Invitation sent successfully'
+      message: skip_send ? 'Invitation created (not sent)' : 'Invitation sent successfully'
     }
   rescue StandardError => e
     Rails.logger.error("Failed to create invitation: #{e.message}")

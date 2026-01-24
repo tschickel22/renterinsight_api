@@ -1359,6 +1359,8 @@ Rails.application.routes.draw do
           get :check_email_dns
           post :generate_email_dns_records
           post :verify_email_domain
+          post :send_owner_invitation  # NEW: Send tenant owner invitation
+          patch :update_owner_invitation  # NEW: Update owner invitation details
         end
         collection do
           get :check_subdomain_available
