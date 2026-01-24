@@ -258,9 +258,7 @@ class Deal < ApplicationRecord
     participants.compact
   end
   
-  private
-  
-  # Determine which commission plan applies to this deal
+  # Determine which commission plan applies to this deal (PUBLIC - called from controller)
   def determine_commission_plan
     return commission_plan if commission_plan_id.present?
     
@@ -290,6 +288,8 @@ class Deal < ApplicationRecord
     # Priority 3: Company default plan
     company.commission_plans.active.current.defaults.first
   end
+  
+  private
   
   # Auto-assign commission plan before save
   def auto_assign_commission_plan
