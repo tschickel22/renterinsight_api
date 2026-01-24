@@ -168,7 +168,8 @@ module Api
         return unless authorize_action!('leads', 'update')
         
         begin
-          Rails.logger.info "Starting lead conversion for lead #{params[:id]}"
+          Rails.logger.info "🔄 [ConvertLead] Starting conversion for lead #{params[:id]}"
+          Rails.logger.info "🔄 [ConvertLead] Params: account_name=#{params[:account_name]}, create_contact=#{params[:create_contact]}, create_deal=#{params[:create_deal]&.keys}"
           
           # Check if already converted
           if @lead.is_converted
@@ -176,132 +177,182 @@ module Api
             return
           end
           
-          # Create account with absolutely minimal fields
-          account_name = params[:account_name].presence || "#{@lead.first_name} #{@lead.last_name}".strip
-          account_name = "Converted Lead #{@lead.id}" if account_name.blank?
-          
-          Rails.logger.info "Creating account with name: #{account_name}"
-          
-          account = Account.new(
-            name: account_name,
-            company_id: @lead.company_id,
-            status: 'active'
-          )
-          
-          # Add optional fields if they won't cause validation errors
-          account.email = @lead.email if @lead.email.present?
-          account.phone = @lead.phone if @lead.phone.present?
-          account.source_id = @lead.source_id if @lead.source_id.present?
-          account.notes = @lead.notes if @lead.notes.present?
-          
-          # Auto-assign location from selector (if user selected a specific location)
-          if Current.location_id.present?
-            account.location_id = Current.location_id
-          # RBAC fallback: Location-tier users auto-assign to their first location if no selector
-          elsif current_user.uses_rbac? && !current_user.effective_admin?
-            location_ids = permission_service.accessible_location_ids
-            account.location_id = location_ids.first if location_ids.any?
-          end
-          
-          # Try to set account_type if the field exists
-          if account.respond_to?(:account_type=)
-            account.account_type = 'converted_lead'
-          end
-          
-          # Save the account
-          if !account.save
-            Rails.logger.error "Account validation failed: #{account.errors.full_messages.join(', ')}"
-            render json: { error: "Failed to create account: #{account.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
-            return
-          end
-          
-          Rails.logger.info "Account created with ID: #{account.id}"
-          
-          # Migrate lead activities to account activities
-          begin
-            if defined?(LeadActivity) && defined?(AccountActivity)
-              Rails.logger.info "Starting migration of #{@lead.lead_activities.count} activities"
+          ActiveRecord::Base.transaction do
+            # 1. CREATE ACCOUNT
+            account_name = params[:account_name].presence || "#{@lead.first_name} #{@lead.last_name}".strip
+            account_name = "Converted Lead #{@lead.id}" if account_name.blank?
+            
+            Rails.logger.info "✅ [ConvertLead] Creating account: #{account_name}"
+            
+            account = Account.new(
+              name: account_name,
+              company_id: @lead.company_id,
+              status: 'active',
+              email: @lead.email,
+              phone: @lead.phone,
+              source_id: @lead.source_id,
+              notes: @lead.notes
+            )
+            
+            # Auto-assign location
+            if Current.location_id.present?
+              account.location_id = Current.location_id
+            elsif current_user.uses_rbac? && !current_user.effective_admin?
+              location_ids = permission_service.accessible_location_ids
+              account.location_id = location_ids.first if location_ids.any?
+            end
+            
+            account.account_type = 'converted_lead' if account.respond_to?(:account_type=)
+            
+            unless account.save
+              raise ActiveRecord::RecordInvalid.new(account)
+            end
+            
+            Rails.logger.info "✅ [ConvertLead] Account created: #{account.id}"
+            
+            # 2. CREATE CONTACT (if requested or if we have name data)
+            contact = nil
+            create_contact = params[:create_contact].present? ? 
+              ActiveModel::Type::Boolean.new.cast(params[:create_contact]) : 
+              (@lead.first_name.present? && @lead.last_name.present?)
+            
+            if create_contact
+              Rails.logger.info "✅ [ConvertLead] Creating contact"
               
-              @lead.lead_activities.each do |lead_activity|
-                account_activity = AccountActivity.new(
+              contact = Contact.new(
+                first_name: @lead.first_name,
+                last_name: @lead.last_name,
+                email: @lead.email,
+                phone: @lead.phone,
+                account_id: account.id,
+                company_id: @lead.company_id,
+                location_id: account.location_id,
+                notes: "Converted from lead ##{@lead.id}"
+              )
+              
+              if contact.save
+                Rails.logger.info "✅ [ConvertLead] Contact created: #{contact.id}"
+              else
+                Rails.logger.warn "⚠️  [ConvertLead] Contact creation failed: #{contact.errors.full_messages}"
+                contact = nil
+              end
+            else
+              Rails.logger.info "⏭️  [ConvertLead] Skipping contact creation (not requested)"
+            end
+            
+            # 3. CREATE DEAL (if requested)
+            deal = nil
+            if params[:create_deal].present? && params[:create_deal].is_a?(ActionController::Parameters)
+              deal_params = params[:create_deal]
+              
+              Rails.logger.info "✅ [ConvertLead] Creating deal with params: #{deal_params.inspect}"
+              
+              deal = Deal.new(
+                name: deal_params[:name] || "#{account_name} Opportunity",
+                account_id: account.id,
+                contact_id: contact&.id,
+                company_id: @lead.company_id,
+                location_id: account.location_id,
+                stage: deal_params[:stage] || 'prospecting',
+                value: (deal_params[:value] || deal_params[:amount] || 0).to_f,
+                expected_close_date: deal_params[:close_date] || deal_params[:expected_close],
+                owner_id: current_user&.id,
+                description: deal_params[:description] || "Converted from lead ##{@lead.id}"
+              )
+              
+              if deal.save
+                Rails.logger.info "✅ [ConvertLead] Deal created: #{deal.id}"
+              else
+                Rails.logger.warn "⚠️  [ConvertLead] Deal creation failed: #{deal.errors.full_messages}"
+                deal = nil
+              end
+            else
+              Rails.logger.info "⏭️  [ConvertLead] Skipping deal creation (not requested)"
+            end
+            
+            # 4. MIGRATE ACTIVITIES
+            if defined?(LeadActivity) && defined?(AccountActivity)
+              activity_count = @lead.lead_activities.count
+              Rails.logger.info "🔄 [ConvertLead] Migrating #{activity_count} activities"
+              
+              @lead.lead_activities.each do |la|
+                aa = AccountActivity.new(
                   account_id: account.id,
-                  user_id: lead_activity.user_id,
-                  assigned_to_id: lead_activity.assigned_to_id,
-                  activity_type: lead_activity.activity_type,
-                  subject: lead_activity.subject,
-                  description: lead_activity.description,
-                  status: lead_activity.status,
-                  priority: lead_activity.priority,
-                  due_date: lead_activity.due_date,
-                  start_time: lead_activity.start_time,
-                  end_time: lead_activity.end_time,
-                  duration_minutes: lead_activity.duration_minutes,
-                  completed_at: lead_activity.completed_at,
-                  call_direction: lead_activity.call_direction,
-                  call_outcome: lead_activity.call_outcome,
-                  phone_number: lead_activity.phone_number,
-                  meeting_location: lead_activity.meeting_location,
-                  meeting_link: lead_activity.meeting_link,
-                  meeting_attendees: lead_activity.meeting_attendees,
-                  reminder_method: lead_activity.reminder_method,
-                  reminder_time: lead_activity.reminder_time,
-                  reminder_sent: lead_activity.reminder_sent,
-                  estimated_hours: lead_activity.estimated_hours,
-                  actual_hours: lead_activity.actual_hours,
-                  outcome_notes: lead_activity.outcome_notes,
-                  metadata: lead_activity.metadata,
-                  created_at: lead_activity.created_at,
-                  updated_at: lead_activity.updated_at
+                  user_id: la.user_id,
+                  assigned_to_id: la.assigned_to_id,
+                  activity_type: la.activity_type,
+                  subject: la.subject,
+                  description: la.description,
+                  status: la.status,
+                  priority: la.priority,
+                  due_date: la.due_date,
+                  start_time: la.start_time,
+                  end_time: la.end_time,
+                  duration_minutes: la.duration_minutes,
+                  completed_at: la.completed_at,
+                  call_direction: la.call_direction,
+                  call_outcome: la.call_outcome,
+                  phone_number: la.phone_number,
+                  meeting_location: la.meeting_location,
+                  meeting_link: la.meeting_link,
+                  meeting_attendees: la.meeting_attendees,
+                  reminder_method: la.reminder_method,
+                  reminder_time: la.reminder_time,
+                  reminder_sent: la.reminder_sent,
+                  estimated_hours: la.estimated_hours,
+                  actual_hours: la.actual_hours,
+                  outcome_notes: la.outcome_notes,
+                  metadata: la.metadata,
+                  created_at: la.created_at,
+                  updated_at: la.updated_at
                 )
                 
-                # For older "Activity" tab fields if they exist
-                account_activity.outcome = lead_activity.outcome if lead_activity.respond_to?(:outcome)
-                account_activity.duration = lead_activity.duration if lead_activity.respond_to?(:duration)
-                account_activity.scheduled_date = lead_activity.scheduled_date if lead_activity.respond_to?(:scheduled_date)
-                
-                if account_activity.save
-                  Rails.logger.info "Migrated activity #{lead_activity.id} to account activity #{account_activity.id}"
-                else
-                  Rails.logger.warn "Failed to migrate activity #{lead_activity.id}: #{account_activity.errors.full_messages.join(', ')}"
-                end
+                aa.save
               end
               
-              Rails.logger.info "Activity migration completed"
+              Rails.logger.info "✅ [ConvertLead] Migrated #{activity_count} activities"
             end
-          rescue => e
-            Rails.logger.error "Error during activity migration: #{e.message}"
-            # Continue with conversion even if activity migration fails
+            
+            # 5. MARK LEAD AS CONVERTED
+            @lead.update!(
+              is_converted: true,
+              converted_at: Time.current,
+              converted_account_id: account.id
+            )
+            
+            Rails.logger.info "🎉 [ConvertLead] Conversion complete!"
+            
+            # Return response
+            render json: {
+              account: {
+                id: account.id,
+                name: account.name,
+                email: account.email,
+                phone: account.phone,
+                status: account.status
+              },
+              contact: contact ? {
+                id: contact.id,
+                firstName: contact.first_name,
+                lastName: contact.last_name,
+                email: contact.email,
+                phone: contact.phone,
+                accountId: contact.account_id
+              } : nil,
+              deal: deal ? {
+                id: deal.id,
+                name: deal.name,
+                stage: deal.stage,
+                value: deal.value,
+                expectedCloseDate: deal.expected_close_date,
+                accountId: deal.account_id,
+                contactId: deal.contact_id
+              } : nil
+            }, status: :ok
           end
-          
-          # Mark lead as converted
-          @lead.is_converted = true
-          @lead.converted_at = Time.current
-          @lead.converted_account_id = account.id
-          
-          if !@lead.save
-            Rails.logger.error "Failed to update lead: #{@lead.errors.full_messages.join(', ')}"
-            account.destroy # Rollback the account creation
-            render json: { error: "Failed to mark lead as converted: #{@lead.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
-            return
-          end
-          
-          Rails.logger.info "Lead marked as converted successfully"
-          
-          # Return simple response
-          render json: {
-            account: {
-              id: account.id,
-              name: account.name,
-              email: account.email,
-              phone: account.phone,
-              status: account.status
-            },
-            contact: nil,
-            deal: nil
-          }, status: :ok
           
         rescue => e
-          Rails.logger.error "Unexpected error during conversion: #{e.class.name}: #{e.message}"
+          Rails.logger.error "❌ [ConvertLead] Error: #{e.message}"
           Rails.logger.error e.backtrace.first(10).join("\n")
           render json: { error: "Conversion failed: #{e.message}" }, status: :internal_server_error
         end
