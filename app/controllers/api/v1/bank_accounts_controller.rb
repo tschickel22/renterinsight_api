@@ -173,7 +173,8 @@ class Api::V1::BankAccountsController < ApplicationController
     # Check RBAC - use 'payments' or 'bank_accounts' resource
     # Assuming you'll add this to RBAC system
     unless current_user.uses_rbac?
-      return render json: { error: 'Unauthorized' }, status: :forbidden
+      render json: { error: 'Unauthorized' }, status: :forbidden
+      return false  # CRITICAL FIX: Return false after rendering
     end
 
     # Check if user has permission for this location
@@ -181,13 +182,15 @@ class Api::V1::BankAccountsController < ApplicationController
     
     # Check location access
     unless permission_service.accessible_location_ids.include?(@location.id)
-      return render json: { error: 'Access denied to this location' }, status: :forbidden
+      render json: { error: 'Access denied to this location' }, status: :forbidden
+      return false  # CRITICAL FIX: Return false after rendering
     end
 
     # For now, allow location admins to manage bank accounts
     # You can add more granular RBAC checks here
     unless current_user.effective_admin?
-      return render json: { error: 'Location Admin or higher required' }, status: :forbidden
+      render json: { error: 'Location Admin or higher required' }, status: :forbidden
+      return false  # CRITICAL FIX: Return false after rendering
     end
 
     true
