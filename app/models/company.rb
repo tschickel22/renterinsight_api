@@ -460,13 +460,22 @@ class Company < ApplicationRecord
   
   # Create default location after company creation
   def create_default_location
-    locations.create!(
+    Rails.logger.info "🏢 [Company#create_default_location] Creating default location for Company #{id} (#{name})"
+    
+    location = locations.create!(
       name: 'Main Location',
       is_default: true,
-      status: 'active'
+      active: true,
+      timezone: 'America/New_York'  # Default timezone
     )
+    
+    Rails.logger.info "✅ [Company#create_default_location] Successfully created location: #{location.name} (ID: #{location.id})"
+    location
   rescue => e
-    Rails.logger.error "Failed to create default location for Company #{id}: #{e.message}"
+    Rails.logger.error "❌ [Company#create_default_location] Failed to create default location for Company #{id}: #{e.message}"
+    Rails.logger.error "   Validation errors: #{e.record.errors.full_messages.join(', ')}" if e.respond_to?(:record) && e.record
+    Rails.logger.error e.backtrace.first(5).join("\n")
+    nil
   end
   
   # Default location

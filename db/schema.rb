@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_24_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_24_064855) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1664,9 +1664,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_24_000001) do
     t.jsonb "quickbooks_settings", default: {}
     t.decimal "default_pack_amount", precision: 15, scale: 2
     t.integer "fiscal_year_start_month", comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. If NULL, falls back to company.fiscal_year_start_month. If both NULL, defaults to 1 (January) for calendar year."
+    t.boolean "is_default", default: false, null: false
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
+    t.index ["company_id", "is_default"], name: "index_locations_on_company_id_and_is_default"
     t.index ["company_id", "is_deleted"], name: "index_locations_on_company_id_and_is_deleted"
     t.index ["company_id"], name: "index_locations_on_company_id"
     t.index ["default_pack_amount"], name: "index_locations_on_default_pack_amount"
