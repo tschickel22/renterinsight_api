@@ -221,8 +221,16 @@ module Api
             return
           end
 
+          # Provide specific error messages based on status
           unless enrollment.status == 'running'
-            render json: { error: 'Enrollment must be running to trigger steps' }, status: :unprocessable_entity
+            case enrollment.status
+            when 'completed'
+              render json: { error: 'This sequence has already completed. Create a new enrollment to restart.' }, status: :unprocessable_entity
+            when 'paused'
+              render json: { error: 'Enrollment is paused. Resume it first before triggering steps.' }, status: :unprocessable_entity
+            else
+              render json: { error: "Enrollment must be running to trigger steps (current status: #{enrollment.status})" }, status: :unprocessable_entity
+            end
             return
           end
 

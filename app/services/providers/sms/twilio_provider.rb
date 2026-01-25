@@ -3,10 +3,11 @@
 module Providers
   module Sms
     class TwilioProvider
-      attr_reader :company, :config
+      attr_reader :company, :location, :config
       
-      def initialize(company: nil)
+      def initialize(company: nil, location: nil)
         @company = company
+        @location = location
         @config = load_config
       end
       
@@ -88,7 +89,7 @@ module Providers
       
       def load_config
         settings_service = company ? 
-          CommunicationSettingsService.for_company(company) : 
+          CommunicationSettingsService.for_company(company, location: location) : 
           CommunicationSettingsService.platform
         
         settings_service.sms_config

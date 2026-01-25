@@ -104,6 +104,7 @@ module Api
                           .where.not(reminder_time: nil)
                           .where(reminder_sent: [false, nil])
                           .where('reminder_time <= ?', Time.current)
+                          .where(assigned_to_id: current_user.id)  # FILTER BY CURRENT USER
                           .includes(:user, :assigned_to)
                           .order(reminder_time: :asc)
         

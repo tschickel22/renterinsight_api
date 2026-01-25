@@ -25,6 +25,8 @@ class ProcessNurtureStepJob < ApplicationJob
     return unless lead
 
     # Process the step based on type
+    Rails.logger.info "[Nurture] Processing step type: #{current_step.step_type} (step_id: #{current_step.id})"
+    
     case current_step.step_type
     when 'email'
       send_nurture_email(lead, current_step, enrollment)
@@ -35,7 +37,10 @@ class ProcessNurtureStepJob < ApplicationJob
       Rails.logger.info "[Nurture] Wait step #{current_step.id} - waiting #{current_step.wait_days} days"
     when 'call'
       # Create a reminder/task for manual call
+      Rails.logger.info "[Nurture] Creating call task for step #{current_step.id}"
       create_call_reminder(lead, current_step)
+    else
+      Rails.logger.warn "[Nurture] Unknown step type: #{current_step.step_type}"
     end
 
     # Move to next step
@@ -62,9 +67,37 @@ class ProcessNurtureStepJob < ApplicationJob
   def send_nurture_email(lead, step, enrollment)
     return unless lead.email.present?
 
-    # Ensure we have non-blank subject and body (with defaults)
-    subject = step.subject.presence || "Follow-up from #{lead.company&.name || 'us'}"
-    body = step.body.presence || "This is an automated follow-up message."
+    # Build context for merge field rendering
+    context = {
+      recipient_name: "#{lead.first_name} #{lead.last_name}".strip,
+      first_name: lead.first_name,
+      last_name: lead.last_name,
+      email: lead.email,
+      phone: lead.phone,
+      company_name: lead.company&.name,
+      location_name: lead.location&.name
+    }
+
+    # Render template if present, otherwise use step content with merge fields
+    if step.template_id.present?
+      template = CommunicationTemplate.find_by(id: step.template_id)
+      if template
+        rendered = template.render(context)
+        subject = rendered[:subject]
+        body = rendered[:body]
+        
+        Rails.logger.info "[Nurture] Using template #{template.id}: #{template.name}"
+      else
+        Rails.logger.warn "[Nurture] Template #{step.template_id} not found, using step content with merge fields"
+        subject = render_merge_fields(step.subject.presence || "Follow-up from #{lead.company&.name || 'us'}", context)
+        body = render_merge_fields(step.body.presence || "This is an automated follow-up message.", context)
+      end
+    else
+      # Use step subject/body directly with merge field processing
+      Rails.logger.info "[Nurture] Using step content with merge fields (no template)"
+      subject = render_merge_fields(step.subject.presence || "Follow-up from #{lead.company&.name || 'us'}", context)
+      body = render_merge_fields(step.body.presence || "This is an automated follow-up message.", context)
+    end
 
     Rails.logger.info "[Nurture] Sending email to #{lead.email} for step #{step.id}"
 
@@ -106,8 +139,34 @@ class ProcessNurtureStepJob < ApplicationJob
   def send_nurture_sms(lead, step, enrollment)
     return unless lead.phone.present?
 
-    # Ensure we have non-blank body (with default)
-    body = step.body.presence || "This is an automated follow-up message."
+    # Build context for merge field rendering
+    context = {
+      recipient_name: "#{lead.first_name} #{lead.last_name}".strip,
+      first_name: lead.first_name,
+      last_name: lead.last_name,
+      email: lead.email,
+      phone: lead.phone,
+      company_name: lead.company&.name,
+      location_name: lead.location&.name
+    }
+
+    # Render template if present, otherwise use step content with merge fields
+    if step.template_id.present?
+      template = CommunicationTemplate.find_by(id: step.template_id)
+      if template
+        rendered = template.render(context)
+        body = rendered[:body] # SMS templates only have body, no subject
+        
+        Rails.logger.info "[Nurture] Using template #{template.id}: #{template.name}"
+      else
+        Rails.logger.warn "[Nurture] Template #{step.template_id} not found, using step content with merge fields"
+        body = render_merge_fields(step.body.presence || "This is an automated follow-up message.", context)
+      end
+    else
+      # Use step body directly with merge field processing
+      Rails.logger.info "[Nurture] Using step content with merge fields (no template)"
+      body = render_merge_fields(step.body.presence || "This is an automated follow-up message.", context)
+    end
 
     Rails.logger.info "[Nurture] Sending SMS to #{lead.phone} for step #{step.id}"
 
@@ -146,28 +205,65 @@ class ProcessNurtureStepJob < ApplicationJob
   end
 
   def create_call_reminder(lead, step)
-    # Create a reminder for manual call
+    # Create a call activity/task
     # Assign to lead owner or first active user
     user = lead.owner || lead.company.users.where(is_active: true).first
     return unless user
 
-    Reminder.create!(
+    # Calculate due date based on wait_days (if this is the first step, schedule for 1 hour from now)
+    due_date = Time.current + ((step.wait_days || 0) > 0 ? step.wait_days.days : 1.hour)
+    
+    # Set reminder time to NOW (send notification immediately when task is created)
+    reminder_time = Time.current
+
+    activity = LeadActivity.create!(
       lead: lead,
-      user: user,
-      reminder_type: 'call',
-      title: "Nurture Call: #{lead.first_name} #{lead.last_name}",
-      description: step.body || 'Follow up call from nurture sequence',
-      due_date: Time.current + 1.hour,
+      user: user,  # Creator
+      assigned_to: user,  # ASSIGNED TO LEAD OWNER - only they will see notification
+      activity_type: 'call',
+      subject: "Nurture Call: #{lead.first_name} #{lead.last_name}",
+      description: step.body.presence || 'Follow up call from nurture sequence',
+      status: 'pending',
       priority: 'medium',
+      due_date: due_date,
+      phone_number: lead.phone,
+      call_direction: 'outbound',
+      reminder_time: reminder_time,
+      reminder_method: ['popup'],  # Enable popup notifications
+      reminder_sent: false,
       metadata: {
         nurture_step_id: step.id,
-        nurture_sequence_id: step.nurture_sequence_id
+        nurture_sequence_id: step.nurture_sequence_id,
+        source: 'nurture_sequence'
       }
     )
+    
+    # Note: Notification will be picked up by the polling system at /reminders/upcoming
+    # The frontend polls this endpoint every 30 seconds and shows popup for activities where:
+    # - reminder_time <= now
+    # - reminder_sent = false
+    # - status = 'pending'
+    # - assigned_to = current_user (IMPORTANT: Only shows for assigned user!)
+    Rails.logger.info "[Nurture] ✅ Call activity created with immediate reminder - will appear on next poll cycle"
 
-    Rails.logger.info "[Nurture] Call reminder created for lead #{lead.id}, assigned to user #{user.id}"
+    Rails.logger.info "[Nurture] Call activity created for lead #{lead.id}, assigned to user #{user.id}, notification sent immediately"
   rescue => e
-    Rails.logger.error "[Nurture] Failed to create call reminder: #{e.message}"
-    # Don't raise - reminder creation failure shouldn't stop the sequence
+    Rails.logger.error "[Nurture] Failed to create call activity: #{e.message}"
+    # Don't raise - activity creation failure shouldn't stop the sequence
+  end
+
+  # Helper to render merge fields in content
+  def render_merge_fields(content, context)
+    return content if content.blank?
+    
+    result = content.dup
+    
+    # Replace each merge field with its value from context
+    context.each do |key, value|
+      # Support both {{key}} and {{KEY}} formats
+      result.gsub!(/\{\{\s*#{key}\s*\}\}/i, value.to_s)
+    end
+    
+    result
   end
 end

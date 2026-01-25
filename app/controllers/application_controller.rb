@@ -70,7 +70,7 @@ class ApplicationController < ActionController::API
       if decoded
         # Valid JWT token found
         @current_user_id = decoded[:user_id]
-        @current_company_id = decoded[:company_id] || request.headers['X-Company-Id']&.to_i || 1
+        @current_company_id = decoded[:company_id] || request.headers['X-Company-Id']&.to_i
         return
       else
         # Token decode failed (expired or invalid)

@@ -36,11 +36,13 @@ class LeadActivity < ApplicationRecord
   scope :upcoming, -> { where('due_date > ? AND status = ?', Time.current, 'pending').order(due_date: :asc) }
   scope :for_user, ->(user_id) { where(assigned_to_id: user_id) }
   
-  after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
-  after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
+  after_create :schedule_reminders, if: -> { ['reminder', 'call', 'task', 'meeting'].include?(activity_type) && reminder_time.present? }
+  after_update :reschedule_reminders_if_changed, if: -> { ['reminder', 'call', 'task', 'meeting'].include?(activity_type) && reminder_time.present? && saved_change_to_reminder_time? }
   after_update :update_lead_last_activity
   after_save :create_activity_log
   before_validation :ensure_reminder_method_array
+  before_validation :set_meeting_reminder_time, if: -> { activity_type == 'meeting' && start_time.present? }
+  before_validation :set_task_reminder_time, if: -> { activity_type == 'task' && due_date.present? }
   
   def complete!
     update!(status: 'completed', completed_at: Time.current)
@@ -61,6 +63,22 @@ class LeadActivity < ApplicationRecord
       self.reminder_method = JSON.parse(reminder_method) rescue []
     elsif reminder_method.nil?
       self.reminder_method = []
+    end
+  end
+  
+  def set_meeting_reminder_time
+    # Auto-set reminder_time to 15 minutes before meeting starts if not already set
+    if reminder_time.nil?
+      self.reminder_time = start_time - 15.minutes
+      self.reminder_method ||= ['popup']  # Default to popup notifications
+    end
+  end
+  
+  def set_task_reminder_time
+    # Auto-set reminder_time to task due date if not already set
+    if reminder_time.nil?
+      self.reminder_time = due_date
+      self.reminder_method ||= ['popup']  # Default to popup notifications
     end
   end
   

@@ -1,12 +1,13 @@
 class CommunicationSettingsService
-  attr_reader :company
+  attr_reader :company, :location
   
-  def initialize(company: nil)
+  def initialize(company: nil, location: nil)
     @company = company
+    @location = location
   end
   
-  def self.for_company(company)
-    new(company: company)
+  def self.for_company(company, location: nil)
+    new(company: company, location: location)
   end
   
   def self.platform
@@ -44,12 +45,11 @@ class CommunicationSettingsService
   
   private
   
-  # NEW METHOD: Intelligently merge Company + Platform settings
-  # Company settings override Platform, but missing/blank fields use Platform defaults
+  # WATERFALL: Platform → Company → Location (Location has highest priority)
   def merged_settings
     return @merged_settings if defined?(@merged_settings)
     
-    # Always load platform settings as the base
+    # Start with platform settings as the base
     platform_setting = Setting.find_by(key: 'communications', scope_type: 'Platform', scope_id: 0)
     platform_data = if platform_setting&.value.present?
                       platform_setting.value.is_a?(Hash) ? platform_setting.value : JSON.parse(platform_setting.value)
@@ -57,24 +57,40 @@ class CommunicationSettingsService
                       {}
                     end
     
-    # If no company, just use platform settings
-    unless company
-      @merged_settings = platform_data
-      return @merged_settings
+    # Merge company settings (overrides platform)
+    if company
+      company_setting = Setting.find_by(key: 'communications', scope_type: 'Company', scope_id: company.id)
+      company_data = if company_setting&.value.present?
+                       company_setting.value.is_a?(Hash) ? company_setting.value : JSON.parse(company_setting.value)
+                     else
+                       {}
+                     end
+      platform_data = deep_merge_settings(platform_data, company_data)
     end
     
-    # Load company settings
-    company_setting = Setting.find_by(key: 'communications', scope_type: 'Company', scope_id: company.id)
-    company_data = if company_setting&.value.present?
-                     company_setting.value.is_a?(Hash) ? company_setting.value : JSON.parse(company_setting.value)
-                   else
-                     {}
-                   end
+    # Merge location settings (overrides company, highest priority)
+    if location
+      location_setting = Setting.find_by(key: 'communications', scope_type: 'Location', scope_id: location.id)
+      location_data = if location_setting&.value.present?
+                        location_setting.value.is_a?(Hash) ? location_setting.value : JSON.parse(location_setting.value)
+                      else
+                        {}
+                      end
+      platform_data = deep_merge_settings(platform_data, location_data)
+    end
     
-    # Deep merge: Company overrides Platform, but blank/nil company fields use platform values
-    @merged_settings = deep_merge_settings(platform_data, company_data)
+    @merged_settings = platform_data
     
-    Rails.logger.debug("📧 Merged settings for company_id=#{company.id}: email.fromEmail=#{@merged_settings.dig('email', 'fromEmail')}, sms.fromNumber=#{@merged_settings.dig('sms', 'fromNumber')}")
+    # Debug logging
+    scope_info = if location
+                   "location_id=#{location.id}"
+                 elsif company
+                   "company_id=#{company.id}"
+                 else
+                   "platform"
+                 end
+    
+    Rails.logger.debug("📧 Merged settings for #{scope_info}: email.fromEmail=#{@merged_settings.dig('email', 'fromEmail')}, sms.fromNumber=#{@merged_settings.dig('sms', 'fromNumber')}")
     
     @merged_settings
   rescue JSON::ParserError => e

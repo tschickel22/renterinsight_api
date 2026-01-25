@@ -299,11 +299,12 @@ class CommunicationService
   private
   
   def send_via_provider(provider:, channel:, communication:, options:)
-    # Extract company from communicable for settings lookup
+    # Extract company and location from communicable for settings lookup
     company = extract_company_from_communicable(communication.communicable)
+    location = extract_location_from_communicable(communication.communicable)
     
     provider_class = get_provider_class(provider, channel)
-    provider_instance = provider_class.new(company: company)
+    provider_instance = provider_class.new(company: company, location: location)
     
     # Prepare attachments if present
     attachments_data = []
@@ -349,6 +350,24 @@ class CommunicationService
     end
   end
   
+  def extract_location_from_communicable(communicable)
+    return nil unless communicable
+    
+    # Try to get location directly
+    return communicable.location if communicable.respond_to?(:location)
+    
+    # For nested entities (quotes, etc), try through associations
+    case communicable.class.name
+    when 'Quote'
+      communicable.contact&.location || communicable.account&.location
+    when 'Account', 'Contact', 'Lead'
+      communicable.location
+    else
+      # Try generic location accessor
+      communicable.location if communicable.respond_to?(:location)
+    end
+  end
+  
   def get_provider_class(provider, channel)
     case channel
     when 'email'
@@ -386,10 +405,11 @@ class CommunicationService
   end
   
   def default_from_address(channel, communicable = nil)
-    # Get from CommunicationSettingsService based on company context for both email and SMS
+    # Get from CommunicationSettingsService based on company and location context for both email and SMS
     company = extract_company_from_communicable(communicable)
+    location = extract_location_from_communicable(communicable)
     settings_service = company ? 
-      CommunicationSettingsService.for_company(company) : 
+      CommunicationSettingsService.for_company(company, location: location) : 
       CommunicationSettingsService.platform
     
     case channel

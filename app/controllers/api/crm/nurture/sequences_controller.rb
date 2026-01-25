@@ -42,11 +42,50 @@ module Api
             return
           end
           
-          if sequence.update(sequence_params)
-            render json: sequence_json(sequence), status: :ok
-          else
-            render json: { errors: sequence.errors.full_messages }, status: :unprocessable_entity
+          ActiveRecord::Base.transaction do
+            # Update sequence attributes
+            sequence.name = params[:name] if params[:name].present?
+            sequence.description = params[:description] if params.key?(:description)
+            sequence.is_active = params[:is_active] != false if params.key?(:is_active)
+            sequence.is_active = params[:isActive] != false if params.key?(:isActive)
+            
+            sequence.save!
+            
+            # ✅ FIX: Handle steps array if provided
+            if params[:steps].present?
+              Rails.logger.info "[Nurture] Updating #{params[:steps].length} steps for sequence #{sequence.id}"
+              
+              # Delete existing steps not in the new list
+              existing_step_ids = params[:steps].map { |s| s[:id] }.compact
+              deleted_count = sequence.nurture_steps.where.not(id: existing_step_ids).destroy_all.count
+              Rails.logger.info "[Nurture] Deleted #{deleted_count} old steps"
+              
+              # Create or update steps
+              params[:steps].each_with_index do |step_data, index|
+                step = if step_data[:id].present?
+                  sequence.nurture_steps.find_or_initialize_by(id: step_data[:id])
+                else
+                  sequence.nurture_steps.new
+                end
+                
+                step.step_type = step_data[:step_type] || step_data[:type] || 'email'
+                step.position = step_data[:position] || step_data[:order] || index
+                step.wait_days = step_data[:wait_days] || step_data[:waitDays] || 0
+                step.subject = step_data[:subject] || ''
+                step.body = step_data[:body] || ''
+                step.template_id = step_data[:template_id] || step_data[:templateId]
+                
+                step.save!
+                
+                Rails.logger.info "[Nurture] Saved step #{step.id}: type=#{step.step_type}, wait_days=#{step.wait_days}, template_id=#{step.template_id}"
+              end
+            end
+            
+            render json: sequence_json(sequence.reload), status: :ok
           end
+        rescue => e
+          Rails.logger.error "[Nurture] Update failed: #{e.message}\n#{e.backtrace.join("\n")}"
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         def destroy
