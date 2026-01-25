@@ -156,6 +156,9 @@ class CommunicationService
     # Get default from address if not provided
     from ||= default_from_address(channel, communicable)
     
+    # Log metadata before saving
+    Rails.logger.info "[CommunicationService] Creating communication with metadata: #{metadata.merge(category: category).inspect}"
+    
     # Create communication record
     @communication = Communication.create!(
       communicable: communicable,
@@ -171,11 +174,11 @@ class CommunicationService
       bcc_addresses: options[:bcc],
       reply_to: options[:reply_to],
       portal_visible: portal_visible,
-      metadata: metadata.merge(category: category),
-      template: template.is_a?(CommunicationTemplate) ? template : (template ? CommunicationTemplate.find(template) : nil),
-      scheduled_for: scheduled_for,
-      scheduled_status: scheduled_for.present? ? 'scheduled' : 'immediate'
+      metadata: metadata.merge(category: category)
     )
+    
+    # Log metadata after saving
+    Rails.logger.info "[CommunicationService] Communication #{@communication.id} created with metadata: #{@communication.metadata.inspect}"
     
     # Attach files if provided
     if attachments.present?

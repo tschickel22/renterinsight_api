@@ -79,6 +79,9 @@ class Communication < ApplicationRecord
   before_create :assign_to_thread
   after_create :update_thread_timestamp
   
+  # Ensure metadata is stored as JSON-compatible hash (string keys, not symbols)
+  before_save :normalize_metadata
+  
   # Status transitions
   def mark_as_sent!
     update!(status: 'sent', sent_at: Time.current)
@@ -194,6 +197,17 @@ class Communication < ApplicationRecord
   end
   
   private
+  
+  def normalize_metadata
+    return if metadata.blank?
+    
+    # Convert symbol keys to string keys for proper JSON storage
+    # This prevents Rails from saving as Ruby hash string: {:key=>value}
+    # Instead ensures proper JSON: {"key":"value"}
+    if metadata.is_a?(Hash)
+      self.metadata = metadata.deep_stringify_keys
+    end
+  end
   
   def validate_channel_requirements
     case channel

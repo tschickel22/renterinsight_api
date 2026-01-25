@@ -201,6 +201,33 @@ module Api
       end
 
       def communication_json(comm)
+        # Handle metadata - could be Hash, String (from JSONB column), or nil
+        # This matches the pattern from Lead CommunicationsController
+        metadata_obj = {}
+        
+        if comm.metadata.present?
+          if comm.metadata.is_a?(Hash)
+            metadata_obj = comm.metadata
+          elsif comm.metadata.is_a?(String)
+            # Try to parse as JSON first
+            begin
+              metadata_obj = JSON.parse(comm.metadata)
+            rescue JSON::ParserError
+              # If JSON parse fails, convert Ruby hash syntax to JSON
+              begin
+                # Replace Ruby syntax with JSON syntax
+                json_str = comm.metadata.gsub(/:([\w_]+)=>/, '"\1":')  # :key=> to "key":
+                                        .gsub(/=>/, ':')                   # => to :
+                                        .gsub(/nil/, 'null')               # nil to null
+                metadata_obj = JSON.parse(json_str)
+              rescue => e
+                Rails.logger.warn "Failed to parse metadata for communication #{comm.id}: #{e.message}"
+                metadata_obj = {}
+              end
+            end
+          end
+        end
+        
         {
           id: comm.id,
           contactId: comm.communicable_id,
@@ -215,7 +242,7 @@ module Api
           openedAt: comm.read_at,
           clickedAt: nil,
           createdAt: comm.created_at,
-          metadata: comm.metadata
+          metadata: metadata_obj  # Returns object, not string!
         }
       end
 
