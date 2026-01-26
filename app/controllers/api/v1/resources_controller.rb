@@ -10,7 +10,7 @@ module Api
       # GET /api/v1/resources
       # List all resources (system-level data)
       def index
-        @resources = Resource.active.order(:category, :name)
+        @resources = Resource.active.order(:position, :name)
         
         render json: {
           resources: @resources.map { |resource| serialize_resource(resource) }

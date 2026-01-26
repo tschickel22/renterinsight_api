@@ -65,7 +65,7 @@ module Api
         end
         
         # Get all available metadata
-        resources_data = Resource.active.order(:category, :name).map do |resource|
+        resources_data = Resource.active.order(:position, :name).map do |resource|
           {
             id: resource.id,
             key: resource.key,
