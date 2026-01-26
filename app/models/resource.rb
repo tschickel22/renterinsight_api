@@ -24,6 +24,59 @@ class Resource < ApplicationRecord
   scope :operations, -> { where(category: 'operations') }
   scope :admin, -> { where(category: 'admin') }
 
+
+# Instance methods
+def permission_ui_type
+  # Calendar uses specialized permission UI with grouped permissions
+  return 'specialized' if key == 'calendar'
+  'standard_crud'
+end
+
+def permission_groups
+  # Calendar has specialized permission groups
+  return calendar_permission_groups if key == 'calendar'
+  {}
+end
+
+private
+
+def calendar_permission_groups
+  {
+    personal: {
+      name: 'Personal Calendar',
+      description: 'Access to personal calendar and activities',
+      permissions: [
+        { action: 'read', scope: 'own', label: 'View own calendar and activities' }
+      ]
+    },
+    team: {
+      name: 'Team Collaboration',
+      description: 'View and manage team calendars',
+      permissions: [
+        { action: 'read', scope: 'assigned_locations', label: 'View team calendars at assigned locations' },
+        { action: 'read', scope: 'all', label: 'View all company calendars' }
+      ]
+    },
+    service: {
+      name: 'Service Tickets',
+      description: 'View service tickets in calendar',
+      permissions: [
+        { action: 'manage', scope: 'all', label: 'View all service tickets in calendar view' },
+        { action: 'delete', scope: 'all', label: 'View unassigned service tickets' }
+      ]
+    },
+    management: {
+      name: 'Schedule Management',
+      description: 'Manage and reschedule calendar items',
+      permissions: [
+        { action: 'update', scope: 'all', label: 'Reschedule activities and manage calendar items' }
+      ]
+    }
+  }
+end
+
+public
+
   # Class methods
   def self.seed_defaults
     resources_data = [

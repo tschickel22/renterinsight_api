@@ -17,20 +17,38 @@ def grant_permissions(role, resources, actions, scopes, permissions_config)
   
   permissions = []
   
-  permissions_config.each do |resource_key, action_keys|
+  permissions_config.each do |resource_key, action_config|
     resource = resources[resource_key]
     next unless resource
     
-    action_keys.each do |action_key|
-      action = actions[action_key]
-      scope = scopes['all']
-      next unless action && scope
-      
-      permissions << {
-        resource_id: resource.id,
-        action_id: action.id,
-        scope_id: scope.id
-      }
+    # Handle both simple arrays and hash configs
+    if action_config.is_a?(Hash) && action_config[:specialized]
+      # Specialized permissions with custom scopes (e.g., calendar)
+      action_config[:permissions].each do |perm|
+        action = actions[perm[:action]]
+        scope = scopes[perm[:scope]]
+        next unless action && scope
+        
+        permissions << {
+          resource_id: resource.id,
+          action_id: action.id,
+          scope_id: scope.id
+        }
+      end
+    else
+      # Standard permissions with 'all' scope
+      action_keys = action_config.is_a?(Array) ? action_config : [action_config]
+      action_keys.each do |action_key|
+        action = actions[action_key]
+        scope = scopes['all']
+        next unless action && scope
+        
+        permissions << {
+          resource_id: resource.id,
+          action_id: action.id,
+          scope_id: scope.id
+        }
+      end
     end
   end
   
@@ -48,9 +66,51 @@ CRUD_MANAGE = ['create', 'read', 'update', 'delete', 'export', 'manage']
 READ_ONLY = ['read']
 READ_EXPORT = ['read', 'export']
 
+# Calendar permission templates
+CALENDAR_FULL = {
+  specialized: true,
+  permissions: [
+    { action: 'read', scope: 'own' },                    # View own calendar
+    { action: 'read', scope: 'assigned_locations' },     # View team at assigned locations
+    { action: 'read', scope: 'all' },                    # View all company calendars (using 'all' scope)
+    { action: 'create', scope: 'all' },                  # Create events
+    { action: 'update', scope: 'all' },                  # Update/reschedule
+    { action: 'delete', scope: 'all' },                  # Delete events
+    { action: 'manage', scope: 'all' }                   # Full calendar management
+  ]
+}
+
+CALENDAR_OWN_AND_TEAM = {
+  specialized: true,
+  permissions: [
+    { action: 'read', scope: 'own' },                    # View own calendar
+    { action: 'read', scope: 'assigned_locations' },     # View team at assigned locations
+    { action: 'create', scope: 'all' },                  # Create events
+    { action: 'update', scope: 'all' },                  # Update/reschedule
+    { action: 'delete', scope: 'all' }                   # Delete events
+  ]
+}
+
+CALENDAR_OWN_ONLY = {
+  specialized: true,
+  permissions: [
+    { action: 'read', scope: 'own' },                    # View own calendar only
+    { action: 'create', scope: 'all' },                  # Create events
+    { action: 'update', scope: 'all' }                   # Update/reschedule
+  ]
+}
+
+CALENDAR_READ_ONLY = {
+  specialized: true,
+  permissions: [
+    { action: 'read', scope: 'own' }                     # View own calendar only
+  ]
+}
+
 # ===== COMPANY ADMINISTRATOR =====
 puts "📋 Company Administrator"
 config = resources.keys.map { |key| [key, ALL] }.to_h
+config['calendar'] = CALENDAR_FULL  # Override with specialized calendar permissions
 grant_permissions(Role.find_by(key: 'company_admin'), resources, actions, scopes, config)
 
 # ===== COMPANY MANAGER =====
@@ -80,7 +140,7 @@ config = {
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY, 'branding' => READ_ONLY,
   
   # Core
-  'calendar' => CRUD_MANAGE, 'reports' => READ_EXPORT, 'portal' => CRUD_MANAGE,
+  'calendar' => CALENDAR_FULL, 'reports' => READ_EXPORT, 'portal' => CRUD_MANAGE,
   'dashboard' => READ_ONLY, 'dashboard_company_wide' => READ_ONLY, 'dashboard_finance' => READ_ONLY
 }
 grant_permissions(Role.find_by(key: 'company_manager'), resources, actions, scopes, config)
@@ -96,7 +156,7 @@ config = {
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY, 'branding' => READ_ONLY,
   'purchase_orders' => READ_ONLY, 'bins' => READ_ONLY, 'part_categories' => READ_ONLY,
   
-  'calendar' => CRUD, 'reports' => READ_ONLY, 'portal' => CRUD, 'dashboard' => READ_ONLY
+  'calendar' => CALENDAR_OWN_AND_TEAM, 'reports' => READ_ONLY, 'portal' => CRUD, 'dashboard' => READ_ONLY
 }
 grant_permissions(Role.find_by(key: 'company_staff'), resources, actions, scopes, config)
 
@@ -117,7 +177,7 @@ config = {
   'users' => ['create', 'read', 'update', 'assign'],
   'company_settings' => READ_ONLY, 'locations' => ['read', 'update'], 'branding' => ['read', 'update'],
   
-  'calendar' => CRUD_MANAGE, 'reports' => READ_EXPORT, 'portal' => CRUD_MANAGE,
+  'calendar' => CALENDAR_FULL, 'reports' => READ_EXPORT, 'portal' => CRUD_MANAGE,
   'dashboard' => READ_ONLY, 'dashboard_finance' => READ_ONLY
 }
 grant_permissions(Role.find_by(key: 'location_admin'), resources, actions, scopes, config)
@@ -134,7 +194,7 @@ config = {
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY, 'branding' => READ_ONLY,
   'finance' => READ_ONLY, 'bins' => READ_ONLY, 'part_categories' => READ_ONLY, 'purchase_orders' => READ_ONLY,
   
-  'calendar' => CRUD, 'reports' => READ_EXPORT, 'portal' => CRUD, 'dashboard' => READ_ONLY
+  'calendar' => CALENDAR_OWN_AND_TEAM, 'reports' => READ_EXPORT, 'portal' => CRUD, 'dashboard' => READ_ONLY
 }
 grant_permissions(Role.find_by(key: 'location_manager'), resources, actions, scopes, config)
 
@@ -152,7 +212,7 @@ config = {
   'listings' => READ_ONLY, 'products' => READ_ONLY, 'suppliers' => READ_ONLY,
   'bins' => READ_ONLY, 'part_categories' => READ_ONLY, 'purchase_orders' => READ_ONLY,
   
-  'calendar' => ['create', 'read', 'update'], 'portal' => ['create', 'read', 'update'], 'dashboard' => READ_ONLY
+  'calendar' => CALENDAR_OWN_ONLY, 'portal' => ['create', 'read', 'update'], 'dashboard' => READ_ONLY
 }
 grant_permissions(Role.find_by(key: 'location_staff'), resources, actions, scopes, config)
 
@@ -170,7 +230,7 @@ config = {
   'suppliers' => READ_ONLY, 'part_categories' => READ_ONLY, 'invoices' => READ_ONLY,
   'tasks' => ['create', 'read', 'update'],
   
-  'calendar' => CRUD, 'dashboard' => READ_EXPORT, 'reports' => READ_EXPORT
+  'calendar' => CALENDAR_OWN_ONLY, 'dashboard' => READ_EXPORT, 'reports' => READ_EXPORT
 }
 grant_permissions(Role.find_by(key: 'sales_rep'), resources, actions, scopes, config)
 
@@ -184,7 +244,7 @@ config = {
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY,
   'products' => READ_ONLY, 'listings' => READ_ONLY,
   
-  'calendar' => CRUD, 'dashboard' => READ_ONLY
+  'calendar' => CALENDAR_OWN_ONLY, 'dashboard' => READ_ONLY
 }
 grant_permissions(Role.find_by(key: 'crm_specialist'), resources, actions, scopes, config)
 
@@ -197,7 +257,7 @@ config = {
   'inventory' => READ_ONLY, 'crm' => READ_ONLY, 'suppliers' => READ_ONLY,
   'part_categories' => READ_ONLY, 'bins' => READ_ONLY,
   
-  'calendar' => ['create', 'read', 'update']
+  'calendar' => CALENDAR_OWN_ONLY
 }
 grant_permissions(Role.find_by(key: 'service_tech'), resources, actions, scopes, config)
 
@@ -212,7 +272,7 @@ config = {
   'company_settings' => READ_ONLY, 'users' => READ_ONLY, 'locations' => READ_ONLY,
   'deals' => READ_ONLY, 'service' => READ_ONLY, 'warranty_claims' => READ_ONLY,
   
-  'calendar' => READ_ONLY, 'reports' => READ_EXPORT
+  'calendar' => CALENDAR_READ_ONLY, 'reports' => READ_EXPORT
 }
 grant_permissions(Role.find_by(key: 'inventory_manager'), resources, actions, scopes, config)
 
@@ -227,13 +287,14 @@ config = {
   'crm' => READ_ONLY, 'leads' => READ_ONLY, 'deals' => READ_ONLY,
   'inventory' => READ_ONLY, 'service' => READ_ONLY,
   
-  'calendar' => READ_ONLY, 'dashboard_finance' => READ_ONLY, 'reports' => READ_EXPORT
+  'calendar' => CALENDAR_READ_ONLY, 'dashboard_finance' => READ_ONLY, 'reports' => READ_EXPORT
 }
 grant_permissions(Role.find_by(key: 'finance_staff'), resources, actions, scopes, config)
 
 # ===== READ-ONLY USER =====
 puts "📋 Read-Only User"
 config = resources.keys.map { |key| [key, READ_ONLY] }.to_h
+config['calendar'] = CALENDAR_READ_ONLY  # Override with specialized calendar permissions
 # Add export for reports/data
 ['reports', 'dashboard', 'inventory', 'crm', 'leads', 'deals', 'invoices'].each do |key|
   config[key] = READ_EXPORT if resources[key]
