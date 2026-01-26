@@ -229,6 +229,7 @@ Rails.application.routes.draw do
         member do
           get :print
           post :clone
+          post :share
           get :tags
           post :tags, to: 'vehicles#add_tags'
           delete 'tags/:tag_name', to: 'vehicles#remove_tag'

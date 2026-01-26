@@ -11,7 +11,7 @@ module Api
         delete_actions: [:destroy, :bulk_delete]
 
       before_action :set_company
-      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone, :tags, :add_tags, :remove_tag]
+      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone, :tags, :add_tags, :remove_tag, :share]
 
       def index
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
@@ -150,6 +150,128 @@ module Api
           render json: { vehicle: vehicle_json(new_vehicle, detailed: true) }, status: :created
         else
           render json: { errors: new_vehicle.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      # POST /api/v1/vehicles/:id/share
+      def share
+        send_params = params.permit(
+          :to_email,
+          :to_phone,
+          :custom_message,
+          :from_email,
+          :from_phone,
+          :cc,
+          :bcc,
+          :contact_id,
+          :lead_id,
+          delivery_methods: []
+        ).to_h
+        
+        # Extract contact_id and lead_id for activity tracking
+        contact_id = send_params.delete(:contact_id)
+        lead_id = send_params.delete(:lead_id)
+        
+        # Default to email if no delivery methods specified
+        send_params[:delivery_methods] ||= ['email']
+        
+        # Convert to symbols for service
+        send_params_symbolized = send_params.deep_symbolize_keys
+        
+        begin
+          result = ListingSendingService.new(@vehicle).send(**send_params_symbolized)
+          
+          if result[:sent].any?
+            # Create activity if contact_id or lead_id provided
+            activity = nil
+            if contact_id.present?
+              activity = create_contact_share_activity(contact_id, result, send_params)
+            elsif lead_id.present?
+              activity = create_lead_share_activity(lead_id, result, send_params)
+            end
+            
+            render json: {
+              success: true,
+              listing: vehicle_json(@vehicle),
+              sent_via: result[:sent].map { |r| { channel: r[:channel], to: r[:to] } },
+              communications: result[:sent].map { |r| r[:communication]&.id },
+              activity_id: activity&.id
+            }
+          else
+            render json: {
+              success: false,
+              error: result[:errors].first || 'Failed to share listing',
+              errors: result[:errors],
+              failed: result[:failed]
+            }, status: :unprocessable_entity
+          end
+        rescue ArgumentError => e
+          render json: { success: false, error: e.message }, status: :bad_request
+        rescue => e
+          Rails.logger.error "Error sharing listing: #{e.message}"
+          Rails.logger.error e.backtrace.join("\n")
+          render json: { success: false, error: e.message }, status: :internal_server_error
+        end
+      end
+
+      # POST /api/v1/vehicles/:id/share
+      def share
+        send_params = params.permit(
+          :to_email,
+          :to_phone,
+          :custom_message,
+          :from_email,
+          :from_phone,
+          :cc,
+          :bcc,
+          :contact_id,
+          :lead_id,
+          delivery_methods: []
+        ).to_h
+        
+        # Extract contact_id and lead_id for activity tracking
+        contact_id = send_params.delete(:contact_id)
+        lead_id = send_params.delete(:lead_id)
+        
+        # Default to email if no delivery methods specified
+        send_params[:delivery_methods] ||= ['email']
+        
+        # Convert to symbols for service
+        send_params_symbolized = send_params.deep_symbolize_keys
+        
+        begin
+          result = ListingSendingService.new(@vehicle).send(**send_params_symbolized)
+          
+          if result[:sent].any?
+            # Create activity if contact_id or lead_id provided
+            activity = nil
+            if contact_id.present?
+              activity = create_contact_share_activity(contact_id, result, send_params)
+            elsif lead_id.present?
+              activity = create_lead_share_activity(lead_id, result, send_params)
+            end
+            
+            render json: {
+              success: true,
+              vehicle: vehicle_json(@vehicle),
+              sent_via: result[:sent].map { |r| { channel: r[:channel], to: r[:to] } },
+              communications: result[:sent].map { |r| r[:communication]&.id },
+              activity_id: activity&.id
+            }
+          else
+            render json: {
+              success: false,
+              error: result[:errors].first || 'Failed to share listing',
+              errors: result[:errors],
+              failed: result[:failed]
+            }, status: :unprocessable_entity
+          end
+        rescue ArgumentError => e
+          render json: { success: false, error: e.message }, status: :bad_request
+        rescue => e
+          Rails.logger.error "Error sharing listing: #{e.message}"
+          Rails.logger.error e.backtrace.join("\n")
+          render json: { success: false, error: e.message }, status: :internal_server_error
         end
       end
 
@@ -813,6 +935,110 @@ module Api
       # Helper method to format currency like the quotes PDF generator
       def format_currency(amount)
         "$#{sprintf('%.2f', amount.to_f)}"
+      end
+
+      # Create activity record for listing share to contact
+      def create_contact_share_activity(contact_id, result, send_params)
+        # Verify contact belongs to this company for tenant isolation
+        contact = @company.contacts.find_by(id: contact_id)
+        return nil unless contact
+        
+        # Build activity description
+        channels = result[:sent].map { |r| r[:channel] }.uniq.join(' and ')
+        recipients = result[:sent].map { |r| r[:to] }.uniq
+        
+        listing_title = [@vehicle.year, @vehicle.make, @vehicle.model].compact.join(' ')
+        
+        description_parts = []
+        description_parts << "Shared listing via #{channels}"
+        description_parts << "Recipients: #{recipients.join(', ')}"
+        description_parts << "Custom message: #{send_params[:custom_message]}" if send_params[:custom_message].present?
+        
+        # Build listing link
+        base_url = request.base_url
+        company_slug = @company.slug || 'demo'
+        listing_url = "#{base_url}/#{company_slug}/listing/#{@vehicle.id}"
+        listing_link = "\n\nView listing: #{listing_url}"
+        
+        description = description_parts.join("\n") + listing_link
+        
+        # Create the activity
+        activity = ContactActivity.create!(
+          contact: contact,
+          user: current_user,
+          activity_type: 'note',
+          subject: "Shared listing: #{listing_title}",
+          description: description,
+          status: 'completed',
+          priority: 'medium',
+          completed_at: Time.current,
+          metadata: {
+            listing_id: @vehicle.id,
+            listing_url: listing_url,
+            listing_type: @vehicle.listing_type,
+            channels_used: result[:sent].map { |r| r[:channel] },
+            communications: result[:sent].map { |r| r[:communication]&.id }.compact
+          }
+        )
+        
+        Rails.logger.info "Created activity #{activity.id} for listing share to contact #{contact.id}"
+        activity
+      rescue => e
+        Rails.logger.error "Failed to create share activity: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        nil
+      end
+
+      # Create activity record for listing share to lead
+      def create_lead_share_activity(lead_id, result, send_params)
+        # Verify lead belongs to this company for tenant isolation
+        lead = Lead.where(company_id: @company.id).find_by(id: lead_id)
+        return nil unless lead
+        
+        # Build activity description
+        channels = result[:sent].map { |r| r[:channel] }.uniq.join(' and ')
+        recipients = result[:sent].map { |r| r[:to] }.uniq
+        
+        listing_title = [@vehicle.year, @vehicle.make, @vehicle.model].compact.join(' ')
+        
+        description_parts = []
+        description_parts << "Shared listing via #{channels}"
+        description_parts << "Recipients: #{recipients.join(', ')}"
+        description_parts << "Custom message: #{send_params[:custom_message]}" if send_params[:custom_message].present?
+        
+        # Build listing link
+        base_url = request.base_url
+        company_slug = @company.slug || 'demo'
+        listing_url = "#{base_url}/#{company_slug}/listing/#{@vehicle.id}"
+        listing_link = "\n\nView listing: #{listing_url}"
+        
+        description = description_parts.join("\n") + listing_link
+        
+        # Create the activity
+        activity = LeadActivity.create!(
+          lead: lead,
+          user: current_user,
+          activity_type: 'note',
+          subject: "Shared listing: #{listing_title}",
+          description: description,
+          status: 'completed',
+          priority: 'medium',
+          completed_at: Time.current,
+          metadata: {
+            listing_id: @vehicle.id,
+            listing_url: listing_url,
+            listing_type: @vehicle.listing_type,
+            channels_used: result[:sent].map { |r| r[:channel] },
+            communications: result[:sent].map { |r| r[:communication]&.id }.compact
+          }
+        )
+        
+        Rails.logger.info "Created activity #{activity.id} for listing share to lead #{lead.id}"
+        activity
+      rescue => e
+        Rails.logger.error "Failed to create lead share activity: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        nil
       end
 
       def vehicle_params
