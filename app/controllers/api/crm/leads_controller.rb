@@ -254,7 +254,7 @@ module Api
                 company_id: @lead.company_id,
                 location_id: account.location_id,
                 stage: deal_params[:stage] || 'prospecting',
-                value: (deal_params[:value] || deal_params[:amount] || 0).to_f,
+                value: 0, # Will be updated when products/pricing added to deal
                 expected_close_date: deal_params[:close_date] || deal_params[:expected_close],
                 owner_id: current_user&.id,
                 description: deal_params[:description] || "Converted from lead ##{@lead.id}"
