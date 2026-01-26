@@ -89,3 +89,10 @@ gem 'xml-simple', '~> 1.1'
 
 # HTTP requests for QuickBooks API integration
 gem 'httparty'
+
+# AWS SDK for SES email sending
+gem 'aws-sdk-ses', '~> 1.0'
+
+# Additional Communication Services
+gem 'sendgrid-ruby'
+gem 'aws-sdk-sns', '~> 1.0'
