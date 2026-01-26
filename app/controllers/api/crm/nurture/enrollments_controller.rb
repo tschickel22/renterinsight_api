@@ -221,17 +221,20 @@ module Api
             return
           end
 
-          # Provide specific error messages based on status
-          unless enrollment.status == 'running'
-            case enrollment.status
-            when 'completed'
-              render json: { error: 'This sequence has already completed. Create a new enrollment to restart.' }, status: :unprocessable_entity
-            when 'paused'
-              render json: { error: 'Enrollment is paused. Resume it first before triggering steps.' }, status: :unprocessable_entity
-            else
-              render json: { error: "Enrollment must be running to trigger steps (current status: #{enrollment.status})" }, status: :unprocessable_entity
-            end
+          # Handle different enrollment states
+          case enrollment.status
+          when 'completed'
+            # Restart from beginning when completed (for testing)
+            Rails.logger.info "[Nurture] Restarting completed enrollment #{enrollment.id} from step 0"
+            enrollment.update!(status: 'running', current_step_index: 0)
+          when 'paused'
+            render json: { error: 'Enrollment is paused. Resume it first before triggering steps.' }, status: :unprocessable_entity
             return
+          when 'running'
+            # Continue normally
+          else
+            # Set to running if in any other state (idle, etc.)
+            enrollment.update!(status: 'running')
           end
 
           # Trigger the job immediately (bypass wait delay)
