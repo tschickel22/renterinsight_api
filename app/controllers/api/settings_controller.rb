@@ -596,9 +596,9 @@ module Api
         end
       end
 
-      # Layer 4: Add quotes settings (company-level)
+      # Layer 4: Add quotes settings (company-level) - ALWAYS include, even if empty
       quotes_setting = Setting.get('Company', @company.id, 'quotes', {})
-      base_settings[:quotes] = quotes_setting.deep_symbolize_keys if quotes_setting.present?
+      base_settings[:quotes] = quotes_setting.is_a?(Hash) ? quotes_setting.deep_symbolize_keys : {}
 
       # Layer 5: Location-level settings (highest priority - overrides company)
       if Current.location_id.present?

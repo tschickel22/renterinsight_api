@@ -15,11 +15,13 @@ module Api
 
       # GET /api/v1/company_settings/operational
       def show_operational
-        settings = @company.operational_settings.presence
+        # Get operational settings from Settings table (Company -> Platform fallback)
+        company_settings = Setting.get('Company', @company.id, 'operational_settings') || {}
+        platform_defaults = PlatformDefaults.operational_settings
 
         render json: {
-          operational_settings: settings,
-          defaults: PlatformDefaults.operational_settings
+          operational_settings: company_settings,
+          defaults: platform_defaults
         }
       end
 
@@ -28,25 +30,30 @@ module Api
         Rails.logger.info "🔧 [CompanySettings#update_operational] Received params: #{params.inspect}"
         Rails.logger.info "🔧 [CompanySettings#update_operational] Company: #{@company&.name} (ID: #{@company&.id})"
 
-        settings = params[:operational_settings] || {}
-        Rails.logger.info "📊 [CompanySettings#update_operational] Operational settings: #{settings.inspect}"
-
-        @company.operational_settings = settings
-
-        if @company.save
-          Rails.logger.info "✅ [CompanySettings#update_operational] Settings saved successfully"
-          render json: {
-            operational_settings: @company.operational_settings,
-            message: 'Operational settings updated successfully'
-          }
+        # Get operational_settings and convert to hash (permit all nested keys)
+        operational_params = params[:operational_settings]
+        if operational_params.present?
+          # Use to_unsafe_h to convert ActionController::Parameters to hash
+          settings = operational_params.to_unsafe_h
         else
-          Rails.logger.error "❌ [CompanySettings#update_operational] Save failed: #{@company.errors.full_messages}"
-          render json: {
-            errors: @company.errors.full_messages
-          }, status: :unprocessable_entity
+          settings = {}
         end
+        
+        Rails.logger.info "📊 [CompanySettings#update_operational] Operational settings to save: #{settings.inspect}"
+
+        # Save to Settings table: Setting.set(scope_type, scope_id, key, value)
+        Setting.set('Company', @company.id, 'operational_settings', settings)
+        
+        # Retrieve saved settings to confirm
+        saved_settings = Setting.get('Company', @company.id, 'operational_settings')
+        Rails.logger.info "✅ [CompanySettings#update_operational] Settings saved successfully: #{saved_settings.inspect}"
+
+        render json: {
+          operational_settings: saved_settings,
+          message: 'Operational settings updated successfully'
+        }
       rescue => e
-        Rails.logger.error "Error updating operational settings: #{e.message}"
+        Rails.logger.error "❌ [CompanySettings#update_operational] Error: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
         render json: {
           errors: [e.message]
