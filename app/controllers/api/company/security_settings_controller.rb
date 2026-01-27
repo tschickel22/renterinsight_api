@@ -62,8 +62,8 @@ module Api
       def mfa_stats
         Rails.logger.info "[SecuritySettings] GET MFA stats for company #{company_id}"
         
-        # Get users through invitations since users don't have company_id directly
-        users = User.joins(:invitation).where(invitations: { company_id: company_id })
+        # Get users for this company
+        users = User.where(company_id: company_id)
         total_users = users.count
         
         # Check if mfa_enabled column exists, otherwise default to 0
@@ -134,8 +134,7 @@ module Api
       def authorize_company_admin!
         Rails.logger.info "[SecuritySettings] Auth check - User: #{current_user.id}, Current Company: #{current_company_id}, Target Company: #{company_id}, Role: #{current_user.role}"
         
-        unless current_company_id.to_s == company_id.to_s && 
-               ['super_admin', 'company_admin'].include?(current_user.role)
+        unless current_company_id.to_s == company_id.to_s && current_user.effective_admin?
           Rails.logger.warn "[SecuritySettings] Authorization failed"
           render json: { 
             success: false,
