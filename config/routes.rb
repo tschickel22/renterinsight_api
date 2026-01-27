@@ -34,6 +34,9 @@ Rails.application.routes.draw do
   # ==================== PUBLIC BROCHURES ====================
   get '/b/:public_id', to: 'api/v1/brochures#public_view', as: :public_brochure
   
+  # ==================== PUBLIC LISTING VIEW ====================
+  get '/l/:id', to: 'api/v1/listings#public_view', as: :public_listing
+  
   # ==================== PUBLIC SYNDICATION FEEDS ====================
   namespace :public do
     get 'feeds/:id', to: 'syndication_feeds#show', as: :syndication_feed

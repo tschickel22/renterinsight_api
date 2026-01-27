@@ -178,8 +178,19 @@ module Api
         # Convert to symbols for service
         send_params_symbolized = send_params.deep_symbolize_keys
         
+        # CRITICAL FIX: Find the published listing for this vehicle
+        # ListingSendingService expects a Listing object, not a Vehicle
+        listing = @company.listings.active.published.find_by(vehicle_id: @vehicle.id)
+        
+        unless listing
+          return render json: {
+            success: false,
+            error: 'No published listing found for this vehicle'
+          }, status: :not_found
+        end
+        
         begin
-          result = ListingSendingService.new(@vehicle).send(**send_params_symbolized)
+          result = ListingSendingService.new(listing).send(**send_params_symbolized)
           
           if result[:sent].any?
             # Create activity if contact_id or lead_id provided
@@ -193,67 +204,6 @@ module Api
             render json: {
               success: true,
               listing: vehicle_json(@vehicle),
-              sent_via: result[:sent].map { |r| { channel: r[:channel], to: r[:to] } },
-              communications: result[:sent].map { |r| r[:communication]&.id },
-              activity_id: activity&.id
-            }
-          else
-            render json: {
-              success: false,
-              error: result[:errors].first || 'Failed to share listing',
-              errors: result[:errors],
-              failed: result[:failed]
-            }, status: :unprocessable_entity
-          end
-        rescue ArgumentError => e
-          render json: { success: false, error: e.message }, status: :bad_request
-        rescue => e
-          Rails.logger.error "Error sharing listing: #{e.message}"
-          Rails.logger.error e.backtrace.join("\n")
-          render json: { success: false, error: e.message }, status: :internal_server_error
-        end
-      end
-
-      # POST /api/v1/vehicles/:id/share
-      def share
-        send_params = params.permit(
-          :to_email,
-          :to_phone,
-          :custom_message,
-          :from_email,
-          :from_phone,
-          :cc,
-          :bcc,
-          :contact_id,
-          :lead_id,
-          delivery_methods: []
-        ).to_h
-        
-        # Extract contact_id and lead_id for activity tracking
-        contact_id = send_params.delete(:contact_id)
-        lead_id = send_params.delete(:lead_id)
-        
-        # Default to email if no delivery methods specified
-        send_params[:delivery_methods] ||= ['email']
-        
-        # Convert to symbols for service
-        send_params_symbolized = send_params.deep_symbolize_keys
-        
-        begin
-          result = ListingSendingService.new(@vehicle).send(**send_params_symbolized)
-          
-          if result[:sent].any?
-            # Create activity if contact_id or lead_id provided
-            activity = nil
-            if contact_id.present?
-              activity = create_contact_share_activity(contact_id, result, send_params)
-            elsif lead_id.present?
-              activity = create_lead_share_activity(lead_id, result, send_params)
-            end
-            
-            render json: {
-              success: true,
-              vehicle: vehicle_json(@vehicle),
               sent_via: result[:sent].map { |r| { channel: r[:channel], to: r[:to] } },
               communications: result[:sent].map { |r| r[:communication]&.id },
               activity_id: activity&.id
@@ -957,7 +907,7 @@ module Api
         # Build listing link
         base_url = request.base_url
         company_slug = @company.slug || 'demo'
-        listing_url = "#{base_url}/#{company_slug}/listing/#{@vehicle.id}"
+        listing_url = "#{base_url}/public/#{company_slug}/listing/#{@vehicle.id}"
         listing_link = "\n\nView listing: #{listing_url}"
         
         description = description_parts.join("\n") + listing_link
@@ -1009,7 +959,7 @@ module Api
         # Build listing link
         base_url = request.base_url
         company_slug = @company.slug || 'demo'
-        listing_url = "#{base_url}/#{company_slug}/listing/#{@vehicle.id}"
+        listing_url = "#{base_url}/public/#{company_slug}/listing/#{@vehicle.id}"
         listing_link = "\n\nView listing: #{listing_url}"
         
         description = description_parts.join("\n") + listing_link

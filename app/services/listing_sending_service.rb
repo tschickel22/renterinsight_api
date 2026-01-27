@@ -45,7 +45,7 @@ class ListingSendingService
     # Validate delivery methods
     valid_methods = ['email', 'sms']
     invalid = delivery_methods - valid_methods
-    raise ArgumentError, "Invalid delivery methods: #{invalid.join(', ')}" if invalid.any?
+    raise ArgumentError, "Invalid delivery_methods: #{invalid.join(', ')}" if invalid.any?
     
     # Validate recipients
     if delivery_methods.include?('email') && to_email.blank?
@@ -99,10 +99,10 @@ class ListingSendingService
         category: 'listings',
         metadata: { 
           listing_id: listing.id,
-          listing_type: listing.listing_type,
-          year: listing.year,
-          make: listing.make,
-          model: listing.model,
+          listing_type: listing.offer_type,
+          year: listing.vehicle&.year,
+          make: listing.vehicle&.make,
+          model: listing.vehicle&.model,
           price: listing.sale_price || listing.rent_price
         },
         portal_visible: false,
@@ -155,10 +155,10 @@ class ListingSendingService
         category: 'listings',
         metadata: { 
           listing_id: listing.id,
-          listing_type: listing.listing_type,
-          year: listing.year,
-          make: listing.make,
-          model: listing.model,
+          listing_type: listing.offer_type,
+          year: listing.vehicle&.year,
+          make: listing.vehicle&.make,
+          model: listing.vehicle&.model,
           price: listing.sale_price || listing.rent_price
         },
         portal_visible: false,
@@ -200,7 +200,7 @@ class ListingSendingService
   end
   
   def build_email_subject
-    listing_title = [listing.year, listing.make, listing.model].compact.join(' ')
+    listing_title = [listing.vehicle&.year, listing.vehicle&.make, listing.vehicle&.model].compact.join(' ')
     "#{listing_title} - Property Listing from #{company_name}"
   end
   
@@ -208,18 +208,18 @@ class ListingSendingService
     # Get public URL for the listing
     base_url = ENV['FRONTEND_URL'] || ENV['API_BASE_URL'] || 'http://localhost:3000'
     company_subdomain = listing.company.subdomain || 'demo'
-    listing_url = "#{base_url}/#{company_subdomain}/listing/#{listing.id}"
+    listing_url = "#{base_url}/public/#{company_subdomain}/listing/#{listing.id}"
     
     # Listing details
-    listing_title = [listing.year, listing.make, listing.model].compact.join(' ')
+    listing_title = [listing.vehicle&.year, listing.vehicle&.make, listing.vehicle&.model].compact.join(' ')
     price = listing.sale_price || listing.rent_price
     price_display = price ? "$#{format_currency(price)}#{listing.rent_price ? '/mo' : ''}" : 'Contact for pricing'
-    location = [listing.location_city, listing.location_state].compact.join(', ')
+    location = [listing.vehicle&.location_city, listing.vehicle&.location_state].compact.join(', ')
     
     # Get first image
     image_url = nil
-    if listing.images&.any?
-      first_image = listing.images.first
+    if listing.vehicle&.images&.any?
+      first_image = listing.vehicle.images.first
       image_url = first_image.start_with?('http') ? first_image : "#{base_url}#{first_image}"
     end
     
@@ -241,10 +241,10 @@ class ListingSendingService
     
     # Features HTML
     features_html = ''
-    if listing.features&.any?
+    if listing.vehicle&.features&.any?
       features_html = '<h3 style=\"margin-top: 20px; margin-bottom: 10px; color: #374151;\">Features:</h3>'
       features_html += '<ul style=\"margin-bottom: 20px; color: #6b7280; line-height: 1.8;\">'
-      listing.features.first(5).each do |feature|
+      listing.vehicle.features.first(5).each do |feature|
         features_html += "<li>#{feature}</li>"
       end
       features_html += '</ul>'
@@ -291,9 +291,9 @@ class ListingSendingService
   def build_sms_body(custom_message:)
     base_url = ENV['FRONTEND_URL'] || ENV['API_BASE_URL'] || 'http://localhost:3000'
     company_subdomain = listing.company.subdomain || 'demo'
-    listing_url = "#{base_url}/#{company_subdomain}/listing/#{listing.id}"
+    listing_url = "#{base_url}/public/#{company_subdomain}/listing/#{listing.id}"
     
-    listing_title = [listing.year, listing.make, listing.model].compact.join(' ')
+    listing_title = [listing.vehicle&.year, listing.vehicle&.make, listing.vehicle&.model].compact.join(' ')
     price = listing.sale_price || listing.rent_price
     price_display = price ? "$#{format_currency(price)}#{listing.rent_price ? '/mo' : ''}" : 'Contact for pricing'
     

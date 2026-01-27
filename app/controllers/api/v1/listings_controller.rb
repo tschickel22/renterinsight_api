@@ -10,7 +10,8 @@ module Api
         update_actions: [:update, :publish, :unpublish],
         delete_actions: [:destroy]
 
-      before_action :set_company
+      skip_before_action :authenticate, only: [:public_view]
+      before_action :set_company, except: [:public_view]
       before_action :set_listing, only: [:show, :update, :destroy, :publish, :unpublish]
 
       # GET /api/v1/listings
@@ -121,6 +122,14 @@ module Api
       # GET /api/v1/listings/:id
       def show
         render json: { listing: listing_json(@listing, detailed: true) }
+      end
+
+      # GET /l/:id (Public listing view - no auth required)
+      def public_view
+        listing = Listing.active.published.find(params[:id])
+        render json: { listing: listing_json(listing, detailed: true) }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Listing not found' }, status: :not_found
       end
 
       # POST /api/v1/listings
