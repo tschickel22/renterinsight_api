@@ -599,7 +599,8 @@ module Api
           # For list view, include minimal vehicle data for thumbnails
           first_vehicle = brochure.vehicles.active.first
           if first_vehicle
-            base_url_for_images = Rails.env.production? ? "https://#{request.host}" : "http://#{request.host}:#{request.port}"
+            # Use HTTPS for all environments (local dev uses SSL certificates)
+            base_url_for_images = request.ssl? ? "https://#{request.host}:#{request.port}" : "http://#{request.host}:#{request.port}"
             first_image = first_vehicle.images&.first
             full_image_url = first_image&.start_with?('http') ? first_image : "#{base_url_for_images}#{first_image}"
             
@@ -614,7 +615,8 @@ module Api
       end
 
       def vehicle_json_for_brochure(vehicle)
-        base_url = Rails.env.production? ? "https://#{request.host}" : "http://#{request.host}:#{request.port}"
+        # Use HTTPS for all environments (local dev uses SSL certificates)
+        base_url = request.ssl? ? "https://#{request.host}:#{request.port}" : "http://#{request.host}:#{request.port}"
         
         full_image_urls = (vehicle.images || []).map do |url|
           url.start_with?('http') ? url : "#{base_url}#{url}"
