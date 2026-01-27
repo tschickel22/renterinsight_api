@@ -89,8 +89,8 @@ module Api
         
         views = []
         
-        # My Calendar - everyone with view_own permission
-        if permission_service.can?('calendar', 'view_own', 'own')
+        # My Calendar - everyone with read/own permission
+        if permission_service.can?('calendar', 'read', 'own')
           views << {
             id: 'my',
             name: 'My Calendar',
@@ -99,8 +99,8 @@ module Api
           }
         end
         
-        # Team Calendar - users with view_team permission
-        if permission_service.can?('calendar', 'view_team', 'assigned_locations')
+        # Team Calendar - users with read/assigned_locations permission
+        if permission_service.can?('calendar', 'read', 'assigned_locations')
           views << {
             id: 'team',
             name: 'Team Calendar',
@@ -109,8 +109,8 @@ module Api
           }
         end
         
-        # All Service Tickets - users with view_service_all permission
-        if permission_service.can?('calendar', 'view_service_all', 'assigned_locations')
+        # All Service Tickets - users with manage/all permission
+        if permission_service.can?('calendar', 'manage', 'all')
           views << {
             id: 'service_all',
             name: 'All Service Tickets',
@@ -119,8 +119,8 @@ module Api
           }
         end
         
-        # Unassigned Service Tickets - users with view_service_unassigned permission
-        if permission_service.can?('calendar', 'view_service_unassigned', 'assigned_locations')
+        # Unassigned Service Tickets - users with delete/all permission
+        if permission_service.can?('calendar', 'delete', 'all')
           views << {
             id: 'service_unassigned',
             name: 'Unassigned Tickets',
@@ -129,8 +129,8 @@ module Api
           }
         end
         
-        # All Company Calendar - admins with view_all permission
-        if permission_service.can?('calendar', 'view_all', 'all')
+        # All Company Calendar - admins with read/all permission
+        if permission_service.can?('calendar', 'read', 'all')
           views << {
             id: 'all',
             name: 'All Company',
@@ -203,6 +203,12 @@ module Api
       return true if current_user.platform_admin?
       return true if current_user.super_admin?
       
+      # Company admins (effective_admin) get full calendar access
+      if current_user.effective_admin?
+        Rails.logger.info "[can_view?] User is company admin - granting access"
+        return true
+      end
+      
       # If current company doesn't use RBAC, allow all access
       Rails.logger.info "[can_view?] Company uses RBAC: #{@company&.use_rbac_system}"
       return true unless @company&.use_rbac_system
@@ -210,17 +216,24 @@ module Api
       Rails.logger.info "[can_view?] Creating PermissionService for user #{current_user.id}"
       permission_service = PermissionService.new(current_user)
         
+        # Calendar permissions use standard actions (read/manage/delete) with different scopes
+        # As defined in Resource model's calendar_permission_groups:
+        # - 'read' with 'own' = view personal calendar
+        # - 'read' with 'assigned_locations' = view team calendars
+        # - 'read' with 'all' = view all company calendars
+        # - 'manage' with 'all' = view all service tickets
+        # - 'delete' with 'all' = view unassigned service tickets
         result = case view
         when 'my'
-        permission_service.can?('calendar', 'view_own', 'own')
+          permission_service.can?('calendar', 'read', 'own')
         when 'team'
-        permission_service.can?('calendar', 'view_team', 'assigned_locations')
+          permission_service.can?('calendar', 'read', 'assigned_locations')
         when 'service_all'
-        permission_service.can?('calendar', 'view_service_all', 'assigned_locations')
+          permission_service.can?('calendar', 'manage', 'all')
         when 'service_unassigned'
-        permission_service.can?('calendar', 'view_service_unassigned', 'assigned_locations')
+          permission_service.can?('calendar', 'delete', 'all')
         when 'all'
-        permission_service.can?('calendar', 'view_all', 'all')
+          permission_service.can?('calendar', 'read', 'all')
         else
         false
         end

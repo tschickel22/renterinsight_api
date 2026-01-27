@@ -10,11 +10,13 @@
 #   events = service.aggregated_events
 #
 # View Types:
-#   - 'my': User's own calendar (view_own permission)
-#   - 'team': Team calendars based on assigned locations (view_team permission)
-#   - 'service_all': All service tickets (view_service_all permission)
-#   - 'service_unassigned': Unassigned service tickets (view_service_unassigned permission)
-#   - 'all': All company calendars (view_all permission)
+#   - 'my': User's own calendar (read/own permission)
+#   - 'team': Team calendars based on assigned locations (read/assigned_locations permission)
+#   - 'service_all': All service tickets (manage/all permission)
+#   - 'service_unassigned': Unassigned service tickets (delete/all permission)
+#   - 'all': All company calendars (read/all permission)
+#
+# Admins (platform_admin, super_admin, effective_admin) have full access to all views
 
 class CalendarService
   attr_reader :user, :company, :params, :permission_service
@@ -42,6 +44,11 @@ class CalendarService
       events += load_activities(view)
     end
     
+    # Add standalone tasks
+    if include_type?('task')
+      events += load_tasks(view)
+    end
+    
     # Add service tickets if requested
     if include_type?('service_ticket')
       events += load_service_tickets(view)
@@ -67,23 +74,35 @@ class CalendarService
   
   # Check if user can view the requested calendar
   def can_view?(view)
+    # Platform admins can view all
+    return true if user.platform_admin?
+    return true if user.super_admin?
+    
+    # Company admins can view all
+    return true if user.effective_admin?
+    
+    # If company doesn't use RBAC, allow all
+    return true unless company&.use_rbac_system
+    
+    # Calendar permissions use standard actions with different scopes:
+    # - 'read' with 'own' = view personal calendar
+    # - 'read' with 'assigned_locations' = view team calendars
+    # - 'read' with 'all' = view all company calendars
+    # - 'manage' with 'all' = view all service tickets
+    # - 'delete' with 'all' = view unassigned service tickets
     case view
     when 'my'
-      # Check for 'own' scope first, then fall back to 'all' (broader scope)
-      permission_service.can?('calendar', 'view_own', 'own') ||
-        permission_service.can?('calendar', 'view_own', 'all')
+      permission_service.can?('calendar', 'read', 'own') ||
+        permission_service.can?('calendar', 'read', 'all')
     when 'team'
-      # Check for 'assigned_locations' first, then fall back to 'all'
-      permission_service.can?('calendar', 'view_team', 'assigned_locations') ||
-        permission_service.can?('calendar', 'view_team', 'all')
+      permission_service.can?('calendar', 'read', 'assigned_locations') ||
+        permission_service.can?('calendar', 'read', 'all')
     when 'service_all'
-      permission_service.can?('calendar', 'view_service_all', 'assigned_locations') ||
-        permission_service.can?('calendar', 'view_service_all', 'all')
+      permission_service.can?('calendar', 'manage', 'all')
     when 'service_unassigned'
-      permission_service.can?('calendar', 'view_service_unassigned', 'assigned_locations') ||
-        permission_service.can?('calendar', 'view_service_unassigned', 'all')
+      permission_service.can?('calendar', 'delete', 'all')
     when 'all'
-      permission_service.can?('calendar', 'view_all', 'all')
+      permission_service.can?('calendar', 'read', 'all')
     else
       false
     end
@@ -99,26 +118,39 @@ class CalendarService
   def load_activities(view)
     activities = []
     
-    # Lead Activities - check assigned_locations or all scope
-    if permission_service.can?('leads', 'read', 'assigned_locations') ||
+    # Admins can see all activities
+    is_admin = user.platform_admin? || user.super_admin? || user.effective_admin?
+    
+    # If user has calendar permission, they should see activities from all modules
+    # Otherwise, check individual module permissions
+    has_calendar_permission = is_admin ||
+                             permission_service.can?('calendar', 'read', 'assigned_locations') ||
+                             permission_service.can?('calendar', 'read', 'all')
+    
+    # Lead Activities
+    if has_calendar_permission ||
+       permission_service.can?('leads', 'read', 'assigned_locations') ||
        permission_service.can?('leads', 'read', 'all')
       activities += load_lead_activities(view)
     end
     
     # Account Activities
-    if permission_service.can?('crm', 'read', 'assigned_locations') ||
+    if has_calendar_permission ||
+       permission_service.can?('crm', 'read', 'assigned_locations') ||
        permission_service.can?('crm', 'read', 'all')
       activities += load_account_activities(view)
     end
     
     # Contact Activities
-    if permission_service.can?('crm', 'read', 'assigned_locations') ||
+    if has_calendar_permission ||
+       permission_service.can?('crm', 'read', 'assigned_locations') ||
        permission_service.can?('crm', 'read', 'all')
       activities += load_contact_activities(view)
     end
     
     # Deal Activities
-    if permission_service.can?('deals', 'read', 'assigned_locations') ||
+    if has_calendar_permission ||
+       permission_service.can?('deals', 'read', 'assigned_locations') ||
        permission_service.can?('deals', 'read', 'all')
       activities += load_deal_activities(view)
     end
@@ -162,6 +194,45 @@ class CalendarService
     activities.map { |activity| activity_to_event(activity, 'deal') }.compact
   end
   
+  # Load standalone tasks
+  def load_tasks(view)
+    # Admins can see all tasks
+    is_admin = user.platform_admin? || user.super_admin? || user.effective_admin?
+    
+    # Calendar permission grants access to all tasks, or check specific tasks permission
+    has_calendar_permission = is_admin ||
+                             permission_service.can?('calendar', 'read', 'assigned_locations') ||
+                             permission_service.can?('calendar', 'read', 'all')
+    
+    return [] unless has_calendar_permission ||
+                     permission_service.can?('tasks', 'read', 'assigned_locations') ||
+                     permission_service.can?('tasks', 'read', 'all')
+    
+    # Tasks don't have is_deleted column - only filter completed/cancelled if needed
+    tasks = company.tasks.where.not(status: [:completed, :cancelled])
+    
+    tasks = case view
+    when 'my'
+      tasks.where(assigned_to_id: user.id)
+    when 'team'
+      team_user_ids = get_team_user_ids
+      tasks.where(assigned_to_id: team_user_ids)
+    when 'all'
+      # Filter by location based on user context
+      if Current.location_filtered?
+        tasks.where(location_id: Current.location_id)
+      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
+        tasks.where(location_id: permission_service.accessible_location_ids)
+      else
+        tasks
+      end
+    else
+      tasks.where(assigned_to_id: user.id)
+    end
+    
+    tasks.map { |task| task_to_event(task) }.compact
+  end
+  
   # Filter activities by calendar view
   def filter_activities_by_view(activities, view)
     case view
@@ -172,11 +243,18 @@ class CalendarService
       team_user_ids = get_team_user_ids
       activities.where(assigned_to_id: team_user_ids)
     when 'all'
-      # Apply location filter if active through parent table
+      parent_table = get_parent_table_name(activities)
+      
+      # Apply location filter based on user context
       if Current.location_filtered?
-        parent_table = get_parent_table_name(activities)
+        # Location selector is active - filter to that specific location
         activities = activities.where("#{parent_table}.location_id" => Current.location_id)
+      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
+        # Location-tier user with no location selected - filter to ALL their assigned locations
+        activities = activities.where("#{parent_table}.location_id" => permission_service.accessible_location_ids)
       end
+      # else: Company admin with no filter = sees everything
+      
       activities
     else
       activities.where(assigned_to_id: user.id)
@@ -201,7 +279,18 @@ class CalendarService
   
   # Load service tickets
   def load_service_tickets(view)
-    return [] unless permission_service.can?('service', 'read', 'assigned_locations') ||
+    # Admins can see all service tickets
+    is_admin = user.platform_admin? || user.super_admin? || user.effective_admin?
+    
+    # Calendar permission grants access to service tickets, or check specific service/calendar permissions
+    has_calendar_permission = is_admin ||
+                             permission_service.can?('calendar', 'read', 'assigned_locations') ||
+                             permission_service.can?('calendar', 'read', 'all') ||
+                             permission_service.can?('calendar', 'manage', 'all') ||
+                             permission_service.can?('calendar', 'delete', 'all')
+    
+    return [] unless has_calendar_permission ||
+                     permission_service.can?('service', 'read', 'assigned_locations') ||
                      permission_service.can?('service', 'read', 'all')
     
     tickets = company.service_tickets  # Remove .includes(:assigned_to_user) - it's a method not association
@@ -216,27 +305,30 @@ class CalendarService
       team_user_ids = get_team_user_ids
       tickets.where(assigned_to: team_user_ids.map(&:to_s))
     when 'service_all'
-      # All service tickets at accessible locations
+      # All service tickets - filter by location
       if Current.location_filtered?
         tickets.where(location_id: Current.location_id)
-      elsif permission_service.accessible_location_ids.any?
+      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
         tickets.where(location_id: permission_service.accessible_location_ids)
       else
         tickets
       end
     when 'service_unassigned'
-      # Unassigned tickets at accessible locations
+      # Unassigned tickets - filter by location
       base = tickets.where(assigned_to: [nil, ''])
       if Current.location_filtered?
         base.where(location_id: Current.location_id)
-      elsif permission_service.accessible_location_ids.any?
+      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
         base.where(location_id: permission_service.accessible_location_ids)
       else
         base
       end
     when 'all'
+      # All tickets - filter by location
       if Current.location_filtered?
         tickets.where(location_id: Current.location_id)
+      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
+        tickets.where(location_id: permission_service.accessible_location_ids)
       else
         tickets
       end
@@ -317,6 +409,66 @@ class CalendarService
       entity_name: entity_name,
       entity_type: source_type,
       entity_id: entity&.id
+    }
+  end
+  
+  # Convert task to unified event format
+  def task_to_event(task)
+    # Return nil if no due date
+    return nil if task.due_date.blank?
+    
+    # Calculate start/end times
+    start_time = task.due_date.is_a?(DateTime) ? task.due_date : task.due_date.to_time.change(hour: 9)
+    # Tasks don't have estimated_hours column - use default 1 hour duration
+    duration = task.respond_to?(:estimated_hours) ? (task.estimated_hours || 1) : 1
+    end_time = start_time + duration.hours
+    
+    # Determine entity info if task is linked to something
+    entity_name = if task.taskable.present?
+      case task.taskable_type
+      when 'Lead'
+        task.taskable.full_name rescue 'Unknown Lead'
+      when 'Account'
+        task.taskable.name rescue 'Unknown Account'
+      when 'Contact'
+        task.taskable.full_name rescue 'Unknown Contact'
+      when 'Deal'
+        task.taskable.name rescue 'Unknown Deal'
+      when 'ServiceTicket'
+        task.taskable.title rescue 'Service Ticket'
+      else
+        task.taskable_type
+      end
+    else
+      'Standalone Task'
+    end
+    
+    {
+      id: "task-#{task.id}",
+      title: task.title,
+      type: 'task',
+      start: start_time.iso8601,
+      end: end_time.iso8601,
+      all_day: false,
+      status: task.status,
+      priority: task.priority,
+      description: task.description,
+      assigned_to: task.assigned_to ? {
+        id: task.assigned_to.id,
+        name: task.assigned_to.full_name,
+        email: task.assigned_to.email
+      } : nil,
+      source: {
+        type: 'task',
+        id: task.id,
+        name: task.title
+      },
+      color: '#3B82F6',  # Blue for tasks
+      entity_name: entity_name,
+      entity_type: task.taskable_type&.downcase || 'task',
+      entity_id: task.taskable_id || task.id,
+      task_module: task.task_module,
+      overdue: task.overdue?
     }
   end
   
