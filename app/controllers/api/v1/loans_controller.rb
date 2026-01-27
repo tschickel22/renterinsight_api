@@ -39,10 +39,16 @@ module Api
         @loans = @loans.by_status(params[:status]) if params[:status].present?
         @loans = @loans.where(loan_type: params[:loan_type]) if params[:loan_type].present?
         
-        # Filter by account - join through contacts since loans don't have account_id
+        # Filter by account - show both direct account loans AND loans through contacts
         if params[:account_id].present?
-          @loans = @loans.joins("INNER JOIN contacts ON loans.borrower_type = 'Contact' AND loans.borrower_id = contacts.id")
-                         .where('contacts.account_id = ?', params[:account_id])
+          account_id = params[:account_id]
+          @loans = @loans.where(
+            "(loans.borrower_type = 'Account' AND loans.borrower_id = ?) OR 
+             (loans.borrower_type = 'Contact' AND loans.borrower_id IN (
+               SELECT id FROM contacts WHERE account_id = ? AND is_deleted IN (FALSE, NULL)
+             ))",
+            account_id, account_id
+          )
         end
         
         # Date range filters
@@ -111,10 +117,16 @@ module Api
           @company.loans.where(is_deleted: [false, nil])
         end
         
-        # Apply account filter if provided - join through contacts since loans don't have account_id
+        # Apply account filter if provided - show both direct account loans AND loans through contacts
         if params[:account_id].present?
-          loans = loans.joins("INNER JOIN contacts ON loans.borrower_type = 'Contact' AND loans.borrower_id = contacts.id")
-                       .where('contacts.account_id = ?', params[:account_id])
+          account_id = params[:account_id]
+          loans = loans.where(
+            "(loans.borrower_type = 'Account' AND loans.borrower_id = ?) OR 
+             (loans.borrower_type = 'Contact' AND loans.borrower_id IN (
+               SELECT id FROM contacts WHERE account_id = ? AND is_deleted IN (FALSE, NULL)
+             ))",
+            account_id, account_id
+          )
         end
         
         # Apply location selector filter
@@ -340,7 +352,7 @@ module Api
         return unless authorize_action!('finance', 'read')
         
         borrower_type = params[:borrower_type]
-        query = params[:query]&.strip
+        query = params[:search]&.strip  # Changed from :query to :search to match frontend
         
         Rails.logger.info("🔍 [search_borrowers] Type: #{borrower_type}, Query: #{query}")
         
@@ -349,27 +361,44 @@ module Api
           return
         end
         
-        # Get the appropriate model
-        borrower_model = borrower_type.constantize
-        
-        # Base query with RBAC and location filtering
-        borrowers = if current_user.uses_rbac?
-          if current_user.effective_admin?
-            @company.send(borrower_type.tableize)
-          else
-            location_ids = permission_service.accessible_location_ids
-            if location_ids.any?
-              @company.send(borrower_type.tableize).where(location_id: location_ids)
+        # Base query with company scoping and RBAC location filtering
+        borrowers = if borrower_type == 'Account'
+          # Accounts - use company association
+          if current_user.uses_rbac?
+            if current_user.effective_admin?
+              @company.accounts.where(is_deleted: [false, nil])
             else
-              @company.send(borrower_type.tableize)
+              location_ids = permission_service.accessible_location_ids
+              if location_ids.any?
+                @company.accounts.where(is_deleted: [false, nil], location_id: location_ids)
+              else
+                @company.accounts.where(is_deleted: [false, nil])
+              end
             end
+          else
+            @company.accounts.where(is_deleted: [false, nil])
           end
-        else
-          @company.send(borrower_type.tableize)
+        else # Contact
+          # Contacts - query directly with company_id (same pattern as buyers endpoint)
+          # DON'T apply location filter - show all company contacts regardless of location
+          base_query = if current_user.uses_rbac?
+            if current_user.effective_admin?
+              Contact.where(company_id: @company.id, is_deleted: [false, nil])
+            else
+              location_ids = permission_service.accessible_location_ids
+              if location_ids.any?
+                Contact.where(company_id: @company.id, is_deleted: [false, nil], location_id: location_ids)
+              else
+                Contact.where(company_id: @company.id, is_deleted: [false, nil])
+              end
+            end
+          else
+            Contact.where(company_id: @company.id, is_deleted: [false, nil])
+          end
+          
+          # Preload account for contact display
+          base_query.includes(:account)
         end
-        
-        # Apply location selector filter
-        borrowers = borrowers.for_current_location
         
         # Search by name or email
         if query.present?
@@ -383,18 +412,43 @@ module Api
           end
         end
         
+        # Sort alphabetically
+        if borrower_type == 'Account'
+          borrowers = borrowers.order(:name)
+        else
+          borrowers = borrowers.order(:first_name, :last_name)
+        end
+        
         # Limit results
         borrowers = borrowers.limit(50)
         
         # Format response
         results = borrowers.map do |borrower|
-          {
-            id: borrower.id,
-            type: borrower_type,
-            name: borrower.respond_to?(:full_name) ? borrower.full_name : borrower.name,
-            email: borrower.respond_to?(:email) ? borrower.email : nil,
-            display_name: borrower.respond_to?(:full_name) ? "#{borrower.full_name} (#{borrower.email})" : borrower.name
-          }
+          if borrower_type == 'Contact'
+            # For contacts, show name and account (if associated)
+            account_name = borrower.account&.name
+            display_parts = [borrower.full_name]
+            display_parts << account_name if account_name.present?
+            
+            {
+              id: borrower.id,
+              type: borrower_type,
+              name: borrower.full_name,
+              email: borrower.email,
+              account_name: account_name,
+              display_name: display_parts.join(' - ')
+            }
+          else
+            # For accounts, show name
+            {
+              id: borrower.id,
+              type: borrower_type,
+              name: borrower.name,
+              email: nil,
+              account_name: nil,
+              display_name: borrower.name
+            }
+          end
         end
         
         Rails.logger.info("✅ [search_borrowers] Found #{results.count} borrowers")
