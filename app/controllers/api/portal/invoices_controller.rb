@@ -312,18 +312,22 @@ module Api
       def invoice_detail_json(invoice)
         invoice_json(invoice).merge(
           invoice_items: invoice.invoice_items.map { |item| invoice_item_json(item) },
-          property: {
-            id: invoice.property_id,
-            name: invoice.property&.name
-          },
-          contact: {
+          location: invoice.location ? {
+            id: invoice.location_id,
+            name: invoice.location.name
+          } : nil,
+          listing: invoice.listing ? {
+            id: invoice.listing_id,
+            name: invoice.listing.name || invoice.listing.title
+          } : nil,
+          contact: invoice.contact ? {
             id: invoice.contact_id,
-            name: "#{invoice.contact&.first_name} #{invoice.contact&.last_name}",
-            email: invoice.contact&.email
-          },
+            name: "#{invoice.contact.first_name} #{invoice.contact.last_name}",
+            email: invoice.contact.email
+          } : nil,
           notes: invoice.notes,
-          payment_terms: invoice.payment_terms,
-          pdf_url: invoice.pdf_url
+          payment_terms: invoice.terms,
+          pdf_url: invoice.respond_to?(:pdf_url) ? invoice.pdf_url : nil
         )
       end
 
