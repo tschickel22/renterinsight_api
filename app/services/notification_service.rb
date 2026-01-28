@@ -359,12 +359,9 @@ class NotificationService
   end
   
   def self.frontend_url
-    # Get frontend URL with environment-based fallback
-    if Rails.env.production?
-      ENV['FRONTEND_URL'] || 'https://app.renterinsight.com'
-    else
-      'https://localhost:5173'
-    end
+    # Get frontend URL with environment-based fallback - respects FRONTEND_URL env var for staging
+    ENV['FRONTEND_URL'] || 
+      (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://localhost:5173')
   end
   
   def self.send_sms(notification, user)

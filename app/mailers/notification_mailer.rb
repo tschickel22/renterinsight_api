@@ -9,12 +9,9 @@ class NotificationMailer < ApplicationMailer
     @company = Company.find_by(id: broadcasting_company_id) if broadcasting_company_id.present?
     @location = Location.find_by(id: notification.location_id) if notification.location_id.present?
     
-    # Get frontend URL for links - hardcoded for development reliability
-    @frontend_url = if Rails.env.production?
-      ENV['FRONTEND_URL'] || 'https://app.renterinsight.com'
-    else
-      'https://localhost:5173'
-    end
+    # Get frontend URL for links - respects FRONTEND_URL env var for staging/production
+    @frontend_url = ENV['FRONTEND_URL'] || 
+                    (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://localhost:5173')
     
     Rails.logger.info "[NotificationMailer] Frontend URL: #{@frontend_url}"
     Rails.logger.info "[NotificationMailer] Action URL: #{notification.action_url}"
