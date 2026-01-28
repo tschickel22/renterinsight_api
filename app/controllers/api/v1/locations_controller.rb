@@ -4,13 +4,13 @@ module Api
   module V1
     class LocationsController < ApplicationController
       # Authentication inherited from ApplicationController
-      before_action :set_location, only: [:show, :update, :destroy, :restore, :users, :available_users, :metrics, :stats, :activities, :assign_user, :remove_user]
+      before_action :set_location, only: [:show, :update, :destroy, :restore, :users, :available_users, :metrics, :stats, :activities, :assign_user, :remove_user, :save_communication_settings, :clear_communication_settings]
       before_action :authorize_company_access!
       
       # RBAC permission checks
       before_action -> { authorize_rbac!('locations', 'read') }, only: [:index, :show, :users, :available_users, :metrics, :stats, :activities]
       before_action -> { authorize_rbac!('locations', 'create') }, only: [:create]
-      before_action -> { authorize_rbac!('locations', 'update') }, only: [:update, :bulk_activate, :bulk_deactivate]
+      before_action -> { authorize_rbac!('locations', 'update') }, only: [:update, :bulk_activate, :bulk_deactivate, :save_communication_settings, :clear_communication_settings]
       before_action -> { authorize_rbac!('locations', 'delete') }, only: [:destroy, :bulk_delete, :restore]
       before_action -> { authorize_rbac!('locations', 'assign') }, only: [:assign_user, :remove_user]
 
@@ -412,6 +412,88 @@ module Api
           message: "#{deleted_count} location(s) deleted successfully",
           deleted_count: deleted_count
         }
+      end
+
+      # PATCH /api/v1/locations/:id/save_communication_settings
+      # Save communication settings for THIS SPECIFIC LOCATION (with correct scope_id)
+      def save_communication_settings
+        settings = params[:communication_settings] || params[:settings] || {}
+        
+        # Convert ActionController::Parameters to hash if needed
+        settings = settings.to_unsafe_h if settings.respond_to?(:to_unsafe_h)
+        
+        Rails.logger.info "[Location Settings] 💾 Saving communications settings for location #{@location.id} (#{@location.name})"
+        Rails.logger.info "[Location Settings] Settings keys: #{settings.keys.join(', ')}"
+        
+        # CRITICAL: Save with THIS location's ID as scope_id
+        Setting.set('Location', @location.id, 'communications', settings)
+        
+        # Verify it was saved correctly
+        saved = Setting.get('Location', @location.id, 'communications')
+        Rails.logger.info "[Location Settings] ✅ Verified saved for location #{@location.id}: #{saved.present?}"
+        
+        # Log the activity
+        begin
+          LocationActivity.log_settings_change(
+            location: @location,
+            user: current_user,
+            category: 'communication',
+            action: 'communication_changed',
+            description: 'Communication settings updated'
+          )
+        rescue => e
+          Rails.logger.warn "[Location Settings] Could not log activity: #{e.message}"
+        end
+        
+        render json: { 
+          success: true, 
+          message: 'Communication settings updated successfully. Location will now use these settings for emails and SMS, falling back to company or platform settings if not specified.',
+          settings: saved
+        }
+      rescue => e
+        Rails.logger.error "[Location Settings] ❌ Error saving settings: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # DELETE /api/v1/locations/:id/clear_communication_settings
+      # Clear all communication settings for this location and use parent defaults
+      def clear_communication_settings
+        # Delete the settings record entirely
+        Setting.where(
+          scope_type: 'Location',
+          scope_id: @location.id,
+          key: 'communications'
+        ).destroy_all
+        
+        # Log the activity
+        begin
+          LocationActivity.log_settings_change(
+            location: @location,
+            user: current_user,
+            category: 'communication',
+            action: 'settings_cleared',
+            description: 'Communication settings cleared - now using company/platform defaults'
+          )
+        rescue => e
+          Rails.logger.warn "[Location Settings] Could not log activity: #{e.message}"
+        end
+        
+        # Determine which parent settings will now be used
+        company_settings = Setting.get('Company', current_company.id, 'communications')
+        parent_source = company_settings.present? ? 'company' : 'platform'
+        
+        Rails.logger.info "[Location Settings] Cleared communications settings for location #{@location.id} (#{@location.name})"
+        Rails.logger.info "[Location Settings] Now using #{parent_source} defaults"
+        
+        render json: { 
+          success: true, 
+          message: "Settings cleared successfully - now using #{parent_source} defaults",
+          parent_source: parent_source
+        }
+      rescue => e
+        Rails.logger.error "[Location Settings] Error clearing settings: #{e.message}"
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       private

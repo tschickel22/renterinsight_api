@@ -95,6 +95,8 @@ Rails.application.routes.draw do
         patch 'loan', action: :update_loan
         get 'portal_modules', action: :show_portal_modules
         patch 'portal_modules', action: :update_portal_modules
+        patch :save_communication_settings
+        delete :clear_communication_settings
       end
       
       # ==================== GLOBAL SEARCH ====================
@@ -402,6 +404,8 @@ Rails.application.routes.draw do
           get :metrics
           get :stats
           get :activities
+          patch :save_communication_settings
+          delete :clear_communication_settings
         end
         
         collection do

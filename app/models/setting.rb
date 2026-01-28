@@ -22,6 +22,7 @@ class Setting < ApplicationRecord
     setting = find_by(scope_type: scope_type, scope_id: scope_id, key: key)
     return default unless setting
     
+    # For TEXT columns, parse JSON string to hash
     begin
       JSON.parse(setting.value)
     rescue JSON::ParserError
@@ -36,6 +37,7 @@ class Setting < ApplicationRecord
       scope_id: scope_id,
       key: key
     )
+    # For TEXT columns, serialize hash to JSON string
     setting.value = value.is_a?(String) ? value : value.to_json
     setting.save!
   end

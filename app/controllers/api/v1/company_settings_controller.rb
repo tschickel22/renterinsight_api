@@ -7,7 +7,7 @@ module Api
       
       # RBAC Authorization - map to appropriate resources
       before_action :authorize_settings_read!, only: [:show_operational, :show_communication]
-      before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac]
+      before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac, :save_communication_settings, :clear_communication_settings]
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
       before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
@@ -279,6 +279,58 @@ module Api
         render json: {
           errors: [e.message]
         }, status: :unprocessable_entity
+      end
+
+      # PATCH /api/v1/company_settings/save_communication_settings
+      # Save communication settings for THIS COMPANY (with correct scope_id)
+      def save_communication_settings
+        settings = params[:communication_settings] || params[:settings] || {}
+        
+        # Convert ActionController::Parameters to hash if needed
+        settings = settings.to_unsafe_h if settings.respond_to?(:to_unsafe_h)
+        
+        Rails.logger.info "[Company Settings] 💾 Saving communications settings for company #{@company.id} (#{@company.name})"
+        Rails.logger.info "[Company Settings] Settings keys: #{settings.keys.join(', ')}"
+        
+        # CRITICAL: Save with THIS company's ID as scope_id
+        Setting.set('Company', @company.id, 'communications', settings)
+        
+        # Verify it was saved correctly
+        saved = Setting.get('Company', @company.id, 'communications')
+        Rails.logger.info "[Company Settings] ✅ Verified saved for company #{@company.id}: #{saved.present?}"
+        
+        render json: { 
+          success: true, 
+          message: 'Communication settings updated successfully',
+          settings: saved
+        }
+      rescue => e
+        Rails.logger.error "[Company Settings] ❌ Error saving settings: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # DELETE /api/v1/company_settings/clear_communication_settings
+      # Clear all communication settings for this company and use platform defaults
+      def clear_communication_settings
+        # Delete the settings record entirely
+        Setting.where(
+          scope_type: 'Company',
+          scope_id: @company.id,
+          key: 'communications'
+        ).destroy_all
+        
+        Rails.logger.info "[Company Settings] Cleared communications settings for company #{@company.id} (#{@company.name})"
+        Rails.logger.info "[Company Settings] Now using platform defaults"
+        
+        render json: { 
+          success: true, 
+          message: 'Settings cleared successfully - now using platform defaults',
+          parent_source: 'platform'
+        }
+      rescue => e
+        Rails.logger.error "[Company Settings] Error clearing settings: #{e.message}"
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       private
