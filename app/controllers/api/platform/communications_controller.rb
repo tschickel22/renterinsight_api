@@ -209,8 +209,22 @@ module Api
           communication.update!(body: enhanced_body)
         end
         
-        # Configure ActionMailer like password reset does
-        configure_action_mailer_smtp(email_config)
+        # Configure ActionMailer based on provider
+        provider = (email_config['provider'] || email_config[:provider] || 'smtp').to_sym
+        
+        case provider
+        when :smtp
+          configure_action_mailer_smtp(email_config)
+        when :gmail
+          configure_action_mailer_gmail(email_config)
+        when :aws_ses
+          configure_action_mailer_ses(email_config)
+        when :sendgrid
+          configure_action_mailer_sendgrid(email_config)
+        else
+          Rails.logger.warn "[Platform::CommunicationsController] Unknown email provider: #{provider}, falling back to SMTP"
+          configure_action_mailer_smtp(email_config)
+        end
         
         # Send email via ActionMailer with enhanced body
         send_result = send_email_via_action_mailer(
@@ -356,9 +370,31 @@ module Api
       end
 
       def get_effective_settings
-        platform_settings = fetch_platform_settings
+        # CRITICAL: Waterfall priority is Location → Company → Platform (highest to lowest)
+        # Higher levels override lower levels
+        
+        location_settings = fetch_location_settings
         company_settings = fetch_company_settings
-        merge_settings(platform_settings, company_settings)
+        platform_settings = fetch_platform_settings
+        
+        Rails.logger.info "[get_effective_settings] Waterfall check:"
+        Rails.logger.info "  - Platform settings: #{platform_settings.dig(:communications, :email, :provider) || 'none'}"
+        Rails.logger.info "  - Company settings: #{company_settings.dig(:communications, :email, :provider) || 'none'}"
+        Rails.logger.info "  - Location settings: #{location_settings.dig(:communications, :email, :provider) || 'none'}"
+        
+        # Start with platform (lowest priority)
+        result = platform_settings.deep_dup
+        
+        # Merge company (overrides platform)
+        result = merge_settings(result, company_settings) if company_settings.present?
+        
+        # Merge location (highest priority - overrides everything)
+        result = merge_settings(result, location_settings) if location_settings.present?
+        
+        final_provider = result.dig(:communications, :email, :provider) || result.dig('communications', 'email', 'provider')
+        Rails.logger.info "[get_effective_settings] ✅ Final provider: #{final_provider}"
+        
+        result
       rescue => e
         Rails.logger.error("[Platform::CommunicationsController] Error fetching settings: #{e.message}")
         {
@@ -371,10 +407,18 @@ module Api
 
       def fetch_platform_settings
         stored = Setting.get('Platform', 0, 'communications')
+        
+        Rails.logger.info "[fetch_platform_settings] Raw stored value present: #{stored.present?}"
+        Rails.logger.info "[fetch_platform_settings] Raw stored keys: #{stored.keys if stored.is_a?(Hash)}"
+        
         return {} unless stored
         
         if stored.is_a?(Hash)
-          { communications: stored }
+          # CRITICAL: symbolize_keys so we can access with :email, :provider, etc.
+          result = { communications: stored.deep_symbolize_keys }
+          provider = result.dig(:communications, :email, :provider)
+          Rails.logger.info "[fetch_platform_settings] Provider after symbolize: #{provider}"
+          result
         else
           {}
         end
@@ -384,28 +428,69 @@ module Api
       end
 
       def fetch_company_settings
-        {}  # Can be implemented later if needed
+        # Get current company (not platform company)
+        company = @company || ::Company.find_by(id: current_company_id)
+        return {} unless company
+        
+        # Platform company (ID=1) has no company-level settings, skip it
+        return {} if company.id == 1
+        
+        stored = Setting.get('Company', company.id, 'communications')
+        return {} unless stored
+        
+        if stored.is_a?(Hash)
+          { communications: stored.deep_symbolize_keys }
+        else
+          {}
+        end
       rescue => e
         Rails.logger.warn("[Platform::CommunicationsController] Could not fetch company settings: #{e.message}")
         {}
       end
+      
+      def fetch_location_settings
+        # Check if there's a current location selected
+        location_id = Current.location_id
+        return {} unless location_id
+        
+        location = ::Location.find_by(id: location_id)
+        return {} unless location
+        
+        stored = Setting.get('Location', location.id, 'communications')
+        return {} unless stored
+        
+        if stored.is_a?(Hash)
+          { communications: stored.deep_symbolize_keys }
+        else
+          {}
+        end
+      rescue => e
+        Rails.logger.warn("[Platform::CommunicationsController] Could not fetch location settings: #{e.message}")
+        {}
+      end
 
-      def merge_settings(platform, company)
-        platform = platform.deep_symbolize_keys if platform.respond_to?(:deep_symbolize_keys)
-        company = company.deep_symbolize_keys if company.respond_to?(:deep_symbolize_keys)
+      def merge_settings(base, override)
+        # Merge override settings on top of base settings
+        # override settings take priority and replace base settings
         
-        result = platform.deep_dup
+        base = base.deep_symbolize_keys if base.respond_to?(:deep_symbolize_keys)
+        override = override.deep_symbolize_keys if override.respond_to?(:deep_symbolize_keys)
         
-        if company.dig(:communications, :email)
+        result = base.deep_dup
+        
+        # Deep merge email settings - override replaces base
+        if override.dig(:communications, :email)
           result[:communications] ||= {}
           result[:communications][:email] ||= {}
-          result[:communications][:email].merge!(company[:communications][:email])
+          # Use deep_merge so nested hashes are properly merged
+          result[:communications][:email] = result[:communications][:email].deep_merge(override[:communications][:email])
         end
         
-        if company.dig(:communications, :sms)
+        # Deep merge SMS settings - override replaces base
+        if override.dig(:communications, :sms)
           result[:communications] ||= {}
           result[:communications][:sms] ||= {}
-          result[:communications][:sms].merge!(company[:communications][:sms])
+          result[:communications][:sms] = result[:communications][:sms].deep_merge(override[:communications][:sms])
         end
         
         result
@@ -483,8 +568,6 @@ module Api
 
       # Configure ActionMailer SMTP like password reset does
       def configure_action_mailer_smtp(email_settings)
-        return unless (email_settings['provider'] || email_settings[:provider]) == 'smtp'
-
         smtp_config = {
           address: email_settings['smtpHost'] || email_settings[:smtpHost] || 'smtp.gmail.com',
           port: (email_settings['smtpPort'] || email_settings[:smtpPort] || 587).to_i,
@@ -501,7 +584,86 @@ module Api
         
         Rails.logger.info("📧 ActionMailer SMTP configured: #{smtp_config[:address]}:#{smtp_config[:port]} (user: #{smtp_config[:user_name]})")
       rescue StandardError => e
-        Rails.logger.error("❌ Failed to configure ActionMailer: #{e.message}")
+        Rails.logger.error("❌ Failed to configure ActionMailer SMTP: #{e.message}")
+        Rails.logger.error(e.backtrace.first(5).join("\n"))
+      end
+      
+      # Configure ActionMailer for Gmail Relay
+      def configure_action_mailer_gmail(email_settings)
+        smtp_config = {
+          address: 'smtp.gmail.com',
+          port: 587,
+          user_name: email_settings['smtpUsername'] || email_settings[:smtpUsername],
+          password: email_settings['smtpPassword'] || email_settings[:smtpPassword],
+          authentication: :plain,
+          enable_starttls_auto: true
+        }
+        
+        ActionMailer::Base.delivery_method = :smtp
+        ActionMailer::Base.smtp_settings = smtp_config
+        ActionMailer::Base.perform_deliveries = true
+        ActionMailer::Base.raise_delivery_errors = true
+        
+        Rails.logger.info("📧 ActionMailer Gmail configured: smtp.gmail.com:587 (user: #{smtp_config[:user_name]})")
+      rescue StandardError => e
+        Rails.logger.error("❌ Failed to configure ActionMailer Gmail: #{e.message}")
+        Rails.logger.error(e.backtrace.first(5).join("\n"))
+      end
+      
+      # Configure ActionMailer for AWS SES using SDK (not SMTP)
+      # This uses IAM credentials directly - no SMTP password needed!
+      def configure_action_mailer_ses(email_settings)
+        # Require the custom delivery method
+        require_relative '../../../../lib/aws_ses_delivery'
+        
+        # Register the custom AWS SES delivery method
+        ActionMailer::Base.add_delivery_method(:aws_ses_sdk, AwsSesDelivery)
+        
+        aws_region = email_settings['awsRegion'] || email_settings[:awsRegion] || 'us-east-1'
+        access_key = email_settings['awsAccessKeyId'] || email_settings[:awsAccessKeyId]
+        secret_key = email_settings['awsSecretAccessKey'] || email_settings[:awsSecretAccessKey]
+        
+        # Debug logging
+        Rails.logger.info "[configure_action_mailer_ses] Using AWS SDK (not SMTP)"
+        Rails.logger.info "[configure_action_mailer_ses] Access Key present: #{access_key.present?}"
+        Rails.logger.info "[configure_action_mailer_ses] Secret Key present: #{secret_key.present?}"
+        Rails.logger.info "[configure_action_mailer_ses] Region: #{aws_region}"
+        
+        # Configure delivery method
+        ActionMailer::Base.delivery_method = :aws_ses_sdk
+        ActionMailer::Base.aws_ses_sdk_settings = {
+          access_key_id: access_key,
+          secret_access_key: secret_key,
+          region: aws_region
+        }
+        ActionMailer::Base.perform_deliveries = true
+        ActionMailer::Base.raise_delivery_errors = true
+        
+        Rails.logger.info("📧 ActionMailer AWS SES SDK configured: region=#{aws_region}, key=#{access_key}")
+      rescue StandardError => e
+        Rails.logger.error("❌ Failed to configure ActionMailer AWS SES: #{e.message}")
+        Rails.logger.error(e.backtrace.first(5).join("\n"))
+      end
+      
+      # Configure ActionMailer for SendGrid
+      def configure_action_mailer_sendgrid(email_settings)
+        smtp_config = {
+          address: 'smtp.sendgrid.net',
+          port: 587,
+          user_name: 'apikey',
+          password: email_settings['sendgridApiKey'] || email_settings[:sendgridApiKey],
+          authentication: :plain,
+          enable_starttls_auto: true
+        }
+        
+        ActionMailer::Base.delivery_method = :smtp
+        ActionMailer::Base.smtp_settings = smtp_config
+        ActionMailer::Base.perform_deliveries = true
+        ActionMailer::Base.raise_delivery_errors = true
+        
+        Rails.logger.info("📧 ActionMailer SendGrid configured: smtp.sendgrid.net:587")
+      rescue StandardError => e
+        Rails.logger.error("❌ Failed to configure ActionMailer SendGrid: #{e.message}")
         Rails.logger.error(e.backtrace.first(5).join("\n"))
       end
 

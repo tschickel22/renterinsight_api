@@ -21,12 +21,23 @@ class CommunicationSettingsService
       provider: config['provider'] || ENV['DEFAULT_EMAIL_PROVIDER'] || 'smtp',
       from_email: config['fromEmail'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@platformdms.com',
       from_name: config['fromName'] || ENV['DEFAULT_FROM_NAME'] || 'Platform DMS',
+      
+      # SMTP fields
       smtp_host: config['smtpHost'] || ENV['SMTP_ADDRESS'],
       smtp_port: (config['smtpPort'] || ENV['SMTP_PORT'] || 587).to_i,
       smtp_username: config['smtpUsername'] || ENV['SMTP_USERNAME'],
       smtp_password: decrypt_value(config['smtpPassword']) || ENV['SMTP_PASSWORD'],
       smtp_domain: config['smtpDomain'] || ENV['SMTP_DOMAIN'],
       smtp_authentication: config['smtpAuthentication'] || ENV['SMTP_AUTHENTICATION'] || 'plain',
+      
+      # AWS SES fields
+      aws_access_key_id: config['awsAccessKeyId'] || ENV['AWS_ACCESS_KEY_ID'],
+      aws_secret_access_key: decrypt_value(config['awsSecretAccessKey']) || ENV['AWS_SECRET_ACCESS_KEY'],
+      aws_region: config['awsRegion'] || ENV['AWS_REGION'] || 'us-east-1',
+      
+      # SendGrid fields
+      sendgrid_api_key: decrypt_value(config['sendgridApiKey']) || ENV['SENDGRID_API_KEY'],
+      
       enabled: config['isEnabled'] != false
     }
   end
