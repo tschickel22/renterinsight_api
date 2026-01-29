@@ -42,6 +42,14 @@ module Api
         # Count total before pagination
         total_count = leads.count
         
+        # Count by status (for stats tiles)
+        status_counts = {
+          new: leads.where(status: 'new').count,
+          qualified: leads.where(status: 'qualified').count,
+          contacted: leads.where(status: 'contacted').count,
+          proposal: leads.where(status: 'proposal').count
+        }
+        
         leads = leads.includes(:source, :owner).order(created_at: :desc)
         
         # Pagination
@@ -57,7 +65,8 @@ module Api
             total: total_count,
             page: page,
             per_page: per_page,
-            total_pages: (total_count.to_f / per_page).ceil
+            total_pages: (total_count.to_f / per_page).ceil,
+            stats: status_counts
           }
         }
       end
