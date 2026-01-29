@@ -37,25 +37,50 @@ module Api
           vehicles = vehicles.where(location_id: Current.location_id)
         end
         
-        # Filters
+        # Apply non-search filters
         vehicles = vehicles.by_type(params[:type]) if params[:type].present?
         vehicles = vehicles.by_status(params[:status]) if params[:status].present?
         vehicles = vehicles.by_year(params[:year]) if params[:year].present?
         vehicles = vehicles.by_make(params[:make]) if params[:make].present?
         vehicles = vehicles.by_model(params[:model]) if params[:model].present?
         
-        # Search
-        vehicles = vehicles.search(params[:search]) if params[:search].present?
+        # Count stats BEFORE search filter (stats tiles show ALL vehicles)
+        all_vehicles_count = vehicles.count
+        status_counts = {
+          available: vehicles.available.count,
+          reserved: vehicles.reserved.count,
+          sold: vehicles.sold.count,
+          pending: vehicles.pending.count
+        }
+        
+        # Calculate total values BEFORE search filter
+        total_sale_value = vehicles.sum(:sale_price).to_f
+        total_rent_value = vehicles.sum(:rent_price).to_f
+        
+        # Count by type BEFORE search filter
+        rv_count = vehicles.rvs.count
+        mh_count = vehicles.manufactured_homes.count
+        
+        # Apply search filter (searches year, make, model, trim, vin, serial_number, inventory_id, location_city)
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          vehicles = vehicles.where(
+            "CAST(year AS TEXT) ILIKE ? OR make ILIKE ? OR model ILIKE ? OR trim ILIKE ? OR vin ILIKE ? OR serial_number ILIKE ? OR inventory_id ILIKE ? OR location_city ILIKE ?",
+            search_term, search_term, search_term, search_term, search_term, search_term, search_term, search_term
+          )
+        end
 
         # Sorting
         sort_by = params[:sort_by] || 'created_at'
         sort_order = params[:sort_order] || 'desc'
         vehicles = vehicles.order("#{sort_by} #{sort_order}")
+        
+        # Count AFTER search filter (for pagination)
+        filtered_count = vehicles.count
 
         # Pagination
         page = params[:page]&.to_i || 1
         per_page = [params[:per_page]&.to_i || 25, 100].min
-        total_count = vehicles.count
         vehicles = vehicles.offset((page - 1) * per_page).limit(per_page)
 
         render json: {
@@ -63,8 +88,13 @@ module Api
           meta: {
             current_page: page,
             per_page: per_page,
-            total_count: total_count,
-            total_pages: (total_count.to_f / per_page).ceil
+            total_count: filtered_count,  # For pagination (filtered results)
+            total_pages: (filtered_count.to_f / per_page).ceil,
+            stats: status_counts.merge(
+              total: all_vehicles_count,
+              by_type: { rv: rv_count, manufactured_home: mh_count },
+              total_value: { sale: total_sale_value, rent: total_rent_value }
+            )  # For tiles (unfiltered totals)
           }
         }
       end

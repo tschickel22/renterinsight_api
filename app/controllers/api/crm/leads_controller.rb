@@ -39,16 +39,26 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         leads = leads.for_current_location
         
-        # Count total before pagination
-        total_count = leads.count
-        
-        # Count by status (for stats tiles)
+        # Count stats BEFORE search filter (stats tiles should show ALL leads)
+        all_leads_count = leads.count
         status_counts = {
           new: leads.where(status: 'new').count,
           qualified: leads.where(status: 'qualified').count,
           contacted: leads.where(status: 'contacted').count,
           proposal: leads.where(status: 'proposal').count
         }
+        
+        # Apply search filter (searches first_name, last_name, email, phone)
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          leads = leads.where(
+            "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ?",
+            search_term, search_term, search_term, search_term
+          )
+        end
+        
+        # Count AFTER search filter (for pagination)
+        filtered_count = leads.count
         
         leads = leads.includes(:source, :owner).order(created_at: :desc)
         
@@ -62,11 +72,11 @@ module Api
         render json: {
           leads: leads.map { |l| lead_json(l) },
           meta: {
-            total: total_count,
+            total: filtered_count,  # For pagination (filtered results)
             page: page,
             per_page: per_page,
-            total_pages: (total_count.to_f / per_page).ceil,
-            stats: status_counts
+            total_pages: (filtered_count.to_f / per_page).ceil,
+            stats: status_counts.merge(total: all_leads_count)  # For tiles (unfiltered totals)
           }
         }
       end

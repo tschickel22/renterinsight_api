@@ -39,17 +39,32 @@ module Api
           @contacts = @contacts.where(location_id: Current.location_id)
         end
 
-        # Apply filters
+        # Apply filters (except search)
         @contacts = apply_filters(@contacts)
+        
+        # Count stats BEFORE search filter (stats tiles should show ALL contacts)
+        all_contacts_count = @contacts.count
+        status_counts = {
+          assigned: @contacts.where.not(account_id: nil).count,
+          unassigned: @contacts.where(account_id: nil).count,
+          with_email: @contacts.where.not(email: [nil, '']).count,
+          with_phone: @contacts.where.not(phone: [nil, '']).count
+        }
 
-        # Apply search
-        @contacts = @contacts.search(params[:search]) if params[:search].present?
+        # Apply search filter (searches first_name, last_name, email, phone, title, department)
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          @contacts = @contacts.where(
+            "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR title ILIKE ? OR department ILIKE ?",
+            search_term, search_term, search_term, search_term, search_term, search_term
+          )
+        end
 
         # Apply sorting
         @contacts = apply_sorting(@contacts)
 
-        # Count BEFORE pagination
-        total_count = @contacts.count
+        # Count AFTER search filter (for pagination)
+        filtered_count = @contacts.count
         
         # Paginate
         page = (params[:page] || 1).to_i
@@ -60,10 +75,11 @@ module Api
         render json: {
           items: @contacts.map { |contact| contact_json(contact) },
           meta: {
-            total: total_count,
+            total: filtered_count,  # For pagination (filtered results)
             page: page,
             per_page: per_page,
-            total_pages: (total_count.to_f / per_page).ceil
+            total_pages: (filtered_count.to_f / per_page).ceil,
+            stats: status_counts.merge(total: all_contacts_count)  # For tiles (unfiltered totals)
           }
         }
       rescue => e

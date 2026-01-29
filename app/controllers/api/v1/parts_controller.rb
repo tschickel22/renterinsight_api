@@ -15,17 +15,13 @@ module Api
 
         parts = @company.parts.where(is_deleted: [false, nil])
 
-        # Apply filters
+        # Apply non-search filters (category, active status)
         parts = parts.where(category_id: params[:category_id]) if params[:category_id].present?
         parts = parts.where(active: params[:active]) if params[:active].present?
         
         # Filter parts with stock
         if params[:with_stock].present? && params[:with_stock] == 'true'
           parts = parts.joins(:stock_balances).where('stock_balances.on_hand > 0').distinct
-        end
-        
-        if params[:search].present?
-          parts = parts.where('sku ILIKE ? OR name ILIKE ?', "%#{params[:search]}%", "%#{params[:search]}%")
         end
 
         # RBAC + Location Filtering
@@ -43,10 +39,37 @@ module Api
           end
         end
 
+        # Count stats BEFORE search filter (stats tiles show ALL parts)
+        all_parts_count = parts.count
+        status_counts = {
+          active: parts.where(active: true).count,
+          inactive: parts.where(active: false).count,
+          with_stock: parts.joins(:stock_balances).where('stock_balances.on_hand > 0').distinct.count,
+          low_stock: parts.joins(:stock_balances)
+                         .where('stock_balances.on_hand > 0 AND stock_balances.on_hand < 10')
+                         .distinct.count
+        }
+
+        # Apply search filter (searches sku, name, description, manufacturer, barcode, part number)
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          parts = parts.where(
+            "sku ILIKE ? OR name ILIKE ? OR description ILIKE ? OR manufacturer_name ILIKE ? OR barcode ILIKE ? OR manufacturer_part_no ILIKE ?",
+            search_term, search_term, search_term, search_term, search_term, search_term
+          )
+        end
+
+        # Apply sorting
+        sort_by = params[:sort_by] || 'created_at'
+        sort_order = params[:sort_order]&.downcase == 'asc' ? :asc : :desc
+        parts = parts.order(sort_by => sort_order)
+
+        # Count AFTER search filter (for pagination)
+        filtered_count = parts.count
+
         # Pagination
         page = (params[:page] || 1).to_i
         per_page = [(params[:per_page] || 50).to_i, 200].min
-        total_count = parts.count
         parts = parts.offset((page - 1) * per_page).limit(per_page)
 
         # Include stock levels
@@ -90,10 +113,11 @@ module Api
         render json: {
           items: parts_data,
           meta: {
-            total: total_count,
+            total: filtered_count,  # For pagination (filtered results)
             page: page,
             per_page: per_page,
-            total_pages: (total_count.to_f / per_page).ceil
+            total_pages: (filtered_count.to_f / per_page).ceil,
+            stats: status_counts.merge(total: all_parts_count)  # For tiles (unfiltered totals)
           }
         }
       end

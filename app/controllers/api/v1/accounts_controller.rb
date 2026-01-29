@@ -34,14 +34,33 @@ module Api
         
         @accounts = @accounts.includes(:tags, :source, :owner)
         
-        # Apply filters
-        @accounts = @accounts.where(account_type: params[:type]) if params[:type].present?
+        # Apply filters (except search)
+        @accounts = @accounts.where(account_type: params[:account_type]) if params[:account_type].present?
         @accounts = @accounts.where(rating: params[:rating]) if params[:rating].present?
         @accounts = @accounts.where(status: params[:status]) if params[:status].present?
-        @accounts = @accounts.search(params[:q]) if params[:q].present?
+        @accounts = @accounts.where(owner_id: params[:owner_id]) if params[:owner_id].present? && params[:owner_id] != 'null'
+        @accounts = @accounts.where(owner_id: nil) if params[:owner_id] == 'null'
         
-        # Count BEFORE pagination
-        total_count = @accounts.count
+        # Count stats BEFORE search filter (stats tiles should show ALL accounts)
+        all_accounts_count = @accounts.count
+        status_counts = {
+          customer: @accounts.where(account_type: 'customer').count,
+          prospect: @accounts.where(account_type: 'prospect').count,
+          partner: @accounts.where(account_type: 'partner').count,
+          vendor: @accounts.where(account_type: 'vendor').count
+        }
+        
+        # Apply search filter (searches name, email, phone, website)
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          @accounts = @accounts.where(
+            "name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR website ILIKE ?",
+            search_term, search_term, search_term, search_term
+          )
+        end
+        
+        # Count AFTER search filter (for pagination)
+        filtered_count = @accounts.count
         
         # Paginate
         page = (params[:page] || 1).to_i
@@ -52,10 +71,11 @@ module Api
         render json: {
           accounts: @accounts.as_json,
           meta: {
-            total: total_count,
+            total: filtered_count,  # For pagination (filtered results)
             page: page,
             per_page: per_page,
-            total_pages: (total_count.to_f / per_page).ceil
+            total_pages: (filtered_count.to_f / per_page).ceil,
+            stats: status_counts.merge(total: all_accounts_count)  # For tiles (unfiltered totals)
           }
         }
       end
