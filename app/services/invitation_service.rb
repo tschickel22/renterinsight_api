@@ -398,6 +398,7 @@ class InvitationService
       'inviter_name' => invitation.invited_by.name || invitation.invited_by.email,
       'company_name' => invitation.company&.name,
       'platform_name' => platform_name,
+      'current_year' => Time.current.year.to_s,
       'invitation_url' => "#{frontend_url}#{invitation_path}?token=#{raw_token}",
       'registration_url' => "#{frontend_url}#{invitation_path}?token=#{raw_token}",
       'invitation_token' => raw_token,

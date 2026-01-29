@@ -75,7 +75,7 @@ email_template = CommunicationTemplate.create!(
                   </tr>
                   <tr>
                     <td class="footer">
-                      © 2025 {{platform_name}}
+                      © {{current_year}} {{platform_name}}
                     </td>
                   </tr>
                 </table>
