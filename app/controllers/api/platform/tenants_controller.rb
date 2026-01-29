@@ -514,7 +514,7 @@ module Api
       end
       
       # PATCH /api/platform/tenants/:id/update_owner_invitation
-      # Update the tenant owner invitation details (email, phone, name)
+      # Update or create the tenant owner invitation details (email, phone, name)
       def update_owner_invitation
         begin
           # Find the most recent tenant invitation (accepted or pending)
@@ -523,16 +523,59 @@ module Api
                               .order(created_at: :desc)
                               .first
           
-          unless invitation
-            return render json: { 
-              error: 'No invitation found for this tenant' 
-            }, status: :not_found
-          end
-          
           # Build full name from first and last
           recipient_name = [params[:first_name], params[:last_name]].compact.join(' ').strip
           recipient_name = nil if recipient_name.empty?
           
+          # If no invitation exists, CREATE one (don't send yet)
+          unless invitation
+            Rails.logger.info "No invitation found for tenant #{@tenant.id}, creating new invitation"
+            
+            if params[:email].blank?
+              return render json: { 
+                error: 'Email is required to create an invitation' 
+              }, status: :unprocessable_entity
+            end
+            
+            # Use InvitationService to create invitation
+            invitation_service = InvitationService.new(
+              invited_by: current_user,
+              company: @tenant
+            )
+            
+            # Determine delivery method
+            delivery_method = params[:phone].present? ? 'both' : 'email'
+            
+            # Create invitation (don't send yet - skip_send: true)
+            result = invitation_service.create_invitation(
+              invitation_type: 'tenant',
+              email: params[:email],
+              phone: params[:phone],
+              recipient_name: recipient_name || params[:email].split('@').first.capitalize,
+              role: 'tenant',
+              permissions: [],
+              delivery_method: delivery_method,
+              message: "You've been invited to set up your company account for #{@tenant.name}.",
+              skip_send: true  # Don't send yet - just create the record
+            )
+            
+            if result[:success]
+              invitation = result[:invitation]
+              Rails.logger.info "✅ Created invitation for tenant #{@tenant.name}: ID #{invitation.id}"
+              
+              return render json: {
+                success: true,
+                invitation: tenant_owner_invitation_status(@tenant),
+                message: 'Owner invitation created successfully (not sent yet)'
+              }
+            else
+              return render json: { 
+                error: result[:error] 
+              }, status: :unprocessable_entity
+            end
+          end
+          
+          # Invitation exists - UPDATE it
           # Prepare update parameters
           update_params = {}
           update_params[:email] = params[:email] if params[:email].present?
