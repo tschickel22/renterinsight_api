@@ -48,6 +48,28 @@ module Api
           proposal: leads.where(status: 'proposal').count
         }
         
+        # Calculate percentage changes (compare to previous periods)
+        # Total leads: compare to last month
+        last_month_start = 1.month.ago.beginning_of_month
+        last_month_end = 1.month.ago.end_of_month
+        last_month_total = leads.where(created_at: last_month_start..last_month_end).count
+        total_change_pct = calculate_percentage_change(last_month_total, all_leads_count)
+        
+        # New leads: compare to last week
+        last_week_start = 1.week.ago.beginning_of_week
+        last_week_end = 1.week.ago.end_of_week
+        this_week_new = leads.where(status: 'new', created_at: Time.current.beginning_of_week..Time.current).count
+        last_week_new = leads.where(status: 'new', created_at: last_week_start..last_week_end).count
+        new_change_pct = calculate_percentage_change(last_week_new, this_week_new)
+        
+        # Qualified: compare to last month
+        this_month_qualified = leads.where(status: 'qualified', created_at: Time.current.beginning_of_month..Time.current).count
+        last_month_qualified = leads.where(status: 'qualified', created_at: last_month_start..last_month_end).count
+        qualified_change_pct = calculate_percentage_change(last_month_qualified, this_month_qualified)
+        
+        # Contacted: no comparison (just "In progress")
+        contacted_subtitle = 'In progress'
+        
         # Apply search filter (searches first_name, last_name, email, phone)
         if params[:search].present?
           search_term = "%#{params[:search]}%"
@@ -76,7 +98,15 @@ module Api
             page: page,
             per_page: per_page,
             total_pages: (filtered_count.to_f / per_page).ceil,
-            stats: status_counts.merge(total: all_leads_count)  # For tiles (unfiltered totals)
+            stats: status_counts.merge(
+              total: all_leads_count,
+              changes: {
+                total: total_change_pct,
+                new: new_change_pct,
+                qualified: qualified_change_pct,
+                contacted: contacted_subtitle
+              }
+            )  # For tiles (unfiltered totals with percentage changes)
           }
         }
       end
@@ -478,6 +508,15 @@ module Api
         score += 20 if lead.notes.present?
         score += 20 if lead.status.present? && lead.status != 'new'
         score
+      end
+      
+      def calculate_percentage_change(previous_value, current_value)
+        return '+0%' if previous_value.zero? && current_value.zero?
+        return '+100%' if previous_value.zero? && current_value > 0
+        return '-100%' if current_value.zero? && previous_value > 0
+        
+        change = ((current_value - previous_value).to_f / previous_value * 100).round
+        change >= 0 ? "+#{change}%" : "#{change}%"
       end
 
       def lead_json(l)
