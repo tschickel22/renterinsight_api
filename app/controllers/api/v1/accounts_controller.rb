@@ -4,7 +4,7 @@ module Api
   module V1
     class AccountsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals insights score communications_rollup]
+      before_action :set_account, only: %i[show update destroy convert_to_customer tags add_tags remove_tag activities deals contacts insights score communications_rollup]
 
       # GET /api/v1/accounts
       def index
@@ -343,6 +343,42 @@ module Api
         #     total_count: total_count
         #   }
         # }
+      end
+
+      # GET /api/v1/accounts/:id/contacts
+      def contacts
+        return unless authorize_action!('crm', 'read')
+        
+        contacts = @company.contacts.where(account_id: @account.id, is_deleted: [false, nil])
+        
+        # RBAC location filtering
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          if location_ids.any?
+            contacts = contacts.where("location_id IN (?) OR location_id IS NULL", location_ids)
+          end
+        end
+        
+        # Pagination (50 default, 200 max)
+        page = (params[:page] || 1).to_i
+        per_page = (params[:per_page] || 50).to_i
+        per_page = [per_page, 200].min
+        
+        total_count = contacts.count
+        contacts = contacts.offset((page - 1) * per_page).limit(per_page)
+        
+        render json: {
+          items: contacts.as_json(
+            only: [:id, :first_name, :last_name, :email, :phone, :account_id, :created_at, :updated_at],
+            methods: [:full_name]
+          ),
+          meta: {
+            total: total_count,
+            page: page,
+            per_page: per_page,
+            total_pages: (total_count.to_f / per_page).ceil
+          }
+        }
       end
 
       # GET /api/v1/accounts/stats
