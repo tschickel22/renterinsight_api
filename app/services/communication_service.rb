@@ -151,7 +151,7 @@ class CommunicationService
     raise Error, "Subject is required for email" if channel == 'email' && subject.blank?
     
     # Set default provider if not specified
-    provider ||= default_provider_for(channel)
+    provider ||= default_provider_for(channel, communicable)
     
     # Get default from address if not provided
     from ||= default_from_address(channel, communicable)
@@ -396,12 +396,27 @@ class CommunicationService
     end
   end
   
-  def default_provider_for(channel)
+  def default_provider_for(channel, communicable = nil)
+    # Get provider from CommunicationSettingsService (respects Location → Company → Platform waterfall)
+    company = extract_company_from_communicable(communicable)
+    location = extract_location_from_communicable(communicable)
+    
+    settings_service = company ? 
+      CommunicationSettingsService.for_company(company, location: location) : 
+      CommunicationSettingsService.platform
+    
     case channel
     when 'email'
-      ENV['DEFAULT_EMAIL_PROVIDER']&.to_sym || :smtp
+      config = settings_service.email_config
+      provider_from_settings = config[:provider]&.to_sym
+      
+      # Use provider from settings (waterfall), fall back to ENV, then :smtp
+      provider_from_settings || ENV['DEFAULT_EMAIL_PROVIDER']&.to_sym || :smtp
     when 'sms'
-      :twilio
+      config = settings_service.sms_config
+      provider_from_settings = config[:provider]&.to_sym
+      
+      provider_from_settings || :twilio
     else
       nil
     end
