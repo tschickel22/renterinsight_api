@@ -96,15 +96,53 @@ class ServiceTicketInvoiceService
   private
   
   def create_customer_invoice_items(invoice)
+    Rails.logger.info "💰 [ServiceTicketInvoiceService] Creating customer invoice items for ticket ##{@ticket.id}"
+    
     # Add customer parts
-    @ticket.customer_parts.each do |part|
-      InvoiceItem.create!(
+    @ticket.customer_parts.each_with_index do |part, index|
+      item = InvoiceItem.create!(
         invoice: invoice,
         description: "Part: #{part['description']}",
         quantity: part['quantity'].to_f,
         rate: part['unitCost'].to_f,
         item_type: 'part'
       )
+      
+      # CRITICAL: Link to actual Part record for inventory deduction
+      part_id = part['partId'] || part['part_id']  # Support both camelCase and snake_case
+      
+      if part_id.present?
+        actual_part = Part.find_by(id: part_id, company_id: @ticket.company_id)
+        
+        if actual_part
+          item.update!(
+            itemable_type: 'Part',
+            itemable_id: actual_part.id
+          )
+          Rails.logger.info "✅ [ServiceTicketInvoiceService] Linked invoice item ##{item.id} to Part ##{actual_part.id} (#{actual_part.name})"
+        else
+          Rails.logger.warn "⚠️ [ServiceTicketInvoiceService] Part ##{part_id} not found for line #{index} - SKU fallback will be attempted"
+          # Try to find by SKU as fallback
+          if part['partNumber'].present?
+            actual_part = Part.find_by(
+              company_id: @ticket.company_id,
+              sku: part['partNumber']
+            )
+            
+            if actual_part
+              item.update!(
+                itemable_type: 'Part',
+                itemable_id: actual_part.id
+              )
+              Rails.logger.info "✅ [ServiceTicketInvoiceService] Linked invoice item ##{item.id} to Part ##{actual_part.id} via SKU match (#{actual_part.name})"
+            else
+              Rails.logger.warn "⚠️ [ServiceTicketInvoiceService] No Part found for SKU '#{part['partNumber']}' - inventory will NOT be deducted"
+            end
+          end
+        end
+      else
+        Rails.logger.info "ℹ️ [ServiceTicketInvoiceService] Line #{index} has no partId - treating as custom part (no inventory deduction)"
+      end
     end
     
     # Add customer labor
@@ -117,18 +155,58 @@ class ServiceTicketInvoiceService
         item_type: 'labor'
       )
     end
+    
+    Rails.logger.info "💰 [ServiceTicketInvoiceService] Created #{@ticket.customer_parts.count} part items and #{@ticket.customer_labor.count} labor items"
   end
   
   def create_warranty_invoice_items(invoice)
+    Rails.logger.info "🔧 [ServiceTicketInvoiceService] Creating warranty invoice items for ticket ##{@ticket.id}"
+    
     # Add warranty parts
-    @ticket.warranty_parts.each do |part|
-      InvoiceItem.create!(
+    @ticket.warranty_parts.each_with_index do |part, index|
+      item = InvoiceItem.create!(
         invoice: invoice,
         description: "Part: #{part['description']} (Part #: #{part['partNumber']})",
         quantity: part['quantity'].to_f,
         rate: part['unitCost'].to_f,
         item_type: 'part'
       )
+      
+      # CRITICAL: Link to actual Part record for inventory deduction
+      part_id = part['partId'] || part['part_id']  # Support both camelCase and snake_case
+      
+      if part_id.present?
+        actual_part = Part.find_by(id: part_id, company_id: @ticket.company_id)
+        
+        if actual_part
+          item.update!(
+            itemable_type: 'Part',
+            itemable_id: actual_part.id
+          )
+          Rails.logger.info "✅ [ServiceTicketInvoiceService] Linked warranty item ##{item.id} to Part ##{actual_part.id} (#{actual_part.name})"
+        else
+          Rails.logger.warn "⚠️ [ServiceTicketInvoiceService] Part ##{part_id} not found for warranty line #{index} - SKU fallback will be attempted"
+          # Try to find by SKU as fallback
+          if part['partNumber'].present?
+            actual_part = Part.find_by(
+              company_id: @ticket.company_id,
+              sku: part['partNumber']
+            )
+            
+            if actual_part
+              item.update!(
+                itemable_type: 'Part',
+                itemable_id: actual_part.id
+              )
+              Rails.logger.info "✅ [ServiceTicketInvoiceService] Linked warranty item ##{item.id} to Part ##{actual_part.id} via SKU match (#{actual_part.name})"
+            else
+              Rails.logger.warn "⚠️ [ServiceTicketInvoiceService] No Part found for SKU '#{part['partNumber']}' - inventory will NOT be deducted"
+            end
+          end
+        end
+      else
+        Rails.logger.info "ℹ️ [ServiceTicketInvoiceService] Warranty line #{index} has no partId - treating as custom part (no inventory deduction)"
+      end
     end
     
     # Add warranty labor
@@ -141,6 +219,8 @@ class ServiceTicketInvoiceService
         item_type: 'labor'
       )
     end
+    
+    Rails.logger.info "🔧 [ServiceTicketInvoiceService] Created #{@ticket.warranty_parts.count} warranty part items and #{@ticket.warranty_labor.count} warranty labor items"
   end
   
   def generate_invoice_number(prefix = 'INV')

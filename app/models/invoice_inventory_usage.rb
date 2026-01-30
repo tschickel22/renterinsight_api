@@ -46,25 +46,33 @@ class InvoiceInventoryUsage < ApplicationRecord
   def deduct_part_inventory!
     part = itemable
     invoice = invoice_item.invoice
-    return unless part && invoice.location_id
+    return unless part
+
+    # Determine location - use invoice location or part's primary stock location
+    location_id = invoice.location_id || part.stock_balances.order(available: :desc).first&.location_id
+    
+    unless location_id
+      Rails.logger.warn "[InvoiceInventoryUsage] No location found for Part #{part.id} - cannot deduct inventory"
+      return
+    end
 
     # Find stock balance for this location
     stock_balance = part.stock_balances.find_by(
-      location_id: invoice.location_id,
+      location_id: location_id,
       bin_id: nil,  # Use default bin for now
       serial_number: nil,
       lot_number: nil
     )
 
     if stock_balance.nil? || stock_balance.available < quantity_used
-      Rails.logger.warn "[InvoiceInventoryUsage] Insufficient stock for Part #{part.id} at Location #{invoice.location_id} - requested #{quantity_used}, available #{stock_balance&.available || 0}"
+      Rails.logger.warn "[InvoiceInventoryUsage] Insufficient stock for Part #{part.id} at Location #{location_id} - requested #{quantity_used}, available #{stock_balance&.available || 0}"
       # Still allow - just log warning
     end
 
     # Create inventory transaction (negative quantity = reduction)
     transaction = part.inventory_transactions.create!(
       company: company,
-      location_id: invoice.location_id,
+      location_id: location_id,
       bin_id: nil,
       transaction_type: 'sale',
       quantity: -quantity_used,  # NEGATIVE for sale

@@ -459,7 +459,7 @@ module Api
           :is_portal_created,
           :portal_notes,
           :portal_visible,  # Allow customer to view this ticket in portal
-          parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total],
+          parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total, :part_id, :partId],
           labor: [:id, :description, :hours, :rate, :total],
           custom_fields: {},
           line_item_billing: [:index, :type, :billing_type, :manufacturer_id]

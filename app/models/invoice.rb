@@ -147,8 +147,17 @@ class Invoice < ApplicationRecord
   def mark_inventory_as_used!(user)
     return unless status == 'paid' # Only process paid invoices
     
+    Rails.logger.info "🏭 [Invoice] Starting inventory deduction for Invoice ##{id} (#{invoice_number})"
+    inventory_items_count = 0
+    deducted_items_count = 0
+    
     invoice_items.where(itemable_type: ['Part', 'Vehicle', 'LandParcel']).find_each do |item|
-      next if item.itemable.nil? # Skip if item was deleted
+      inventory_items_count += 1
+      
+      if item.itemable.nil?
+        Rails.logger.warn "⚠️ [Invoice] Invoice item ##{item.id} has no itemable (deleted?) - skipping"
+        next
+      end
       
       # Check if already marked as used
       usage = invoice_inventory_usages.find_or_initialize_by(
@@ -157,12 +166,25 @@ class Invoice < ApplicationRecord
         itemable: item.itemable
       )
       
-      next if usage.marked? # Skip if already processed
+      if usage.marked?
+        Rails.logger.info "ℹ️ [Invoice] Invoice item ##{item.id} already marked as used - skipping"
+        next
+      end
       
       usage.quantity_used = item.quantity || 1
       usage.save!
-      usage.mark_as_used!(user) rescue nil # Continue even if stock deduction fails
+      
+      begin
+        usage.mark_as_used!(user)
+        deducted_items_count += 1
+        Rails.logger.info "✅ [Invoice] Successfully deducted #{item.quantity} of #{item.itemable_type} ##{item.itemable_id}"
+      rescue => e
+        Rails.logger.error "❌ [Invoice] Failed to deduct item ##{item.id}: #{e.message}"
+        # Continue even if one item fails
+      end
     end
+    
+    Rails.logger.info "🏭 [Invoice] Inventory deduction complete: #{deducted_items_count}/#{inventory_items_count} items processed"
   end
   
   # Manual override to mark inventory as used
