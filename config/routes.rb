@@ -1162,6 +1162,7 @@ Rails.application.routes.draw do
           get :commission_breakdown # Commission economics breakdown
           get :financials # NEW: Get deal financials (permission-gated)
           patch :financials, to: 'deals#update_financials' # NEW: Update deal financials (permission-gated)
+          get :service_tickets # NEW: Get service tickets for this deal
         end
         
         # Commission Payments (nested under deals)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_26_021740) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2531,6 +2531,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_26_021740) do
     t.text "home_info"
     t.boolean "portal_visible", default: true, null: false
     t.string "ticket_number"
+    t.bigint "deal_id"
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
@@ -2539,6 +2540,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_26_021740) do
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
+    t.index ["deal_id"], name: "index_service_tickets_on_deal_id"
     t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
     t.index ["is_portal_created"], name: "index_service_tickets_on_is_portal_created"
     t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"
@@ -3302,6 +3304,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_26_021740) do
     t.decimal "target_gross", precision: 10, scale: 2, comment: "Target gross profit for this unit"
     t.decimal "minimum_price", precision: 10, scale: 2, comment: "Minimum acceptable selling price"
     t.boolean "use_location_address", default: false
+    t.string "public_id"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -3317,6 +3320,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_26_021740) do
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
     t.index ["location_id"], name: "index_vehicles_on_location_id"
     t.index ["mileage", "year"], name: "index_vehicles_on_mileage_and_year"
+    t.index ["public_id"], name: "index_vehicles_on_public_id", unique: true
     t.index ["quickbooks_id"], name: "index_vehicles_on_quickbooks_id"
     t.index ["rv_class"], name: "index_vehicles_on_rv_class"
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
@@ -3603,6 +3607,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_26_021740) do
   add_foreign_key "service_tickets", "accounts"
   add_foreign_key "service_tickets", "companies"
   add_foreign_key "service_tickets", "contacts"
+  add_foreign_key "service_tickets", "deals", on_delete: :nullify
   add_foreign_key "service_tickets", "locations"
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "service_tickets", "warranty_claims", on_delete: :nullify

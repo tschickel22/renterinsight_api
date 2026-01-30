@@ -2,7 +2,7 @@ module Api
   module Crm
     class DealsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag]
+      before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets]
 
       # GET /api/crm/deals
       def index
@@ -429,7 +429,48 @@ module Api
         head :no_content
       end
 
+      # GET /api/crm/deals/:id/service_tickets
+      def service_tickets
+        return unless authorize_action!('service', 'read')
+        
+        # STRICT TENANT ISOLATION: Only show service tickets from the same company
+        tickets = @deal.service_tickets.includes(:account, :contact, :vehicle)
+        
+        # Apply location filter if needed
+        if Current.location_filtered?
+          tickets = tickets.where(location_id: Current.location_id)
+        end
+        
+        tickets = tickets.order(created_at: :desc)
+        
+        render json: {
+          data: tickets.map { |ticket| serialize_service_ticket(ticket) }
+        }
+      end
+
       private
+
+      def serialize_service_ticket(ticket)
+        {
+          id: ticket.id,
+          ticketNumber: ticket.ticket_number,
+          title: ticket.title,
+          description: ticket.description,
+          status: ticket.status,
+          priority: ticket.priority,
+          assignedTo: ticket.assigned_to,
+          scheduledDate: ticket.scheduled_date&.iso8601,
+          accountId: ticket.account_id,
+          accountName: ticket.account&.name,
+          contactId: ticket.contact_id,
+          contactName: ticket.contact ? "#{ticket.contact.first_name} #{ticket.contact.last_name}".strip : nil,
+          vehicleId: ticket.vehicle_id,
+          vehicleName: ticket.vehicle&.display_name,
+          dealId: ticket.deal_id,
+          createdAt: ticket.created_at&.iso8601,
+          updatedAt: ticket.updated_at&.iso8601
+        }
+      end
 
       def set_company_scope
         unless current_user

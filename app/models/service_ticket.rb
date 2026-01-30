@@ -36,6 +36,7 @@ class ServiceTicket < ApplicationRecord
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
   belongs_to :vehicle, optional: true
+  belongs_to :deal, optional: true
   belongs_to :warranty_claim, optional: true
   belongs_to :portal_user, class_name: 'BuyerPortalAccess', optional: true
   has_one :warranty_claim_owned, class_name: 'WarrantyClaim', foreign_key: :service_ticket_id, dependent: :restrict_with_error
