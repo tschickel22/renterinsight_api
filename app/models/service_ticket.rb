@@ -68,7 +68,7 @@ class ServiceTicket < ApplicationRecord
   attribute :line_item_billing, :json, default: []
   
   # Validations
-  validates :ticket_number, presence: true, uniqueness: { scope: :company_id }
+  validates :ticket_number, uniqueness: { scope: :company_id }, if: -> { ticket_number.present? }
   validates :title, presence: true
   validates :description, presence: true
   validates :status, presence: true, inclusion: { 
