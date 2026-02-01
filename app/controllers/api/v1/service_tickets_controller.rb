@@ -211,9 +211,6 @@ module Api
       def set_line_billing
       return unless authorize_action!('service', 'update')
       
-      Rails.logger.info "🔧 [set_line_billing] Called with params: #{params.slice(:index, :type, :billing_type, :manufacturer_id).to_json}"
-      Rails.logger.info "🔧 [set_line_billing] Current line_item_billing BEFORE: #{@service_ticket.line_item_billing.to_json}"
-
       begin
       @service_ticket.set_line_billing(
         index: params[:index].to_i,
@@ -223,7 +220,6 @@ module Api
       )
       
       @service_ticket.reload
-      Rails.logger.info "🔧 [set_line_billing] Current line_item_billing AFTER: #{@service_ticket.line_item_billing.to_json}"
       
       render json: {
       success: true,
@@ -435,8 +431,6 @@ module Api
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
-        
-        Rails.logger.info "✅ [ServiceTicketsController] Company scope set: #{@company.name} (ID: #{@company.id})"
       end
       
       def service_ticket_params
@@ -471,9 +465,7 @@ module Api
         labor_array = ticket.labor.is_a?(Array) ? ticket.labor : (ticket.labor.present? ? (JSON.parse(ticket.labor) rescue []) : [])
         custom_fields_hash = ticket.custom_fields.is_a?(Hash) ? ticket.custom_fields : (ticket.custom_fields.present? ? (JSON.parse(ticket.custom_fields) rescue {}) : {})
         
-        Rails.logger.info "📤 [serialize_ticket] line_item_billing raw: #{ticket.line_item_billing.inspect}"
         line_item_billing_array = ticket.line_item_billing.is_a?(Array) ? ticket.line_item_billing : (ticket.line_item_billing.present? ? (JSON.parse(ticket.line_item_billing) rescue []) : [])
-        Rails.logger.info "📤 [serialize_ticket] lineItemBilling will be sent as: #{line_item_billing_array.to_json}"
         
         data = {
           id: ticket.id,
