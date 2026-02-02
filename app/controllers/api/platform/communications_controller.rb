@@ -370,14 +370,22 @@ module Api
       end
 
       def get_effective_settings
-        # CRITICAL: Waterfall priority is Location → Company → Platform (highest to lowest)
-        # Higher levels override lower levels
+        # CRITICAL: Waterfall priority is User → Location → Company → Platform
+        # User email connection has HIGHEST priority
+        
+        # Check user email connection FIRST (highest priority)
+        user_settings = fetch_user_email_settings
+        if user_settings.present?
+          Rails.logger.info "[get_effective_settings] ✅ Using USER email connection for #{current_user&.email}"
+          return user_settings
+        end
         
         location_settings = fetch_location_settings
         company_settings = fetch_company_settings
         platform_settings = fetch_platform_settings
         
         Rails.logger.info "[get_effective_settings] Waterfall check:"
+        Rails.logger.info "  - User settings: none (no email connection)"
         Rails.logger.info "  - Platform settings: #{platform_settings.dig(:communications, :email, :provider) || 'none'}"
         Rails.logger.info "  - Company settings: #{company_settings.dig(:communications, :email, :provider) || 'none'}"
         Rails.logger.info "  - Location settings: #{location_settings.dig(:communications, :email, :provider) || 'none'}"
@@ -388,7 +396,7 @@ module Api
         # Merge company (overrides platform)
         result = merge_settings(result, company_settings) if company_settings.present?
         
-        # Merge location (highest priority - overrides everything)
+        # Merge location (highest priority - overrides everything except user)
         result = merge_settings(result, location_settings) if location_settings.present?
         
         final_provider = result.dig(:communications, :email, :provider) || result.dig('communications', 'email', 'provider')
@@ -403,6 +411,37 @@ module Api
             sms: { isEnabled: false }
           }
         }
+      end
+
+      # Fetch user's personal email connection settings (highest priority in waterfall)
+      def fetch_user_email_settings
+        return {} unless current_user
+        return {} unless current_user.respond_to?(:has_email_connection?) && current_user.has_email_connection?
+        
+        connection = current_user.user_email_connection
+        return {} unless connection&.smtp_configured?
+        
+        Rails.logger.info "[fetch_user_email_settings] User #{current_user.email} has email connection configured"
+        
+        {
+          communications: {
+            email: {
+              provider: :smtp,
+              isEnabled: true,
+              fromEmail: connection.email_address,
+              fromName: current_user.name || current_user.email,
+              smtpHost: connection.smtp_host,
+              smtpPort: connection.smtp_port,
+              smtpUsername: connection.smtp_username,
+              smtpPassword: connection.smtp_password,
+              smtpAuthentication: 'plain',
+              smtpEnableStarttls: true
+            }
+          }
+        }
+      rescue => e
+        Rails.logger.warn("[fetch_user_email_settings] Error: #{e.message}")
+        {}
       end
 
       def fetch_platform_settings
