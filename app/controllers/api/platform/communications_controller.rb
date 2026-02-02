@@ -370,22 +370,15 @@ module Api
       end
 
       def get_effective_settings
-        # CRITICAL: Waterfall priority is User → Location → Company → Platform
-        # User email connection has HIGHEST priority
-        
-        # Check user email connection FIRST (highest priority)
-        user_settings = fetch_user_email_settings
-        if user_settings.present?
-          Rails.logger.info "[get_effective_settings] ✅ Using USER email connection for #{current_user&.email}"
-          return user_settings
-        end
+        # Waterfall: User → Location → Company → Platform
+        # User email connection has HIGHEST priority for EMAIL only
+        # SMS always uses Location → Company → Platform (users don't have SMS numbers)
         
         location_settings = fetch_location_settings
         company_settings = fetch_company_settings
         platform_settings = fetch_platform_settings
         
         Rails.logger.info "[get_effective_settings] Waterfall check:"
-        Rails.logger.info "  - User settings: none (no email connection)"
         Rails.logger.info "  - Platform settings: #{platform_settings.dig(:communications, :email, :provider) || 'none'}"
         Rails.logger.info "  - Company settings: #{company_settings.dig(:communications, :email, :provider) || 'none'}"
         Rails.logger.info "  - Location settings: #{location_settings.dig(:communications, :email, :provider) || 'none'}"
@@ -396,11 +389,21 @@ module Api
         # Merge company (overrides platform)
         result = merge_settings(result, company_settings) if company_settings.present?
         
-        # Merge location (highest priority - overrides everything except user)
+        # Merge location (overrides company)
         result = merge_settings(result, location_settings) if location_settings.present?
         
-        final_provider = result.dig(:communications, :email, :provider) || result.dig('communications', 'email', 'provider')
-        Rails.logger.info "[get_effective_settings] ✅ Final provider: #{final_provider}"
+        # Check user email connection LAST (highest priority for EMAIL only)
+        # Only override email settings - preserve SMS from location/company/platform
+        user_settings = fetch_user_email_settings
+        if user_settings.present?
+          Rails.logger.info "[get_effective_settings] ✅ Overlaying USER email connection for #{current_user&.email}"
+          result[:communications] ||= {}
+          result[:communications][:email] = user_settings.dig(:communications, :email)
+        end
+        
+        final_email = result.dig(:communications, :email, :provider) || 'none'
+        final_sms = result.dig(:communications, :sms, :isEnabled) || result.dig(:communications, :sms, 'isEnabled') || false
+        Rails.logger.info "[get_effective_settings] ✅ Final email: #{final_email}, SMS enabled: #{final_sms}"
         
         result
       rescue => e
