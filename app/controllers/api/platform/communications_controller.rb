@@ -419,7 +419,7 @@ module Api
         return {} unless current_user.respond_to?(:has_email_connection?) && current_user.has_email_connection?
         
         connection = current_user.user_email_connection
-        return {} unless connection&.smtp_configured?
+        return {} unless connection&.smtp_credentials_valid?
         
         Rails.logger.info "[fetch_user_email_settings] User #{current_user.email} has email connection configured"
         
