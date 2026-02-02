@@ -24,6 +24,7 @@ class User < ApplicationRecord
 
   # Notification System Associations
   has_many :notifications, as: :recipient, dependent: :destroy
+  has_one :user_email_connection, dependent: :destroy
   has_many :notification_preferences, dependent: :destroy
 
   # Email Connection Associations (for sending from personal email)
