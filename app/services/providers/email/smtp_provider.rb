@@ -11,6 +11,7 @@ module Providers
         from_name = config[:from_name] || 'Platform DMS'
         
         Rails.logger.info "📧 Sending email via SMTP to #{to} from #{from_address}"
+        Rails.logger.info "📧 Reply-To: #{reply_to}" if reply_to.present?
         
         # Configure ActionMailer SMTP settings
         configure_smtp_settings if smtp_configured?
@@ -24,6 +25,7 @@ module Providers
           body: body,
           cc: cc,
           bcc: bcc,
+          reply_to: reply_to,
           file_attachments: attachments
         )
         

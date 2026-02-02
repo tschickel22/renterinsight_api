@@ -38,56 +38,32 @@ module Api
           return
         end
 
-        # Get effective settings
-        settings = get_effective_communication_settings
-
-        unless settings[:email][:is_enabled]
-          render json: { ok: false, error: 'Email is not configured' }, status: :unprocessable_entity
-          return
-        end
-
-        # Create communication record
-        communication = @contact.communications.create!(
-          channel: 'email',
-          direction: 'outbound',
-          subject: params[:subject],
-          body: params[:body],
-          to_address: @contact.email,
-          from_address: settings[:email][:from_email],
-          status: 'pending',
-          provider: settings[:email][:provider]
-        )
-
-        # Send email via EmailService
-        result = EmailService.send_email(
+        # Send email via CommunicationService with user email connection waterfall
+        company = @contact.company || @contact.account&.company
+        
+        result = CommunicationService.send_email(
+          communicable: @contact,
           to: @contact.email,
-          from: settings[:email][:from_email],
           subject: params[:subject],
           body: params[:body],
-          company: @contact.company || @contact.account&.company
+          category: 'contacts',
+          metadata: { contact_id: @contact.id },
+          portal_visible: false,
+          send_async: false,
+          user: current_user  # USER EMAIL CONNECTION WATERFALL
         )
 
         if result[:success]
-          communication.update!(
-            status: 'sent',
-            sent_at: Time.current,
-            provider_message_id: result[:message_id],
-            metadata: (communication.metadata || {}).merge(provider_response: result[:response])
-          )
+          render json: { 
+            ok: true, 
+            id: result[:communication]&.id,
+            messageId: result[:message_id],
+            provider: result[:provider] || 'smtp',
+            userEmailConnection: current_user&.has_email_connection?
+          }
         else
-          communication.update!(
-            status: 'failed',
-            metadata: (communication.metadata || {}).merge(error: result[:error])
-          )
           render json: { ok: false, error: result[:error] }, status: :unprocessable_entity
-          return
         end
-
-        render json: { 
-          ok: true, 
-          id: communication.id,
-          provider: settings[:email][:provider]
-        }
       rescue => e
         Rails.logger.error "Error sending email to contact: #{e.message}\n#{e.backtrace.join("\n")}"
         render json: { ok: false, error: e.message }, status: :internal_server_error

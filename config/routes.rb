@@ -117,6 +117,19 @@ Rails.application.routes.draw do
         patch 'notifications', action: 'update_notifications'
       end
       
+      # ==================== USER EMAIL CONNECTIONS ====================
+      resources :user_email_connections, path: 'user-email-connections' do
+        member do
+          post :test
+          post :set_default
+          post :send_verification
+        end
+        collection do
+          get :check_domain
+          post :verify  # Token-based verification (no auth on token itself)
+        end
+      end
+      
       # ==================== NOTIFICATIONS ====================
       resources :notifications, only: [:index, :show, :destroy] do
         collection do

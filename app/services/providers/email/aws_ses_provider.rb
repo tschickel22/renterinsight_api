@@ -11,6 +11,7 @@ module Providers
         from_name = config[:from_name] || 'Platform DMS'
         
         Rails.logger.info "📧 Sending email via AWS SES to #{to} from #{from_address}"
+        Rails.logger.info "📧 Reply-To: #{reply_to}" if reply_to.present?
         
         # Configure ActionMailer to use AWS SES SDK
         configure_aws_ses_sdk
@@ -24,6 +25,7 @@ module Providers
           body: body,
           cc: cc,
           bcc: bcc,
+          reply_to: reply_to,
           file_attachments: attachments
         )
         

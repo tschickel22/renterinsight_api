@@ -227,7 +227,8 @@ module Api
         
         # Use QuoteSendingService to send the quote
         begin
-          result = QuoteSendingService.new(@quote).send(**send_params_symbolized)
+          # Pass current_user for user-level email connection waterfall
+          result = QuoteSendingService.new(@quote).send(**send_params_symbolized, user: current_user)
           
           if result[:sent].any?
             # Update quote status

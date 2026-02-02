@@ -1,20 +1,37 @@
 class CommunicationSettingsService
-  attr_reader :company, :location
+  attr_reader :company, :location, :user
   
-  def initialize(company: nil, location: nil)
+  def initialize(company: nil, location: nil, user: nil)
     @company = company
     @location = location
+    @user = user
   end
   
   def self.for_company(company, location: nil)
     new(company: company, location: location)
   end
   
+  # NEW: Include user-level email connection in waterfall
+  def self.for_user(user, location: nil)
+    new(company: user&.company, location: location, user: user)
+  end
+  
   def self.platform
     new
   end
   
+  # UPDATED WATERFALL: User → Location → Company → Platform
+  # User email connection has highest priority (if configured and verified)
   def email_config
+    # Check for user-level email connection first
+    if user&.has_email_connection?
+      user_connection = user.default_email_connection
+      if user_connection&.verified? && user_connection.is_active
+        return user_email_config(user_connection)
+      end
+    end
+    
+    # Fall back to standard waterfall: Location → Company → Platform
     config = merged_settings.dig('email') || {}
     
     {
@@ -38,7 +55,10 @@ class CommunicationSettingsService
       # SendGrid fields
       sendgrid_api_key: decrypt_value(config['sendgridApiKey']) || ENV['SENDGRID_API_KEY'],
       
-      enabled: config['isEnabled'] != false
+      enabled: config['isEnabled'] != false,
+      
+      # Metadata about source
+      source: determine_email_source
     }
   end
   
@@ -55,6 +75,67 @@ class CommunicationSettingsService
   end
   
   private
+  
+  # Build email config from user's personal email connection
+  def user_email_config(connection)
+    base_config = {
+      from_email: connection.email_address,
+      from_name: connection.display_name || user.name,
+      enabled: true,
+      source: 'user',
+      user_connection_id: connection.id
+    }
+    
+    case connection.provider
+    when 'smtp'
+      base_config.merge(
+        provider: 'smtp',
+        smtp_host: connection.smtp_host,
+        smtp_port: connection.smtp_port || 587,
+        smtp_username: connection.smtp_username,
+        smtp_password: connection.smtp_password_encrypted,
+        smtp_authentication: connection.smtp_authentication || 'plain',
+        smtp_enable_starttls: connection.smtp_enable_starttls
+      )
+    when 'company_domain'
+      # Use company's email infrastructure but with user's email as from
+      company_config = merged_settings.dig('email') || {}
+      base_config.merge(
+        provider: company_config['provider'] || ENV['DEFAULT_EMAIL_PROVIDER'] || 'smtp',
+        smtp_host: company_config['smtpHost'] || ENV['SMTP_ADDRESS'],
+        smtp_port: (company_config['smtpPort'] || ENV['SMTP_PORT'] || 587).to_i,
+        smtp_username: company_config['smtpUsername'] || ENV['SMTP_USERNAME'],
+        smtp_password: decrypt_value(company_config['smtpPassword']) || ENV['SMTP_PASSWORD'],
+        smtp_authentication: company_config['smtpAuthentication'] || ENV['SMTP_AUTHENTICATION'] || 'plain',
+        aws_access_key_id: company_config['awsAccessKeyId'] || ENV['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key: decrypt_value(company_config['awsSecretAccessKey']) || ENV['AWS_SECRET_ACCESS_KEY'],
+        aws_region: company_config['awsRegion'] || ENV['AWS_REGION'] || 'us-east-1'
+      )
+    when 'oauth_gmail', 'oauth_outlook'
+      # Future: OAuth-based email sending
+      Rails.logger.warn "[CommunicationSettingsService] OAuth email connections not yet implemented"
+      # Fall through to company/platform settings for now
+      company_config = merged_settings.dig('email') || {}
+      base_config.merge(
+        provider: company_config['provider'] || 'smtp'
+      )
+    else
+      base_config
+    end
+  end
+  
+  # Determine where email settings are coming from
+  def determine_email_source
+    if user&.has_email_connection? && user.default_email_connection&.verified?
+      'user'
+    elsif location && Setting.exists?(key: 'communications', scope_type: 'Location', scope_id: location.id)
+      'location'
+    elsif company && Setting.exists?(key: 'communications', scope_type: 'Company', scope_id: company.id)
+      'company'
+    else
+      'platform'
+    end
+  end
   
   # WATERFALL: Platform → Company → Location (Location has highest priority)
   def merged_settings
@@ -93,7 +174,9 @@ class CommunicationSettingsService
     @merged_settings = platform_data
     
     # Debug logging
-    scope_info = if location
+    scope_info = if user
+                   "user_id=#{user.id}"
+                 elsif location
                    "location_id=#{location.id}"
                  elsif company
                    "company_id=#{company.id}"

@@ -3,11 +3,12 @@
 module Providers
   module Email
     class BaseProvider
-      attr_reader :company, :location, :config
+      attr_reader :company, :location, :user, :config
       
-      def initialize(company: nil, location: nil)
+      def initialize(company: nil, location: nil, user: nil)
         @company = company
         @location = location
+        @user = user
         @config = load_config
       end
       
@@ -18,6 +19,13 @@ module Providers
       protected
       
       def load_config
+        # Waterfall priority: User → Location → Company → Platform
+        # Check if user has their own email connection configured
+        if user&.has_email_connection?
+          Rails.logger.info "[BaseProvider] Loading email config from user #{user.id} connection"
+          return CommunicationSettingsService.for_user(user).email_config
+        end
+        
         settings_service = company ? 
           CommunicationSettingsService.for_company(company, location: location) : 
           CommunicationSettingsService.platform

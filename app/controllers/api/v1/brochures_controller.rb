@@ -223,7 +223,8 @@ module Api
         send_params_symbolized = send_params.deep_symbolize_keys
         
         begin
-          result = BrochureSendingService.new(@brochure).send(**send_params_symbolized)
+          # Pass current_user for user-level email connection waterfall
+          result = BrochureSendingService.new(@brochure).send(**send_params_symbolized, user: current_user)
           
           if result[:sent].any?
             # Increment share count

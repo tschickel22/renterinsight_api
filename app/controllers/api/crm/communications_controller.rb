@@ -32,7 +32,13 @@ module Api
       # POST /api/crm/leads/:lead_id/communications/email
       # POST /api/crm/leads/:lead_id/communications/send_email
       def send_email
-        # Check if email is configured
+        # USER EMAIL CONNECTION WATERFALL: Check if user has their own email connection first
+        if current_user&.has_email_connection?
+          Rails.logger.info "[CommunicationsController#send_email] Using user #{current_user.id} email connection"
+          return send_email_via_user_connection
+        end
+        
+        # Check if email is configured (company/platform waterfall)
         settings = get_effective_settings
         email_config = settings.dig(:communications, :email) || settings.dig('communications', 'email') || {}
         
@@ -559,6 +565,84 @@ module Api
       rescue => e
         Rails.logger.error "[send_sms_via_aws_sns] Exception: #{e.message}"
         { success: false, error: e.message }
+      end
+      
+      # Send email via user's personal email connection
+      def send_email_via_user_connection
+        email_params = extract_email_params
+        user_config = CommunicationSettingsService.for_user(current_user).email_config
+        
+        Rails.logger.info "[send_email_via_user_connection] User #{current_user.id} config: #{user_config.except(:smtp_password).inspect}"
+        
+        # Build SMTP-style config from user email connection
+        smtp_config = {
+          smtpHost: user_config[:smtp_server],
+          smtpPort: user_config[:smtp_port],
+          smtpUsername: user_config[:smtp_username],
+          smtpPassword: user_config[:smtp_password],
+          fromEmail: user_config[:from_email],
+          fromName: user_config[:from_name] || current_user.full_name,
+          provider: 'smtp'
+        }
+        
+        send_result = send_email_via_smtp(email_params, smtp_config)
+        
+        unless send_result[:success]
+          return render json: {
+            ok: false,
+            success: false,
+            error: send_result[:error] || 'Failed to send email via user connection'
+          }, status: :unprocessable_entity
+        end
+        
+        # Only create communication log if we have a lead
+        if @lead.present?
+          log = Communication.create!(
+            communicable: @lead,
+            channel: 'email',
+            direction: 'outbound',
+            subject: email_params[:subject],
+            body: email_params[:content],
+            status: 'sent',
+            sent_at: Time.current,
+            to_address: email_params[:to],
+            from_address: smtp_config[:fromEmail],
+            metadata: build_email_metadata(email_params, smtp_config).merge(
+              message_id: send_result[:message_id],
+              sent_by_user_id: current_user.id,
+              user_email_connection: true
+            )
+          )
+          
+          render json: {
+            ok: true,
+            success: true,
+            id: log.id,
+            messageId: send_result[:message_id],
+            provider: 'smtp',
+            userEmailConnection: true,
+            communication: comm_log_json(log)
+          }, status: :created
+        else
+          # Test email without lead
+          render json: {
+            ok: true,
+            success: true,
+            message: 'Test email sent via user connection',
+            messageId: send_result[:message_id],
+            provider: 'smtp',
+            userEmailConnection: true,
+            to: email_params[:to],
+            from: smtp_config[:fromEmail]
+          }, status: :ok
+        end
+      rescue => e
+        Rails.logger.error "[send_email_via_user_connection] Error: #{e.message}"
+        render json: {
+          ok: false,
+          success: false,
+          error: e.message
+        }, status: :unprocessable_entity
       end
       
       # Send email via provider (SMTP, Gmail, SendGrid, AWS SES)

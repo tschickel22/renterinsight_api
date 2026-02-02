@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 class CommunicationMailer < ApplicationMailer
-  def send_communication(to:, subject:, body:, from_email:, from_name:, cc: nil, bcc: nil, file_attachments: [])
+  def send_communication(to:, subject:, body:, from_email:, from_name:, cc: nil, bcc: nil, reply_to: nil, file_attachments: [])
     # Add file attachments if present (BEFORE calling mail)
     # Renamed parameter from 'attachments' to 'file_attachments' to avoid shadowing the mail attachments method
     
     Rails.logger.info "[CommunicationMailer] Processing #{file_attachments&.length || 0} attachments"
+    Rails.logger.info "[CommunicationMailer] Reply-To: #{reply_to}" if reply_to.present?
     
     if file_attachments.present?
       file_attachments.each_with_index do |file_attachment, index|
@@ -38,14 +39,20 @@ class CommunicationMailer < ApplicationMailer
       end
     end
     
-    # Now create and send the mail
-    mail(
+    # Build mail options
+    mail_options = {
       to: to,
       from: "#{from_name} <#{from_email}>",
       cc: cc,
       bcc: bcc,
       subject: subject
-    ) do |format|
+    }
+    
+    # Add reply_to if provided
+    mail_options[:reply_to] = reply_to if reply_to.present?
+    
+    # Now create and send the mail
+    mail(mail_options) do |format|
       if body&.include?('<html') || body&.include?('<body')
         format.html { render html: body.html_safe }
       else

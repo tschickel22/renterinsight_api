@@ -721,6 +721,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
     t.decimal "default_pack_amount", precision: 15, scale: 2, default: "0.0"
     t.integer "fiscal_year_start_month", default: 1, null: false, comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. Default is 1 (January) for calendar year."
     t.boolean "is_demo", default: false, null: false
+    t.jsonb "verified_email_domains", default: []
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
@@ -733,6 +734,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
     t.index ["use_rbac_system"], name: "index_companies_on_use_rbac_system"
+    t.index ["verified_email_domains"], name: "idx_companies_verified_domains", using: :gin
   end
 
   create_table "company_hidden_roles", force: :cascade do |t|
@@ -3035,6 +3037,42 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
     t.index ["user_id"], name: "index_territory_users_on_user_id"
   end
 
+  create_table "user_email_connections", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "company_id", null: false
+    t.string "provider", default: "smtp", null: false
+    t.string "email_address", null: false
+    t.string "display_name"
+    t.string "smtp_host"
+    t.integer "smtp_port", default: 587
+    t.string "smtp_username"
+    t.text "smtp_password_encrypted"
+    t.string "smtp_authentication", default: "plain"
+    t.boolean "smtp_enable_tls", default: true
+    t.boolean "smtp_enable_starttls", default: true
+    t.text "oauth_token_encrypted"
+    t.text "oauth_refresh_token_encrypted"
+    t.datetime "oauth_expires_at"
+    t.string "oauth_provider"
+    t.boolean "is_default", default: false
+    t.boolean "is_active", default: true
+    t.datetime "verified_at"
+    t.string "verification_token"
+    t.datetime "verification_sent_at"
+    t.datetime "last_used_at"
+    t.datetime "last_error_at"
+    t.text "last_error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "email_address"], name: "idx_user_email_connections_company_email"
+    t.index ["company_id"], name: "index_user_email_connections_on_company_id"
+    t.index ["email_address"], name: "index_user_email_connections_on_email_address"
+    t.index ["user_id", "is_default"], name: "idx_user_email_connections_user_default"
+    t.index ["user_id"], name: "idx_user_email_connections_one_default", unique: true, where: "(is_default = true)"
+    t.index ["user_id"], name: "index_user_email_connections_on_user_id"
+    t.index ["verification_token"], name: "index_user_email_connections_on_verification_token", unique: true, where: "(verification_token IS NOT NULL)"
+  end
+
   create_table "user_locations", force: :cascade do |t|
     t.bigint "user_id", null: false
     t.bigint "location_id", null: false
@@ -3641,6 +3679,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"
   add_foreign_key "territory_users", "users"
+  add_foreign_key "user_email_connections", "companies"
+  add_foreign_key "user_email_connections", "users"
   add_foreign_key "user_locations", "companies"
   add_foreign_key "user_locations", "locations"
   add_foreign_key "user_locations", "users"

@@ -208,6 +208,9 @@ module Api
         # Convert to symbols for service
         send_params_symbolized = send_params.deep_symbolize_keys
         
+        # USER EMAIL CONNECTION WATERFALL: Pass current user for email routing
+        send_params_symbolized[:user] = current_user
+        
         # CRITICAL FIX: Find the published listing for this vehicle
         # ListingSendingService expects a Listing object, not a Vehicle
         listing = @company.listings.active.published.find_by(vehicle_id: @vehicle.id)

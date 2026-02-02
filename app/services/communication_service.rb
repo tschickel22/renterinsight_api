@@ -118,6 +118,9 @@ class CommunicationService
     skip_preference_check: false,
     **options
   )
+    # Extract sending user from options (for user-level email settings)
+    @sending_user = options[:user] || options[:sent_by]
+    
     # Check communication preferences (opt-in/out)
     # For quotes, we check preferences on the contact/account, not the quote itself
     unless skip_preference_check
@@ -151,15 +154,17 @@ class CommunicationService
     raise Error, "Subject is required for email" if channel == 'email' && subject.blank?
     
     # Set default provider if not specified
-    provider ||= default_provider_for(channel, communicable)
+    # User email connection takes highest priority in waterfall
+    provider ||= default_provider_for(channel, communicable, user: @sending_user)
     
     # Get default from address if not provided
-    from ||= default_from_address(channel, communicable)
+    # User email connection takes highest priority in waterfall
+    from ||= default_from_address(channel, communicable, user: @sending_user)
     
     # Log metadata before saving
     Rails.logger.info "[CommunicationService] Creating communication with metadata: #{metadata.merge(category: category).inspect}"
     
-    # Create communication record
+    # Create communication record (reply_to will be set after creation for tracking)
     @communication = Communication.create!(
       communicable: communicable,
       direction: direction,
@@ -176,6 +181,17 @@ class CommunicationService
       portal_visible: portal_visible,
       metadata: metadata.merge(category: category)
     )
+    
+    # Auto-generate reply-to address for tracking (if not already provided)
+    if channel == 'email' && direction == 'outbound' && @communication.reply_to.blank?
+      # Get the user who is sending (if available from options or context)
+      sending_user = options[:user] || options[:sent_by]
+      
+      generated_reply_to = ReplyToAddressService.generate_for(@communication, user: sending_user)
+      @communication.update_column(:reply_to, generated_reply_to)
+      
+      Rails.logger.info "[CommunicationService] Auto-generated reply_to: #{generated_reply_to} for communication #{@communication.id}"
+    end
     
     # Log metadata after saving
     Rails.logger.info "[CommunicationService] Communication #{@communication.id} created with metadata: #{@communication.metadata.inspect}"
@@ -306,8 +322,11 @@ class CommunicationService
     company = extract_company_from_communicable(communication.communicable)
     location = extract_location_from_communicable(communication.communicable)
     
+    # Get sending user (for user-level email settings)
+    sending_user = @sending_user || options[:user] || options[:sent_by]
+    
     provider_class = get_provider_class(provider, channel)
-    provider_instance = provider_class.new(company: company, location: location)
+    provider_instance = provider_class.new(company: company, location: location, user: sending_user)
     
     # Prepare attachments if present
     attachments_data = []
@@ -396,7 +415,14 @@ class CommunicationService
     end
   end
   
-  def default_provider_for(channel, communicable = nil)
+  def default_provider_for(channel, communicable = nil, user: nil)
+    # Waterfall priority: User → Location → Company → Platform
+    # Check if user has their own email connection configured
+    if channel == 'email' && user&.has_email_connection?
+      Rails.logger.info "[CommunicationService] Using user #{user.id} email connection for provider"
+      return :smtp  # User connections always use SMTP
+    end
+    
     # Get provider from CommunicationSettingsService (respects Location → Company → Platform waterfall)
     company = extract_company_from_communicable(communicable)
     location = extract_location_from_communicable(communicable)
@@ -422,7 +448,15 @@ class CommunicationService
     end
   end
   
-  def default_from_address(channel, communicable = nil)
+  def default_from_address(channel, communicable = nil, user: nil)
+    # Waterfall priority: User → Location → Company → Platform
+    # Check if user has their own email connection configured
+    if channel == 'email' && user&.has_email_connection?
+      from_email = user.sending_email_address
+      Rails.logger.info "[CommunicationService] Using user #{user.id} email address: #{from_email}"
+      return from_email
+    end
+    
     # Get from CommunicationSettingsService based on company and location context for both email and SMS
     company = extract_company_from_communicable(communicable)
     location = extract_location_from_communicable(communicable)

@@ -37,5 +37,22 @@ module RenterinsightApi
     # Enable sessions for OAuth flows (QuickBooks, etc.)
     config.middleware.use ActionDispatch::Cookies
     config.middleware.use ActionDispatch::Session::CookieStore
+    
+    # Active Record Encryption configuration for Rails 7+
+    # Required for models using `encrypts` (e.g., UserEmailConnection.smtp_password)
+    config.before_configuration do
+      if ENV['ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY'].present?
+        # Use environment variables (staging/production)
+        ENV['ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY'] # Already set
+      elsif Rails.env.development? || Rails.env.test?
+        # For development/test, derive keys from a stable base
+        require 'digest'
+        base = 'renterinsight-dev-encryption-base-key-2024'
+        
+        ENV['ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY'] ||= Digest::SHA256.hexdigest("#{base}-primary")[0..31]
+        ENV['ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY'] ||= Digest::SHA256.hexdigest("#{base}-deterministic")[0..31]
+        ENV['ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT'] ||= Digest::SHA256.hexdigest("#{base}-salt")[0..31]
+      end
+    end
   end
 end

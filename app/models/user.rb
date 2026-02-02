@@ -26,6 +26,9 @@ class User < ApplicationRecord
   has_many :notifications, as: :recipient, dependent: :destroy
   has_many :notification_preferences, dependent: :destroy
 
+  # Email Connection Associations (for sending from personal email)
+  has_many :user_email_connections, dependent: :destroy
+
   validates :email, presence: true, uniqueness: true
   validates :first_name, presence: true, if: -> { name.blank? }
   validates :password, length: { minimum: 6 }, if: -> { password.present? }
@@ -318,6 +321,29 @@ class User < ApplicationRecord
       # Assign the new role
       assign_rbac_role(role_identifier, company_id: target_company_id, tier: effective_tier, assigned_by: assigned_by)
     end
+  end
+
+  # ==================== EMAIL CONNECTION METHODS ====================
+  
+  # Get the default email connection for this user
+  def default_email_connection
+    user_email_connections.active.verified.find_by(is_default: true) ||
+      user_email_connections.active.verified.first
+  end
+  
+  # Check if user has a verified email connection
+  def has_email_connection?
+    user_email_connections.active.verified.exists?
+  end
+  
+  # Get the email address to use for sending (falls back to user's email)
+  def sending_email_address
+    default_email_connection&.email_address || email
+  end
+  
+  # Get the BCC address for capturing external emails
+  def bcc_capture_address
+    ReplyToAddressService.generate_bcc_address(self)
   end
 
   private
