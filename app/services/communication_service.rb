@@ -322,11 +322,20 @@ class CommunicationService
     company = extract_company_from_communicable(communication.communicable)
     location = extract_location_from_communicable(communication.communicable)
     
-    # Get sending user (for user-level email settings)
+    # Get sending user (for user-level email settings ONLY)
     sending_user = @sending_user || options[:user] || options[:sent_by]
     
     provider_class = get_provider_class(provider, channel)
-    provider_instance = provider_class.new(company: company, location: location, user: sending_user)
+    
+    # CRITICAL: Only pass user to EMAIL providers
+    # SMS waterfall: Location → Company → Platform (NO user level)
+    # Email waterfall: User → Location → Company → Platform
+    provider_params = { company: company, location: location }
+    if channel == 'email'
+      provider_params[:user] = sending_user
+    end
+    
+    provider_instance = provider_class.new(**provider_params)
     
     # Prepare attachments if present
     attachments_data = []
@@ -357,37 +366,25 @@ class CommunicationService
   def extract_company_from_communicable(communicable)
     return nil unless communicable
     
-    case communicable.class.name
-    when 'Quote'
-      communicable.account&.company || communicable.contact&.company
-    when 'Account', 'Contact'
-      communicable.company
-    when 'User'
-      communicable.company if communicable.respond_to?(:company)
-    when 'Invitation'
-      communicable.company
-    else
-      # Try to get company if the object responds to it
-      communicable.company if communicable.respond_to?(:company)
+    # CRITICAL: Multi-tenant entities (Quote, Vehicle, Brochure, Lead, Contact, etc.) have company_id directly
+    # Don't try to get through associations - just use .company
+    if communicable.respond_to?(:company)
+      return communicable.company
     end
+    
+    nil
   end
   
   def extract_location_from_communicable(communicable)
     return nil unless communicable
     
-    # Try to get location directly
-    return communicable.location if communicable.respond_to?(:location)
-    
-    # For nested entities (quotes, etc), try through associations
-    case communicable.class.name
-    when 'Quote'
-      communicable.contact&.location || communicable.account&.location
-    when 'Account', 'Contact', 'Lead'
-      communicable.location
-    else
-      # Try generic location accessor
-      communicable.location if communicable.respond_to?(:location)
+    # CRITICAL: Most entities (Quote, Lead, Contact, etc.) have location_id directly
+    # Try to get location directly from the entity first
+    if communicable.respond_to?(:location)
+      return communicable.location
     end
+    
+    nil
   end
   
   def get_provider_class(provider, channel)
@@ -416,8 +413,10 @@ class CommunicationService
   end
   
   def default_provider_for(channel, communicable = nil, user: nil)
-    # Waterfall priority: User → Location → Company → Platform
-    # Check if user has their own email connection configured
+    # Waterfall priority: User → Location → Company → Platform (EMAIL ONLY)
+    # SMS waterfall: Location → Company → Platform (NO user level)
+    
+    # Check if user has their own email connection configured (EMAIL ONLY)
     if channel == 'email' && user&.has_email_connection?
       Rails.logger.info "[CommunicationService] Using user #{user.id} email connection for provider"
       return :smtp  # User connections always use SMTP
@@ -449,8 +448,10 @@ class CommunicationService
   end
   
   def default_from_address(channel, communicable = nil, user: nil)
-    # Waterfall priority: User → Location → Company → Platform
-    # Check if user has their own email connection configured
+    # Waterfall priority: User → Location → Company → Platform (EMAIL ONLY)
+    # SMS waterfall: Location → Company → Platform (NO user level)
+    
+    # Check if user has their own email connection configured (EMAIL ONLY)
     if channel == 'email' && user&.has_email_connection?
       from_email = user.sending_email_address
       Rails.logger.info "[CommunicationService] Using user #{user.id} email address: #{from_email}"
