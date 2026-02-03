@@ -18,11 +18,12 @@ Rails.application.routes.draw do
   # Inbound email webhook (separate namespace - singular)
   namespace :webhook do
     # Inbound email handling (BCC capture + reply tracking)
-    post 'inbound_mail/process', to: 'inbound_mail#process'
+    post 'inbound_mail/handle', to: 'inbound_mail#handle'
   end
   
-  # Legacy route alias (for existing SNS subscription)
-  post 'webhooks/inbound_mail/process', to: 'webhook/inbound_mail#process'
+  # Legacy route aliases (for existing SNS subscription)
+  post 'webhooks/inbound_mail/process', to: 'webhook/inbound_mail#handle'
+  post 'webhooks/inbound_mail/handle', to: 'webhook/inbound_mail#handle'
   
   # Other webhooks (plural namespace)
   namespace :webhooks do
