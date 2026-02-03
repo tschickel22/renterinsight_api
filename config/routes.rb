@@ -21,6 +21,9 @@ Rails.application.routes.draw do
     post 'inbound_mail/process', to: 'inbound_mail#process'
   end
   
+  # Legacy route alias (for existing SNS subscription)
+  post 'webhooks/inbound_mail/process', to: 'webhook/inbound_mail#process'
+  
   # Other webhooks (plural namespace)
   namespace :webhooks do
     # Twilio SMS status callbacks (Twilio signature verification)
