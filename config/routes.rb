@@ -13,10 +13,16 @@ Rails.application.routes.draw do
   namespace :webhooks do
     # Email tracking pixel (no auth required)
     get 'email/:communication_id/pixel.gif', to: 'email_tracking#pixel', as: :email_pixel
-    
+  end
+  
+  # Inbound email webhook (separate namespace - singular)
+  namespace :webhook do
     # Inbound email handling (BCC capture + reply tracking)
     post 'inbound_mail/process', to: 'inbound_mail#process'
-    
+  end
+  
+  # Other webhooks (plural namespace)
+  namespace :webhooks do
     # Twilio SMS status callbacks (Twilio signature verification)
     post 'twilio/sms/status', to: 'twilio#sms_status'
     
