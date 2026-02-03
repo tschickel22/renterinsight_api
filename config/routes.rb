@@ -14,6 +14,9 @@ Rails.application.routes.draw do
     # Email tracking pixel (no auth required)
     get 'email/:communication_id/pixel.gif', to: 'email_tracking#pixel', as: :email_pixel
     
+    # Inbound email handling (BCC capture + reply tracking)
+    post 'inbound_mail/process', to: 'inbound_mail#process'
+    
     # Twilio SMS status callbacks (Twilio signature verification)
     post 'twilio/sms/status', to: 'twilio#sms_status'
     
