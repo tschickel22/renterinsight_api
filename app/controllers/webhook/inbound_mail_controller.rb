@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Webhook::InboundMailController < ActionController::Base
+  skip_before_action :verify_authenticity_token  # CRITICAL - skip CSRF for webhooks
   
   # POST /webhook/inbound_mail/handle
   def handle
