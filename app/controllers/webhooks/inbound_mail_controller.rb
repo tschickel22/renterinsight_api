@@ -11,8 +11,6 @@
 # - SNS subscription: HTTPS webhook to /webhooks/inbound_mail/process
 #
 class Webhook::InboundMailController < ApplicationController
-  skip_before_action :authenticate
-  skip_before_action :set_company_scope
   
   # POST /webhooks/inbound_mail/process
   def process
