@@ -10,8 +10,7 @@
 # - Receipt rule: reply+*@mail.renterinsight.com, crm+*@mail.renterinsight.com → SNS Topic
 # - SNS subscription: HTTPS webhook to /webhooks/inbound_mail/process
 #
-class Webhooks::InboundMailController < ApplicationController
-  skip_before_action :verify_authenticity_token
+class Webhook::InboundMailController < ApplicationController
   skip_before_action :authenticate
   skip_before_action :set_company_scope
   
