@@ -201,12 +201,18 @@ module Api
         # Create communication BEFORE sending (so we have ID for tracking pixel)
         communication = create_pending_communication(email_params, email_config) if params[:entity_id]
         
-        # Add tracking pixel to email body
-        enhanced_body = email_params[:content]
+        # Auto-generate Reply-To address for tracking
         if communication
+          generated_reply_to = ReplyToAddressService.generate_for(communication, user: current_user)
+          communication.update_column(:reply_to, generated_reply_to)
+          Rails.logger.info "[Platform::CommunicationsController] Auto-generated reply_to: #{generated_reply_to} for communication #{communication.id}"
+          
+          # Add tracking pixel to email body
           enhanced_body = add_tracking_pixel(email_params[:content], communication.id)
           # Update the communication record with the HTML version
           communication.update!(body: enhanced_body)
+        else
+          enhanced_body = email_params[:content]
         end
         
         # Configure ActionMailer based on provider
@@ -229,7 +235,8 @@ module Api
         # Send email via ActionMailer with enhanced body
         send_result = send_email_via_action_mailer(
           email_params.merge(content: enhanced_body), 
-          email_config
+          email_config,
+          reply_to: communication&.reply_to
         )
         
         unless send_result[:success]
@@ -710,11 +717,12 @@ module Api
       end
 
       # Send email via ActionMailer like password reset does
-      def send_email_via_action_mailer(email_params, config)
+      def send_email_via_action_mailer(email_params, config, reply_to: nil)
         from_email = config['fromEmail'] || config[:fromEmail]
         from_name = config['fromName'] || config[:fromName] || 'RenterInsight'
         
         Rails.logger.info "[send_email_via_action_mailer] Sending to #{email_params[:to]} from #{from_email}"
+        Rails.logger.info "[send_email_via_action_mailer] Reply-To: #{reply_to}" if reply_to.present?
         Rails.logger.info "[send_email_via_action_mailer] Attachments count: #{email_params[:attachments]&.length || 0}"
         
         mail = CommunicationMailer.send_communication(
@@ -725,6 +733,7 @@ module Api
           from_name: from_name,
           cc: email_params[:cc],
           bcc: email_params[:bcc],
+          reply_to: reply_to,
           file_attachments: email_params[:attachments] || []
         )
         
