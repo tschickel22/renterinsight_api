@@ -20,9 +20,13 @@ module InboundEmail
       # Parse MIME email using Mail gem
       mail = Mail.new(decoded_content)
       
-      # Extract token from To address (e.g., reply+lead-123@mail.renterinsight.com)
-      to_address = mail.to.first
-      token = extract_token(to_address)
+      # Extract token from recipient addresses
+      # For reply tracking: Check TO header field
+      # For BCC capture: Check all destination addresses from SES envelope
+      recipients = email_data.dig('mail', 'destination') || []
+      to_header = mail.to&.first
+      
+      token = extract_token_from_recipients(recipients, to_header)
       
       # Extract body (prefer text, fallback to HTML)
       body_text = mail.text_part&.decoded || mail.body.decoded
@@ -46,7 +50,20 @@ module InboundEmail
     
     private
     
-    # Extract token from email address
+    # Extract token from recipient addresses
+    # Checks both envelope recipients (for BCC) and header TO field (for replies)
+    def extract_token_from_recipients(recipients, to_header)
+      # Check all envelope recipients first (includes BCC'd addresses)
+      recipients.each do |recipient|
+        token = extract_token(recipient)
+        return token if token && ['reply', 'crm'].include?(token[:prefix])
+      end
+      
+      # Fallback to TO header for direct replies
+      extract_token(to_header)
+    end
+    
+    # Extract token from a single email address
     # reply+lead-123@mail.renterinsight.com → { prefix: "reply", token: "lead-123" }
     # crm+bcc-456@mail.renterinsight.com → { prefix: "crm", token: "bcc-456" }
     def extract_token(email_address)
