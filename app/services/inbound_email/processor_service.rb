@@ -64,7 +64,7 @@ module InboundEmail
         subject: parsed_email[:subject],
         body: body_content,
         sent_at: parsed_email[:timestamp],
-        status: 'received',
+        status: 'delivered',
         metadata: {
           message_id: parsed_email[:message_id],
           reply_tracking_token: token,
