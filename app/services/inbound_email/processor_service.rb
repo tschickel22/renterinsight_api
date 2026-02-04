@@ -52,6 +52,9 @@ module InboundEmail
       end
       
       # Create Communication record
+      # Use body_html if available (contains HTML), otherwise fall back to body_text
+      body_content = parsed_email[:body_html].presence || parsed_email[:body_text]
+      
       communication = Communication.create!(
         communicable: entity,
         channel: 'email',
@@ -59,8 +62,7 @@ module InboundEmail
         from_address: parsed_email[:from],
         to_address: parsed_email[:to],
         subject: parsed_email[:subject],
-        body: parsed_email[:body_text],
-        body_html: parsed_email[:body_html],
+        body: body_content,
         sent_at: parsed_email[:timestamp],
         status: 'received',
         metadata: {
