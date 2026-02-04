@@ -23,22 +23,27 @@ class Webhook::InboundMailController < ActionController::Base
     Rails.logger.info "[InboundMail] From: #{mail_obj['source']}"
     Rails.logger.info "[InboundMail] To: #{mail_obj['destination']&.join(', ')}"
     Rails.logger.info "[InboundMail] Subject: #{mail_obj['commonHeaders']&.dig('subject')}"
-    Rails.logger.info "[InboundMail] Timestamp: #{mail_obj['timestamp']}"
     
-    # Get the content (if available in notification)
-    content = email_data['content']
-    if content
-      Rails.logger.info "[InboundMail] Content length: #{content.length} bytes"
-      Rails.logger.info "[InboundMail] Content preview: #{content[0..200]}"
+    # Parse the email using ParserService
+    parser = InboundEmail::ParserService.new(email_data)
+    parsed_email = parser.parse
+    
+    Rails.logger.info "[InboundMail] Token: #{parsed_email[:token]&.inspect}"
+    Rails.logger.info "[InboundMail] Body text: #{parsed_email[:body_text]&.[](0..200)}"
+    
+    # Process the email (match token, create Communication)
+    processor = InboundEmail::ProcessorService.new(parsed_email)
+    result = processor.process
+    
+    if result[:success]
+      Rails.logger.info "[InboundMail] ✅ SUCCESS: Communication ##{result[:communication_id]} created"
     else
-      Rails.logger.info "[InboundMail] No content in notification (may need S3 fetch)"
+      Rails.logger.warn "[InboundMail] ⚠️ FAILED: #{result[:error]}"
     end
     
-    # Log the full raw data for debugging
-    Rails.logger.info "[InboundMail] Full mail object: #{mail_obj.to_json}"
     Rails.logger.info "[InboundMail] ========================================="
     
-    render json: { success: true, message: 'Email logged' }
+    render json: { success: true, message: 'Email processed', result: result }
   rescue JSON::ParserError => e
     Rails.logger.error "[InboundMail] JSON parse error: #{e.message}"
     render json: { error: 'Invalid JSON' }, status: :bad_request
