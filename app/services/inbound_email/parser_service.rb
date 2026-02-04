@@ -53,13 +53,20 @@ module InboundEmail
     # Extract token from recipient addresses
     # Checks both envelope recipients (for BCC) and header TO field (for replies)
     def extract_token_from_recipients(recipients, to_header)
+      # DEBUG: Log what we received
+      Rails.logger.info "[ParserService] Envelope recipients: #{recipients.inspect}"
+      Rails.logger.info "[ParserService] TO header: #{to_header.inspect}"
+      
       # Check all envelope recipients first (includes BCC'd addresses)
       recipients.each do |recipient|
+        Rails.logger.info "[ParserService] Checking recipient: #{recipient}"
         token = extract_token(recipient)
+        Rails.logger.info "[ParserService] Extracted token: #{token.inspect}"
         return token if token && ['reply', 'crm'].include?(token[:prefix])
       end
       
       # Fallback to TO header for direct replies
+      Rails.logger.info "[ParserService] No valid token in envelope, checking TO header"
       extract_token(to_header)
     end
     
