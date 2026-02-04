@@ -16,10 +16,29 @@ class Webhook::InboundMailController < ActionController::Base
     
     # Parse email notification from SNS message
     email_data = JSON.parse(message['Message'])
+    mail_obj = email_data['mail']
     
-    Rails.logger.info "[InboundMail] Received email: #{email_data.dig('mail', 'messageId')}"
+    Rails.logger.info "[InboundMail] ========================================="
+    Rails.logger.info "[InboundMail] Message ID: #{mail_obj['messageId']}"
+    Rails.logger.info "[InboundMail] From: #{mail_obj['source']}"
+    Rails.logger.info "[InboundMail] To: #{mail_obj['destination']&.join(', ')}"
+    Rails.logger.info "[InboundMail] Subject: #{mail_obj['commonHeaders']&.dig('subject')}"
+    Rails.logger.info "[InboundMail] Timestamp: #{mail_obj['timestamp']}"
     
-    render json: { success: true, message: 'Email processed' }
+    # Get the content (if available in notification)
+    content = email_data['content']
+    if content
+      Rails.logger.info "[InboundMail] Content length: #{content.length} bytes"
+      Rails.logger.info "[InboundMail] Content preview: #{content[0..200]}"
+    else
+      Rails.logger.info "[InboundMail] No content in notification (may need S3 fetch)"
+    end
+    
+    # Log the full raw data for debugging
+    Rails.logger.info "[InboundMail] Full mail object: #{mail_obj.to_json}"
+    Rails.logger.info "[InboundMail] ========================================="
+    
+    render json: { success: true, message: 'Email logged' }
   rescue JSON::ParserError => e
     Rails.logger.error "[InboundMail] JSON parse error: #{e.message}"
     render json: { error: 'Invalid JSON' }, status: :bad_request
