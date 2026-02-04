@@ -1,28 +1,16 @@
 # frozen_string_literal: true
 
 # Generates reply-to addresses for tracking email replies
-# Format: reply+{communication_id}@{mail_domain}
+# Format: reply+{entity_type}-{entity_id}@{mail_domain}
+# Example: reply+lead-38@mail.renterinsight.com
 #
 # Usage:
 #   ReplyToAddressService.generate_for(communication)
-#   # => "reply+abc123@mail.renterinsight.com"
-#
-#   ReplyToAddressService.parse("reply+abc123@mail.renterinsight.com")
-#   # => { communication_id: "abc123" }
-#
-# Environment Setup:
-#   - INBOUND_MAIL_DOMAIN: The domain configured to receive inbound emails
-#   - This should be DIFFERENT from your outbound sending domain
-#   - Example: Outbound = notifications.renterinsight.com, Inbound = mail.renterinsight.com
-#
-# DNS Requirements for inbound domain:
-#   - MX record pointing to your inbound processor (SendGrid, AWS SES, Mailgun)
-#   - Example: mail.renterinsight.com MX 10 mx.sendgrid.net
+#   # => "reply+lead-38@mail.renterinsight.com"
 #
 class ReplyToAddressService
   # Default mail domain for receiving replies
   # IMPORTANT: This must have MX records configured for inbound email processing
-  # In development, replies won't actually arrive - test inbound in staging
   MAIL_DOMAIN = ENV.fetch('INBOUND_MAIL_DOMAIN', 'mail.renterinsight.com')
   
   # Prefix for reply tracking
@@ -46,14 +34,14 @@ class ReplyToAddressService
       generate_tracked_address(communication)
     end
     
-    # Generate a BCC address for a user to capture external emails
-    # @param user [User] The user
+    # Generate a BCC address for a company to capture external emails
+    # @param company [Company] The company
     # @return [String] The BCC address for capturing emails
-    def generate_bcc_address(user)
-      "#{BCC_PREFIX}+#{user.id}@#{mail_domain}"
+    def generate_bcc_address(company)
+      "#{BCC_PREFIX}+bcc-#{company.id}@#{mail_domain}"
     end
     
-    # Parse an incoming reply-to address to extract the communication ID
+    # Parse an incoming reply-to address to extract entity info
     # @param address [String] The incoming email address
     # @return [Hash, nil] Parsed data or nil if invalid
     def parse(address)
@@ -63,26 +51,32 @@ class ReplyToAddressService
       local_part = address.to_s.split('@').first&.downcase
       return nil if local_part.blank?
       
-      # Check for reply format: reply+{communication_id}
+      # Check for reply format: reply+{entity_type}-{entity_id}
+      # Example: reply+lead-38 → { type: :reply, entity_type: "Lead", entity_id: 38 }
       if local_part.start_with?("#{REPLY_PREFIX}+")
-        communication_id = local_part.sub("#{REPLY_PREFIX}+", '')
-        return nil if communication_id.blank?
+        token = local_part.sub("#{REPLY_PREFIX}+", '')
+        parts = token.split('-')
         
-        return {
-          type: :reply,
-          communication_id: communication_id
-        }
+        if parts.length == 2
+          return {
+            type: :reply,
+            entity_type: parts[0].capitalize,  # "lead" → "Lead"
+            entity_id: parts[1].to_i
+          }
+        end
       end
       
-      # Check for BCC format: crm+{user_id}
+      # Check for BCC format: crm+bcc-{company_id}
       if local_part.start_with?("#{BCC_PREFIX}+")
-        user_id = local_part.sub("#{BCC_PREFIX}+", '')
-        return nil if user_id.blank?
+        token = local_part.sub("#{BCC_PREFIX}+", '')
         
-        return {
-          type: :bcc_capture,
-          user_id: user_id.to_i
-        }
+        if token.start_with?('bcc-')
+          company_id = token.sub('bcc-', '').to_i
+          return {
+            type: :bcc_capture,
+            company_id: company_id
+          }
+        end
       end
       
       nil
@@ -103,13 +97,17 @@ class ReplyToAddressService
     
     private
     
+    # Generate tracked address using entity type and ID
+    # reply+lead-38@mail.renterinsight.com (for Lead #38)
+    # reply+contact-456@mail.renterinsight.com (for Contact #456)
     def generate_tracked_address(communication)
-      # Use a short, unique identifier based on communication ID
-      # We use the communication ID directly for simplicity
-      # Could also use a hash for obfuscation: 
-      #   Digest::SHA256.hexdigest("#{communication.id}-#{communication.created_at}")[0..10]
+      return nil unless communication.communicable
       
-      "#{REPLY_PREFIX}+#{communication.id}@#{mail_domain}"
+      # Get entity type and ID
+      entity_type = communication.communicable_type.downcase  # "Lead" → "lead"
+      entity_id = communication.communicable_id
+      
+      "#{REPLY_PREFIX}+#{entity_type}-#{entity_id}@#{mail_domain}"
     end
   end
 end
