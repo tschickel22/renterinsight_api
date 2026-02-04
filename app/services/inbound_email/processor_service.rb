@@ -79,9 +79,57 @@ module InboundEmail
     
     # Process BCC capture token: crm+bcc-5@mail.renterinsight.com
     def process_bcc_capture(token)
-      # TODO: Implement BCC capture in Phase 2
-      # Will match sender email to Contact/Lead in company
-      { success: false, error: 'BCC capture not yet implemented' }
+      # Parse token: "bcc-5" → company_id: 5
+      parts = token.split('-')
+      
+      unless parts.length == 2 && parts[0] == 'bcc'
+        return { success: false, error: "Invalid BCC token format: #{token}" }
+      end
+      
+      company_id = parts[1].to_i
+      
+      # Find the company
+      company = Company.find_by(id: company_id)
+      unless company
+        return { success: false, error: "Company ##{company_id} not found" }
+      end
+      
+      # Extract recipient email (the Lead/Contact who received the email)
+      recipient_email = parsed_email[:to]
+      
+      # Search for Contact or Lead by email in this company
+      entity = find_entity_by_email(company, recipient_email)
+      
+      unless entity
+        Rails.logger.warn "[ProcessorService] No Contact/Lead found for #{recipient_email} in company #{company.name}"
+        return { success: false, error: "No Contact or Lead found with email #{recipient_email}" }
+      end
+      
+      # Create Communication record
+      body_content = parsed_email[:body_html].presence || parsed_email[:body_text]
+      
+      communication = Communication.create!(
+        communicable: entity,
+        channel: 'email',
+        direction: 'outbound',  # BCC capture is outbound from user's perspective
+        from_address: parsed_email[:from],
+        to_address: parsed_email[:to],
+        subject: parsed_email[:subject],
+        body: body_content,
+        sent_at: parsed_email[:timestamp],
+        status: 'delivered',
+        metadata: {
+          message_id: parsed_email[:message_id],
+          bcc_capture_token: token,
+          source: 'bcc_capture',
+          company_id: company_id,
+          captured_via: 'bcc'
+        }
+      )
+      
+      Rails.logger.info "[ProcessorService] BCC captured: Communication ##{communication.id} for #{entity.class.name} ##{entity.id} (#{recipient_email}) in company #{company.name}"
+      
+      { success: true, communication_id: communication.id, entity_type: entity.class.name, entity_id: entity.id }
     end
     
     # Find entity by type and ID
@@ -98,6 +146,22 @@ module InboundEmail
       else
         nil
       end
+    end
+    
+    # Find Contact or Lead by email in a company
+    def find_entity_by_email(company, email)
+      # Normalize email for case-insensitive search
+      normalized_email = email.to_s.strip.downcase
+      
+      # Search Contacts first (more specific)
+      contact = company.contacts.where('LOWER(email) = ?', normalized_email).first
+      return contact if contact
+      
+      # Then search Leads
+      lead = company.leads.where('LOWER(email) = ?', normalized_email).first
+      return lead if lead
+      
+      nil
     end
   end
 end
