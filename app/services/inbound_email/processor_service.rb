@@ -74,6 +74,9 @@ module InboundEmail
       
       Rails.logger.info "[ProcessorService] Created Communication ##{communication.id} for #{entity_type} ##{entity_id}"
       
+      # Broadcast notification to user (leverages existing notification system)
+      broadcast_reply_notification(entity, communication)
+      
       { success: true, communication_id: communication.id }
     end
     
@@ -145,21 +148,64 @@ module InboundEmail
       end
     end
     
-    # Find Contact or Lead by email in a company
-    # (kept for potential future use)
-    def find_entity_by_email(company, email)
-      # Normalize email for case-insensitive search
-      normalized_email = email.to_s.strip.downcase
+    # Broadcast reply notification to entity owner
+    def broadcast_reply_notification(entity, communication)
+      # Determine entity owner (user to notify)
+      user = case entity
+             when Lead
+               entity.owner || entity.company.users.where(is_active: true).first
+             when Contact
+               entity.account&.owner || entity.company.users.where(is_active: true).first
+             when Deal
+               entity.owner || entity.company.users.where(is_active: true).first
+             when Account
+               entity.owner || entity.company.users.where(is_active: true).first
+             else
+               nil
+             end
       
-      # Search Contacts first (more specific)
-      contact = company.contacts.where('LOWER(email) = ?', normalized_email).first
-      return contact if contact
+      return unless user
       
-      # Then search Leads
-      lead = company.leads.where('LOWER(email) = ?', normalized_email).first
-      return lead if lead
+      # Entity name for notification
+      entity_name = case entity
+                    when Lead
+                      "#{entity.first_name} #{entity.last_name}".strip
+                    when Contact
+                      "#{entity.first_name} #{entity.last_name}".strip
+                    when Deal
+                      entity.name
+                    when Account
+                      entity.name
+                    else
+                      'Unknown'
+                    end
       
-      nil
+      # Broadcast to user's channel
+      broadcast_data = {
+        type: 'email_reply',
+        communication: {
+          id: communication.id,
+          from: communication.from_address,
+          subject: communication.subject,
+          preview: communication.body&.truncate(100)
+        },
+        entity: {
+          type: entity.class.name.downcase,
+          id: entity.id,
+          name: entity_name
+        },
+        timestamp: Time.current.iso8601
+      }
+      
+      ActionCable.server.broadcast(
+        "user_notifications_#{user.id}",
+        broadcast_data
+      )
+      
+      Rails.logger.info "[ProcessorService] Broadcasted reply notification to User ##{user.id} for #{entity.class.name} ##{entity.id}"
+    rescue => e
+      Rails.logger.error "[ProcessorService] Failed to broadcast notification: #{e.message}"
+      # Don't fail the whole process if notification fails
     end
   end
 end
