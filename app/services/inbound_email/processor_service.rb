@@ -55,6 +55,9 @@ module InboundEmail
       # Use body_html if available (contains HTML), otherwise fall back to body_text
       body_content = parsed_email[:body_html].presence || parsed_email[:body_text]
       
+      # Strip HTML tags before saving to database (fix for displaying clean text)
+      clean_body = strip_html_tags(body_content)
+      
       communication = Communication.create!(
         communicable: entity,
         channel: 'email',
@@ -62,7 +65,7 @@ module InboundEmail
         from_address: parsed_email[:from],
         to_address: parsed_email[:to],
         subject: parsed_email[:subject],
-        body: body_content,
+        body: clean_body,
         sent_at: parsed_email[:timestamp],
         status: 'delivered',
         metadata: {
@@ -103,6 +106,9 @@ module InboundEmail
       # Use body_html if available (contains HTML), otherwise fall back to body_text
       body_content = parsed_email[:body_html].presence || parsed_email[:body_text]
       
+      # Strip HTML tags before saving to database (fix for displaying clean text)
+      clean_body = strip_html_tags(body_content)
+      
       # Create communication record associated with the user
       communication = Communication.create!(
         communicable_type: 'User',
@@ -112,7 +118,7 @@ module InboundEmail
         from_address: parsed_email[:from],
         to_address: parsed_email[:to],
         subject: parsed_email[:subject],
-        body: body_content,
+        body: clean_body,
         sent_at: parsed_email[:timestamp],
         status: 'delivered',
         metadata: {
