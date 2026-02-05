@@ -284,12 +284,21 @@ module InboundEmail
       Rails.logger.error "[ProcessorService] Failed to broadcast toast: #{e.message}"
     end
     
-    # Strip HTML tags to get clean text preview
+    # Strip HTML tags AND decode HTML entities (matches Platform::CommunicationsController)
     def strip_html_tags(html)
       return nil if html.blank?
       
       # Use Rails sanitizer to remove ALL HTML/VML tags (handles Outlook VML)
       text = ActionView::Base.full_sanitizer.sanitize(html)
+      
+      # Decode HTML entities (CRITICAL - Rails sanitizer doesn't do this!)
+      text = text.gsub('&nbsp;', ' ')
+                 .gsub('&amp;', '&')
+                 .gsub('&lt;', '<')
+                 .gsub('&gt;', '>')
+                 .gsub('&quot;', '"')
+                 .gsub('&#39;', "'")
+                 .gsub('&apos;', "'")
       
       # Clean up whitespace
       text.gsub(/\s+/, ' ').strip
