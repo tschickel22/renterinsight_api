@@ -194,7 +194,7 @@ module InboundEmail
             company_id: entity.company.id,
             category: 'email_reply',
             title: "Reply from #{entity_name}",
-            message: "#{communication.subject}: #{communication.body&.truncate(100)}",
+            message: "#{communication.subject}: #{strip_html_tags(communication.body)&.truncate(100)}",
             link: entity_link,
             read: false,
             metadata: {
@@ -219,7 +219,7 @@ module InboundEmail
             entity_type: entity_type,
             from_address: communication.from_address,
             subject: communication.subject,
-            preview: communication.body&.truncate(200),
+            preview: strip_html_tags(communication.body)&.truncate(200),
             link: entity_link
           ).deliver_later
           Rails.logger.info "[ProcessorService] ✅ Queued email notification to #{user.email}"
@@ -258,7 +258,7 @@ module InboundEmail
           id: communication.id,
           from: communication.from_address,
           subject: communication.subject,
-          preview: communication.body&.truncate(100)
+          preview: strip_html_tags(communication.body)&.truncate(100)
         },
         entity: {
           type: entity.class.name.downcase,
@@ -276,6 +276,25 @@ module InboundEmail
       Rails.logger.info "[ProcessorService] ✅ Broadcasted toast to User ##{user.id} for #{entity.class.name} ##{entity.id}"
     rescue => e
       Rails.logger.error "[ProcessorService] Failed to broadcast toast: #{e.message}"
+    end
+    
+    # Strip HTML tags to get clean text preview
+    def strip_html_tags(html)
+      return nil if html.blank?
+      
+      # Remove HTML tags using regex
+      text = html.gsub(/<[^>]*>/, '')
+      
+      # Decode common HTML entities
+      text = text.gsub('&nbsp;', ' ')
+                .gsub('&amp;', '&')
+                .gsub('&lt;', '<')
+                .gsub('&gt;', '>')
+                .gsub('&quot;', '"')
+                .gsub('&#39;', "'")
+      
+      # Clean up whitespace
+      text.gsub(/\s+/, ' ').strip
     end
   end
 end
