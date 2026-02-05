@@ -1,0 +1,24 @@
+📧 NEW EMAIL REPLY
+================
+
+You have a reply from <%= @entity_name %>
+
+FROM: <%= @from_address %>
+SUBJECT: <%= @subject %>
+
+---
+
+<%= @preview %>
+
+---
+
+VIEW IN RENTERINSIGHT:
+<%= @full_link %>
+
+This email was sent to a <%= @entity_type %> you manage in RenterInsight.
+
+---
+
+You received this notification because you manage <%= @entity_name %> in RenterInsight.
+
+© <%= Time.current.year %> RenterInsight. All rights reserved.

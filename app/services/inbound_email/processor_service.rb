@@ -74,8 +74,8 @@ module InboundEmail
       
       Rails.logger.info "[ProcessorService] Created Communication ##{communication.id} for #{entity_type} ##{entity_id}"
       
-      # Broadcast notification to user (leverages existing notification system)
-      broadcast_reply_notification(entity, communication)
+      # Send all notifications (toast, email, SMS, bell)
+      send_reply_notifications(entity, communication)
       
       { success: true, communication_id: communication.id }
     end
@@ -148,8 +148,8 @@ module InboundEmail
       end
     end
     
-    # Broadcast reply notification to entity owner
-    def broadcast_reply_notification(entity, communication)
+    # Send comprehensive notifications (toast, email, SMS, bell)
+    def send_reply_notifications(entity, communication)
       # Determine entity owner (user to notify)
       user = case entity
              when Lead
@@ -166,7 +166,7 @@ module InboundEmail
       
       return unless user
       
-      # Entity name for notification
+      # Entity name and link
       entity_name = case entity
                     when Lead
                       "#{entity.first_name} #{entity.last_name}".strip
@@ -180,7 +180,78 @@ module InboundEmail
                       'Unknown'
                     end
       
-      # Broadcast to user's channel
+      entity_type = entity.class.name.downcase
+      entity_link = "/crm/#{entity_type}s/#{entity.id}?tab=communications"
+      
+      # Get user's notification preferences
+      notification_settings = user.notification_settings || {}
+      
+      # 1. Create in-app notification (bell icon)
+      if notification_settings['email_reply_in_app'] != false  # Default: enabled
+        begin
+          Notification.create!(
+            user: user,
+            company: entity.company,
+            category: 'email_reply',
+            title: "Reply from #{entity_name}",
+            message: "#{communication.subject}: #{communication.body&.truncate(100)}",
+            link: entity_link,
+            read: false,
+            metadata: {
+              communication_id: communication.id,
+              entity_type: entity_type,
+              entity_id: entity.id,
+              from_address: communication.from_address
+            }
+          )
+          Rails.logger.info "[ProcessorService] ✅ Created in-app notification for User ##{user.id}"
+        rescue => e
+          Rails.logger.error "[ProcessorService] Failed to create notification: #{e.message}"
+        end
+      end
+      
+      # 2. Send email notification
+      if notification_settings['email_reply_email'] != false && user.email.present?
+        begin
+          NotificationMailer.email_reply(
+            user: user,
+            entity_name: entity_name,
+            entity_type: entity_type,
+            from_address: communication.from_address,
+            subject: communication.subject,
+            preview: communication.body&.truncate(200),
+            link: entity_link
+          ).deliver_later
+          Rails.logger.info "[ProcessorService] ✅ Queued email notification to #{user.email}"
+        rescue => e
+          Rails.logger.error "[ProcessorService] Failed to send email: #{e.message}"
+        end
+      end
+      
+      # 3. Send SMS notification
+      if notification_settings['email_reply_sms'] != false && user.phone.present?
+        begin
+          sms_service = SmsService.new(company: entity.company)
+          sms_service.send_sms(
+            to: user.phone,
+            body: "📧 Reply from #{entity_name}: #{communication.subject}"
+          )
+          Rails.logger.info "[ProcessorService] ✅ Sent SMS to #{user.phone}"
+        rescue => e
+          Rails.logger.error "[ProcessorService] Failed to send SMS: #{e.message}"
+        end
+      end
+      
+      # 4. Broadcast ActionCable toast (already working)
+      broadcast_toast_notification(entity, communication, user, entity_name)
+      
+    rescue => e
+      Rails.logger.error "[ProcessorService] Failed to send notifications: #{e.message}"
+      # Don't fail the whole process if notifications fail
+    end
+    
+    # Broadcast toast notification via ActionCable
+    def broadcast_toast_notification(entity, communication, user, entity_name)
       broadcast_data = {
         type: 'email_reply',
         communication: {
@@ -202,10 +273,9 @@ module InboundEmail
         broadcast_data
       )
       
-      Rails.logger.info "[ProcessorService] Broadcasted reply notification to User ##{user.id} for #{entity.class.name} ##{entity.id}"
+      Rails.logger.info "[ProcessorService] ✅ Broadcasted toast to User ##{user.id} for #{entity.class.name} ##{entity.id}"
     rescue => e
-      Rails.logger.error "[ProcessorService] Failed to broadcast notification: #{e.message}"
-      # Don't fail the whole process if notification fails
+      Rails.logger.error "[ProcessorService] Failed to broadcast toast: #{e.message}"
     end
   end
 end
