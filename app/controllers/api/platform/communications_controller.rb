@@ -851,7 +851,29 @@ module Api
         nil
       end
 
+      # Strip HTML tags and decode HTML entities
+      def strip_html_tags(html_string)
+        return '' if html_string.blank?
+        
+        # Remove all HTML tags
+        text = html_string.gsub(/<[^>]*>/, ' ')
+        
+        # Decode common HTML entities
+        text = text.gsub('&nbsp;', ' ')
+                   .gsub('&amp;', '&')
+                   .gsub('&lt;', '<')
+                   .gsub('&gt;', '>')
+                   .gsub('&quot;', '"')
+                   .gsub('&#39;', "'")
+        
+        # Collapse multiple spaces and trim
+        text.gsub(/\s+/, ' ').strip
+      end
+
       def comm_log_json(comm)
+        # Strip HTML from body for clean preview
+        clean_body = strip_html_tags(comm.body || '')
+        
         {
           id: comm.id,
           leadId: comm.communicable_id,
@@ -860,7 +882,8 @@ module Api
           type: comm.channel,
           direction: comm.direction,
           subject: comm.subject,
-          content: comm.body,
+          content: clean_body,
+          body: clean_body,
           status: comm.status,
           sentAt: comm.sent_at&.iso8601,
           deliveredAt: comm.delivered_at&.iso8601,
