@@ -288,16 +288,8 @@ module InboundEmail
     def strip_html_tags(html)
       return nil if html.blank?
       
-      # Remove HTML tags using regex
-      text = html.gsub(/<[^>]*>/, '')
-      
-      # Decode common HTML entities
-      text = text.gsub('&nbsp;', ' ')
-                .gsub('&amp;', '&')
-                .gsub('&lt;', '<')
-                .gsub('&gt;', '>')
-                .gsub('&quot;', '"')
-                .gsub('&#39;', "'")
+      # Use Rails sanitizer to remove ALL HTML/VML tags (handles Outlook VML)
+      text = ActionView::Base.full_sanitizer.sanitize(html)
       
       # Clean up whitespace
       text.gsub(/\s+/, ' ').strip
