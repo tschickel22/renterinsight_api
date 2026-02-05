@@ -190,8 +190,8 @@ module InboundEmail
       if notification_settings['email_reply_in_app'] != false  # Default: enabled
         begin
           Notification.create!(
-            user: user,
-            company: entity.company,
+            user_id: user.id,
+            company_id: entity.company.id,
             category: 'email_reply',
             title: "Reply from #{entity_name}",
             message: "#{communication.subject}: #{communication.body&.truncate(100)}",
