@@ -153,13 +153,13 @@ module InboundEmail
       # Determine entity owner (user to notify)
       user = case entity
              when Lead
-               entity.owner || entity.company.users.where(is_active: true).first
+               entity.owner || entity.company.users.where(status: 'active').first
              when Contact
-               entity.account&.owner || entity.company.users.where(is_active: true).first
+               entity.account&.owner || entity.company.users.where(status: 'active').first
              when Deal
-               entity.owner || entity.company.users.where(is_active: true).first
+               entity.owner || entity.company.users.where(status: 'active').first
              when Account
-               entity.owner || entity.company.users.where(is_active: true).first
+               entity.owner || entity.company.users.where(status: 'active').first
              else
                nil
              end
