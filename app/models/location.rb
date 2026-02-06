@@ -24,6 +24,11 @@ class Location < ApplicationRecord
   has_many :location_manufacturers, dependent: :destroy
   has_many :manufacturers, through: :location_manufacturers
   
+  # Parts & Inventory Module Associations
+  has_many :bins, dependent: :destroy
+  has_many :stock_balances, dependent: :destroy
+  has_many :inventory_transactions, dependent: :destroy
+  
   # QuickBooks Integration Associations
   has_many :quickbooks_sync_logs, dependent: :destroy
 

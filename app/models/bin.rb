@@ -64,8 +64,8 @@ class Bin < ApplicationRecord
   
   def as_json(options = {})
     super(options.merge(
-      only: [:id, :location_id, :bin_code, :label, :bin_type, :is_default, :active, 
-             :created_at, :updated_at],
+      only: [:id, :location_id, :bin_code, :label, :bin_type, :capacity_cubic_feet, 
+             :notes, :is_default, :active, :created_at, :updated_at],
       methods: [:display_name, :parts_count, :total_units],
       include: {
         location: { only: [:id, :name, :code] }

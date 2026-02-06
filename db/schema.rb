@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_05_220000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_06_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2735,6 +2735,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_05_220000) do
     t.index ["bin_id"], name: "index_stock_balances_on_bin_id"
     t.index ["company_id", "location_id"], name: "index_stock_balances_on_company_id_and_location_id"
     t.index ["company_id", "part_id", "location_id", "bin_id", "serial_number", "lot_number"], name: "index_stock_balances_uniqueness", unique: true
+    t.index ["company_id", "part_id", "location_id", "bin_id"], name: "index_stock_balances_on_company_part_location_bin", unique: true, where: "(bin_id IS NOT NULL)"
+    t.index ["company_id", "part_id", "location_id"], name: "index_stock_balances_on_company_part_location_null_bin", unique: true, where: "(bin_id IS NULL)"
     t.index ["company_id", "part_id"], name: "index_stock_balances_on_company_id_and_part_id"
     t.index ["company_id"], name: "index_stock_balances_on_company_id"
     t.index ["location_id"], name: "index_stock_balances_on_location_id"

@@ -682,7 +682,12 @@ Rails.application.routes.draw do
       end
       
       # Bins
-      resources :bins
+      resources :bins do
+        collection do
+          get :stats
+          post :transfer
+        end
+      end
       
       # Inventory Transactions
       resources :inventory_transactions, path: 'inventory-transactions', only: [:index, :show] do
