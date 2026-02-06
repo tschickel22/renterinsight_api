@@ -42,8 +42,11 @@ class Api::V1::PurchaseOrdersController < ApplicationController
       )
     end
 
-    # Status filter
-    purchase_orders = purchase_orders.where(status: params[:status]) if params[:status].present?
+    # Status filter (supports comma-separated values)
+    if params[:status].present?
+      statuses = params[:status].split(',').map(&:strip)
+      purchase_orders = purchase_orders.where(status: statuses)
+    end
 
     # Supplier filter
     purchase_orders = purchase_orders.where(supplier_id: params[:supplier_id]) if params[:supplier_id].present?
@@ -67,6 +70,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
           location: { only: [:id, :name] },
           created_by: { only: [:id, :first_name, :last_name, :email] },
           lines: {
+            methods: [:part_name, :part_number],
             include: {
               part: { only: [:id, :part_number, :name] }
             }
@@ -100,6 +104,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         created_by: { only: [:id, :first_name, :last_name, :email] },
         approved_by: { only: [:id, :first_name, :last_name, :email] },
         lines: {
+          methods: [:part_name, :part_number, :percent_received, :status],
           include: {
             part: { only: [:id, :part_number, :name, :description] }
           }
@@ -130,7 +135,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         include: {
           supplier: { only: [:id, :name] },
           location: { only: [:id, :name] },
-          lines: { include: { part: { only: [:id, :part_number, :name] } } }
+          lines: { methods: [:part_name, :part_number], include: { part: { only: [:id, :part_number, :name] } } }
         }
       ), status: :created
     else
@@ -146,7 +151,7 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         include: {
           supplier: { only: [:id, :name] },
           location: { only: [:id, :name] },
-          lines: { include: { part: { only: [:id, :part_number, :name] } } }
+          lines: { methods: [:part_name, :part_number], include: { part: { only: [:id, :part_number, :name] } } }
         }
       )
     else
@@ -225,15 +230,15 @@ class Api::V1::PurchaseOrdersController < ApplicationController
 
     transactions = InventoryTransaction.joins(:purchase_order_line)
       .where(purchase_order_lines: { purchase_order_id: @purchase_order.id })
-      .where(transaction_type: 'receipt')
-      .includes(:part, :location, :user)
+      .where(transaction_type: 'receive')
+      .includes(:part, :location, :created_by)
       .order(transaction_date: :desc)
 
     render json: transactions.as_json(
       include: {
-        part: { only: [:id, :part_number, :name] },
+        part: { only: [:id, :sku, :name] },
         location: { only: [:id, :name] },
-        user: { only: [:id, :first_name, :last_name] }
+        created_by: { only: [:id, :first_name, :last_name] }
       }
     )
   end

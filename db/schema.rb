@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_05_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2017,6 +2017,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "manufacturer_id"
+    t.jsonb "images", default: []
     t.index ["barcode"], name: "index_parts_on_barcode"
     t.index ["category_id"], name: "index_parts_on_category_id"
     t.index ["company_id", "active"], name: "index_parts_on_company_id_and_active"
@@ -2025,6 +2026,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
     t.index ["company_id", "sku"], name: "index_parts_on_company_id_and_sku", unique: true, where: "(is_deleted = false)"
     t.index ["company_id"], name: "index_parts_on_company_id"
     t.index ["created_by_id"], name: "index_parts_on_created_by_id"
+    t.index ["images"], name: "index_parts_on_images", using: :gin
     t.index ["manufacturer_id"], name: "index_parts_on_manufacturer_id"
     t.index ["manufacturer_part_no"], name: "index_parts_on_manufacturer_part_no"
     t.index ["qb_item_id"], name: "index_parts_on_qb_item_id"
@@ -2234,6 +2236,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
     t.jsonb "custom_fields", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "received_date"
     t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
     t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
     t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
@@ -2245,6 +2248,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_01_29_000001) do
     t.index ["is_deleted"], name: "index_purchase_orders_on_is_deleted"
     t.index ["location_id"], name: "index_purchase_orders_on_location_id"
     t.index ["order_date"], name: "index_purchase_orders_on_order_date"
+    t.index ["received_date"], name: "index_purchase_orders_on_received_date"
     t.index ["status"], name: "index_purchase_orders_on_status"
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
   end

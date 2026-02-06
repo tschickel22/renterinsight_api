@@ -54,7 +54,7 @@ module Api
         if params[:search].present?
           search_term = "%#{params[:search]}%"
           parts = parts.where(
-            "sku ILIKE ? OR name ILIKE ? OR description ILIKE ? OR manufacturer_name ILIKE ? OR barcode ILIKE ? OR manufacturer_part_no ILIKE ?",
+            "parts.sku ILIKE ? OR parts.name ILIKE ? OR parts.description ILIKE ? OR parts.manufacturer_name ILIKE ? OR parts.barcode ILIKE ? OR parts.manufacturer_part_no ILIKE ?",
             search_term, search_term, search_term, search_term, search_term, search_term
           )
         end
@@ -62,7 +62,13 @@ module Api
         # Apply sorting
         sort_by = params[:sort_by] || 'created_at'
         sort_order = params[:sort_order]&.downcase == 'asc' ? :asc : :desc
-        parts = parts.order(sort_by => sort_order)
+        
+        # Handle sorting by category (joined table)
+        if sort_by == 'category'
+          parts = parts.left_joins(:category).order("part_categories.name #{sort_order}")
+        else
+          parts = parts.order(sort_by => sort_order)
+        end
 
         # Count AFTER search filter (for pagination)
         filtered_count = parts.count
@@ -402,6 +408,64 @@ module Api
         render json: { message: 'Part name deleted' }
       end
 
+      # Upload image to part
+      def upload_image
+        return unless authorize_action!('inventory', 'update')
+
+        @part = @company.parts.find(params[:id])
+        
+        if params[:image].present?
+          # Read the uploaded file
+          uploaded_file = params[:image]
+          
+          # Generate unique filename
+          file_extension = File.extname(uploaded_file.original_filename)
+          unique_filename = "parts/#{@part.id}/#{SecureRandom.uuid}#{file_extension}"
+          
+          # For now, store as Base64 in JSONB (Phase 1 - simple implementation)
+          # In Phase 2, we can move to S3/Cloudinary
+          image_data = {
+            url: "data:#{uploaded_file.content_type};base64,#{Base64.strict_encode64(uploaded_file.read)}",
+            filename: uploaded_file.original_filename,
+            content_type: uploaded_file.content_type,
+            size: uploaded_file.size,
+            uploaded_at: Time.current.iso8601
+          }
+          
+          # Initialize images array if nil
+          @part.images ||= []
+          @part.images << image_data
+          @part.save!
+          
+          render json: { part: @part.as_json, message: 'Image uploaded successfully' }
+        else
+          render json: { error: 'No image provided' }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error "Image upload failed: #{e.message}"
+        render json: { error: 'Image upload failed' }, status: :internal_server_error
+      end
+
+      # Delete image from part
+      def delete_image
+        return unless authorize_action!('inventory', 'update')
+
+        @part = @company.parts.find(params[:id])
+        image_index = params[:image_index].to_i
+        
+        if @part.images && @part.images[image_index]
+          @part.images.delete_at(image_index)
+          @part.save!
+          
+          render json: { part: @part.as_json, message: 'Image deleted successfully' }
+        else
+          render json: { error: 'Image not found' }, status: :not_found
+        end
+      rescue => e
+        Rails.logger.error "Image deletion failed: #{e.message}"
+        render json: { error: 'Image deletion failed' }, status: :internal_server_error
+      end
+
       # Export parts to CSV
       def export
         return unless authorize_action!('inventory', 'read')
@@ -649,6 +713,7 @@ module Api
           supplier_ids: []
         )
         # Note: company_id NOT permitted (tenant isolation)
+        # Note: images are uploaded via upload_image endpoint, not in params
       end
     end
   end

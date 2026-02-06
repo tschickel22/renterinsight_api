@@ -643,6 +643,8 @@ Rails.application.routes.draw do
         member do
           get :stock_by_location, path: 'stock-by-location'
           get :transaction_history, path: 'transaction-history'
+          post :upload_image, path: 'upload-image'
+          delete 'delete-image/:image_index', action: :delete_image, as: :delete_image
         end
         collection do
           get :stats

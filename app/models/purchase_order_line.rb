@@ -2,13 +2,21 @@
 
 class PurchaseOrderLine < ApplicationRecord
   # Associations
-  belongs_to :purchase_order
+  belongs_to :purchase_order, inverse_of: :lines
   belongs_to :part
   has_many :inventory_transactions, dependent: :nullify
   
+  # Delegate part attributes for easier access
+  # Creates methods: part_name, part_number (maps to part.sku)
+  delegate :name, to: :part, prefix: 'part', allow_nil: true
+  delegate :sku, to: :part, prefix: false, allow_nil: true
+  
+  # Alias sku as part_number for frontend compatibility
+  alias_method :part_number, :sku
+  
   # Validations
-  validates :purchase_order_id, presence: true
-  validates :part_id, presence: true
+  validates :purchase_order, presence: true
+  validates :part, presence: true
   validates :line_number, presence: true, numericality: { only_integer: true, greater_than: 0 }
   validates :quantity_ordered, presence: true, numericality: { greater_than: 0 }
   validates :unit_cost, presence: true, numericality: { greater_than_or_equal_to: 0 }
@@ -17,7 +25,8 @@ class PurchaseOrderLine < ApplicationRecord
   
   # Callbacks
   before_save :calculate_line_total
-  after_save :update_purchase_order_totals
+  after_save :update_purchase_order_totals, unless: :only_quantity_received_changed?
+  after_save :update_purchase_order_status, if: :saved_change_to_quantity_received?
   after_destroy :update_purchase_order_totals
   
   # Scopes
@@ -52,6 +61,10 @@ class PurchaseOrderLine < ApplicationRecord
   
   private
   
+  def only_quantity_received_changed?
+    saved_changes.keys == ['quantity_received'] || saved_changes.keys == ['quantity_received', 'updated_at']
+  end
+  
   def calculate_line_total
     subtotal = quantity_ordered * unit_cost
     discount = subtotal * ((discount_percent || 0) / 100.0)
@@ -61,5 +74,50 @@ class PurchaseOrderLine < ApplicationRecord
   def update_purchase_order_totals
     # Just trigger a save - the before_save callback will recalculate totals
     purchase_order.save(validate: false) if purchase_order.persisted?
+  end
+  
+  def update_purchase_order_status
+    po = purchase_order
+    return if po.blank?
+    return if po.status == 'cancelled'
+    
+    # Get all active lines for this PO
+    all_lines = po.lines
+    
+    # Check if all lines are fully received
+    fully_received = all_lines.all? { |line| 
+      (line.quantity_received || 0) >= line.quantity_ordered 
+    }
+    
+    # Check if any lines have been partially received
+    partially_received = all_lines.any? { |line| 
+      (line.quantity_received || 0) > 0 
+    }
+    
+    # Determine new status
+    new_status = if fully_received
+      'received'
+    elsif partially_received
+      'partially_received'
+    else
+      po.status # Keep current status if no receipts
+    end
+    
+    # Only update if status has changed
+    if po.status != new_status
+      updates = { status: new_status }
+      
+      # Set received_date when fully received for the first time
+      if new_status == 'received' && po.received_date.nil?
+        updates[:received_date] = Time.current
+      end
+      
+      po.update_columns(updates)
+      
+      Rails.logger.info "[PO Status] PO ##{po.po_number}: #{po.status} → #{new_status}"
+    end
+  rescue StandardError => e
+    Rails.logger.error "[PO Status Update] Failed: #{e.message}"
+    # Don't fail the save if status update fails
   end
 end

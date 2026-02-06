@@ -154,7 +154,7 @@ class Part < ApplicationRecord
              :manufacturer_name, :default_cost, :average_cost, :last_cost, :list_price, :sale_price, 
              :taxable, :active, :created_at, :updated_at,
              :inventory_method, :is_serialized, :is_lot_tracked,
-             :weight_lbs, :length_inches, :width_inches, :height_inches],
+             :weight_lbs, :length_inches, :width_inches, :height_inches, :images],
       methods: [:display_name, :total_on_hand, :total_available, :inventory_value, 
                 :preferred_supplier, :margin_percent]
     ))

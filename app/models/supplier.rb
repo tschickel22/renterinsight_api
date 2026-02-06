@@ -48,8 +48,10 @@ class Supplier < ApplicationRecord
   
   def as_json(options = {})
     super(options.merge(
-      only: [:id, :name, :code, :account_number, :contact_name, :email, :phone, :website, :payment_terms, 
-             :default_lead_time_days, :active, :created_at, :updated_at],
+      only: [:id, :name, :code, :account_number, :contact_name, :email, :phone, :website, 
+             :address_line1, :address_line2, :city, :state, :zip_code, :country,
+             :tax_id, :notes, :payment_terms, :default_lead_time_days, :active, 
+             :created_at, :updated_at],
       methods: [:display_name, :full_address]
     ))
   end

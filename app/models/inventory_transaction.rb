@@ -22,6 +22,7 @@ class InventoryTransaction < ApplicationRecord
   before_validation :set_defaults, on: :create
   before_create :generate_transaction_number
   after_create :update_stock_balance
+  after_create :update_purchase_order_line_quantity, if: :is_receive_with_po?
   
   scope :for_company, ->(company_id) { where(company_id: company_id) }
   scope :for_part, ->(part_id) { where(part_id: part_id) }
@@ -125,5 +126,29 @@ class InventoryTransaction < ApplicationRecord
   def prevent_changes
     errors.add(:base, "Inventory transactions are immutable and cannot be changed")
     throw(:abort)
+  end
+  
+  def is_receive_with_po?
+    transaction_type == 'receive' && purchase_order_line_id.present?
+  end
+  
+  def update_purchase_order_line_quantity
+    po_line = purchase_order_line
+    return unless po_line
+    
+    # Sum all received quantities for this PO line
+    total_received = InventoryTransaction
+      .where(purchase_order_line_id: po_line.id, transaction_type: 'receive')
+      .sum(:quantity)
+    
+    # Use update! to trigger the after_save callback that updates PO status
+    # Only update if changed to avoid unnecessary callbacks
+    if po_line.quantity_received != total_received
+      po_line.update!(quantity_received: total_received)
+      Rails.logger.info "[PO Line Update] Line ##{po_line.id} received: #{total_received}/#{po_line.quantity_ordered}"
+    end
+  rescue StandardError => e
+    Rails.logger.error "[PO Line Update] Failed: #{e.message}"
+    # Don't fail the transaction if PO update fails
   end
 end
