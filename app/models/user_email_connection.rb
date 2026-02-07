@@ -239,6 +239,98 @@ class UserEmailConnection < ApplicationRecord
     }.compact
   end
   
+  # ========================================
+  # IMAP Methods for Sent Email Sync
+  # ========================================
+  
+  # Derive IMAP server from SMTP server
+  def imap_server
+    return nil unless smtp_provider? && smtp_host.present?
+    
+    case smtp_host.downcase
+    when 'smtp.gmail.com'
+      'imap.gmail.com'
+    when 'smtp.office365.com', 'smtp-mail.outlook.com', 'outlook.office365.com'
+      'outlook.office365.com'
+    when /^smtp\./
+      # Generic replacement: smtp.example.com → imap.example.com
+      smtp_host.gsub(/^smtp\./, 'imap.')
+    else
+      # Unknown provider - can't derive IMAP
+      nil
+    end
+  end
+  
+  # IMAP port (standard SSL port)
+  def imap_port
+    993  # Standard IMAP over SSL port
+  end
+  
+  # Determine sent folder name based on provider
+  def sent_folder_names
+    return [] unless smtp_host.present?
+    
+    case smtp_host.downcase
+    when 'smtp.gmail.com'
+      ['[Gmail]/Sent Mail', 'Sent', '[Gmail]/Sent']
+    when 'smtp.office365.com', 'smtp-mail.outlook.com', 'outlook.office365.com'
+      ['Sent Items', 'Sent']
+    else
+      ['Sent', 'Sent Items', 'Sent Messages']
+    end
+  end
+  
+  # Check if IMAP is available for this connection
+  def imap_available?
+    smtp_provider? && 
+    smtp_credentials_valid? && 
+    imap_server.present?
+  end
+  
+  # Test IMAP connection and return sent folder name
+  def test_imap_connection!
+    return { success: false, error: 'IMAP not available for this connection' } unless imap_available?
+    
+    begin
+      imap = Net::IMAP.new(imap_server, imap_port, true)
+      imap.login(smtp_username, smtp_password_encrypted)
+      
+      # Try to find sent folder
+      sent_folder = nil
+      sent_folder_names.each do |folder|
+        begin
+          imap.select(folder)
+          sent_folder = folder
+          break
+        rescue Net::IMAP::NoResponseError
+          # Folder doesn't exist, try next
+        end
+      end
+      
+      imap.logout
+      imap.disconnect
+      
+      if sent_folder
+        { success: true, message: "IMAP connection successful. Sent folder: #{sent_folder}" }
+      else
+        { success: false, error: "IMAP connected but couldn't find Sent folder. Tried: #{sent_folder_names.join(', ')}" }
+      end
+      
+    rescue Net::IMAP::NoResponseError => e
+      record_error!("IMAP Auth failed: #{e.message}")
+      { success: false, error: "IMAP authentication failed: #{e.message}" }
+    rescue Net::OpenTimeout, Net::ReadTimeout => e
+      record_error!("IMAP timeout: #{e.message}")
+      { success: false, error: "IMAP connection timeout - check host and port" }
+    rescue SocketError => e
+      record_error!("IMAP connection failed: #{e.message}")
+      { success: false, error: "Could not connect to #{imap_server}:#{imap_port}" }
+    rescue => e
+      record_error!(e.message)
+      { success: false, error: e.message }
+    end
+  end
+  
   private
   
   def set_company_from_user

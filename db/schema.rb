@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_06_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_07_010800) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -672,9 +672,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_06_120000) do
     t.string "scheduled_job_id"
     t.datetime "read_at"
     t.datetime "received_at"
+    t.integer "company_id"
+    t.integer "user_id"
     t.index ["channel"], name: "index_communications_on_channel"
     t.index ["communicable_type", "communicable_id"], name: "index_communications_on_communicable"
     t.index ["communication_thread_id"], name: "index_communications_on_communication_thread_id"
+    t.index ["company_id"], name: "index_communications_on_company_id"
     t.index ["created_at"], name: "index_communications_on_created_at"
     t.index ["direction"], name: "index_communications_on_direction"
     t.index ["external_id"], name: "index_communications_on_external_id"
@@ -684,6 +687,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_06_120000) do
     t.index ["scheduled_status"], name: "index_communications_on_scheduled_status"
     t.index ["status"], name: "index_communications_on_status"
     t.index ["template_id"], name: "index_communications_on_template_id"
+    t.index ["user_id"], name: "index_communications_on_user_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -3166,10 +3170,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_06_120000) do
     t.datetime "invitation_expires_at"
     t.jsonb "notification_settings", default: {"lead_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "account_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "contact_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}, "activity_reminders"=>{"enabled"=>true, "channels"=>{"sms"=>false, "bell"=>true, "email"=>false, "popup"=>true}}}
     t.jsonb "custom_permissions", default: []
+    t.string "email_username"
+    t.string "email_password"
+    t.string "smtp_server"
+    t.integer "smtp_port", default: 587
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
     t.index ["email", "invitation_id"], name: "index_users_on_email_and_invitation_id"
+    t.index ["email_username"], name: "index_users_on_email_username"
     t.index ["invitation_id"], name: "index_users_on_invitation_id"
     t.index ["invitation_token"], name: "index_users_on_invitation_token", unique: true
     t.index ["magic_link_token"], name: "index_users_on_magic_link_token", unique: true

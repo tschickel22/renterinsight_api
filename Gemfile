@@ -55,6 +55,7 @@ end
 gem "rack-cors", "~> 3.0"
 gem 'liquid'
 gem 'sidekiq'
+gem 'sidekiq-cron', '~> 1.12'  # Scheduled background jobs
 
 group :test do
   gem 'rspec-rails'
