@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_07_010800) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_08_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -308,6 +308,51 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_07_010800) do
     t.index ["location_id", "bin_code"], name: "index_bins_on_location_id_and_bin_code", unique: true, where: "(is_deleted = false)"
     t.index ["location_id", "is_default"], name: "index_bins_on_location_id_and_is_default"
     t.index ["location_id"], name: "index_bins_on_location_id"
+  end
+
+  create_table "blog_categories", force: :cascade do |t|
+    t.bigint "website_id", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.text "description"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["website_id", "slug"], name: "index_blog_categories_on_website_id_and_slug", unique: true
+    t.index ["website_id"], name: "index_blog_categories_on_website_id"
+  end
+
+  create_table "blog_posts", force: :cascade do |t|
+    t.bigint "website_id", null: false
+    t.bigint "author_id", null: false
+    t.string "title", null: false
+    t.string "slug", null: false
+    t.text "excerpt"
+    t.text "content"
+    t.string "featured_image_url"
+    t.integer "status", default: 0, null: false
+    t.datetime "published_at"
+    t.datetime "scheduled_at"
+    t.string "seo_title"
+    t.text "seo_description"
+    t.string "og_image_url"
+    t.integer "view_count", default: 0
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["author_id"], name: "index_blog_posts_on_author_id"
+    t.index ["published_at"], name: "index_blog_posts_on_published_at"
+    t.index ["status"], name: "index_blog_posts_on_status"
+    t.index ["website_id", "slug"], name: "index_blog_posts_on_website_id_and_slug", unique: true
+    t.index ["website_id"], name: "index_blog_posts_on_website_id"
+  end
+
+  create_table "blog_posts_categories", id: false, force: :cascade do |t|
+    t.bigint "blog_post_id", null: false
+    t.bigint "blog_category_id", null: false
+    t.index ["blog_category_id"], name: "index_blog_posts_categories_on_blog_category_id"
+    t.index ["blog_post_id", "blog_category_id"], name: "index_blog_posts_categories_on_post_and_category", unique: true
+    t.index ["blog_post_id"], name: "index_blog_posts_categories_on_blog_post_id"
   end
 
   create_table "brochure_templates", force: :cascade do |t|
@@ -3430,6 +3475,90 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_07_010800) do
     t.index ["submitted_at"], name: "index_warranty_claims_on_submitted_at"
   end
 
+  create_table "website_media", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "website_id"
+    t.bigint "uploaded_by_id"
+    t.string "name", null: false
+    t.string "url", null: false
+    t.string "file_type", null: false
+    t.string "mime_type"
+    t.bigint "file_size", null: false
+    t.integer "width"
+    t.integer "height"
+    t.string "s3_key"
+    t.string "s3_bucket"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_website_media_on_company_id"
+    t.index ["file_type"], name: "index_website_media_on_file_type"
+    t.index ["uploaded_by_id"], name: "index_website_media_on_uploaded_by_id"
+    t.index ["website_id"], name: "index_website_media_on_website_id"
+  end
+
+  create_table "website_pages", force: :cascade do |t|
+    t.bigint "website_id", null: false
+    t.string "title", null: false
+    t.string "path", null: false
+    t.integer "order", default: 0
+    t.boolean "is_visible", default: true
+    t.jsonb "blocks", default: []
+    t.string "seo_title"
+    t.text "seo_description"
+    t.string "og_image_url"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["order"], name: "index_website_pages_on_order"
+    t.index ["website_id", "path"], name: "index_website_pages_on_website_id_and_path", unique: true
+    t.index ["website_id"], name: "index_website_pages_on_website_id"
+  end
+
+  create_table "website_versions", force: :cascade do |t|
+    t.bigint "website_id", null: false
+    t.bigint "created_by_id", null: false
+    t.string "version_name", null: false
+    t.jsonb "snapshot", null: false
+    t.boolean "is_published_version", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_at"], name: "index_website_versions_on_created_at"
+    t.index ["created_by_id"], name: "index_website_versions_on_created_by_id"
+    t.index ["website_id"], name: "index_website_versions_on_website_id"
+  end
+
+  create_table "websites", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.string "domain"
+    t.string "subdomain"
+    t.integer "status", default: 0, null: false
+    t.integer "build_status", default: 0, null: false
+    t.integer "client_access_level", default: 0, null: false
+    t.jsonb "theme", default: {}
+    t.jsonb "nav_config", default: {}
+    t.jsonb "brand", default: {}
+    t.jsonb "seo_config", default: {}
+    t.jsonb "tracking_config", default: {}
+    t.string "favicon_url"
+    t.datetime "published_at"
+    t.string "preview_url"
+    t.string "live_url"
+    t.string "netlify_site_id"
+    t.string "cloudflare_zone_id"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "slug"], name: "index_websites_on_company_id_and_slug", unique: true
+    t.index ["company_id"], name: "index_websites_on_company_id"
+    t.index ["domain"], name: "index_websites_on_domain", unique: true, where: "(domain IS NOT NULL)"
+    t.index ["location_id"], name: "index_websites_on_location_id"
+    t.index ["subdomain"], name: "index_websites_on_subdomain", unique: true, where: "(subdomain IS NOT NULL)"
+  end
+
   create_table "win_loss_reports", force: :cascade do |t|
     t.integer "deal_id", null: false
     t.string "result", null: false
@@ -3476,6 +3605,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_07_010800) do
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
   add_foreign_key "bins", "locations"
+  add_foreign_key "blog_categories", "websites"
+  add_foreign_key "blog_posts", "users", column: "author_id"
+  add_foreign_key "blog_posts", "websites"
+  add_foreign_key "blog_posts_categories", "blog_categories"
+  add_foreign_key "blog_posts_categories", "blog_posts"
   add_foreign_key "brochures", "companies"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
@@ -3714,6 +3848,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_07_010800) do
   add_foreign_key "warranty_claims", "locations", on_delete: :nullify
   add_foreign_key "warranty_claims", "manufacturers", on_delete: :restrict
   add_foreign_key "warranty_claims", "service_tickets", on_delete: :restrict
+  add_foreign_key "website_media", "companies"
+  add_foreign_key "website_media", "users", column: "uploaded_by_id"
+  add_foreign_key "website_media", "websites"
+  add_foreign_key "website_pages", "websites"
+  add_foreign_key "website_versions", "users", column: "created_by_id"
+  add_foreign_key "website_versions", "websites"
+  add_foreign_key "websites", "companies"
+  add_foreign_key "websites", "locations"
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"
 end
