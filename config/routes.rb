@@ -255,6 +255,31 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== WEBSITE BUILDER ====================
+      resources :websites do
+        member do
+          post :publish
+          post :unpublish
+        end
+        
+        resources :pages, controller: 'website_pages' do
+          collection do
+            post :reorder
+          end
+        end
+        
+        resources :media, controller: 'website_media', only: [:index, :show, :create, :destroy]
+        
+        resources :blog_posts, path: 'blog-posts' do
+          member do
+            post :publish
+            post :unpublish
+          end
+        end
+        
+        resources :blog_categories, path: 'blog-categories'
+      end
+      
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
         member do

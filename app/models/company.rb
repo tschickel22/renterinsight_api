@@ -59,6 +59,10 @@ class Company < ApplicationRecord
   has_many :stock_balances, dependent: :destroy
   has_many :reorder_rules, dependent: :destroy
   
+  # Website Builder Associations
+  has_many :sites, dependent: :destroy
+  has_many :site_media, dependent: :destroy
+  
   # RBAC System Associations
   has_many :roles, dependent: :destroy
   has_many :company_hidden_roles, dependent: :destroy
