@@ -1,90 +1,138 @@
 class Api::V1::WebsiteMediaController < ApplicationController
   before_action :set_company_scope
-  before_action :set_media, only: [:show, :destroy]
+  before_action :set_website, only: [:index, :create]
+  before_action :set_media, only: [:show, :update, :destroy]
 
+  # GET /api/v1/websites/:website_id/media
   def index
     return unless authorize_action!('websites', 'read')
 
-    @media = @company.site_media.where(is_deleted: [false, nil])
+    media_items = @website.website_media.where(is_deleted: [false, nil])
 
-    # Filter by website if provided
-    if params[:website_id].present?
-      @media = @media.where(website_id: params[:website_id])
+    # Apply search filter
+    if params[:search].present?
+      search_term = "%#{params[:search]}%"
+      media_items = media_items.where(
+        "file_name ILIKE ? OR alt_text ILIKE ? OR caption ILIKE ?",
+        search_term, search_term, search_term
+      )
     end
 
-    # Filter by file type if provided
+    # Filter by file type
     if params[:file_type].present?
-      @media = @media.where(file_type: params[:file_type])
+      media_items = media_items.where(file_type: params[:file_type])
     end
 
-    render json: @media
+    # Sort by most recent
+    sort_by = params[:sort_by] || 'created_at'
+    sort_order = params[:sort_order]&.downcase == 'asc' ? :asc : :desc
+    media_items = media_items.order(sort_by => sort_order)
+
+    # Paginate
+    page = (params[:page] || 1).to_i
+    per_page = (params[:per_page] || 50).to_i
+    per_page = [per_page, 200].min
+    
+    total_count = media_items.count
+    media_items = media_items.offset((page - 1) * per_page).limit(per_page)
+
+    render json: {
+      items: media_items.as_json(methods: [:full_url]),
+      meta: {
+        total: total_count,
+        page: page,
+        per_page: per_page,
+        total_pages: (total_count.to_f / per_page).ceil
+      }
+    }
   end
 
+  # GET /api/v1/media/:id (global - not nested under website)
   def show
     return unless authorize_action!('websites', 'read')
-    render json: @media
+
+    render json: @media.as_json(methods: [:full_url])
   end
 
+  # POST /api/v1/websites/:website_id/media
   def create
     return unless authorize_action!('websites', 'create')
 
-    # TODO: Replace with actual S3 upload in Phase 4-5
-    # For now, create placeholder record
-    @media = @company.site_media.build(media_params)
-    @media.uploaded_by = current_user
-    
-    # Determine file_type from mime_type
-    if @media.mime_type.present?
-      @media.file_type = case @media.mime_type
-      when /^image\//
-        'image'
-      when /^video\//
-        'video'
-      else
-        'document'
-      end
-    end
+    # CRITICAL: Scoped to both @company AND @website
+    media = @website.website_media.build(media_params)
+    media.company = @company  # Explicitly set company for dual scope
 
-    # Placeholder URL (Phase 4-5 will use S3)
-    @media.url ||= "https://placeholder.example.com/#{@media.name}"
-
-    if @media.save
-      render json: @media, status: :created
+    if media.save
+      render json: media.as_json(methods: [:full_url]), status: :created
     else
-      render json: { errors: @media.errors }, status: :unprocessable_entity
+      render json: { errors: media.errors.full_messages }, status: :unprocessable_entity
     end
   end
 
+  # PATCH/PUT /api/v1/media/:id
+  def update
+    return unless authorize_action!('websites', 'update')
+
+    if @media.update(media_params)
+      render json: @media.as_json(methods: [:full_url])
+    else
+      render json: { errors: @media.errors.full_messages }, status: :unprocessable_entity
+    end
+  end
+
+  # DELETE /api/v1/media/:id
   def destroy
     return unless authorize_action!('websites', 'delete')
 
-    @media.update!(is_deleted: true)
-    
-    # TODO: Delete from S3 in Phase 4-5
-    
+    @media.update!(is_deleted: true, deleted_at: Time.current)
     head :no_content
+  end
+
+  # GET /api/v1/media/stats
+  def stats
+    return unless authorize_action!('websites', 'read')
+
+    base_media = @company.website_media.where(is_deleted: [false, nil])
+
+    # Filter by website if provided
+    base_media = base_media.where(website_id: params[:website_id]) if params[:website_id].present?
+
+    render json: {
+      total: base_media.count,
+      images: base_media.where(file_type: WebsiteMedia.file_types[:image]).count,
+      videos: base_media.where(file_type: WebsiteMedia.file_types[:video]).count,
+      documents: base_media.where(file_type: WebsiteMedia.file_types[:document]).count,
+      total_size: base_media.sum(:file_size)
+    }
   end
 
   private
 
+  def set_website
+    # CRITICAL: Always use @company scope
+    @website = @company.websites.find(params[:website_id])
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Website not found' }, status: :not_found
+  end
+
   def set_media
-    @media = @company.site_media.find(params[:id])
+    # CRITICAL: Media belongs to company, not just website
+    @media = @company.website_media.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Media not found' }, status: :not_found
   end
 
   def media_params
-    params.require(:media).permit(
-      :name,
-      :url,
-      :mime_type,
+    # CRITICAL: NEVER permit company_id or website_id
+    # company_id set via @company, website_id set via @website.website_media.build()
+    params.require(:website_media).permit(
+      :file_name,
+      :file_url,
       :file_size,
-      :width,
-      :height,
-      :website_id,
-      :s3_key,
-      :s3_bucket
+      :file_type,
+      :mime_type,
+      :alt_text,
+      :caption
     )
-    # file_type is auto-determined from mime_type
   end
 end

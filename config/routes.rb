@@ -260,24 +260,53 @@ Rails.application.routes.draw do
         member do
           post :publish
           post :unpublish
+          post :sync_branding  # Sync branding from Company/Location settings
         end
         
+        collection do
+          get :stats
+          get :branding_preview  # Preview branding before sync
+        end
+        
+        # Website Pages (nested under websites)
         resources :pages, controller: 'website_pages' do
-          collection do
+          member do
+            post :show_page, path: 'show'
+            post :hide_page, path: 'hide'
             post :reorder
+          end
+          
+          collection do
+            post :bulk_reorder
           end
         end
         
-        resources :media, controller: 'website_media', only: [:index, :show, :create, :destroy]
+        # Website Media (nested under websites)
+        resources :media, controller: 'website_media'
         
-        resources :blog_posts, path: 'blog-posts' do
+        # Blog Posts (nested under websites)
+        resources :blog_posts, path: 'blog/posts', controller: 'blog_posts' do
           member do
             post :publish
             post :unpublish
+            post :schedule
+            post :increment_views
           end
         end
         
-        resources :blog_categories, path: 'blog-categories'
+        # Blog Categories (nested under websites)
+        resources :blog_categories, path: 'blog/categories', controller: 'blog_categories' do
+          collection do
+            post :bulk_reorder
+          end
+        end
+      end
+      
+      # Global media endpoints (not nested under websites)
+      resources :media, controller: 'website_media', only: [:show, :update, :destroy] do
+        collection do
+          get :stats
+        end
       end
       
       # ==================== VEHICLES/INVENTORY ====================

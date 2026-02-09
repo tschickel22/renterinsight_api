@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_08_000007) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_09_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3510,6 +3510,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_08_000007) do
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "style", default: {}
     t.index ["order"], name: "index_website_pages_on_order"
     t.index ["website_id", "path"], name: "index_website_pages_on_website_id_and_path", unique: true
     t.index ["website_id"], name: "index_website_pages_on_website_id"

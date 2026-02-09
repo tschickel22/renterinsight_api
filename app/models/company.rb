@@ -60,6 +60,7 @@ class Company < ApplicationRecord
   has_many :reorder_rules, dependent: :destroy
   
   # Website Builder Associations
+  has_many :websites, dependent: :destroy
   has_many :sites, dependent: :destroy
   has_many :site_media, dependent: :destroy
   
