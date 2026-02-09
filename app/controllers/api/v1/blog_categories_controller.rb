@@ -21,7 +21,7 @@ class Api::V1::BlogCategoriesController < ApplicationController
     # Sort by order, then name
     sort_by = params[:sort_by] || 'order'
     sort_order = params[:sort_order]&.downcase == 'asc' ? :asc : :desc
-    categories = categories.order(sort_by => sort_order, :name)
+    categories = categories.order(sort_by => sort_order).order(:name)
 
     render json: categories.as_json(methods: [:posts_count])
   end
