@@ -18,34 +18,41 @@ class Api::V1::WebsitePagesController < ApplicationController
     # Filter by visibility
     pages = pages.where(is_visible: params[:is_visible]) if params[:is_visible].present?
 
-    # Filter by parent (top-level pages or children)
-    if params[:parent_id].present?
-      pages = pages.where(parent_page_id: params[:parent_id])
-    elsif params[:top_level] == 'true'
-      pages = pages.where(parent_page_id: nil)
-    end
+    # COMMENTED OUT - parent_page_id column doesn't exist yet
+    # # Filter by parent (top-level pages or children)
+    # if params[:parent_id].present?
+    #   pages = pages.where(parent_page_id: params[:parent_id])
+    # elsif params[:top_level] == 'true'
+    #   pages = pages.where(parent_page_id: nil)
+    # end
 
     # Sort by order, then title
     pages = pages.order(:order, :title)
 
-    render json: pages.as_json(
-      include: {
-        parent_page: { only: [:id, :title, :path] },
-        child_pages: { only: [:id, :title, :path, :order] }
-      }
-    )
+    # COMMENTED OUT - parent_page and child_pages associations don't exist yet
+    # render json: pages.as_json(
+    #   include: {
+    #     parent_page: { only: [:id, :title, :path] },
+    #     child_pages: { only: [:id, :title, :path, :order] }
+    #   }
+    # )
+    
+    render json: { items: pages.as_json }
   end
 
   # GET /api/v1/websites/:website_id/pages/:id
   def show
     return unless authorize_action!('websites', 'read')
 
-    render json: @page.as_json(
-      include: {
-        parent_page: { only: [:id, :title, :path] },
-        child_pages: { only: [:id, :title, :path, :order, :is_visible] }
-      }
-    )
+    # COMMENTED OUT - parent_page and child_pages associations don't exist yet
+    # render json: @page.as_json(
+    #   include: {
+    #     parent_page: { only: [:id, :title, :path] },
+    #     child_pages: { only: [:id, :title, :path, :order, :is_visible] }
+    #   }
+    # )
+    
+    render json: @page.as_json
   end
 
   # POST /api/v1/websites/:website_id/pages
@@ -163,13 +170,23 @@ class Api::V1::WebsitePagesController < ApplicationController
       :path,
       :order,
       :is_visible,
-      :parent_page_id,
+      :parent_page_id,  # Will be ignored if column doesn't exist
       :seo_title,
       :seo_description,
       :og_image_url,
       :robots,
       :canonical_path,
-      blocks: []  # JSONB array
+      style: {},  # Permit page-level style settings (backgroundColor, backgroundImage, etc.)
+      blocks: [
+        :id,
+        :type,
+        :order,
+        content: {},  # Permit any content hash (JSONB flexibility)
+        spacing: {},
+        borders: {},
+        shadows: {},
+        filters: {}
+      ]
     )
   end
 end

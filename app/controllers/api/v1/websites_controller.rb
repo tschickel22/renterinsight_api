@@ -244,19 +244,53 @@ class Api::V1::WebsitesController < ApplicationController
     render json: { error: 'Website not found' }, status: :not_found
   end
   
+  # Helper to ensure color has # prefix
+  def normalize_color(color)
+    return nil if color.blank?
+    color = color.to_s.strip
+    color.start_with?('#') ? color : "##{color}"
+  end
+  
   # Extract branding from Location settings
+  # FIXED: Uses company branding as proper fallback since LocationSettingsResolver cascade wasn't working
   def extract_location_branding(location)
-    resolved_branding = location.resolved_branding_settings || {}
+    # First try location's own branding_settings (the raw column, not resolver)
+    location_branding = location.branding_settings || {}
+    Rails.logger.info "[Website Sync] Location own branding_settings: #{location_branding.inspect}"
+    
+    # Get company branding as base/fallback
+    company_branding = Setting.get('Company', location.company.id, 'branding') || {}
+    Rails.logger.info "[Website Sync] Company branding for fallback: #{company_branding.inspect}"
+    
+    # Location colors (check both camelCase and snake_case)
+    loc_primary = location_branding['primaryColor'] || location_branding['primary_color']
+    loc_secondary = location_branding['secondaryColor'] || location_branding['secondary_color']
+    loc_font = location_branding['fontFamily'] || location_branding['font_family']
+    loc_logo = location_branding['logo'] || location_branding['logo_url'] || location_branding['portalLogo']
+    
+    # Company colors (check both camelCase and snake_case)
+    company_primary = company_branding['primaryColor'] || company_branding['primary_color']
+    company_secondary = company_branding['secondaryColor'] || company_branding['secondary_color']
+    company_font = company_branding['fontFamily'] || company_branding['font_family']
+    company_logo = company_branding['logo'] || company_branding['logo_url'] || company_branding['portalLogo']
+    
+    # Use location values if present, otherwise fall back to company, then defaults
+    primary_color = normalize_color(loc_primary.presence || company_primary) || '#3b82f6'
+    secondary_color = normalize_color(loc_secondary.presence || company_secondary) || '#8b5cf6'
+    font_family = loc_font.presence || company_font || 'Inter'
+    logo = loc_logo.presence || company_logo
+    
+    Rails.logger.info "[Website Sync] Final location branding - primary: #{primary_color}, secondary: #{secondary_color}, font: #{font_family}"
     
     {
       theme: {
-        primary_color: resolved_branding['primary_color'] || resolved_branding['primaryColor'],
-        secondary_color: resolved_branding['secondary_color'] || resolved_branding['secondaryColor'],
-        font_family: resolved_branding['font_family'] || resolved_branding['fontFamily'] || 'Inter'
+        primary_color: primary_color,
+        secondary_color: secondary_color,
+        font_family: font_family
       },
       brand: {
         company_name: location.company.name,
-        logo_url: resolved_branding['logo'] || resolved_branding['logo_url'],
+        logo_url: logo,
         phone: location.phone,
         email: location.email,
         address: location.address_line1,
@@ -264,7 +298,7 @@ class Api::V1::WebsitesController < ApplicationController
         state: location.state,
         zip: location.zip_code,
         country: location.country || 'US'
-      },
+      }.compact,
       nav_config: {
         logo_position: 'left',
         layout: 'horizontal',
@@ -275,17 +309,30 @@ class Api::V1::WebsitesController < ApplicationController
   
   # Extract branding from Company settings
   def extract_company_branding(company)
-    # Company-level branding (if stored in platform_settings or similar)
-    # For now, use sensible defaults with company name
+    company_branding = Setting.get('Company', company.id, 'branding') || {}
+    
+    Rails.logger.info "[Website Sync] Company branding: #{company_branding.inspect}"
+    
+    # Handle both camelCase and snake_case keys
+    primary_color = normalize_color(company_branding['primaryColor'] || company_branding['primary_color']) || '#3b82f6'
+    secondary_color = normalize_color(company_branding['secondaryColor'] || company_branding['secondary_color']) || '#8b5cf6'
+    font_family = company_branding['fontFamily'] || company_branding['font_family'] || 'Inter'
+    logo = company_branding['logo'] || company_branding['logo_url'] || company_branding['portalLogo']
+    
+    Rails.logger.info "[Website Sync] Final company branding - primary: #{primary_color}, secondary: #{secondary_color}, font: #{font_family}"
+    
     {
       theme: {
-        primary_color: '#3b82f6',
-        secondary_color: '#8b5cf6',
-        font_family: 'Inter'
+        primary_color: primary_color,
+        secondary_color: secondary_color,
+        font_family: font_family
       },
       brand: {
-        company_name: company.name
-      },
+        company_name: company.name,
+        logo_url: logo,
+        phone: company_branding['phone'],
+        email: company_branding['email']
+      }.compact,
       nav_config: {
         logo_position: 'left',
         layout: 'horizontal',
@@ -316,7 +363,10 @@ class Api::V1::WebsitesController < ApplicationController
         :secondary_color,
         :accent_color,
         :font_family,
+        :font_size_base,
         :heading_font,
+        :header_style,
+        :footer_style,
         :custom_css
       ],
       nav_config: [
