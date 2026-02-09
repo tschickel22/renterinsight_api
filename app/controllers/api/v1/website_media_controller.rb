@@ -13,8 +13,8 @@ class Api::V1::WebsiteMediaController < ApplicationController
     if params[:search].present?
       search_term = "%#{params[:search]}%"
       media_items = media_items.where(
-        "file_name ILIKE ? OR alt_text ILIKE ? OR caption ILIKE ?",
-        search_term, search_term, search_term
+        "name ILIKE ?",
+        search_term
       )
     end
 
@@ -58,14 +58,40 @@ class Api::V1::WebsiteMediaController < ApplicationController
   def create
     return unless authorize_action!('websites', 'create')
 
-    # CRITICAL: Scoped to both @company AND @website
-    media = @website.website_media.build(media_params)
-    media.company = @company  # Explicitly set company for dual scope
+    # Check if file is provided
+    unless params[:file].present?
+      return render json: { error: 'No file provided' }, status: :unprocessable_entity
+    end
 
-    if media.save
-      render json: media.as_json(methods: [:full_url]), status: :created
-    else
-      render json: { errors: media.errors.full_messages }, status: :unprocessable_entity
+    file = params[:file]
+
+    # Upload to S3
+    begin
+      s3_service = S3UploadService.new
+      s3_result = s3_service.upload(file, folder: "websites/#{@website.id}/media")
+
+      # CRITICAL: Scoped to both @company AND @website
+      media = @website.website_media.build(
+        name: file.original_filename,
+        url: s3_result[:url],
+        s3_key: s3_result[:key],  # Store S3 key for presigned URLs
+        s3_bucket: ENV['AWS_S3_BUCKET'],
+        file_size: s3_result[:size],
+        mime_type: s3_result[:content_type],
+        file_type: determine_file_type(s3_result[:content_type])
+      )
+      media.company = @company  # Explicitly set company for dual scope
+
+      if media.save
+        render json: media.as_json(methods: [:full_url]), status: :created
+      else
+        # Rollback: delete from S3 if DB save fails
+        s3_service.delete(s3_result[:key])
+        render json: { errors: media.errors.full_messages }, status: :unprocessable_entity
+      end
+    rescue StandardError => e
+      Rails.logger.error("S3 upload failed: #{e.message}")
+      render json: { error: "Upload failed: #{e.message}" }, status: :internal_server_error
     end
   end
 
@@ -125,14 +151,20 @@ class Api::V1::WebsiteMediaController < ApplicationController
   def media_params
     # CRITICAL: NEVER permit company_id or website_id
     # company_id set via @company, website_id set via @website.website_media.build()
-    params.require(:website_media).permit(
-      :file_name,
-      :file_url,
-      :file_size,
-      :file_type,
-      :mime_type,
+    # name, url, s3_key, s3_bucket are set programmatically during upload
+    params.permit(
       :alt_text,
-      :caption
+      :caption,
+      :width,
+      :height
     )
+  end
+
+  # Determine file type from MIME type
+  def determine_file_type(mime_type)
+    return 'image' if mime_type&.start_with?('image/')
+    return 'video' if mime_type&.start_with?('video/')
+    return 'document' if mime_type&.match?(/(pdf|msword|wordprocessingml|spreadsheet|presentation)/)
+    'other'
   end
 end

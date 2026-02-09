@@ -93,6 +93,8 @@ gem 'httparty'
 
 # AWS SDK for SES email sending
 gem 'aws-sdk-ses', '~> 1.0'
+# AWS SDK for S3 file storage
+gem 'aws-sdk-s3', '~> 1.0'
 
 # Additional Communication Services
 gem 'sendgrid-ruby'
