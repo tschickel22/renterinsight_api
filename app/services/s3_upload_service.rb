@@ -44,7 +44,7 @@ class S3UploadService
         key: key,
         body: file.respond_to?(:read) ? file.read : File.read(file.path),
         content_type: content_type,
-        acl: 'private',  # Keep private, use presigned URLs
+        # No ACL needed - bucket policy makes all objects public
         metadata: {
           'original_filename' => file.original_filename || File.basename(file.path),
           'uploaded_at' => Time.now.iso8601
@@ -54,7 +54,7 @@ class S3UploadService
       # Get file size
       file_size = file.respond_to?(:size) ? file.size : File.size(file.path)
       
-      # Return S3 URL (we'll generate presigned URLs when needed)
+      # Return permanent public S3 URL
       {
         url: "https://#{bucket_name}.s3.#{region}.amazonaws.com/#{key}",
         key: key,
