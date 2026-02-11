@@ -1,0 +1,316 @@
+# API controller for managing custom domains via Cloudflare for SaaS
+class Api::V1::CompanyDomainsController < ApplicationController
+  before_action :set_company_scope
+  before_action :set_domain, only: [:show, :update, :destroy, :verify, :check_dns, :activate, :deactivate]
+  
+  # GET /api/v1/company_domains
+  def index
+    return unless authorize_action!('company_settings', 'read')
+    
+    domains = @company.company_domains
+                      .order(created_at: :desc)
+                      .includes(:website)
+    
+    render json: {
+      domains: domains.map { |domain| domain_json(domain) },
+      cloudflare_enabled: cloudflare_enabled?
+    }
+  end
+  
+  # GET /api/v1/company_domains/:id
+  def show
+    return unless authorize_action!('company_settings', 'read')
+    
+    render json: { domain: domain_json(@domain) }
+  end
+  
+  # POST /api/v1/company_domains
+  def create
+    return unless authorize_action!('company_settings', 'update')
+    
+    unless cloudflare_enabled?
+      return render json: { 
+        error: 'Cloudflare for SaaS is not enabled for this installation' 
+      }, status: :forbidden
+    end
+    
+    hostname = params[:hostname]&.strip
+    
+    if hostname.blank?
+      return render json: { error: 'Hostname is required' }, status: :unprocessable_entity
+    end
+    
+    # Check if domain already exists
+    existing = CompanyDomain.find_by(hostname: hostname)
+    if existing
+      return render json: { 
+        error: "Domain #{hostname} is already registered" 
+      }, status: :unprocessable_entity
+    end
+    
+    # Create domain record
+    domain = @company.company_domains.build(
+      hostname: hostname,
+      website_id: params[:website_id],
+      force_ssl: params[:force_ssl] != false,
+      force_www: params[:force_www] || false,
+      redirect_type: params[:redirect_type] || 'none',
+      verification_status: 'pending'
+    )
+    
+    unless domain.save
+      return render json: { 
+        error: domain.errors.full_messages.join(', ') 
+      }, status: :unprocessable_entity
+    end
+    
+    # Add to Cloudflare
+    begin
+      cloudflare_service = CloudflareSaasService.new
+      cf_response = cloudflare_service.add_custom_hostname(hostname)
+      
+      # Parse response and update domain
+      parsed = cloudflare_service.parse_custom_hostname_response(cf_response)
+      domain.update!(
+        cloudflare_custom_hostname_id: parsed[:custom_hostname_id],
+        verification_status: parsed[:verification_status],
+        verification_records: parsed[:verification_records],
+        ssl_status: parsed[:ssl_status],
+        cname_target: parsed[:cname_target]
+      )
+      
+      Rails.logger.info "[CompanyDomains] Created domain #{hostname} for company #{@company.id}"
+      
+      render json: { 
+        domain: domain_json(domain.reload),
+        message: 'Custom domain added successfully. Please configure DNS records.' 
+      }, status: :created
+      
+    rescue CloudflareSaasService::CloudflareError => e
+      domain.destroy
+      Rails.logger.error "[CompanyDomains] Cloudflare error: #{e.message}"
+      render json: { error: "Cloudflare error: #{e.message}" }, status: :unprocessable_entity
+    end
+  end
+  
+  # PATCH /api/v1/company_domains/:id
+  def update
+    return unless authorize_action!('company_settings', 'update')
+    
+    update_params = params.permit(:force_ssl, :force_www, :redirect_type)
+    
+    if @domain.update(update_params)
+      render json: { 
+        domain: domain_json(@domain),
+        message: 'Domain settings updated' 
+      }
+    else
+      render json: { error: @domain.errors.full_messages.join(', ') }, status: :unprocessable_entity
+    end
+  end
+  
+  # DELETE /api/v1/company_domains/:id
+  def destroy
+    return unless authorize_action!('company_settings', 'update')
+    
+    # Delete from Cloudflare first if it exists
+    if @domain.cloudflare_custom_hostname_id.present?
+      begin
+        cloudflare_service = CloudflareSaasService.new
+        cloudflare_service.delete_custom_hostname(@domain.cloudflare_custom_hostname_id)
+      rescue CloudflareSaasService::CloudflareError => e
+        Rails.logger.warn "[CompanyDomains] Failed to delete from Cloudflare: #{e.message}"
+        # Continue with local deletion anyway
+      end
+    end
+    
+    @domain.destroy
+    
+    Rails.logger.info "[CompanyDomains] Deleted domain #{@domain.hostname} for company #{@company.id}"
+    
+    render json: { message: 'Custom domain removed' }
+  end
+  
+  # POST /api/v1/company_domains/:id/verify
+  def verify
+    return unless authorize_action!('company_settings', 'update')
+    
+    unless @domain.cloudflare_custom_hostname_id.present?
+      return render json: { error: 'Domain not registered with Cloudflare' }, status: :unprocessable_entity
+    end
+    
+    begin
+      cloudflare_service = CloudflareSaasService.new
+      cf_response = cloudflare_service.check_custom_hostname_status(@domain.cloudflare_custom_hostname_id)
+      
+      # Parse and update status
+      parsed = cloudflare_service.parse_custom_hostname_response(cf_response)
+      @domain.update!(
+        verification_status: parsed[:verification_status],
+        ssl_status: parsed[:ssl_status],
+        ssl_issued_at: parsed[:ssl_status] == 'active' ? Time.current : @domain.ssl_issued_at,
+        dns_checked_at: Time.current,
+        dns_error: nil
+      )
+      
+      if @domain.verified? && @domain.ssl_active?
+        @domain.activate! unless @domain.active?
+        
+        render json: { 
+          domain: domain_json(@domain.reload),
+          message: 'Domain verified and SSL certificate issued! Your custom domain is ready to use.',
+          verified: true
+        }
+      elsif @domain.verified?
+        render json: { 
+          domain: domain_json(@domain.reload),
+          message: 'Domain verified. Waiting for SSL certificate...',
+          verified: true,
+          ssl_pending: true
+        }
+      else
+        render json: { 
+          domain: domain_json(@domain.reload),
+          message: 'Domain verification pending. Please check DNS configuration.',
+          verified: false
+        }
+      end
+      
+    rescue CloudflareSaasService::CloudflareError => e
+      @domain.update(dns_error: e.message, dns_checked_at: Time.current)
+      Rails.logger.error "[CompanyDomains] Verification failed: #{e.message}"
+      render json: { error: e.message, verified: false }, status: :unprocessable_entity
+    end
+  end
+  
+  # POST /api/v1/company_domains/:id/check_dns
+  def check_dns
+    return unless authorize_action!('company_settings', 'read')
+    
+    unless @domain.cname_target.present?
+      return render json: { 
+        configured: false, 
+        message: 'No CNAME target available yet' 
+      }
+    end
+    
+    # Check if DNS is configured correctly
+    begin
+      require 'resolv'
+      resolver = Resolv::DNS.new
+      
+      # Look up CNAME record
+      cname_records = []
+      begin
+        cname_records = resolver.getresources(@domain.hostname, Resolv::DNS::Resource::IN::CNAME)
+      rescue Resolv::ResolvError
+        # No CNAME found, that's okay
+      end
+      
+      configured = cname_records.any? { |r| r.name.to_s.include?('cloudflare') || r.name.to_s == @domain.cname_target }
+      
+      if configured
+        @domain.update(dns_checked_at: Time.current, dns_error: nil)
+        render json: { 
+          configured: true,
+          message: 'DNS is configured correctly',
+          records_found: cname_records.map { |r| r.name.to_s }
+        }
+      else
+        render json: { 
+          configured: false,
+          message: 'CNAME record not found or incorrect. Please add the DNS record.',
+          expected: @domain.cname_target,
+          records_found: cname_records.map { |r| r.name.to_s }
+        }
+      end
+      
+    rescue => e
+      Rails.logger.error "[CompanyDomains] DNS check failed: #{e.message}"
+      render json: { 
+        configured: false, 
+        message: "DNS lookup failed: #{e.message}" 
+      }, status: :unprocessable_entity
+    end
+  end
+  
+  # POST /api/v1/company_domains/:id/activate
+  def activate
+    return unless authorize_action!('company_settings', 'update')
+    
+    unless @domain.verified? && @domain.ssl_active?
+      return render json: { 
+        error: 'Domain must be verified and have active SSL before activation' 
+      }, status: :unprocessable_entity
+    end
+    
+    @domain.activate!
+    
+    render json: { 
+      domain: domain_json(@domain),
+      message: 'Custom domain activated' 
+    }
+  end
+  
+  # POST /api/v1/company_domains/:id/deactivate
+  def deactivate
+    return unless authorize_action!('company_settings', 'update')
+    
+    @domain.deactivate!
+    
+    render json: { 
+      domain: domain_json(@domain),
+      message: 'Custom domain deactivate' 
+    }
+  end
+  
+  private
+  
+  def set_domain
+    @domain = @company.company_domains.find(params[:id])
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Domain not found' }, status: :not_found
+  end
+  
+  def cloudflare_enabled?
+    # Check if Cloudflare credentials are configured
+    Rails.application.credentials.dig(:cloudflare, :zone_id).present? &&
+    Rails.application.credentials.dig(:cloudflare, :api_token).present?
+  end
+  
+  def domain_json(domain)
+    {
+      id: domain.id,
+      hostname: domain.hostname,
+      domain_root: domain.domain_root,
+      full_url: domain.full_url,
+      
+      # Status
+      active: domain.active,
+      verification_status: domain.verification_status,
+      ssl_status: domain.ssl_status,
+      ready_for_use: domain.ready_for_use?,
+      
+      # DNS configuration
+      cname_target: domain.cname_target,
+      verification_records: domain.dns_records_for_display,
+      dns_checked_at: domain.dns_checked_at,
+      dns_error: domain.dns_error,
+      
+      # SSL certificate
+      ssl_issued_at: domain.ssl_issued_at,
+      ssl_expires_at: domain.ssl_expires_at,
+      
+      # Settings
+      force_ssl: domain.force_ssl,
+      force_www: domain.force_www,
+      redirect_type: domain.redirect_type,
+      
+      # Metadata
+      activated_at: domain.activated_at,
+      deactivated_at: domain.deactivated_at,
+      created_at: domain.created_at,
+      updated_at: domain.updated_at
+    }
+  end
+end

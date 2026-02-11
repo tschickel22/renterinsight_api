@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_09_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_10_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -784,6 +784,36 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_09_210000) do
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
     t.index ["use_rbac_system"], name: "index_companies_on_use_rbac_system"
     t.index ["verified_email_domains"], name: "idx_companies_verified_domains", using: :gin
+  end
+
+  create_table "company_domains", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "website_id"
+    t.string "hostname", null: false
+    t.string "domain_root"
+    t.string "cloudflare_custom_hostname_id"
+    t.string "verification_status"
+    t.jsonb "verification_records", default: {}
+    t.string "ssl_status"
+    t.datetime "ssl_issued_at"
+    t.datetime "ssl_expires_at"
+    t.string "cname_target"
+    t.datetime "dns_checked_at"
+    t.string "dns_error"
+    t.boolean "active", default: false
+    t.datetime "activated_at"
+    t.datetime "deactivated_at"
+    t.boolean "force_ssl", default: true
+    t.boolean "force_www", default: false
+    t.string "redirect_type"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["cloudflare_custom_hostname_id"], name: "index_company_domains_on_cloudflare_custom_hostname_id"
+    t.index ["company_id", "active"], name: "index_company_domains_on_company_id_and_active"
+    t.index ["company_id"], name: "index_company_domains_on_company_id"
+    t.index ["hostname"], name: "index_company_domains_on_hostname", unique: true
+    t.index ["verification_status"], name: "index_company_domains_on_verification_status"
+    t.index ["website_id"], name: "index_company_domains_on_website_id"
   end
 
   create_table "company_hidden_roles", force: :cascade do |t|
@@ -3639,6 +3669,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_09_210000) do
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
+  add_foreign_key "company_domains", "companies"
+  add_foreign_key "company_domains", "websites"
   add_foreign_key "company_hidden_roles", "companies"
   add_foreign_key "company_hidden_roles", "roles"
   add_foreign_key "company_manufacturers", "companies"

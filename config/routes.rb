@@ -432,6 +432,16 @@ Rails.application.routes.draw do
       # ==================== BROCHURE TEMPLATES ====================
       resources :brochure_templates, path: 'brochure-templates', only: [:index, :show, :create, :update, :destroy]
       
+      # ==================== COMPANY DOMAINS (CUSTOM DOMAINS) ====================
+      resources :company_domains, path: 'company-domains' do
+        member do
+          post :verify
+          post :check_dns, path: 'check-dns'
+          post :activate
+          post :deactivate
+        end
+      end
+      
       # ==================== RBAC ROLES ====================
       resources :roles do
         member do
