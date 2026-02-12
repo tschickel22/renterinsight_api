@@ -108,7 +108,25 @@ class Api::V1::WebsitesController < ApplicationController
     end
 
     if @website.save
-      render json: @website, status: :created
+      # Create pages from template if template_data provided
+      if params[:template_data].present?
+        create_pages_from_template(@website, params[:template_data])
+      else
+        # Create default home page if no template
+        @website.website_pages.create!(
+          title: 'Home',
+          path: '/',
+          order: 0,
+          is_visible: true,
+          blocks: []
+        )
+      end
+      
+      render json: @website.as_json(
+        include: {
+          website_pages: { only: [:id, :title, :path, :is_visible, :order] }
+        }
+      ), status: :created
     else
       render json: { errors: @website.errors.full_messages }, status: :unprocessable_entity
     end
@@ -244,6 +262,31 @@ class Api::V1::WebsitesController < ApplicationController
     render json: { error: 'Website not found' }, status: :not_found
   end
   
+  # Helper to create pages from template data
+  def create_pages_from_template(website, template_data)
+    pages = template_data[:pages] || template_data['pages'] || []
+    
+    Rails.logger.info "[Website] Creating #{pages.length} pages from template for website #{website.id}"
+    
+    pages.each_with_index do |page_data, index|
+      page_data = page_data.with_indifferent_access if page_data.is_a?(Hash)
+      
+      website.website_pages.create!(
+        title: page_data[:title] || page_data[:name],
+        path: page_data[:path] || "/#{(page_data[:title] || page_data[:name]).to_s.parameterize}",
+        order: page_data[:order] || index,
+        is_visible: page_data[:is_visible].nil? ? true : page_data[:is_visible],
+        blocks: page_data[:blocks] || []
+      )
+    end
+    
+    Rails.logger.info "[Website] Successfully created #{pages.length} pages for website #{website.id}"
+  rescue => e
+    Rails.logger.error "[Website] Failed to create pages from template: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    # Don't fail the website creation, just log the error
+  end
+  
   # Helper to ensure color has # prefix
   def normalize_color(color)
     return nil if color.blank?
@@ -369,12 +412,7 @@ class Api::V1::WebsitesController < ApplicationController
         :footer_style,
         :custom_css
       ],
-      nav_config: [
-        :logo_position,
-        :layout,
-        :sticky,
-        items: [:label, :url, :target, :order, :parent_id]
-      ],
+      nav_config: {},  # Allow any nested JSON structure for navigation config
       brand: [
         :company_name,
         :tagline,

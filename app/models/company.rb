@@ -63,6 +63,7 @@ class Company < ApplicationRecord
   has_many :websites, dependent: :destroy
   has_many :sites, dependent: :destroy
   has_many :site_media, dependent: :destroy
+  has_many :website_media, class_name: 'WebsiteMedia', dependent: :destroy  # Media for websites
   has_many :company_domains, dependent: :destroy
   
   # RBAC System Associations

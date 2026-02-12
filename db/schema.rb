@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_10_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_12_001500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3511,7 +3511,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_10_000001) do
     t.bigint "uploaded_by_id"
     t.string "name", null: false
     t.string "url", null: false
-    t.string "file_type", null: false
     t.string "mime_type"
     t.bigint "file_size", null: false
     t.integer "width"
@@ -3521,6 +3520,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_10_000001) do
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "file_type", default: 3
     t.index ["company_id"], name: "index_website_media_on_company_id"
     t.index ["file_type"], name: "index_website_media_on_file_type"
     t.index ["uploaded_by_id"], name: "index_website_media_on_uploaded_by_id"

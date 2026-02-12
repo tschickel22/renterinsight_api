@@ -110,7 +110,7 @@ class Api::V1::WebsiteMediaController < ApplicationController
   def destroy
     return unless authorize_action!('websites', 'delete')
 
-    @media.update!(is_deleted: true, deleted_at: Time.current)
+    @media.update!(is_deleted: true)
     head :no_content
   end
 
@@ -162,9 +162,9 @@ class Api::V1::WebsiteMediaController < ApplicationController
 
   # Determine file type from MIME type
   def determine_file_type(mime_type)
-    return 'image' if mime_type&.start_with?('image/')
-    return 'video' if mime_type&.start_with?('video/')
-    return 'document' if mime_type&.match?(/(pdf|msword|wordprocessingml|spreadsheet|presentation)/)
-    'other'
+    return :image if mime_type&.start_with?('image/')
+    return :video if mime_type&.start_with?('video/')
+    return :document if mime_type&.match?(/(pdf|msword|wordprocessingml|spreadsheet|presentation)/)
+    :other
   end
 end
