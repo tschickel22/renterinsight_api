@@ -2,7 +2,10 @@
 # Handles CRUD operations for websites
 
 class Api::V1::WebsitesController < ApplicationController
-  before_action :set_company_scope
+  # Public preview endpoint - no auth required
+  skip_before_action :authenticate, only: [:by_token]
+  
+  before_action :set_company_scope, except: [:by_token]
   before_action :set_website, only: [:show, :update, :destroy, :publish, :unpublish, :sync_branding]
 
   def index
@@ -224,6 +227,24 @@ class Api::V1::WebsitesController < ApplicationController
     }
   end
   
+  # PUBLIC ENDPOINT - No authentication required
+  # GET /api/v1/websites/by_token/:token
+  def by_token
+    @website = Website.find_by!(preview_token: params[:token])
+    
+    render json: @website.as_json(
+      include: {
+        website_pages: {
+          only: [:id, :title, :slug, :path, :is_visible, :order, :blocks],
+          methods: [:full_path]
+        }
+      },
+      methods: [:full_theme]
+    )
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Preview not found' }, status: :not_found
+  end
+  
   # GET /api/v1/websites/branding_preview
   # Preview branding from Company or Location before syncing
   def branding_preview
@@ -254,6 +275,22 @@ class Api::V1::WebsitesController < ApplicationController
   end
 
   private
+
+  def set_company_scope
+    company_id = request.headers['X-Company-ID'] || params[:company_id]
+    
+    if company_id.blank?
+      render json: { error: 'Missing company context' }, status: :unauthorized
+      return
+    end
+    
+    @company = Company.find_by(id: company_id)
+    
+    unless @company
+      render json: { error: 'Company not found' }, status: :not_found
+      return
+    end
+  end
 
   def set_website
     # ALWAYS use scoped find - tenant isolation

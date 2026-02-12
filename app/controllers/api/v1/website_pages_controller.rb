@@ -90,7 +90,7 @@ class Api::V1::WebsitePagesController < ApplicationController
   def destroy
     return unless authorize_action!('websites', 'delete')
 
-    @page.update!(is_deleted: true, deleted_at: Time.current)
+    @page.update!(is_deleted: true)
     head :no_content
   end
 

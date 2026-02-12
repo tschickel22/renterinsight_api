@@ -266,6 +266,7 @@ Rails.application.routes.draw do
         collection do
           get :stats
           get :branding_preview  # Preview branding before sync
+          get 'by_token/:token', action: :by_token  # ⭐ PUBLIC - Preview website by token
         end
         
         # Website Pages (nested under websites)

@@ -17,10 +17,12 @@ class Website < ApplicationRecord
   validates :slug, presence: true, uniqueness: { scope: :company_id }
   validates :domain, uniqueness: { scope: :company_id, allow_nil: true }
   validates :subdomain, uniqueness: { allow_nil: true }
+  validates :location_id, presence: { message: 'must be selected' }
   
   # Callbacks
   before_validation :generate_slug, if: -> { slug.blank? }
   before_validation :set_defaults, on: :create
+  before_create :generate_preview_token
   
   # Scopes
   scope :active, -> { where(is_deleted: [false, nil]) }
@@ -90,5 +92,13 @@ class Website < ApplicationRecord
     self.brand ||= {}
     self.seo_config ||= {}
     self.tracking_config ||= {}
+  end
+  
+  def generate_preview_token
+    # Generate a unique 10-character alphanumeric token
+    loop do
+      self.preview_token = SecureRandom.alphanumeric(10)
+      break unless Website.exists?(preview_token: preview_token)
+    end
   end
 end
