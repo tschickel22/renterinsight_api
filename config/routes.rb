@@ -53,6 +53,13 @@ Rails.application.routes.draw do
   # ==================== PUBLIC SYNDICATION FEEDS ====================
   namespace :public do
     get 'feeds/:id', to: 'syndication_feeds#show', as: :syndication_feed
+    
+    # ==================== PUBLIC INVENTORY (Vehicle Catalog) ====================
+    resources :inventory, only: [:index, :show], controller: 'inventory' do
+      collection do
+        get :filters  # Get available filter options
+      end
+    end
   end
   
   # ==================== PUBLIC QUOTES ====================
@@ -141,6 +148,12 @@ Rails.application.routes.draw do
           get :check_domain
           post :verify  # Token-based verification (no auth on token itself)
         end
+      end
+      
+      # ==================== SETTINGS (Public Inventory) ====================
+      namespace :settings do
+        patch :company
+        post :regenerate_public_inventory_token
       end
       
       # ==================== NOTIFICATIONS ====================

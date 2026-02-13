@@ -82,8 +82,22 @@ class Company < ApplicationRecord
   # Enums
   enum :quickbooks_scope, { company: 'company', location: 'location' }, prefix: true, default: :company
   
+  # Public Inventory Settings (JSONB store)
+  store_accessor :public_inventory_settings,
+    :public_inventory_enabled,        # boolean - enable/disable public inventory
+    :public_statuses,                 # array - which statuses to show publicly (e.g., ['available', 'on_order'])
+    :show_pricing,                    # boolean - show prices on public listings
+    :show_contact_button,             # boolean - show "Request Info" button
+    :contact_button_text,             # string - custom button text
+    :require_approval,                # boolean - admin must approve each public listing
+    :items_per_page,                  # integer - pagination (default 12)
+    :default_layout,                  # string - 'grid' or 'list'
+    :show_filters                     # boolean - show filter sidebar
+  
   # Callbacks
   after_create :create_default_location
+  before_create :generate_public_inventory_token
+  before_create :set_default_public_inventory_settings
   
   # Validations for tenant fields
   validates :subdomain, 
@@ -613,5 +627,106 @@ class Company < ApplicationRecord
   # Returns the month name for fiscal_year_start_month
   def fiscal_year_start_month_name
     Date::MONTHNAMES[fiscal_year_start_month]
+  end
+  
+  # ====================
+  # Public Inventory Methods
+  # ====================
+  
+  # Generate public inventory token for secure access
+  def generate_public_inventory_token
+    self.public_inventory_token = SecureRandom.urlsafe_base64(32)
+  end
+  
+  # Set default public inventory settings on company creation
+  def set_default_public_inventory_settings
+    # Only set defaults if public_inventory_settings is blank/nil
+    return if public_inventory_settings.present?
+    
+    self.public_inventory_settings = {}
+    self.public_inventory_enabled = false  # Disabled by default
+    self.public_statuses = ['available', 'available_to_order']  # Include both statuses
+    self.show_pricing = true
+    self.show_contact_button = true
+    self.contact_button_text = 'Request Info'
+    self.require_approval = false
+    self.items_per_page = 12
+    self.default_layout = 'grid'
+    self.show_filters = true
+  end
+  
+  # Regenerate public inventory token (for security)
+  def regenerate_public_inventory_token!
+    generate_public_inventory_token
+    save!
+  end
+  
+  # Check if public inventory is enabled
+  def public_inventory_enabled?
+    public_inventory_enabled == true || public_inventory_enabled == 'true'
+  end
+  
+  # Hierarchical branding resolution: Website → Location → Company
+  # @param website [Website, nil] - If inventory is embedded in a website
+  # @param location [Location, nil] - If inventory is location-specific
+  # @return [Hash] Branding settings with logo, colors, fonts
+  def resolve_branding_for_inventory(website: nil, location: nil)
+    branding = {}
+    
+    # Priority 1: Website branding (if embedded in website)
+    if website.present?
+      website_settings = website.branding_settings || {}
+      branding.merge!(website_settings) if website_settings.any?
+    end
+    
+    # Priority 2: Location branding (fallback)
+    if location.present? && branding.blank?
+      location_settings = Setting.get('Location', location.id, 'branding') || {}
+      branding.merge!(location_settings) if location_settings.any?
+    end
+    
+    # Priority 3: Company branding (final fallback)
+    if branding.blank?
+      company_settings = Setting.get('Company', id, 'branding') || {}
+      branding.merge!(company_settings)
+    end
+    
+    # Ensure required branding fields have defaults
+    branding[:logo] ||= logo
+    branding[:primary_color] ||= '#3b82f6'  # Default blue
+    branding[:company_name] ||= name
+    
+    branding
+  end
+  
+  # Get public inventory URL
+  def public_inventory_url(filters = {})
+    return nil unless public_inventory_enabled?
+    
+    base_url = Rails.env.production? ? 
+      "https://#{primary_domain}" : 
+      "https://localhost:5173"
+    
+    query_params = { token: public_inventory_token }.merge(filters)
+    "#{base_url}/public/inventory?#{query_params.to_query}"
+  end
+  
+  # Get inventory embed code (iframe)
+  def inventory_embed_code(filters = {}, options = {})
+    return nil unless public_inventory_enabled?
+    
+    width = options[:width] || '100%'
+    height = options[:height] || '800'
+    url = public_inventory_url(filters)
+    
+    <<~HTML
+      <iframe 
+        src="#{url}"
+        width="#{width}"
+        height="#{height}"
+        frameborder="0"
+        style="border: 1px solid #e5e7eb; border-radius: 8px;"
+      ></iframe>
+    HTML
   end
 end

@@ -491,7 +491,10 @@ module Api
         in_grace_period: subscription_status[:in_grace_period],
         max_users: subscription_status.dig(:limits, :max_users),
         max_locations: subscription_status.dig(:limits, :max_locations),
-        max_storage_gb: subscription_status.dig(:limits, :max_storage_gb)
+        max_storage_gb: subscription_status.dig(:limits, :max_storage_gb),
+        # Public Inventory fields
+        public_inventory_enabled: @company.public_inventory_enabled || false,
+        public_inventory_token: @company.public_inventory_token
       }
     end
 

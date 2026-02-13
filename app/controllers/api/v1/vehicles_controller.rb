@@ -1173,6 +1173,7 @@ module Api
           :description, :notes, :mileage, :condition,
           :bedrooms, :bathrooms, :length, :width, :sleeps, :weight,
           :width1, :length1, :width2, :length2, :width3, :length3,
+          :sections,  # CRITICAL: Number of sections for manufactured homes (1, 2, or 3)
           :garage, :carport, :deck, :patio, :fireplace, :msrp, :cost,
           :transmission, :features, :images, :videos, :appliances,
           :awning, :generator, :utilities, :terms,
@@ -1241,6 +1242,7 @@ module Api
           # Location ID and address override
           :location_id,
           :use_location_address,
+          :sections,  # NEW: Number of sections for manufactured homes
           # Arrays
           features: [], images: [], videos: [], appliances: []
         )
@@ -1398,7 +1400,8 @@ module Api
             length2: vehicle.length2,
             width3: vehicle.width3,
             length3: vehicle.length3,
-            squareFootage: vehicle.square_feet,  # Changed from squareFeet to match frontend
+            sections: vehicle.sections,  # Number of sections (1, 2, or 3)
+          squareFootage: vehicle.square_feet,  # Changed from squareFeet to match frontend
             roofType: vehicle.roof_type,
             sidingType: vehicle.siding_type,
             lotRent: vehicle.lot_rent&.to_f,
