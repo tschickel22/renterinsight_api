@@ -175,6 +175,7 @@ module Api
         new_vehicle.images = @vehicle.images&.dup || []
         new_vehicle.videos = @vehicle.videos&.dup || []
         new_vehicle.appliances = @vehicle.appliances&.dup || []
+        new_vehicle.floor_plan_images = @vehicle.floor_plan_images&.dup || []
         
         if new_vehicle.save
           render json: { vehicle: vehicle_json(new_vehicle, detailed: true) }, status: :created
@@ -1121,6 +1122,7 @@ module Api
           photoURL: :photo_url,
           virtualTour: :virtual_tour,
           salesPhoto: :sales_photo,
+          floorPlanImages: :floor_plan_images,
           # RVT.com Syndication Fields - NEW
           rvClass: :rv_class,
           engineMake: :engine_make,
@@ -1183,7 +1185,8 @@ module Api
           # CRITICAL: Location fields must be in direct_fields to be copied to transformed
           :location_id, :use_location_address,
           # CRITICAL: Allow snake_case location fields from frontend (MH form sends these directly)
-          :location_city, :location_state, :location_zip
+          :location_city, :location_state, :location_zip,
+          :floor_plan_images
         ]
         
         direct_fields.each do |field|
@@ -1244,7 +1247,7 @@ module Api
           :use_location_address,
           :sections,  # NEW: Number of sections for manufactured homes
           # Arrays
-          features: [], images: [], videos: [], appliances: []
+          features: [], images: [], videos: [], appliances: [], floor_plan_images: []
         )
       end
 
@@ -1372,6 +1375,7 @@ module Api
             virtualTourUrl: vehicle.virtual_tour_url,
             specialFeatures: vehicle.special_features,
             overlayText: vehicle.overlay_text,
+            floorPlanImages: (vehicle.floor_plan_images || []).map { |url| url.start_with?('http') ? url : "#{base_url}#{url}" },
             # RBAC Cost Detail Fields - NEW
             dealerCost: vehicle.dealer_cost&.to_f,
             freightCost: vehicle.freight_cost&.to_f,
@@ -1431,8 +1435,10 @@ module Api
             wallType: vehicle.wall_type,
             # Media URLs
             photoURL: vehicle.photo_url,
-            virtualTour: vehicle.virtual_tour,
+            videoUrl: vehicle.video_url,
+            virtualTourUrl: vehicle.virtual_tour_url,
             salesPhoto: vehicle.sales_photo,
+            floorPlanImages: (vehicle.floor_plan_images || []).map { |url| url.start_with?('http') ? url : "#{base_url}#{url}" },
             # Pricing & terms
             utilities: vehicle.utilities&.to_f,
             terms: vehicle.terms,

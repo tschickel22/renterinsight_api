@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_13_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_14_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3438,6 +3438,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_13_200000) do
     t.boolean "use_location_address", default: false
     t.string "public_id"
     t.integer "sections"
+    t.json "floor_plan_images", default: [], null: false
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"

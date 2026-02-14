@@ -53,6 +53,12 @@ class IntakeSubmission < ApplicationRecord
       status: 'new'
     }
     
+    # Extract vehicle location if this is from embedded inventory form
+    if submission_data['vehicle_location_id'].present?
+      lead_data[:location_id] = submission_data['vehicle_location_id'].to_i
+      Rails.logger.info "[IntakeSubmission] Assigning location_id from vehicle: #{lead_data[:location_id]}"
+    end
+    
     # Only set owner_id if notified_user exists
     if form.notified_user_id.present?
       lead_data[:owner_id] = form.notified_user_id
@@ -138,21 +144,26 @@ class IntakeSubmission < ApplicationRecord
     
     Rails.logger.info "Created lead #{new_lead.id} from intake submission #{id}"
     
-    # Create note with unmapped fields (using Note model, not lead.notes column)
-    if unmapped_data.present?
-      begin
-        note_content = build_notes(unmapped_data, form)
+    # Create note with vehicle information (if from inventory embed) and unmapped fields
+    begin
+      # Get notes from form field mapping (if any field was mapped to 'notes')
+      form_mapped_notes = lead_data[:notes]
+      
+      # Build note content with vehicle info and/or unmapped data
+      note_content = build_notes_with_vehicle(submission_data, unmapped_data, form, form_mapped_notes)
+      
+      if note_content.present?
         Note.create!(
           entity_type: 'lead',
           entity_id: new_lead.id,
           content: note_content,
           created_by_name: 'System (Intake Form)'
         )
-        Rails.logger.info "Created note for lead #{new_lead.id} with unmapped form data"
-      rescue => note_error
-        Rails.logger.error "Failed to create note for lead #{new_lead.id}: #{note_error.message}"
-        # Don't fail the entire lead creation if note creation fails
+        Rails.logger.info "Created note for lead #{new_lead.id} with form submission details"
       end
+    rescue => note_error
+      Rails.logger.error "Failed to create note for lead #{new_lead.id}: #{note_error.message}"
+      # Don't fail the entire lead creation if note creation fails
     end
     
     # Create activity and send notification if enabled
@@ -234,6 +245,63 @@ class IntakeSubmission < ApplicationRecord
       return value if value.present?
     end
     nil
+  end
+  
+  def build_notes_with_vehicle(submission_data, unmapped_data, form, form_mapped_notes = nil)
+    notes = []
+    
+    # Check if this submission includes vehicle information (from inventory embed)
+    vehicle_keys = %w[vehicle_id vehicle_title vehicle_year vehicle_make vehicle_model vehicle_vin vehicle_stock_number vehicle_price vehicle_url]
+    has_vehicle_data = vehicle_keys.any? { |key| submission_data[key].present? }
+    
+    if has_vehicle_data
+      notes << "🚗 VEHICLE OF INTEREST"
+      notes << "=" * 50
+      
+      if submission_data['vehicle_title'].present?
+        notes << "Vehicle: #{submission_data['vehicle_title']}"
+      elsif submission_data['vehicle_year'].present? || submission_data['vehicle_make'].present? || submission_data['vehicle_model'].present?
+        vehicle_desc = [submission_data['vehicle_year'], submission_data['vehicle_make'], submission_data['vehicle_model']].compact.join(' ')
+        notes << "Vehicle: #{vehicle_desc}"
+      end
+      
+      notes << "Stock #: #{submission_data['vehicle_stock_number']}" if submission_data['vehicle_stock_number'].present?
+      notes << "VIN: #{submission_data['vehicle_vin']}" if submission_data['vehicle_vin'].present?
+      notes << "Price: $#{submission_data['vehicle_price']}" if submission_data['vehicle_price'].present?
+      notes << "Listing URL: #{submission_data['vehicle_url']}" if submission_data['vehicle_url'].present?
+      notes << ""
+    end
+    
+    # Add form submission details
+    notes << "📋 FORM SUBMISSION"
+    notes << "=" * 50
+    notes << "Form: #{form.name}"
+    notes << "Submitted: #{submitted_at || Time.current}"
+    notes << ""
+    
+    # Add notes from form field mapping (if a field was mapped to 'notes')
+    if form_mapped_notes.present?
+      notes << "Customer Notes:"
+      notes << form_mapped_notes
+      notes << ""
+    end
+    
+    # Add unmapped form data (if any)
+    if unmapped_data.present?
+      notes << "Additional Information:"
+      unmapped_data.each do |key, value|
+        next if value.blank?
+        # Skip vehicle fields (already shown above)
+        next if vehicle_keys.include?(key.to_s)
+        # Skip notes field (already shown above)
+        next if key.to_s.downcase == 'notes' || key.to_s.downcase == 'comments' || key.to_s.downcase == 'message'
+        
+        formatted_key = key.to_s.humanize
+        notes << "  #{formatted_key}: #{value}"
+      end
+    end
+    
+    notes.any? ? notes.join("\n") : nil
   end
   
   def build_notes(submission_data, form)

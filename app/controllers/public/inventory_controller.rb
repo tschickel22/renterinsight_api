@@ -145,19 +145,26 @@ class Public::InventoryController < ApplicationController
   # - website_id (optional): For website-specific branding
   # - location_id (optional): For location-specific branding
   def show
-    # Get branding for response
-    website = params[:website_id].present? ? @company.websites.find_by(id: params[:website_id]) : nil
-    location = params[:location_id].present? ? @company.locations.find_by(id: params[:location_id]) : nil
-    branding = @company.resolve_branding_for_inventory(website: website, location: location)
+    # Get branding (Location → Company → Platform hierarchy)
+    location = @vehicle.location || 
+               (params[:location_id].present? ? @company.locations.find_by(id: params[:location_id]) : nil)
+    branding = resolve_branding(location)
+    
+    # Contact info - from location if available, otherwise company name only
+    company_data = {
+      name: @company.name,
+      phone: location&.phone,
+      email: location&.email,
+      address: location&.address_line1,
+      city: location&.city,
+      state: location&.state,
+      zip: location&.zip_code
+    }
     
     render json: {
       vehicle: vehicle_detail_json(@vehicle),
-      branding: branding,
-      settings: {
-        show_pricing: get_boolean_setting(:show_pricing),
-        show_contact_button: get_boolean_setting(:show_contact_button),
-        contact_button_text: get_string_setting(:contact_button_text, 'Contact Us')
-      }
+      company: company_data,
+      branding: branding
     }
   end
   
@@ -399,6 +406,7 @@ class Public::InventoryController < ApplicationController
       id: vehicle.id,
       inventory_id: vehicle.inventory_id,
       listing_type: vehicle.listing_type,
+      location_id: vehicle.location_id,  # CRITICAL: For lead assignment
       status: vehicle.status,
       status_label: format_status_label(vehicle.status),
       
@@ -438,6 +446,10 @@ class Public::InventoryController < ApplicationController
       primary_image_url: vehicle.images&.first,
       image_urls: vehicle.images || [],
       
+      # Media flags for list view icons
+      has_virtual_tour: vehicle.virtual_tour_url.present?,
+      has_video: vehicle.video_url.present?,
+      
       # Timestamps
       created_at: vehicle.created_at,
       updated_at: vehicle.updated_at,
@@ -457,10 +469,68 @@ class Public::InventoryController < ApplicationController
       description: vehicle.description,
       features: vehicle.features || [],
       
+      # Media links
+      virtual_tour_url: vehicle.virtual_tour_url,
+      video_url: vehicle.video_url,
+      floor_plan_images: vehicle.floor_plan_images || [],
+      
       # Identifiers
       vin: vehicle.vin,
       serial_number: vehicle.serial_number,
       stock_number: vehicle.stock_number,
+      color: vehicle.color,
+      
+      # Manufactured Home Type
+      home_type: vehicle.home_type,
+      
+      # Location details
+      location_type: vehicle.location_type,
+      community_name: vehicle.community_name,
+      community_key: vehicle.community_key,
+      address1: vehicle.address1,
+      county_name: vehicle.county_name,
+      
+      # Dimensions
+      width2: vehicle.width2,
+      length2: vehicle.length2,
+      width3: vehicle.width3,
+      length3: vehicle.length3,
+      
+      # Construction Materials
+      exterior_material: vehicle.exterior_material,
+      roof_material: vehicle.roof_material,
+      flooring_type: vehicle.flooring_type,
+      insulation_type: vehicle.insulation_type,
+      ceiling_type: vehicle.ceiling_type,
+      wall_type: vehicle.wall_type,
+      
+      # Amenities & Features (boolean flags)
+      fireplace: vehicle.fireplace,
+      garage: vehicle.garage,
+      carport: vehicle.carport,
+      deck: vehicle.deck,
+      patio: vehicle.patio,
+      central_air: vehicle.central_air,
+      cathedral_ceiling: vehicle.cathedral_ceiling,
+      ceiling_fan: vehicle.ceiling_fan,
+      skylight: vehicle.skylight,
+      walkin_closet: vehicle.walkin_closet,
+      laundry_room: vehicle.laundry_room,
+      pantry: vehicle.pantry,
+      sun_room: vehicle.sun_room,
+      basement: vehicle.basement,
+      has_storage: vehicle.has_storage,
+      garden_tub: vehicle.garden_tub,
+      garbage_disposal: vehicle.garbage_disposal,
+      refrigerator: vehicle.refrigerator,
+      microwave: vehicle.microwave,
+      oven: vehicle.oven,
+      dishwasher: vehicle.dishwasher,
+      clothes_washer: vehicle.clothes_washer,
+      clothes_dryer: vehicle.clothes_dryer,
+      gutters: vehicle.gutters,
+      shutters: vehicle.shutters,
+      thermopane: vehicle.thermopane,
       
       # Detailed specs
       fuel_type: vehicle.fuel_type,
@@ -478,10 +548,10 @@ class Public::InventoryController < ApplicationController
       siding_type: vehicle.siding_type,
       
       # Full address (if location available)
-      location_street: vehicle.location&.street,
+      location_street: vehicle.location&.address_line1,
       location_city: vehicle.location&.city,
       location_state: vehicle.location&.state,
-      location_zip: vehicle.location&.zip,
+      location_zip: vehicle.location&.zip_code,
       location_phone: vehicle.location&.phone,
       location_email: vehicle.location&.email
     )

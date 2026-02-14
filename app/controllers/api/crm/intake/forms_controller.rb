@@ -5,11 +5,22 @@ module Api
         include RbacAuthorization
         rbac_resource :crm
 
+        # Skip authentication for index/show - we'll handle both public and admin access in set_company_scope
+        skip_before_action :authenticate, only: [:index, :show]
+        skip_before_action :check_rbac_authorization, only: [:index, :show]
+        
         before_action :set_company_scope
         before_action :set_form, only: [:show, :update, :destroy]
 
         def index
-          @forms = @company.intake_forms.order(updated_at: :desc)
+          # For public requests (via token), only show active forms
+          # For admin requests (authenticated), show all forms
+          if params[:token].present? && params[:company_id].present?
+            @forms = @company.intake_forms.where(is_active: true).order(updated_at: :desc)
+          else
+            @forms = @company.intake_forms.order(updated_at: :desc)
+          end
+          
           render json: @forms.map(&:as_json)
         end
         
@@ -96,13 +107,76 @@ module Api
         private
 
         def set_company_scope
-          unless current_user
-            Rails.logger.error "🚫 [Intake::FormsController] No authenticated user found"
+          # Public access via token (for public inventory pages)
+          if params[:token].present? && params[:company_id].present?
+            Rails.logger.info "🌐 [Intake::FormsController] Public access via token"
+            
+            company = ::Company.find_by(id: params[:company_id])
+            if company.nil?
+              Rails.logger.error "🚫 [Intake::FormsController] Company #{params[:company_id]} not found"
+              render json: { error: 'Company not found' }, status: :not_found
+              return
+            end
+            
+            # Verify token matches company's public inventory token
+            if company.public_inventory_token != params[:token]
+              Rails.logger.error "🚫 [Intake::FormsController] Invalid token for company #{company.id}"
+              render json: { error: 'Invalid token' }, status: :unauthorized
+              return
+            end
+            
+            @company = company
+            Rails.logger.info "✅ [Intake::FormsController] Public company scope set: #{@company.name} (ID: #{@company.id})"
+            return
+          end
+          
+          # Admin access - manually authenticate from Authorization header
+          Rails.logger.info "🔐 [Intake::FormsController] Admin access - authenticating from header"
+          
+          # Extract and validate JWT token
+          header = request.headers['Authorization']
+          
+          unless header.present?
+            Rails.logger.error "🚫 [Intake::FormsController] No authorization header present"
             render json: { error: 'Authentication required' }, status: :unauthorized
             return
           end
           
-          company_id = current_company_id
+          token = header.split(' ').last
+          decoded = JsonWebToken.decode(token)
+          
+          unless decoded
+            Rails.logger.error "🚫 [Intake::FormsController] JWT decode failed"
+            render json: { error: 'Invalid or expired token' }, status: :unauthorized
+            return
+          end
+          
+          # Set user ID from JWT
+          @current_user_id = decoded[:user_id]
+          @current_company_id = decoded[:company_id] || request.headers['X-Company-Id']&.to_i
+          
+          # Get current user
+          user = User.find_by(id: @current_user_id)
+          unless user
+            Rails.logger.error "🚫 [Intake::FormsController] User #{@current_user_id} not found"
+            render json: { error: 'User not found' }, status: :unauthorized
+            return
+          end
+          
+          @current_user = user
+          
+          # Get company ID (with platform admin override)
+          company_id = if user.role.in?(['platform_admin', 'tenant', 'super_admin', 'admin'])
+            context_company_id = request.headers['X-Company-ID']&.to_i || request.headers['X-Company-Context']&.to_i
+            if context_company_id.present? && context_company_id > 0
+              Rails.logger.info "✅ [Intake::FormsController] Platform admin #{user.email} switching to company #{context_company_id}"
+              context_company_id
+            else
+              @current_company_id || user.company_id
+            end
+          else
+            @current_company_id || user.company_id
+          end
           
           unless company_id.present?
             Rails.logger.error "🚫 [Intake::FormsController] No company context available"
@@ -118,7 +192,7 @@ module Api
             return
           end
           
-          Rails.logger.info "✅ [Intake::FormsController] Company scope set: #{@company.name} (ID: #{@company.id})"
+          Rails.logger.info "✅ [Intake::FormsController] Admin company scope set: #{@company.name} (ID: #{@company.id}) for user #{user.email}"
         end
 
         def set_form

@@ -620,8 +620,9 @@ module Api
         base_url = request.ssl? ? "https://#{request.host}:#{request.port}" : "http://#{request.host}:#{request.port}"
         
         full_image_urls = (vehicle.images || []).map do |url|
+          next url if url.blank?
           url.start_with?('http') ? url : "#{base_url}#{url}"
-        end
+        end.compact
         
         {
           id: vehicle.id.to_s,
@@ -632,24 +633,86 @@ module Api
           model: vehicle.model,
           trim: vehicle.trim,
           displayName: vehicle.display_name,
+          condition: vehicle.condition,
+          color: vehicle.color,
+          stockNumber: vehicle.stock_number,
+          status: vehicle.status,
+          statusLabel: vehicle.respond_to?(:status_label) ? vehicle.status_label : vehicle.status&.titleize,
+          priceType: vehicle.respond_to?(:price_type) ? vehicle.price_type : 'sale',
           salePrice: vehicle.sale_price&.to_f,
           rentPrice: vehicle.rent_price&.to_f,
+          msrp: vehicle.msrp&.to_f,
           description: vehicle.description,
           features: vehicle.features || [],
           images: full_image_urls,
+          floorPlanImages: (vehicle.floor_plan_images || []).map { |url|
+            next url if url.blank?
+            url.start_with?('http') ? url : "#{base_url}#{url}"
+          }.compact,
+          videoUrl: vehicle.video_url,
+          virtualTourUrl: vehicle.virtual_tour_url,
+          # Location details
           location: {
             street: vehicle.address1,
             city: vehicle.location_city,
             state: vehicle.location_state,
             zip: vehicle.location_zip
           },
+          locationType: vehicle.respond_to?(:location_type) ? vehicle.location_type : nil,
+          communityName: vehicle.respond_to?(:community_name) ? vehicle.community_name : nil,
+          communityKey: vehicle.respond_to?(:community_key) ? vehicle.community_key : nil,
+          countyName: vehicle.respond_to?(:county_name) ? vehicle.county_name : nil,
+          # Specs
           bedrooms: vehicle.bedrooms,
           bathrooms: vehicle.bathrooms,
           squareFootage: vehicle.square_feet,
           sleeps: vehicle.sleeps,
           length: vehicle.length,
+          width: vehicle.width,
+          length2: vehicle.length2,
+          width2: vehicle.width2,
+          length3: vehicle.length3,
+          width3: vehicle.width3,
+          sections: vehicle.sections,
+          homeType: vehicle.home_type,
           vin: vehicle.vin,
-          serialNumber: vehicle.serial_number
+          serialNumber: vehicle.serial_number,
+          # Construction details
+          exteriorMaterial: vehicle.respond_to?(:exterior_material) ? vehicle.exterior_material : nil,
+          roofMaterial: vehicle.respond_to?(:roof_material) ? vehicle.roof_material : nil,
+          flooringType: vehicle.respond_to?(:flooring_type) ? vehicle.flooring_type : nil,
+          insulationType: vehicle.respond_to?(:insulation_type) ? vehicle.insulation_type : nil,
+          ceilingType: vehicle.respond_to?(:ceiling_type) ? vehicle.ceiling_type : nil,
+          wallType: vehicle.respond_to?(:wall_type) ? vehicle.wall_type : nil,
+          # Amenities (boolean flags)
+          amenities: {
+            fireplace: vehicle.respond_to?(:fireplace) ? vehicle.fireplace : nil,
+            garage: vehicle.respond_to?(:garage) ? vehicle.garage : nil,
+            carport: vehicle.respond_to?(:carport) ? vehicle.carport : nil,
+            deck: vehicle.respond_to?(:deck) ? vehicle.deck : nil,
+            patio: vehicle.respond_to?(:patio) ? vehicle.patio : nil,
+            centralAir: vehicle.respond_to?(:central_air) ? vehicle.central_air : nil,
+            cathedralCeiling: vehicle.respond_to?(:cathedral_ceiling) ? vehicle.cathedral_ceiling : nil,
+            ceilingFan: vehicle.respond_to?(:ceiling_fan) ? vehicle.ceiling_fan : nil,
+            skylight: vehicle.respond_to?(:skylight) ? vehicle.skylight : nil,
+            walkinCloset: vehicle.respond_to?(:walkin_closet) ? vehicle.walkin_closet : nil,
+            laundryRoom: vehicle.respond_to?(:laundry_room) ? vehicle.laundry_room : nil,
+            pantry: vehicle.respond_to?(:pantry) ? vehicle.pantry : nil,
+            sunRoom: vehicle.respond_to?(:sun_room) ? vehicle.sun_room : nil,
+            basement: vehicle.respond_to?(:basement) ? vehicle.basement : nil,
+            storage: vehicle.respond_to?(:has_storage) ? vehicle.has_storage : nil,
+            gardenTub: vehicle.respond_to?(:garden_tub) ? vehicle.garden_tub : nil,
+            garbageDisposal: vehicle.respond_to?(:garbage_disposal) ? vehicle.garbage_disposal : nil,
+            refrigerator: vehicle.respond_to?(:refrigerator) ? vehicle.refrigerator : nil,
+            microwave: vehicle.respond_to?(:microwave) ? vehicle.microwave : nil,
+            oven: vehicle.respond_to?(:oven) ? vehicle.oven : nil,
+            dishwasher: vehicle.respond_to?(:dishwasher) ? vehicle.dishwasher : nil,
+            clothesWasher: vehicle.respond_to?(:clothes_washer) ? vehicle.clothes_washer : nil,
+            clothesDryer: vehicle.respond_to?(:clothes_dryer) ? vehicle.clothes_dryer : nil,
+            gutters: vehicle.respond_to?(:gutters) ? vehicle.gutters : nil,
+            shutters: vehicle.respond_to?(:shutters) ? vehicle.shutters : nil,
+            thermopane: vehicle.respond_to?(:thermopane) ? vehicle.thermopane : nil
+          }.compact
         }
       end
       

@@ -468,14 +468,35 @@ module Api
         
         # Add detailed vehicle data if requested
         if detailed
+          base_url = "#{request.protocol}#{request.host_with_port}"
+
+          # Build public share URL using company's public_inventory_token
+          company = listing.vehicle.company
+          if company&.public_inventory_token.present?
+            public_params = "token=#{company.public_inventory_token}&company_id=#{company.id}"
+            json[:publicUrl] = "/public/inventory/#{vehicle.id}?#{public_params}"
+          end
           json[:vehicle].merge!({
             serialNumber: vehicle.serial_number,
             vin: vehicle.vin,
+            stockNumber: vehicle.stock_number,
+            color: vehicle.color,
             length: vehicle.length,
             width: vehicle.width,
+            width2: vehicle.width2,
+            length2: vehicle.length2,
+            width3: vehicle.width3,
+            length3: vehicle.length3,
+            sections: vehicle.sections,
+            homeType: vehicle.home_type,
             condition: vehicle.condition,
+            statusLabel: vehicle.status&.titleize,
             images: convert_image_urls_to_https(vehicle.images),
-            features: vehicle.features || []
+            floorPlanImages: (vehicle.floor_plan_images || []).map { |url| url.start_with?('http') ? url : "#{base_url}#{url}" },
+            virtualTourUrl: vehicle.virtual_tour_url,
+            videoUrl: vehicle.video_url,
+            features: vehicle.features || [],
+            description: vehicle.description
           })
         end
         
