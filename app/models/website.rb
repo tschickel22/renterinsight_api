@@ -15,11 +15,12 @@ class Website < ApplicationRecord
   # Validations
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: { scope: :company_id }
-  validates :domain, uniqueness: { scope: :company_id, allow_nil: true }
-  validates :subdomain, uniqueness: { allow_nil: true }
+  validates :domain, uniqueness: { scope: :company_id, allow_blank: true }
+  validates :subdomain, uniqueness: { allow_blank: true }
   validates :location_id, presence: { message: 'must be selected' }
   
   # Callbacks
+  before_validation :nullify_blank_domain_fields
   before_validation :generate_slug, if: -> { slug.blank? }
   before_validation :set_defaults, on: :create
   before_create :generate_preview_token
@@ -63,6 +64,8 @@ class Website < ApplicationRecord
       brand: brand,
       seo_config: seo_config,
       tracking_config: tracking_config,
+      site_header: site_header,
+      site_footer: site_footer,
       favicon_url: favicon_url,
       pages: website_pages.active.map do |page|
         {
@@ -80,6 +83,11 @@ class Website < ApplicationRecord
   
   private
   
+  def nullify_blank_domain_fields
+    self.domain = nil if domain.blank?
+    self.subdomain = nil if subdomain.blank?
+  end
+
   def generate_slug
     return if name.blank?
     self.slug = name.parameterize
@@ -92,6 +100,8 @@ class Website < ApplicationRecord
     self.brand ||= {}
     self.seo_config ||= {}
     self.tracking_config ||= {}
+    self.site_header ||= {}
+    self.site_footer ||= {}
   end
   
   def generate_preview_token

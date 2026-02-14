@@ -44,7 +44,17 @@ module Api
         end
 
         def show
-          render json: @form.as_json
+          response = @form.as_json
+
+          # For public requests, include company locations so the form can show a location picker
+          if params[:token].present? && params[:company_id].present?
+            locations = @company.locations.active.order(:name)
+            if locations.count > 1
+              response[:company_locations] = locations.map { |l| { id: l.id, name: l.name, city: l.city, state: l.state } }
+            end
+          end
+
+          render json: response
         end
 
         def create

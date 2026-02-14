@@ -491,8 +491,10 @@ class Api::V1::WebsitesController < ApplicationController
         :google_tag_manager_id,
         :facebook_pixel_id,
         :hotjar_id,
-        :custom_scripts
-      ]
+        custom_scripts: [:head, :body]
+      ],
+      site_header: {},  # Allow any nested JSON structure for site-level header
+      site_footer: {}   # Allow any nested JSON structure for site-level footer
     )
     # CRITICAL: NEVER permit company_id
   end

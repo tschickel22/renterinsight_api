@@ -53,8 +53,12 @@ class IntakeSubmission < ApplicationRecord
       status: 'new'
     }
     
-    # Extract vehicle location if this is from embedded inventory form
-    if submission_data['vehicle_location_id'].present?
+    # Extract location_id from submission data
+    # Priority: explicit location_id (from location picker) > vehicle_location_id (from inventory embed)
+    if submission_data['location_id'].present?
+      lead_data[:location_id] = submission_data['location_id'].to_i
+      Rails.logger.info "[IntakeSubmission] Assigning location_id from form picker: #{lead_data[:location_id]}"
+    elsif submission_data['vehicle_location_id'].present?
       lead_data[:location_id] = submission_data['vehicle_location_id'].to_i
       Rails.logger.info "[IntakeSubmission] Assigning location_id from vehicle: #{lead_data[:location_id]}"
     end
@@ -293,6 +297,8 @@ class IntakeSubmission < ApplicationRecord
         next if value.blank?
         # Skip vehicle fields (already shown above)
         next if vehicle_keys.include?(key.to_s)
+        # Skip internal/metadata fields
+        next if %w[location_id source vehicle_location_id].include?(key.to_s)
         # Skip notes field (already shown above)
         next if key.to_s.downcase == 'notes' || key.to_s.downcase == 'comments' || key.to_s.downcase == 'message'
         
