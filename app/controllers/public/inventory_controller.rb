@@ -81,6 +81,16 @@ class Public::InventoryController < ApplicationController
       @vehicles = @vehicles.where('square_feet <= ?', params[:square_feet_max])
     end
     
+    # Sections filter
+    if params[:sections].present?
+      @vehicles = @vehicles.where(sections: params[:sections])
+    end
+    
+    # Condition filter
+    if params[:condition].present?
+      @vehicles = @vehicles.where(condition: params[:condition])
+    end
+    
     # Vehicle filters
     @vehicles = @vehicles.where(make: params[:make]) if params[:make].present?
     @vehicles = @vehicles.where(model: params[:model]) if params[:model].present?
@@ -101,7 +111,7 @@ class Public::InventoryController < ApplicationController
     sort_order = params[:sort_order]&.downcase == 'asc' ? :asc : :desc
     
     # Validate sort_by to prevent SQL injection
-    allowed_sort_fields = %w[created_at sale_price year make model mileage]
+    allowed_sort_fields = %w[created_at sale_price year make model mileage square_feet bedrooms bathrooms sections]
     sort_by = 'created_at' unless allowed_sort_fields.include?(sort_by)
     
     @vehicles = @vehicles.order(sort_by => sort_order)
@@ -185,6 +195,28 @@ class Public::InventoryController < ApplicationController
     models = vehicles.where.not(model: [nil, '']).distinct.pluck(:model).compact.sort
     years = vehicles.where.not(year: nil).distinct.pluck(:year).compact.sort.reverse
     types = vehicles.where.not(listing_type: [nil, '']).distinct.pluck(:listing_type).compact
+    conditions = vehicles.where.not(condition: [nil, '']).distinct.pluck(:condition).compact.sort
+    
+    # Manufactured home specific options
+    bedrooms = vehicles.where.not(bedrooms: nil).distinct.pluck(:bedrooms).compact.sort
+    bathrooms = vehicles.where.not(bathrooms: nil).distinct.pluck(:bathrooms).compact.sort
+    sections = vehicles.where.not(sections: nil).distinct.pluck(:sections).compact.sort
+    
+    # Square footage range
+    sqft_values = vehicles.where.not(square_feet: nil).pluck(:square_feet).compact.map(&:to_i)
+    sqft_range = if sqft_values.any?
+      { min: sqft_values.min, max: sqft_values.max }
+    else
+      { min: 0, max: 0 }
+    end
+    
+    # Models grouped by make (for cascading dropdowns)
+    models_by_make = {}
+    vehicles.where.not(make: [nil, '']).where.not(model: [nil, '']).distinct.pluck(:make, :model).each do |make, model|
+      models_by_make[make] ||= []
+      models_by_make[make] << model unless models_by_make[make].include?(model)
+    end
+    models_by_make.each { |k, v| models_by_make[k] = v.sort }
     
     # Location filter options
     location_ids = vehicles.where.not(location_id: nil).distinct.pluck(:location_id)
@@ -211,10 +243,17 @@ class Public::InventoryController < ApplicationController
     render json: {
       makes: makes,
       models: models,
+      models_by_make: models_by_make,
       years: years,
       types: types,
+      conditions: conditions,
+      bedrooms: bedrooms,
+      bathrooms: bathrooms,
+      sections: sections,
       locations: locations,
-      price_range: price_range
+      price_range: price_range,
+      sqft_range: sqft_range,
+      total_count: vehicles.count
     }
   end
   
@@ -445,6 +484,7 @@ class Public::InventoryController < ApplicationController
       # Images (using database column - it's a JSON array)
       primary_image_url: vehicle.images&.first,
       image_urls: vehicle.images || [],
+      floor_plan_images: vehicle.floor_plan_images || [],
       
       # Media flags for list view icons
       has_virtual_tour: vehicle.virtual_tour_url.present?,
