@@ -88,12 +88,21 @@ class Api::V1::WebsitesController < ApplicationController
   def show
     return unless authorize_action!('websites', 'read')
     
-    render json: @website.as_json(
+    website_json = @website.as_json(
       include: {
         website_pages: { only: [:id, :title, :slug, :is_visible, :page_order] },
         blog_posts: { only: [:id, :title, :slug, :status, :published_at] }
       }
     )
+
+    # Include inventory embed config so website builder can auto-configure inventory blocks
+    website_json['inventory_embed_config'] = {
+      token: @company.public_inventory_token,
+      company_id: @company.id,
+      enabled: @company.public_inventory_enabled || false
+    }
+
+    render json: website_json
   end
 
   def create

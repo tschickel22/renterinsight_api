@@ -183,12 +183,25 @@ class Public::InventoryController < ApplicationController
   #
   # Params:
   # - token (required): Public inventory token
+  # - statuses (optional): Comma-separated statuses to scope filter options
+  # - listing_type (optional): Comma-separated listing types to scope filter options
   def filters
-    # Only include vehicles in public_statuses
-    statuses = get_public_statuses
+    # Use passed statuses param if present, otherwise fall back to company defaults
+    statuses = if params[:statuses].present?
+      params[:statuses].split(',').map(&:strip)
+    else
+      get_public_statuses
+    end
+    
     vehicles = @company.vehicles
                       .where(status: statuses)
                       .where(is_deleted: [false, nil])
+    
+    # Apply listing type filter if provided (so filter options match visible vehicles)
+    if params[:listing_type].present?
+      listing_types = params[:listing_type].split(',').map(&:strip)
+      vehicles = vehicles.where(listing_type: listing_types)
+    end
     
     # Get unique values for filters
     makes = vehicles.where.not(make: [nil, '']).distinct.pluck(:make).compact.sort
@@ -300,8 +313,14 @@ class Public::InventoryController < ApplicationController
       return
     end
     
-    # Check if vehicle status is in public_statuses
-    statuses = get_public_statuses
+    # Check if vehicle status is in allowed statuses
+    # Accept statuses from params (block-configured) or fall back to company defaults
+    statuses = if params[:statuses].present?
+      params[:statuses].split(',').map(&:strip)
+    else
+      get_public_statuses
+    end
+    
     unless statuses.include?(@vehicle.status)
       render json: { error: 'Vehicle not available for public viewing' }, status: :forbidden
       return
