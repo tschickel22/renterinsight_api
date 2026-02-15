@@ -60,6 +60,13 @@ Rails.application.routes.draw do
         get :filters  # Get available filter options
       end
     end
+
+    # ==================== PUBLIC LAND PARCELS ====================
+    resources :land_parcels, only: [:index, :show], controller: 'land_parcels' do
+      collection do
+        get :filters
+      end
+    end
   end
   
   # ==================== PUBLIC QUOTES ====================
