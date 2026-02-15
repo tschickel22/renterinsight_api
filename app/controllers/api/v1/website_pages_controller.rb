@@ -170,6 +170,8 @@ class Api::V1::WebsitePagesController < ApplicationController
       :path,
       :order,
       :is_visible,
+      :show_in_nav,
+      :show_in_footer,
       :parent_page_id,  # Will be ignored if column doesn't exist
       :seo_title,
       :seo_description,

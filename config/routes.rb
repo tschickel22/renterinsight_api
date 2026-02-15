@@ -50,6 +50,11 @@ Rails.application.routes.draw do
   # ==================== PUBLIC LISTING VIEW ====================
   get '/l/:id', to: 'api/v1/listings#public_view', as: :public_listing
   
+  # ==================== PUBLIC BLOG (No Auth Required) ====================
+  get 'api/public/websites/:token/blog', to: 'api/public/blog_posts#index'
+  get 'api/public/websites/:token/blog/categories', to: 'api/public/blog_posts#categories'
+  get 'api/public/websites/:token/blog/:slug', to: 'api/public/blog_posts#show'
+  
   # ==================== PUBLIC SYNDICATION FEEDS ====================
   namespace :public do
     get 'feeds/:id', to: 'syndication_feeds#show', as: :syndication_feed

@@ -64,9 +64,16 @@ class Public::InventoryController < ApplicationController
       @vehicles = @vehicles.where('sale_price <= ?', params[:max_price].to_f)
     end
     
-    # Manufactured home filters
+    # Manufactured home filters (supports: "3" exact, "1,2" IN list, "4+" minimum)
     if params[:bedrooms].present?
-      @vehicles = @vehicles.where(bedrooms: params[:bedrooms])
+      bed_val = params[:bedrooms].to_s.strip
+      if bed_val.end_with?('+')
+        @vehicles = @vehicles.where('bedrooms >= ?', bed_val.chomp('+').to_i)
+      elsif bed_val.include?(',')
+        @vehicles = @vehicles.where(bedrooms: bed_val.split(',').map(&:to_i))
+      else
+        @vehicles = @vehicles.where(bedrooms: bed_val)
+      end
     end
     
     if params[:bathrooms].present?

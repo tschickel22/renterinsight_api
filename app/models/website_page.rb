@@ -14,6 +14,8 @@ class WebsitePage < ApplicationRecord
   # Scopes
   scope :active, -> { where(is_deleted: [false, nil]) }
   scope :visible, -> { where(is_visible: true) }
+  scope :visible_in_nav, -> { where(show_in_nav: true) }
+  scope :visible_in_footer, -> { where(show_in_footer: true) }
   scope :top_level, -> { where(parent_page_id: nil) }
   
   # Visibility

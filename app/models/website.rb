@@ -7,6 +7,7 @@ class Website < ApplicationRecord
   has_many :website_pages, dependent: :destroy
   has_many :website_media, class_name: 'WebsiteMedia', dependent: :destroy
   has_many :blog_posts, dependent: :destroy
+  has_many :blog_categories, dependent: :destroy
   has_many :website_versions, dependent: :destroy
   
   # Enums - Rails 8 syntax (only status for Phase 1, others can be added later with prefixes)

@@ -241,7 +241,7 @@ class Api::V1::WebsitesController < ApplicationController
   def by_token
     @website = Website.find_by!(preview_token: params[:token])
     
-    render json: @website.as_json(
+    website_json = @website.as_json(
       include: {
         website_pages: {
           only: [:id, :title, :slug, :path, :is_visible, :order, :blocks],
@@ -250,6 +250,32 @@ class Api::V1::WebsitesController < ApplicationController
       },
       methods: [:full_theme]
     )
+    
+    # Include recent published blog posts for blogList blocks
+    published_posts = @website.blog_posts
+                              .where(is_deleted: [false, nil])
+                              .where(status: :published)
+                              .where('published_at <= ?', Time.current)
+                              .order(published_at: :desc)
+                              .limit(12)
+    
+    website_json['blog_posts'] = published_posts.as_json(
+      only: [:id, :title, :slug, :excerpt, :featured_image_url, :featured_image_alt,
+             :published_at, :view_count],
+      include: {
+        author: { only: [:id, :first_name, :last_name] },
+        blog_categories: { only: [:id, :name, :slug] }
+      },
+      methods: [:reading_time]
+    )
+    
+    # Include blog categories
+    website_json['blog_categories'] = @website.blog_categories
+                                              .where(is_deleted: [false, nil])
+                                              .order(:order, :name)
+                                              .as_json(only: [:id, :name, :slug], methods: [:posts_count])
+    
+    render json: website_json
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Preview not found' }, status: :not_found
   end

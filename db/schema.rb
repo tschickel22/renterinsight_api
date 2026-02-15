@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_14_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_16_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -318,6 +318,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_200000) do
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "order", default: 0
+    t.datetime "deleted_at"
+    t.string "seo_title"
+    t.text "seo_description"
     t.index ["website_id", "slug"], name: "index_blog_categories_on_website_id_and_slug", unique: true
     t.index ["website_id"], name: "index_blog_categories_on_website_id"
   end
@@ -340,6 +344,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_200000) do
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "featured_image_alt"
+    t.string "robots"
+    t.datetime "deleted_at"
     t.index ["author_id"], name: "index_blog_posts_on_author_id"
     t.index ["published_at"], name: "index_blog_posts_on_published_at"
     t.index ["status"], name: "index_blog_posts_on_status"
@@ -3547,6 +3554,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_200000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "style", default: {}
+    t.boolean "show_in_nav", default: true
+    t.boolean "show_in_footer", default: true
     t.index ["order"], name: "index_website_pages_on_order"
     t.index ["website_id", "path"], name: "index_website_pages_on_website_id_and_path", unique: true
     t.index ["website_id"], name: "index_website_pages_on_website_id"
