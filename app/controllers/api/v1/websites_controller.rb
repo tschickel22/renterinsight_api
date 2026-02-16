@@ -180,11 +180,19 @@ class Api::V1::WebsitesController < ApplicationController
 
   # POST /api/v1/websites/:id/sync_branding
   # Sync branding from Company or Location settings
+  #
+  # Option C: "Smart Defaults + Optional Reset"
+  #   - ALWAYS syncs: theme, brand, nav_config, header logo, footer logo/company name
+  #   - OPTIONALLY (reset_block_colors=true): clears explicit color overrides from
+  #     block content so they fall back to theme at render time. This is better than
+  #     writing colors INTO blocks because future theme changes auto-cascade.
+  #
   def sync_branding
     return unless authorize_action!('websites', 'update')
     
     source_type = params[:source_type] # 'company' or 'location'
     location_id = params[:location_id]
+    reset_block_colors = ActiveModel::Type::Boolean.new.cast(params[:reset_block_colors])
     
     branding_data = case source_type
     when 'location'
@@ -204,16 +212,96 @@ class Api::V1::WebsitesController < ApplicationController
       return render json: { error: 'Invalid source_type. Must be company or location' }, status: :bad_request
     end
     
-    # Merge synced branding into website's existing data
+    # --- ALWAYS: Sync theme, brand, nav_config ---
     @website.theme = (@website.theme || {}).merge(branding_data[:theme])
     @website.brand = (@website.brand || {}).merge(branding_data[:brand])
     @website.nav_config = (@website.nav_config || {}).merge(branding_data[:nav_config])
+
+    logo_url = branding_data[:brand][:logo_url]
+    company_name = branding_data[:brand][:company_name]
+
+    primary_color = branding_data[:theme][:primary_color]
+    secondary_color = branding_data[:theme][:secondary_color]
+
+    # --- ALWAYS: Sync header logo + colors ---
+    # Header is site chrome — should always match branding
+    if @website.site_header.present? && @website.site_header['enabled']
+      header = @website.site_header.dup
+      header['logo'] = logo_url if logo_url.present?
+      header['backgroundColor'] = '#ffffff'
+      header['textColor'] = '#1f2937'
+      @website.site_header = header
+    end
+
+    # --- ALWAYS: Sync footer logo, name + colors ---
+    # Footer is site chrome — should always match branding
+    if @website.site_footer.present? && @website.site_footer['enabled']
+      footer = @website.site_footer.dup
+      footer['logoUrl'] = logo_url if logo_url.present?
+      footer['companyName'] = company_name if company_name.present?
+      footer['backgroundColor'] = secondary_color || '#111827'
+      footer['textColor'] = '#d1d5db'
+      footer['headingColor'] = '#ffffff'
+      @website.site_footer = footer
+    end
+
+    # --- OPTIONAL: Reset block color overrides ---
+    # When enabled, REMOVES explicit color overrides from block content.
+    # This makes blocks fall back to theme colors at render time,
+    # so future theme changes auto-cascade without re-syncing.
+    synced_blocks = 0
+    if reset_block_colors
+      # Map of block_type => array of content keys to clear
+      # Removing these keys makes renderers fall back to theme colors
+      color_overrides_to_clear = {
+        'stats'           => %w[accentColor],
+        'banner'          => %w[backgroundColor textColor],
+        'inventorySearch'  => %w[searchButtonColor search_button_color],
+        'hero'            => %w[ctaColor ctaTextColor],
+        'cta'             => %w[buttonColor buttonTextColor backgroundColor textColor],
+        'features'        => %w[accentColor],
+        'pricing'         => %w[accentColor highlightColor],
+        'comparison'      => %w[highlightColor],
+      }
+
+      @website.website_pages.each do |page|
+        blocks = page.blocks
+        next unless blocks.is_a?(Array)
+
+        changed = false
+        blocks.each do |block|
+          keys_to_clear = color_overrides_to_clear[block['type']]
+          next unless keys_to_clear
+          content = block['content']
+          next unless content.is_a?(Hash)
+
+          keys_to_clear.each do |key|
+            if content.key?(key)
+              content.delete(key)
+              changed = true
+            end
+          end
+        end
+
+        if changed
+          page.update_column(:blocks, blocks)
+          synced_blocks += 1
+        end
+      end
+
+      Rails.logger.info "[Website Sync] Reset block color overrides on #{synced_blocks} page(s)"
+    end
     
+    synced_fields = branding_data.keys + ['site_header', 'site_footer']
+    synced_fields << 'block_colors_reset' if reset_block_colors
+
     if @website.save
       render json: {
         website: @website,
         synced_from: source_type,
-        synced_fields: branding_data.keys
+        synced_fields: synced_fields,
+        synced_blocks: synced_blocks,
+        block_colors_reset: reset_block_colors || false
       }
     else
       render json: { errors: @website.errors.full_messages }, status: :unprocessable_entity
@@ -510,7 +598,7 @@ class Api::V1::WebsitesController < ApplicationController
   end
 
   def website_params
-    params.require(:website).permit(
+    permitted = params.require(:website).permit(
       :name,
       :slug,
       :domain,
@@ -571,10 +659,21 @@ class Api::V1::WebsitesController < ApplicationController
         :facebook_pixel_id,
         :hotjar_id,
         custom_scripts: [:head, :body]
-      ],
-      site_header: {},  # Allow any nested JSON structure for site-level header
-      site_footer: {}   # Allow any nested JSON structure for site-level footer
+      ]
     )
     # CRITICAL: NEVER permit company_id
+
+    # FIX: site_header and site_footer are JSONB columns with deeply nested structures
+    # (arrays of hashes like columns/socialLinks). Rails permit(key: {}) only passes
+    # scalar values and silently STRIPS arrays, causing footer.enabled and columns
+    # to be lost on create. Use permit! to preserve the full nested JSON structure.
+    if params.dig(:website, :site_header).present?
+      permitted[:site_header] = params[:website][:site_header].permit!.to_h
+    end
+    if params.dig(:website, :site_footer).present?
+      permitted[:site_footer] = params[:website][:site_footer].permit!.to_h
+    end
+
+    permitted
   end
 end
