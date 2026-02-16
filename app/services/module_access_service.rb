@@ -46,6 +46,45 @@ class ModuleAccessService
     has_module?(module_key)
   end
   
+  # Get module configuration (merged: plan defaults → overrides)
+  # Returns hash like { "marketing.website" => { "website_access_level" => 3 } }
+  def module_configs
+    configs = {}
+
+    # 1. Start with plan-level configs
+    subscription = company.tenant_subscription
+    if subscription&.subscription_plan
+      subscription.subscription_plan
+                  .subscription_plan_modules
+                  .where(is_enabled: true)
+                  .where.not(config: [nil, {}])
+                  .each do |spm|
+        configs[spm.module_key] = (spm.config || {}).deep_stringify_keys
+      end
+    else
+      # Legacy fallback: use default configs from PlatformModule
+      tier = company.subscription_tier&.to_sym || :starter
+      PlatformModule.default_configs_for_template(tier).each do |key, cfg|
+        configs[key] = cfg.deep_stringify_keys
+      end
+    end
+
+    # 2. Merge company-level overrides (takes precedence)
+    company.tenant_module_overrides
+           .where.not(config: [nil, {}])
+           .each do |override|
+      configs[override.module_key] ||= {}
+      configs[override.module_key].merge!((override.config || {}).deep_stringify_keys)
+    end
+
+    configs
+  end
+
+  # Get config for a specific module
+  def module_config(module_key)
+    module_configs[module_key] || {}
+  end
+
   # Get all enabled modules for the company
   def enabled_modules
     # Start with plan modules
@@ -167,7 +206,8 @@ class ModuleAccessService
       modules: modules_with_status,
       modules_by_category: modules_by_category,
       enabled_module_keys: enabled_modules,
-      disabled_module_keys: disabled_modules
+      disabled_module_keys: disabled_modules,
+      module_configs: module_configs
     }
   end
   

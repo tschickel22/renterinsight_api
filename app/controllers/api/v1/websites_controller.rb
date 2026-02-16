@@ -279,6 +279,59 @@ class Api::V1::WebsitesController < ApplicationController
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Preview not found' }, status: :not_found
   end
+
+  # GET /api/v1/websites/by_slug/:slug
+  # Authenticated preview - returns full website data for the site preview route
+  def by_slug
+    return unless authorize_action!('websites', 'read')
+
+    @website = @company.websites.find_by!(slug: params[:slug])
+
+    website_json = @website.as_json(
+      include: {
+        website_pages: {
+          only: [:id, :title, :slug, :path, :is_visible, :order, :blocks, :show_in_nav, :show_in_footer, :page_order],
+          methods: [:full_path]
+        }
+      },
+      methods: [:full_theme]
+    )
+
+    # Include inventory embed config
+    website_json['inventory_embed_config'] = {
+      token: @company.public_inventory_token,
+      company_id: @company.id,
+      enabled: @company.public_inventory_enabled || false
+    }
+
+    # Include recent published blog posts for blogList blocks
+    published_posts = @website.blog_posts
+                              .where(is_deleted: [false, nil])
+                              .where(status: :published)
+                              .where('published_at <= ?', Time.current)
+                              .order(published_at: :desc)
+                              .limit(12)
+
+    website_json['blog_posts'] = published_posts.as_json(
+      only: [:id, :title, :slug, :excerpt, :featured_image_url, :featured_image_alt,
+             :published_at, :view_count],
+      include: {
+        author: { only: [:id, :first_name, :last_name] },
+        blog_categories: { only: [:id, :name, :slug] }
+      },
+      methods: [:reading_time]
+    )
+
+    # Include blog categories
+    website_json['blog_categories'] = @website.blog_categories
+                                              .where(is_deleted: [false, nil])
+                                              .order(:order, :name)
+                                              .as_json(only: [:id, :name, :slug], methods: [:posts_count])
+
+    render json: website_json
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Website not found' }, status: :not_found
+  end
   
   # GET /api/v1/websites/branding_preview
   # Preview branding from Company or Location before syncing

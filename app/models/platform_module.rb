@@ -135,9 +135,26 @@ class PlatformModule
       end.sort_by { |c| c[:position] }
     end
     
+    # Default module configs per plan template
+    # Only modules that need config are listed here
+    PLAN_CONFIG_DEFAULTS = {
+      starter: {},
+      professional: {
+        'marketing.website' => { 'website_access_level' => 2 }  # Content Editor
+      },
+      enterprise: {
+        'marketing.website' => { 'website_access_level' => 3 }  # Full Editor
+      }
+    }.freeze
+
     # Get module keys for a plan template
     def template_modules(template_name)
       PLAN_TEMPLATES[template_name.to_sym] || []
+    end
+
+    # Get default configs for a plan template
+    def default_configs_for_template(template_name)
+      PLAN_CONFIG_DEFAULTS[template_name.to_sym] || {}
     end
     
     # Get modules as hash for plan creation { key => true/false }

@@ -358,6 +358,7 @@ module Api
           name: company.name,
           # Module access
           enabled_modules: module_access.enabled_modules,
+          module_configs: module_access.module_configs,
           # Subscription status
           subscription_status: subscription_status[:status],
           plan_name: subscription_status[:plan_name],

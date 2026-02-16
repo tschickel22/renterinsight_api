@@ -292,6 +292,7 @@ Rails.application.routes.draw do
           get :stats
           get :branding_preview  # Preview branding before sync
           get 'by_token/:token', action: :by_token  # ⭐ PUBLIC - Preview website by token
+          get 'by_slug/:slug', action: :by_slug  # Authenticated preview by slug
         end
         
         # Website Pages (nested under websites)
@@ -1464,6 +1465,7 @@ Rails.application.routes.draw do
       resources :subscription_plans, path: 'subscription-plans' do
         member do
           post :set_modules
+          patch :set_module_config
         end
         collection do
           get :modules
@@ -1485,6 +1487,7 @@ Rails.application.routes.draw do
         post 'modules/override', to: 'tenant_subscriptions#override_module'
         delete 'modules/override/:module_key', to: 'tenant_subscriptions#remove_override'
         post 'modules/bulk_override', to: 'tenant_subscriptions#bulk_override'
+        patch 'modules/config', to: 'tenant_subscriptions#update_module_config'
         
         member do
           get :check_domain_dns

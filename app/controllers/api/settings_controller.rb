@@ -482,6 +482,7 @@ module Api
         updatedAt: @company.updated_at,
         # Subscription and module access data
         enabled_modules: module_access.enabled_modules,
+        module_configs: module_access.module_configs,
         subscription_status: subscription_status[:status],
         plan_name: subscription_status[:plan_name],
         plan_display_name: subscription_status[:plan_display_name],

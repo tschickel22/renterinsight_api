@@ -159,6 +159,34 @@ module Api
         }
       end
       
+      # PATCH /api/platform/tenants/:tenant_id/modules/config
+      # Set module-level config (e.g., website_access_level for marketing.website)
+      def update_module_config
+        module_key = params[:module_key]
+        config = params[:config]&.to_unsafe_h || {}
+
+        unless PlatformModule.valid_key?(module_key)
+          render json: { error: "Invalid module key: #{module_key}" }, status: :unprocessable_entity
+          return
+        end
+
+        # Find or create override record for this module
+        override = @tenant.tenant_module_overrides.find_or_initialize_by(module_key: module_key)
+        override.is_enabled = true if override.new_record? # Default to enabled
+        override.config = (override.config || {}).merge(config.deep_stringify_keys)
+        override.override_reason = params[:reason] || "Config updated by platform admin"
+        override.overridden_by = current_user
+
+        if override.save
+          render json: {
+            module_access: @tenant.module_access.as_json,
+            message: "Config for '#{module_key}' updated"
+          }
+        else
+          render json: { errors: override.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
       # POST /api/platform/tenants/:tenant_id/modules/bulk_override
       def bulk_override
         overrides = params[:overrides] || {}

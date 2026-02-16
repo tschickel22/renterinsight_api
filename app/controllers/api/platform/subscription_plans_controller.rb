@@ -4,7 +4,7 @@ module Api
   module Platform
     class SubscriptionPlansController < ApplicationController
       before_action :require_platform_admin!
-      before_action :set_plan, only: [:show, :update, :destroy, :set_modules]
+      before_action :set_plan, only: [:show, :update, :destroy, :set_modules, :set_module_config]
       
       # GET /api/platform/subscription_plans
       def index
@@ -35,6 +35,9 @@ module Api
             plan.set_enabled_modules(PlatformModule.template_modules(params[:template]))
           end
           
+          # Set module configs if provided (e.g., website_access_level)
+          set_plan_module_configs(plan, params[:module_configs]) if params[:module_configs].present?
+          
           render json: { 
             plan: plan.reload.as_json_with_modules,
             message: 'Subscription plan created successfully'
@@ -49,6 +52,9 @@ module Api
         if @plan.update(plan_params)
           # Update modules if provided
           set_plan_modules(@plan, params[:modules]) if params[:modules].present?
+          
+          # Update module configs if provided
+          set_plan_module_configs(@plan, params[:module_configs]) if params[:module_configs].present?
           
           render json: { 
             plan: @plan.reload.as_json_with_modules,
@@ -85,6 +91,31 @@ module Api
         }
       end
       
+      # PATCH /api/platform/subscription_plans/:id/set_module_config
+      # Set config for a specific module on this plan (e.g., website_access_level)
+      def set_module_config
+        module_key = params[:module_key]
+        config = params[:config]&.to_unsafe_h || {}
+
+        unless PlatformModule.valid_key?(module_key)
+          render json: { error: "Invalid module key: #{module_key}" }, status: :unprocessable_entity
+          return
+        end
+
+        mod = @plan.subscription_plan_modules.find_or_initialize_by(module_key: module_key)
+        mod.is_enabled = true if mod.new_record?
+        mod.config = (mod.config || {}).merge(config.deep_stringify_keys)
+
+        if mod.save
+          render json: {
+            plan: @plan.reload.as_json_with_modules,
+            message: "Config for '#{module_key}' updated on plan '#{@plan.display_name}'"
+          }
+        else
+          render json: { errors: mod.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
       # GET /api/platform/subscription_plans/modules
       def modules
         render json: PlatformModule.as_json_with_categories
@@ -128,6 +159,18 @@ module Api
           
           mod = plan.subscription_plan_modules.find_or_initialize_by(module_key: key.to_s)
           mod.is_enabled = ActiveModel::Type::Boolean.new.cast(enabled)
+          mod.save!
+        end
+      end
+
+      def set_plan_module_configs(plan, configs_hash)
+        configs_hash.each do |module_key, config|
+          next unless PlatformModule.valid_key?(module_key.to_s)
+          next if config.blank?
+
+          mod = plan.subscription_plan_modules.find_or_initialize_by(module_key: module_key.to_s)
+          mod.is_enabled = true if mod.new_record?
+          mod.config = (mod.config || {}).merge(config.is_a?(Hash) ? config : config.to_unsafe_h).deep_stringify_keys
           mod.save!
         end
       end

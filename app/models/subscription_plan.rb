@@ -148,6 +148,7 @@ class SubscriptionPlan < ApplicationRecord
       is_popular: is_popular,
       position: position,
       modules: modules_hash,
+      module_configs: module_configs_hash,
       created_at: created_at,
       updated_at: updated_at
     }
@@ -158,6 +159,15 @@ class SubscriptionPlan < ApplicationRecord
     result = {}
     subscription_plan_modules.each do |mod|
       result[mod.module_key] = mod.is_enabled
+    end
+    result
+  end
+
+  # Get module configs as hash { 'marketing.website' => { 'website_access_level' => 3 } }
+  def module_configs_hash
+    result = {}
+    subscription_plan_modules.each do |mod|
+      result[mod.module_key] = mod.config if mod.respond_to?(:config) && mod.config.present?
     end
     result
   end

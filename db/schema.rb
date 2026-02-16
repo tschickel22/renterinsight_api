@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_16_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_16_020001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2842,6 +2842,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_000001) do
     t.boolean "is_enabled", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "config", default: {}
     t.index ["module_key", "is_enabled"], name: "index_subscription_plan_modules_on_module_key_and_is_enabled"
     t.index ["module_key"], name: "index_subscription_plan_modules_on_module_key"
     t.index ["subscription_plan_id", "module_key"], name: "idx_plan_modules_unique", unique: true
@@ -3056,6 +3057,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_000001) do
     t.bigint "overridden_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "config", default: {}
     t.index ["company_id", "module_key"], name: "idx_tenant_module_override_unique", unique: true
     t.index ["company_id"], name: "index_tenant_module_overrides_on_company_id"
     t.index ["module_key", "is_enabled"], name: "index_tenant_module_overrides_on_module_key_and_is_enabled"
@@ -3583,7 +3585,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_000001) do
     t.string "subdomain"
     t.integer "status", default: 0, null: false
     t.integer "build_status", default: 0, null: false
-    t.integer "client_access_level", default: 0, null: false
+    t.integer "client_access_level", default: 3, null: false
     t.jsonb "theme", default: {}
     t.jsonb "nav_config", default: {}
     t.jsonb "brand", default: {}
