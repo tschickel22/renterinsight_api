@@ -418,7 +418,19 @@ module Api
           default_interest_rate: 6.99,
           max_loan_term: 84,
           min_down_payment_percent: 10,
-          default_payment_frequency: 'monthly'
+          default_payment_frequency: 'monthly',
+          # Affordability Calculator defaults
+          calculator_enabled: true,
+          calculator_include_lot_rent: false,
+          calculator_default_lot_rent: 500,
+          calculator_include_property_tax: false,
+          calculator_default_property_tax_rate: 1.0,
+          calculator_include_insurance: false,
+          calculator_default_insurance_annual: 1200,
+          calculator_include_setup_fee: false,
+          calculator_default_setup_fee: 0,
+          calculator_loan_term_options: [120, 180, 240, 300, 360],
+          calculator_disclaimer_text: 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.'
         }
       end
     end

@@ -281,6 +281,25 @@ module Api
           template_data['theme'] = get_theme_data(template_data['theme'])
         end
         
+        # Build calculator settings from loan_settings (public-safe subset only)
+        loan_settings = company.loan_settings || {}
+        calculator_settings = {
+          enabled: loan_settings['calculator_enabled'] != false, # Default enabled
+          defaultInterestRate: (loan_settings['default_interest_rate'] || 6.99).to_f,
+          defaultLoanTermMonths: (loan_settings['max_loan_term'] || 240).to_i,
+          minDownPaymentPercent: (loan_settings['min_down_payment_percent'] || 10).to_f,
+          includeLotRent: loan_settings['calculator_include_lot_rent'] == true,
+          defaultLotRentMonthly: (loan_settings['calculator_default_lot_rent'] || 0).to_f,
+          includePropertyTax: loan_settings['calculator_include_property_tax'] == true,
+          defaultPropertyTaxRate: (loan_settings['calculator_default_property_tax_rate'] || 1.0).to_f,
+          includeInsurance: loan_settings['calculator_include_insurance'] == true,
+          defaultInsuranceAnnual: (loan_settings['calculator_default_insurance_annual'] || 0).to_f,
+          includeSetupFee: loan_settings['calculator_include_setup_fee'] == true,
+          defaultSetupFee: (loan_settings['calculator_default_setup_fee'] || 0).to_f,
+          loanTermOptions: (loan_settings['calculator_loan_term_options'] || [120, 180, 240, 300, 360]).map(&:to_i),
+          disclaimerText: loan_settings['calculator_disclaimer_text'] || 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.'
+        }
+
         render json: {
           brochure: {
             id: @brochure.public_id,
@@ -294,7 +313,8 @@ module Api
             company: {
               name: company.name,
               branding: branding
-            }
+            },
+            calculatorSettings: calculator_settings
           }
         }
       rescue ActiveRecord::RecordNotFound
