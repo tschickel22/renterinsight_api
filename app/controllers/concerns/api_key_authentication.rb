@@ -1,0 +1,83 @@
+# frozen_string_literal: true
+
+module ApiKeyAuthentication
+  extend ActiveSupport::Concern
+
+  included do
+    before_action :authenticate_api_key
+    before_action :enforce_rate_limit
+  end
+
+  private
+
+  def authenticate_api_key
+    token = extract_bearer_token
+    unless token
+      render json: { error: "Missing API key. Use Authorization: Bearer <api_key>" }, status: :unauthorized
+      return
+    end
+
+    @current_api_key = ApiKey.active.find_by(key: token)
+    unless @current_api_key
+      render json: { error: "Invalid or revoked API key" }, status: :unauthorized
+      return
+    end
+
+    @current_api_key.touch_usage!
+  end
+
+  def enforce_rate_limit
+    return unless @current_api_key
+
+    key = @current_api_key.rate_limit_key
+    window = 1.hour
+    limit = @current_api_key.rate_limit
+
+    count = Rails.cache.increment(key, 1, expires_in: window, initial: 1)
+
+    if count > limit
+      response.set_header("X-RateLimit-Limit", limit.to_s)
+      response.set_header("X-RateLimit-Remaining", "0")
+      response.set_header("Retry-After", window.to_i.to_s)
+      render json: { error: "Rate limit exceeded. Limit: #{limit} requests per hour." }, status: :too_many_requests
+      return
+    end
+
+    response.set_header("X-RateLimit-Limit", limit.to_s)
+    response.set_header("X-RateLimit-Remaining", [limit - count, 0].max.to_s)
+  end
+
+  def current_api_key
+    @current_api_key
+  end
+
+  def current_company
+    return @current_company if defined?(@current_company)
+    @current_company = @current_api_key&.company
+  end
+
+  def current_company_id
+    @current_api_key&.company_id
+  end
+
+  def authorize_permission!(resource, action)
+    return if @current_api_key.permissions.blank? || @current_api_key.permissions.empty?
+
+    unless @current_api_key.has_permission?(resource, action)
+      render json: {
+        error: "Insufficient permissions",
+        required: "#{resource}:#{action}"
+      }, status: :forbidden
+    end
+  end
+
+  def extract_bearer_token
+    header = request.headers["Authorization"]
+    return nil unless header.present?
+
+    scheme, token = header.split(" ", 2)
+    return token if scheme&.casecmp("bearer")&.zero? && token.present?
+
+    nil
+  end
+end
