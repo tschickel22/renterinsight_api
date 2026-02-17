@@ -102,6 +102,9 @@ class Api::V1::WebsitesController < ApplicationController
       enabled: @company.public_inventory_enabled || false
     }
 
+    # Include calculator settings from company loan_settings
+    website_json['calculator_settings'] = build_calculator_settings(@company)
+
     render json: website_json
   end
 
@@ -363,6 +366,16 @@ class Api::V1::WebsitesController < ApplicationController
                                               .order(:order, :name)
                                               .as_json(only: [:id, :name, :slug], methods: [:posts_count])
     
+    # Include calculator settings from company loan_settings
+    website_json['calculator_settings'] = build_calculator_settings(@website.company)
+
+    # Include inventory embed config for public preview
+    website_json['inventory_embed_config'] = {
+      token: @website.company.public_inventory_token,
+      company_id: @website.company.id,
+      enabled: @website.company.public_inventory_enabled || false
+    }
+
     render json: website_json
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Preview not found' }, status: :not_found
@@ -391,6 +404,9 @@ class Api::V1::WebsitesController < ApplicationController
       company_id: @company.id,
       enabled: @company.public_inventory_enabled || false
     }
+
+    # Include calculator settings from company loan_settings
+    website_json['calculator_settings'] = build_calculator_settings(@company)
 
     # Include recent published blog posts for blogList blocks
     published_posts = @website.blog_posts
@@ -466,6 +482,27 @@ class Api::V1::WebsitesController < ApplicationController
       render json: { error: 'Company not found' }, status: :not_found
       return
     end
+  end
+
+  # Build public-safe calculator settings from company loan_settings JSONB
+  def build_calculator_settings(company)
+    loan_settings = company.loan_settings || {}
+    {
+      enabled: loan_settings['calculator_enabled'] != false,
+      defaultInterestRate: (loan_settings['default_interest_rate'] || 6.99).to_f,
+      defaultLoanTermMonths: (loan_settings['max_loan_term'] || 240).to_i,
+      minDownPaymentPercent: (loan_settings['min_down_payment_percent'] || 10).to_f,
+      includeLotRent: loan_settings['calculator_include_lot_rent'] == true,
+      defaultLotRentMonthly: (loan_settings['calculator_default_lot_rent'] || 0).to_f,
+      includePropertyTax: loan_settings['calculator_include_property_tax'] == true,
+      defaultPropertyTaxRate: (loan_settings['calculator_default_property_tax_rate'] || 1.0).to_f,
+      includeInsurance: loan_settings['calculator_include_insurance'] == true,
+      defaultInsuranceAnnual: (loan_settings['calculator_default_insurance_annual'] || 0).to_f,
+      includeSetupFee: loan_settings['calculator_include_setup_fee'] == true,
+      defaultSetupFee: (loan_settings['calculator_default_setup_fee'] || 0).to_f,
+      loanTermOptions: (loan_settings['calculator_loan_term_options'] || [120, 180, 240, 300, 360]).map(&:to_i),
+      disclaimerText: loan_settings['calculator_disclaimer_text'] || 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.'
+    }
   end
 
   def set_website
