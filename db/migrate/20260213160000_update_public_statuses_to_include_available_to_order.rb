@@ -1,47 +1,36 @@
 class UpdatePublicStatusesToIncludeAvailableToOrder < ActiveRecord::Migration[8.0]
   def up
     # Update all existing companies to include 'available_to_order' in their public_statuses
-    Company.find_each do |company|
-      # Get current public_statuses
-      current_statuses = if company.public_statuses.is_a?(String)
-        begin
-          JSON.parse(company.public_statuses)
-        rescue JSON::ParserError
-          [company.public_statuses]
-        end
-      elsif company.public_statuses.is_a?(Array)
-        company.public_statuses
-      else
-        ['available']
-      end
-      
-      # Add 'available_to_order' if not already present
-      unless current_statuses.include?('available_to_order')
-        current_statuses << 'available_to_order'
-        company.update_column(:public_inventory_settings, 
-          company.public_inventory_settings.merge('public_statuses' => current_statuses))
-      end
-    end
+    # Uses raw SQL to avoid dependency on model store_accessor configuration
+    execute <<-SQL
+      UPDATE companies
+      SET public_inventory_settings = jsonb_set(
+        COALESCE(public_inventory_settings, '{}'),
+        '{public_statuses}',
+        CASE
+          WHEN public_inventory_settings->'public_statuses' IS NULL
+            THEN '["available", "available_to_order"]'::jsonb
+          WHEN NOT (public_inventory_settings->'public_statuses' @> '"available_to_order"')
+            THEN (public_inventory_settings->'public_statuses') || '"available_to_order"'::jsonb
+          ELSE public_inventory_settings->'public_statuses'
+        END
+      )
+    SQL
   end
 
   def down
-    # Remove 'available_to_order' from all companies
-    Company.find_each do |company|
-      current_statuses = if company.public_statuses.is_a?(String)
-        begin
-          JSON.parse(company.public_statuses)
-        rescue JSON::ParserError
-          [company.public_statuses]
-        end
-      elsif company.public_statuses.is_a?(Array)
-        company.public_statuses
-      else
-        ['available']
-      end
-      
-      current_statuses.delete('available_to_order')
-      company.update_column(:public_inventory_settings, 
-        company.public_inventory_settings.merge('public_statuses' => current_statuses))
-    end
+    # Remove 'available_to_order' from all companies' public_statuses
+    execute <<-SQL
+      UPDATE companies
+      SET public_inventory_settings = jsonb_set(
+        COALESCE(public_inventory_settings, '{}'),
+        '{public_statuses}',
+        COALESCE(
+          (public_inventory_settings->'public_statuses') - 'available_to_order',
+          '[]'::jsonb
+        )
+      )
+      WHERE public_inventory_settings->'public_statuses' @> '"available_to_order"'
+    SQL
   end
 end
