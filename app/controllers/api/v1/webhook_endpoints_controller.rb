@@ -3,9 +3,24 @@
 module Api
   module V1
     class WebhookEndpointsController < ApplicationController
-      before_action :set_company_scope
+      skip_before_action :authenticate, only: [:available_events], raise: false
+      skip_before_action :authenticate!, only: [:available_events], raise: false
+      skip_before_action :authenticate_user!, only: [:available_events], raise: false
+      skip_before_action :set_current_attributes, only: [:available_events], raise: false
+      before_action :set_company_scope, except: [:available_events]
       before_action :set_endpoint, only: [:show, :update, :destroy, :test]
 
+      # GET /api/v1/webhook-endpoints/available_events
+      # Public — no auth required, returns global config list from YAML
+      def available_events
+        events = WebhookEndpoint.available_events
+        if events.empty?
+          WebhookEndpoint.reload_events!
+          events = WebhookEndpoint.available_events
+        end
+        render json: { events: events }
+      end
+      
       # GET /api/v1/webhook-endpoints
       def index
         return unless authorize_action!("webhooks", "read")

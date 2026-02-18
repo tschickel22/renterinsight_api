@@ -6,6 +6,11 @@ module Api
       before_action :set_company_scope
       before_action :set_api_key, only: [:show, :update, :destroy, :revoke]
 
+      # GET /api/v1/api-keys/available_resources
+      def available_resources
+        render json: ApiKey.available_resources
+      end
+      
       # GET /api/v1/api-keys
       def index
         return unless authorize_action!("api_keys", "read")

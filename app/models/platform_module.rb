@@ -52,6 +52,8 @@ class PlatformModule
     'admin.users' => { name: 'User Management', category: 'Administration', icon: 'Users', description: 'User accounts and access control' },
     'admin.locations' => { name: 'Location Management', category: 'Administration', icon: 'Building2', description: 'Multi-location management' },
     'admin.roles' => { name: 'Role Management', category: 'Administration', icon: 'Shield', description: 'Custom roles and permissions' },
+    'admin.api_keys' => { name: 'API Keys', category: 'Administration', icon: 'Key', description: 'External API key management for integrations' },
+    'admin.webhooks' => { name: 'Webhooks', category: 'Administration', icon: 'Webhook', description: 'Webhook endpoint management for event notifications' },
     'admin.platform' => { name: 'Platform Admin', category: 'Administration', icon: 'Crown', description: 'Platform-level administration (Enterprise only)' }
   }.freeze
   
@@ -90,7 +92,7 @@ class PlatformModule
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 
       management.calendar management.contractors management.workflows management.territories
-      admin.settings admin.users admin.locations admin.roles admin.platform
+      admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks admin.platform
     ]
   }.freeze
   

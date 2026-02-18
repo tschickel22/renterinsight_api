@@ -1,0 +1,110 @@
+# Webhook Events Configuration
+# All available webhook events organized by category
+# IMPORTANT: Events here MUST match WebhookService::EVENTS exactly.
+# Events not in WebhookService::EVENTS will never fire, even if listed here.
+# NOTE: Only add events here once they are actually wired up in the codebase.
+
+events:
+  # ── CRM Events ──
+  - value: contact.created
+    label: Contact Created
+    category: CRM Events
+  - value: contact.updated
+    label: Contact Updated
+    category: CRM Events
+  - value: contact.deleted
+    label: Contact Deleted
+    category: CRM Events
+
+  - value: lead.created
+    label: Lead Created
+    category: CRM Events
+  - value: lead.updated
+    label: Lead Updated
+    category: CRM Events
+  - value: lead.converted
+    label: Lead Converted
+    category: CRM Events
+
+  - value: account.created
+    label: Account Created
+    category: CRM Events
+  - value: account.updated
+    label: Account Updated
+    category: CRM Events
+
+  - value: deal.created
+    label: Deal Created
+    category: CRM Events
+  - value: deal.updated
+    label: Deal Updated
+    category: CRM Events
+  - value: deal.won
+    label: Deal Won
+    category: CRM Events
+  - value: deal.lost
+    label: Deal Lost
+    category: CRM Events
+
+  # ── Financial Events ──
+  - value: invoice.created
+    label: Invoice Created
+    category: Financial Events
+  - value: invoice.paid
+    label: Invoice Paid
+    category: Financial Events
+  - value: invoice.overdue
+    label: Invoice Overdue
+    category: Financial Events
+
+  - value: quote.created
+    label: Quote Created
+    category: Financial Events
+  - value: quote.approved
+    label: Quote Approved
+    category: Financial Events
+  - value: quote.rejected
+    label: Quote Rejected
+    category: Financial Events
+
+  - value: payment.received
+    label: Payment Received
+    category: Financial Events
+  - value: payment.refunded
+    label: Payment Refunded
+    category: Financial Events
+
+  # ── Inventory Events ──
+  - value: vehicle.created
+    label: Vehicle Created
+    category: Inventory Events
+  - value: vehicle.updated
+    label: Vehicle Updated
+    category: Inventory Events
+  - value: vehicle.sold
+    label: Vehicle Sold
+    category: Inventory Events
+  - value: vehicle.archived
+    label: Vehicle Archived
+    category: Inventory Events
+  - value: inventory.increase
+    label: Inventory Increase
+    category: Inventory Events
+  - value: inventory.decrease
+    label: Inventory Decrease
+    category: Inventory Events
+
+  # ── Parts & Supply Events ──
+  # NOTE: Parts use lifecycle names (added/edited/removed), NOT created/updated/deleted
+  - value: parts.added
+    label: Part Added
+    category: Parts & Supply Events
+  - value: parts.edited
+    label: Part Edited
+    category: Parts & Supply Events
+  - value: parts.removed
+    label: Part Removed
+    category: Parts & Supply Events
+  - value: parts.low_stock
+    label: Part Low Stock
+    category: Parts & Supply Events

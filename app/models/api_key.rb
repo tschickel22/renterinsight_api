@@ -10,6 +10,7 @@ class ApiKey < ApplicationRecord
   validates :key, presence: true, uniqueness: true
   validates :status, presence: true, inclusion: { in: %w[active revoked] }
   validates :rate_limit, numericality: { greater_than: 0 }
+  validate :validate_permissions, if: -> { permissions.present? }
 
   # Scopes
   scope :active, -> { where(status: "active") }
@@ -19,6 +20,30 @@ class ApiKey < ApplicationRecord
 
   # Callbacks
   before_validation :generate_key, on: :create
+  
+  # ==================== AUTOMATED API SCOPE GENERATION ====================
+  # Auto-generate available resources from the resources table
+  # This eliminates need to manually update when adding new modules
+  
+  # Returns array of available resources with their permissions
+  # Format: [{ resource: 'leads', name: 'Leads', actions: ['read', 'write', 'delete'] }, ...]
+  def self.available_resources
+    Resource.active.order(:position, :name).map do |resource|
+      {
+        resource: resource.key,
+        name: resource.name,
+        actions: %w[read write delete]  # Standard CRUD permissions
+      }
+    end
+  end
+  
+  # Returns flattened list of all valid resource:action combinations
+  # Used for validation and frontend display
+  def self.valid_permission_keys
+    available_resources.flat_map do |res|
+      res[:actions].map { |action| "#{res[:resource]}:#{action}" }
+    end
+  end
 
   # Scope helpers
   def platform_level?
@@ -63,5 +88,17 @@ class ApiKey < ApplicationRecord
 
   def generate_key
     self.key = "ri_live_#{SecureRandom.hex(24)}" if key.blank?
+  end
+  
+  # Validate that all permission resources exist in resources table
+  def validate_permissions
+    return if permissions.blank?
+    
+    valid_resources = Resource.active.pluck(:key)
+    invalid = permissions.keys - valid_resources
+    
+    if invalid.any?
+      errors.add(:permissions, "references invalid resources: #{invalid.join(', ')}")
+    end
   end
 end

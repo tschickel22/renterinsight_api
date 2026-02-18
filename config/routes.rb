@@ -985,6 +985,9 @@ Rails.application.routes.draw do
 
       # ==================== PARTNER API KEY MANAGEMENT ====================
       resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do
+        collection do
+          get :available_resources
+        end
         member do
           post :revoke
         end
@@ -992,6 +995,9 @@ Rails.application.routes.draw do
 
       # ==================== WEBHOOK MANAGEMENT ====================
       resources :webhook_endpoints, only: [:index, :show, :create, :update, :destroy], path: 'webhook-endpoints' do
+        collection do
+          get :available_events
+        end
         member do
           post :test
         end
