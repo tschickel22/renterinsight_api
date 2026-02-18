@@ -236,16 +236,6 @@ class InvitationService
   def resend_invitation(invitation_id)
     invitation = Invitation.find(invitation_id)
     
-<<<<<<< HEAD
-    # Only block resend for accepted or revoked invitations
-    # Expired pending invitations CAN be resent (resend resets expiry)
-    if invitation.accepted?
-      raise Error, 'Invitation has already been accepted'
-    end
-    
-    if invitation.revoked?
-      raise Error, 'Invitation has been revoked'
-=======
     # Allow resending pending invitations even if expired (resend resets expiry)
     # Only block resending for accepted or revoked invitations
     if invitation.accepted?
@@ -254,7 +244,6 @@ class InvitationService
     
     if invitation.revoked?
       raise Error, 'Invitation has been revoked and cannot be resent'
->>>>>>> feature-web2
     end
     
     # Regenerate token for security
