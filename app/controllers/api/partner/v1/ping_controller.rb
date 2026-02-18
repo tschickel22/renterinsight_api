@@ -8,7 +8,7 @@ module Api
           render json: {
             status: "ok",
             api_version: "v1",
-            company: current_company.name,
+            company: current_company&.name || 'Platform',
             api_key: current_api_key.name,
             timestamp: Time.current.iso8601
           }

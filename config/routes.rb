@@ -134,6 +134,12 @@ Rails.application.routes.draw do
       # ==================== GLOBAL SEARCH ====================
       get 'search/global', to: 'search#global'
       
+      # ==================== COMPANIES (Platform Admin) ====================
+      scope path: 'companies', controller: 'companies' do
+        get 'accessible', action: :accessible
+        get ':id/locations', action: :locations
+      end
+      
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       

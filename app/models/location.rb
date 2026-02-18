@@ -2,6 +2,7 @@
 
 class Location < ApplicationRecord
   include QuickbooksIntegration
+  include WebhookNotifiable
   
   # Associations
   belongs_to :company

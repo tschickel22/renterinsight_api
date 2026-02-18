@@ -10,16 +10,16 @@ module Api
       def index
         return unless authorize_action!("webhooks", "read")
 
-        endpoints = @company.webhook_endpoints.order(created_at: :desc)
+        endpoints = scoped_endpoints.order(created_at: :desc)
 
-        # Filter
+        # Filter by status
         endpoints = endpoints.where(status: params[:status]) if params[:status].present?
 
         render json: {
           webhook_endpoints: endpoints.map { |e| endpoint_json(e) },
           meta: {
             total: endpoints.count,
-            company_id: @company.id
+            company_id: @company&.id
           }
         }
       end
@@ -42,7 +42,16 @@ module Api
       def create
         return unless authorize_action!("webhooks", "create")
 
-        endpoint = @company.webhook_endpoints.new(endpoint_params)
+        target_company_id = resolve_target_company_id
+
+        endpoint = WebhookEndpoint.new(endpoint_params)
+        endpoint.company_id = target_company_id
+        endpoint.created_by_user_id = current_user.id
+
+        # Set location_ids if provided (only for company-scoped webhooks)
+        if target_company_id.present? && params[:location_ids].present?
+          endpoint.location_ids = Array(params[:location_ids]).map(&:to_i)
+        end
 
         if endpoint.save
           json = endpoint_json(endpoint, detailed: true)
@@ -61,7 +70,18 @@ module Api
       def update
         return unless authorize_action!("webhooks", "update")
 
-        if @endpoint.update(endpoint_params)
+        update_attrs = endpoint_params
+
+        # Update location_ids if provided
+        if params.key?(:location_ids)
+          if params[:location_ids].blank? || params[:location_ids] == []
+            update_attrs[:location_ids] = nil  # Clear = all locations
+          else
+            update_attrs[:location_ids] = Array(params[:location_ids]).map(&:to_i)
+          end
+        end
+
+        if @endpoint.update(update_attrs)
           render json: {
             webhook_endpoint: endpoint_json(@endpoint, detailed: true),
             message: "Webhook endpoint updated successfully"
@@ -100,8 +120,12 @@ module Api
           payload: test_payload
         )
 
-        # Deliver synchronously so we can return the result
-        WebhookDeliveryJob.perform_now(delivery.id)
+        begin
+          WebhookDeliveryJob.perform_now(delivery.id)
+        rescue StandardError => e
+          Rails.logger.warn "[Webhook Test] Delivery failed (expected for bad endpoints): #{e.message}"
+        end
+
         delivery.reload
 
         render json: {
@@ -118,23 +142,60 @@ module Api
 
       private
 
+      # Scope endpoints based on user role:
+      # - Platform admin: sees all (platform-level + all companies)
+      # - Company admin: sees only their company's endpoints
+      def scoped_endpoints
+        if current_user.role == "platform_admin"
+          if params[:company_id].present?
+            if params[:company_id] == "platform"
+              WebhookEndpoint.platform_level
+            else
+              WebhookEndpoint.where(company_id: params[:company_id])
+            end
+          else
+            WebhookEndpoint.all
+          end
+        else
+          @company.webhook_endpoints
+        end
+      end
+
       def set_endpoint
-        @endpoint = @company.webhook_endpoints.find(params[:id])
+        @endpoint = scoped_endpoints.find(params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: "Webhook endpoint not found" }, status: :not_found
       end
 
+      # Resolve which company_id to assign to a new webhook
+      def resolve_target_company_id
+        if current_user.role == "platform_admin"
+          if params[:company_id].blank? || params[:company_id].to_s == "platform"
+            nil  # Platform-level webhook
+          else
+            params[:company_id].to_i
+          end
+        else
+          @company.id
+        end
+      end
+
       def endpoint_params
-        params.permit(:url, :status, events: [])
+        params.permit(:url, :status, :description, events: [])
       end
 
       def endpoint_json(endpoint, detailed: false)
         json = {
           id: endpoint.id,
           url: endpoint.url,
+          description: endpoint.description,
           events: endpoint.events,
           status: endpoint.status,
           failure_count: endpoint.failure_count,
+          company_id: endpoint.company_id,
+          company_name: endpoint.company&.name,
+          scope: endpoint.platform_level? ? "platform" : "company",
+          location_ids: endpoint.location_ids,
           created_at: endpoint.created_at&.iso8601,
           updated_at: endpoint.updated_at&.iso8601
         }
@@ -142,7 +203,8 @@ module Api
         if detailed
           json.merge!(
             last_triggered_at: endpoint.last_triggered_at&.iso8601,
-            available_events: WebhookService::EVENTS
+            available_events: WebhookService::EVENTS,
+            created_by_user_id: endpoint.created_by_user_id
           )
         end
 

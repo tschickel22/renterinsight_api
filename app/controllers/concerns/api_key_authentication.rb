@@ -23,17 +23,38 @@ module ApiKeyAuthentication
       return
     end
 
+    # Resolve company context
+    if @current_api_key.company_scoped?
+      # Company-scoped key: company is fixed
+      @current_company = @current_api_key.company
+    else
+      # Platform-level key: require X-Company-ID header to specify target company
+      company_id = request.headers["X-Company-ID"]
+      if company_id.present?
+        @current_company = Company.find_by(id: company_id)
+        unless @current_company
+          render json: { error: "Invalid company ID in X-Company-ID header" }, status: :bad_request
+          return
+        end
+      else
+        # Platform key without company header — only valid for platform-level endpoints
+        @current_company = nil
+      end
+    end
+
     @current_api_key.touch_usage!
   end
 
   def enforce_rate_limit
     return unless @current_api_key
 
+    # Skip rate limiting if not configured (nil or 0)
+    limit = @current_api_key.rate_limit.to_i
+    return if limit <= 0
+
     key = @current_api_key.rate_limit_key
     window = 1.hour
-    limit = @current_api_key.rate_limit
-
-    count = Rails.cache.increment(key, 1, expires_in: window, initial: 1)
+    count = Rails.cache.increment(key, 1, expires_in: window, initial: 1).to_i
 
     if count > limit
       response.set_header("X-RateLimit-Limit", limit.to_s)
@@ -57,7 +78,16 @@ module ApiKeyAuthentication
   end
 
   def current_company_id
-    @current_api_key&.company_id
+    @current_company&.id
+  end
+
+  # Require a company context — for endpoints that need tenant isolation
+  def require_company_context!
+    unless @current_company
+      render json: {
+        error: "Company context required. Platform-level keys must provide X-Company-ID header."
+      }, status: :bad_request
+    end
   end
 
   def authorize_permission!(resource, action)

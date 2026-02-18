@@ -197,7 +197,9 @@ module Api
           @part.soft_delete!
           render json: { message: 'Part deleted successfully' }
         rescue ActiveRecord::RecordInvalid => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          # Return clean validation messages (without "Validation failed:" prefix)
+          error_messages = e.record&.errors&.full_messages || [e.message]
+          render json: { errors: error_messages }, status: :unprocessable_entity
         end
       end
 

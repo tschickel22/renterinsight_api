@@ -236,8 +236,14 @@ class InvitationService
   def resend_invitation(invitation_id)
     invitation = Invitation.find(invitation_id)
     
-    unless invitation.can_accept?
-      raise Error, 'Invitation cannot be resent'
+    # Allow resending pending invitations even if expired (resend resets expiry)
+    # Only block resending for accepted or revoked invitations
+    if invitation.accepted?
+      raise Error, 'Invitation has already been accepted and cannot be resent'
+    end
+    
+    if invitation.revoked?
+      raise Error, 'Invitation has been revoked and cannot be resent'
     end
     
     # Regenerate token for security

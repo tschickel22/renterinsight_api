@@ -1,4 +1,6 @@
 class Invoice < ApplicationRecord
+  include WebhookNotifiable
+
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :contact, optional: true
@@ -23,6 +25,7 @@ class Invoice < ApplicationRecord
   before_save :calculate_totals
   after_save :update_status_based_on_payments
   after_update :mark_inventory_as_used_on_payment, if: -> { saved_change_to_status? && status == 'paid' }
+  after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
   
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
   validates :invoice_date, presence: true
@@ -285,5 +288,25 @@ class Invoice < ApplicationRecord
     
     Rails.logger.info "[Invoice] Invoice #{id} marked as paid, deducting inventory (user: #{user&.id || 'nil'})"
     mark_inventory_as_used!(user) if user
+  end
+
+  # Fire custom lifecycle webhook events on status transitions
+  # WebhookNotifiable handles generic invoice.created/updated/deleted
+  # This adds invoice.paid and invoice.overdue for specific transitions.
+  def fire_lifecycle_webhooks
+    event = case status
+            when 'paid'    then 'invoice.paid'
+            when 'overdue' then 'invoice.overdue'
+            end
+
+    return unless event
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: event,
+      payload: webhook_payload
+    )
+  rescue => e
+    Rails.logger.error "[Invoice] Failed to fire lifecycle webhook #{event}: #{e.message}"
   end
 end

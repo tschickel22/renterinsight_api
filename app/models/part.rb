@@ -42,16 +42,19 @@ class Part < ApplicationRecord
   # Callbacks
   before_validation :normalize_fields
   before_validation :set_defaults, on: :create
+  after_create_commit :fire_parts_added_webhook
+  after_update_commit :fire_parts_edited_webhook
   
   # Soft delete
   def soft_delete!
-    # Check for open transactions or PO lines
-    if inventory_transactions.where(created_at: 30.days.ago..).exists?
-      errors.add(:base, "Cannot delete part with recent inventory transactions")
+    # Allow deletion if stock is zero; block if stock remains and recent transactions exist
+    if total_on_hand > 0
+      errors.add(:base, "Cannot delete part with #{total_on_hand} units still in stock. Adjust inventory to 0 first.")
       raise ActiveRecord::RecordInvalid, self
     end
     
     update!(is_deleted: true, deleted_at: Time.current, active: false)
+    fire_parts_removed_webhook
   end
   
   def restore!
@@ -175,5 +178,72 @@ class Part < ApplicationRecord
     self.taxable = true if taxable.nil?
     self.active = true if active.nil?
     self.is_deleted = false if is_deleted.nil?
+  end
+
+  def fire_parts_added_webhook
+    WebhookService.fire(
+      company_id: company_id,
+      event: 'parts.added',
+      payload: {
+        part_id: id,
+        part_sku: sku,
+        part_name: name,
+        description: description,
+        category: category&.name,
+        uom: uom,
+        manufacturer_name: manufacturer_name,
+        default_cost: default_cost,
+        sale_price: sale_price,
+        is_serialized: is_serialized,
+        is_lot_tracked: is_lot_tracked,
+        created_at: created_at&.iso8601
+      }
+    )
+  rescue => e
+    Rails.logger.error "[Part] Failed to fire parts.added webhook: #{e.message}"
+  end
+
+  def fire_parts_edited_webhook
+    tracked_fields = %w[
+      name sku description category_id uom barcode manufacturer_part_no manufacturer_name
+      default_cost average_cost last_cost list_price sale_price taxable active
+      inventory_method is_serialized is_lot_tracked
+      weight_lbs length_inches width_inches height_inches
+    ]
+
+    changed_fields = previous_changes.keys & tracked_fields
+    return if changed_fields.empty?
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: 'parts.edited',
+      payload: {
+        part_id: id,
+        part_sku: sku,
+        part_name: name,
+        changed_fields: changed_fields,
+        changes: changed_fields.each_with_object({}) { |f, h| h[f] = { from: previous_changes[f][0], to: previous_changes[f][1] } },
+        total_on_hand: total_on_hand,
+        updated_at: updated_at&.iso8601
+      }
+    )
+  rescue => e
+    Rails.logger.error "[Part] Failed to fire parts.edited webhook: #{e.message}"
+  end
+
+  def fire_parts_removed_webhook
+    WebhookService.fire(
+      company_id: company_id,
+      event: 'parts.removed',
+      payload: {
+        part_id: id,
+        part_sku: sku,
+        part_name: name,
+        total_on_hand: total_on_hand,
+        removed_at: Time.current.iso8601
+      }
+    )
+  rescue => e
+    Rails.logger.error "[Part] Failed to fire parts.removed webhook: #{e.message}"
   end
 end

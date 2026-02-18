@@ -3,6 +3,7 @@
 class Contact < ApplicationRecord
   include LocationAware
   include NotifiableContact
+  include WebhookNotifiable
   
   # Associations
   belongs_to :account, optional: true

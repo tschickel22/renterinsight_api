@@ -2,6 +2,7 @@
 
 class Vehicle < ApplicationRecord
   include LocationAware
+  include WebhookNotifiable
   
   # Associations
   belongs_to :company, optional: true
@@ -92,6 +93,7 @@ class Vehicle < ApplicationRecord
   before_validation :normalize_fields
   before_validation :normalize_bedroom_bathroom_values  # FIX: Added to handle "4+" values
   before_validation :generate_inventory_id, on: :create
+  after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
 
   # Soft delete
   def soft_delete!
@@ -191,5 +193,24 @@ class Vehicle < ApplicationRecord
     random = SecureRandom.hex(3).upcase
     
     self.inventory_id = "#{prefix}-#{timestamp}-#{random}"
+  end
+
+  # Fire custom lifecycle webhook events on status transitions
+  # WebhookNotifiable handles generic vehicle.created/updated/deleted
+  # This adds vehicle.sold and vehicle.archived for specific transitions.
+  def fire_lifecycle_webhooks
+    event = case status
+            when 'sold' then 'vehicle.sold'
+            end
+
+    return unless event
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: event,
+      payload: webhook_payload
+    )
+  rescue => e
+    Rails.logger.error "[Vehicle] Failed to fire lifecycle webhook #{event}: #{e.message}"
   end
 end

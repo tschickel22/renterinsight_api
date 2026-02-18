@@ -7,6 +7,7 @@
 
 class Payment < ApplicationRecord
   include LocationAware
+  include WebhookNotifiable
   
   # Constants
   STATUSES = %w[pending processing completed failed refunded cancelled voided].freeze
@@ -58,6 +59,7 @@ class Payment < ApplicationRecord
   after_initialize :set_defaults, if: :new_record?
   after_commit :update_loan_after_completion, if: -> { saved_change_to_status? && status == 'completed' && !try(:skip_loan_processing?) }
   after_commit :update_invoice_after_completion, if: -> { saved_change_to_status? && status == 'completed' && payable_type == 'Invoice' }
+  after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
   
   # Instance methods
   def display_name
@@ -276,5 +278,25 @@ class Payment < ApplicationRecord
     # 2. Updates status to 'paid' if total_paid >= total
     # 3. Triggers mark_inventory_as_used! if status becomes 'paid'
     payable.touch
+  end
+
+  # Fire custom lifecycle webhook events on status transitions
+  # WebhookNotifiable handles generic payment.created/updated/deleted
+  # This adds payment.received and payment.refunded for specific transitions.
+  def fire_lifecycle_webhooks
+    event = case status
+            when 'completed' then 'payment.received'
+            when 'refunded'  then 'payment.refunded'
+            end
+
+    return unless event
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: event,
+      payload: webhook_payload
+    )
+  rescue => e
+    Rails.logger.error "[Payment] Failed to fire lifecycle webhook #{event}: #{e.message}"
   end
 end

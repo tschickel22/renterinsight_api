@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_16_030001) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_18_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -187,10 +187,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_030001) do
   end
 
   create_table "api_keys", force: :cascade do |t|
-    t.bigint "company_id", null: false
+    t.bigint "company_id"
     t.string "name", null: false
     t.string "key", null: false
-    t.string "secret_digest", null: false
+    t.string "secret_digest"
     t.jsonb "permissions", default: {}
     t.string "status", default: "active", null: false
     t.datetime "last_used_at"
@@ -3557,7 +3557,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_030001) do
   end
 
   create_table "webhook_endpoints", force: :cascade do |t|
-    t.bigint "company_id", null: false
+    t.bigint "company_id"
     t.string "url", null: false
     t.jsonb "events", default: []
     t.string "secret", null: false
@@ -3566,8 +3566,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_030001) do
     t.integer "failure_count", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "location_ids"
+    t.string "description"
+    t.bigint "created_by_user_id"
     t.index ["company_id", "status"], name: "index_webhook_endpoints_on_company_id_and_status"
     t.index ["company_id"], name: "index_webhook_endpoints_on_company_id"
+    t.index ["created_by_user_id"], name: "index_webhook_endpoints_on_created_by_user_id"
     t.index ["status"], name: "index_webhook_endpoints_on_status"
   end
 

@@ -2,7 +2,8 @@
 
 class WebhookEndpoint < ApplicationRecord
   # Associations
-  belongs_to :company
+  belongs_to :company, optional: true  # NULL = platform-level webhook
+  belongs_to :created_by_user, class_name: "User", foreign_key: "created_by_user_id", optional: true
   has_many :webhook_deliveries, dependent: :destroy
 
   # Validations
@@ -15,9 +16,32 @@ class WebhookEndpoint < ApplicationRecord
   scope :active, -> { where(status: "active") }
   scope :inactive, -> { where(status: "inactive") }
   scope :for_event, ->(event) { active.where("events @> ?", [event].to_json) }
+  scope :platform_level, -> { where(company_id: nil) }
+  scope :company_scoped, -> { where.not(company_id: nil) }
 
   # Callbacks
   before_validation :generate_secret, on: :create
+
+  # Scope helpers
+  def platform_level?
+    company_id.nil?
+  end
+
+  def company_scoped?
+    company_id.present?
+  end
+
+  # Check if this endpoint should fire for a given location
+  def matches_location?(location_id)
+    # No location filter = matches all locations
+    return true if location_ids.blank?
+
+    # If event has no location context, still deliver
+    return true if location_id.nil?
+
+    # Check if the event's location is in our filter list
+    location_ids.include?(location_id.to_i)
+  end
 
   # Instance methods
   def active?
@@ -33,7 +57,6 @@ class WebhookEndpoint < ApplicationRecord
   end
 
   def activate!
-    update!(status: "inactive")
     update!(status: "active", failure_count: 0)
   end
 

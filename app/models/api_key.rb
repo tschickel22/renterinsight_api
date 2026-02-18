@@ -2,25 +2,32 @@
 
 class ApiKey < ApplicationRecord
   # Associations
-  belongs_to :company
+  belongs_to :company, optional: true  # NULL = platform-level key
   belongs_to :created_by_user, class_name: "User", foreign_key: "created_by_user_id"
 
   # Validations
   validates :name, presence: true
   validates :key, presence: true, uniqueness: true
-  validates :secret_digest, presence: true
   validates :status, presence: true, inclusion: { in: %w[active revoked] }
   validates :rate_limit, numericality: { greater_than: 0 }
 
   # Scopes
   scope :active, -> { where(status: "active") }
   scope :revoked, -> { where(status: "revoked") }
+  scope :platform_level, -> { where(company_id: nil) }
+  scope :company_scoped, -> { where.not(company_id: nil) }
 
   # Callbacks
-  before_validation :generate_key_and_secret, on: :create
+  before_validation :generate_key, on: :create
 
-  # Virtual attribute - only available on creation
-  attr_accessor :raw_secret
+  # Scope helpers
+  def platform_level?
+    company_id.nil?
+  end
+
+  def company_scoped?
+    company_id.present?
+  end
 
   # Instance methods
   def active?
@@ -33,12 +40,6 @@ class ApiKey < ApplicationRecord
 
   def revoke!
     update!(status: "revoked")
-  end
-
-  def authenticate_secret(raw_secret)
-    BCrypt::Password.new(secret_digest) == raw_secret
-  rescue BCrypt::Errors::InvalidHash
-    false
   end
 
   def touch_usage!
@@ -60,12 +61,7 @@ class ApiKey < ApplicationRecord
 
   private
 
-  def generate_key_and_secret
+  def generate_key
     self.key = "ri_live_#{SecureRandom.hex(24)}" if key.blank?
-
-    if secret_digest.blank?
-      self.raw_secret = "ri_secret_#{SecureRandom.hex(32)}"
-      self.secret_digest = BCrypt::Password.create(raw_secret)
-    end
   end
 end

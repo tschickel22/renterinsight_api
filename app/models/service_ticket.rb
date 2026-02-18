@@ -29,6 +29,7 @@
 class ServiceTicket < ApplicationRecord
   include LocationAware
   include NotifiableServiceTicket
+  include WebhookNotifiable
   
   # Associations
   belongs_to :company

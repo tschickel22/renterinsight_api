@@ -4,6 +4,7 @@ class Lead < ApplicationRecord
   include Communicable
   include LocationAware
   include NotifiableLead
+  include WebhookNotifiable
   
   belongs_to :company
   belongs_to :location, optional: true
@@ -30,6 +31,9 @@ class Lead < ApplicationRecord
     self.owner = user
   end
 
+  # Lifecycle webhook for lead conversion
+  after_commit :fire_lifecycle_webhooks, if: :saved_change_to_is_converted?
+
   # Scopes for filtering converted leads
   scope :active, -> { where(is_converted: [false, nil]) }
   scope :converted, -> { where(is_converted: true) }
@@ -53,5 +57,21 @@ class Lead < ApplicationRecord
 
   def can_convert?
     !converted? && email.present?
+  end
+
+  private
+
+  # Fire lead.converted lifecycle webhook when is_converted changes to true
+  # WebhookNotifiable handles generic lead.created/updated/deleted
+  def fire_lifecycle_webhooks
+    return unless is_converted == true
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: 'lead.converted',
+      payload: webhook_payload
+    )
+  rescue => e
+    Rails.logger.error "[Lead] Failed to fire lifecycle webhook lead.converted: #{e.message}"
   end
 end
