@@ -58,14 +58,15 @@ class Company < ApplicationRecord
   has_many :inventory_transactions, dependent: :destroy
   has_many :stock_balances, dependent: :destroy
   has_many :reorder_rules, dependent: :destroy
-  
   # Website Builder Associations
   has_many :websites, dependent: :destroy
   has_many :sites, dependent: :destroy
   has_many :site_media, dependent: :destroy
   has_many :website_media, class_name: 'WebsiteMedia', dependent: :destroy  # Media for websites
   has_many :company_domains, dependent: :destroy
-  
+  # Partner API Associations
+  has_many :api_keys, dependent: :destroy
+  has_many :webhook_endpoints, dependent: :destroy
   # RBAC System Associations
   has_many :roles, dependent: :destroy
   has_many :company_hidden_roles, dependent: :destroy

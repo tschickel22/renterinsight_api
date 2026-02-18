@@ -134,6 +134,12 @@ Rails.application.routes.draw do
       # ==================== GLOBAL SEARCH ====================
       get 'search/global', to: 'search#global'
       
+      # ==================== COMPANIES (Platform Admin) ====================
+      scope path: 'companies', controller: 'companies' do
+        get 'accessible', action: :accessible
+        get ':id/locations', action: :locations
+      end
+      
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
       
@@ -976,6 +982,21 @@ Rails.application.routes.draw do
           end
         end
       end
+
+      # ==================== PARTNER API KEY MANAGEMENT ====================
+      resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do
+        member do
+          post :revoke
+        end
+      end
+
+      # ==================== WEBHOOK MANAGEMENT ====================
+      resources :webhook_endpoints, only: [:index, :show, :create, :update, :destroy], path: 'webhook-endpoints' do
+        member do
+          post :test
+        end
+        resources :deliveries, only: [:index, :show], controller: 'webhook_deliveries'
+      end
     end
   end
 
@@ -1616,6 +1637,40 @@ Rails.application.routes.draw do
       
       # Portal Service Tickets
       resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
+    end
+  end
+
+  # ==================== PARTNER API (API Key Auth) ====================
+  namespace :api do
+    namespace :partner do
+      namespace :v1 do
+        # Health check
+        get 'ping', to: 'ping#show'
+
+        # Tier 1 - Core CRM Resources
+        resources :contacts, only: [:index, :show, :create, :update, :destroy]
+        resources :leads, only: [:index, :show, :create, :update, :destroy]
+        resources :accounts, only: [:index, :show, :create, :update, :destroy]
+        resources :deals, only: [:index, :show, :create, :update, :destroy]
+
+        # Tier 2 - Operations & Inventory
+        resources :vehicles, only: [:index, :show, :create, :update, :destroy]
+        resources :invoices, only: [:index, :show, :create, :update, :destroy]
+        resources :service_tickets, only: [:index, :show, :create, :update, :destroy], path: 'service-tickets'
+        resources :quotes, only: [:index, :show, :create, :update, :destroy]
+
+        # Tier 3 - Organization & Finance
+        resources :locations, only: [:index, :show, :create, :update, :destroy]
+        resources :users, only: [:index, :show]
+        resources :payments, only: [:index, :show, :create, :update, :destroy]
+        resources :loans, only: [:index, :show, :create, :update, :destroy]
+
+        # Webhooks
+        get 'webhook-events', to: 'webhook_events#index'
+        resources :webhook_endpoints, only: [:index, :show, :create, :update, :destroy], path: 'webhook-endpoints' do
+          resources :deliveries, only: [:index, :show], controller: 'webhook_deliveries'
+        end
+      end
     end
   end
 

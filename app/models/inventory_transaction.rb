@@ -23,6 +23,8 @@ class InventoryTransaction < ApplicationRecord
   before_create :generate_transaction_number
   after_create :update_stock_balance
   after_create :update_purchase_order_line_quantity, if: :is_receive_with_po?
+  after_create_commit :fire_inventory_webhook
+  after_create_commit :check_low_stock_webhook
   
   scope :for_company, ->(company_id) { where(company_id: company_id) }
   scope :for_part, ->(part_id) { where(part_id: part_id) }
@@ -128,6 +130,64 @@ class InventoryTransaction < ApplicationRecord
     throw(:abort)
   end
   
+  def fire_inventory_webhook
+    event = quantity > 0 ? 'inventory.increase' : 'inventory.decrease'
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: event,
+      payload: {
+        part_id: part_id,
+        part_sku: part&.sku,
+        part_name: part&.name,
+        location_id: location_id,
+        location_name: location&.name,
+        bin_id: bin_id,
+        transaction_type: transaction_type,
+        transaction_number: transaction_number,
+        quantity_change: quantity,
+        unit_cost: unit_cost,
+        new_on_hand: part&.on_hand_at(location_id),
+        new_total_on_hand: part&.total_on_hand,
+        serial_number: serial_number,
+        lot_number: lot_number,
+        notes: notes,
+        transaction_date: transaction_date&.iso8601,
+        created_by_id: created_by_id
+      }
+    )
+  rescue => e
+    Rails.logger.error "[InventoryTransaction] Failed to fire #{event} webhook: #{e.message}"
+  end
+
+  def check_low_stock_webhook
+    return if quantity > 0 # Only check on decreases
+
+    rule = part&.reorder_rules&.find_by(location_id: location_id)
+    return unless rule&.reorder_point.present?
+
+    current_available = part.available_at(location_id)
+    return unless current_available <= rule.reorder_point
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: 'parts.low_stock',
+      payload: {
+        part_id: part_id,
+        part_sku: part&.sku,
+        part_name: part&.name,
+        location_id: location_id,
+        location_name: location&.name,
+        current_available: current_available,
+        reorder_point: rule.reorder_point,
+        reorder_quantity: rule.reorder_quantity,
+        total_on_hand: part&.total_on_hand
+      }
+    )
+  rescue => e
+    Rails.logger.error "[InventoryTransaction] Failed to fire parts.low_stock webhook: #{e.message}"
+  end
+
   def is_receive_with_po?
     transaction_type == 'receive' && purchase_order_line_id.present?
   end

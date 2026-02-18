@@ -3,6 +3,7 @@ class Account < ApplicationRecord
   include Communicable
   include LocationAware
   include NotifiableAccount
+  include WebhookNotifiable
   
   # Account Types
   ACCOUNT_TYPES = %w[customer prospect vendor partner competitor converted_lead].freeze

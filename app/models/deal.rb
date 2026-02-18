@@ -1,6 +1,7 @@
 class Deal < ApplicationRecord
   include LocationAware
   include NotifiableDeal
+  include WebhookNotifiable
   
   belongs_to :company, optional: true
   belongs_to :location, optional: true
@@ -71,6 +72,7 @@ class Deal < ApplicationRecord
   
   # Auto-generate commission payment when deal is marked closed_won
   after_save :generate_commission_payment, if: :just_closed_won?
+  after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
   
   def normalize_stage
     self.stage = stage&.downcase
@@ -323,6 +325,26 @@ class Deal < ApplicationRecord
     # Don't raise - we don't want to block the deal save if commission generation fails
   end
   
+  # Fire custom lifecycle webhook events on stage transitions
+  # WebhookNotifiable handles generic deal.created/updated/deleted
+  # This adds deal.won and deal.lost for specific transitions.
+  def fire_lifecycle_webhooks
+    event = case stage
+            when 'closed_won'  then 'deal.won'
+            when 'closed_lost' then 'deal.lost'
+            end
+
+    return unless event
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: event,
+      payload: webhook_payload
+    )
+  rescue => e
+    Rails.logger.error "[Deal] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
   # Sync vehicle pricing data when vehicle is assigned
   def sync_vehicle_pricing
     return unless vehicle_id.present?

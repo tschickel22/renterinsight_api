@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_16_020001) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_18_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -184,6 +184,26 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_020001) do
     t.index ["insight_type"], name: "index_ai_insights_on_insight_type"
     t.index ["lead_id", "is_read"], name: "index_ai_insights_on_lead_id_and_is_read"
     t.index ["lead_id"], name: "index_ai_insights_on_lead_id"
+  end
+
+  create_table "api_keys", force: :cascade do |t|
+    t.bigint "company_id"
+    t.string "name", null: false
+    t.string "key", null: false
+    t.string "secret_digest"
+    t.jsonb "permissions", default: {}
+    t.string "status", default: "active", null: false
+    t.datetime "last_used_at"
+    t.bigint "request_count", default: 0, null: false
+    t.integer "rate_limit", default: 1000, null: false
+    t.bigint "created_by_user_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_api_keys_on_company_id_and_status"
+    t.index ["company_id"], name: "index_api_keys_on_company_id"
+    t.index ["created_by_user_id"], name: "index_api_keys_on_created_by_user_id"
+    t.index ["key"], name: "index_api_keys_on_key", unique: true
+    t.index ["status"], name: "index_api_keys_on_status"
   end
 
   create_table "api_logs", force: :cascade do |t|
@@ -3518,6 +3538,41 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_020001) do
     t.index ["service_ticket_id"], name: "index_warranty_claims_on_service_ticket_id"
     t.index ["status"], name: "index_warranty_claims_on_status"
     t.index ["submitted_at"], name: "index_warranty_claims_on_submitted_at"
+  end
+
+  create_table "webhook_deliveries", force: :cascade do |t|
+    t.bigint "webhook_endpoint_id", null: false
+    t.string "event", null: false
+    t.jsonb "payload", default: {}
+    t.integer "response_code"
+    t.text "response_body"
+    t.datetime "delivered_at"
+    t.integer "attempts", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["delivered_at"], name: "index_webhook_deliveries_on_delivered_at"
+    t.index ["event"], name: "index_webhook_deliveries_on_event"
+    t.index ["webhook_endpoint_id", "event"], name: "index_webhook_deliveries_on_webhook_endpoint_id_and_event"
+    t.index ["webhook_endpoint_id"], name: "index_webhook_deliveries_on_webhook_endpoint_id"
+  end
+
+  create_table "webhook_endpoints", force: :cascade do |t|
+    t.bigint "company_id"
+    t.string "url", null: false
+    t.jsonb "events", default: []
+    t.string "secret", null: false
+    t.string "status", default: "active", null: false
+    t.datetime "last_triggered_at"
+    t.integer "failure_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "location_ids"
+    t.string "description"
+    t.bigint "created_by_user_id"
+    t.index ["company_id", "status"], name: "index_webhook_endpoints_on_company_id_and_status"
+    t.index ["company_id"], name: "index_webhook_endpoints_on_company_id"
+    t.index ["created_by_user_id"], name: "index_webhook_endpoints_on_created_by_user_id"
+    t.index ["status"], name: "index_webhook_endpoints_on_status"
   end
 
   create_table "website_media", force: :cascade do |t|

@@ -3,6 +3,7 @@
 class Quote < ApplicationRecord
   include Communicable
   include LocationAware
+  include WebhookNotifiable
   # Quote Statuses
   STATUSES = %w[draft sent viewed accepted rejected expired].freeze
   
@@ -45,6 +46,7 @@ class Quote < ApplicationRecord
   before_validation :generate_public_token, on: :create
   before_validation :calculate_totals
   before_validation :check_expiration
+  after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
   
   # Soft Delete
   def soft_delete!
@@ -353,5 +355,25 @@ class Quote < ApplicationRecord
     if valid_until.present? && valid_until < Date.current
       errors.add(:valid_until, 'must be a future date')
     end
+  end
+
+  # Fire custom lifecycle webhook events on status transitions
+  # WebhookNotifiable handles generic quote.created/updated/deleted
+  # This adds quote.approved and quote.rejected for specific transitions.
+  def fire_lifecycle_webhooks
+    event = case status
+            when 'accepted' then 'quote.approved'
+            when 'rejected' then 'quote.rejected'
+            end
+
+    return unless event
+
+    WebhookService.fire(
+      company_id: company_id,
+      event: event,
+      payload: webhook_payload
+    )
+  rescue => e
+    Rails.logger.error "[Quote] Failed to fire lifecycle webhook #{event}: #{e.message}"
   end
 end

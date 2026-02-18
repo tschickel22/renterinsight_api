@@ -7,6 +7,7 @@
 
 class Loan < ApplicationRecord
   include LocationAware
+  include WebhookNotifiable
   
   # Constants
   STATUSES = %w[pending active paid_off defaulted cancelled].freeze
