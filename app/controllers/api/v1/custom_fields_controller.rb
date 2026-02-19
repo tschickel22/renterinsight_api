@@ -35,6 +35,8 @@ module Api
         else
           render json: { error: 'Validation failed', details: field.errors.full_messages }, status: :unprocessable_entity
         end
+      rescue ActiveRecord::RecordNotUnique
+        render json: { error: 'A custom field with this name already exists for this module' }, status: :unprocessable_entity
       end
 
       # PATCH /api/v1/custom_fields/:id
@@ -90,7 +92,7 @@ module Api
           placeholder: field.placeholder,
           isActive: field.is_active,
           isSystemField: field.is_system_field,
-          hidden: field.hidden,
+          hidden: field.respond_to?(:hidden) ? field.hidden : false,
           options: field.options,
           validationRules: field.validation_rules,
           createdAt: field.created_at&.iso8601,
