@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_18_030000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_19_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -800,6 +800,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_18_030000) do
     t.jsonb "verified_email_domains", default: []
     t.string "public_inventory_token"
     t.jsonb "public_inventory_settings", default: {}
+    t.jsonb "pipeline_stages"
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
@@ -986,6 +987,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_18_030000) do
     t.string "section"
     t.bigint "created_by_id"
     t.bigint "updated_by_id"
+    t.boolean "hidden", default: false, null: false
     t.index ["company_id", "module", "field_key"], name: "index_custom_fields_on_company_module_field_key", unique: true
     t.index ["company_id", "module", "is_active"], name: "index_custom_fields_on_company_id_and_module_and_is_active"
     t.index ["company_id", "module", "name"], name: "index_custom_fields_on_company_module_name", unique: true
@@ -1545,6 +1547,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_18_030000) do
     t.string "rv_experience"
     t.string "preferred_contact_method"
     t.text "interests_requirements"
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
@@ -2068,6 +2071,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_18_030000) do
     t.index ["nurture_sequence_id", "position"], name: "index_nurture_steps_on_nurture_sequence_id_and_position"
     t.index ["nurture_sequence_id"], name: "index_nurture_steps_on_nurture_sequence_id"
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
+  end
+
+  create_table "page_layouts", force: :cascade do |t|
+    t.integer "company_id", null: false
+    t.string "module_name", null: false
+    t.string "layout_type", default: "detail", null: false
+    t.jsonb "layout_data", default: {}, null: false
+    t.boolean "is_default", default: false
+    t.bigint "created_by_id"
+    t.bigint "updated_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module_name", "layout_type"], name: "idx_page_layouts_company_module_type", unique: true
+    t.index ["company_id"], name: "index_page_layouts_on_company_id"
   end
 
   create_table "part_categories", force: :cascade do |t|

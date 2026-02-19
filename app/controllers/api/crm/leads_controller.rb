@@ -119,48 +119,56 @@ module Api
 
       def create
         return unless authorize_action!('leads', 'create')
-        
+
         Rails.logger.info "[LeadsController#create] Received params: #{params.inspect}"
         Rails.logger.info "[LeadsController#create] Processed lead_params: #{lead_params.inspect}"
-        
+
+        # Validate custom field values before creating
+        custom_errors = validate_custom_field_values('leads', custom_field_values_param)
+        if custom_errors.any?
+          render json: { error: 'Validation failed', details: custom_errors }, status: :unprocessable_entity
+          return
+        end
+
         # STRICT TENANT ISOLATION: Create lead within current company
         l = @company.leads.new(lead_params)
-        
+        l.custom_field_values = custom_field_values_param if custom_field_values_param.present?
+
         # Auto-assign owner to current user if not specified
         l.owner_id ||= current_user&.id
-        
+
         # Auto-assign location from selector (if user selected a specific location)
         l.location_id ||= Current.location_id if Current.location_id.present?
-        
+
         # RBAC fallback: Location-tier users auto-assign to their first location if no selector
         if l.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           l.location_id ||= location_ids.first if location_ids.any?
         end
-        
+
         if l.save
           Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
           render json: lead_json(l), status: :created
         else
           Rails.logger.error "[LeadsController#create] Validation failed: #{l.errors.full_messages.join(', ')}"
-          render json: { 
-            error: 'Validation failed', 
+          render json: {
+            error: 'Validation failed',
             details: l.errors.full_messages,
-            params_received: lead_params 
+            params_received: lead_params
           }, status: :unprocessable_entity
         end
       rescue => e
         Rails.logger.error "[LeadsController#create] Exception: #{e.class.name}: #{e.message}"
         Rails.logger.error e.backtrace.first(5).join("\n")
-        
+
         begin
           params_info = lead_params
         rescue
           params_info = 'Could not parse params'
         end
-        
-        render json: { 
-          error: 'Internal server error', 
+
+        render json: {
+          error: 'Internal server error',
           message: e.message,
           params_received: params_info
         }, status: :internal_server_error
@@ -168,16 +176,27 @@ module Api
 
       def update
         return unless authorize_action!('leads', 'update')
-        
-        Rails.logger.info "🔍 [LeadUpdate] BEFORE: lead_id=#{@lead.id}, owner_id=#{@lead.owner_id}, location_id=#{@lead.location_id}, is_converted=#{@lead.is_converted}"
-        Rails.logger.info "🔍 [LeadUpdate] PARAMS: #{lead_params.inspect}"
-        Rails.logger.info "🔍 [LeadUpdate] User: #{current_user.email}, RBAC locations: #{permission_service.accessible_location_ids.inspect}"
-        
-        @lead.update!(lead_params)
-        
-        Rails.logger.info "🔍 [LeadUpdate] AFTER: lead_id=#{@lead.id}, owner_id=#{@lead.owner_id}, location_id=#{@lead.location_id}, is_converted=#{@lead.is_converted}"
-        Rails.logger.info "🔍 [LeadUpdate] Will user see this lead? RBAC=#{current_user.uses_rbac?}, Admin=#{current_user.effective_admin?}"
-        
+
+        Rails.logger.info "[LeadUpdate] BEFORE: lead_id=#{@lead.id}, owner_id=#{@lead.owner_id}, location_id=#{@lead.location_id}, is_converted=#{@lead.is_converted}"
+        Rails.logger.info "[LeadUpdate] PARAMS: #{lead_params.inspect}"
+        Rails.logger.info "[LeadUpdate] User: #{current_user.email}, RBAC locations: #{permission_service.accessible_location_ids.inspect}"
+
+        # Validate custom field values before updating
+        custom_errors = validate_custom_field_values('leads', custom_field_values_param)
+        if custom_errors.any?
+          render json: { error: 'Validation failed', details: custom_errors }, status: :unprocessable_entity
+          return
+        end
+
+        update_attrs = lead_params
+        if custom_field_values_param.present?
+          update_attrs = update_attrs.merge(custom_field_values: (@lead.custom_field_values || {}).merge(custom_field_values_param))
+        end
+
+        @lead.update!(update_attrs)
+
+        Rails.logger.info "[LeadUpdate] AFTER: lead_id=#{@lead.id}, owner_id=#{@lead.owner_id}, location_id=#{@lead.location_id}, is_converted=#{@lead.is_converted}"
+
         render json: lead_json(@lead)
       end
 
@@ -500,6 +519,24 @@ module Api
         }.compact
       end
 
+      def custom_field_values_param
+        raw = params[:custom_field_values] || params[:customFieldValues]
+        return {} if raw.blank?
+        raw.is_a?(ActionController::Parameters) ? raw.to_unsafe_h : raw.to_h
+      end
+
+      def validate_custom_field_values(module_name, values)
+        return [] if values.blank?
+
+        errors = []
+        @company.custom_fields.active.for_module(module_name).each do |field|
+          value = values[field.field_key]
+          field_errors = field.validate_value(value)
+          errors.concat(field_errors)
+        end
+        errors
+      end
+
       def calculate_lead_score(lead)
         score = 0
         score += 20 if lead.email.present?
@@ -551,6 +588,7 @@ module Api
           rvExperience: l.respond_to?(:rv_experience) ? l.rv_experience : nil,
           preferredContactMethod: l.respond_to?(:preferred_contact_method) ? l.preferred_contact_method : nil,
           interestsRequirements: l.respond_to?(:interests_requirements) ? l.interests_requirements : nil,
+          customFieldValues: l.respond_to?(:custom_field_values) ? l.custom_field_values : {},
           createdAt: l.created_at,
           updatedAt: l.updated_at
         }

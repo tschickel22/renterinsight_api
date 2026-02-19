@@ -1003,6 +1003,15 @@ Rails.application.routes.draw do
         end
         resources :deliveries, only: [:index, :show], controller: 'webhook_deliveries'
       end
+
+      # ==================== CUSTOM FIELDS ====================
+      resources :custom_fields, only: [:index, :create, :update, :destroy]
+
+      # ==================== PAGE LAYOUTS ====================
+      get 'page_layouts/:module_name', to: 'page_layouts#show'
+      patch 'page_layouts/:module_name', to: 'page_layouts#update'
+      post 'page_layouts/:module_name/reset', to: 'page_layouts#reset'
+      get 'page_layouts/:module_name/field_definitions', to: 'page_layouts#field_definitions'
     end
   end
 
