@@ -50,11 +50,12 @@ class CustomField < ApplicationRecord
   
   # Callbacks
   before_validation :generate_field_key, on: :create
+  before_validation :set_label_from_name
   before_validation :normalize_options
   
   # Serialize JSON columns
   serialize :options, coder: JSON
-  serialize :validation_rules, coder: JSON
+  # validation_rules is jsonb - no serialize needed (PostgreSQL handles it natively)
   
   # Helper: Validate a value against this field's rules
   def validate_value(value)
@@ -141,6 +142,10 @@ class CustomField < ApplicationRecord
   
   private
   
+  def set_label_from_name
+    self.label = name if label.blank? && name.present?
+  end
+
   def generate_field_key
     return if field_key.present?
     

@@ -131,7 +131,8 @@ module Api
           { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false,
             options: %w[new contacted qualified proposal negotiation won lost] },
           { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },
-          { key: 'source_id', label: 'Source', type: 'select', source: 'standard', required: false, protected: false },
+          { key: 'source_id', label: 'Source', type: 'select', source: 'standard', required: false, protected: false,
+            options: Source.for_company(@company.id).order(:name).pluck(:name) },
           { key: 'budget_range', label: 'Budget Range', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'purchase_timeframe', label: 'Purchase Timeframe', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'rv_experience', label: 'RV Experience', type: 'text', source: 'standard', required: false, protected: false },
@@ -144,6 +145,7 @@ module Api
       def custom_field_definitions(module_name)
         @company.custom_fields.active.for_module(module_name).ordered.map do |field|
           {
+            id: field.id,
             key: field.field_key,
             label: field.label || field.name,
             type: field.field_type,

@@ -5,7 +5,7 @@ module Api
   module Crm
     class SourcesController < ApplicationController
       include RbacAuthorization
-      rbac_resource :crm,
+      rbac_resource :leads,
         read_actions: [:index, :show, :stats],
         create_actions: [:create],
         update_actions: [:update],
@@ -70,8 +70,8 @@ module Api
       # GET /api/crm/sources/:id/stats
       def stats
         # STRICT TENANT ISOLATION: Only count leads from current company
-        leads_count = @company.leads.where(source_id: @source.id, is_deleted: [false, nil]).count
-        deals_count = @company.deals.where(source_id: @source.id, is_deleted: [false, nil]).count
+        leads_count = @company.leads.where(source_id: @source.id).count
+        deals_count = @company.deals.where(source_id: @source.id).count
         
         # Calculate conversion rate: deals / leads * 100 (or 0 if no leads)
         conversion_rate = leads_count > 0 ? (deals_count.to_f / leads_count * 100).round(1) : 0.0

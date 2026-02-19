@@ -67,7 +67,7 @@ module Api
       end
 
       def custom_field_params
-        params.permit(
+        params.require(:custom_field).permit(
           :name, :label, :field_type, :module, :required, :display_order,
           :section, :description, :placeholder, :default_value,
           options: [], validation_rules: {}

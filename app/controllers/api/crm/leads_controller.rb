@@ -181,8 +181,8 @@ module Api
         Rails.logger.info "[LeadUpdate] PARAMS: #{lead_params.inspect}"
         Rails.logger.info "[LeadUpdate] User: #{current_user.email}, RBAC locations: #{permission_service.accessible_location_ids.inspect}"
 
-        # Validate custom field values before updating
-        custom_errors = validate_custom_field_values('leads', custom_field_values_param)
+        # Validate custom field values before updating (partial: true — only validate submitted fields)
+        custom_errors = validate_custom_field_values('leads', custom_field_values_param, partial: true)
         if custom_errors.any?
           render json: { error: 'Validation failed', details: custom_errors }, status: :unprocessable_entity
           return
@@ -525,11 +525,14 @@ module Api
         raw.is_a?(ActionController::Parameters) ? raw.to_unsafe_h : raw.to_h
       end
 
-      def validate_custom_field_values(module_name, values)
+      def validate_custom_field_values(module_name, values, partial: false)
         return [] if values.blank?
 
         errors = []
         @company.custom_fields.active.for_module(module_name).each do |field|
+          # For partial updates (inline edit), only validate fields actually submitted
+          next if partial && !values.key?(field.field_key)
+
           value = values[field.field_key]
           field_errors = field.validate_value(value)
           errors.concat(field_errors)
