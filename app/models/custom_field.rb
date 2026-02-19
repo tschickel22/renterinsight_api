@@ -32,6 +32,7 @@ class CustomField < ApplicationRecord
     checkbox
     user
     file
+    image
   ].freeze
   
   validates :field_type, inclusion: { in: FIELD_TYPES }

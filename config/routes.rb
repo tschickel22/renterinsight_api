@@ -1007,6 +1007,13 @@ Rails.application.routes.draw do
       # ==================== CUSTOM FIELDS ====================
       resources :custom_fields, only: [:index, :create, :update, :destroy]
 
+      # ==================== CUSTOM FIELD FILE/IMAGE UPLOADS ====================
+      resources :custom_field_uploads, only: [:create] do
+        collection do
+          delete :destroy, action: :destroy
+        end
+      end
+
       # ==================== PAGE LAYOUTS ====================
       get 'page_layouts/:module_name', to: 'page_layouts#show'
       patch 'page_layouts/:module_name', to: 'page_layouts#update'
