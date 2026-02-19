@@ -160,7 +160,15 @@ module Api
         # Extract tags from the contact params before updating
         tag_names = contact_params_with_extra[:tags]
         
-        if @contact.update(contact_params)
+        # Handle custom_field_values merge (partial update pattern)
+        update_attrs = contact_params
+        custom_field_values_param = params[:custom_field_values] || params[:contact]&.dig(:custom_field_values)
+        if custom_field_values_param.present?
+          existing = @contact.custom_field_values || {}
+          update_attrs = update_attrs.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
+        end
+        
+        if @contact.update(update_attrs)
           # Handle tags if provided
           handle_tags(@contact, tag_names) if tag_names
 
@@ -825,6 +833,7 @@ module Api
           state: contact.state,
           zip: contact.zip,
           country: contact.country,
+          customFieldValues: contact.respond_to?(:custom_field_values) ? contact.custom_field_values : {},
           createdAt: contact.created_at,
           updatedAt: contact.updated_at
         }

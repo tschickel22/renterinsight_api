@@ -47,7 +47,7 @@ class Account < ApplicationRecord
   validates :account_type, inclusion: { in: ACCOUNT_TYPES }, allow_blank: true
   validates :rating, inclusion: { in: RATINGS }, allow_blank: true
   validates :ownership, inclusion: { in: OWNERSHIP_TYPES }, allow_blank: true
-  validates :website, format: { with: /\Ahttps?:\/\//, message: 'must start with http:// or https://' }, allow_blank: true, allow_nil: true
+  validates :website, format: { with: /\Ahttps?:\/\//, message: 'must be a valid URL' }, allow_blank: true, allow_nil: true
   validates :annual_revenue, numericality: { greater_than_or_equal_to: 0 }, allow_blank: true
   validates :employee_count, numericality: { greater_than_or_equal_to: 0, only_integer: true }, allow_blank: true
   
@@ -154,7 +154,10 @@ class Account < ApplicationRecord
   
   def normalize_fields
     self.email = email&.downcase&.strip
-    self.website = website&.downcase&.strip if website.present?
+    if website.present?
+      self.website = website.downcase.strip
+      self.website = "https://#{self.website}" unless self.website =~ /\Ahttps?:\/\//
+    end
     self.phone = phone&.gsub(/\D/, '') if phone.present?
   end
   

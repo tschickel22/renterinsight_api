@@ -116,9 +116,72 @@ module Api
         case module_name
         when 'leads'
           leads_standard_fields
+        when 'accounts'
+          accounts_standard_fields
+        when 'contacts'
+          contacts_standard_fields
         else
           []
         end
+      end
+
+      def accounts_standard_fields
+        protected_keys = PageLayout::PROTECTED_FIELDS['accounts'] || []
+        [
+          { key: 'name', label: 'Name', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('name') },
+          { key: 'email', label: 'Email', type: 'email', source: 'standard', required: false, protected: protected_keys.include?('email') },
+          { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: false, protected: protected_keys.include?('phone') },
+          { key: 'account_type', label: 'Account Type', type: 'select', source: 'standard', required: false, protected: false,
+            options: %w[prospect customer partner vendor other] },
+          { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false,
+            options: %w[active inactive suspended] },
+          { key: 'rating', label: 'Rating', type: 'select', source: 'standard', required: false, protected: false,
+            options: %w[hot warm cold] },
+          { key: 'website', label: 'Website', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'industry', label: 'Industry', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'ownership', label: 'Ownership', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'annual_revenue', label: 'Annual Revenue', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'employee_count', label: 'Employee Count', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'source_id', label: 'Source', type: 'select', source: 'standard', required: false, protected: false,
+            options: Source.for_company(@company.id).order(:name).pluck(:name) },
+          { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },
+          { key: 'billing_street', label: 'Billing Street', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_city', label: 'Billing City', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_state', label: 'Billing State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_postal_code', label: 'Billing Postal Code', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_country', label: 'Billing Country', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'shipping_street', label: 'Shipping Street', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'shipping_city', label: 'Shipping City', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'shipping_state', label: 'Shipping State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'shipping_postal_code', label: 'Shipping Postal Code', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'shipping_country', label: 'Shipping Country', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'description', label: 'Description', type: 'longtext', source: 'standard', required: false, protected: false },
+          { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
+        ]
+      end
+
+      def contacts_standard_fields
+        protected_keys = PageLayout::PROTECTED_FIELDS['contacts'] || []
+        [
+          { key: 'first_name', label: 'First Name', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('first_name') },
+          { key: 'last_name', label: 'Last Name', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('last_name') },
+          { key: 'email', label: 'Email', type: 'email', source: 'standard', required: true, protected: protected_keys.include?('email') },
+          { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: false, protected: protected_keys.include?('phone') },
+          { key: 'title', label: 'Job Title', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'department', label: 'Department', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'company_name', label: 'Company Name', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'account_id', label: 'Account', type: 'select', source: 'standard', required: false, protected: false },
+          { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },
+          { key: 'is_primary', label: 'Primary Contact', type: 'boolean', source: 'standard', required: false, protected: false },
+          { key: 'street', label: 'Street', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'city', label: 'City', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'state', label: 'State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'zip', label: 'Zip', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'country', label: 'Country', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'opt_out_email', label: 'Opt Out Email', type: 'boolean', source: 'standard', required: false, protected: false },
+          { key: 'opt_out_sms', label: 'Opt Out SMS', type: 'boolean', source: 'standard', required: false, protected: false },
+          { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
+        ]
       end
 
       def leads_standard_fields

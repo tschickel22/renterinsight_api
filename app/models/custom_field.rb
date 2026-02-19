@@ -88,7 +88,9 @@ class CustomField < ApplicationRecord
       
     when 'url'
       begin
-        uri = URI.parse(value)
+        url_to_check = value.to_s.strip
+        url_to_check = "https://#{url_to_check}" unless url_to_check =~ /\Ahttps?:\/\//i
+        uri = URI.parse(url_to_check)
         errors << "#{name} must be a valid URL" unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
       rescue URI::InvalidURIError
         errors << "#{name} must be a valid URL"

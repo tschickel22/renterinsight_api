@@ -154,7 +154,15 @@ module Api
           params[:website] = nil
         end
         
-        if @account.update(account_params)
+        # Handle custom_field_values merge (partial update pattern)
+        update_attrs = account_params
+        custom_field_values_param = params[:custom_field_values] || params[:account]&.dig(:custom_field_values)
+        if custom_field_values_param.present?
+          existing = @account.custom_field_values || {}
+          update_attrs = update_attrs.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
+        end
+        
+        if @account.update(update_attrs)
           # Handle tags if provided
           if params.key?(:tags)
             # Clear existing tags

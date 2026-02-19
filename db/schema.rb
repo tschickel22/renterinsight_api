@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_19_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_19_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -96,6 +96,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_19_000002) do
     t.boolean "is_deleted", default: false, null: false
     t.datetime "deleted_at"
     t.bigint "location_id"
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["account_number"], name: "index_accounts_on_account_number", unique: true
     t.index ["account_type"], name: "index_accounts_on_account_type"
     t.index ["company_id", "location_id"], name: "index_accounts_on_company_id_and_location_id"
@@ -944,6 +945,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_19_000002) do
     t.datetime "quickbooks_synced_at"
     t.boolean "is_deleted", default: false, null: false
     t.string "company_name"
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
