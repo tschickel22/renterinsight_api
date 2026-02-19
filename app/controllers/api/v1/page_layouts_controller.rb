@@ -136,7 +136,6 @@ module Api
           { key: 'budget_range', label: 'Budget Range', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'purchase_timeframe', label: 'Purchase Timeframe', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'rv_experience', label: 'RV Experience', type: 'text', source: 'standard', required: false, protected: false },
-          { key: 'preferred_contact_method', label: 'Preferred Contact', type: 'select', source: 'standard', required: false, protected: false },
           { key: 'interests_requirements', label: 'Interests/Requirements', type: 'longtext', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
         ]

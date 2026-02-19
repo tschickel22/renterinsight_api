@@ -56,8 +56,7 @@ class PageLayout < ApplicationRecord
             { key: 'source_id', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'budget_range', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'purchase_timeframe', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rv_experience', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'preferred_contact_method', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'rv_experience', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {
