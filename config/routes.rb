@@ -1019,6 +1019,11 @@ Rails.application.routes.draw do
       patch 'page_layouts/:module_name', to: 'page_layouts#update'
       post 'page_layouts/:module_name/reset', to: 'page_layouts#reset'
       get 'page_layouts/:module_name/field_definitions', to: 'page_layouts#field_definitions'
+
+      # Field option overrides (company-specific dropdown customization)
+      get 'page_layouts/:module_name/field_option_overrides', to: 'page_layouts#field_option_overrides'
+      put 'page_layouts/:module_name/field_option_overrides/:field_key', to: 'page_layouts#update_field_option_override'
+      delete 'page_layouts/:module_name/field_option_overrides/:field_key', to: 'page_layouts#delete_field_option_override'
     end
   end
 

@@ -9,6 +9,7 @@ class Company < ApplicationRecord
   has_many :intake_forms, dependent: :destroy
   has_many :custom_fields, dependent: :destroy
   has_many :page_layouts, dependent: :destroy
+  has_many :field_option_overrides, dependent: :destroy
   has_many :leads, dependent: :destroy
   has_many :vehicles, dependent: :destroy
   has_many :listings, dependent: :destroy

@@ -36,6 +36,13 @@ class CustomField < ApplicationRecord
   ].freeze
   
   validates :field_type, inclusion: { in: FIELD_TYPES }
+
+  # Visibility: internal (admin only), public (public-facing only), or both
+  VISIBILITY_OPTIONS = %w[internal public both].freeze
+  validates :visibility, inclusion: { in: VISIBILITY_OPTIONS }, allow_nil: true
+
+  # Default visibility for new records - prevents NULL values in database
+  after_initialize -> { self.visibility ||= 'internal' }, if: :new_record?
   
   # Validate that select/multiselect have options
   validate :select_fields_have_options
@@ -138,7 +145,7 @@ class CustomField < ApplicationRecord
   
   def as_json(options = {})
     super(options.merge(
-      only: [:id, :module, :name, :field_key, :field_type, :required, :default_value, :display_order, :section, :description, :placeholder, :is_active],
+      only: [:id, :module, :name, :field_key, :field_type, :required, :default_value, :display_order, :section, :description, :placeholder, :is_active, :visibility],
       methods: [:options, :validation_rules]
     ))
   end

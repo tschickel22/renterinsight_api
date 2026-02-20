@@ -15,7 +15,10 @@ class PageLayout < ApplicationRecord
   PROTECTED_FIELDS = {
     'leads' => %w[first_name last_name email phone].freeze,
     'accounts' => %w[name].freeze,
-    'contacts' => %w[first_name last_name email].freeze
+    'contacts' => %w[first_name last_name email].freeze,
+    'inventory' => %w[inventory_id year make model listing_type].freeze,
+    'inventory_rv' => %w[inventory_id year make model listing_type].freeze,
+    'inventory_mh' => %w[inventory_id year make model listing_type].freeze
   }.freeze
 
   LAYOUT_TYPES = %w[detail edit list].freeze
@@ -31,6 +34,12 @@ class PageLayout < ApplicationRecord
       default_accounts_layout
     when 'contacts'
       default_contacts_layout
+    when 'inventory'
+      default_inventory_layout
+    when 'inventory_rv'
+      default_inventory_rv_layout
+    when 'inventory_mh'
+      default_inventory_mh_layout
     else
       { sections: [] }
     end
@@ -176,6 +185,771 @@ class PageLayout < ApplicationRecord
             { key: 'notes', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
+        {
+          id: 'custom_fields',
+          title: 'Custom Fields',
+          columns: 2,
+          collapsed: false,
+          fields: []
+        }
+      ]
+    }
+  end
+
+  private_class_method def self.default_inventory_layout
+    {
+      sections: [
+        # === DETAILS TAB ===
+        {
+          id: 'basic_info',
+          title: 'Basic Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'inventory_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'stock_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'year', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'make', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'model', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'trim', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'listing_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'status', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'condition', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'color', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vin', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'serial_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'date_in_stock', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'date_sold', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'listing_url', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'description_notes',
+          title: 'Description & Notes',
+          columns: 1,
+          collapsed: false,
+          fields: [
+            { key: 'description', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'notes', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === SPECS TAB ===
+        {
+          id: 'rv_specs',
+          title: 'RV Specifications',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'rv_class', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rv_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'body_style', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vehicle_configuration', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'mileage', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'mileage_unit', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'fuel_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'transmission', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'engine_make', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'engine_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'exterior_color', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'interior_color', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vehicle_interior_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sleeps', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sleeping_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'slide_outs', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'slideouts', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'number_of_doors', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seating_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'awning', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'awnings', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'num_air_conditioners', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'leveling_jacks', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'self_contained', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'solar_panels', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'backup_camera', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'satellite_tv', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'mh_specs',
+          title: 'MH Specifications',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'home_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'dwelling_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'foundation_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sections', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'bedrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'bathrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'square_feet', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width1', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length1', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width2', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length2', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width3', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length3', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'master_bedroom_location', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'construction',
+          title: 'Construction & Materials',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'exterior_material', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'roof_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'roof_material', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'siding_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'flooring_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'insulation_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'ceiling_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'wall_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'heating_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cooling_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'water_heater_type', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'water_tanks',
+          title: 'Water & Tanks',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'fresh_water_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'gray_water_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'black_water_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'propane_capacity', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'weights',
+          title: 'Weights',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'dry_weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'gross_weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'hitch_weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cargo_capacity', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'generator',
+          title: 'Generator',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'generator', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'generator_make', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'generator_hours', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'generator_fuel_type', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'amenities',
+          title: 'Amenities',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'fireplace', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'central_air', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'deck', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'patio', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'garage', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'carport', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'has_storage', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'thermopane', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'gutters', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'shutters', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cathedral_ceiling', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'ceiling_fan', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'skylight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'walkin_closet', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'laundry_room', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'pantry', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sun_room', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'basement', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'garden_tub', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'appliances',
+          title: 'Appliances',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'refrigerator', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'microwave', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'oven', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'dishwasher', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'garbage_disposal', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'clothes_washer', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'clothes_dryer', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'special_features',
+          title: 'Special Features',
+          columns: 1,
+          collapsed: false,
+          fields: [
+            { key: 'special_features', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'overlay_text', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === PRICING TAB ===
+        {
+          id: 'pricing',
+          title: 'Pricing',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'sale_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'msrp', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_to_own_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'deposit_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'lot_rent', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'utilities', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'price_currency', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sale_pending', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'repo', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'package_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'terms', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'cost_details',
+          title: 'Cost Details',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'dealer_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'freight_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'pdi_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'total_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'holdback_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'floor_plan_rate', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'target_gross', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'minimum_price', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === LOCATION TAB ===
+        {
+          id: 'address_info',
+          title: 'Address Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'use_location_address', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'address1', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'address2', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_zip', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'county_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'community_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'community_key', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === SELLER TAB ===
+        {
+          id: 'seller_info',
+          title: 'Seller Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'seller_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_phone', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_street', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_zip', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === MEDIA TAB ===
+        {
+          id: 'media_links',
+          title: 'Media Links',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'video_url', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'virtual_tour_url', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === CUSTOM FIELDS (defaults to details tab) ===
+        {
+          id: 'custom_fields',
+          title: 'Custom Fields',
+          columns: 2,
+          collapsed: false,
+          fields: []
+        }
+      ]
+    }
+  end
+
+  private_class_method def self.default_inventory_rv_layout
+    {
+      sections: [
+        # === DETAILS TAB ===
+        {
+          id: 'basic_info',
+          title: 'Basic Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'inventory_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'stock_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'year', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'make', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'model', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'trim', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'listing_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'status', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'condition', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'color', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vin', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'serial_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'date_in_stock', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'date_sold', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'listing_url', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'description_notes',
+          title: 'Description & Notes',
+          columns: 1,
+          collapsed: false,
+          fields: [
+            { key: 'description', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'notes', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === SPECS TAB ===
+        {
+          id: 'rv_specs',
+          title: 'RV Specifications',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'rv_class', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rv_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'body_style', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vehicle_configuration', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'mileage', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'mileage_unit', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'fuel_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'transmission', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'engine_make', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'engine_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'exterior_color', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'interior_color', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vehicle_interior_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sleeps', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sleeping_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'slide_outs', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'slideouts', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'number_of_doors', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seating_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'awning', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'awnings', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'num_air_conditioners', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'leveling_jacks', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'self_contained', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'solar_panels', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'backup_camera', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'satellite_tv', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'water_tanks',
+          title: 'Water & Tanks',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'fresh_water_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'gray_water_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'black_water_capacity', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'propane_capacity', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'weights',
+          title: 'Weights',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'dry_weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'gross_weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'hitch_weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cargo_capacity', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'generator',
+          title: 'Generator',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'generator', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'generator_make', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'generator_hours', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'generator_fuel_type', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === PRICING TAB ===
+        {
+          id: 'pricing',
+          title: 'Pricing',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'sale_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'msrp', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_to_own_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'deposit_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'lot_rent', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'utilities', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'price_currency', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sale_pending', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'repo', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'package_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'terms', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'cost_details',
+          title: 'Cost Details',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'dealer_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'freight_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'pdi_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'total_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'holdback_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'floor_plan_rate', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'target_gross', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'minimum_price', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === LOCATION TAB ===
+        {
+          id: 'address_info',
+          title: 'Address Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'use_location_address', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'address1', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'address2', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_zip', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'county_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'community_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'community_key', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === SELLER TAB ===
+        {
+          id: 'seller_info',
+          title: 'Seller Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'seller_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_phone', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_street', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_zip', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === MEDIA TAB ===
+        {
+          id: 'media_links',
+          title: 'Media Links',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'video_url', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'virtual_tour_url', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === CUSTOM FIELDS ===
+        {
+          id: 'custom_fields',
+          title: 'Custom Fields',
+          columns: 2,
+          collapsed: false,
+          fields: []
+        }
+      ]
+    }
+  end
+
+  private_class_method def self.default_inventory_mh_layout
+    {
+      sections: [
+        # === DETAILS TAB ===
+        {
+          id: 'basic_info',
+          title: 'Basic Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'inventory_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'stock_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'year', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'make', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'model', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'trim', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'listing_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'status', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'condition', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'color', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vin', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'serial_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'date_in_stock', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'date_sold', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'listing_url', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'description_notes',
+          title: 'Description & Notes',
+          columns: 1,
+          collapsed: false,
+          fields: [
+            { key: 'description', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'notes', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === SPECS TAB ===
+        {
+          id: 'mh_specs',
+          title: 'Home Specifications',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'home_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'dwelling_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'foundation_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sections', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'bedrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'bathrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'square_feet', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'master_bedroom_location', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'mh_dimensions',
+          title: 'Dimensions',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'length', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'weight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width1', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length1', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width2', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length2', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'width3', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'length3', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'construction',
+          title: 'Construction & Materials',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'exterior_material', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'roof_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'roof_material', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'siding_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'flooring_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'insulation_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'ceiling_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'wall_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'heating_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cooling_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'water_heater_type', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'amenities',
+          title: 'Amenities',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'fireplace', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'central_air', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'deck', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'patio', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'garage', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'carport', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'has_storage', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'thermopane', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'gutters', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'shutters', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cathedral_ceiling', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'ceiling_fan', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'skylight', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'walkin_closet', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'laundry_room', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'pantry', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sun_room', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'basement', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'garden_tub', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'appliances',
+          title: 'Appliances',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'refrigerator', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'microwave', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'oven', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'dishwasher', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'garbage_disposal', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'clothes_washer', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'clothes_dryer', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'special_features',
+          title: 'Special Features',
+          columns: 1,
+          collapsed: false,
+          fields: [
+            { key: 'special_features', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'overlay_text', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === PRICING TAB ===
+        {
+          id: 'pricing',
+          title: 'Pricing',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'sale_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'msrp', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rent_to_own_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'deposit_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'lot_rent', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'utilities', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'price_currency', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'sale_pending', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'repo', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'package_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'terms', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'cost_details',
+          title: 'Cost Details',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'dealer_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'freight_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'pdi_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'total_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'holdback_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'floor_plan_rate', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'target_gross', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'minimum_price', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === LOCATION TAB ===
+        {
+          id: 'address_info',
+          title: 'Address Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'use_location_address', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'address1', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'address2', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_zip', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'county_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'location_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'community_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'community_key', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === SELLER TAB ===
+        {
+          id: 'seller_info',
+          title: 'Seller Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'seller_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_phone', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_street', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'seller_address_zip', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === MEDIA TAB ===
+        {
+          id: 'media_links',
+          title: 'Media Links',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'video_url', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'virtual_tour_url', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+
+        # === CUSTOM FIELDS ===
         {
           id: 'custom_fields',
           title: 'Custom Fields',

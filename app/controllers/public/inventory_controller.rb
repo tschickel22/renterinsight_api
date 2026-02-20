@@ -449,6 +449,41 @@ class Public::InventoryController < ApplicationController
     branding
   end
   
+  # Cached public custom field definitions (avoids N+1 on list endpoints)
+  def public_custom_field_definitions
+    @_public_cf_defs ||= begin
+      return [] unless @company.present?
+      @company.custom_fields
+              .where(module: ['inventory', 'inventory_rv', 'inventory_mh'])
+              .where(is_active: true)
+              .where("visibility IN (?) OR visibility IS NULL", ['public', 'both'])
+              .order(:section, :display_order, :created_at)
+              .to_a
+    end
+  end
+
+  # Get public custom fields for a specific vehicle
+  def public_custom_fields_for(vehicle)
+    fields = public_custom_field_definitions
+    return [] if fields.empty?
+
+    custom_values = vehicle.custom_field_values || {}
+
+    fields.filter_map do |field|
+      value = custom_values[field.field_key]
+      next if value.nil? || (value.is_a?(String) && value.blank?)
+
+      {
+        key: field.field_key,
+        label: field.label || field.name,
+        type: field.field_type,
+        value: value,
+        section: field.section,
+        options: field.options
+      }
+    end
+  end
+
   # JSON for vehicle list view (lighter payload)
   def vehicle_list_json(vehicle)
     # Determine which price to display (prefer sale_price)
@@ -520,6 +555,9 @@ class Public::InventoryController < ApplicationController
       created_at: vehicle.created_at,
       updated_at: vehicle.updated_at,
       
+      # Custom fields (public visibility only)
+      custom_fields: public_custom_fields_for(vehicle),
+
       # Computed fields
       display_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".strip,
       full_location: [vehicle.location_city, vehicle.location_state].compact.join(', '),

@@ -123,7 +123,17 @@ module Api
       end
 
       def update
-        if @vehicle.update(vehicle_params)
+        params_to_update = vehicle_params
+
+        # Handle custom_field_values merge (partial update pattern - same as contacts)
+        # Read directly from params since vehicle_params transformation strips dynamic JSONB keys
+        custom_field_values_param = params[:vehicle]&.dig(:custom_field_values) || params[:vehicle]&.dig(:customFieldValues)
+        if custom_field_values_param.present?
+          existing = @vehicle.custom_field_values || {}
+          params_to_update = params_to_update.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
+        end
+
+        if @vehicle.update(params_to_update)
           render json: { vehicle: vehicle_json(@vehicle, detailed: true) }
         else
           render json: { errors: @vehicle.errors.full_messages }, status: :unprocessable_entity
@@ -1159,7 +1169,9 @@ module Api
           holdbackAmount: :holdback_amount,
           floorPlanRate: :floor_plan_rate,
           targetGross: :target_gross,
-          minimumPrice: :minimum_price
+          minimumPrice: :minimum_price,
+          # Custom field values (Page Layout Editor)
+          customFieldValues: :custom_field_values
         }
         
         # Copy and transform camelCase fields
@@ -1248,6 +1260,8 @@ module Api
           :sections,  # NEW: Number of sections for manufactured homes
           # Arrays
           features: [], images: [], videos: [], appliances: [], floor_plan_images: []
+          # NOTE: custom_field_values is handled directly in update action (not here)
+          # because dynamic JSONB keys get stripped by strong params
         )
       end
 
@@ -1314,7 +1328,9 @@ module Api
           sellerAddressStreet: vehicle.seller_address_street,
           sellerAddressCity: vehicle.seller_address_city,
           sellerAddressState: vehicle.seller_address_state,
-          sellerAddressZip: vehicle.seller_address_zip
+          sellerAddressZip: vehicle.seller_address_zip,
+          # Custom field values (Page Layout Editor)
+          customFieldValues: vehicle.custom_field_values || {}
         }
 
         # Add type-specific fields

@@ -732,10 +732,47 @@ module Api
             gutters: vehicle.respond_to?(:gutters) ? vehicle.gutters : nil,
             shutters: vehicle.respond_to?(:shutters) ? vehicle.shutters : nil,
             thermopane: vehicle.respond_to?(:thermopane) ? vehicle.thermopane : nil
-          }.compact
+          }.compact,
+          # Public custom fields
+          customFields: public_custom_fields_for_vehicle(vehicle)
         }
       end
-      
+
+      # Cached public custom field definitions for brochure vehicles
+      def public_custom_field_definitions
+        @_public_cf_defs ||= begin
+          company = @brochure&.company
+          return [] unless company.present?
+          company.custom_fields
+                 .where(module: ['inventory', 'inventory_rv', 'inventory_mh'])
+                 .where(is_active: true)
+                 .where(visibility: ['public', 'both'])
+                 .order(:section, :display_order, :created_at)
+                 .to_a
+        end
+      end
+
+      def public_custom_fields_for_vehicle(vehicle)
+        fields = public_custom_field_definitions
+        return [] if fields.empty?
+
+        custom_values = vehicle.custom_field_values || {}
+
+        fields.filter_map do |field|
+          value = custom_values[field.field_key]
+          next if value.nil? || (value.is_a?(String) && value.blank?)
+
+          {
+            key: field.field_key,
+            label: field.label.presence || field.name,
+            type: field.field_type,
+            value: value,
+            section: field.section,
+            options: field.options
+          }
+        end
+      end
+
       # Theme definitions matching frontend
       def get_theme_data(theme_id)
         themes = {

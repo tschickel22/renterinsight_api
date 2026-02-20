@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_19_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -990,6 +990,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_19_180000) do
     t.bigint "created_by_id"
     t.bigint "updated_by_id"
     t.boolean "hidden", default: false, null: false
+    t.string "visibility", default: "internal", null: false
     t.index ["company_id", "module", "field_key"], name: "index_custom_fields_on_company_module_field_key", unique: true
     t.index ["company_id", "module", "is_active"], name: "index_custom_fields_on_company_id_and_module_and_is_active"
     t.index ["company_id", "module", "name"], name: "index_custom_fields_on_company_module_name", unique: true
@@ -1201,6 +1202,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_19_180000) do
     t.index ["vehicle_id"], name: "index_deals_on_vehicle_id"
     t.index ["vertical"], name: "index_deals_on_vertical"
     t.index ["won_at"], name: "index_deals_on_won_at"
+  end
+
+  create_table "field_option_overrides", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "module_name", null: false
+    t.string "field_key", null: false
+    t.jsonb "options", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module_name", "field_key"], name: "idx_field_option_overrides_unique", unique: true
+    t.index ["company_id"], name: "index_field_option_overrides_on_company_id"
   end
 
   create_table "intake_forms", force: :cascade do |t|
@@ -3487,6 +3499,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_19_180000) do
     t.string "public_id"
     t.integer "sections"
     t.json "floor_plan_images", default: [], null: false
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -3805,6 +3818,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_19_180000) do
   add_foreign_key "deals", "users", column: "primary_salesperson_id"
   add_foreign_key "deals", "users", column: "sales_manager_id"
   add_foreign_key "deals", "users", column: "secondary_salesperson_id"
+  add_foreign_key "field_option_overrides", "companies"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_forms", "users", column: "notified_user_id"

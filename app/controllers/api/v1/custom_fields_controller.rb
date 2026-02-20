@@ -71,7 +71,7 @@ module Api
       def custom_field_params
         params.require(:custom_field).permit(
           :name, :label, :field_type, :module, :required, :display_order,
-          :section, :description, :placeholder, :default_value,
+          :section, :description, :placeholder, :default_value, :visibility,
           options: [], validation_rules: {}
         )
       end
@@ -93,6 +93,7 @@ module Api
           isActive: field.is_active,
           isSystemField: field.is_system_field,
           hidden: field.respond_to?(:hidden) ? field.hidden : false,
+          visibility: field.visibility || 'internal',
           options: field.options,
           validationRules: field.validation_rules,
           createdAt: field.created_at&.iso8601,

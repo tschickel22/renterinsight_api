@@ -462,7 +462,8 @@ module Api
               city: vehicle.location_city,
               state: vehicle.location_state,
               zip: vehicle.location_zip
-            }
+            },
+            customFields: public_custom_fields_for_vehicle(vehicle)
           }
         }
         
@@ -501,6 +502,40 @@ module Api
         end
         
         json
+      end
+
+      # Cached public custom field definitions for listing vehicles
+      def public_custom_field_definitions_for(company)
+        @_public_cf_defs ||= begin
+          return [] unless company.present?
+          company.custom_fields
+                 .where(module: ['inventory', 'inventory_rv', 'inventory_mh'])
+                 .where(is_active: true)
+                 .where(visibility: ['public', 'both'])
+                 .order(:section, :display_order, :created_at)
+                 .to_a
+        end
+      end
+
+      def public_custom_fields_for_vehicle(vehicle)
+        fields = public_custom_field_definitions_for(vehicle.company)
+        return [] if fields.empty?
+
+        custom_values = vehicle.custom_field_values || {}
+
+        fields.filter_map do |field|
+          value = custom_values[field.field_key]
+          next if value.nil? || (value.is_a?(String) && value.blank?)
+
+          {
+            key: field.field_key,
+            label: field.label.presence || field.name,
+            type: field.field_type,
+            value: value,
+            section: field.section,
+            options: field.options
+          }
+        end
       end
 
       # Helper to convert image URLs to HTTPS protocol
