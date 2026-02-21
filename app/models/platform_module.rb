@@ -30,6 +30,7 @@ class PlatformModule
     'finance.loans' => { name: 'Finance Management', category: 'Finance & Agreements', icon: 'DollarSign', description: 'Loan and payment management' },
     'finance.agreements' => { name: 'Agreement Vault', category: 'Finance & Agreements', icon: 'FileSignature', description: 'Digital contract management' },
     'finance.invoices' => { name: 'Invoice & Payments', category: 'Finance & Agreements', icon: 'Receipt', description: 'Billing and payment processing' },
+    'finance.documents' => { name: 'Document Management', category: 'Finance & Agreements', icon: 'FolderOpen', description: 'Client document storage and management' },
     'finance.applications' => { name: 'Finance Applications', category: 'Finance & Agreements', icon: 'FileCheck', description: 'Customer finance application processing' },
     
     # Service & Support
@@ -79,7 +80,7 @@ class PlatformModule
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures
-      finance.loans finance.agreements finance.invoices finance.applications
+      finance.loans finance.agreements finance.invoices finance.documents finance.applications
       service.operations service.portal
       management.reports management.tags management.tasks management.calendar
       admin.settings admin.users admin.locations
@@ -88,7 +89,7 @@ class PlatformModule
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures marketing.website marketing.syndication
-      finance.loans finance.agreements finance.invoices finance.applications
+      finance.loans finance.agreements finance.invoices finance.documents finance.applications
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 
       management.calendar management.contractors management.workflows management.territories
