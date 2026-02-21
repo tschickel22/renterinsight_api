@@ -93,7 +93,7 @@ class PlatformModule
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 
       management.calendar management.contractors management.workflows management.territories
-      admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks admin.platform
+      admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks
     ]
   }.freeze
   
