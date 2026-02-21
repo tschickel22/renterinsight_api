@@ -73,7 +73,7 @@ plans_data = [
 plans_data.each do |plan_data|
   modules = plan_data.delete(:modules)
   
-  plan = SubscriptionPlan.find_or_initialize_by(name: plan_data[:name])
+  plan = SubscriptionPlan.find_or_initialize_by(zoho_plan_code: plan_data[:zoho_plan_code])
   plan.assign_attributes(plan_data)
   
   if plan.save
