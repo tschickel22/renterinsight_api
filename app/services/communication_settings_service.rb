@@ -63,6 +63,37 @@ class CommunicationSettingsService
   end
   
   def sms_config
+    # Phase 0: Check SMS provisioning mode before returning config
+    mode = company&.sms_provisioning_mode || 'platform'
+    
+    if mode == 'disabled'
+      Rails.logger.info "[CommunicationSettingsService] SMS disabled for company #{company&.id}"
+      return {
+        provider: 'twilio',
+        from_number: nil,
+        twilio_account_sid: nil,
+        twilio_auth_token: nil,
+        enabled: false,
+        sms_provisioning_mode: 'disabled'
+      }
+    end
+    
+    # Phase 1: Dedicated sub-account credentials per company
+    if mode == 'dedicated' && company&.twilio_account&.active?
+      ta = company.twilio_account
+      Rails.logger.info "[CommSettings] Using dedicated Twilio for Company #{company.id}: #{ta.phone_number}"
+      return {
+        provider: 'twilio',
+        from_number: ta.phone_number,
+        twilio_account_sid: ta.sub_account_sid,
+        twilio_auth_token: ta.auth_token,
+        enabled: true,
+        sms_provisioning_mode: 'dedicated',
+        source: 'dedicated_sub_account'
+      }
+    end
+
+    # For 'platform' mode: use existing waterfall
     config = merged_settings.dig('sms') || {}
     
     {
@@ -70,7 +101,8 @@ class CommunicationSettingsService
       from_number: config['fromNumber'] || ENV['TWILIO_PHONE_NUMBER'],
       twilio_account_sid: decrypt_value(config['twilioAccountSid']) || ENV['TWILIO_ACCOUNT_SID'],
       twilio_auth_token: decrypt_value(config['twilioAuthToken']) || ENV['TWILIO_AUTH_TOKEN'],
-      enabled: config['isEnabled'] != false
+      enabled: config['isEnabled'] != false,
+      sms_provisioning_mode: mode
     }
   end
   

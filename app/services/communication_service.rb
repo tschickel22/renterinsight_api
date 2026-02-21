@@ -41,6 +41,7 @@ class CommunicationService
     scheduled_for: nil,
     send_async: false,
     skip_preference_check: false,
+    sender_user_id: nil,
     **options
   )
     new.send_communication(
@@ -61,6 +62,7 @@ class CommunicationService
       scheduled_for: scheduled_for,
       send_async: send_async,
       skip_preference_check: skip_preference_check,
+      sender_user_id: sender_user_id,
       **options
     )
   end
@@ -116,6 +118,7 @@ class CommunicationService
     scheduled_for: nil,
     send_async: false,
     skip_preference_check: false,
+    sender_user_id: nil,
     **options
   )
     # Extract sending user from options (for user-level email settings)
@@ -152,7 +155,31 @@ class CommunicationService
     # Validate required fields
     raise Error, "Body is required" if body.blank?
     raise Error, "Subject is required for email" if channel == 'email' && subject.blank?
-    
+
+    # For SMS outbound: capture sender and source for reply routing and usage tracking
+    if channel == 'sms' && direction == 'outbound'
+      assigned_user = extract_assigned_user(communicable)
+      unless assigned_user
+        raise Error, "SMS requires an assigned user (owner) on this #{communicable.class.name.underscore.humanize}. Please assign an owner before sending SMS."
+      end
+      metadata ||= {}
+      metadata[:assigned_user_id] = assigned_user.id  # owner of the record (for context)
+      metadata[:sender_user_id]   = sender_user_id    # person who pressed send (for reply forwarding)
+      # Source defaults to 'manual'; callers should pass 'sequence' for automated nurture sends
+      metadata[:source] ||= 'manual'
+    end
+
+    # Cap check for SMS outbound sends
+    if channel == 'sms' && direction == 'outbound'
+      sms_source = metadata&.dig(:source) || 'manual'
+      company = extract_company_from_communicable(communicable)
+      begin
+        SmsCapService.check!(company: company, source: sms_source)
+      rescue SmsCapService::CapExceededError => e
+        raise Error, e.message
+      end
+    end
+
     # Set default provider if not specified
     # User email connection takes highest priority in waterfall
     provider ||= default_provider_for(channel, communicable, user: @sending_user)
@@ -233,10 +260,20 @@ class CommunicationService
       
       # Update communication with external ID
       @communication.update!(external_id: result[:external_id]) if result[:external_id]
-      
+
       # Track send event
       @communication.track_event('sent', result)
-      
+
+      # Log SMS usage for billing tracking
+      if channel == 'sms'
+        SmsUsageLog.log!(
+          company:          extract_company_from_communicable(communicable),
+          direction:        direction || 'outbound',
+          source:           metadata&.dig(:source) || 'manual',
+          communication_id: @communication&.id
+        )
+      end
+
       { success: true, communication: @communication, provider: provider, external_id: result[:external_id] }
     rescue => e
       @communication.mark_as_failed!(e.message)
@@ -316,7 +353,12 @@ class CommunicationService
   end
   
   private
-  
+
+  def extract_assigned_user(communicable)
+    return nil unless communicable.present?
+    communicable.respond_to?(:owner) ? communicable.owner : nil
+  end
+
   def send_via_provider(provider:, channel:, communication:, options:)
     # Extract company and location from communicable for settings lookup
     company = extract_company_from_communicable(communication.communicable)

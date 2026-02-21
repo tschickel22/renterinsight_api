@@ -9,6 +9,10 @@ Rails.application.routes.draw do
   # Serve uploaded files (logos, images, etc.) - Legacy URLs without /api prefix
   get 'uploads/*path', to: 'api/uploads#show', format: false
   
+  # Public tokenized SMS reply links — no authentication required
+  get  'r/:token',       to: 'sms_replies#show'
+  post 'r/:token/reply', to: 'sms_replies#reply'
+
   # ==================== WEBHOOKS (NO AUTH REQUIRED) ====================
   namespace :webhooks do
     # Email tracking pixel (no auth required)
@@ -29,6 +33,7 @@ Rails.application.routes.draw do
   namespace :webhooks do
     # Twilio SMS status callbacks (Twilio signature verification)
     post 'twilio/sms/status', to: 'twilio#sms_status'
+    post 'twilio/sms/inbound', to: 'twilio#sms_inbound'
     
     # Zego payment webhooks
     post 'zego/processed', to: 'zego#processed'
@@ -1551,13 +1556,23 @@ Rails.application.routes.draw do
           get :check_subdomain_available
           get :check_domain_available
         end
+
+        # Twilio SMS Provisioning (Platform Admin)
+        post   'twilio/provision',   to: 'twilio_provisioning#provision'
+        delete 'twilio/deprovision', to: 'twilio_provisioning#deprovision'
+        get    'twilio/status',      to: 'twilio_provisioning#status'
       end
-      
+
+      # SMS Usage Dashboard (Platform Admin)
+      get   'sms_usage',                        to: 'sms_usage#index'
+      get   'sms_usage/:company_id',            to: 'sms_usage#show'
+      patch 'sms_usage/:company_id/set_limit',  to: 'sms_usage#set_limit'
+
       resource :settings, only: %i[show update] do
         post :test_email, on: :collection
         post :test_sms, on: :collection
       end
-      
+
       # ==================== PLATFORM COMMUNICATIONS ====================
       # Unified communications API for all entity types
       get 'communications/:entity_type/:entity_id/history', to: 'communications#history'

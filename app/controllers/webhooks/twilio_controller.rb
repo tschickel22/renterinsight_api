@@ -2,7 +2,7 @@
 
 module Webhooks
   class TwilioController < ActionController::API
-    before_action :verify_twilio_signature, only: [:sms_status]
+    before_action :verify_twilio_signature, only: [:sms_status, :sms_inbound]
 
     # POST /webhooks/twilio/sms/status
     def sms_status
@@ -52,7 +52,144 @@ module Webhooks
       Rails.logger.error e.backtrace.first(5).join("\n")
       head :ok
     end
-    
+
+    # POST /webhooks/twilio/sms/inbound
+    # Handles inbound SMS replies from contacts/leads
+    def sms_inbound
+      from_number = params['From']     # Contact's phone number
+      to_number   = params['To']       # Our Twilio number that received the reply
+      body        = params['Body']
+      message_sid = params['MessageSid']
+
+      Rails.logger.info "[TwilioWebhook] Inbound SMS from #{from_number} to #{to_number}: #{body&.truncate(100)}"
+
+      # Match receiving number to a dedicated TwilioAccount
+      twilio_account = TwilioAccount.active.find_by(phone_number: to_number)
+      company = twilio_account&.company
+
+      unless company
+        platform_number = ENV['TWILIO_PHONE_NUMBER']
+        if to_number == platform_number
+          Rails.logger.info "[TwilioWebhook] Inbound to platform number #{to_number}"
+        else
+          Rails.logger.warn "[TwilioWebhook] No TwilioAccount or platform match for number #{to_number}"
+          head :ok and return
+        end
+      end
+
+      # Find most recent outbound SMS to this contact to link the reply to the correct
+      # conversation, communicable entity, and the user who originally sent the message
+      original_communication = Communication.where(
+        channel: 'sms',
+        direction: 'outbound',
+        to_address: from_number
+      ).order(created_at: :desc).first
+
+      if original_communication
+        communicable     = original_communication.communicable
+        company        ||= original_communication.company
+        # sender_user_id is who pressed send — this is who should receive the forwarded reply
+        sender_user_id   = original_communication.metadata&.dig('sender_user_id')
+        assigned_user_id = original_communication.metadata&.dig('assigned_user_id')
+
+        Rails.logger.info "[TwilioWebhook] Matched reply to Communication ##{original_communication.id}, " \
+                          "entity: #{communicable&.class&.name} ##{communicable&.id}, " \
+                          "sender_user: #{sender_user_id}, assigned_user: #{assigned_user_id}"
+
+        # Log inbound message to conversation thread
+        inbound_comm = Communication.create!(
+          company_id:    company&.id,
+          communicable:  communicable,
+          channel:       'sms',
+          direction:     'inbound',
+          from_address:  from_number,
+          to_address:    to_number,
+          body:          body,
+          status:        'delivered',
+          sent_at:       Time.current,
+          delivered_at:  Time.current,
+          metadata: {
+            message_sid:          message_sid,
+            sender_user_id:       sender_user_id,
+            assigned_user_id:     assigned_user_id,
+            matched_outbound_id:  original_communication.id,
+            source:               twilio_account ? 'dedicated' : 'platform'
+          }.compact
+        )
+
+        # Log inbound usage
+        SmsUsageLog.log!(
+          company:          company,
+          direction:        'inbound',
+          source:           'inbound',
+          communication_id: inbound_comm&.id
+        )
+
+        # Forward reply to the user who originally sent the SMS
+        # Generates a tokenized reply link so they can respond without logging in
+        forward_to_id = sender_user_id || assigned_user_id
+        if forward_to_id
+          forward_user = User.find_by(id: forward_to_id)
+          # User model has no phone field — try is safe and returns nil if method absent
+          user_cell = forward_user&.try(:phone).presence || forward_user&.try(:mobile_phone).presence
+
+          if forward_user && user_cell.present?
+            # Generate or reuse a valid reply token
+            sender_user = forward_user
+            reply_token = SmsReplyToken.generate_for(
+              communication: original_communication,
+              sender_user:   sender_user,
+              company:       company,
+              contact_phone: from_number
+            )
+
+            forward_sms_to_sender(
+              to_cell:      user_cell,
+              from_number:  from_number,
+              body:         body,
+              communicable: communicable,
+              reply_token:  reply_token.token
+            )
+          else
+            Rails.logger.info "[TwilioWebhook] Sender user #{forward_to_id} has no cell number — skipping forward"
+          end
+        end
+
+      else
+        Rails.logger.warn "[TwilioWebhook] No matching outbound SMS found for #{from_number}. Logging as unmatched."
+
+        if company
+          Communication.create!(
+            company_id:   company.id,
+            communicable: nil,
+            channel:      'sms',
+            direction:    'inbound',
+            from_address: from_number,
+            to_address:   to_number,
+            body:         body,
+            status:       'delivered',
+            sent_at:      Time.current,
+            delivered_at: Time.current,
+            metadata: {
+              message_sid: message_sid,
+              unmatched:   true,
+              source:      twilio_account ? 'dedicated' : 'platform'
+            }
+          )
+
+          SmsUsageLog.log!(
+            company:          company,
+            direction:        'inbound',
+            source:           'inbound',
+            communication_id: nil
+          )
+        end
+      end
+
+      # Return empty TwiML — no auto-reply to contact
+      render xml: '<Response></Response>', content_type: 'text/xml'
+    end
+
     private
     
     def verify_twilio_signature
@@ -75,12 +212,24 @@ module Webhooks
       url = request.original_url
       post_params = request.request_parameters
       
-      unless validator.validate(url, post_params, signature)
+      is_valid = validator.validate(url, post_params, signature)
+
+      # Fallback: verify against dedicated TwilioAccount auth token
+      unless is_valid
+        to_number      = params['To']
+        twilio_account = TwilioAccount.active.find_by(phone_number: to_number)
+        if twilio_account
+          validator = Twilio::Security::RequestValidator.new(twilio_account.auth_token)
+          is_valid  = validator.validate(url, post_params, signature)
+        end
+      end
+
+      unless is_valid
         Rails.logger.error "[Twilio] Invalid signature - possible spoofed request"
         head :forbidden
         return false
       end
-      
+
       true
     rescue NameError => e
       Rails.logger.warn "[Twilio] Twilio gem not loaded - skipping signature verification: #{e.message}"
@@ -91,6 +240,35 @@ module Webhooks
       false
     end
     
+    # Forward an inbound contact reply to the CRM user who originally sent the SMS
+    # Appends a tokenized reply link so the user can respond without logging in
+    def forward_sms_to_sender(to_cell:, from_number:, body:, communicable:, reply_token: nil)
+      entity_label = communicable ? "#{communicable.class.name} ##{communicable.id}" : 'Unknown contact'
+      base_body    = "DMS Reply from #{from_number} (#{entity_label}): #{body}"
+
+      if reply_token.present?
+        api_base     = ENV.fetch('APP_BASE_URL', 'https://app.platformdms.com')
+        reply_url    = "#{api_base}/reply/#{reply_token}"
+        forward_body = "#{base_body}\nReply here: #{reply_url}"
+      else
+        forward_body = base_body
+      end
+
+      client        = Twilio::REST::Client.new(ENV['TWILIO_ACCOUNT_SID'], ENV['TWILIO_AUTH_TOKEN'])
+      platform_from = ENV['TWILIO_PHONE_NUMBER']
+
+      client.messages.create(
+        from: platform_from,
+        to:   to_cell,
+        body: forward_body.truncate(320)  # allow longer to fit the URL
+      )
+
+      Rails.logger.info "[TwilioWebhook] Forwarded reply with token to sender cell #{to_cell}"
+    rescue => e
+      Rails.logger.error "[TwilioWebhook] Failed to forward SMS to #{to_cell}: #{e.message}"
+      # Never re-raise — forward failure must not break inbound logging
+    end
+
     def twilio_params
       {
         message_sid: params['MessageSid'],

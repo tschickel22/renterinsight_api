@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_21_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -802,6 +802,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
     t.string "public_inventory_token"
     t.jsonb "public_inventory_settings", default: {}
     t.jsonb "pipeline_stages"
+    t.string "sms_provisioning_mode", default: "platform", null: false
+    t.integer "sms_monthly_limit", default: 2000, null: false
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
@@ -812,6 +814,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
     t.index ["public_inventory_token"], name: "index_companies_on_public_inventory_token", unique: true
     t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
     t.index ["quickbooks_scope"], name: "index_companies_on_quickbooks_scope"
+    t.index ["sms_provisioning_mode"], name: "index_companies_on_sms_provisioning_mode"
     t.index ["status"], name: "index_companies_on_status"
     t.index ["subdomain"], name: "index_companies_on_subdomain", unique: true
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
@@ -2714,6 +2717,37 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
     t.index ["scope_type", "scope_id"], name: "index_settings_on_scope_type_and_scope_id"
   end
 
+  create_table "sms_reply_tokens", force: :cascade do |t|
+    t.string "token", null: false
+    t.bigint "company_id", null: false
+    t.bigint "communication_id", null: false
+    t.bigint "sender_user_id", null: false
+    t.string "contact_phone", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "used_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["communication_id"], name: "index_sms_reply_tokens_on_communication_id"
+    t.index ["company_id", "sender_user_id"], name: "index_sms_reply_tokens_on_company_id_and_sender_user_id"
+    t.index ["company_id"], name: "index_sms_reply_tokens_on_company_id"
+    t.index ["token"], name: "index_sms_reply_tokens_on_token", unique: true
+  end
+
+  create_table "sms_usage_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "billing_period", null: false
+    t.string "direction", null: false
+    t.string "source", default: "manual", null: false
+    t.integer "message_count", default: 1, null: false
+    t.decimal "twilio_cost", precision: 10, scale: 6, default: "0.0"
+    t.bigint "communication_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["communication_id"], name: "index_sms_usage_logs_on_communication_id"
+    t.index ["company_id", "billing_period"], name: "index_sms_usage_logs_on_company_id_and_billing_period"
+    t.index ["company_id"], name: "index_sms_usage_logs_on_company_id"
+  end
+
   create_table "solid_cable_messages", force: :cascade do |t|
     t.binary "channel", null: false
     t.binary "payload", null: false
@@ -3184,6 +3218,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
     t.index ["territory_id", "user_id"], name: "index_territory_users_on_territory_id_and_user_id", unique: true
     t.index ["territory_id"], name: "index_territory_users_on_territory_id"
     t.index ["user_id"], name: "index_territory_users_on_user_id"
+  end
+
+  create_table "twilio_accounts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "sub_account_sid", null: false
+    t.text "auth_token", null: false
+    t.string "phone_number", null: false
+    t.string "phone_number_sid", null: false
+    t.string "status", default: "provisioning", null: false
+    t.datetime "provisioned_at"
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_twilio_accounts_on_company_id"
+    t.index ["phone_number"], name: "index_twilio_accounts_on_phone_number", unique: true
+    t.index ["status"], name: "index_twilio_accounts_on_status"
+    t.index ["sub_account_sid"], name: "index_twilio_accounts_on_sub_account_sid", unique: true
   end
 
   create_table "user_email_connections", force: :cascade do |t|
@@ -3940,6 +3991,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
   add_foreign_key "service_tickets", "locations"
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "service_tickets", "warranty_claims", on_delete: :nullify
+  add_foreign_key "sms_reply_tokens", "companies"
+  add_foreign_key "sms_usage_logs", "companies"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_claimed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "solid_queue_failed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
@@ -3970,6 +4023,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_20_200000) do
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"
   add_foreign_key "territory_users", "users"
+  add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"
   add_foreign_key "user_email_connections", "users"
   add_foreign_key "user_locations", "companies"

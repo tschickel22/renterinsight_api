@@ -96,6 +96,15 @@ module Providers
       end
       
       def validate_config!
+        # Phase 0: Check SMS provisioning mode before validating credentials
+        if config[:sms_provisioning_mode] == 'disabled'
+          raise ConfigurationError, "SMS is disabled for this company. Enable SMS provisioning in Platform Admin to send messages."
+        end
+        
+        if config[:enabled] == false
+          raise ConfigurationError, "SMS is not enabled for this company."
+        end
+        
         raise ConfigurationError, "Twilio Account SID is required" if config[:twilio_account_sid].blank?
         raise ConfigurationError, "Twilio Auth Token is required" if config[:twilio_auth_token].blank?
         raise ConfigurationError, "From number is required" if config[:from_number].blank?

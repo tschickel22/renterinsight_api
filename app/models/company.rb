@@ -74,6 +74,9 @@ class Company < ApplicationRecord
   has_many :company_hidden_roles, dependent: :destroy
   has_many :hidden_roles, through: :company_hidden_roles, source: :role
   
+  # Twilio SMS Provisioning
+  has_one :twilio_account, dependent: :destroy
+
   # Subscription System Associations
   has_one :tenant_subscription, dependent: :destroy
   has_many :tenant_module_overrides, dependent: :destroy
@@ -116,6 +119,22 @@ class Company < ApplicationRecord
   
   validates :status, inclusion: { in: %w[active trial suspended cancelled], allow_nil: true }
   validates :subscription_tier, inclusion: { in: %w[free starter professional enterprise], allow_nil: true }
+  
+  # SMS Provisioning Mode
+  SMS_PROVISIONING_MODES = %w[platform dedicated disabled].freeze
+  validates :sms_provisioning_mode, inclusion: { in: SMS_PROVISIONING_MODES }, allow_nil: false
+  
+  def sms_enabled?
+    sms_provisioning_mode != 'disabled'
+  end
+  
+  def sms_dedicated?
+    sms_provisioning_mode == 'dedicated'
+  end
+  
+  def sms_platform?
+    sms_provisioning_mode == 'platform'
+  end
   
   # Fiscal year validation (1-12 for January-December)
   validates :fiscal_year_start_month, 
