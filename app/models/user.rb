@@ -33,6 +33,10 @@ class User < ApplicationRecord
   validates :email, presence: true, uniqueness: true
   validates :first_name, presence: true, if: -> { name.blank? }
   validates :password, length: { minimum: 6 }, if: -> { password.present? }
+
+  # Scopes
+  scope :active,           -> { where(status: 'active') }
+  scope :platform_admins,  -> { where(role: %w[platform_admin super_admin]) }
   
   # Virtual attribute for full name (backward compatibility with 'name' field)
   def name

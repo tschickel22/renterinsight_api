@@ -769,6 +769,15 @@ module Api
         account_sid = config['twilioAccountSid'] || config[:twilioAccountSid]
         auth_token = config['twilioAuthToken'] || config[:twilioAuthToken]
         from_number = config['fromNumber'] || config[:fromNumber]
+
+        # Normalize to E.164 — add +1 for bare 10-digit US/CA numbers
+        to = to.to_s.gsub(/[^+\d]/, '')
+        to = "+1#{to}" if to.match?(/^\d{10}$/)
+        to = "+#{to}" if to.match?(/^1\d{10}$/)
+
+        # Normalize from number too
+        from_number = from_number.to_s.gsub(/[^+\d]/, '')
+        from_number = "+#{from_number}" unless from_number.start_with?('+')
         
         Rails.logger.info "[send_sms_via_twilio] Sending to #{to} from #{from_number}"
         

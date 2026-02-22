@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_21_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_22_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3222,8 +3222,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_21_190000) do
 
   create_table "twilio_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
-    t.string "sub_account_sid", null: false
-    t.text "auth_token", null: false
+    t.string "sub_account_sid"
+    t.text "auth_token"
     t.string "phone_number", null: false
     t.string "phone_number_sid", null: false
     t.string "status", default: "provisioning", null: false
@@ -3234,7 +3234,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_21_190000) do
     t.index ["company_id"], name: "index_twilio_accounts_on_company_id"
     t.index ["phone_number"], name: "index_twilio_accounts_on_phone_number", unique: true
     t.index ["status"], name: "index_twilio_accounts_on_status"
-    t.index ["sub_account_sid"], name: "index_twilio_accounts_on_sub_account_sid", unique: true
   end
 
   create_table "user_email_connections", force: :cascade do |t|

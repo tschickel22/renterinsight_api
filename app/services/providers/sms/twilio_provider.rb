@@ -25,7 +25,8 @@ module Providers
           from: from_number,
           body: body,
           account_sid: config[:twilio_account_sid],
-          auth_token: config[:twilio_auth_token]
+          auth_token: config[:twilio_auth_token],
+          messaging_service_sid: config[:messaging_service_sid] || config[:twilio_messaging_service_sid]
         )
         
         if result[:success]
@@ -49,7 +50,7 @@ module Providers
       
       private
       
-      def send_via_http(to:, from:, body:, account_sid:, auth_token:)
+      def send_via_http(to:, from:, body:, account_sid:, auth_token:, messaging_service_sid: nil)
         require 'net/http'
         require 'uri'
         require 'json'
@@ -59,11 +60,17 @@ module Providers
         request = Net::HTTP::Post.new(uri)
         request.basic_auth(account_sid, auth_token)
         
-        request.set_form_data({
-          'From' => from,
-          'To' => to,
-          'Body' => body
-        })
+        form_data = { 'To' => to, 'Body' => body }
+        if messaging_service_sid.present? && from.present?
+          form_data['MessagingServiceSid'] = messaging_service_sid
+          form_data['From'] = from
+        elsif messaging_service_sid.present?
+          form_data['MessagingServiceSid'] = messaging_service_sid
+        else
+          form_data['From'] = from
+        end
+        
+        request.set_form_data(form_data)
         
         response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
           http.request(request)

@@ -71,66 +71,54 @@ module Api
 
       # POST /api/v1/contacts/:contact_id/communications/sms
       def sms
-        # Check if contact opted out
         if @contact.opt_out_sms?
           render json: { ok: false, error: 'Contact has opted out of SMS communications' }, status: :unprocessable_entity
           return
         end
 
-        # Check if contact has phone
         if @contact.phone.blank?
           render json: { ok: false, error: 'Contact has no phone number' }, status: :unprocessable_entity
           return
         end
 
-        # Get effective settings
-        settings = get_effective_communication_settings
+        company = @contact.company || @contact.account&.company
 
-        unless settings[:sms][:is_enabled]
-          render json: { ok: false, error: 'SMS is not configured' }, status: :unprocessable_entity
+        # Use CommunicationSettingsService for proper waterfall + MessagingServiceSid
+        sms_cfg = CommunicationSettingsService.for_company(company).sms_config
+
+        if sms_cfg[:sms_provisioning_mode] == 'disabled' || sms_cfg[:enabled] == false
+          render json: { ok: false, error: 'SMS is not configured for this company' }, status: :unprocessable_entity
           return
         end
 
-        # Create communication record
-        communication = @contact.communications.create!(
-          channel: 'sms',
-          direction: 'outbound',
-          body: params[:message],
-          to_address: @contact.phone,
-          from_address: settings[:sms][:from_number],
-          status: 'pending',
-          provider: settings[:sms][:provider]
-        )
-
-        # Send SMS via SmsService
-        result = SmsService.send_sms(
-          to: @contact.phone,
-          from: settings[:sms][:from_number],
-          body: params[:message],
-          company: @contact.company || @contact.account&.company
+        result = TwilioSmsService.send(
+          to:                    @contact.phone,
+          body:                  params[:message] || params[:body],
+          from_number:           sms_cfg[:from_number],
+          account_sid:           sms_cfg[:twilio_account_sid],
+          auth_token:            sms_cfg[:twilio_auth_token],
+          messaging_service_sid: sms_cfg[:twilio_messaging_service_sid]
         )
 
         if result[:success]
-          communication.update!(
-            status: 'sent',
-            sent_at: Time.current,
-            provider_message_id: result[:message_id],
-            metadata: (communication.metadata || {}).merge(provider_response: result[:response])
+          communication = @contact.communications.create!(
+            channel:      'sms',
+            direction:    'outbound',
+            body:         params[:message] || params[:body],
+            to_address:   @contact.phone,
+            from_address: sms_cfg[:from_number],
+            status:       'sent',
+            sent_at:      Time.current,
+            metadata: {
+              message_sid:       result[:message_sid],
+              sender_user_id:    current_user&.id,
+              messaging_service: sms_cfg[:twilio_messaging_service_sid].present?
+            }.compact
           )
+          render json: { ok: true, id: communication.id, messageId: result[:message_sid], provider: 'twilio' }
         else
-          communication.update!(
-            status: 'failed',
-            metadata: (communication.metadata || {}).merge(error: result[:error])
-          )
           render json: { ok: false, error: result[:error] }, status: :unprocessable_entity
-          return
         end
-
-        render json: { 
-          ok: true, 
-          id: communication.id,
-          provider: settings[:sms][:provider]
-        }
       rescue => e
         Rails.logger.error "Error sending SMS to contact: #{e.message}\n#{e.backtrace.join("\n")}"
         render json: { ok: false, error: e.message }, status: :internal_server_error

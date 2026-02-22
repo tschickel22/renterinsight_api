@@ -20,8 +20,32 @@ class SmsCapNotificationJob < ApplicationJob
 
     Rails.logger.warn "[SmsCapNotification] #{message}"
 
-    # TODO: wire up email notification to company billing contact and platform admin
-    # For now this logs the event — email delivery will be added when notification
-    # system is extended in a future run
+    # Notify all company admins in-app
+    admin_users = User.where(company_id: company.id)
+                      .where(role: %w[admin company_admin])
+                      .active
+    admin_users.each do |admin|
+      NotificationService.create(
+        recipient:         admin,
+        notification_type: :sms_cap_alert,
+        message:           message,
+        company_id:        company.id,
+        action_url:        '/settings/communications',
+        action_text:       'View SMS Settings'
+      )
+    end
+
+    # Also notify platform admins
+    platform_admins = User.platform_admins.active
+    platform_admins.each do |pa|
+      NotificationService.create(
+        recipient:         pa,
+        notification_type: :sms_cap_alert,
+        message:           message,
+        company_id:        company.id,
+        action_url:        '/admin/sms-usage',
+        action_text:       'View SMS Usage'
+      )
+    end
   end
 end

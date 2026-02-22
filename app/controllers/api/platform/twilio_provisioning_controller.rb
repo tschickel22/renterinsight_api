@@ -6,7 +6,9 @@ class Api::Platform::TwilioProvisioningController < ApplicationController
 
   # POST /api/platform/tenants/:tenant_id/twilio/provision
   def provision
-    result = TwilioProvisioningService.provision_client(@company)
+    area_code = params[:area_code].presence
+    country   = params[:country].presence || 'US'
+    result = TwilioProvisioningService.provision_client(@company, area_code: area_code, country: country)
 
     if result[:success]
       render json: {
@@ -16,7 +18,11 @@ class Api::Platform::TwilioProvisioningController < ApplicationController
         status: 'active'
       }, status: :created
     else
-      render json: { error: result[:error] }, status: :unprocessable_entity
+      render json: {
+        error: result[:error],
+        error_code: result[:error_code],
+        area_code: result[:area_code]
+      }, status: :unprocessable_entity
     end
   end
 

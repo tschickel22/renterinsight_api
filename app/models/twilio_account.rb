@@ -5,9 +5,9 @@ class TwilioAccount < ApplicationRecord
 
   encrypts :auth_token
 
-  validates :sub_account_sid, presence: true, uniqueness: true
+  # sub_account_sid and auth_token are legacy — numbers now live on master account
   validates :phone_number, presence: true, uniqueness: true,
-            format: { with: /\A\+1\d{10}\z/, message: "must be in E.164 format (e.g., +15551234567)" }
+            format: { with: /\A\+\d{7,15}\z/, message: "must be in E.164 format (e.g., +15551234567)" }
   validates :phone_number_sid, presence: true
   validates :status, presence: true, inclusion: { in: %w[provisioning active suspended failed] }
 

@@ -23,7 +23,7 @@ class Notification < ApplicationRecord
   # Validations
   validates :recipient_type, :recipient_id, :notification_type, :category, :title, :message, presence: true
   validates :priority, inclusion: { in: %w[urgent high normal low] }
-  validates :category, inclusion: { in: %w[service crm sales finance system broadcast] }
+  validates :category, inclusion: { in: %w[service crm sales finance system broadcast communications] }
   
   # Notification types with their default settings
   TYPES = {
@@ -67,7 +67,11 @@ class Notification < ApplicationRecord
     
     # Broadcast notifications
     broadcast_message: { category: 'broadcast', priority: 'normal', title: 'Company Announcement' },
-    system_alert: { category: 'broadcast', priority: 'urgent', title: 'System Alert' }
+    system_alert: { category: 'broadcast', priority: 'urgent', title: 'System Alert' },
+
+    # SMS / Communications notifications
+    sms_reply_received: { category: 'communications', priority: 'high', title: 'SMS Reply Received' },
+    sms_cap_alert: { category: 'system', priority: 'normal', title: 'SMS Usage Alert' }
   }.freeze
   
   # Mark notification as read

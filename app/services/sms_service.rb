@@ -48,47 +48,28 @@ class SmsService
     )
   end
   
-  # Generic SMS sender
+  # Generic SMS sender — routes through TwilioSmsService for A2P compliance
   def send_sms(to:, body:)
-    # Check all possible key variations for from_number
-    from_number = sms_settings['fromNumber'] || 
-                  sms_settings[:fromNumber] ||
-                  sms_settings['from_number'] ||
-                  sms_settings[:from_number] ||
-                  sms_settings['FromNumber'] ||
-                  sms_settings[:FromNumber]
-    
-    unless from_number.present?
-      Rails.logger.error "[SmsService] Cannot send SMS - no from number configured"
-      Rails.logger.error "[SmsService] Available SMS settings keys: #{sms_settings.keys.inspect}"
-      Rails.logger.error "[SmsService] Full SMS settings: #{sms_settings.inspect}"
-      return { success: false, error: 'SMS from number not configured' }
-    end
-    
-    # Initialize Twilio client
-    twilio_client = build_twilio_client
-    
-    unless twilio_client
-      return { success: false, error: 'Twilio credentials not configured' }
-    end
-    
-    begin
-      message = twilio_client.messages.create(
-        from: from_number,
-        to: normalize_phone(to),
-        body: body
-      )
-      
-      Rails.logger.info "[SmsService] SMS sent successfully - SID: #{message.sid}"
-      
-      { success: true, message_sid: message.sid }
-    rescue Twilio::REST::RestError => e
-      Rails.logger.error "[SmsService] Twilio error: #{e.message}"
-      { success: false, error: e.message }
-    rescue => e
-      Rails.logger.error "[SmsService] SMS send error: #{e.message}"
-      { success: false, error: e.message }
-    end
+    from_number = sms_settings['fromNumber']  || sms_settings[:fromNumber]  ||
+                  sms_settings['from_number'] || sms_settings[:from_number]
+
+    account_sid = sms_settings['twilioAccountSid'] || sms_settings[:twilioAccountSid] ||
+                  sms_settings['accountSid']       || sms_settings[:accountSid]
+
+    auth_token  = sms_settings['twilioAuthToken'] || sms_settings[:twilioAuthToken] ||
+                  sms_settings['authToken']        || sms_settings[:authToken]
+
+    messaging_service_sid = sms_settings['twilioMessagingServiceSid'] ||
+                            sms_settings[:twilioMessagingServiceSid]
+
+    TwilioSmsService.send(
+      to:                    to,
+      body:                  body,
+      from_number:           from_number,
+      account_sid:           account_sid,
+      auth_token:            auth_token,
+      messaging_service_sid: messaging_service_sid
+    )
   end
   
   private

@@ -426,21 +426,38 @@ module Api
         require 'uri'
         require 'json'
         
-        account_sid = config[:twilioAccountSid] || config['twilioAccountSid']
-        auth_token = decrypt_if_needed(config[:twilioAuthToken] || config['twilioAuthToken'])
-        from_number = config[:fromNumber] || config['fromNumber']
+        account_sid           = config[:twilioAccountSid]          || config['twilioAccountSid']          || ENV['TWILIO_ACCOUNT_SID']
+        auth_token            = decrypt_if_needed(config[:twilioAuthToken] || config['twilioAuthToken']) || ENV['TWILIO_AUTH_TOKEN']
+        from_number           = config[:fromNumber]                || config['fromNumber']                || ENV['TWILIO_PHONE_NUMBER']
+        messaging_service_sid = config[:twilioMessagingServiceSid] || config['twilioMessagingServiceSid'] || ENV['TWILIO_MESSAGING_SERVICE_SID']
         
-        Rails.logger.info "[send_sms_via_twilio] Sending to #{to} from #{from_number}"
+        if messaging_service_sid.present?
+          Rails.logger.info "[send_sms_via_twilio] Sending to #{to} via MessagingService #{messaging_service_sid}"
+        else
+          Rails.logger.info "[send_sms_via_twilio] Sending to #{to} from #{from_number} (no MessagingService)"
+        end
         
         uri = URI.parse("https://api.twilio.com/2010-04-01/Accounts/#{account_sid}/Messages.json")
         
         request = Net::HTTP::Post.new(uri)
         request.basic_auth(account_sid, auth_token)
-        request.set_form_data(
-          'From' => from_number,
-          'To' => to,
-          'Body' => message
-        )
+        
+        # A2P 10DLC compliance: send with BOTH MessagingServiceSid AND From.
+        # MessagingServiceSid satisfies carrier A2P requirements (routes through
+        # the registered campaign). From ensures the message goes out from the
+        # company's dedicated number, not a random number from the pool.
+        # Twilio supports both fields together when the From number is in the pool.
+        form_data = { 'To' => to, 'Body' => message }
+        if messaging_service_sid.present? && from_number.present?
+          form_data['MessagingServiceSid'] = messaging_service_sid
+          form_data['From'] = from_number
+        elsif messaging_service_sid.present?
+          form_data['MessagingServiceSid'] = messaging_service_sid
+        else
+          form_data['From'] = from_number
+        end
+        
+        request.set_form_data(form_data)
         
         response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
           http.request(request)

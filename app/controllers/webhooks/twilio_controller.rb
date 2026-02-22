@@ -125,6 +125,24 @@ module Webhooks
           communication_id: inbound_comm&.id
         )
 
+        # Notify the assigned user in-app that a reply arrived
+        notify_user_id = sender_user_id || assigned_user_id
+        if notify_user_id
+          notify_user = User.find_by(id: notify_user_id)
+          if notify_user
+            contact_label = communicable&.respond_to?(:display_name) ? communicable.display_name : from_number
+            NotificationService.create(
+              recipient:         notify_user,
+              notification_type: :sms_reply_received,
+              notifiable:        inbound_comm,
+              message:           "SMS reply from #{contact_label}: #{body&.truncate(120)}",
+              company_id:        company&.id,
+              action_url:        communicable ? "/contacts/#{communicable.id}?tab=communications" : nil,
+              action_text:       'View Conversation'
+            )
+          end
+        end
+
         # Forward reply to the user who originally sent the SMS
         # Generates a tokenized reply link so they can respond without logging in
         forward_to_id = sender_user_id || assigned_user_id
@@ -214,15 +232,7 @@ module Webhooks
       
       is_valid = validator.validate(url, post_params, signature)
 
-      # Fallback: verify against dedicated TwilioAccount auth token
-      unless is_valid
-        to_number      = params['To']
-        twilio_account = TwilioAccount.active.find_by(phone_number: to_number)
-        if twilio_account
-          validator = Twilio::Security::RequestValidator.new(twilio_account.auth_token)
-          is_valid  = validator.validate(url, post_params, signature)
-        end
-      end
+      # No sub-account fallback needed — all numbers are on master account now
 
       unless is_valid
         Rails.logger.error "[Twilio] Invalid signature - possible spoofed request"
@@ -247,20 +257,17 @@ module Webhooks
       base_body    = "DMS Reply from #{from_number} (#{entity_label}): #{body}"
 
       if reply_token.present?
-        api_base     = ENV.fetch('APP_BASE_URL', 'https://app.platformdms.com')
-        reply_url    = "#{api_base}/reply/#{reply_token}"
+        app_base     = ENV.fetch('FRONTEND_URL', 'https://staging-dms.renterinsight.com')
+        reply_url    = "#{app_base}/reply/#{reply_token}"
         forward_body = "#{base_body}\nReply here: #{reply_url}"
       else
         forward_body = base_body
       end
 
-      client        = Twilio::REST::Client.new(ENV['TWILIO_ACCOUNT_SID'], ENV['TWILIO_AUTH_TOKEN'])
-      platform_from = ENV['TWILIO_PHONE_NUMBER']
-
-      client.messages.create(
-        from: platform_from,
+      # Send the forward via master account through the Messaging Service
+      TwilioSmsService.send_via_master(
         to:   to_cell,
-        body: forward_body.truncate(320)  # allow longer to fit the URL
+        body: forward_body.truncate(320)
       )
 
       Rails.logger.info "[TwilioWebhook] Forwarded reply with token to sender cell #{to_cell}"

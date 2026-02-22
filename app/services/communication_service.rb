@@ -188,11 +188,23 @@ class CommunicationService
     # User email connection takes highest priority in waterfall
     from ||= default_from_address(channel, communicable, user: @sending_user)
     
+    # Normalize SMS phone number to E.164
+    if channel == 'sms' && to.present? && !to.start_with?('+')
+      to = "+1#{to.gsub(/\D/, '')}"
+    end
+
+    # Ensure metadata is stored as string keys (proper JSON in JSONB column)
+    metadata = metadata.deep_stringify_keys if metadata.is_a?(Hash)
+
+    # Resolve company for the Communication record
+    resolved_company = extract_company_from_communicable(communicable)
+
     # Log metadata before saving
-    Rails.logger.info "[CommunicationService] Creating communication with metadata: #{metadata.merge(category: category).inspect}"
-    
+    Rails.logger.info "[CommunicationService] Creating communication with metadata: #{metadata.merge('category' => category).inspect}"
+
     # Create communication record (reply_to will be set after creation for tracking)
     @communication = Communication.create!(
+      company_id: resolved_company&.id,
       communicable: communicable,
       direction: direction,
       channel: channel,
@@ -206,7 +218,7 @@ class CommunicationService
       bcc_addresses: options[:bcc],
       reply_to: options[:reply_to],
       portal_visible: portal_visible,
-      metadata: metadata.merge(category: category)
+      metadata: metadata.merge('category' => category)
     )
     
     # Auto-generate reply-to address for tracking (if not already provided)

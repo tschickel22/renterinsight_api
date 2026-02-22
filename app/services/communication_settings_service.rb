@@ -78,31 +78,57 @@ class CommunicationSettingsService
       }
     end
     
-    # Phase 1: Dedicated sub-account credentials per company
+    # Phase 1: Dedicated number on master account
+    # Numbers are now purchased on the master Twilio account directly (not sub-accounts),
+    # so we use master credentials with the company's dedicated from_number.
     if mode == 'dedicated' && company&.twilio_account&.active?
       ta = company.twilio_account
-      Rails.logger.info "[CommSettings] Using dedicated Twilio for Company #{company.id}: #{ta.phone_number}"
+      master_sid   = ENV['TWILIO_ACCOUNT_SID'].presence
+      master_token = ENV['TWILIO_AUTH_TOKEN'].presence
+
+      # Fall back to platform settings if env vars not set (local dev)
+      unless master_sid && master_token
+        sms_cfg = PlatformSetting.communications.dig(:sms) ||
+                  PlatformSetting.communications.dig('sms') || {}
+        master_sid   ||= sms_cfg[:twilioAccountSid].presence || sms_cfg['twilioAccountSid'].presence
+        enc_token = sms_cfg[:twilioAuthToken].presence || sms_cfg['twilioAuthToken'].presence
+        master_token ||= decrypt_value(enc_token)
+      end
+
+      # Messaging Service SID is the same for all companies (master A2P registration)
+      msid = ENV['TWILIO_MESSAGING_SERVICE_SID'].presence ||
+             begin
+               sms_cfg = PlatformSetting.communications.dig(:sms) ||
+                         PlatformSetting.communications.dig('sms') || {}
+               sms_cfg[:twilioMessagingServiceSid].presence || sms_cfg['twilioMessagingServiceSid'].presence
+             rescue StandardError
+               nil
+             end
+
+      Rails.logger.info "[CommSettings] Using dedicated number on master Twilio for Company #{company.id}: #{ta.phone_number}"
       return {
-        provider: 'twilio',
-        from_number: ta.phone_number,
-        twilio_account_sid: ta.sub_account_sid,
-        twilio_auth_token: ta.auth_token,
-        enabled: true,
-        sms_provisioning_mode: 'dedicated',
-        source: 'dedicated_sub_account'
+        provider:                      'twilio',
+        from_number:                   ta.phone_number,
+        twilio_account_sid:            master_sid,
+        twilio_auth_token:             master_token,
+        twilio_messaging_service_sid:  msid,
+        enabled:                       true,
+        sms_provisioning_mode:         'dedicated',
+        source:                        'dedicated_master_account'
       }
     end
 
     # For 'platform' mode: use existing waterfall
     config = merged_settings.dig('sms') || {}
-    
+
     {
-      provider: config['provider'] || ENV['SMS_PROVIDER'] || 'twilio',
-      from_number: config['fromNumber'] || ENV['TWILIO_PHONE_NUMBER'],
-      twilio_account_sid: decrypt_value(config['twilioAccountSid']) || ENV['TWILIO_ACCOUNT_SID'],
-      twilio_auth_token: decrypt_value(config['twilioAuthToken']) || ENV['TWILIO_AUTH_TOKEN'],
-      enabled: config['isEnabled'] != false,
-      sms_provisioning_mode: mode
+      provider:                      config['provider'] || ENV['SMS_PROVIDER'] || 'twilio',
+      from_number:                   config['fromNumber'] || ENV['TWILIO_PHONE_NUMBER'],
+      twilio_account_sid:            decrypt_value(config['twilioAccountSid']) || ENV['TWILIO_ACCOUNT_SID'],
+      twilio_auth_token:             decrypt_value(config['twilioAuthToken']) || ENV['TWILIO_AUTH_TOKEN'],
+      twilio_messaging_service_sid:  config['twilioMessagingServiceSid'] || ENV['TWILIO_MESSAGING_SERVICE_SID'],
+      enabled:                       config['isEnabled'] != false,
+      sms_provisioning_mode:         mode
     }
   end
   
