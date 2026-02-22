@@ -63,6 +63,29 @@ module Webhooks
 
       Rails.logger.info "[TwilioWebhook] Inbound SMS from #{from_number} to #{to_number}: #{body&.truncate(100)}"
 
+      # Handle STOP/START keyword opt-out/opt-in (A2P compliance)
+      stripped_body = body.to_s.strip.upcase
+      stop_keywords  = %w[STOP STOPALL UNSUBSCRIBE CANCEL END QUIT].freeze
+      start_keywords = %w[START YES UNSTOP SUBSCRIBE].freeze
+
+      if stop_keywords.include?(stripped_body) || start_keywords.include?(stripped_body)
+        recipient = Contact.find_by(phone: from_number) || Lead.find_by(phone: from_number)
+
+        if recipient
+          pref = CommunicationPreference.find_or_create_for(recipient: recipient, channel: 'sms')
+
+          if stop_keywords.include?(stripped_body)
+            pref.opt_out!('SMS STOP keyword received')
+            Rails.logger.info "[TwilioWebhook] STOP received from #{from_number} — opted out"
+          else
+            pref.opt_in!
+            Rails.logger.info "[TwilioWebhook] START received from #{from_number} — opted back in"
+          end
+        else
+          Rails.logger.warn "[TwilioWebhook] #{stripped_body} keyword from #{from_number} but no Contact/Lead found"
+        end
+      end
+
       # Match receiving number to a dedicated TwilioAccount
       twilio_account = TwilioAccount.active.find_by(phone_number: to_number)
       company = twilio_account&.company

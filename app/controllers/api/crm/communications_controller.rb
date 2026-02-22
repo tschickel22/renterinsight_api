@@ -78,6 +78,7 @@ module Api
         if @lead.present?
           log = Communication.create!(
             communicable: @lead,
+            company_id: @company&.id,
             channel:    'email',
             direction:  'outbound',
             subject:    email_params[:subject],
@@ -164,6 +165,7 @@ module Api
         if @lead.present?
           log = Communication.create!(
             communicable: @lead,
+            company_id: @company&.id,
             channel:    'sms',
             direction:  'outbound',
             body:       sms_params[:content],
@@ -616,6 +618,7 @@ module Api
         if @lead.present?
           log = Communication.create!(
             communicable: @lead,
+            company_id: @company&.id,
             channel: 'email',
             direction: 'outbound',
             subject: email_params[:subject],
@@ -1159,7 +1162,9 @@ module Api
           bcc: email_params[:bcc],
           has_attachments: email_params[:attachments].present?,
           from_email: config[:fromEmail],
-          from_name: config[:fromName]
+          from_name: config[:fromName],
+          sender_user_id: current_user&.id,
+          assigned_user_id: @lead&.assigned_user_id
         }.compact
       end
 
@@ -1170,7 +1175,9 @@ module Api
           template_id: sms_params[:template_id],
           to: sms_params[:to],
           character_count: sms_params[:content]&.length,
-          from_number: config[:fromNumber]
+          from_number: config[:fromNumber],
+          sender_user_id: current_user&.id,
+          assigned_user_id: @lead&.assigned_user_id
         }.compact
       end
 

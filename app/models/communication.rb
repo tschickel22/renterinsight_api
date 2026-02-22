@@ -42,7 +42,8 @@ class Communication < ApplicationRecord
   serialize :metadata, coder: JSON unless ActiveRecord::Base.connection.adapter_name == 'PostgreSQL'
   
   # Polymorphic association - can belong to Lead, Account, Quote, etc.
-  belongs_to :communicable, polymorphic: true
+  belongs_to :communicable, polymorphic: true, optional: true
+  belongs_to :company, optional: true
   belongs_to :communication_thread, optional: true
   belongs_to :template, class_name: 'CommunicationTemplate', foreign_key: 'template_id', optional: true
   
