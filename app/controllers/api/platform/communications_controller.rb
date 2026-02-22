@@ -766,9 +766,10 @@ module Api
         require 'uri'
         require 'json'
         
-        account_sid = config['twilioAccountSid'] || config[:twilioAccountSid]
-        auth_token = config['twilioAuthToken'] || config[:twilioAuthToken]
-        from_number = config['fromNumber'] || config[:fromNumber]
+        account_sid           = config['twilioAccountSid'] || config[:twilioAccountSid]
+        auth_token            = config['twilioAuthToken'] || config[:twilioAuthToken]
+        from_number           = config['fromNumber'] || config[:fromNumber]
+        messaging_service_sid = config['twilioMessagingServiceSid'] || config[:twilioMessagingServiceSid] || ENV['TWILIO_MESSAGING_SERVICE_SID']
 
         # Normalize to E.164 — add +1 for bare 10-digit US/CA numbers
         to = to.to_s.gsub(/[^+\d]/, '')
@@ -778,9 +779,13 @@ module Api
         # Normalize from number too
         from_number = from_number.to_s.gsub(/[^+\d]/, '')
         from_number = "+#{from_number}" unless from_number.start_with?('+')
-        
-        Rails.logger.info "[send_sms_via_twilio] Sending to #{to} from #{from_number}"
-        
+
+        if messaging_service_sid.present?
+          Rails.logger.info "[send_sms_via_twilio] Sending to #{to} via MessagingService #{messaging_service_sid}"
+        else
+          Rails.logger.info "[send_sms_via_twilio] Sending to #{to} from #{from_number} (no MessagingService)"
+        end
+
         # Configure status callback URL for delivery tracking
         # Skip callback URL if using localhost (Twilio rejects localhost URLs)
         callback_url = nil
@@ -790,18 +795,23 @@ module Api
         else
           Rails.logger.warn "[send_sms_via_twilio] Skipping StatusCallback (localhost or no request context)"
         end
-        
+
         uri = URI.parse("https://api.twilio.com/2010-04-01/Accounts/#{account_sid}/Messages.json")
-        
+
         request_obj = Net::HTTP::Post.new(uri)
         request_obj.basic_auth(account_sid, auth_token)
-        
-        form_data = {
-          'From' => from_number,
-          'To' => to,
-          'Body' => message
-        }
-        
+
+        # A2P 10DLC compliance: send with BOTH MessagingServiceSid AND From
+        form_data = { 'To' => to, 'Body' => message }
+        if messaging_service_sid.present? && from_number.present?
+          form_data['MessagingServiceSid'] = messaging_service_sid
+          form_data['From'] = from_number
+        elsif messaging_service_sid.present?
+          form_data['MessagingServiceSid'] = messaging_service_sid
+        else
+          form_data['From'] = from_number
+        end
+
         # Only add StatusCallback if we have a valid URL
         form_data['StatusCallback'] = callback_url if callback_url.present?
         

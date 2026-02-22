@@ -213,52 +213,13 @@ class MfaService
   def send_sms_code(user, code, phone)
     message = "Your verification code is: #{code}\nValid for 5 minutes."
 
-    # Get SMS settings (follows Platform → Company → Location waterfall)
-    sms_settings = get_sms_settings(user)
+    result = TwilioSmsService.send_via_master(to: phone, body: message)
 
-    # Send SMS via Twilio
-    result = send_sms_via_twilio(phone, message, sms_settings)
-    
     unless result[:success]
       raise DeliveryFailedError, result[:error] || 'Failed to send SMS'
     end
-    
-    Rails.logger.info "📱 MFA SMS sent to #{phone}: #{result[:message_sid]}"
-  end
 
-  def send_sms_via_twilio(to, message, config)
-    require 'net/http'
-    require 'uri'
-    require 'json'
-    
-    account_sid = config['twilioAccountSid'] || config[:twilioAccountSid]
-    auth_token = config['twilioAuthToken'] || config[:twilioAuthToken]
-    from_number = config['fromNumber'] || config[:fromNumber]
-    
-    uri = URI.parse("https://api.twilio.com/2010-04-01/Accounts/#{account_sid}/Messages.json")
-    
-    request = Net::HTTP::Post.new(uri)
-    request.basic_auth(account_sid, auth_token)
-    request.set_form_data(
-      'From' => from_number,
-      'To' => to,
-      'Body' => message
-    )
-    
-    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
-      http.request(request)
-    end
-    
-    result = JSON.parse(response.body)
-    
-    if response.code.to_i == 201
-      { success: true, message_sid: result['sid'], status: result['status'] }
-    else
-      { success: false, error: result['message'] || 'Twilio API error' }
-    end
-  rescue => e
-    Rails.logger.error "[send_sms_via_twilio] Exception: #{e.message}"
-    { success: false, error: e.message }
+    Rails.logger.info "[MfaService] MFA SMS sent to #{phone}: #{result[:message_sid]}"
   end
 
   def get_email_settings(user)

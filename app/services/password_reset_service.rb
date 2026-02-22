@@ -316,70 +316,19 @@ class PasswordResetService
   def send_sms_reset(user, code, phone)
     message = "Your password reset code is: #{code}\nValid for 15 minutes."
 
-    # Get SMS settings from platform/company
-    sms_settings = get_sms_settings(user)
+    send_result = TwilioSmsService.send_via_master(to: phone, body: message)
 
-    # Send SMS directly via Twilio (same approach as Platform test SMS)
-    send_result = send_sms_via_twilio(phone, message, sms_settings)
-    
     unless send_result[:success]
       raise DeliveryFailedError, send_result[:error] || 'Failed to send SMS'
     end
-    
-    Rails.logger.info "📱 SMS password reset sent successfully: #{send_result[:message_sid]}"
+
+    Rails.logger.info "[PasswordResetService] SMS reset sent: #{send_result[:message_sid]}"
+  rescue DeliveryFailedError
+    raise
   rescue StandardError => e
-    Rails.logger.error("📱 SMS send failed: #{e.message}")
+    Rails.logger.error("[PasswordResetService] SMS send failed: #{e.message}")
     Rails.logger.error(e.backtrace.first(5).join("\n"))
     raise DeliveryFailedError, 'Failed to send SMS'
-  end
-
-  def send_sms_via_twilio(to, message, config)
-    require 'net/http'
-    require 'uri'
-    require 'json'
-    
-    account_sid = config['twilioAccountSid'] || config[:twilioAccountSid]
-    auth_token = config['twilioAuthToken'] || config[:twilioAuthToken]
-    from_number = config['fromNumber'] || config[:fromNumber]
-    
-    Rails.logger.info "[send_sms_via_twilio] Sending to #{to} from #{from_number}"
-    
-    uri = URI.parse("https://api.twilio.com/2010-04-01/Accounts/#{account_sid}/Messages.json")
-    
-    request_obj = Net::HTTP::Post.new(uri)
-    request_obj.basic_auth(account_sid, auth_token)
-    
-    form_data = {
-      'From' => from_number,
-      'To' => to,
-      'Body' => message
-    }
-    
-    request_obj.set_form_data(form_data)
-    
-    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
-      http.request(request_obj)
-    end
-    
-    result = JSON.parse(response.body)
-    
-    if response.code.to_i == 201
-      Rails.logger.info "[send_sms_via_twilio] Success: #{result['sid']}"
-      { 
-        success: true, 
-        message_sid: result['sid'],
-        status: result['status']
-      }
-    else
-      Rails.logger.error "[send_sms_via_twilio] Error: #{result['message']}"
-      { 
-        success: false, 
-        error: result['message'] || 'Twilio API error'
-      }
-    end
-  rescue => e
-    Rails.logger.error "[send_sms_via_twilio] Exception: #{e.message}"
-    { success: false, error: e.message }
   end
 
   def get_email_settings(user)
