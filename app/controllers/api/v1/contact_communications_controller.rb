@@ -102,6 +102,7 @@ module Api
 
         if result[:success]
           communication = @contact.communications.create!(
+            company_id:   current_company_id,
             channel:      'sms',
             direction:    'outbound',
             body:         params[:message] || params[:body],
@@ -112,6 +113,7 @@ module Api
             metadata: {
               message_sid:       result[:message_sid],
               sender_user_id:    current_user&.id,
+              assigned_user_id:  @contact.try(:assigned_user_id),
               messaging_service: sms_cfg[:twilio_messaging_service_sid].present?
             }.compact
           )

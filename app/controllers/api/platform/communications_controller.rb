@@ -329,6 +329,7 @@ module Api
           if entity
             log = Communication.create!(
               communicable: entity,
+              company_id: current_company_id,
               channel: 'sms',
               direction: 'outbound',
               body: sms_params[:content],
@@ -341,7 +342,9 @@ module Api
                 message_sid: send_result[:message_sid],
                 provider: sms_config['provider'] || sms_config[:provider] || 'twilio',
                 template_id: sms_params[:template_id],
-                initial_status: send_result[:status]
+                initial_status: send_result[:status],
+                sender_user_id: current_user&.id,
+                assigned_user_id: entity.try(:assigned_user_id)
               }.compact
             )
             
@@ -925,6 +928,7 @@ module Api
         
         Communication.create!(
           communicable: entity,
+          company_id: current_company_id,
           channel: 'email',
           direction: 'outbound',
           subject: email_params[:subject],
@@ -935,7 +939,9 @@ module Api
           cc_addresses: email_params[:cc],
           bcc_addresses: email_params[:bcc],
           metadata: {
-            template_id: email_params[:template_id]
+            template_id: email_params[:template_id],
+            sender_user_id: current_user&.id,
+            assigned_user_id: entity.try(:assigned_user_id)
           }.compact
         )
       end
