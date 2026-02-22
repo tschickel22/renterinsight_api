@@ -69,7 +69,10 @@ module Webhooks
       start_keywords = %w[START YES UNSTOP SUBSCRIBE].freeze
 
       if stop_keywords.include?(stripped_body) || start_keywords.include?(stripped_body)
-        recipient = Contact.find_by(phone: from_number) || Lead.find_by(phone: from_number)
+        # Match on last 10 digits to handle format variations
+        stop_digits = from_number.to_s.gsub(/\D/, '').last(10)
+        recipient = Contact.where("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?", "%#{stop_digits}").first ||
+                   Lead.where("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?", "%#{stop_digits}").first
 
         if recipient
           pref = CommunicationPreference.find_or_create_for(recipient: recipient, channel: 'sms')
@@ -101,11 +104,16 @@ module Webhooks
       end
 
       # Find most recent outbound SMS to this contact to link the reply to the correct
-      # conversation, communicable entity, and the user who originally sent the message
+      # conversation, communicable entity, and the user who originally sent the message.
+      # Phone numbers may be stored in various formats (E.164, 10-digit, dashes, etc.)
+      # so we strip to digits and match on the last 10.
+      from_digits = from_number.to_s.gsub(/\D/, '').last(10)
       original_communication = Communication.where(
         channel: 'sms',
-        direction: 'outbound',
-        to_address: from_number
+        direction: 'outbound'
+      ).where(
+        "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(to_address, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?",
+        "%#{from_digits}"
       ).order(created_at: :desc).first
 
       if original_communication
