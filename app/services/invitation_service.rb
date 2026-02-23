@@ -475,6 +475,7 @@ class InvitationService
       body: rendered[:body],
       category: 'invitations',
       skip_preference_check: true, # Invitations always send
+      reply_to: 'support@renterinsight.com', # Invitations don't support reply tracking
       metadata: {
         invitation_id: invitation.id,
         invitation_type: invitation.invitation_type
