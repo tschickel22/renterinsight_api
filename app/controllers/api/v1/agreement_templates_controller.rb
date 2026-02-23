@@ -127,17 +127,6 @@ module Api
 
       private
 
-      def set_company_scope
-        unless current_user
-          return render json: { error: 'Authentication required' }, status: :unauthorized
-        end
-
-        @company = Company.find_by(id: current_company_id)
-        unless @company
-          return render json: { error: 'Company not found' }, status: :not_found
-        end
-      end
-
       def set_template
         @template = @company.agreement_templates.active.find(params[:id])
       rescue ActiveRecord::RecordNotFound

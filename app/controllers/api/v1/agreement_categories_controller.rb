@@ -73,17 +73,6 @@ module Api
 
       private
 
-      def set_company_scope
-        unless current_user
-          return render json: { error: 'Authentication required' }, status: :unauthorized
-        end
-
-        @company = Company.find_by(id: current_company_id)
-        unless @company
-          return render json: { error: 'Company not found' }, status: :not_found
-        end
-      end
-
       def set_category
         @category = @company.agreement_categories.active.find(params[:id])
       rescue ActiveRecord::RecordNotFound
