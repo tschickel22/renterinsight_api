@@ -46,7 +46,11 @@ class NotificationPreference < ApplicationRecord
     
     # Broadcast notifications
     broadcast_message: { in_app: true, email: false, sms: false },
-    system_alert: { in_app: true, email: true, sms: false }
+    system_alert: { in_app: true, email: true, sms: false },
+
+    # Communications notifications
+    sms_reply_received: { in_app: true, email: true, sms: false },
+    sms_cap_alert: { in_app: true, email: true, sms: false }
   }.freeze
   
   # Get or create preference for user and notification type
