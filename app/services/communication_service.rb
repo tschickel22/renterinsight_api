@@ -368,7 +368,18 @@ class CommunicationService
 
   def extract_assigned_user(communicable)
     return nil unless communicable.present?
-    communicable.respond_to?(:owner) ? communicable.owner : nil
+    
+    # Try owner first (most entities)
+    if communicable.respond_to?(:owner) && communicable.owner.present?
+      return communicable.owner
+    end
+    
+    # For Invitations, use invited_by as the assigned user
+    if communicable.respond_to?(:invited_by) && communicable.invited_by.present?
+      return communicable.invited_by
+    end
+    
+    nil
   end
 
   def send_via_provider(provider:, channel:, communication:, options:)

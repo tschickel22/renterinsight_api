@@ -120,7 +120,13 @@ class InvitationService
       log_invitation_url(invitation, context)
     end
     
-    # Try to send via templates (optional in development)
+    # Try to send via templates - handle email and SMS independently
+    # so partial success (e.g., email sent but SMS failed) is properly reported
+    email_sent = false
+    sms_sent = false
+    email_error = nil
+    sms_error = nil
+    
     begin
       # Get appropriate template
       template = find_template(invitation)
@@ -128,12 +134,24 @@ class InvitationService
       if template
         # Send via email if required
         if invitation.delivery_method.in?(['email', 'both'])
-          send_email_invitation(invitation, template, context)
+          begin
+            send_email_invitation(invitation, template, context)
+            email_sent = true
+          rescue StandardError => e
+            email_error = e.message
+            Rails.logger.error("❌ Invitation email failed: #{e.message}")
+          end
         end
         
         # Send via SMS if required
         if invitation.delivery_method.in?(['sms', 'both'])
-          send_sms_invitation(invitation, template, context)
+          begin
+            send_sms_invitation(invitation, template, context)
+            sms_sent = true
+          rescue StandardError => e
+            sms_error = e.message
+            Rails.logger.error("❌ Invitation SMS failed: #{e.message}")
+          end
         end
       elsif Rails.env.production?
         # In production, templates are required
@@ -150,7 +168,7 @@ class InvitationService
       end
     rescue StandardError => e
       if Rails.env.production?
-        # In production, fail hard
+        # In production, fail hard only if NOTHING sent
         Rails.logger.error("Failed to send invitation: #{e.message}")
         raise DeliveryFailedError, "Failed to send invitation: #{e.message}"
       else
@@ -165,6 +183,24 @@ class InvitationService
         puts "Error: #{e.message}"
         puts "="*80 + "\n"
       end
+    end
+    
+    # For 'both' delivery: if at least one method succeeded, don't fail the whole invitation
+    # But if NOTHING sent and we're in production, raise
+    if invitation.delivery_method == 'both' && !email_sent && !sms_sent
+      error_msg = [email_error, sms_error].compact.join('; ')
+      raise DeliveryFailedError, "Failed to send invitation: #{error_msg}"
+    elsif invitation.delivery_method == 'email' && !email_sent && email_error
+      raise DeliveryFailedError, "Failed to send invitation: #{email_error}"
+    elsif invitation.delivery_method == 'sms' && !sms_sent && sms_error
+      raise DeliveryFailedError, "Failed to send invitation: #{sms_error}"
+    end
+    
+    # Log partial success warnings
+    if email_sent && sms_error
+      Rails.logger.warn("⚠️ Invitation #{invitation.id}: Email sent but SMS failed: #{sms_error}")
+    elsif sms_sent && email_error
+      Rails.logger.warn("⚠️ Invitation #{invitation.id}: SMS sent but email failed: #{email_error}")
     end
     
     # Update invitation status (even if sending failed in development)
