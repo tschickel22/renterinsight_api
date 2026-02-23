@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_22_030000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_22_231500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -716,8 +716,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_22_030000) do
   end
 
   create_table "communications", force: :cascade do |t|
-    t.string "communicable_type", null: false
-    t.integer "communicable_id", null: false
+    t.string "communicable_type"
+    t.integer "communicable_id"
     t.integer "communication_thread_id"
     t.string "direction", null: false
     t.string "channel", null: false
