@@ -11,6 +11,8 @@ class Supplier < ApplicationRecord
   has_many :supplier_parts, dependent: :destroy
   has_many :parts, through: :supplier_parts
   # has_many :purchase_orders, dependent: :restrict_with_error # Phase 2A
+  has_many :agreement_signers, as: :signable, dependent: :nullify
+  has_many :agreement_attachments, as: :attachable, dependent: :destroy
   
   # Validations
   validates :company_id, presence: true

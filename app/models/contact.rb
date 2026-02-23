@@ -21,6 +21,8 @@ class Contact < ApplicationRecord
   has_many :contact_activities, dependent: :destroy
   has_many :portal_documents, as: :owner, dependent: :destroy
   has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
+  has_many :agreement_signers, as: :signable, dependent: :nullify
+  has_many :agreement_attachments, as: :attachable, dependent: :destroy
 
   # Owner helper methods
   def owner_user

@@ -77,6 +77,11 @@ class Company < ApplicationRecord
   # Twilio SMS Provisioning
   has_one :twilio_account, dependent: :destroy
 
+  # Agreement & E-Sign Module
+  has_many :agreement_categories, dependent: :destroy
+  has_many :agreement_templates, dependent: :destroy
+  has_many :agreements, dependent: :destroy
+
   # Subscription System Associations
   has_one :tenant_subscription, dependent: :destroy
   has_many :tenant_module_overrides, dependent: :destroy

@@ -119,6 +119,9 @@ public
       { key: 'manufacturer_ar', name: 'Manufacturer AR', category: 'operations', description: 'Track and manage manufacturer accounts receivable', position: 161 },
       { key: 'manufacturers', name: 'Manufacturers', category: 'operations', description: 'View and manage manufacturer information', position: 162 },
       
+      # Agreements (position 115)
+      { key: 'agreements', name: 'Agreements', category: 'operations', description: 'Agreement & e-sign management', position: 115 },
+
       # Cost Details (position 170-175)
       { key: 'inventory_cost_details', name: 'Inventory (Cost Details)', category: 'operations', description: 'View detailed cost breakdowns for inventory', position: 170 },
       { key: 'deals_cost_details', name: 'Deals (Cost Details)', category: 'operations', description: 'View detailed cost breakdowns for deals', position: 171 },

@@ -252,6 +252,28 @@ class Api::V1::SearchController < ApplicationController
       Rails.logger.error("Search suppliers error: #{e.message}")
     end
     
+    # Operations - Agreements
+    begin
+      agreements = @company.agreements
+                          .where(is_deleted: [false, nil])
+                          .where("title ILIKE ? OR agreement_number ILIKE ? OR category ILIKE ?",
+                                 "%#{query}%", "%#{query}%", "%#{query}%")
+                          .limit(5)
+
+      results += agreements.map do |agr|
+        {
+          id: agr.id,
+          type: 'agreement',
+          title: agr.agreement_number,
+          subtitle: agr.title,
+          badge: agr.status&.titleize,
+          score: calculate_score(query, agr.agreement_number, agr.title, agr.category)
+        }
+      end
+    rescue => e
+      Rails.logger.error("Search agreements error: #{e.message}")
+    end
+
     # Sort by relevance score (higher = better match)
     results.sort_by! { |r| -r[:score] }
     

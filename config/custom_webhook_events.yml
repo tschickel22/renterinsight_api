@@ -108,3 +108,32 @@ events:
   - value: parts.low_stock
     label: Part Low Stock
     category: Parts & Supply Events
+
+  # ── Agreement Events ──
+  - value: agreement.created
+    label: Agreement Created
+    category: Agreement Events
+  - value: agreement.sent
+    label: Agreement Sent
+    category: Agreement Events
+  - value: agreement.viewed
+    label: Agreement Viewed
+    category: Agreement Events
+  - value: agreement.signed
+    label: Agreement Signed
+    category: Agreement Events
+  - value: agreement.completed
+    label: Agreement Completed
+    category: Agreement Events
+  - value: agreement.declined
+    label: Agreement Declined
+    category: Agreement Events
+  - value: agreement.voided
+    label: Agreement Voided
+    category: Agreement Events
+  - value: agreement.expired
+    label: Agreement Expired
+    category: Agreement Events
+  - value: agreement.reminder_sent
+    label: Agreement Reminder Sent
+    category: Agreement Events

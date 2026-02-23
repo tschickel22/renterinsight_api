@@ -13,6 +13,13 @@ Rails.application.routes.draw do
   get  'r/:token',       to: 'sms_replies#show'
   post 'r/:token/reply', to: 'sms_replies#reply'
 
+  # ==================== PUBLIC AGREEMENT SIGNING (No Auth Required) ====================
+  get  'sign/:token',          to: 'public/agreement_signing#show'
+  post 'sign/:token/view',    to: 'public/agreement_signing#view_agreement'
+  post 'sign/:token/sign',    to: 'public/agreement_signing#sign'
+  post 'sign/:token/decline', to: 'public/agreement_signing#decline'
+  get  'sign/:token/download', to: 'public/agreement_signing#download'
+
   # ==================== WEBHOOKS (NO AUTH REQUIRED) ====================
   namespace :webhooks do
     # Email tracking pixel (no auth required)
@@ -1029,6 +1036,50 @@ Rails.application.routes.draw do
       get 'page_layouts/:module_name/field_option_overrides', to: 'page_layouts#field_option_overrides'
       put 'page_layouts/:module_name/field_option_overrides/:field_key', to: 'page_layouts#update_field_option_override'
       delete 'page_layouts/:module_name/field_option_overrides/:field_key', to: 'page_layouts#delete_field_option_override'
+
+      # ==================== AGREEMENTS & E-SIGN ====================
+      resources :agreement_categories, only: [:index, :create, :update, :destroy]
+
+      resources :agreement_templates do
+        member do
+          post :duplicate
+          post :preview
+        end
+      end
+
+      resources :agreements do
+        member do
+          post :send_agreement
+          post :void
+          post :remind
+          post :remind_signer
+          post :duplicate
+          get :audit_log
+          get :download
+          get :certificate
+          post :prepare_signature
+        end
+
+        collection do
+          get :stats
+        end
+
+        # Nested signers
+        post 'signers', to: 'agreements#add_signer'
+        patch 'signers/:signer_id', to: 'agreements#update_signer'
+        delete 'signers/:signer_id', to: 'agreements#remove_signer'
+
+        # Nested attachments
+        post 'attachments', to: 'agreements#add_attachment'
+        delete 'attachments/:attachment_id', to: 'agreements#remove_attachment'
+      end
+
+      # Agreement Documents (upload & merge preview)
+      post 'agreement_documents/upload', to: 'agreement_documents#upload'
+      post 'agreement_documents/merge_preview', to: 'agreement_documents#merge_preview'
+
+      # Agreement Merge Fields (definitions)
+      get 'agreement_merge_fields', to: 'agreement_merge_fields#index'
     end
   end
 
@@ -1679,6 +1730,13 @@ Rails.application.routes.draw do
       
       # Portal Service Tickets
       resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
+
+      # Portal Agreements
+      resources :agreements, only: [:index, :show] do
+        member do
+          get :download
+        end
+      end
     end
   end
 

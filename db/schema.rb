@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_22_231500) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_22_232006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -166,6 +166,177 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_22_231500) do
     t.index ["lead_id", "created_at"], name: "index_activities_on_lead_id_and_created_at"
     t.index ["lead_id"], name: "index_activities_on_lead_id"
     t.index ["user_id"], name: "index_activities_on_user_id"
+  end
+
+  create_table "agreement_attachments", force: :cascade do |t|
+    t.bigint "agreement_id", null: false
+    t.string "attachable_type", null: false
+    t.integer "attachable_id", null: false
+    t.integer "attached_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["agreement_id", "attachable_type", "attachable_id"], name: "idx_agr_attachments_unique", unique: true
+    t.index ["agreement_id"], name: "index_agreement_attachments_on_agreement_id"
+    t.index ["attachable_type", "attachable_id"], name: "idx_agr_attachments_polymorphic"
+    t.index ["attached_by_id"], name: "index_agreement_attachments_on_attached_by_id"
+  end
+
+  create_table "agreement_audit_logs", force: :cascade do |t|
+    t.bigint "agreement_id", null: false
+    t.bigint "agreement_signer_id"
+    t.string "action", null: false
+    t.string "ip_address"
+    t.text "user_agent"
+    t.string "geolocation"
+    t.string "performed_by_type"
+    t.integer "performed_by_id"
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["agreement_id", "action"], name: "idx_agr_audit_agreement_action"
+    t.index ["agreement_id", "created_at"], name: "idx_agr_audit_agreement_time"
+    t.index ["agreement_id"], name: "index_agreement_audit_logs_on_agreement_id"
+    t.index ["agreement_signer_id"], name: "index_agreement_audit_logs_on_agreement_signer_id"
+    t.index ["performed_by_type", "performed_by_id"], name: "idx_agr_audit_performer"
+  end
+
+  create_table "agreement_categories", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "color", default: "#6B7280"
+    t.boolean "is_system", default: false, null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_deleted"], name: "index_agreement_categories_on_company_id_and_is_deleted"
+    t.index ["company_id", "name"], name: "idx_agreement_categories_unique_name", unique: true, where: "(is_deleted = false)"
+    t.index ["company_id"], name: "index_agreement_categories_on_company_id"
+  end
+
+  create_table "agreement_reminders", force: :cascade do |t|
+    t.bigint "agreement_id", null: false
+    t.bigint "agreement_signer_id", null: false
+    t.datetime "scheduled_at", null: false
+    t.datetime "sent_at"
+    t.string "reminder_type", default: "auto", null: false
+    t.string "channel", default: "email", null: false
+    t.string "status", default: "pending", null: false
+    t.text "error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["agreement_id", "agreement_signer_id"], name: "idx_agr_reminders_agr_signer"
+    t.index ["agreement_id"], name: "index_agreement_reminders_on_agreement_id"
+    t.index ["agreement_signer_id"], name: "index_agreement_reminders_on_agreement_signer_id"
+    t.index ["scheduled_at", "sent_at"], name: "idx_agr_reminders_pending", where: "(sent_at IS NULL)"
+  end
+
+  create_table "agreement_signers", force: :cascade do |t|
+    t.bigint "agreement_id", null: false
+    t.string "role", default: "signer", null: false
+    t.integer "signing_order", default: 1, null: false
+    t.string "signable_type"
+    t.integer "signable_id"
+    t.string "name", null: false
+    t.string "email", null: false
+    t.string "phone"
+    t.string "access_token", null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "signed_at"
+    t.datetime "viewed_at"
+    t.datetime "declined_at"
+    t.string "signature_url"
+    t.string "signature_method"
+    t.string "initials_url"
+    t.string "initials_method"
+    t.string "typed_signature"
+    t.string "typed_initials"
+    t.string "signature_font"
+    t.string "ip_address"
+    t.text "user_agent"
+    t.text "decline_reason"
+    t.string "signature_hash"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["access_token"], name: "index_agreement_signers_on_access_token", unique: true
+    t.index ["agreement_id", "role"], name: "idx_agr_signers_agreement_role"
+    t.index ["agreement_id"], name: "index_agreement_signers_on_agreement_id"
+    t.index ["email"], name: "index_agreement_signers_on_email"
+    t.index ["signable_type", "signable_id"], name: "idx_agr_signers_polymorphic"
+    t.index ["status"], name: "index_agreement_signers_on_status"
+  end
+
+  create_table "agreement_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "category"
+    t.bigint "agreement_category_id"
+    t.string "document_url"
+    t.text "content"
+    t.string "template_type", default: "upload", null: false
+    t.jsonb "merge_fields", default: {}
+    t.jsonb "field_placements", default: []
+    t.jsonb "default_signers", default: []
+    t.string "status", default: "draft", null: false
+    t.integer "version", default: 1, null: false
+    t.boolean "is_system_template", default: false, null: false
+    t.bigint "location_id"
+    t.integer "created_by_id"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["agreement_category_id"], name: "index_agreement_templates_on_agreement_category_id"
+    t.index ["company_id", "category"], name: "idx_agr_templates_company_category"
+    t.index ["company_id", "status", "is_deleted"], name: "idx_agr_templates_company_status"
+    t.index ["company_id"], name: "index_agreement_templates_on_company_id"
+    t.index ["created_by_id"], name: "index_agreement_templates_on_created_by_id"
+    t.index ["location_id"], name: "index_agreement_templates_on_location_id"
+  end
+
+  create_table "agreements", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "agreement_template_id"
+    t.string "title", null: false
+    t.text "description"
+    t.string "agreement_number", null: false
+    t.string "category"
+    t.string "status", default: "draft", null: false
+    t.string "document_url"
+    t.string "sealed_document_url"
+    t.text "content"
+    t.string "content_type", default: "upload", null: false
+    t.jsonb "merge_field_values", default: {}
+    t.jsonb "field_placements", default: []
+    t.integer "prepared_by_id"
+    t.datetime "expires_at"
+    t.datetime "sent_at"
+    t.datetime "completed_at"
+    t.datetime "voided_at"
+    t.datetime "declined_at"
+    t.integer "voided_by_id"
+    t.text "void_reason"
+    t.integer "version", default: 1, null: false
+    t.integer "parent_agreement_id"
+    t.integer "reminder_frequency_days", default: 3
+    t.datetime "last_reminder_sent_at"
+    t.bigint "location_id"
+    t.jsonb "metadata", default: {}
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["agreement_template_id"], name: "index_agreements_on_agreement_template_id"
+    t.index ["company_id", "agreement_number"], name: "idx_agreements_unique_number", unique: true
+    t.index ["company_id", "category"], name: "idx_agreements_company_category"
+    t.index ["company_id", "status", "is_deleted"], name: "idx_agreements_company_status"
+    t.index ["company_id"], name: "index_agreements_on_company_id"
+    t.index ["expires_at"], name: "index_agreements_on_expires_at"
+    t.index ["location_id"], name: "index_agreements_on_location_id"
+    t.index ["parent_agreement_id"], name: "index_agreements_on_parent_agreement_id"
+    t.index ["prepared_by_id"], name: "index_agreements_on_prepared_by_id"
+    t.index ["status", "expires_at"], name: "idx_agreements_expiry_check", where: "((status)::text = ANY ((ARRAY['sent'::character varying, 'viewed'::character varying, 'partially_signed'::character varying])::text[]))"
+    t.index ["voided_by_id"], name: "index_agreements_on_voided_by_id"
   end
 
   create_table "ai_insights", force: :cascade do |t|
@@ -3782,6 +3953,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_22_231500) do
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
+  add_foreign_key "agreement_attachments", "agreements"
+  add_foreign_key "agreement_audit_logs", "agreement_signers"
+  add_foreign_key "agreement_audit_logs", "agreements"
+  add_foreign_key "agreement_categories", "companies"
+  add_foreign_key "agreement_reminders", "agreement_signers"
+  add_foreign_key "agreement_reminders", "agreements"
+  add_foreign_key "agreement_signers", "agreements"
+  add_foreign_key "agreement_templates", "agreement_categories"
+  add_foreign_key "agreement_templates", "companies"
+  add_foreign_key "agreement_templates", "locations"
+  add_foreign_key "agreements", "agreement_templates"
+  add_foreign_key "agreements", "companies"
+  add_foreign_key "agreements", "locations"
   add_foreign_key "ai_insights", "leads"
   add_foreign_key "api_logs", "companies"
   add_foreign_key "approval_actions", "approval_steps"

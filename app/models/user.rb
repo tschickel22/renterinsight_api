@@ -22,6 +22,9 @@ class User < ApplicationRecord
   has_many :user_role_assignments, dependent: :destroy
   has_many :roles, through: :user_role_assignments
 
+  # Agreement & E-Sign Module
+  has_many :prepared_agreements, class_name: 'Agreement', foreign_key: :prepared_by_id, dependent: :nullify
+
   # Notification System Associations
   has_many :notifications, as: :recipient, dependent: :destroy
   has_one :user_email_connection, dependent: :destroy
