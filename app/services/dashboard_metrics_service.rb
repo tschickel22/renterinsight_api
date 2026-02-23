@@ -44,29 +44,34 @@ class DashboardMetricsService
   # ==================== DEALS COUNT CARD ====================
   # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url, by_stage }
   def deals_count
-    # Get deals for current period (exclude closed_won and closed_lost)
+    # Get ALL active deals (exclude closed_won and closed_lost)
+    # This matches what the Deals page shows - no date filter on active deals
     current_deals = @company.deals
-      .where(created_at: @date_range[:start_date]..@date_range[:end_date])
       .where.not(stage: ['closed_lost', 'closed_won'])
     
     current_count = current_deals.count
     
-    # Get deals for previous period
+    # For trend: count NEW deals created in current period vs previous period
+    new_deals_current = @company.deals
+      .where(created_at: @date_range[:start_date]..@date_range[:end_date])
+      .where.not(stage: ['closed_lost', 'closed_won'])
+      .count
+    
     previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
     previous_start = @date_range[:start_date] - previous_period_days.days
     previous_end = @date_range[:start_date] - 1.day
-    previous_count = @company.deals
+    new_deals_previous = @company.deals
       .where(created_at: previous_start..previous_end)
       .where.not(stage: ['closed_lost', 'closed_won'])
       .count
     
-    # Calculate trend
-    trend = calculate_trend(current_count, previous_count)
+    # Calculate trend based on new deals created
+    trend = calculate_trend(new_deals_current, new_deals_previous)
     
     # Generate sparkline (deals created per day, last 30 days)
     sparkline_data = generate_deals_sparkline
     
-    # Breakdown by stage
+    # Breakdown by stage (all active deals)
     by_stage = current_deals.group(:stage).count
     
     {
@@ -304,18 +309,19 @@ class DashboardMetricsService
     
     unpaid_invoices.each do |invoice|
       days_old = (today - invoice.invoice_date).to_i
-      
+      amount = (invoice.amount_due || 0).to_f
+
       if days_old <= 30
-        buckets[:current][:amount] += invoice.amount_due
+        buckets[:current][:amount] += amount
         buckets[:current][:count] += 1
       elsif days_old <= 60
-        buckets[:days_30][:amount] += invoice.amount_due
+        buckets[:days_30][:amount] += amount
         buckets[:days_30][:count] += 1
       elsif days_old <= 90
-        buckets[:days_60][:amount] += invoice.amount_due
+        buckets[:days_60][:amount] += amount
         buckets[:days_60][:count] += 1
       else
-        buckets[:days_90][:amount] += invoice.amount_due
+        buckets[:days_90][:amount] += amount
         buckets[:days_90][:count] += 1
       end
     end
@@ -488,18 +494,21 @@ class DashboardMetricsService
       .select('payment_date, amount')
     
     # Group by month manually (database-agnostic)
+    # Guard against nil/NaN amounts and ensure clean numeric output
     current_revenue = {}
     current_payments.each do |payment|
+      next unless payment.payment_date.present?
       month_key = payment.payment_date.beginning_of_month
-      current_revenue[month_key] ||= 0
-      current_revenue[month_key] += payment.amount
+      current_revenue[month_key] ||= 0.0
+      current_revenue[month_key] += (payment.amount || 0).to_f
     end
     
     previous_revenue = {}
     previous_payments.each do |payment|
+      next unless payment.payment_date.present?
       month_key = payment.payment_date.beginning_of_month
-      previous_revenue[month_key] ||= 0
-      previous_revenue[month_key] += payment.amount
+      previous_revenue[month_key] ||= 0.0
+      previous_revenue[month_key] += (payment.amount || 0).to_f
     end
     
     # Build months array
@@ -511,8 +520,8 @@ class DashboardMetricsService
       months << {
         month: month_start.strftime('%b %Y'),
         month_short: month_start.strftime('%b'),
-        current_year: current,
-        previous_year: previous,
+        current_year: current.to_f,
+        previous_year: previous.to_f,
         current_formatted: format_currency(current),
         previous_formatted: format_currency(previous)
       }
@@ -580,7 +589,7 @@ class DashboardMetricsService
     
     # Simple aggregation query - don't filter by date for now
     query = <<-SQL
-      SELECT 
+      SELECT
         users.id as user_id,
         users.first_name,
         users.last_name,
@@ -589,15 +598,17 @@ class DashboardMetricsService
         SUM(deals.value) as total_value
       FROM deals
       INNER JOIN users ON deals.#{owner_field} = users.id
-      WHERE deals.company_id = #{@company.id}
+        AND users.company_id = $1
+      WHERE deals.company_id = $1
         AND deals.stage = 'closed_won'
         AND deals.#{owner_field} IS NOT NULL
       GROUP BY users.id, users.first_name, users.last_name, users.email
       ORDER BY total_value DESC
       LIMIT 5
     SQL
-    
-    results = ActiveRecord::Base.connection.exec_query(query)
+
+    binds = [ActiveRecord::Relation::QueryAttribute.new('company_id', @company.id, ActiveRecord::Type::Integer.new)]
+    results = ActiveRecord::Base.connection.exec_query(query, 'TopPerformers', binds)
     Rails.logger.info "[Top Performers] Query returned #{results.count} performers"
     
     performers = results.map do |row|
@@ -680,6 +691,8 @@ class DashboardMetricsService
       Rails.logger.info "[Recent Activities] Found #{recent_deals.count} deals"
       
       recent_deals.each do |deal|
+        # Use actual creator/owner name, NOT current user
+        creator_name = deal.owner&.full_name || deal.user&.full_name || 'System'
         activities << {
           id: deal.id,
           type: 'deal',
@@ -687,7 +700,7 @@ class DashboardMetricsService
           entity_type: 'deal',
           entity_id: deal.id,
           entity_name: deal.name || deal.customer_name,
-          user_name: @current_user&.full_name || 'System',
+          user_name: creator_name,
           created_at: deal.created_at,
           formatted_time: time_ago_in_words(deal.created_at)
         }
@@ -706,6 +719,8 @@ class DashboardMetricsService
         Rails.logger.info "[Recent Activities] Found #{recent_tasks.count} tasks"
         
         recent_tasks.each do |task|
+          # Use actual assigned user name, NOT current user
+          task_user_name = task.assigned_to&.full_name || 'System'
           activities << {
             id: task.id,
             type: 'task',
@@ -713,7 +728,7 @@ class DashboardMetricsService
             entity_type: 'task',
             entity_id: task.id,
             entity_name: task.title,
-            user_name: @current_user&.full_name || 'System',
+            user_name: task_user_name,
             created_at: task.created_at,
             formatted_time: time_ago_in_words(task.created_at)
           }
@@ -734,6 +749,9 @@ class DashboardMetricsService
       Rails.logger.info "[Recent Activities] Found #{recent_tickets.count} tickets"
       
       recent_tickets.each do |ticket|
+        # Use actual assigned technician name, NOT current user
+        ticket_user = ticket.respond_to?(:technician) ? ticket.technician : nil
+        ticket_user_name = ticket_user&.full_name || (ticket.assigned_to.present? ? @company.users.find_by(id: ticket.assigned_to)&.full_name : nil) || 'System'
         activities << {
           id: ticket.id,
           type: 'service_ticket',
@@ -741,7 +759,7 @@ class DashboardMetricsService
           entity_type: 'service_ticket',
           entity_id: ticket.id,
           entity_name: ticket.title,
-          user_name: @current_user&.full_name || 'System',
+          user_name: ticket_user_name,
           created_at: ticket.created_at,
           formatted_time: time_ago_in_words(ticket.created_at)
         }
@@ -760,6 +778,8 @@ class DashboardMetricsService
         Rails.logger.info "[Recent Activities] Found #{recent_brochures.count} brochures"
         
         recent_brochures.each do |brochure|
+          # Use actual creator name if available, NOT current user
+          brochure_user = brochure.respond_to?(:user) ? brochure.user : nil
           activities << {
             id: brochure.id,
             type: 'brochure',
@@ -767,7 +787,7 @@ class DashboardMetricsService
             entity_type: 'brochure',
             entity_id: brochure.id,
             entity_name: brochure.title,
-            user_name: @current_user&.full_name || 'System',
+            user_name: brochure_user&.full_name || 'System',
             created_at: brochure.created_at,
             formatted_time: time_ago_in_words(brochure.created_at)
           }
@@ -814,7 +834,7 @@ class DashboardMetricsService
         .limit(10)
       
       tasks_data = tasks.map do |task|
-        assigned_user = task.respond_to?(:assigned_to) ? User.find_by(id: task.assigned_to) : nil
+        assigned_user = task.respond_to?(:assigned_to) ? @company.users.find_by(id: task.assigned_to) : nil
         
         {
           id: task.id,
@@ -850,8 +870,9 @@ class DashboardMetricsService
     
     # Check if Message or Notification model exists
     if defined?(Notification)
-      # Note: Database uses recipient_id/recipient_type (polymorphic) not user_id
-      notifications = Notification
+      # CRITICAL: Must scope by company for tenant isolation
+      # Without company scope, proxied users see notifications from ALL companies
+      notifications = @company.notifications
         .where(recipient_id: @current_user.id, recipient_type: 'User')
         .where(read: [false, nil])
         .order('created_at DESC')
