@@ -70,6 +70,15 @@ module Api
         when 'lost'
           deals = deals.lost
         end
+
+        # Apply search filter
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          deals = deals.where(
+            "deals.name ILIKE ? OR deals.customer_name ILIKE ? OR deals.description ILIKE ?",
+            search_term, search_term, search_term
+          )
+        end
         
         # Count BEFORE pagination
         total_count = deals.count

@@ -5,6 +5,9 @@ class Agreement < ApplicationRecord
   belongs_to :prepared_by, class_name: 'User', optional: true
   belongs_to :voided_by, class_name: 'User', optional: true
   belongs_to :parent_agreement, class_name: 'Agreement', optional: true
+  belongs_to :contact, optional: true
+  belongs_to :account, optional: true
+  belongs_to :deal, optional: true
 
   has_many :versions, class_name: 'Agreement', foreign_key: :parent_agreement_id, dependent: :nullify
   has_many :agreement_signers, dependent: :destroy
@@ -27,6 +30,17 @@ class Agreement < ApplicationRecord
   scope :for_current_location, -> {
     Current.location_filtered? ? where(location_id: Current.location_id) : all
   }
+  scope :for_entity, ->(type, id) {
+    case type.to_s
+    when 'Contact' then where(contact_id: id)
+    when 'Account' then where(account_id: id)
+    when 'Deal'    then where(deal_id: id)
+    else none
+    end
+  }
+  scope :for_contact, ->(id) { where(contact_id: id) }
+  scope :for_account, ->(id) { where(account_id: id) }
+  scope :for_deal, ->(id) { where(deal_id: id) }
   scope :expiring_soon, ->(days = 7) {
     where(status: %w[sent viewed partially_signed])
       .where('expires_at IS NOT NULL AND expires_at <= ?', days.days.from_now)

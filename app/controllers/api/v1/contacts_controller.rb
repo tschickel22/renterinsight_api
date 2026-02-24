@@ -70,7 +70,7 @@ module Api
         page = (params[:page] || 1).to_i
         per_page = (params[:per_page] || 50).to_i
         per_page = [per_page, 200].min  # Cap at 200
-        @contacts = @contacts.offset((page - 1) * per_page).limit(per_page)
+        @contacts = @contacts.includes(:account).offset((page - 1) * per_page).limit(per_page)
 
         render json: {
           items: @contacts.map { |contact| contact_json(contact) },
@@ -833,6 +833,7 @@ module Api
           state: contact.state,
           zip: contact.zip,
           country: contact.country,
+          accountName: contact.account&.name,
           customFieldValues: contact.respond_to?(:custom_field_values) ? contact.custom_field_values : {},
           createdAt: contact.created_at,
           updatedAt: contact.updated_at

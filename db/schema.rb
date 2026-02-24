@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_23_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_24_060000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -326,11 +326,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_23_160000) do
     t.boolean "is_deleted", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "contact_id"
+    t.bigint "account_id"
+    t.bigint "deal_id"
+    t.index ["account_id"], name: "index_agreements_on_account_id"
     t.index ["agreement_template_id"], name: "index_agreements_on_agreement_template_id"
+    t.index ["company_id", "account_id"], name: "idx_agreements_company_account"
     t.index ["company_id", "agreement_number"], name: "idx_agreements_unique_number", unique: true
     t.index ["company_id", "category"], name: "idx_agreements_company_category"
+    t.index ["company_id", "contact_id"], name: "idx_agreements_company_contact"
+    t.index ["company_id", "deal_id"], name: "idx_agreements_company_deal"
     t.index ["company_id", "status", "is_deleted"], name: "idx_agreements_company_status"
     t.index ["company_id"], name: "index_agreements_on_company_id"
+    t.index ["contact_id"], name: "index_agreements_on_contact_id"
+    t.index ["deal_id"], name: "index_agreements_on_deal_id"
     t.index ["expires_at"], name: "index_agreements_on_expires_at"
     t.index ["location_id"], name: "index_agreements_on_location_id"
     t.index ["parent_agreement_id"], name: "index_agreements_on_parent_agreement_id"

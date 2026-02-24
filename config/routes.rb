@@ -1062,6 +1062,7 @@ Rails.application.routes.draw do
 
         collection do
           get :stats
+          get :entity_context
         end
 
         # Nested signers

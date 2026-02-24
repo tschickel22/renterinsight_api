@@ -23,6 +23,14 @@ module Api
         # Location selector filter
         agreements = agreements.for_current_location if Current.location_filtered?
 
+        # Entity filter (explicit columns)
+        if params[:entity_type].present? && params[:entity_id].present?
+          agreements = agreements.for_entity(params[:entity_type], params[:entity_id])
+        end
+        agreements = agreements.for_contact(params[:contact_id]) if params[:contact_id].present?
+        agreements = agreements.for_account(params[:account_id]) if params[:account_id].present?
+        agreements = agreements.for_deal(params[:deal_id]) if params[:deal_id].present?
+
         # Status filter
         agreements = agreements.by_status(params[:status]) if params[:status].present?
         agreements = agreements.by_category(params[:category]) if params[:category].present?
@@ -384,6 +392,68 @@ module Api
         }
       end
 
+      # GET /api/v1/agreements/entity_context
+      def entity_context
+        return unless authorize_action!('agreements', 'read')
+
+        entity_type = params[:entity_type]
+        entity_id = params[:entity_id]
+
+        result = { contacts: [], account: nil, deals: [] }
+
+        case entity_type
+        when 'Contact'
+          contact = @company.contacts.find_by(id: entity_id)
+          if contact
+            result[:contacts] = [{ id: contact.id, name: [contact.first_name, contact.last_name].compact.join(' '), email: contact.email, phone: contact.phone }]
+            if contact.account_id.present?
+              account = @company.accounts.find_by(id: contact.account_id)
+              result[:account] = { id: account.id, name: account.name } if account
+            end
+            # Find deals associated with this contact
+            if @company.respond_to?(:deals)
+              deals = @company.deals.where(contact_id: contact.id).where(is_deleted: [false, nil])
+              result[:deals] = deals.map { |d| { id: d.id, name: d.respond_to?(:title) ? d.title : d.name, stage: d.respond_to?(:stage) ? d.stage : nil } }
+            end
+          end
+        when 'Account'
+          account = @company.accounts.find_by(id: entity_id)
+          if account
+            result[:account] = { id: account.id, name: account.name }
+            contacts = @company.contacts.where(account_id: account.id).where(is_deleted: [false, nil]).limit(50)
+            result[:contacts] = contacts.map { |c| { id: c.id, name: [c.first_name, c.last_name].compact.join(' '), email: c.email, phone: c.phone } }
+            if @company.respond_to?(:deals)
+              deals = @company.deals.where(account_id: account.id).where(is_deleted: [false, nil])
+              result[:deals] = deals.map { |d| { id: d.id, name: d.respond_to?(:title) ? d.title : d.name, stage: d.respond_to?(:stage) ? d.stage : nil } }
+            end
+          end
+        when 'Deal'
+          if @company.respond_to?(:deals)
+            deal = @company.deals.find_by(id: entity_id)
+            if deal
+              result[:deals] = [{ id: deal.id, name: deal.respond_to?(:title) ? deal.title : deal.name, stage: deal.respond_to?(:stage) ? deal.stage : nil }]
+              if deal.respond_to?(:account_id) && deal.account_id.present?
+                account = @company.accounts.find_by(id: deal.account_id)
+                result[:account] = { id: account.id, name: account.name } if account
+              end
+              if deal.respond_to?(:contact_id) && deal.contact_id.present?
+                contact = @company.contacts.find_by(id: deal.contact_id)
+                result[:contacts] = [{ id: contact.id, name: [contact.first_name, contact.last_name].compact.join(' '), email: contact.email, phone: contact.phone }] if contact
+              elsif result[:account].present?
+                # Load account's contacts as signer options
+                contacts = @company.contacts.where(account_id: result[:account][:id]).where(is_deleted: [false, nil]).limit(50)
+                result[:contacts] = contacts.map { |c| { id: c.id, name: [c.first_name, c.last_name].compact.join(' '), email: c.email, phone: c.phone } }
+              end
+            end
+          end
+        end
+
+        render json: result
+      rescue => e
+        Rails.logger.error "Error in agreements#entity_context: #{e.message}"
+        render json: { contacts: [], account: nil, deals: [] }
+      end
+
       # === Nested Signer Actions ===
 
       # POST /api/v1/agreements/:id/signers
@@ -481,7 +551,8 @@ module Api
       def agreement_params
         permitted = params.require(:agreement).permit(
           :title, :description, :category, :document_url, :content,
-          :content_type, :expires_at, :reminder_frequency_days, :location_id
+          :content_type, :expires_at, :reminder_frequency_days, :location_id,
+          :contact_id, :account_id, :deal_id
         )
 
         # Handle JSON fields
@@ -512,6 +583,12 @@ module Api
           prepared_by_id: agreement.prepared_by_id,
           prepared_by_name: agreement.prepared_by&.name,
           location_id: agreement.location_id,
+          contact_id: agreement.contact_id,
+          account_id: agreement.account_id,
+          deal_id: agreement.deal_id,
+          contact_name: agreement.contact&.respond_to?(:name) ? agreement.contact.name : [agreement.contact&.first_name, agreement.contact&.last_name].compact.join(' '),
+          account_name: agreement.account&.name,
+          deal_name: agreement.deal&.respond_to?(:title) ? agreement.deal.title : agreement.deal&.name,
           signers_count: agreement.agreement_signers.size,
           created_at: agreement.created_at,
           updated_at: agreement.updated_at
