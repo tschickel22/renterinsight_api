@@ -558,6 +558,7 @@ module Api
         # Handle JSON fields
         permitted[:field_placements] = params[:agreement][:field_placements] if params.dig(:agreement, :field_placements).present?
         permitted[:merge_field_values] = params[:agreement][:merge_field_values] if params.dig(:agreement, :merge_field_values).present?
+        permitted[:merge_field_placements] = params[:agreement][:merge_field_placements] if params.dig(:agreement, :merge_field_placements).present?
         permitted[:metadata] = params[:agreement][:metadata] if params.dig(:agreement, :metadata).present?
 
         permitted
@@ -603,6 +604,7 @@ module Api
             template_name: agreement.agreement_template&.name,
             field_placements: agreement.field_placements,
             merge_field_values: agreement.merge_field_values,
+            merge_field_placements: agreement.merge_field_placements,
             metadata: agreement.metadata,
             voided_at: agreement.voided_at,
             void_reason: agreement.void_reason,
