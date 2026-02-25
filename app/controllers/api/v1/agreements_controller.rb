@@ -4,7 +4,7 @@ module Api
       before_action :set_company_scope
       before_action :set_agreement, only: [
         :show, :update, :destroy, :send_agreement, :void, :remind, :remind_signer,
-        :duplicate, :audit_log, :download, :certificate, :prepare_signature,
+        :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature,
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment
       ]
 
@@ -256,6 +256,93 @@ module Api
         new_agreement = @agreement.duplicate!(current_user)
         render json: agreement_json(new_agreement, detailed: true), status: :created
       rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # POST /api/v1/agreements/:id/save_as_template
+      def save_as_template
+        return unless authorize_action!('agreements', 'create')
+
+        name = params[:name]&.strip
+        return render json: { error: 'Template name is required' }, status: :unprocessable_entity if name.blank?
+
+        # Find or create category matching the agreement's category
+        category = @company.agreement_categories.find_by(name: @agreement.category) if @agreement.category.present?
+
+        # Map agreement content_type to template_type (upload/editor)
+        template_type = case @agreement.content_type
+                        when 'editor', 'html' then 'editor'
+                        else 'upload'
+                        end
+
+        # Build signer index → generic label map BEFORE creating template
+        # signerIndex in field_placements is 0-based, matches signing_order - 1
+        ordered_signers = @agreement.agreement_signers.order(:signing_order).to_a
+        signer_labels = ordered_signers.each_with_index.map do |s, i|
+          [i, s.role.titleize]  # e.g. 0 => "Signer", 1 => "Signer"
+        end.to_h
+
+        # Normalize field placements — strip actual signer names from fieldLabel
+        # e.g. "Signature — Tom Admin" => "Signature — Signer 1"
+        normalize_placements = ->(placements) {
+          return placements unless placements.is_a?(Array)
+          placements.map do |p|
+            p = p.is_a?(Hash) ? p.dup : p.to_h
+            if p['isSignerField'] || p[:isSignerField]
+              idx = (p['signerIndex'] || p[:signerIndex] || 0).to_i
+              generic_label = "Signer #{idx + 1}"
+              field_label = p['fieldLabel'] || p[:fieldLabel] || ''
+              # Replace everything after " — " (em dash or regular dash) with generic label
+              normalized = field_label.sub(/\s*[—\-–]\s*.+$/, " — #{generic_label}")
+              p['fieldLabel'] = normalized
+              p[:fieldLabel] = normalized if p.key?(:fieldLabel)
+            end
+            p
+          end
+        }
+
+        normalized_field_placements = normalize_placements.call(@agreement.field_placements)
+        normalized_merge_field_placements = normalize_placements.call(@agreement.merge_field_placements)
+
+        template = @company.agreement_templates.new(
+          name: name,
+          description: params[:description]&.strip,
+          template_type: template_type,
+          content: @agreement.content,
+          document_url: @agreement.document_url,
+          field_placements: normalized_field_placements,
+          merge_fields: @agreement.merge_field_values,
+          agreement_category: category,
+          status: 'draft',
+          created_by: current_user
+        )
+
+        # Set JSONB columns that may have been added via migration
+        template.document_urls = @agreement.document_urls if template.respond_to?(:document_urls=)
+        template.merge_field_placements = normalized_merge_field_placements if template.respond_to?(:merge_field_placements=)
+
+        # Copy default signers from agreement signers (structure only, no personal data)
+        if ordered_signers.any?
+          template.default_signers = ordered_signers
+            .each_with_index
+            .map { |s, i| { role: s.role, order_index: i, label: "Signer #{i + 1}" } }
+        end
+
+        if template.save
+          AgreementAuditLog.log!(@agreement, 'saved_as_template', performed_by: current_user,
+            metadata: { template_id: template.id, template_name: template.name })
+          render json: {
+            id: template.id,
+            name: template.name,
+            description: template.description,
+            status: template.status,
+            created_at: template.created_at
+          }, status: :created
+        else
+          render json: { errors: template.errors.full_messages }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error "Error in agreements#save_as_template: #{e.message}\n#{e.backtrace.first(3).join("\n")}"
         render json: { error: e.message }, status: :unprocessable_entity
       end
 

@@ -136,13 +136,28 @@ module Api
       def template_params
         permitted = params.require(:agreement_template).permit(
           :name, :description, :category, :agreement_category_id,
-          :document_url, :content, :template_type, :status, :location_id
+          :document_url, :content, :template_type, :status, :location_id,
+          default_signers: [:role, :label, :order_index]
         )
 
-        # Handle JSON fields
-        permitted[:merge_fields] = params[:agreement_template][:merge_fields] if params[:agreement_template][:merge_fields].present?
-        permitted[:field_placements] = params[:agreement_template][:field_placements] if params[:agreement_template][:field_placements].present?
-        permitted[:default_signers] = params[:agreement_template][:default_signers] if params[:agreement_template][:default_signers].present?
+        # Handle JSON array fields that can't be expressed in permit() syntax
+        if params[:agreement_template][:merge_fields].present?
+          permitted[:merge_fields] = params[:agreement_template][:merge_fields]
+        end
+
+        if params[:agreement_template][:field_placements].present?
+          raw = params[:agreement_template][:field_placements]
+          permitted[:field_placements] = raw.is_a?(Array) ? raw.map { |fp| fp.respond_to?(:to_unsafe_h) ? fp.to_unsafe_h : fp } : raw
+        end
+
+        if params[:agreement_template][:merge_field_placements].present?
+          raw = params[:agreement_template][:merge_field_placements]
+          permitted[:merge_field_placements] = raw.is_a?(Array) ? raw.map { |fp| fp.respond_to?(:to_unsafe_h) ? fp.to_unsafe_h : fp } : raw
+        end
+
+        if params[:agreement_template][:document_urls].present?
+          permitted[:document_urls] = params[:agreement_template][:document_urls]
+        end
 
         permitted
       end
@@ -167,8 +182,10 @@ module Api
           data.merge!(
             content: template.content,
             document_url: template.document_url,
+            document_urls: template.document_urls,
             merge_fields: template.merge_fields,
             field_placements: template.field_placements,
+            merge_field_placements: template.merge_field_placements,
             default_signers: template.default_signers,
             location_id: template.location_id,
             created_by_id: template.created_by_id

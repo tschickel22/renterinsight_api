@@ -1054,6 +1054,7 @@ Rails.application.routes.draw do
           post :remind
           post :remind_signer
           post :duplicate
+          post :save_as_template
           get :audit_log
           get :download
           get :certificate
