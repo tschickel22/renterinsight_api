@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_24_165123) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_24_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -330,6 +330,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_24_165123) do
     t.bigint "account_id"
     t.bigint "deal_id"
     t.jsonb "merge_field_placements", default: []
+    t.string "delivery_method", default: "email", null: false
+    t.string "signing_order", default: "parallel", null: false
+    t.text "message_to_signers"
+    t.jsonb "document_urls", default: []
     t.index ["account_id"], name: "index_agreements_on_account_id"
     t.index ["agreement_template_id"], name: "index_agreements_on_agreement_template_id"
     t.index ["company_id", "account_id"], name: "idx_agreements_company_account"

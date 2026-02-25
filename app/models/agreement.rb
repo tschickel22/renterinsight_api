@@ -22,6 +22,8 @@ class Agreement < ApplicationRecord
   validates :status, presence: true, inclusion: {
     in: %w[draft sent viewed partially_signed completed expired voided declined]
   }
+  validates :delivery_method, inclusion: { in: %w[email sms both] }, allow_nil: true
+  validates :signing_order, inclusion: { in: %w[parallel sequential counter_sign] }, allow_nil: true
 
   # Scopes
   scope :active, -> { where(is_deleted: [false, nil]) }
@@ -93,7 +95,15 @@ class Agreement < ApplicationRecord
     update!(status: STATUS_COMPLETED, completed_at: Time.current)
     AgreementAuditLog.log!(self, AgreementAuditLog::ACTION_COMPLETED)
 
-    SealAgreementJob.perform_later(id) if defined?(SealAgreementJob)
+    # Use perform_now to ensure sealing happens immediately
+    # (perform_later requires Solid Queue worker running)
+    if defined?(SealAgreementJob)
+      if Rails.env.production? || Rails.env.staging?
+        SealAgreementJob.perform_later(id)
+      else
+        SealAgreementJob.perform_now(id)
+      end
+    end
     true
   end
 

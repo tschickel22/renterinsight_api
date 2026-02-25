@@ -85,6 +85,80 @@ module Api
         end
       end
 
+      # POST /api/v1/agreement_documents/merge
+      # Merges multiple uploaded PDFs into a single PDF for signing
+      def merge
+        return unless authorize_action!('agreements', 'update')
+
+        agreement_id = params[:agreement_id]
+        pdf_urls = params[:pdf_urls]
+
+        unless agreement_id.present? && pdf_urls.is_a?(Array) && pdf_urls.length >= 2
+          return render json: { error: 'agreement_id and at least 2 pdf_urls are required' }, status: :unprocessable_entity
+        end
+
+        agreement = @company.agreements.where(is_deleted: [false, nil]).find_by(id: agreement_id)
+        unless agreement
+          return render json: { error: 'Agreement not found' }, status: :not_found
+        end
+
+        begin
+          require 'combine_pdf'
+          require 'open-uri'
+
+          combined = CombinePDF.new
+
+          pdf_urls.each_with_index do |url, idx|
+            Rails.logger.info "[AgreementDocuments] Merging PDF #{idx + 1}/#{pdf_urls.length}: #{url.truncate(80)}"
+            pdf_data = URI.open(url).read
+            combined << CombinePDF.parse(pdf_data)
+          end
+
+          # Write merged PDF to temp file
+          tmp = Tempfile.new(['merged', '.pdf'])
+          combined.save(tmp.path)
+          tmp.rewind
+
+          # Upload merged PDF to S3
+          s3_service = S3UploadService.new
+          folder = "agreements/#{@company.id}/documents"
+
+          upload_file = ActionDispatch::Http::UploadedFile.new(
+            tempfile: tmp,
+            filename: "merged_#{SecureRandom.hex(6)}.pdf",
+            type: 'application/pdf'
+          )
+
+          s3_result = s3_service.upload(upload_file, folder: folder)
+
+          # Update agreement with merged PDF URL and store individual URLs
+          agreement.update!(
+            document_url: s3_result[:url],
+            document_urls: pdf_urls,
+            content_type: 'pdf_upload'
+          )
+
+          Rails.logger.info "[AgreementDocuments] Merged #{pdf_urls.length} PDFs for agreement #{agreement_id} → #{s3_result[:url].truncate(80)}"
+
+          render json: {
+            document_url: s3_result[:url],
+            s3_key: s3_result[:key],
+            page_count: combined.pages.length,
+            source_count: pdf_urls.length
+          }, status: :ok
+
+        rescue CombinePDF::ParsingError => e
+          Rails.logger.error "[AgreementDocuments] PDF parse error: #{e.message}"
+          render json: { error: "One or more files could not be parsed as PDF: #{e.message}" }, status: :unprocessable_entity
+        rescue => e
+          Rails.logger.error "[AgreementDocuments] Merge failed: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+          render json: { error: "Merge failed: #{e.message}" }, status: :internal_server_error
+        ensure
+          tmp&.close
+          tmp&.unlink
+        end
+      end
+
       # POST /api/v1/agreement_documents/merge_preview
       def merge_preview
         return unless authorize_action!('agreements', 'read')

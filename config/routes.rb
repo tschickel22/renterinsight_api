@@ -1075,9 +1075,10 @@ Rails.application.routes.draw do
         delete 'attachments/:attachment_id', to: 'agreements#remove_attachment'
       end
 
-      # Agreement Documents (upload, delete & merge preview)
+      # Agreement Documents (upload, delete, merge & merge preview)
       post 'agreement_documents/upload', to: 'agreement_documents#upload'
       delete 'agreement_documents', to: 'agreement_documents#delete'
+      post 'agreement_documents/merge', to: 'agreement_documents#merge'
       post 'agreement_documents/merge_preview', to: 'agreement_documents#merge_preview'
 
       # Agreement Merge Fields (definitions)

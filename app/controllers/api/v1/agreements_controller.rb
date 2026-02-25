@@ -80,7 +80,7 @@ module Api
         total = agreements.count
         agreements = agreements.offset((page - 1) * per_page).limit(per_page)
 
-        agreements = agreements.includes(:agreement_signers, :prepared_by)
+        agreements = agreements.includes(:agreement_signers, :prepared_by, :location)
 
         render json: {
           items: agreements.map { |a| agreement_json(a) },
@@ -136,17 +136,7 @@ module Api
 
         if agreement.save
           # Create initial signers if provided
-          if params.dig(:agreement, :signers).present?
-            params[:agreement][:signers].each do |signer_data|
-              agreement.agreement_signers.create!(
-                name: signer_data[:name],
-                email: signer_data[:email],
-                phone: signer_data[:phone],
-                role: signer_data[:role] || 'signer',
-                signing_order: signer_data[:signing_order] || 1
-              )
-            end
-          end
+          sync_signers(agreement) if params.dig(:agreement, :signers).present?
 
           render json: agreement_json(agreement.reload, detailed: true), status: :created
         else
@@ -166,7 +156,10 @@ module Api
         end
 
         if @agreement.update(agreement_params)
-          render json: agreement_json(@agreement, detailed: true)
+          # Sync signers if provided (full replace while in draft)
+          sync_signers(@agreement) if params.dig(:agreement, :signers).present?
+
+          render json: agreement_json(@agreement.reload, detailed: true)
         else
           render json: { errors: @agreement.errors.full_messages }, status: :unprocessable_entity
         end
@@ -227,6 +220,7 @@ module Api
             reminder_type: 'manual',
             channel: 'email'
           )
+          SendAgreementReminderJob.perform_later(@agreement.id, signer.id)
         end
 
         AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_REMINDER_SENT, performed_by: current_user)
@@ -245,9 +239,10 @@ module Api
           reminder_type: 'manual',
           channel: 'email'
         )
+        SendAgreementReminderJob.perform_later(@agreement.id, signer.id)
 
         AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_REMINDER_SENT, performed_by: current_user, metadata: { signer_id: signer.id })
-        render json: { success: true, message: "Reminder queued for #{signer.name}" }
+        render json: { success: true, message: "Reminder sent to #{signer.name}" }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Signer not found' }, status: :not_found
       end
@@ -270,6 +265,15 @@ module Api
 
         render json: {
           items: logs.map { |log|
+            # Resolve actor name from polymorphic performed_by
+            actor_name = if log.agreement_signer.present?
+              log.agreement_signer.name
+            elsif log.performed_by.is_a?(User)
+              log.performed_by.name rescue nil
+            elsif log.performed_by.is_a?(AgreementSigner)
+              log.performed_by.name rescue nil
+            end
+
             {
               id: log.id,
               action: log.action,
@@ -277,6 +281,7 @@ module Api
               geolocation: log.geolocation,
               performed_by_type: log.performed_by_type,
               performed_by_id: log.performed_by_id,
+              performed_by_name: actor_name,
               signer_name: log.agreement_signer&.name,
               metadata: log.metadata,
               created_at: log.created_at
@@ -289,8 +294,11 @@ module Api
       def download
         return unless authorize_action!('agreements', 'read')
 
+        effective_doc_url = @agreement.document_url.presence ||
+          (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+
         url = @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present? ?
-          @agreement.sealed_document_url : @agreement.document_url
+          @agreement.sealed_document_url : effective_doc_url
 
         unless url.present?
           return render json: { error: 'No document available' }, status: :not_found
@@ -552,20 +560,72 @@ module Api
         permitted = params.require(:agreement).permit(
           :title, :description, :category, :document_url, :content,
           :content_type, :expires_at, :reminder_frequency_days, :location_id,
-          :contact_id, :account_id, :deal_id
+          :contact_id, :account_id, :deal_id,
+          :delivery_method, :signing_order, :message_to_signers
         )
 
-        # Handle JSON fields
-        permitted[:field_placements] = params[:agreement][:field_placements] if params.dig(:agreement, :field_placements).present?
-        permitted[:merge_field_values] = params[:agreement][:merge_field_values] if params.dig(:agreement, :merge_field_values).present?
-        permitted[:merge_field_placements] = params[:agreement][:merge_field_placements] if params.dig(:agreement, :merge_field_placements).present?
-        permitted[:metadata] = params[:agreement][:metadata] if params.dig(:agreement, :metadata).present?
+        # Handle JSONB fields - must use permit!/to_unsafe_h for arbitrary nested structures
+        # Rails 8 raises ActionController::UnfilteredParameters without this
+        raw = params[:agreement].to_unsafe_h
+
+        permitted[:field_placements] = raw[:field_placements] if raw[:field_placements].present?
+        permitted[:merge_field_values] = raw[:merge_field_values] if raw[:merge_field_values].present?
+        permitted[:merge_field_placements] = raw[:merge_field_placements] if raw[:merge_field_placements].present?
+        permitted[:metadata] = raw[:metadata] if raw[:metadata].present?
+        permitted[:document_urls] = raw[:document_urls] if raw[:document_urls].present?
 
         permitted
       end
 
       def signer_params
         params.require(:signer).permit(:name, :email, :phone, :role, :signing_order, :signable_type, :signable_id)
+      end
+
+      # Sync signers from the frontend payload
+      # In draft status: full replace (delete all, recreate)
+      # Preserves existing signers that have already been sent/signed (non-draft)
+      def sync_signers(agreement)
+        signers_data = params[:agreement][:signers]
+        return if signers_data.blank?
+
+        if agreement.status == Agreement::STATUS_DRAFT
+          # Draft: safe to do full replace
+          agreement.agreement_signers.destroy_all
+
+          signers_data.each do |sd|
+            sd = sd.to_unsafe_h if sd.respond_to?(:to_unsafe_h)
+
+            # Determine signable (polymorphic link to Contact)
+            signable_type = sd['signable_type'] || (sd['contact_id'].present? ? 'Contact' : nil)
+            signable_id = sd['signable_id'] || sd['contact_id']
+
+            agreement.agreement_signers.create!(
+              name: sd['name'],
+              email: sd['email'],
+              phone: sd['phone'],
+              role: sd['role'] || 'signer',
+              signing_order: sd['signing_order'] || 1,
+              signable_type: signable_type,
+              signable_id: signable_id
+            )
+          end
+        else
+          # Non-draft: only add NEW signers (don't touch existing)
+          existing_emails = agreement.agreement_signers.pluck(:email).map(&:downcase)
+
+          signers_data.each do |sd|
+            sd = sd.to_unsafe_h if sd.respond_to?(:to_unsafe_h)
+            next if existing_emails.include?(sd['email']&.downcase)
+
+            agreement.agreement_signers.create!(
+              name: sd['name'],
+              email: sd['email'],
+              phone: sd['phone'],
+              role: sd['role'] || 'signer',
+              signing_order: sd['signing_order'] || 1
+            )
+          end
+        end
       end
 
       def agreement_json(agreement, detailed: false)
@@ -584,12 +644,16 @@ module Api
           prepared_by_id: agreement.prepared_by_id,
           prepared_by_name: agreement.prepared_by&.name,
           location_id: agreement.location_id,
+          location_name: agreement.location&.name,
           contact_id: agreement.contact_id,
           account_id: agreement.account_id,
           deal_id: agreement.deal_id,
           contact_name: agreement.contact&.respond_to?(:name) ? agreement.contact.name : [agreement.contact&.first_name, agreement.contact&.last_name].compact.join(' '),
           account_name: agreement.account&.name,
           deal_name: agreement.deal&.respond_to?(:title) ? agreement.deal.title : agreement.deal&.name,
+          delivery_method: agreement.delivery_method,
+          signing_order: agreement.signing_order,
+          message_to_signers: agreement.message_to_signers,
           signers_count: agreement.agreement_signers.size,
           created_at: agreement.created_at,
           updated_at: agreement.updated_at
@@ -600,6 +664,7 @@ module Api
             content: agreement.content,
             document_url: agreement.document_url,
             sealed_document_url: agreement.sealed_document_url,
+            document_urls: agreement.document_urls,
             template_id: agreement.agreement_template_id,
             template_name: agreement.agreement_template&.name,
             field_placements: agreement.field_placements,

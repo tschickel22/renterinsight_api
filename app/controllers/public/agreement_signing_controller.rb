@@ -2,11 +2,22 @@ module Public
   class AgreementSigningController < ApplicationController
     skip_before_action :authenticate
     before_action :find_signer
-    before_action :validate_agreement_status, except: [:download]
+    before_action :validate_agreement_status, except: [:show, :download]
 
     # GET /sign/:token
     def show
       company = @agreement.company
+
+      # Determine signer's index in the ordered list (matches field_placements signerIndex)
+      ordered_signers = @agreement.agreement_signers.order(:signing_order, :id)
+      current_signer_index = ordered_signers.index { |s| s.id == @signer.id } || 0
+
+      # Resolve branding waterfall: Location → Company → Platform
+      branding = resolve_branding(company, @agreement.location_id)
+
+      # Resolve effective document URL: merged PDF > single upload > first from array
+      effective_doc_url = @agreement.document_url.presence ||
+        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
 
       render json: {
         agreement: {
@@ -15,10 +26,13 @@ module Public
           description: @agreement.description,
           agreement_number: @agreement.agreement_number,
           status: @agreement.status,
-          document_url: @agreement.document_url,
+          document_url: effective_doc_url,
+          document_urls: @agreement.document_urls,
           content: @agreement.content,
-          content_type: @agreement.content_type,
-          field_placements: @agreement.field_placements,
+          content_type: @agreement.content_type || (@agreement.document_urls.present? ? 'upload' : 'editor'),
+          field_placements: @agreement.merge_field_placements,
+          merge_field_values: @agreement.merge_field_values,
+          message_to_signers: @agreement.message_to_signers,
           expires_at: @agreement.expires_at,
           created_at: @agreement.created_at
         },
@@ -28,14 +42,17 @@ module Public
           email: @signer.email,
           role: @signer.role,
           status: @signer.status,
-          signing_order: @signer.signing_order
+          signing_order: @signer.signing_order,
+          signer_index: current_signer_index,
+          signed_at: @signer.signed_at
         },
-        all_signers: @agreement.agreement_signers.order(:signing_order).map { |s|
-          { name: s.name, role: s.role, status: s.status, signing_order: s.signing_order }
+        all_signers: ordered_signers.map { |s|
+          { id: s.id, name: s.name, role: s.role, status: s.status, signing_order: s.signing_order, signed_at: s.signed_at }
         },
         company: {
-          name: company.name,
-          logo: company.logo
+          name: branding[:company_name],
+          logo: branding[:logo_url],
+          primary_color: branding[:primary_color]
         }
       }
     end
@@ -48,7 +65,7 @@ module Public
 
     # POST /sign/:token/sign
     def sign
-      signature_url = params[:signature_url]
+      signature_url = params[:signature_url] || params[:signature_data]
       signature_method = params[:signature_method]
 
       if @signer.requires_signature? && signature_url.blank? && params[:typed_signature].blank?
@@ -58,7 +75,7 @@ module Public
       result = @signer.sign!(
         signature_url: signature_url,
         signature_method: signature_method,
-        initials_url: params[:initials_url],
+        initials_url: params[:initials_url] || params[:initials_data],
         initials_method: params[:initials_method],
         typed_signature: params[:typed_signature],
         typed_initials: params[:typed_initials],
@@ -66,6 +83,13 @@ module Public
         ip_address: request.remote_ip,
         user_agent: request.user_agent
       )
+
+      # Save field values filled by this signer (text inputs, checkboxes, etc.)
+      if result && params[:field_values].present?
+        existing = @agreement.merge_field_values || {}
+        signer_values = params[:field_values].to_unsafe_h rescue params[:field_values].to_h
+        @agreement.update(merge_field_values: existing.merge(signer_values))
+      end
 
       if result
         render json: { success: true, agreement_status: @agreement.reload.status }
@@ -90,8 +114,11 @@ module Public
 
     # GET /sign/:token/download
     def download
+      effective_url = @agreement.document_url.presence ||
+        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+
       url = @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present? ?
-        @agreement.sealed_document_url : @agreement.document_url
+        @agreement.sealed_document_url : effective_url
 
       unless url.present?
         return render json: { error: 'No document available' }, status: :not_found
@@ -124,6 +151,42 @@ module Public
           status: @agreement.status
         }, status: :gone
       end
+    end
+
+    def resolve_branding(company, location_id)
+      branding = { company_name: 'Platform DMS', logo_url: nil, primary_color: '#3b82f6' }
+
+      # Platform
+      platform_b = Setting.get('platform', nil, 'branding', {})
+      merge_brand!(branding, platform_b) if platform_b.is_a?(Hash)
+
+      # Company
+      if company
+        company_b = Setting.get('company', company.id, 'branding', {})
+        merge_brand!(branding, company_b) if company_b.is_a?(Hash)
+        branding[:company_name] = company.name if company.name.present?
+      end
+
+      # Location (highest priority)
+      if location_id.present?
+        location_b = Setting.get('location', location_id, 'branding', {})
+        merge_brand!(branding, location_b) if location_b.is_a?(Hash)
+      end
+
+      # Ensure logo is absolute URL
+      if branding[:logo_url].present? && !branding[:logo_url].start_with?('http')
+        api_base = ENV['RAILS_API_URL'] || 'https://localhost:3001'
+        branding[:logo_url] = "#{api_base}#{branding[:logo_url]}"
+      end
+
+      branding
+    end
+
+    def merge_brand!(target, source)
+      s = source.stringify_keys
+      target[:company_name]  = s['companyName']  if s['companyName'].present?
+      target[:logo_url]      = s['logo']         if s['logo'].present?
+      target[:primary_color] = s['primaryColor'] if s['primaryColor'].present?
     end
   end
 end

@@ -1,91 +1,500 @@
+require 'open-uri'
+require 'tempfile'
+require 'combine_pdf'
+require 'prawn'
+
 class AgreementPdfService
   def initialize(agreement)
     @agreement = agreement
     @company = agreement.company
   end
 
-  # Generate document with merge fields applied
-  # Phase 1: Return document_url as-is (merge field injection comes later with HexaPDF)
-  def generate_document
-    # TODO: When HexaPDF is ready, inject merge_field_values into document
-    @agreement.document_url
-  end
-
-  # Embed signatures onto PDF at field_placement coordinates
-  # Phase 1: Placeholder — actual PDF stamping comes with HexaPDF
-  def embed_signatures
-    Rails.logger.info("[AgreementPdfService] Embedding signatures for agreement #{@agreement.id}")
-    # TODO: Stamp signature images onto PDF at field_placement coordinates
-    @agreement.document_url
-  end
-
-  # Seal the document — flatten PDF, embed audit metadata
+  # Main entry point: stamp signatures + field values onto PDF, upload sealed version
   def seal_document
     Rails.logger.info("[AgreementPdfService] Sealing agreement #{@agreement.id}")
 
-    # For now, copy document_url to sealed_document_url
-    # When HexaPDF is ready: flatten form fields, embed audit trail, lock document
-    sealed_url = @agreement.document_url
+    source_url = effective_document_url
+    unless source_url.present?
+      Rails.logger.warn("[AgreementPdfService] No source document URL for agreement #{@agreement.id}")
+      return nil
+    end
 
-    @agreement.update!(sealed_document_url: sealed_url)
+    placements = @agreement.merge_field_placements || []
+    if placements.empty?
+      Rails.logger.info("[AgreementPdfService] No field placements — copying source as sealed")
+      @agreement.update!(sealed_document_url: source_url)
+      log_sealed!
+      return source_url
+    end
 
-    AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_SEALED, metadata: {
-      sealed_at: Time.current.iso8601,
-      signers_count: @agreement.agreement_signers.signed.count
-    })
+    # Download source PDF (same method as agreement_documents_controller merge)
+    source_pdf_data = download_pdf(source_url)
+    unless source_pdf_data
+      Rails.logger.error("[AgreementPdfService] Failed to download source PDF from #{source_url}")
+      @agreement.update!(sealed_document_url: source_url)
+      log_sealed!
+      return source_url
+    end
 
-    sealed_url
+    Rails.logger.info("[AgreementPdfService] Downloaded #{source_pdf_data.size} bytes")
+
+    begin
+      # Load source PDF
+      source_pdf = CombinePDF.parse(source_pdf_data)
+      page_count = source_pdf.pages.count
+      Rails.logger.info("[AgreementPdfService] Parsed PDF: #{page_count} pages")
+
+      # Build values map (merge field key → display value)
+      values_map = build_values_map
+      # Build signatures map (signer_index → { signature_url, typed_signature, font })
+      signatures_map = build_signatures_map
+
+      Rails.logger.info("[AgreementPdfService] #{placements.size} placements, #{signatures_map.size} signers with signatures")
+
+      # Group placements by page
+      placements_by_page = placements.group_by { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }
+
+      # For each page that has placements, create an overlay and stamp it
+      overlays_applied = 0
+      source_pdf.pages.each_with_index do |page, page_index|
+        page_placements = placements_by_page[page_index] || []
+        next if page_placements.empty?
+
+        # Get page dimensions from the PDF page
+        page_box = page[:MediaBox] || page[:CropBox] || [0, 0, 612, 792]
+        page_width = (page_box[2] - page_box[0]).to_f
+        page_height = (page_box[3] - page_box[1]).to_f
+
+        Rails.logger.info("[AgreementPdfService] Page #{page_index}: #{page_width}x#{page_height} pts, #{page_placements.size} placements")
+
+        # Create overlay PDF for this page using Prawn
+        overlay_data = create_page_overlay(page_placements, page_width, page_height, values_map, signatures_map)
+
+        if overlay_data
+          overlay_pdf = CombinePDF.parse(overlay_data)
+          overlay_page = overlay_pdf.pages.first
+          if overlay_page
+            page << overlay_page
+            overlays_applied += 1
+          end
+        end
+      end
+
+      Rails.logger.info("[AgreementPdfService] Applied #{overlays_applied} page overlays")
+
+      # Generate sealed PDF data
+      sealed_data = source_pdf.to_pdf
+      Rails.logger.info("[AgreementPdfService] Sealed PDF: #{sealed_data.size} bytes (original: #{source_pdf_data.size} bytes)")
+
+      # Upload to S3 using the same service the rest of the app uses
+      sealed_url = upload_sealed_pdf(sealed_data)
+
+      if sealed_url
+        @agreement.update!(sealed_document_url: sealed_url)
+        log_sealed!
+        Rails.logger.info("[AgreementPdfService] ✅ Sealed document uploaded: #{sealed_url}")
+        sealed_url
+      else
+        Rails.logger.error("[AgreementPdfService] Failed to upload sealed PDF to S3")
+        @agreement.update!(sealed_document_url: source_url)
+        log_sealed!
+        source_url
+      end
+
+    rescue => e
+      Rails.logger.error("[AgreementPdfService] Sealing failed: #{e.class}: #{e.message}")
+      Rails.logger.error(e.backtrace.first(10).join("\n"))
+      # Fallback: use source as sealed
+      @agreement.update!(sealed_document_url: source_url)
+      log_sealed!
+      source_url
+    end
   end
 
-  # Generate completion certificate PDF
-  def generate_completion_certificate
-    Rails.logger.info("[AgreementPdfService] Generating certificate for agreement #{@agreement.id}")
+  # Legacy methods
+  def generate_document
+    effective_document_url
+  end
 
-    # Return certificate data (frontend will render it)
+  def embed_signatures
+    seal_document
+  end
+
+  def generate_completion_certificate
     {
       agreement_number: @agreement.agreement_number,
       title: @agreement.title,
       completed_at: @agreement.completed_at,
       signers: @agreement.agreement_signers.required_signers.map do |signer|
-        {
-          name: signer.name,
-          email: signer.email,
-          role: signer.role,
-          signed_at: signer.signed_at,
-          signature_method: signer.signature_method,
-          ip_address: signer.ip_address
-        }
-      end,
-      audit_trail: @agreement.agreement_audit_logs.order(:created_at).map do |log|
-        {
-          action: log.action,
-          performed_at: log.created_at,
-          ip_address: log.ip_address,
-          user_agent: log.user_agent
-        }
+        { name: signer.name, email: signer.email, role: signer.role, signed_at: signer.signed_at, signature_method: signer.signature_method, ip_address: signer.ip_address }
       end,
       seal_hash: Digest::SHA256.hexdigest("#{@agreement.id}|#{@agreement.completed_at}|#{@agreement.agreement_signers.signed.pluck(:signature_hash).join('|')}")
     }
   end
 
-  # Upload signature image to S3
-  def self.upload_signature(file_data, agreement_id, signer_id, type = 'signature')
-    # file_data is base64 encoded PNG
-    return nil if file_data.blank?
+  private
 
-    # Decode base64
-    decoded = Base64.decode64(file_data.sub(/^data:image\/\w+;base64,/, ''))
+  def effective_document_url
+    @agreement.document_url.presence ||
+      (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+  end
 
-    # Generate S3 key
-    s3_key = "agreements/signatures/#{agreement_id}/#{signer_id}/#{type}_#{SecureRandom.uuid}.png"
+  # Normalize placement keys (handle both camelCase and snake_case from JSONB)
+  def normalize_placement(p)
+    p = p.stringify_keys if p.is_a?(Hash)
+    {
+      id: p['id'],
+      field_key: p['fieldKey'] || p['field_key'],
+      field_label: p['fieldLabel'] || p['field_label'],
+      field_type: p['fieldType'] || p['field_type'],
+      page: (p['page'] || p['pageIndex'] || 0).to_i,
+      x: (p['x'] || 0).to_f,
+      y: (p['y'] || 0).to_f,
+      width: (p['width'] || 10).to_f,
+      height: (p['height'] || 3).to_f,
+      signer_index: (p['signerIndex'] || p['signer_index'] || 0).to_i,
+      is_signer_field: p['isSignerField'] || p['is_signer_field']
+    }
+  end
 
-    # Upload to S3
-    obj = Aws::S3::Resource.new.bucket(Rails.application.credentials.dig(:aws, :bucket) || ENV['S3_BUCKET']).object(s3_key)
-    obj.put(body: decoded, content_type: 'image/png', acl: 'private')
+  # Build map of field_key → resolved value for merge fields
+  def build_values_map
+    values = {}
 
-    obj.public_url
+    # From merge_field_values (resolved at send time or from signer input)
+    if @agreement.merge_field_values.is_a?(Hash)
+      @agreement.merge_field_values.each { |k, v| values[k.to_s] = v.to_s }
+    end
+
+    # System fields
+    values['agreement.agreement_number'] = @agreement.agreement_number.to_s
+    values['agreement.title'] = @agreement.title.to_s
+    values['agreement.created_at'] = @agreement.created_at&.strftime('%m/%d/%Y').to_s
+    values['agreement.completed_at'] = @agreement.completed_at&.strftime('%m/%d/%Y').to_s
+
+    # Contact fields
+    if @agreement.contact.present?
+      c = @agreement.contact
+      values['contact.first_name'] = c.respond_to?(:first_name) ? c.first_name.to_s : ''
+      values['contact.last_name'] = c.respond_to?(:last_name) ? c.last_name.to_s : ''
+      values['contact.email'] = c.email.to_s if c.respond_to?(:email)
+      values['contact.phone'] = c.phone.to_s if c.respond_to?(:phone)
+      values['contact.name'] = [c.respond_to?(:first_name) ? c.first_name : '', c.respond_to?(:last_name) ? c.last_name : ''].compact.join(' ')
+    end
+
+    # Account fields
+    if @agreement.account.present?
+      values['account.name'] = @agreement.account.name.to_s
+    end
+
+    Rails.logger.info("[AgreementPdfService] Values map: #{values.keys.join(', ')}")
+    values
+  end
+
+  # Build map of signer_index → signature data
+  def build_signatures_map
+    signers = @agreement.agreement_signers.order(:signing_order, :id)
+    map = {}
+
+    signers.each_with_index do |signer, idx|
+      next unless signer.status == AgreementSigner::STATUS_SIGNED
+
+      sig_url = signer.signature_url
+      Rails.logger.info("[AgreementPdfService] Signer[#{idx}] #{signer.name}: method=#{signer.signature_method}, signature_url=#{sig_url.present? ? "#{sig_url.to_s[0..30]}..." : 'nil'}, typed=#{signer.typed_signature}")
+
+      map[idx] = {
+        name: signer.name,
+        email: signer.email,
+        signature_url: sig_url,
+        signature_method: signer.signature_method,
+        typed_signature: signer.typed_signature,
+        signature_font: signer.signature_font,
+        initials_url: signer.initials_url,
+        typed_initials: signer.typed_initials,
+        signed_at: signer.signed_at
+      }
+    end
+
+    map
+  end
+
+  # Create a transparent Prawn overlay PDF for one page
+  def create_page_overlay(placements, page_width, page_height, values_map, signatures_map)
+    pdf = Prawn::Document.new(
+      page_size: [page_width, page_height],
+      margin: 0
+    )
+
+    stamps_applied = 0
+
+    placements.each do |raw_placement|
+      p = normalize_placement(raw_placement)
+
+      # Convert percentage positions to PDF points
+      x_pt = (p[:x] / 100.0) * page_width
+      y_pt_from_top = (p[:y] / 100.0) * page_height
+      w_pt = (p[:width] / 100.0) * page_width
+      h_pt = (p[:height] / 100.0) * page_height
+
+      # Convert to Prawn coordinates (bottom-left origin)
+      y_pt = page_height - y_pt_from_top
+
+      field_type = p[:field_type].to_s
+      field_key = p[:field_key].to_s
+      signer_idx = p[:signer_index]
+
+      Rails.logger.debug("[AgreementPdfService] Stamping: type=#{field_type} key=#{field_key} signer=#{signer_idx} at (#{x_pt.round(1)}, #{y_pt.round(1)}) #{w_pt.round(1)}x#{h_pt.round(1)}")
+
+      applied = case field_type
+      when 'signature'
+        stamp_signature(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+      when 'initials'
+        stamp_initials(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+      when 'date_signed'
+        stamp_date_signed(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+      when 'signer_name'
+        stamp_signer_name(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+      when 'signer_email'
+        stamp_signer_email(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+      when 'text_input', 'custom_text'
+        value = values_map[p[:id].to_s] || values_map[field_key] || ''
+        stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value)
+      when 'date_input', 'custom_date'
+        value = values_map[p[:id].to_s] || values_map[field_key] || ''
+        stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value)
+      when 'checkbox', 'custom_checkbox'
+        value = values_map[p[:id].to_s] || values_map[field_key]
+        stamp_checkbox(pdf, x_pt, y_pt, w_pt, h_pt, value)
+      else
+        # Generic merge field
+        value = values_map[field_key] || values_map[p[:id].to_s] || ''
+        stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value) if value.present?
+      end
+
+      stamps_applied += 1 if applied
+    end
+
+    Rails.logger.info("[AgreementPdfService] Overlay: #{stamps_applied}/#{placements.size} stamps applied")
+    pdf.render
   rescue => e
-    Rails.logger.error("[AgreementPdfService] Signature upload failed: #{e.message}")
+    Rails.logger.error("[AgreementPdfService] Overlay creation failed: #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace.first(5).join("\n"))
     nil
+  end
+
+  # ── Stamp helpers ────────────────────────────────────────────────────
+
+  def stamp_signature(pdf, x, y, w, h, signer_idx, signatures_map)
+    signer = signatures_map[signer_idx]
+    unless signer
+      Rails.logger.warn("[AgreementPdfService] No signer data for index #{signer_idx}")
+      return false
+    end
+
+    if signer[:signature_url].present?
+      stamp_image(pdf, x, y, w, h, signer[:signature_url])
+    elsif signer[:typed_signature].present?
+      stamp_typed_signature(pdf, x, y, w, h, signer[:typed_signature])
+    else
+      Rails.logger.warn("[AgreementPdfService] Signer #{signer_idx} has no signature data")
+      false
+    end
+  end
+
+  def stamp_initials(pdf, x, y, w, h, signer_idx, signatures_map)
+    signer = signatures_map[signer_idx]
+    return false unless signer
+
+    if signer[:initials_url].present?
+      stamp_image(pdf, x, y, w, h, signer[:initials_url])
+    elsif signer[:typed_initials].present?
+      stamp_typed_signature(pdf, x, y, w, h, signer[:typed_initials])
+    else
+      initials = signer[:name].to_s.split(' ').map { |n| n[0] }.join.upcase
+      stamp_typed_signature(pdf, x, y, w, h, initials) if initials.present?
+    end
+  end
+
+  def stamp_date_signed(pdf, x, y, w, h, signer_idx, signatures_map)
+    signer = signatures_map[signer_idx]
+    return false unless signer
+    date_str = signer[:signed_at]&.strftime('%m/%d/%Y') || Time.current.strftime('%m/%d/%Y')
+    stamp_text(pdf, x, y, w, h, date_str)
+  end
+
+  def stamp_signer_name(pdf, x, y, w, h, signer_idx, signatures_map)
+    signer = signatures_map[signer_idx]
+    return false unless signer
+    stamp_text(pdf, x, y, w, h, signer[:name].to_s)
+  end
+
+  def stamp_signer_email(pdf, x, y, w, h, signer_idx, signatures_map)
+    signer = signatures_map[signer_idx]
+    return false unless signer
+    stamp_text(pdf, x, y, w, h, signer[:email].to_s)
+  end
+
+  def stamp_text(pdf, x, y, w, h, text)
+    return false if text.blank?
+    font_size = [h * 0.65, 12].min
+    font_size = [font_size, 6].max
+
+    pdf.font("Helvetica", size: font_size)
+    pdf.fill_color '1a1a1a'
+    pdf.text_box text.to_s,
+      at: [x, y],
+      width: w,
+      height: h,
+      overflow: :shrink_to_fit,
+      min_font_size: 5,
+      valign: :center
+    true
+  end
+
+  def stamp_typed_signature(pdf, x, y, w, h, text)
+    return false if text.blank?
+    font_size = [h * 0.7, 18].min
+    font_size = [font_size, 8].max
+
+    pdf.font("Times-Roman", style: :italic, size: font_size)
+    pdf.fill_color '000066'
+    pdf.text_box text.to_s,
+      at: [x, y],
+      width: w,
+      height: h,
+      overflow: :shrink_to_fit,
+      min_font_size: 6,
+      valign: :center
+    true
+  end
+
+  def stamp_checkbox(pdf, x, y, w, h, value)
+    checked = value.to_s.downcase.in?(%w[true yes 1 on checked])
+    return false unless checked
+
+    pdf.fill_color '1a6b1a'
+    center_x = x + w / 2
+    center_y = y - h / 2
+    size = [w, h].min * 0.6
+
+    pdf.stroke_color '1a6b1a'
+    pdf.line_width 1.5
+    pdf.stroke do
+      pdf.move_to(center_x - size * 0.3, center_y)
+      pdf.line_to(center_x - size * 0.05, center_y - size * 0.3)
+      pdf.line_to(center_x + size * 0.35, center_y + size * 0.3)
+    end
+    true
+  end
+
+  def stamp_image(pdf, x, y, w, h, image_data)
+    return false if image_data.blank?
+
+    tempfile = if image_data.to_s.start_with?('data:')
+      decode_base64_image(image_data)
+    elsif image_data.to_s.start_with?('http')
+      download_image(image_data)
+    else
+      # Might be raw base64 without data: prefix
+      decode_base64_image("data:image/png;base64,#{image_data}")
+    end
+
+    return false unless tempfile
+
+    begin
+      pdf.image tempfile.path,
+        at: [x, y],
+        fit: [w, h]
+      true
+    rescue => e
+      Rails.logger.warn("[AgreementPdfService] Image stamp failed: #{e.class}: #{e.message}")
+      false
+    ensure
+      tempfile.close rescue nil
+      tempfile.unlink rescue nil
+    end
+  end
+
+  def decode_base64_image(data_uri)
+    return nil if data_uri.blank?
+    raw_data = data_uri.to_s.sub(/^data:image\/\w+;base64,/, '')
+    decoded = Base64.decode64(raw_data)
+
+    tempfile = Tempfile.new(['sig', '.png'])
+    tempfile.binmode
+    tempfile.write(decoded)
+    tempfile.rewind
+    tempfile
+  rescue => e
+    Rails.logger.warn("[AgreementPdfService] Base64 decode failed: #{e.class}: #{e.message}")
+    nil
+  end
+
+  # ── Download helpers ─────────────────────────────────────────────────
+
+  # Use URI.open — same approach as AgreementDocumentsController#merge which works
+  def download_pdf(url)
+    Rails.logger.info("[AgreementPdfService] Downloading PDF from: #{url}")
+    data = URI.open(url, ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE).read
+    Rails.logger.info("[AgreementPdfService] Downloaded #{data.size} bytes")
+    data
+  rescue => e
+    Rails.logger.error("[AgreementPdfService] PDF download error: #{e.class}: #{e.message}")
+    nil
+  end
+
+  def download_image(url)
+    return nil if url.blank?
+
+    tempfile = Tempfile.new(['sig', '.png'])
+    tempfile.binmode
+
+    data = URI.open(url, ssl_verify_mode: OpenSSL::SSL::VERIFY_NONE).read
+    tempfile.write(data)
+    tempfile.rewind
+    tempfile
+  rescue => e
+    Rails.logger.warn("[AgreementPdfService] Image download error: #{e.class}: #{e.message}")
+    nil
+  end
+
+  # ── S3 upload (uses same S3UploadService as rest of app) ─────────────
+
+  def upload_sealed_pdf(pdf_data)
+    # Write to temp file
+    tmp = Tempfile.new(['sealed', '.pdf'])
+    tmp.binmode
+    tmp.write(pdf_data)
+    tmp.rewind
+
+    begin
+      s3_service = S3UploadService.new
+      folder = "agreements/#{@company.id}/sealed"
+
+      # Create an upload-like object that S3UploadService expects
+      upload_file = ActionDispatch::Http::UploadedFile.new(
+        tempfile: tmp,
+        filename: "sealed_#{@agreement.agreement_number}_#{SecureRandom.hex(6)}.pdf",
+        type: 'application/pdf'
+      )
+
+      result = s3_service.upload(upload_file, folder: folder)
+      Rails.logger.info("[AgreementPdfService] S3 upload result: #{result[:url]}")
+      result[:url]
+    rescue => e
+      Rails.logger.error("[AgreementPdfService] S3 upload failed: #{e.class}: #{e.message}")
+      Rails.logger.error(e.backtrace.first(5).join("\n"))
+      nil
+    ensure
+      tmp.close rescue nil
+      tmp.unlink rescue nil
+    end
+  end
+
+  def log_sealed!
+    AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_SEALED, metadata: {
+      sealed_at: Time.current.iso8601,
+      signers_count: @agreement.agreement_signers.signed.count
+    })
   end
 end
