@@ -31,12 +31,11 @@ module Api
         agreements = agreements.for_account(params[:account_id]) if params[:account_id].present?
         agreements = agreements.for_deal(params[:deal_id]) if params[:deal_id].present?
 
-        # Status filter
-        agreements = agreements.by_status(params[:status]) if params[:status].present?
+        # Category & prepared_by filters (apply before stats)
         agreements = agreements.by_category(params[:category]) if params[:category].present?
         agreements = agreements.where(prepared_by_id: params[:prepared_by_id]) if params[:prepared_by_id].present?
 
-        # Date range filters
+        # Date range filters (apply before stats — tiles reflect date range)
         if params[:created_after].present?
           agreements = agreements.where('agreements.created_at >= ?', params[:created_after])
         end
@@ -47,7 +46,7 @@ module Api
           agreements = agreements.where('agreements.expires_at <= ?', params[:expires_before])
         end
 
-        # Stats BEFORE search (unfiltered totals for tiles)
+        # Stats BEFORE status filter & search (tiles show totals within date range)
         stats = {
           total: agreements.count,
           draft: agreements.where(status: 'draft').count,
@@ -59,6 +58,9 @@ module Api
           voided: agreements.where(status: 'voided').count,
           declined: agreements.where(status: 'declined').count
         }
+
+        # Status filter AFTER stats (clicking a tile doesn't change tile counts)
+        agreements = agreements.by_status(params[:status]) if params[:status].present?
 
         # Search AFTER stats
         if params[:search].present?
@@ -522,14 +524,41 @@ module Api
       def add_attachment
         return unless authorize_action!('agreements', 'update')
 
-        attachment = @agreement.agreement_attachments.new(
-          attachable_type: params[:attachable_type],
-          attachable_id: params[:attachable_id],
-          attached_by: current_user
-        )
+        file = params[:file]
+
+        if file.present?
+          # File-based attachment — upload to S3
+          if file.size > 25.megabytes
+            return render json: { error: 'File size exceeds 25MB limit' }, status: :unprocessable_entity
+          end
+
+          begin
+            s3_service = S3UploadService.new
+            folder = "agreements/#{@company.id}/#{@agreement.id}/attachments"
+            result = s3_service.upload(file, folder: folder)
+
+            attachment = @agreement.agreement_attachments.new(
+              filename: file.original_filename,
+              file_url: result[:url],
+              file_content_type: file.content_type,
+              byte_size: file.size,
+              attached_by: current_user
+            )
+          rescue => e
+            Rails.logger.error "S3 upload error: #{e.message}"
+            return render json: { error: 'Failed to upload file' }, status: :unprocessable_entity
+          end
+        else
+          # Entity-link attachment
+          attachment = @agreement.agreement_attachments.new(
+            attachable_type: params[:attachable_type],
+            attachable_id: params[:attachable_id],
+            attached_by: current_user
+          )
+        end
 
         if attachment.save
-          AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_ATTACHMENT_ADDED, performed_by: current_user, metadata: { attachable_type: attachment.attachable_type, attachable_id: attachment.attachable_id })
+          AgreementAuditLog.log!(@agreement, AgreementAuditLog::ACTION_ATTACHMENT_ADDED, performed_by: current_user, metadata: { filename: attachment.filename })
           render json: agreement_json(@agreement.reload, detailed: true), status: :created
         else
           render json: { errors: attachment.errors.full_messages }, status: :unprocessable_entity
@@ -655,6 +684,10 @@ module Api
           signing_order: agreement.signing_order,
           message_to_signers: agreement.message_to_signers,
           signers_count: agreement.agreement_signers.size,
+          signer_names: agreement.agreement_signers
+            .select { |s| s.role == 'signer' }
+            .sort_by(&:signing_order)
+            .map(&:name),
           created_at: agreement.created_at,
           updated_at: agreement.updated_at
         }
@@ -698,8 +731,14 @@ module Api
             attachments: agreement.agreement_attachments.map { |a|
               {
                 id: a.id,
+                filename: a.filename,
+                file_url: a.file_url,
+                content_type: a.file_content_type,
+                file_size: a.byte_size,
+                byte_size: a.byte_size,
                 attachable_type: a.attachable_type,
                 attachable_id: a.attachable_id,
+                uploaded_by_name: a.attached_by&.name,
                 created_at: a.created_at
               }
             },

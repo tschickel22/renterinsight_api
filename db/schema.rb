@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_24_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_25_040000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -170,11 +170,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_24_210000) do
 
   create_table "agreement_attachments", force: :cascade do |t|
     t.bigint "agreement_id", null: false
-    t.string "attachable_type", null: false
-    t.integer "attachable_id", null: false
+    t.string "attachable_type"
+    t.integer "attachable_id"
     t.integer "attached_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "filename"
+    t.string "file_url"
+    t.string "file_content_type"
+    t.bigint "byte_size"
     t.index ["agreement_id", "attachable_type", "attachable_id"], name: "idx_agr_attachments_unique", unique: true
     t.index ["agreement_id"], name: "index_agreement_attachments_on_agreement_id"
     t.index ["attachable_type", "attachable_id"], name: "idx_agr_attachments_polymorphic"
