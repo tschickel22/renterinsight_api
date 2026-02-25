@@ -16,6 +16,7 @@ class PageLayout < ApplicationRecord
     'leads' => %w[first_name last_name email phone].freeze,
     'accounts' => %w[name].freeze,
     'contacts' => %w[first_name last_name email].freeze,
+    'deals' => %w[name deal_number].freeze,
     'inventory' => %w[inventory_id year make model listing_type].freeze,
     'inventory_rv' => %w[inventory_id year make model listing_type].freeze,
     'inventory_mh' => %w[inventory_id year make model listing_type].freeze
@@ -34,6 +35,8 @@ class PageLayout < ApplicationRecord
       default_accounts_layout
     when 'contacts'
       default_contacts_layout
+    when 'deals'
+      default_deals_layout
     when 'inventory'
       default_inventory_layout
     when 'inventory_rv'
@@ -43,6 +46,87 @@ class PageLayout < ApplicationRecord
     else
       { sections: [] }
     end
+  end
+
+  private_class_method def self.default_deals_layout
+    {
+      sections: [
+        {
+          id: 'deal_info',
+          title: 'Deal Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'deal_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'name', type: 'standard', visible: true, required: true, width: 1 },
+            { key: 'customer_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'stage', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'value', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'probability', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'deal_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'vertical', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'lead_source', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'owner_id', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'deal_dates',
+          title: 'Dates',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'expected_close_date', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'actual_close_date', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_date', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'deal_economics',
+          title: 'Deal Economics',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'selling_price', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'unit_cost', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'trade_allowance', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'trade_payoff', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'accessories_total', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'doc_fee', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_fee', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'setup_fee', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'skirting_fee', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'deal_outcome',
+          title: 'Outcome',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'win_reason', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'loss_reason', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'competitor', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'deal_notes',
+          title: 'Notes & Description',
+          columns: 1,
+          collapsed: false,
+          fields: [
+            { key: 'description', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'notes', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'custom_fields',
+          title: 'Custom Fields',
+          columns: 2,
+          collapsed: false,
+          fields: []
+        }
+      ]
+    }
   end
 
   private_class_method def self.default_accounts_layout

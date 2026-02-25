@@ -1209,6 +1209,8 @@ Rails.application.routes.draw do
     patch 'settings/branding', to: 'settings#update_branding'
     get 'settings/quotes', to: 'settings#quotes'
     patch 'settings/quotes', to: 'settings#update_quotes'
+    get 'settings/pipeline_stages', to: 'settings#pipeline_stages'
+    patch 'settings/pipeline_stages', to: 'settings#update_pipeline_stages'
     
     # Custom Fields
     get 'settings/custom_fields', to: 'settings#custom_fields'

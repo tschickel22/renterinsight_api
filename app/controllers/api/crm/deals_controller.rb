@@ -297,6 +297,13 @@ module Api
         return unless authorize_action!('deals', 'update')
         
         old_stage = @deal.stage
+
+        # Merge custom_field_values rather than replace (preserves other custom fields)
+        if params[:deal][:custom_field_values].present?
+          existing = @deal.custom_field_values || {}
+          merged = existing.merge(params[:deal][:custom_field_values].to_unsafe_h)
+          params[:deal][:custom_field_values] = merged
+        end
         
         if @deal.update(deal_params)
           # Track stage change
@@ -543,7 +550,9 @@ module Api
           # Commission plan
           :commission_plan_id,
           # Deal Participants (for commission calculation)
-          :sales_manager_id, :finance_manager_id, :desk_manager_id, :secondary_salesperson_id
+          :sales_manager_id, :finance_manager_id, :desk_manager_id, :secondary_salesperson_id,
+          # Custom fields (JSONB column - merged in update action, never replaced)
+          custom_field_values: {}
           # NOTE: company_id is intentionally excluded - it should never change after creation
           # It's set via @company.deals.build and must remain immutable
         )
@@ -561,6 +570,7 @@ module Api
         
         base = {
           id: deal.id,
+          dealNumber: deal.deal_number,
           name: deal.name,
           accountId: deal.account_id,
           accountName: deal.account&.name,
@@ -601,6 +611,7 @@ module Api
           winReason: deal.win_reason,
           lossReason: deal.loss_reason,
           competitor: deal.competitor,
+          customFieldValues: deal.custom_field_values || {},
           createdAt: deal.created_at&.iso8601,
           updatedAt: deal.updated_at&.iso8601,
           

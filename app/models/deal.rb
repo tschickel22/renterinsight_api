@@ -45,19 +45,29 @@ class Deal < ApplicationRecord
   validates :name, presence: true
   validates :value, numericality: { greater_than_or_equal_to: 0 }
   validates :probability, numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 100 }, allow_nil: true
-  validates :stage, presence: true, inclusion: { 
-    in: %w[
-      prospecting qualification needs_analysis proposal 
-      negotiation closing closed_won closed_lost
-      PROSPECTING QUALIFICATION NEEDS_ANALYSIS PROPOSAL 
-      NEGOTIATION CLOSING CLOSED_WON CLOSED_LOST
-    ], 
-    message: "%{value} is not a valid stage" 
-  }
+  validate :stage_is_valid
+
+  def stage_is_valid
+    return if stage.blank?
+    normalized = stage.downcase
+    # Check against company pipeline stages if configured
+    saved_stages = company ? Setting.get('Company', company_id, 'pipeline_stages', nil) : nil
+    allowed = if saved_stages.is_a?(Array) && saved_stages.any?
+      saved_stages.map { |s| (s['key'] || s[:key]).to_s.downcase }
+    else
+      %w[prospecting qualification needs_analysis proposal negotiation closing closed_won closed_lost]
+    end
+    unless allowed.include?(normalized)
+      errors.add(:stage, "#{stage} is not a valid stage")
+    end
+  end
   
   # Ensure at least account or contact is present
   validate :account_or_contact_required
   
+  # Auto-generate deal number on creation
+  before_create :generate_deal_number
+
   # Normalize stage to lowercase before validation
   before_validation :normalize_stage
   
@@ -175,17 +185,10 @@ class Deal < ApplicationRecord
   
   # FRONT GROSS (Sale Price - Cost - Trade Difference)
   def front_gross
-    # Primary home gross (with cost tracking)
     base_gross = (selling_price || 0) - (unit_cost || 0)
     trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
     primary_gross = base_gross - trade_difference
-    
-    # Add gross from all deal_products (additional homes/land/parts)
-    # NOTE: deal_products don't have individual cost tracking, so we treat the 'total'
-    # as the gross profit. For accessories/parts this is acceptable (high margins).
-    # For additional homes, cost should be added to deal.unit_cost or tracked separately.
     products_gross = deal_products.sum(:total)
-    
     (primary_gross + products_gross).round(2)
   end
   
@@ -233,23 +236,18 @@ class Deal < ApplicationRecord
   def trade_equity_check
     if (trade_payoff || 0) > (trade_allowance || 0)
       negative_equity = ((trade_payoff || 0) - (trade_allowance || 0)).round(2)
-      # This is just a warning - some deals have negative equity
-      # Don't add error, just log for visibility
       Rails.logger.warn("Deal #{id}: Negative equity of $#{negative_equity} (Payoff: $#{trade_payoff}, Allowance: $#{trade_allowance})")
     end
   end
   
-  # Helper to check if deal is delivered (for commission generation)
   def delivered?
     stage == 'closed_won' && delivery_date.present?
   end
   
-  # Check if status just changed to closed_won (triggers commission payment generation)
   def just_closed_won?
     saved_change_to_stage? && stage == 'closed_won'
   end
   
-  # Check if status just changed to delivered (legacy check)
   def just_delivered?
     saved_change_to_stage? && stage == 'closed_won' && delivery_date.present?
   end
@@ -277,32 +275,42 @@ class Deal < ApplicationRecord
     salesperson = primary_salesperson || owner
     return nil unless salesperson && company
     
-    # Priority 1: User-specific plan
     user_plan = company.commission_plans
-      .active
-      .current
+      .active.current
       .where(assigned_user_id: salesperson.id)
       .first
-    
     return user_plan if user_plan
     
-    # Priority 2: Role-based plan
     if salesperson.role.present?
       role_plan = company.commission_plans
-        .active
-        .current
+        .active.current
         .where(assigned_role: salesperson.role)
         .first
-      
       return role_plan if role_plan
     end
     
-    # Priority 3: Company default plan
     company.commission_plans.active.current.defaults.first
   end
   
   private
   
+  # Auto-generate unique deal number per company (e.g. D-000001)
+  def generate_deal_number
+    return if deal_number.present?
+
+    # Find the highest existing number for this company using safe SQL
+    last_num = 0
+    if company_id.present?
+      result = self.class.connection.select_value(
+        "SELECT MAX(CAST(SUBSTRING(deal_number FROM 3) AS INTEGER)) FROM deals " \
+        "WHERE company_id = #{company_id} AND deal_number ~ '^D-[0-9]+$'"
+      )
+      last_num = result.to_i
+    end
+
+    self.deal_number = "D-#{(last_num + 1).to_s.rjust(6, '0')}"
+  end
+
   # Auto-assign commission plan before save
   def auto_assign_commission_plan
     plan = determine_commission_plan
@@ -311,29 +319,23 @@ class Deal < ApplicationRecord
   
   # Sync primary_salesperson_id with owner_id (for commission system)
   def sync_primary_salesperson
-    # Always keep primary_salesperson_id in sync with owner_id
     self.primary_salesperson_id = owner_id
   end
   
   # Auto-generate commission payment when deal is delivered
   def generate_commission_payment
     return unless primary_salesperson_id.present?
-    
     CommissionPaymentGeneratorService.generate_for_deal(self)
   rescue StandardError => e
     Rails.logger.error "[Deal] Failed to generate commission payment for deal #{id}: #{e.message}"
-    # Don't raise - we don't want to block the deal save if commission generation fails
   end
   
   # Fire custom lifecycle webhook events on stage transitions
-  # WebhookNotifiable handles generic deal.created/updated/deleted
-  # This adds deal.won and deal.lost for specific transitions.
   def fire_lifecycle_webhooks
     event = case stage
             when 'closed_won'  then 'deal.won'
             when 'closed_lost' then 'deal.lost'
             end
-
     return unless event
 
     WebhookService.fire(
@@ -348,26 +350,17 @@ class Deal < ApplicationRecord
   # Sync vehicle pricing data when vehicle is assigned
   def sync_vehicle_pricing
     return unless vehicle_id.present?
-    
-    # Only sync if vehicle exists
     vehicle = Vehicle.find_by(id: vehicle_id)
     return unless vehicle
     
-    # Sync pricing fields from vehicle to deal
-    # Only update if deal field is blank or zero (don't overwrite manual entries > 0)
     vehicle_price = vehicle.sale_price || vehicle.msrp
-    
     self.selling_price = vehicle_price if selling_price.nil? || selling_price == 0
     self.unit_cost = vehicle.cost if unit_cost.nil? || unit_cost == 0
     self.value = vehicle_price if value.nil? || value == 0
-    
-    # Auto-populate quantity if not set
     self.quantity ||= 1
     
-    # Log the sync for debugging
     Rails.logger.info "[Deal] Synced pricing from vehicle #{vehicle_id}: selling_price=$#{selling_price}, unit_cost=$#{unit_cost}, value=$#{value}"
   rescue StandardError => e
     Rails.logger.error "[Deal] Failed to sync vehicle pricing: #{e.message}"
-    # Don't raise - we don't want to block the deal save if vehicle sync fails
   end
 end

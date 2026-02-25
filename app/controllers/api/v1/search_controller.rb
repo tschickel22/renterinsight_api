@@ -77,7 +77,7 @@ class Api::V1::SearchController < ApplicationController
     # CRM - Deals (NO is_deleted column in production)
     begin
       deals = @company.deals
-                     .where("name ILIKE ?", "%#{query}%")
+                     .where("name ILIKE ? OR deal_number ILIKE ?", "%#{query}%", "%#{query}%")
                      .limit(5)
       
       results += deals.map do |deal|
@@ -85,10 +85,10 @@ class Api::V1::SearchController < ApplicationController
           id: deal.id,
           type: 'deal',
           title: deal.name,
-          subtitle: deal.amount.present? ? "$#{deal.amount.to_f.round(2)}" : nil,
+          subtitle: deal.deal_number,
           badge: deal.stage&.titleize,
-          amount: deal.amount,
-          score: calculate_score(query, deal.name)
+          amount: deal.value,
+          score: calculate_score(query, deal.name, deal.deal_number)
         }
       end
     rescue => e

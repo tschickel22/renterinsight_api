@@ -187,6 +187,8 @@ module Api
           accounts_standard_fields
         when 'contacts'
           contacts_standard_fields
+        when 'deals'
+          deals_standard_fields
         when 'inventory'
           inventory_standard_fields
         when 'inventory_rv'
@@ -222,6 +224,47 @@ module Api
           walkin_closet laundry_room pantry sun_room basement garden_tub
           refrigerator microwave oven dishwasher garbage_disposal
           clothes_washer clothes_dryer
+        ]
+      end
+
+      def deals_standard_fields
+        protected_keys = PageLayout::PROTECTED_FIELDS['deals'] || []
+        [
+          { key: 'deal_number', label: 'Deal Number', type: 'text', source: 'standard', required: false, protected: true },
+          { key: 'name', label: 'Deal Name', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('name') },
+          { key: 'customer_name', label: 'Customer Name', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'value', label: 'Deal Value', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'stage', label: 'Stage', type: 'select', source: 'standard', required: false, protected: false,
+            options: deals_stage_options, option_labels: deals_stage_option_labels },
+          { key: 'probability', label: 'Probability (%)', type: 'percent', source: 'standard', required: false, protected: false },
+          { key: 'expected_close_date', label: 'Expected Close Date', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'actual_close_date', label: 'Actual Close Date', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'delivery_date', label: 'Delivery Date', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'deal_type', label: 'Deal Type', type: 'select', source: 'standard', required: false, protected: false,
+            options: %w[new used rental rent_to_own consignment] },
+          { key: 'vertical', label: 'Vertical', type: 'select', source: 'standard', required: false, protected: false,
+            options: %w[rv manufactured_home other] },
+          { key: 'lead_source', label: 'Lead Source', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'owner_id', label: 'Owner / Sales Rep', type: 'user', source: 'standard', required: false, protected: false },
+          { key: 'quantity', label: 'Quantity', type: 'number', source: 'standard', required: false, protected: false },
+          # Note: source_id, account_id, contact_id, vehicle_id are relationship/lookup fields
+          # managed via DealForm only — not supported as inline-editable layout fields
+          # Economics
+          { key: 'selling_price', label: 'Selling Price', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'unit_cost', label: 'Unit Cost', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'trade_allowance', label: 'Trade Allowance', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'trade_payoff', label: 'Trade Payoff', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'accessories_total', label: 'Accessories Total', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'doc_fee', label: 'Doc Fee', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'delivery_fee', label: 'Delivery Fee', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'setup_fee', label: 'Setup Fee', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'skirting_fee', label: 'Skirting Fee', type: 'currency', source: 'standard', required: false, protected: false },
+          # Text
+          { key: 'win_reason', label: 'Win Reason', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'loss_reason', label: 'Loss Reason', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'competitor', label: 'Competitor', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'description', label: 'Description', type: 'longtext', source: 'standard', required: false, protected: false },
+          { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
         ]
       end
 
@@ -489,6 +532,28 @@ module Api
           { key: 'repo', label: 'Repo', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'internal' },
           { key: 'package_type', label: 'Package Type', type: 'text', source: 'standard', required: false, protected: false, visibility: 'both' }
         ]
+      end
+
+      def deals_stage_options
+        saved = Setting.get('Company', @company.id, 'pipeline_stages', nil)
+        if saved.is_a?(Array) && saved.any?
+          saved.sort_by { |s| s['order'] || s[:order] || 0 }.map { |s| s['key'] || s[:key] }
+        else
+          %w[prospecting qualification needs_analysis proposal negotiation closed_won closed_lost]
+        end
+      end
+
+      def deals_stage_option_labels
+        saved = Setting.get('Company', @company.id, 'pipeline_stages', nil)
+        if saved.is_a?(Array) && saved.any?
+          saved.each_with_object({}) { |s, h| h[s['key'] || s[:key]] = s['name'] || s[:name] }
+        else
+          {
+            'prospecting' => 'Prospecting', 'qualification' => 'Qualification',
+            'needs_analysis' => 'Needs Analysis', 'proposal' => 'Proposal',
+            'negotiation' => 'Negotiation', 'closed_won' => 'Closed Won', 'closed_lost' => 'Closed Lost'
+          }
+        end
       end
 
       def custom_field_definitions(module_name)

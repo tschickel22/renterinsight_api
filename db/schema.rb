@@ -1367,15 +1367,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_25_120000) do
     t.bigint "finance_manager_id"
     t.bigint "desk_manager_id"
     t.bigint "secondary_salesperson_id"
+    t.string "deal_number"
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
     t.index ["commission_plan_id", "delivery_date"], name: "index_deals_on_plan_and_delivery"
     t.index ["commission_plan_id"], name: "index_deals_on_commission_plan_id"
+    t.index ["company_id", "deal_number"], name: "index_deals_on_company_id_and_deal_number", unique: true
     t.index ["company_id", "delivery_date"], name: "index_deals_on_company_and_delivery"
     t.index ["company_id", "location_id"], name: "index_deals_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_deals_on_company_id"
     t.index ["contact_id"], name: "index_deals_on_contact_id"
+    t.index ["custom_field_values"], name: "index_deals_on_custom_field_values", using: :gin
     t.index ["deal_type"], name: "index_deals_on_deal_type"
     t.index ["deleted_at"], name: "index_deals_on_deleted_at"
     t.index ["desk_manager_id"], name: "index_deals_on_desk_manager_id"

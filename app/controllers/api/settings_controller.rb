@@ -270,6 +270,39 @@ module Api
       }
     end
 
+    # GET /api/settings/pipeline_stages
+    def pipeline_stages
+      stages = Setting.get('Company', @company.id, 'pipeline_stages', nil)
+
+      if stages.nil?
+        stages = [
+          { key: 'lead',         name: 'Lead',         probability: 10,  color: '#94a3b8', locked: false, order: 0 },
+          { key: 'qualified',    name: 'Qualified',    probability: 25,  color: '#60a5fa', locked: false, order: 1 },
+          { key: 'proposal',     name: 'Proposal',     probability: 50,  color: '#f59e0b', locked: false, order: 2 },
+          { key: 'negotiation',  name: 'Negotiation',  probability: 75,  color: '#f97316', locked: false, order: 3 },
+          { key: 'won',          name: 'Won',          probability: 100, color: '#22c55e', locked: true,  order: 4 },
+          { key: 'lost',         name: 'Lost',         probability: 0,   color: '#ef4444', locked: true,  order: 5 }
+        ]
+      end
+
+      render json: { stages: stages }
+    end
+
+    # PATCH /api/settings/pipeline_stages
+    def update_pipeline_stages
+      stages = params[:stages]
+
+      unless stages.is_a?(Array)
+        render json: { error: 'stages must be an array' }, status: :unprocessable_entity
+        return
+      end
+
+      Setting.set('Company', @company.id, 'pipeline_stages', stages)
+      render json: { stages: stages, message: 'Pipeline stages saved successfully' }
+    rescue => e
+      render json: { error: e.message }, status: :internal_server_error
+    end
+
     # GET /api/settings/custom_fields
     def custom_fields
       module_name = params[:module]
@@ -517,6 +550,10 @@ module Api
         operational = @company.operational_settings.deep_symbolize_keys
         base_settings[:timezone] = operational[:timezone] if operational[:timezone].present?
       end
+
+      # Include pipeline stages so deal pipeline/form work without full settings permission
+      pipeline_stages = Setting.get('Company', @company.id, 'pipeline_stages', nil)
+      base_settings[:pipeline_stages] = pipeline_stages if pipeline_stages.present?
 
       base_settings
     end
