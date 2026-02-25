@@ -20,14 +20,8 @@ class AgreementPdfService
     end
 
     placements = @agreement.merge_field_placements || []
-    if placements.empty?
-      Rails.logger.info("[AgreementPdfService] No field placements — copying source as sealed")
-      @agreement.update!(sealed_document_url: source_url)
-      log_sealed!
-      return source_url
-    end
 
-    # Download source PDF (same method as agreement_documents_controller merge)
+    # Download source PDF (always needed for audit certificate, even if no placements)
     source_pdf_data = download_pdf(source_url)
     unless source_pdf_data
       Rails.logger.error("[AgreementPdfService] Failed to download source PDF from #{source_url}")
@@ -50,6 +44,10 @@ class AgreementPdfService
       signatures_map = build_signatures_map
 
       Rails.logger.info("[AgreementPdfService] #{placements.size} placements, #{signatures_map.size} signers with signatures")
+
+      if placements.empty?
+        Rails.logger.info("[AgreementPdfService] No field placements — will still append audit certificate")
+      end
 
       # Group placements by page
       placements_by_page = placements.group_by { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }
@@ -81,6 +79,18 @@ class AgreementPdfService
       end
 
       Rails.logger.info("[AgreementPdfService] Applied #{overlays_applied} page overlays")
+
+      # Append audit certificate page
+      begin
+        cert_data = generate_audit_certificate_pdf
+        if cert_data
+          cert_pdf = CombinePDF.parse(cert_data)
+          cert_pdf.pages.each { |cert_page| source_pdf << cert_page }
+          Rails.logger.info("[AgreementPdfService] ✅ Audit certificate appended (#{cert_pdf.pages.count} page(s))")
+        end
+      rescue => e
+        Rails.logger.error("[AgreementPdfService] Audit certificate generation failed (non-fatal): #{e.message}")
+      end
 
       # Generate sealed PDF data
       sealed_data = source_pdf.to_pdf
@@ -489,6 +499,244 @@ class AgreementPdfService
       tmp.close rescue nil
       tmp.unlink rescue nil
     end
+  end
+
+  # ── Audit Certificate ─────────────────────────────────────────────────
+
+  def generate_audit_certificate_pdf
+    signers = @agreement.agreement_signers.required_signers.order(:signing_order, :id)
+    audit_logs = @agreement.agreement_audit_logs.order(created_at: :asc)
+    completed_at = @agreement.completed_at || Time.current
+
+    # Document fingerprint
+    sig_hashes = signers.signed.map { |s| s.signature_hash.to_s }.join('|')
+    document_hash = Digest::SHA256.hexdigest(
+      "#{@agreement.id}|#{@agreement.agreement_number}|#{completed_at.iso8601}|#{sig_hashes}"
+    )
+    envelope_id = "ENV-#{@agreement.id}-#{document_hash[0..7].upcase}"
+
+    pdf = Prawn::Document.new(
+      page_size: 'LETTER',
+      margin: [50, 50, 50, 50]
+    )
+
+    # ── Header bar ──────────────────────────────────────────────────────
+    pdf.fill_color '1e3a5f'
+    pdf.fill_rectangle [pdf.bounds.left, pdf.cursor + 10], pdf.bounds.width, 55
+    pdf.fill_color 'ffffff'
+    pdf.font('Helvetica', style: :bold, size: 20) do
+      pdf.text_box 'Certificate of Completion',
+        at: [15, pdf.cursor + 5],
+        width: pdf.bounds.width - 30,
+        height: 40,
+        valign: :center
+    end
+    pdf.move_down 60
+
+    # ── Envelope ID & Status ────────────────────────────────────────────
+    pdf.fill_color '333333'
+    pdf.font('Helvetica', size: 9) do
+      pdf.text "Envelope ID: #{envelope_id}", color: '666666'
+      pdf.text "Status: Completed", color: '166534'
+    end
+    pdf.move_down 15
+
+    # ── Agreement Details ───────────────────────────────────────────────
+    section_header(pdf, 'Agreement Details')
+
+    details = [
+      ['Title:', @agreement.title.to_s],
+      ['Agreement #:', @agreement.agreement_number.to_s],
+      ['Created:', @agreement.created_at&.strftime('%B %d, %Y %l:%M %p %Z')],
+      ['Sent:', @agreement.sent_at&.strftime('%B %d, %Y %l:%M %p %Z')],
+      ['Completed:', completed_at.strftime('%B %d, %Y %l:%M %p %Z')],
+    ]
+    details << ['Prepared By:', "#{@agreement.prepared_by&.full_name} (#{@agreement.prepared_by&.email})"] if @agreement.prepared_by.present?
+    details << ['Company:', @company.name] if @company.present?
+    details << ['Location:', @agreement.location&.name] if @agreement.location.present?
+
+    detail_table(pdf, details)
+    pdf.move_down 15
+
+    # ── Signing Summary ─────────────────────────────────────────────────
+    section_header(pdf, 'Signing Summary')
+
+    if signers.any?
+      table_data = [['Name', 'Email', 'Role', 'Status', 'Signed At', 'IP Address', 'Method']]
+
+      signers.each do |signer|
+        table_data << [
+          signer.name,
+          signer.email,
+          signer.role.to_s.titleize,
+          signer.status.to_s.titleize,
+          signer.signed_at&.strftime('%m/%d/%Y %l:%M %p') || '—',
+          signer.ip_address || '—',
+          (signer.signature_method || '—').to_s.titleize
+        ]
+      end
+
+      pdf.table(table_data, width: pdf.bounds.width, cell_style: { size: 7.5, padding: [4, 5], border_width: 0.5, border_color: 'cccccc' }) do |t|
+        t.row(0).font_style = :bold
+        t.row(0).background_color = 'f1f5f9'
+        t.row(0).text_color = '334155'
+        t.columns(0..6).align = :left
+        t.cells.border_color = 'e2e8f0'
+      end
+    end
+
+    pdf.move_down 15
+
+    # ── Document Integrity ──────────────────────────────────────────────
+    section_header(pdf, 'Document Integrity')
+
+    integrity_data = [
+      ['Document Fingerprint (SHA-256):', document_hash],
+      ['Total Pages:', (@agreement.merge_field_placements&.map { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }.max.to_i + 1).to_s],
+      ['Signers Required:', signers.count.to_s],
+      ['Signers Completed:', signers.signed.count.to_s],
+    ]
+    if @agreement.document_url.present?
+      integrity_data << ['Source Document:', @agreement.document_url.split('/').last.to_s.truncate(60)]
+    end
+
+    detail_table(pdf, integrity_data)
+    pdf.move_down 15
+
+    # ── Audit Trail ─────────────────────────────────────────────────────
+    # Check if we need a new page before the audit trail
+    if pdf.cursor < 200
+      pdf.start_new_page
+    end
+
+    section_header(pdf, 'Audit Trail')
+
+    if audit_logs.any?
+      trail_data = [['Timestamp', 'Action', 'Performed By', 'IP Address', 'Details']]
+
+      audit_logs.each do |log|
+        performer = if log.performed_by.is_a?(User)
+          "#{log.performed_by.full_name} (User)"
+        elsif log.performed_by.is_a?(AgreementSigner)
+          "#{log.performed_by.name} (Signer)"
+        elsif log.agreement_signer.present?
+          "#{log.agreement_signer.name} (Signer)"
+        else
+          'System'
+        end
+
+        details = case log.action
+        when 'signed'
+          method = log.metadata&.dig('signature_method') || log.agreement_signer&.signature_method
+          method.present? ? "Method: #{method.titleize}" : ''
+        when 'viewed'
+          ua = log.user_agent.to_s.truncate(40)
+          ua.present? ? "Browser: #{ua}" : ''
+        when 'declined'
+          reason = log.metadata&.dig('reason')
+          reason.present? ? "Reason: #{reason.truncate(40)}" : ''
+        when 'voided'
+          reason = log.metadata&.dig('reason')
+          reason.present? ? "Reason: #{reason.truncate(40)}" : ''
+        else
+          ''
+        end
+
+        trail_data << [
+          log.created_at.strftime('%m/%d/%Y %l:%M:%S %p'),
+          format_audit_action(log.action),
+          performer.truncate(30),
+          log.ip_address || '—',
+          details.truncate(45)
+        ]
+      end
+
+      # Split into chunks if too many rows (Prawn table can overflow)
+      trail_data.each_slice(30).with_index do |chunk, idx|
+        chunk.unshift(trail_data.first) if idx > 0 # Re-add header row
+
+        pdf.start_new_page if idx > 0
+
+        pdf.table(chunk, width: pdf.bounds.width, cell_style: { size: 7, padding: [3, 4], border_width: 0.5 }) do |t|
+          t.row(0).font_style = :bold
+          t.row(0).background_color = 'f1f5f9'
+          t.row(0).text_color = '334155'
+          t.cells.border_color = 'e2e8f0'
+          t.column(0).width = 110
+          t.column(1).width = 80
+          t.column(3).width = 80
+        end
+      end
+    else
+      pdf.font('Helvetica', size: 9, style: :italic) do
+        pdf.text 'No audit events recorded.', color: '999999'
+      end
+    end
+
+    # ── Footer ──────────────────────────────────────────────────────────
+    pdf.move_down 20
+    pdf.stroke_color 'cccccc'
+    pdf.stroke_horizontal_rule
+    pdf.move_down 8
+
+    pdf.font('Helvetica', size: 7) do
+      pdf.fill_color '999999'
+      company_name = @company&.name || 'Platform DMS'
+      pdf.text "This certificate was automatically generated by #{company_name} e-signature system.", align: :center
+      pdf.text "Document sealed on #{completed_at.strftime('%B %d, %Y at %l:%M %p %Z')}. Envelope ID: #{envelope_id}", align: :center
+      pdf.move_down 4
+      pdf.text "Fingerprint: #{document_hash}", align: :center, size: 6, color: 'bbbbbb'
+    end
+
+    pdf.render
+  rescue => e
+    Rails.logger.error("[AgreementPdfService] Audit certificate generation error: #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace.first(5).join("\n"))
+    nil
+  end
+
+  def section_header(pdf, title)
+    pdf.fill_color '1e3a5f'
+    pdf.font('Helvetica', style: :bold, size: 11) do
+      pdf.text title
+    end
+    pdf.stroke_color '3b82f6'
+    pdf.line_width = 1.5
+    pdf.stroke_horizontal_rule
+    pdf.move_down 8
+    pdf.fill_color '333333'
+    pdf.line_width = 1
+  end
+
+  def detail_table(pdf, rows)
+    pdf.table(rows, width: pdf.bounds.width, cell_style: { size: 9, padding: [3, 5], border_width: 0 }) do |t|
+      t.column(0).font_style = :bold
+      t.column(0).text_color = '64748b'
+      t.column(0).width = 160
+      t.column(1).text_color = '1e293b'
+    end
+  end
+
+  def format_audit_action(action)
+    {
+      'created' => 'Agreement Created',
+      'sent' => 'Sent for Signing',
+      'viewed' => 'Document Viewed',
+      'signed' => 'Signature Applied',
+      'declined' => 'Signing Declined',
+      'voided' => 'Agreement Voided',
+      'completed' => 'All Signatures Complete',
+      'reminder_sent' => 'Reminder Sent',
+      'expired' => 'Agreement Expired',
+      'downloaded' => 'Document Downloaded',
+      'sealed' => 'Document Sealed',
+      'prepared_signature' => 'Prepared Signature',
+      'field_completed' => 'Field Completed',
+      'attachment_added' => 'Attachment Added',
+      'attachment_removed' => 'Attachment Removed',
+      'signer_added' => 'Signer Added',
+      'signer_removed' => 'Signer Removed'
+    }[action.to_s] || action.to_s.titleize
   end
 
   def log_sealed!
