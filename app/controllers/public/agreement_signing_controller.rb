@@ -157,19 +157,19 @@ module Public
       branding = { company_name: 'Platform DMS', logo_url: nil, primary_color: '#3b82f6' }
 
       # Platform
-      platform_b = Setting.get('platform', nil, 'branding', {})
+      platform_b = Setting.get('Platform', 0, 'branding', {})
       merge_brand!(branding, platform_b) if platform_b.is_a?(Hash)
 
       # Company
       if company
-        company_b = Setting.get('company', company.id, 'branding', {})
+        company_b = Setting.get('Company', company.id, 'branding', {})
         merge_brand!(branding, company_b) if company_b.is_a?(Hash)
         branding[:company_name] = company.name if company.name.present?
       end
 
       # Location (highest priority)
       if location_id.present?
-        location_b = Setting.get('location', location_id, 'branding', {})
+        location_b = Setting.get('Location', location_id, 'branding', {})
         merge_brand!(branding, location_b) if location_b.is_a?(Hash)
       end
 

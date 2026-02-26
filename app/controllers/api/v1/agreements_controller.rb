@@ -46,17 +46,18 @@ module Api
           agreements = agreements.where('agreements.expires_at <= ?', params[:expires_before])
         end
 
-        # Stats BEFORE status filter & search (tiles show totals within date range)
+        # Stats BEFORE status filter & search — 1 GROUP BY query instead of 9 COUNT queries
+        status_counts = agreements.group(:status).count
         stats = {
-          total: agreements.count,
-          draft: agreements.where(status: 'draft').count,
-          sent: agreements.where(status: 'sent').count,
-          viewed: agreements.where(status: 'viewed').count,
-          partially_signed: agreements.where(status: 'partially_signed').count,
-          completed: agreements.where(status: 'completed').count,
-          expired: agreements.where(status: 'expired').count,
-          voided: agreements.where(status: 'voided').count,
-          declined: agreements.where(status: 'declined').count
+          total: status_counts.values.sum,
+          draft: status_counts['draft'] || 0,
+          sent: status_counts['sent'] || 0,
+          viewed: status_counts['viewed'] || 0,
+          partially_signed: status_counts['partially_signed'] || 0,
+          completed: status_counts['completed'] || 0,
+          expired: status_counts['expired'] || 0,
+          voided: status_counts['voided'] || 0,
+          declined: status_counts['declined'] || 0
         }
 
         # Status filter AFTER stats (clicking a tile doesn't change tile counts)
@@ -80,9 +81,10 @@ module Api
         page = (params[:page] || 1).to_i
         per_page = [(params[:per_page] || 50).to_i, 200].min
         total = agreements.count
-        agreements = agreements.offset((page - 1) * per_page).limit(per_page)
-
-        agreements = agreements.includes(:agreement_signers, :prepared_by, :location)
+        agreements = agreements
+          .offset((page - 1) * per_page)
+          .limit(per_page)
+          .includes(:agreement_signers, :prepared_by, :location, :contact, :account, :deal)
 
         render json: {
           items: agreements.map { |a| agreement_json(a) },

@@ -217,17 +217,17 @@ class SealAgreementJob < ApplicationJob
   def load_branding(agreement)
     branding = { company_name: 'Platform DMS', logo_url: nil, primary_color: '#3b82f6' }
 
-    platform_b = Setting.get('platform', nil, 'branding', {})
+    platform_b = Setting.get('Platform', 0, 'branding', {})
     merge_branding!(branding, platform_b) if platform_b.is_a?(Hash)
 
     if agreement.company.present?
-      company_b = Setting.get('company', agreement.company_id, 'branding', {})
+      company_b = Setting.get('Company', agreement.company_id, 'branding', {})
       merge_branding!(branding, company_b) if company_b.is_a?(Hash)
       branding[:company_name] = agreement.company.name if agreement.company.name.present?
     end
 
     if agreement.location_id.present?
-      location_b = Setting.get('location', agreement.location_id, 'branding', {})
+      location_b = Setting.get('Location', agreement.location_id, 'branding', {})
       merge_branding!(branding, location_b) if location_b.is_a?(Hash)
     end
 

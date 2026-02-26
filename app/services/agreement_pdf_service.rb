@@ -11,6 +11,12 @@ class AgreementPdfService
 
   # Main entry point: stamp signatures + field values onto PDF, upload sealed version
   def seal_document
+    # Idempotency guard — if already sealed (e.g. job killed mid-run and retried), skip
+    if @agreement.sealed_document_url.present?
+      Rails.logger.info("[AgreementPdfService] Agreement #{@agreement.id} already sealed, skipping")
+      return @agreement.sealed_document_url
+    end
+
     Rails.logger.info("[AgreementPdfService] Sealing agreement #{@agreement.id}")
 
     source_url = effective_document_url
@@ -33,8 +39,10 @@ class AgreementPdfService
     Rails.logger.info("[AgreementPdfService] Downloaded #{source_pdf_data.size} bytes")
 
     begin
-      # Load source PDF
+      # Load source PDF and free the raw bytes immediately — no need to hold both
       source_pdf = CombinePDF.parse(source_pdf_data)
+      source_pdf_data = nil  # GC hint: release raw download bytes
+      GC.compact rescue nil
       page_count = source_pdf.pages.count
       Rails.logger.info("[AgreementPdfService] Parsed PDF: #{page_count} pages")
 
@@ -92,9 +100,11 @@ class AgreementPdfService
         Rails.logger.error("[AgreementPdfService] Audit certificate generation failed (non-fatal): #{e.message}")
       end
 
-      # Generate sealed PDF data
+      # Generate sealed PDF data and release the parsed PDF tree
       sealed_data = source_pdf.to_pdf
-      Rails.logger.info("[AgreementPdfService] Sealed PDF: #{sealed_data.size} bytes (original: #{source_pdf_data.size} bytes)")
+      source_pdf = nil  # GC hint: release parsed PDF object tree
+      GC.compact rescue nil
+      Rails.logger.info("[AgreementPdfService] Sealed PDF: #{sealed_data.size} bytes")
 
       # Upload to S3 using the same service the rest of the app uses
       sealed_url = upload_sealed_pdf(sealed_data)
