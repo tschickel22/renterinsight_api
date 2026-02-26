@@ -245,8 +245,8 @@ class Agreement < ApplicationRecord
     else return
     end
 
-    WebhookService.trigger(
-      company: company,
+    WebhookService.fire(
+      company_id: company.id,
       event: event,
       payload: as_json(
         only: [:id, :title, :agreement_number, :status, :category, :sent_at, :completed_at, :expires_at],
