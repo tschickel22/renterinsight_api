@@ -16,7 +16,8 @@ class Api::V1::OauthEmailController < ApplicationController
     scope_id   = params[:scope_id]
     return_url = params[:return_url]
 
-    client_id = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+    client_id = ENV["#{provider.upcase}_OAUTH_CLIENT_ID"] ||
+                Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
     return render json: { error: "#{provider} OAuth not configured" }, status: :unprocessable_entity if client_id.blank?
 
     key       = Rails.application.secret_key_base[0..31]
@@ -76,8 +77,10 @@ class Api::V1::OauthEmailController < ApplicationController
       provider      = state_data['provider']
       scope_type    = state_data['scope_type']
       scope_id      = state_data['scope_id']
-      client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
-      client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+      client_id     = ENV["#{provider.upcase}_OAUTH_CLIENT_ID"] ||
+                      Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+      client_secret = ENV["#{provider.upcase}_OAUTH_CLIENT_SECRET"] ||
+                      Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
 
       # Exchange code for tokens
       token_url = case provider
