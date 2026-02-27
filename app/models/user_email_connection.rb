@@ -358,9 +358,7 @@ class UserEmailConnection < ApplicationRecord
       token = refreshed if refreshed
     end
 
-    # Build XOAUTH2 string per RFC: "user={email}\x01auth=Bearer {token}\x01\x01"
-    xoauth2_string = "user=#{email}\x01auth=Bearer #{token}\x01\x01"
-    imap.authenticate('XOAUTH2', xoauth2_string)
+    imap.authenticate('XOAUTH2', email, token)
   end
 
   # Refresh OAuth token and persist
