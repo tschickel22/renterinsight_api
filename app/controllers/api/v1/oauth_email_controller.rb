@@ -44,7 +44,7 @@ class Api::V1::OauthEmailController < ApplicationController
               client_id:     client_id,
               response_type: 'code',
               redirect_uri:  REDIRECT_URI,
-              scope:         'offline_access https://outlook.office.com/SMTP.Send https://outlook.office365.com/IMAP.AccessAsUser.All User.Read',
+              scope:         'offline_access https://outlook.office365.com/SMTP.Send https://outlook.office365.com/IMAP.AccessAsUser.All User.Read',
               state:         state,
               response_mode: 'query'
             }
@@ -92,13 +92,19 @@ class Api::V1::OauthEmailController < ApplicationController
                   when 'google'    then 'https://oauth2.googleapis.com/token'
                   end
 
-      tokens = http_post_form(token_url, {
+      token_params = {
         client_id:     client_id,
         client_secret: client_secret,
         code:          params[:code],
         redirect_uri:  REDIRECT_URI,
         grant_type:    'authorization_code'
-      })
+      }
+      # Microsoft requires scope in the token exchange when multiple resource domains are used
+      if provider == 'microsoft'
+        token_params[:scope] = 'offline_access https://outlook.office365.com/SMTP.Send https://outlook.office365.com/IMAP.AccessAsUser.All User.Read'
+      end
+
+      tokens = http_post_form(token_url, token_params)
 
       Rails.logger.info "[OAuthEmail] Token exchange response keys: #{tokens.keys.inspect}"
       Rails.logger.info "[OAuthEmail] Token exchange error: #{tokens['error'].inspect} - #{tokens['error_description'].inspect}" if tokens['error'].present?

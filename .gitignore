@@ -131,3 +131,5 @@ ActiveRecordBase.connection.active
 
 /config/credentials/production.key
 /vendor/bundle/
+
+/config/credentials/development.key
