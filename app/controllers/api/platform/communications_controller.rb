@@ -227,6 +227,8 @@ module Api
           configure_action_mailer_ses(email_config)
         when :sendgrid
           configure_action_mailer_sendgrid(email_config)
+        when :oauth_microsoft, :oauth_google
+          configure_action_mailer_oauth(email_config)
         else
           Rails.logger.warn "[Platform::CommunicationsController] Unknown email provider: #{provider}, falling back to SMTP"
           configure_action_mailer_smtp(email_config)
@@ -430,28 +432,49 @@ module Api
       def fetch_user_email_settings
         return {} unless current_user
         return {} unless current_user.respond_to?(:has_email_connection?) && current_user.has_email_connection?
-        
-        connection = current_user.user_email_connection
-        return {} unless connection&.smtp_credentials_valid?
-        
-        Rails.logger.info "[fetch_user_email_settings] User #{current_user.email} has email connection configured"
-        
-        {
-          communications: {
-            email: {
-              provider: :smtp,
-              isEnabled: true,
-              fromEmail: connection.email_address,
-              fromName: current_user.name || current_user.email,
-              smtpHost: connection.smtp_host,
-              smtpPort: connection.smtp_port,
-              smtpUsername: connection.smtp_username,
-              smtpPassword: connection.smtp_password,
-              smtpAuthentication: 'plain',
-              smtpEnableStarttls: true
+
+        connection = current_user.default_email_connection
+        return {} unless connection&.is_active
+
+        Rails.logger.info "[fetch_user_email_settings] User #{current_user.email} has #{connection.provider} connection: #{connection.email_address}"
+
+        if connection.oauth_provider?
+          oauth_type = connection.provider == 'oauth_gmail' ? 'google' : 'microsoft'
+          {
+            communications: {
+              email: {
+                provider: :"oauth_#{oauth_type}",
+                isEnabled: true,
+                fromEmail: connection.email_address,
+                fromName: connection.display_name || current_user.name || current_user.email,
+                oauthProvider: oauth_type,
+                oauthEmail: connection.email_address,
+                oauthAccessToken: connection.oauth_token_encrypted,
+                oauthRefreshToken: connection.oauth_refresh_token_encrypted,
+                oauthExpiresAt: connection.oauth_expires_at&.iso8601
+              }
             }
           }
-        }
+        elsif connection.smtp_credentials_valid?
+          {
+            communications: {
+              email: {
+                provider: :smtp,
+                isEnabled: true,
+                fromEmail: connection.email_address,
+                fromName: connection.display_name || current_user.name || current_user.email,
+                smtpHost: connection.smtp_host,
+                smtpPort: connection.smtp_port,
+                smtpUsername: connection.smtp_username,
+                smtpPassword: connection.smtp_password,
+                smtpAuthentication: (connection.smtp_authentication || 'plain'),
+                smtpEnableStarttls: true
+              }
+            }
+          }
+        else
+          {}
+        end
       rescue => e
         Rails.logger.warn("[fetch_user_email_settings] Error: #{e.message}")
         {}
@@ -550,10 +573,10 @@ module Api
 
       def email_configured?(config)
         is_enabled = config[:isEnabled] || config['isEnabled']
-        from_email = config[:fromEmail] || config['fromEmail']
+        from_email = config[:fromEmail] || config['fromEmail'] || config[:oauthEmail] || config['oauthEmail']
         provider = config[:provider] || config['provider']
         smtp_host = config[:smtpHost] || config['smtpHost']
-        
+
         is_enabled == true &&
         from_email.present? &&
         (provider.present? || smtp_host.present?)
@@ -697,6 +720,80 @@ module Api
         Rails.logger.error(e.backtrace.first(5).join("\n"))
       end
       
+      # Configure ActionMailer for OAuth (Microsoft/Google) via SMTP + XOAUTH2
+      def configure_action_mailer_oauth(email_settings)
+        oauth_provider = email_settings['oauthProvider'] || email_settings[:oauthProvider]
+        oauth_email    = email_settings['oauthEmail'] || email_settings[:oauthEmail]
+        access_token   = email_settings['oauthAccessToken'] || email_settings[:oauthAccessToken]
+
+        # Refresh token if near expiry
+        oauth_expires = email_settings['oauthExpiresAt'] || email_settings[:oauthExpiresAt]
+        if oauth_expires.present?
+          expires_at = Time.parse(oauth_expires.to_s) rescue nil
+          if expires_at && expires_at <= 5.minutes.from_now
+            refresh_token = email_settings['oauthRefreshToken'] || email_settings[:oauthRefreshToken]
+            refreshed = refresh_oauth_access_token_for_send(oauth_provider, refresh_token)
+            access_token = refreshed if refreshed
+          end
+        end
+
+        smtp_host, smtp_port = case oauth_provider.to_s
+                               when 'microsoft' then ['smtp.office365.com', 587]
+                               when 'google'    then ['smtp.gmail.com', 587]
+                               else ['smtp.gmail.com', 587]
+                               end
+
+        smtp_config = {
+          address: smtp_host,
+          port: smtp_port,
+          user_name: oauth_email,
+          password: access_token,
+          authentication: :xoauth2,
+          enable_starttls_auto: true
+        }
+
+        ActionMailer::Base.delivery_method = :smtp
+        ActionMailer::Base.smtp_settings = smtp_config
+        ActionMailer::Base.perform_deliveries = true
+        ActionMailer::Base.raise_delivery_errors = true
+
+        Rails.logger.info("📧 ActionMailer OAuth SMTP configured: #{smtp_host}:#{smtp_port} (user: #{oauth_email}, provider: #{oauth_provider})")
+      rescue StandardError => e
+        Rails.logger.error("❌ Failed to configure ActionMailer OAuth: #{e.message}")
+        Rails.logger.error(e.backtrace.first(5).join("\n"))
+      end
+
+      def refresh_oauth_access_token_for_send(provider, refresh_token)
+        return nil if refresh_token.blank?
+
+        token_url = case provider.to_s
+                    when 'microsoft' then 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+                    when 'google'    then 'https://oauth2.googleapis.com/token'
+                    else return nil
+                    end
+
+        client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+        client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+
+        uri = URI(token_url)
+        req = Net::HTTP::Post.new(uri)
+        req.set_form_data(
+          client_id:     client_id,
+          client_secret: client_secret,
+          refresh_token: refresh_token,
+          grant_type:    'refresh_token'
+        )
+        res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+        tokens = JSON.parse(res.body)
+
+        return nil if tokens['error'].present?
+
+        tokens['access_token']
+      rescue => e
+        Rails.logger.error "[Platform::CommunicationsController] OAuth token refresh failed: #{e.message}"
+        nil
+      end
+
       # Configure ActionMailer for SendGrid
       def configure_action_mailer_sendgrid(email_settings)
         smtp_config = {
@@ -721,7 +818,7 @@ module Api
 
       # Send email via ActionMailer like password reset does
       def send_email_via_action_mailer(email_params, config, reply_to: nil)
-        from_email = config['fromEmail'] || config[:fromEmail]
+        from_email = config['fromEmail'] || config[:fromEmail] || config['oauthEmail'] || config[:oauthEmail]
         from_name = config['fromName'] || config[:fromName] || 'RenterInsight'
         
         Rails.logger.info "[send_email_via_action_mailer] Sending to #{email_params[:to]} from #{from_email}"

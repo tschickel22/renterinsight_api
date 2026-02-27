@@ -68,6 +68,8 @@ module Api
             return
           end
           
+          # Nullify template references in nurture_steps first to avoid FK violation
+          NurtureStep.where(template_id: template.id).update_all(template_id: nil)
           template.destroy!
           head :no_content
         end
@@ -97,6 +99,8 @@ module Api
           ActiveRecord::Base.transaction do
             # Delete templates (scoped to company)
             if delete_ids.any?
+              # Nullify template references in nurture_steps first to avoid FK violation
+              NurtureStep.where(template_id: delete_ids).update_all(template_id: nil)
               @company.templates.where(id: delete_ids).destroy_all
             end
             
@@ -195,6 +199,13 @@ module Api
               }
             end
           end
+
+          # Find nurture sequences that use this template (via nurture_steps)
+          using_sequences = NurtureSequence
+            .joins(:nurture_steps)
+            .where(nurture_steps: { template_id: template.id })
+            .distinct
+            .pluck(:name)
           
           {
             id: template.id,
@@ -206,6 +217,8 @@ module Api
             isActive: template.is_active,
             is_active: template.is_active,
             attachments: attachments_data,
+            usageCount: using_sequences.size,
+            usedInSequences: using_sequences,
             createdAt: template.created_at&.iso8601,
             updatedAt: template.updated_at&.iso8601
           }

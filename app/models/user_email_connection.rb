@@ -243,57 +243,73 @@ class UserEmailConnection < ApplicationRecord
   # IMAP Methods for Sent Email Sync
   # ========================================
   
-  # Derive IMAP server from SMTP server
+  # Derive IMAP server from SMTP server or OAuth provider
   def imap_server
-    return nil unless smtp_provider? && smtp_host.present?
-    
-    case smtp_host.downcase
-    when 'smtp.gmail.com'
-      'imap.gmail.com'
-    when 'smtp.office365.com', 'smtp-mail.outlook.com', 'outlook.office365.com'
-      'outlook.office365.com'
-    when /^smtp\./
-      # Generic replacement: smtp.example.com → imap.example.com
-      smtp_host.gsub(/^smtp\./, 'imap.')
-    else
-      # Unknown provider - can't derive IMAP
-      nil
+    if oauth_provider?
+      case provider
+      when 'oauth_gmail'  then 'imap.gmail.com'
+      when 'oauth_outlook' then 'outlook.office365.com'
+      end
+    elsif smtp_provider? && smtp_host.present?
+      case smtp_host.downcase
+      when 'smtp.gmail.com'
+        'imap.gmail.com'
+      when 'smtp.office365.com', 'smtp-mail.outlook.com', 'outlook.office365.com'
+        'outlook.office365.com'
+      when /^smtp\./
+        smtp_host.gsub(/^smtp\./, 'imap.')
+      end
     end
   end
-  
+
   # IMAP port (standard SSL port)
   def imap_port
-    993  # Standard IMAP over SSL port
+    993
   end
-  
+
   # Determine sent folder name based on provider
   def sent_folder_names
-    return [] unless smtp_host.present?
-    
-    case smtp_host.downcase
-    when 'smtp.gmail.com'
-      ['[Gmail]/Sent Mail', 'Sent', '[Gmail]/Sent']
-    when 'smtp.office365.com', 'smtp-mail.outlook.com', 'outlook.office365.com'
-      ['Sent Items', 'Sent']
+    if oauth_provider?
+      case provider
+      when 'oauth_gmail'   then ['[Gmail]/Sent Mail', 'Sent', '[Gmail]/Sent']
+      when 'oauth_outlook' then ['Sent Items', 'Sent']
+      else ['Sent', 'Sent Items', 'Sent Messages']
+      end
+    elsif smtp_host.present?
+      case smtp_host.downcase
+      when 'smtp.gmail.com'
+        ['[Gmail]/Sent Mail', 'Sent', '[Gmail]/Sent']
+      when 'smtp.office365.com', 'smtp-mail.outlook.com', 'outlook.office365.com'
+        ['Sent Items', 'Sent']
+      else
+        ['Sent', 'Sent Items', 'Sent Messages']
+      end
     else
-      ['Sent', 'Sent Items', 'Sent Messages']
+      []
     end
   end
-  
+
   # Check if IMAP is available for this connection
   def imap_available?
-    smtp_provider? && 
-    smtp_credentials_valid? && 
-    imap_server.present?
+    if oauth_provider?
+      email_address.present? && oauth_token_encrypted.present? && imap_server.present?
+    else
+      smtp_provider? && smtp_credentials_valid? && imap_server.present?
+    end
   end
   
   # Test IMAP connection and return sent folder name
   def test_imap_connection!
     return { success: false, error: 'IMAP not available for this connection' } unless imap_available?
-    
+
     begin
       imap = Net::IMAP.new(imap_server, imap_port, true)
-      imap.login(smtp_username, smtp_password_encrypted)
+
+      if oauth_provider?
+        imap_authenticate_oauth!(imap)
+      else
+        imap.login(smtp_username, smtp_password_encrypted)
+      end
       
       # Try to find sent folder
       sent_folder = nil
@@ -331,8 +347,61 @@ class UserEmailConnection < ApplicationRecord
     end
   end
   
+  # Authenticate to IMAP using XOAUTH2 for OAuth connections
+  def imap_authenticate_oauth!(imap)
+    token = oauth_token_encrypted
+    email = email_address
+
+    # Refresh token if expired
+    if oauth_token_expired? && oauth_refresh_token_encrypted.present?
+      refreshed = refresh_oauth_token!
+      token = refreshed if refreshed
+    end
+
+    # Build XOAUTH2 string per RFC: "user={email}\x01auth=Bearer {token}\x01\x01"
+    xoauth2_string = "user=#{email}\x01auth=Bearer #{token}\x01\x01"
+    imap.authenticate('XOAUTH2', xoauth2_string)
+  end
+
+  # Refresh OAuth token and persist
+  def refresh_oauth_token!
+    oauth_type = provider == 'oauth_gmail' ? :google : :microsoft
+
+    token_url = case oauth_type
+                when :microsoft then 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+                when :google    then 'https://oauth2.googleapis.com/token'
+                end
+
+    client_id     = Rails.application.credentials.dig(:oauth, oauth_type, :client_id)
+    client_secret = Rails.application.credentials.dig(:oauth, oauth_type, :client_secret)
+
+    uri = URI(token_url)
+    req = Net::HTTP::Post.new(uri)
+    req.set_form_data(
+      client_id:     client_id,
+      client_secret: client_secret,
+      refresh_token: oauth_refresh_token_encrypted,
+      grant_type:    'refresh_token'
+    )
+    res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+    tokens = JSON.parse(res.body)
+
+    return nil if tokens['error'].present?
+
+    # Persist new tokens
+    update!(
+      oauth_token_encrypted: tokens['access_token'],
+      oauth_expires_at: Time.current + tokens['expires_in'].to_i.seconds
+    )
+
+    tokens['access_token']
+  rescue => e
+    Rails.logger.error "[UserEmailConnection#refresh_oauth_token!] Failed: #{e.message}"
+    nil
+  end
+
   private
-  
+
   def set_company_from_user
     self.company_id ||= user&.company_id
   end

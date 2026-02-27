@@ -58,13 +58,13 @@ class LocationSettingsResolver
   
   def determine_email_source(location, company, platform)
     # Check if location has email configured
-    if location.dig('email', 'isEnabled') == true || location.dig('email', 'fromEmail').present?
+    if location.dig('email', 'isEnabled') == true || location.dig('email', 'fromEmail').present? || location.dig('email', 'oauthEmail').present?
       'location'
-    # Check if company has email configured  
-    elsif company.dig('email', 'isEnabled') == true || company.dig('email', 'fromEmail').present?
+    # Check if company has email configured
+    elsif company.dig('email', 'isEnabled') == true || company.dig('email', 'fromEmail').present? || company.dig('email', 'oauthEmail').present?
       'company'
     # Fall back to platform
-    elsif platform.dig('email', 'isEnabled') == true || platform.dig('email', 'fromEmail').present?
+    elsif platform.dig('email', 'isEnabled') == true || platform.dig('email', 'fromEmail').present? || platform.dig('email', 'oauthEmail').present?
       'platform'
     else
       'none'

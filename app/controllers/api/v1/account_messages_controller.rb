@@ -143,16 +143,25 @@ module Api
         }, status: :unprocessable_entity
       end
 
-      # Get effective communication settings (company overrides platform)
+      # Get effective communication settings with waterfall:
+      # Location → Company → Platform
       def get_effective_settings
         platform_settings = fetch_platform_settings
         company_settings = fetch_company_settings
-        
-        # Deep merge: company settings override platform settings
-        merge_settings(platform_settings, company_settings)
+        location_settings = fetch_location_settings
+
+        # Start with platform (lowest priority)
+        result = platform_settings.deep_dup
+
+        # Merge company (overrides platform)
+        result = merge_settings(result, company_settings) if company_settings.present?
+
+        # Merge location (overrides company)
+        result = merge_settings(result, location_settings) if location_settings.present?
+
+        result
       rescue => e
         Rails.logger.error("[AccountMessagesController] Error fetching settings: #{e.message}")
-        # Return safe defaults
         {
           communications: {
             email: { isEnabled: false },
@@ -162,65 +171,71 @@ module Api
       end
 
       def fetch_platform_settings
-        # Make internal request to platform settings
-        response = Faraday.get("#{request.base_url}/api/platform/settings") rescue nil
-        return {} unless response&.success?
-        
-        JSON.parse(response.body, symbolize_names: true) rescue {}
+        stored = Setting.get('Platform', 0, 'communications')
+        return {} unless stored.is_a?(Hash)
+
+        { communications: stored.deep_symbolize_keys }
       rescue => e
         Rails.logger.warn("[AccountMessagesController] Could not fetch platform settings: #{e.message}")
-        # Return default platform settings
-        {
-          communications: {
-            email: {
-              provider: 'smtp',
-              fromEmail: 'platform@renterinsight.com',
-              fromName: 'RenterInsight Platform',
-              isEnabled: true
-            },
-            sms: {
-              provider: 'twilio',
-              fromNumber: '+1234567890',
-              isEnabled: false
-            }
-          }
-        }
+        {}
       end
 
       def fetch_company_settings
-        # Make internal request to company settings
-        response = Faraday.get("#{request.base_url}/api/company/settings") rescue nil
-        return {} unless response&.success?
-        
-        JSON.parse(response.body, symbolize_names: true) rescue {}
+        return {} unless @company
+
+        stored = Setting.get('Company', @company.id, 'communications')
+        return {} unless stored.is_a?(Hash)
+
+        { communications: stored.deep_symbolize_keys }
       rescue => e
         Rails.logger.warn("[AccountMessagesController] Could not fetch company settings: #{e.message}")
         {}
       end
 
-      def merge_settings(platform, company)
-        result = platform.deep_dup
-        
-        if company.dig(:communications, :email)
+      def fetch_location_settings
+        location_id = Current.location_id
+        return {} unless location_id.present?
+
+        stored = Setting.get('Location', location_id, 'communications')
+        return {} unless stored.is_a?(Hash)
+
+        { communications: stored.deep_symbolize_keys }
+      rescue => e
+        Rails.logger.warn("[AccountMessagesController] Could not fetch location settings: #{e.message}")
+        {}
+      end
+
+      def merge_settings(base, override)
+        base = base.deep_symbolize_keys if base.respond_to?(:deep_symbolize_keys)
+        override = override.deep_symbolize_keys if override.respond_to?(:deep_symbolize_keys)
+
+        result = base.deep_dup
+
+        if override.dig(:communications, :email)
           result[:communications] ||= {}
           result[:communications][:email] ||= {}
-          result[:communications][:email].merge!(company[:communications][:email])
+          result[:communications][:email] = result[:communications][:email].deep_merge(override[:communications][:email])
         end
-        
-        if company.dig(:communications, :sms)
+
+        if override.dig(:communications, :sms)
           result[:communications] ||= {}
           result[:communications][:sms] ||= {}
-          result[:communications][:sms].merge!(company[:communications][:sms])
+          result[:communications][:sms] = result[:communications][:sms].deep_merge(override[:communications][:sms])
         end
-        
+
         result
       end
 
       # Check if email is properly configured
       def email_configured?(config)
-        config[:isEnabled] == true &&
-        config[:fromEmail].present? &&
-        (config[:provider].present? || config[:smtpHost].present?)
+        is_enabled = config[:isEnabled] || config['isEnabled']
+        from_email = config[:fromEmail] || config['fromEmail'] || config[:oauthEmail] || config['oauthEmail']
+        provider = config[:provider] || config['provider']
+        smtp_host = config[:smtpHost] || config['smtpHost']
+
+        is_enabled == true &&
+        from_email.present? &&
+        (provider.present? || smtp_host.present?)
       end
 
       # Check if SMS is properly configured

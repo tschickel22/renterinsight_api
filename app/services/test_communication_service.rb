@@ -36,6 +36,8 @@ class TestCommunicationService
       test_sendgrid(decrypted_settings)
     when :aws_ses
       test_aws_ses(decrypted_settings)
+    when :oauth_microsoft, :oauth_google
+      test_oauth_smtp(decrypted_settings)
     else
       { success: false, error: "Unknown email provider: #{provider}" }
     end
@@ -159,6 +161,89 @@ class TestCommunicationService
   rescue => e
     Rails.logger.error "[TestCommunicationService] AWS SES test failed: #{e.message}"
     { success: false, error: e.message, provider: 'aws_ses' }
+  end
+
+  def test_oauth_smtp(settings)
+    require 'net/smtp'
+
+    oauth_provider = (settings[:oauthProvider] || settings['oauthProvider']).to_s
+    smtp_host, smtp_port = case oauth_provider
+                           when 'microsoft' then ['smtp.office365.com', 587]
+                           when 'google'    then ['smtp.gmail.com', 587]
+                           else return { success: false, error: "Unknown OAuth provider: #{oauth_provider}" }
+                           end
+
+    email        = settings[:oauthEmail] || settings['oauthEmail'] || settings[:fromEmail] || settings['fromEmail']
+    access_token = settings[:oauthAccessToken] || settings['oauthAccessToken']
+
+    if email.blank?
+      return { success: false, error: 'OAuth email address is missing. Please reconnect your account.', provider: "oauth_#{oauth_provider}" }
+    end
+
+    if access_token.blank?
+      return { success: false, error: 'OAuth access token is missing. Please reconnect your account to re-authorize.', provider: "oauth_#{oauth_provider}" }
+    end
+
+    # Refresh token if near expiry
+    oauth_expires = settings[:oauthExpiresAt] || settings['oauthExpiresAt']
+    if oauth_expires.present?
+      expires_at = Time.parse(oauth_expires.to_s) rescue nil
+      if expires_at && expires_at <= 5.minutes.from_now
+        refresh_token = settings[:oauthRefreshToken] || settings['oauthRefreshToken']
+        refreshed = refresh_oauth_access_token(oauth_provider, refresh_token)
+        access_token = refreshed if refreshed
+      end
+    end
+
+    Rails.logger.info "[TestCommunicationService] OAuth config keys: #{settings.keys.inspect}"
+    Rails.logger.info "[TestCommunicationService] oauthEmail value: #{email.inspect}"
+    Rails.logger.info "[TestCommunicationService] Testing OAuth SMTP: #{email}@#{smtp_host}:#{smtp_port}"
+
+    smtp = Net::SMTP.new(smtp_host, smtp_port)
+    smtp.enable_starttls_auto
+    smtp.start(smtp_host, email, access_token, :xoauth2) do |connection|
+      Rails.logger.info "[TestCommunicationService] OAuth SMTP connection successful"
+    end
+
+    {
+      success: true,
+      message: "Successfully connected to #{smtp_host}:#{smtp_port} via XOAUTH2",
+      provider: "oauth_#{oauth_provider}"
+    }
+  rescue => e
+    Rails.logger.error "[TestCommunicationService] OAuth SMTP test failed: #{e.message}"
+    { success: false, error: e.message, provider: "oauth_#{oauth_provider}" }
+  end
+
+  def refresh_oauth_access_token(provider, refresh_token)
+    return nil if refresh_token.blank?
+
+    token_url = case provider
+                when 'microsoft' then 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+                when 'google'    then 'https://oauth2.googleapis.com/token'
+                else return nil
+                end
+
+    client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+    client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+
+    uri = URI(token_url)
+    req = Net::HTTP::Post.new(uri)
+    req.set_form_data(
+      client_id:     client_id,
+      client_secret: client_secret,
+      refresh_token: refresh_token,
+      grant_type:    'refresh_token'
+    )
+    res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+    tokens = JSON.parse(res.body)
+
+    return nil if tokens['error'].present?
+
+    tokens['access_token']
+  rescue => e
+    Rails.logger.error "[TestCommunicationService] OAuth token refresh failed: #{e.message}"
+    nil
   end
 
   def test_twilio(settings)

@@ -37,34 +37,30 @@ module Api
           Rails.logger.info "[CommunicationsController#send_email] Using user #{current_user.id} email connection"
           return send_email_via_user_connection
         end
-        
+
         # Check if email is configured (company/platform waterfall)
         settings = get_effective_settings
         email_config = settings.dig(:communications, :email) || settings.dig('communications', 'email') || {}
-        
-        Rails.logger.info "[CommunicationsController#send_email] Email config: #{email_config.inspect}"
-        Rails.logger.info "[CommunicationsController#send_email] Email configured check: #{email_configured?(email_config)}"
-        
+
+        Rails.logger.info "[CommunicationsController#send_email] Email config provider: #{email_config[:provider] || email_config['provider']}"
+
         unless email_configured?(email_config)
-          return render json: { 
-            ok: false, 
+          return render json: {
+            ok: false,
             success: false,
-            error: 'Email is not configured. Please configure email settings in Platform or Company Settings.',
-            debug: {
-              config: email_config,
-              has_provider: email_config[:provider].present? || email_config['provider'].present?,
-              has_from_email: email_config[:fromEmail].present? || email_config['fromEmail'].present?,
-              is_enabled: email_config[:isEnabled] || email_config['isEnabled']
-            }
+            error: 'Email is not configured. Please configure email settings in Platform or Company Settings.'
           }, status: :unprocessable_entity
         end
 
         # Support multiple parameter formats
         email_params = extract_email_params
-        
-        # Actually send the email via provider
-        send_result = send_email_via_provider(email_params, email_config)
-        
+
+        # Generate reply-to address for tracking
+        reply_to = generate_reply_to_address
+
+        # Actually send the email via provider (with reply_to)
+        send_result = send_email_via_provider(email_params, email_config, reply_to: reply_to)
+
         unless send_result[:success]
           return render json: {
             ok: false,
@@ -73,8 +69,9 @@ module Api
           }, status: :unprocessable_entity
         end
 
+        from_addr = email_config[:fromEmail] || email_config['fromEmail'] || email_config[:oauthEmail] || email_config['oauthEmail']
+
         # Only create communication log if we have a lead
-        # For test email (no lead), just return success without creating record
         if @lead.present?
           log = Communication.create!(
             communicable: @lead,
@@ -86,36 +83,36 @@ module Api
             status:     'sent',
             sent_at:    Time.current,
             to_address: email_params[:to],
-            from_address: email_config[:fromEmail],
+            from_address: from_addr,
+            reply_to:   reply_to,
             metadata:   build_email_metadata(email_params, email_config).merge(
               message_id: send_result[:message_id]
             )
           )
 
-          render json: { 
-            ok: true, 
+          render json: {
+            ok: true,
             success: true,
             id: log.id,
             messageId: send_result[:message_id],
-            provider: email_config[:provider] || 'smtp',
+            provider: email_config[:provider] || email_config['provider'] || 'smtp',
             communication: comm_log_json(log)
           }, status: :created
         else
-          # Test email without lead - email was sent successfully
-          render json: { 
-            ok: true, 
+          render json: {
+            ok: true,
             success: true,
             message: 'Test email sent successfully',
             messageId: send_result[:message_id],
-            provider: email_config[:provider] || 'smtp',
+            provider: email_config[:provider] || email_config['provider'] || 'smtp',
             to: email_params[:to],
-            from: email_config[:fromEmail]
+            from: from_addr
           }, status: :ok
         end
       rescue => e
         Rails.logger.error("[CommunicationsController#send_email] Error: #{e.message}")
-        render json: { 
-          ok: false, 
+        render json: {
+          ok: false,
           success: false,
           error: e.message,
           details: e.backtrace.first(3)
@@ -273,23 +270,33 @@ module Api
         end
       end
 
-      # Get effective communication settings (company overrides platform)
+      # Get effective communication settings with 4-level waterfall:
+      # User → Location → Company → Platform
       def get_effective_settings
         platform_settings = fetch_platform_settings
-        Rails.logger.info "[get_effective_settings] Platform settings: #{platform_settings.inspect}"
-        
         company_settings = fetch_company_settings
-        Rails.logger.info "[get_effective_settings] Company settings: #{company_settings.inspect}"
-        
-        # Deep merge: company settings override platform settings
-        result = merge_settings(platform_settings, company_settings)
-        Rails.logger.info "[get_effective_settings] Merged result: #{result.inspect}"
-        
+        location_settings = fetch_location_settings
+
+        Rails.logger.info "[get_effective_settings] Waterfall check:"
+        Rails.logger.info "  - Platform: #{platform_settings.dig(:communications, :email, :provider) || 'none'}"
+        Rails.logger.info "  - Company: #{company_settings.dig(:communications, :email, :provider) || 'none'}"
+        Rails.logger.info "  - Location: #{location_settings.dig(:communications, :email, :provider) || 'none'}"
+
+        # Start with platform (lowest priority)
+        result = platform_settings.deep_dup
+
+        # Merge company (overrides platform)
+        result = merge_settings(result, company_settings) if company_settings.present?
+
+        # Merge location (overrides company)
+        result = merge_settings(result, location_settings) if location_settings.present?
+
+        Rails.logger.info "[get_effective_settings] Merged result provider: #{result.dig(:communications, :email, :provider)}"
+
         result
       rescue => e
         Rails.logger.error("[CommunicationsController] Error fetching settings: #{e.message}")
         Rails.logger.error(e.backtrace.first(5).join("\n"))
-        # Return safe defaults
         {
           communications: {
             email: { isEnabled: false },
@@ -299,84 +306,58 @@ module Api
       end
 
       def fetch_platform_settings
-        # Fetch directly from database instead of HTTP request
         stored = Setting.get('Platform', 0, 'communications')
-        Rails.logger.info "[fetch_platform_settings] Raw stored value: #{stored.inspect}"
-        return {} unless stored
-        
-        # If stored is already a hash with the right structure, return it
-        if stored.is_a?(Hash)
-          result = {
-            communications: stored
-          }
-          Rails.logger.info "[fetch_platform_settings] Returning: #{result.inspect}"
-          return result
-        end
-        
-        {}
+        return {} unless stored.is_a?(Hash)
+
+        { communications: stored.deep_symbolize_keys }
       rescue => e
         Rails.logger.warn("[CommunicationsController] Could not fetch platform settings: #{e.message}")
-        # Return default platform settings
-        {
-          communications: {
-            email: {
-              provider: 'smtp',
-              fromEmail: 'platform@renterinsight.com',
-              fromName: 'RenterInsight Platform',
-              isEnabled: true
-            },
-            sms: {
-              provider: 'twilio',
-              fromNumber: '+1234567890',
-              isEnabled: false
-            }
-          }
-        }
+        {}
       end
 
       def fetch_company_settings
         return {} unless @company
-        
-        # Fetch directly from database using same cascade as company settings controller
-        # Layer 1: Try location settings first (if location context exists)
-        if Current.location_id.present?
-          location_settings = Setting.get('Location', Current.location_id, 'communications')
-          Rails.logger.info "[fetch_company_settings] Location settings (#{Current.location_id}): #{location_settings.inspect}"
-          return { communications: location_settings } if location_settings.present?
-        end
-        
-        # Layer 2: Fall back to company settings
-        company_settings = Setting.get('Company', @company.id, 'communications')
-        Rails.logger.info "[fetch_company_settings] Company settings (#{@company.id}): #{company_settings.inspect}"
-        return { communications: company_settings } if company_settings.present?
-        
-        # No company/location override
-        Rails.logger.info "[fetch_company_settings] No company or location settings found"
-        {}
+
+        stored = Setting.get('Company', @company.id, 'communications')
+        return {} unless stored.is_a?(Hash)
+
+        { communications: stored.deep_symbolize_keys }
       rescue => e
         Rails.logger.warn("[CommunicationsController] Could not fetch company settings: #{e.message}")
         {}
       end
 
-      def merge_settings(platform, company)
-        # Convert all keys to symbols for consistent access
-        platform = platform.deep_symbolize_keys if platform.respond_to?(:deep_symbolize_keys)
-        company = company.deep_symbolize_keys if company.respond_to?(:deep_symbolize_keys)
-        
-        result = platform.deep_dup
-        
-        if company.dig(:communications, :email)
+      def fetch_location_settings
+        location_id = Current.location_id
+        return {} unless location_id.present?
+
+        stored = Setting.get('Location', location_id, 'communications')
+        return {} unless stored.is_a?(Hash)
+
+        { communications: stored.deep_symbolize_keys }
+      rescue => e
+        Rails.logger.warn("[CommunicationsController] Could not fetch location settings: #{e.message}")
+        {}
+      end
+
+      def merge_settings(base, override)
+        base = base.deep_symbolize_keys if base.respond_to?(:deep_symbolize_keys)
+        override = override.deep_symbolize_keys if override.respond_to?(:deep_symbolize_keys)
+
+        result = base.deep_dup
+
+        if override.dig(:communications, :email)
           result[:communications] ||= {}
           result[:communications][:email] ||= {}
-          result[:communications][:email].merge!(company[:communications][:email])
+          result[:communications][:email] = result[:communications][:email].deep_merge(override[:communications][:email])
         end
-        
-        if company.dig(:communications, :sms)
+
+        if override.dig(:communications, :sms)
           result[:communications] ||= {}
           result[:communications][:sms] ||= {}
-          result[:communications][:sms].merge!(company[:communications][:sms])
+          result[:communications][:sms] = result[:communications][:sms].deep_merge(override[:communications][:sms])
         end
-        
+
         result
       end
 
@@ -384,10 +365,10 @@ module Api
       def email_configured?(config)
         # Handle both string and symbol keys
         is_enabled = config[:isEnabled] || config['isEnabled']
-        from_email = config[:fromEmail] || config['fromEmail']
+        from_email = config[:fromEmail] || config['fromEmail'] || config[:oauthEmail] || config['oauthEmail']
         provider = config[:provider] || config['provider']
         smtp_host = config[:smtpHost] || config['smtpHost']
-        
+
         is_enabled == true &&
         from_email.present? &&
         (provider.present? || smtp_host.present?)
@@ -589,23 +570,44 @@ module Api
       # Send email via user's personal email connection
       def send_email_via_user_connection
         email_params = extract_email_params
+        connection = current_user.default_email_connection
         user_config = CommunicationSettingsService.for_user(current_user).email_config
-        
-        Rails.logger.info "[send_email_via_user_connection] User #{current_user.id} config: #{user_config.except(:smtp_password).inspect}"
-        
-        # Build SMTP-style config from user email connection
-        smtp_config = {
-          smtpHost: user_config[:smtp_server],
-          smtpPort: user_config[:smtp_port],
-          smtpUsername: user_config[:smtp_username],
-          smtpPassword: user_config[:smtp_password],
-          fromEmail: user_config[:from_email],
-          fromName: user_config[:from_name] || current_user.full_name,
-          provider: 'smtp'
-        }
-        
-        send_result = send_email_via_smtp(email_params, smtp_config)
-        
+
+        Rails.logger.info "[send_email_via_user_connection] User #{current_user.id} provider: #{connection&.provider}, config: #{user_config.except(:smtp_password).inspect}"
+
+        # Generate reply-to address for tracking
+        reply_to = generate_reply_to_address
+
+        # Route based on connection type (SMTP vs OAuth)
+        if connection&.oauth_provider?
+          oauth_config = {
+            oauthProvider: connection.provider == 'oauth_gmail' ? 'google' : 'microsoft',
+            oauthEmail: connection.email_address,
+            oauthAccessToken: connection.oauth_token_encrypted,
+            oauthRefreshToken: connection.oauth_refresh_token_encrypted,
+            oauthExpiresAt: connection.oauth_expires_at&.iso8601,
+            fromEmail: connection.email_address,
+            fromName: connection.display_name || current_user.full_name,
+            provider: connection.provider == 'oauth_gmail' ? 'oauth_google' : 'oauth_microsoft'
+          }
+          send_result = send_email_via_oauth_smtp(email_params, oauth_config, reply_to: reply_to)
+          used_provider = oauth_config[:provider]
+        else
+          smtp_config = {
+            smtpHost: user_config[:smtp_server],
+            smtpPort: user_config[:smtp_port],
+            smtpUsername: user_config[:smtp_username],
+            smtpPassword: user_config[:smtp_password],
+            fromEmail: user_config[:from_email],
+            fromName: user_config[:from_name] || current_user.full_name,
+            provider: 'smtp'
+          }
+          send_result = send_email_via_smtp(email_params, smtp_config, reply_to: reply_to)
+          used_provider = 'smtp'
+        end
+
+        from_addr = user_config[:from_email] || connection&.email_address
+
         unless send_result[:success]
           return render json: {
             ok: false,
@@ -613,8 +615,7 @@ module Api
             error: send_result[:error] || 'Failed to send email via user connection'
           }, status: :unprocessable_entity
         end
-        
-        # Only create communication log if we have a lead
+
         if @lead.present?
           log = Communication.create!(
             communicable: @lead,
@@ -626,34 +627,35 @@ module Api
             status: 'sent',
             sent_at: Time.current,
             to_address: email_params[:to],
-            from_address: smtp_config[:fromEmail],
-            metadata: build_email_metadata(email_params, smtp_config).merge(
+            from_address: from_addr,
+            reply_to: reply_to,
+            metadata: build_email_metadata(email_params, { fromEmail: from_addr }).merge(
               message_id: send_result[:message_id],
               sent_by_user_id: current_user.id,
-              user_email_connection: true
+              user_email_connection: true,
+              provider: used_provider
             )
           )
-          
+
           render json: {
             ok: true,
             success: true,
             id: log.id,
             messageId: send_result[:message_id],
-            provider: 'smtp',
+            provider: used_provider,
             userEmailConnection: true,
             communication: comm_log_json(log)
           }, status: :created
         else
-          # Test email without lead
           render json: {
             ok: true,
             success: true,
             message: 'Test email sent via user connection',
             messageId: send_result[:message_id],
-            provider: 'smtp',
+            provider: used_provider,
             userEmailConnection: true,
             to: email_params[:to],
-            from: smtp_config[:fromEmail]
+            from: from_addr
           }, status: :ok
         end
       rescue => e
@@ -665,19 +667,21 @@ module Api
         }, status: :unprocessable_entity
       end
       
-      # Send email via provider (SMTP, Gmail, SendGrid, AWS SES)
-      def send_email_via_provider(email_params, config)
+      # Send email via provider (SMTP, Gmail, SendGrid, AWS SES, OAuth)
+      def send_email_via_provider(email_params, config, reply_to: nil)
         provider = (config[:provider] || config['provider'] || 'smtp').to_sym
-        
+
         case provider
         when :smtp
-          send_email_via_smtp(email_params, config)
+          send_email_via_smtp(email_params, config, reply_to: reply_to)
         when :gmail
-          send_email_via_gmail(email_params, config)
+          send_email_via_gmail(email_params, config, reply_to: reply_to)
         when :sendgrid
           send_email_via_sendgrid(email_params, config)
         when :aws_ses
           send_email_via_aws_ses(email_params, config)
+        when :oauth_microsoft, :oauth_google
+          send_email_via_oauth_smtp(email_params, config, reply_to: reply_to)
         else
           { success: false, error: "Unknown email provider: #{provider}" }
         end
@@ -687,33 +691,26 @@ module Api
       end
       
       # Send email via SMTP
-      def send_email_via_smtp(email_params, config)
+      def send_email_via_smtp(email_params, config, reply_to: nil)
         require 'net/smtp'
         require 'mail'
-        
+
         host = config[:smtpHost] || config['smtpHost']
         port = (config[:smtpPort] || config['smtpPort'] || 587).to_i
         username = config[:smtpUsername] || config['smtpUsername']
         raw_password = config[:smtpPassword] || config['smtpPassword']
-        
-        Rails.logger.info "[send_email_via_smtp] Raw password value: #{raw_password.inspect[0..60]}"
         password = decrypt_if_needed(raw_password)
-        Rails.logger.info "[send_email_via_smtp] Decrypted password length: #{password&.length || 'nil'}"
-        Rails.logger.info "[send_email_via_smtp] Password starts with 'encrypted:': #{password.to_s.start_with?('encrypted:')}"
-        Rails.logger.info "[send_email_via_smtp] First 4 chars of password: #{password.to_s[0..3] if password}..."
-        Rails.logger.info "[send_email_via_smtp] Last 4 chars of password: ...#{password.to_s[-4..-1] if password}"
-        
+
         from_email = config[:fromEmail] || config['fromEmail']
         from_name = config[:fromName] || config['fromName']
-        
-        Rails.logger.info "[send_email_via_smtp] Sending to #{email_params[:to]} via #{host}:#{port}"
-        
+
+        Rails.logger.info "[send_email_via_smtp] Sending to #{email_params[:to]} via #{host}:#{port}, reply_to: #{reply_to}"
+
         mail = Mail.new do
           from     "#{from_name} <#{from_email}>"
           to       email_params[:to]
           subject  email_params[:subject]
-          
-          # Support both HTML and text content
+
           if email_params[:content]&.include?('<html') || email_params[:content]&.include?('<body')
             html_part do
               content_type 'text/html; charset=UTF-8'
@@ -723,11 +720,11 @@ module Api
             body email_params[:content]
           end
         end
-        
-        # Add CC and BCC if present
+
+        mail.reply_to = reply_to if reply_to.present?
         mail.cc = email_params[:cc] if email_params[:cc].present?
         mail.bcc = email_params[:bcc] if email_params[:bcc].present?
-        
+
         mail.delivery_method :smtp, {
           address: host,
           port: port,
@@ -736,54 +733,153 @@ module Api
           authentication: :plain,
           enable_starttls_auto: port == 587
         }
-        
+
         mail.deliver!
-        
+
         Rails.logger.info "[send_email_via_smtp] Success: #{mail.message_id}"
-        { 
-          success: true, 
-          message_id: mail.message_id
-        }
+        { success: true, message_id: mail.message_id }
       rescue => e
         Rails.logger.error "[send_email_via_smtp] Exception: #{e.message}"
         { success: false, error: e.message }
       end
-      
+
+      # Send email via OAuth SMTP (Microsoft 365 / Google) using XOAUTH2
+      def send_email_via_oauth_smtp(email_params, config, reply_to: nil)
+        require 'mail'
+
+        oauth_provider = config[:oauthProvider] || config['oauthProvider']
+        oauth_email    = config[:oauthEmail] || config['oauthEmail']
+        access_token   = config[:oauthAccessToken] || config['oauthAccessToken']
+
+        # Refresh token if near expiry
+        oauth_expires = config[:oauthExpiresAt] || config['oauthExpiresAt']
+        if oauth_expires.present?
+          expires_at = Time.parse(oauth_expires.to_s) rescue nil
+          if expires_at && expires_at <= 5.minutes.from_now
+            refresh_token = config[:oauthRefreshToken] || config['oauthRefreshToken']
+            refreshed = refresh_oauth_access_token_for_send(oauth_provider, refresh_token)
+            access_token = refreshed if refreshed
+          end
+        end
+
+        from_email = config[:fromEmail] || config['fromEmail'] || oauth_email
+        from_name  = config[:fromName] || config['fromName'] || oauth_email
+
+        unless oauth_email.present? && access_token.present?
+          return { success: false, error: "OAuth email not configured: email=#{oauth_email.present?}, token=#{access_token.present?}" }
+        end
+
+        smtp_host, smtp_port = case oauth_provider.to_s
+                               when 'microsoft' then ['smtp.office365.com', 587]
+                               when 'google'    then ['smtp.gmail.com', 587]
+                               else ['smtp.gmail.com', 587]
+                               end
+
+        Rails.logger.info "[send_email_via_oauth_smtp] Sending to #{email_params[:to]} via #{smtp_host}:#{smtp_port} as #{oauth_email}, reply_to: #{reply_to}"
+
+        mail = Mail.new do
+          from     "#{from_name} <#{from_email}>"
+          to       email_params[:to]
+          subject  email_params[:subject]
+
+          if email_params[:content]&.include?('<html') || email_params[:content]&.include?('<body')
+            html_part do
+              content_type 'text/html; charset=UTF-8'
+              body email_params[:content]
+            end
+          else
+            body email_params[:content]
+          end
+        end
+
+        mail.reply_to = reply_to if reply_to.present?
+        mail.cc = email_params[:cc] if email_params[:cc].present?
+        mail.bcc = email_params[:bcc] if email_params[:bcc].present?
+
+        mail.delivery_method :smtp, {
+          address: smtp_host,
+          port: smtp_port,
+          user_name: oauth_email,
+          password: access_token,
+          authentication: :xoauth2,
+          enable_starttls_auto: true
+        }
+
+        mail.deliver!
+
+        Rails.logger.info "[send_email_via_oauth_smtp] Success: #{mail.message_id}"
+        { success: true, message_id: mail.message_id }
+      rescue => e
+        Rails.logger.error "[send_email_via_oauth_smtp] Exception: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
+        { success: false, error: e.message }
+      end
+
+      def refresh_oauth_access_token_for_send(provider, refresh_token)
+        return nil if refresh_token.blank?
+
+        token_url = case provider.to_s
+                    when 'microsoft' then 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+                    when 'google'    then 'https://oauth2.googleapis.com/token'
+                    else return nil
+                    end
+
+        client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+        client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+
+        uri = URI(token_url)
+        req = Net::HTTP::Post.new(uri)
+        req.set_form_data(
+          client_id:     client_id,
+          client_secret: client_secret,
+          refresh_token: refresh_token,
+          grant_type:    'refresh_token'
+        )
+        res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+        tokens = JSON.parse(res.body)
+
+        return nil if tokens['error'].present?
+
+        tokens['access_token']
+      rescue => e
+        Rails.logger.error "[Crm::CommunicationsController] OAuth token refresh failed: #{e.message}"
+        nil
+      end
+
       # Send email via Gmail OAuth
-      def send_email_via_gmail(email_params, config)
+      def send_email_via_gmail(email_params, config, reply_to: nil)
         require 'net/http'
         require 'uri'
         require 'json'
         require 'base64'
-        
+
         access_token = decrypt_if_needed(config[:gmailAccessToken] || config['gmailAccessToken'])
         refresh_token = decrypt_if_needed(config[:gmailRefreshToken] || config['gmailRefreshToken'])
         client_id = config[:gmailClientId] || config['gmailClientId']
         client_secret = decrypt_if_needed(config[:gmailClientSecret] || config['gmailClientSecret'])
         from_email = config[:fromEmail] || config['fromEmail']
         from_name = config[:fromName] || config['fromName']
-        
+
         # If access token expired, refresh it
         if access_token.blank? && refresh_token.present?
           Rails.logger.info "[send_email_via_gmail] Refreshing access token"
           token_result = refresh_gmail_token(refresh_token, client_id, client_secret)
-          
+
           if token_result[:success]
             access_token = token_result[:access_token]
-            # TODO: Save new access token to database
           else
             return { success: false, error: "Failed to refresh Gmail token: #{token_result[:error]}" }
           end
         end
-        
+
         unless access_token.present?
           return { success: false, error: 'Gmail access token not configured. Please connect your Gmail account.' }
         end
-        
-        Rails.logger.info "[send_email_via_gmail] Sending to #{email_params[:to]}"
-        
+
+        Rails.logger.info "[send_email_via_gmail] Sending to #{email_params[:to]}, reply_to: #{reply_to}"
+
         # Create RFC 2822 formatted email
-        email_content = create_rfc2822_email(email_params, from_email, from_name)
+        email_content = create_rfc2822_email(email_params, from_email, from_name, reply_to: reply_to)
         
         # Base64url encode the email
         encoded_email = Base64.urlsafe_encode64(email_content).gsub('=', '')
@@ -856,10 +952,11 @@ module Api
       end
       
       # Create RFC 2822 formatted email message
-      def create_rfc2822_email(email_params, from_email, from_name)
+      def create_rfc2822_email(email_params, from_email, from_name, reply_to: nil)
         lines = []
         lines << "From: #{from_name} <#{from_email}>"
         lines << "To: #{email_params[:to]}"
+        lines << "Reply-To: #{reply_to}" if reply_to.present?
         lines << "Cc: #{email_params[:cc]}" if email_params[:cc].present?
         lines << "Bcc: #{email_params[:bcc]}" if email_params[:bcc].present?
         lines << "Subject: #{email_params[:subject]}"
@@ -1153,6 +1250,20 @@ module Api
       end
 
       # Build email metadata
+      # Generate reply-to address for email tracking
+      def generate_reply_to_address
+        # If user has a verified email connection, use their address as reply-to
+        if current_user&.respond_to?(:default_email_connection) && current_user.default_email_connection&.verified?
+          return current_user.default_email_connection.email_address
+        end
+
+        # Generate platform-tracked reply address from lead
+        return nil unless @lead.present?
+
+        entity_type = @lead.class.name.downcase
+        "reply+#{entity_type}-#{@lead.id}@#{ReplyToAddressService.mail_domain}"
+      end
+
       def build_email_metadata(email_params, config = {})
         {
           provider: config[:provider] || 'smtp',

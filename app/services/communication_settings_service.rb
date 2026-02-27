@@ -33,7 +33,29 @@ class CommunicationSettingsService
     
     # Fall back to standard waterfall: Location → Company → Platform
     config = merged_settings.dig('email') || {}
-    
+
+    # Handle OAuth providers - use SMTP with XOAUTH2 authentication
+    provider_value = config['provider'] || config[:provider]
+    if provider_value.to_s.start_with?('oauth_')
+      oauth_email    = config['oauthEmail'] || config[:oauthEmail]
+      oauth_provider = config['oauthProvider'] || config[:oauthProvider]
+      access_token   = refresh_oauth_token_if_needed(config)
+      smtp_host, smtp_port = oauth_smtp_host_port(oauth_provider)
+
+      return {
+        provider: provider_value,
+        from_email: oauth_email || config['fromEmail'] || config[:fromEmail],
+        from_name: config['fromName'] || config[:fromName] || oauth_email,
+        smtp_host: smtp_host,
+        smtp_port: smtp_port,
+        smtp_username: oauth_email,
+        smtp_password: access_token,
+        smtp_authentication: 'xoauth2',
+        enabled: (config['isEnabled'] || config[:isEnabled]) != false,
+        source: determine_email_source
+      }
+    end
+
     {
       provider: config['provider'] || ENV['DEFAULT_EMAIL_PROVIDER'] || 'smtp',
       from_email: config['fromEmail'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@platformdms.com',
@@ -170,12 +192,23 @@ class CommunicationSettingsService
         aws_region: company_config['awsRegion'] || ENV['AWS_REGION'] || 'us-east-1'
       )
     when 'oauth_gmail', 'oauth_outlook'
-      # Future: OAuth-based email sending
-      Rails.logger.warn "[CommunicationSettingsService] OAuth email connections not yet implemented"
-      # Fall through to company/platform settings for now
-      company_config = merged_settings.dig('email') || {}
+      oauth_provider = connection.oauth_provider
+      oauth_config = {
+        'oauthProvider' => oauth_provider,
+        'oauthAccessToken' => connection.oauth_token_encrypted,
+        'oauthRefreshToken' => connection.oauth_refresh_token_encrypted,
+        'oauthExpiresAt' => connection.oauth_expires_at&.iso8601
+      }
+      access_token = refresh_oauth_token_if_needed(oauth_config, user_connection: connection)
+      smtp_host, smtp_port = oauth_smtp_host_port(oauth_provider)
+
       base_config.merge(
-        provider: company_config['provider'] || 'smtp'
+        provider: connection.provider,
+        smtp_host: smtp_host,
+        smtp_port: smtp_port,
+        smtp_username: connection.email_address,
+        smtp_password: access_token,
+        smtp_authentication: 'xoauth2'
       )
     else
       base_config
@@ -277,6 +310,122 @@ class CommunicationSettingsService
     merged_settings
   end
   
+  # ----------------------------------------------------------------
+  # OAuth token refresh
+  # ----------------------------------------------------------------
+
+  def oauth_smtp_host_port(provider)
+    case provider.to_s
+    when 'microsoft' then ['smtp.office365.com', 587]
+    when 'google'    then ['smtp.gmail.com', 587]
+    else ['smtp.gmail.com', 587]
+    end
+  end
+
+  def refresh_oauth_token_if_needed(config, user_connection: nil)
+    expires_at_str = config['oauthExpiresAt'] || config[:oauthExpiresAt]
+    access_token   = config['oauthAccessToken'] || config[:oauthAccessToken]
+
+    if expires_at_str.present?
+      expires_at = Time.parse(expires_at_str.to_s) rescue nil
+      if expires_at && expires_at <= 5.minutes.from_now
+        refreshed = perform_oauth_token_refresh(config)
+        if refreshed
+          persist_refreshed_tokens(refreshed, config, user_connection: user_connection)
+          return refreshed[:access_token]
+        end
+      end
+    end
+
+    access_token
+  rescue => e
+    Rails.logger.error "[CommunicationSettingsService] Token refresh check failed: #{e.message}"
+    access_token
+  end
+
+  def perform_oauth_token_refresh(config)
+    provider      = config['oauthProvider'] || config[:oauthProvider]
+    refresh_token = config['oauthRefreshToken'] || config[:oauthRefreshToken]
+    return nil if refresh_token.blank?
+
+    token_url = case provider
+                when 'microsoft' then 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+                when 'google'    then 'https://oauth2.googleapis.com/token'
+                else return nil
+                end
+
+    client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+    client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+
+    uri = URI(token_url)
+    req = Net::HTTP::Post.new(uri)
+    req.set_form_data(
+      client_id:     client_id,
+      client_secret: client_secret,
+      refresh_token: refresh_token,
+      grant_type:    'refresh_token'
+    )
+    res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+    tokens = JSON.parse(res.body)
+
+    if tokens['error'].present?
+      Rails.logger.error "[CommunicationSettingsService] OAuth refresh error: #{tokens['error_description'] || tokens['error']}"
+      return nil
+    end
+
+    {
+      access_token:  tokens['access_token'],
+      refresh_token: tokens['refresh_token'].presence || refresh_token,
+      expires_at:    (Time.current + tokens['expires_in'].to_i.seconds).iso8601
+    }
+  rescue => e
+    Rails.logger.error "[CommunicationSettingsService] OAuth token refresh failed: #{e.message}"
+    nil
+  end
+
+  def persist_refreshed_tokens(refreshed, _config, user_connection: nil)
+    if user_connection
+      user_connection.update!(
+        oauth_token_encrypted:         refreshed[:access_token],
+        oauth_refresh_token_encrypted: refreshed[:refresh_token],
+        oauth_expires_at:              Time.parse(refreshed[:expires_at])
+      )
+      return
+    end
+
+    scope_class, scope_id = find_oauth_settings_scope
+    return unless scope_class
+
+    existing       = Setting.get(scope_class, scope_id, 'communications') || {}
+    existing_email = (existing['email'] || {}).stringify_keys
+    merged_email   = existing_email.merge(
+      'oauthAccessToken'  => refreshed[:access_token],
+      'oauthRefreshToken' => refreshed[:refresh_token],
+      'oauthExpiresAt'    => refreshed[:expires_at]
+    )
+    merged_comms = existing.stringify_keys.merge('email' => merged_email)
+    Setting.set(scope_class, scope_id, 'communications', merged_comms)
+  rescue => e
+    Rails.logger.error "[CommunicationSettingsService] Failed to persist refreshed tokens: #{e.message}"
+  end
+
+  def find_oauth_settings_scope
+    if location
+      loc = Setting.get('Location', location.id, 'communications')
+      return ['Location', location.id] if loc.is_a?(Hash) && loc.dig('email', 'oauthProvider').present?
+    end
+
+    if company
+      comp = Setting.get('Company', company.id, 'communications')
+      return ['Company', company.id] if comp.is_a?(Hash) && comp.dig('email', 'oauthProvider').present?
+    end
+
+    plat = Setting.get('Platform', 0, 'communications')
+    return ['Platform', 0] if plat.is_a?(Hash) && plat.dig('email', 'oauthProvider').present?
+
+    nil
+  end
+
   def decrypt_value(value)
     return nil if value.blank?
     return value unless value.is_a?(String) && value.start_with?('encrypted:')

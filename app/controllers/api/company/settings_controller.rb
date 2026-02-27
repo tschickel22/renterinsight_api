@@ -62,6 +62,17 @@ module Api
         return render_missing_settings('email') if email_settings.blank?
         
         settings_hash = email_settings.is_a?(ActionController::Parameters) ? email_settings.to_unsafe_h : email_settings
+
+        # For OAuth providers, oauthEmail/oauthAccessToken are set server-side during the
+        # OAuth callback and are NOT sent back by the frontend form - merge from DB
+        provider = settings_hash['provider'] || settings_hash[:provider]
+        if provider.to_s.start_with?('oauth_')
+          db_email_settings = (fetch_communications_settings(@company)&.dig('email') || {}).stringify_keys
+          %w[oauthEmail oauthProvider oauthAccessToken oauthRefreshToken oauthExpiresAt oauthConnectedAt].each do |key|
+            settings_hash[key] = db_email_settings[key] if settings_hash[key].blank? && db_email_settings[key].present?
+          end
+          Rails.logger.info "[test_email] Merged OAuth fields from DB: oauthEmail=#{settings_hash['oauthEmail'].inspect}"
+        end
         
         result = TestCommunicationService.new(settings_hash, :email).test
         
@@ -118,7 +129,12 @@ module Api
         
         # Get provider and from address
         provider = decrypted_settings[:provider] || 'smtp'
-        from_email = decrypted_settings[:fromEmail] || decrypted_settings[:from_email]
+        is_oauth = provider.to_s.start_with?('oauth_')
+        from_email = if is_oauth
+          decrypted_settings[:oauthEmail] || decrypted_settings['oauthEmail']
+        else
+          decrypted_settings[:fromEmail] || decrypted_settings[:from_email]
+        end
         
         if from_email.blank?
           return render json: {
@@ -168,6 +184,8 @@ module Api
           send_via_sendgrid(to: to, from: from, subject: subject, body: body, settings: settings)
         when :aws_ses
           send_via_aws_ses(to: to, from: from, subject: subject, body: body, settings: settings)
+        when :oauth_microsoft, :oauth_google
+          send_via_oauth_smtp(to: to, from: from, subject: subject, body: body, settings: settings)
         else
           { success: false, error: "Unknown email provider: #{provider}" }
         end
@@ -192,12 +210,14 @@ module Api
         end
         
         # Send via SMTP
+        authentication = (settings[:smtpAuthentication] || settings[:smtp_authentication] || 'plain').to_sym
+
         mail.delivery_method :smtp, {
           address: host,
           port: port,
           user_name: username,
           password: password,
-          authentication: :plain,
+          authentication: authentication,
           enable_starttls_auto: port == 587
         }
         
@@ -209,6 +229,74 @@ module Api
         { success: false, error: e.message }
       end
       
+      def send_via_oauth_smtp(to:, from:, subject:, body:, settings:)
+        oauth_provider = (settings[:oauthProvider] || settings['oauthProvider'] || '').to_s
+        smtp_host, smtp_port = case oauth_provider
+                               when 'microsoft' then ['smtp.office365.com', 587]
+                               when 'google'    then ['smtp.gmail.com', 587]
+                               else return { success: false, error: "Unknown OAuth provider: #{oauth_provider}" }
+                               end
+
+        oauth_email  = settings[:oauthEmail] || settings['oauthEmail']
+        access_token = settings[:oauthAccessToken] || settings['oauthAccessToken']
+
+        # Refresh token if near expiry
+        oauth_expires = settings[:oauthExpiresAt] || settings['oauthExpiresAt']
+        if oauth_expires.present?
+          expires_at = Time.parse(oauth_expires.to_s) rescue nil
+          if expires_at && expires_at <= 5.minutes.from_now
+            refresh_token = settings[:oauthRefreshToken] || settings['oauthRefreshToken']
+            refreshed = refresh_oauth_access_token_for_test(oauth_provider, refresh_token)
+            access_token = refreshed if refreshed
+          end
+        end
+
+        oauth_from = from.presence || oauth_email
+
+        send_via_smtp(
+          to: to, from: oauth_from, subject: subject, body: body,
+          settings: settings.merge(
+            smtpHost: smtp_host,
+            smtpPort: smtp_port,
+            smtpUsername: oauth_email,
+            smtpPassword: access_token,
+            smtpAuthentication: 'xoauth2',
+            fromName: settings[:fromName] || settings['fromName'] || oauth_email
+          )
+        )
+      end
+
+      def refresh_oauth_access_token_for_test(provider, refresh_token)
+        return nil if refresh_token.blank?
+
+        token_url = case provider
+                    when 'microsoft' then 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+                    when 'google'    then 'https://oauth2.googleapis.com/token'
+                    else return nil
+                    end
+
+        client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+        client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+
+        uri = URI(token_url)
+        req = Net::HTTP::Post.new(uri)
+        req.set_form_data(
+          client_id:     client_id,
+          client_secret: client_secret,
+          refresh_token: refresh_token,
+          grant_type:    'refresh_token'
+        )
+        res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+        tokens = JSON.parse(res.body)
+
+        return nil if tokens['error'].present?
+
+        tokens['access_token']
+      rescue => e
+        Rails.logger.error "[CompanySettings] OAuth token refresh failed: #{e.message}"
+        nil
+      end
+
       def send_via_sendgrid(to:, from:, subject:, body:, settings:)
         require 'net/http'
         require 'uri'
@@ -340,25 +428,20 @@ module Api
 
       def fetch_communications_settings(company)
         return default_communications_settings unless company
-        
-        # Three-tier waterfall: Location → Company → Platform
-        
-        # 1. Try location settings first (if location context exists)
-        if Current.location_id.present?
-          location_settings = Setting.get('Location', Current.location_id, 'communications')
-          return location_settings if location_settings.present?
-        end
-        
-        # 2. Fall back to company settings
-        company_settings = Setting.get('Company', company.id, 'communications')
-        return company_settings if company_settings.present?
-        
-        # 3. Fall back to platform settings
-        platform_settings = Setting.get('Platform', 0, 'communications')
-        return platform_settings if platform_settings.present?
-        
-        # 4. Final fallback to hard-coded defaults
-        default_communications_settings
+
+        # Three-tier waterfall with deep_merge: Platform → Company → Location
+        # Each level overrides the previous, so Location SMS + Company email both work
+        platform_settings = Setting.get('Platform', 0, 'communications') || {}
+        company_settings = Setting.get('Company', company.id, 'communications') || {}
+        location_settings = if Current.location_id.present?
+                              Setting.get('Location', Current.location_id, 'communications') || {}
+                            else
+                              {}
+                            end
+
+        result = platform_settings.deep_merge(company_settings).deep_merge(location_settings)
+
+        result.present? ? result : default_communications_settings
       end
 
       def fetch_notifications_settings(company)

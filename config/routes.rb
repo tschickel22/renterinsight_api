@@ -929,6 +929,13 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== OAUTH EMAIL CONNECTIONS ====================
+      scope path: 'oauth-email', controller: 'oauth_email' do
+        get  'authorize',   action: :authorize
+        get  'callback',    action: :callback
+        delete 'disconnect', action: :disconnect
+      end
+
       # ==================== QUICKBOOKS INTEGRATION ====================
       namespace :integrations do
         scope path: 'quickbooks' do
