@@ -105,6 +105,12 @@ module Api
 
       def create
         vehicle = @company.vehicles.new(vehicle_params)
+
+        # Handle custom_field_values on create (same merge pattern as update)
+        custom_field_values_param = params[:vehicle]&.dig(:custom_field_values) || params[:vehicle]&.dig(:customFieldValues)
+        if custom_field_values_param.present?
+          vehicle.custom_field_values = custom_field_values_param.to_unsafe_h
+        end
         
         # Auto-assign location from selector (if user selected a specific location)
         vehicle.location_id ||= Current.location_id if Current.location_id.present?

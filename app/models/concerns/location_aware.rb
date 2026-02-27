@@ -29,7 +29,7 @@ module LocationAware
     # If no location is selected, returns all records
     scope :for_current_location, -> {
       if Current.location_filtered?
-        where(location_id: Current.location_id)
+        where("#{table_name}.location_id = ? OR #{table_name}.location_id IS NULL", Current.location_id)
       else
         all
       end

@@ -372,8 +372,11 @@ class UserEmailConnection < ApplicationRecord
                 when :google    then 'https://oauth2.googleapis.com/token'
                 end
 
-    client_id     = Rails.application.credentials.dig(:oauth, oauth_type, :client_id)
-    client_secret = Rails.application.credentials.dig(:oauth, oauth_type, :client_secret)
+    provider_name = oauth_type == :microsoft ? 'MICROSOFT' : 'GOOGLE'
+    client_id     = ENV["#{provider_name}_OAUTH_CLIENT_ID"] ||
+                    Rails.application.credentials.dig(:oauth, oauth_type, :client_id)
+    client_secret = ENV["#{provider_name}_OAUTH_CLIENT_SECRET"] ||
+                    Rails.application.credentials.dig(:oauth, oauth_type, :client_secret)
 
     uri = URI(token_url)
     req = Net::HTTP::Post.new(uri)

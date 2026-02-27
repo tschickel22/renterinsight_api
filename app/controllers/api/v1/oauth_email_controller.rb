@@ -2,7 +2,11 @@
 
 class Api::V1::OauthEmailController < ApplicationController
   REDIRECT_URI = "#{ENV.fetch('RAILS_API_URL', ENV.fetch('RAILS_BASE_URL', 'https://localhost:3001'))}/api/v1/oauth-email/callback"
-  FRONTEND_URL = ENV.fetch('FRONTEND_URL', 'https://localhost:5173')
+  FRONTEND_URL = if Rails.env.production?
+                   ENV.fetch('FRONTEND_URL')
+                 else
+                   ENV.fetch('FRONTEND_URL', 'https://localhost:5173')
+                 end
 
   skip_before_action :authenticate, only: [:callback]
   before_action :set_company_scope, except: [:callback]

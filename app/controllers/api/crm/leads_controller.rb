@@ -246,37 +246,26 @@ module Api
           end
           
           ActiveRecord::Base.transaction do
-            # 1. CREATE ACCOUNT
+            # Inherit location from lead, fall back to current location selector
+            location_id = @lead.location_id || Current.location_id
+
+            # 1. FIND OR CREATE ACCOUNT
             account_name = params[:account_name].presence || "#{@lead.first_name} #{@lead.last_name}".strip
             account_name = "Converted Lead #{@lead.id}" if account_name.blank?
-            
-            Rails.logger.info "✅ [ConvertLead] Creating account: #{account_name}"
-            
-            account = Account.new(
-              name: account_name,
-              company_id: @lead.company_id,
-              status: 'active',
-              email: @lead.email,
-              phone: @lead.phone,
-              source_id: @lead.source_id,
-              notes: @lead.notes
-            )
-            
-            # Auto-assign location
-            if Current.location_id.present?
-              account.location_id = Current.location_id
-            elsif current_user.uses_rbac? && !current_user.effective_admin?
-              location_ids = permission_service.accessible_location_ids
-              account.location_id = location_ids.first if location_ids.any?
+
+            Rails.logger.info "✅ [ConvertLead] Finding or creating account: #{account_name}"
+
+            account = Account.find_or_create_by!(name: account_name, company_id: @lead.company_id) do |a|
+              a.status = 'active'
+              a.email = @lead.email
+              a.phone = @lead.phone
+              a.source_id = @lead.source_id
+              a.notes = @lead.notes
+              a.location_id = location_id
+              a.account_type = 'converted_lead' if a.respond_to?(:account_type=)
             end
-            
-            account.account_type = 'converted_lead' if account.respond_to?(:account_type=)
-            
-            unless account.save
-              raise ActiveRecord::RecordInvalid.new(account)
-            end
-            
-            Rails.logger.info "✅ [ConvertLead] Account created: #{account.id}"
+
+            Rails.logger.info "✅ [ConvertLead] Account #{account.previously_new_record? ? 'created' : 'reused'}: #{account.id}"
             
             # 2. CREATE CONTACT (if requested or if we have name data)
             contact = nil
@@ -294,7 +283,7 @@ module Api
                 phone: @lead.phone,
                 account_id: account.id,
                 company_id: @lead.company_id,
-                location_id: account.location_id,
+                location_id: location_id,
                 notes: "Converted from lead ##{@lead.id}"
               )
               
@@ -320,7 +309,7 @@ module Api
                 account_id: account.id,
                 contact_id: contact&.id,
                 company_id: @lead.company_id,
-                location_id: account.location_id,
+                location_id: location_id,
                 stage: deal_params[:stage] || 'prospecting',
                 value: 0, # Will be updated when products/pricing added to deal
                 expected_close_date: deal_params[:close_date] || deal_params[:expected_close],

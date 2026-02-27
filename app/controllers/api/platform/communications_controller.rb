@@ -772,8 +772,10 @@ module Api
                     else return nil
                     end
 
-        client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
-        client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+        client_id     = ENV["#{provider.upcase}_OAUTH_CLIENT_ID"] ||
+                        Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+        client_secret = ENV["#{provider.upcase}_OAUTH_CLIENT_SECRET"] ||
+                        Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
 
         uri = URI(token_url)
         req = Net::HTTP::Post.new(uri)
