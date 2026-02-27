@@ -1254,12 +1254,9 @@ module Api
       # Build email metadata
       # Generate reply-to address for email tracking
       def generate_reply_to_address
-        # If user has a verified email connection, use their address as reply-to
-        if current_user&.respond_to?(:default_email_connection) && current_user.default_email_connection&.verified?
-          return current_user.default_email_connection.email_address
-        end
-
-        # Generate platform-tracked reply address from lead
+        # Always use platform-tracked reply address so inbound replies
+        # are routed through SES and captured by the webhook.
+        # The user's personal email is used as the FROM address, not REPLY-TO.
         return nil unless @lead.present?
 
         entity_type = @lead.class.name.downcase

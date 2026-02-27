@@ -44,7 +44,7 @@ class Api::V1::OauthEmailController < ApplicationController
               client_id:     client_id,
               response_type: 'code',
               redirect_uri:  REDIRECT_URI,
-              scope:         'offline_access https://outlook.office.com/SMTP.Send User.Read',
+              scope:         'offline_access https://outlook.office.com/SMTP.Send https://outlook.office365.com/IMAP.AccessAsUser.All User.Read',
               state:         state,
               response_mode: 'query'
             }
@@ -103,6 +103,11 @@ class Api::V1::OauthEmailController < ApplicationController
       Rails.logger.info "[OAuthEmail] Token exchange response keys: #{tokens.keys.inspect}"
       Rails.logger.info "[OAuthEmail] Token exchange error: #{tokens['error'].inspect} - #{tokens['error_description'].inspect}" if tokens['error'].present?
       Rails.logger.info "[OAuthEmail] access_token present: #{tokens['access_token'].present?}, refresh_token present: #{tokens['refresh_token'].present?}, id_token present: #{tokens['id_token'].present?}"
+
+      if tokens['error'].present? || tokens['access_token'].blank?
+        error_msg = tokens['error_description'] || tokens['error'] || 'Token exchange failed'
+        raise StandardError, error_msg
+      end
 
       # Get user email
       email = case provider

@@ -25,12 +25,9 @@ class ReplyToAddressService
     # @param user [User, nil] Optional user to route replies to
     # @return [String] The generated reply-to address
     def generate_for(communication, user: nil)
-      # If user has a personal email configured, use that
-      if user&.respond_to?(:default_email_connection) && user.default_email_connection&.verified?
-        return user.default_email_connection.email_address
-      end
-      
-      # Generate platform-tracked reply address
+      # Always use platform-tracked reply address so inbound replies
+      # are routed through SES and captured by the webhook.
+      # The user's personal email is used as the FROM address, not REPLY-TO.
       generate_tracked_address(communication)
     end
     
