@@ -174,8 +174,8 @@ class ImapSentEmailService
 
         next unless recipient_email
 
-        # Deduplicate by IMAP UID
-        existing_comm = Communication.where("metadata LIKE ?", "%imap_uid=>#{imap_uid}%").first
+        # Deduplicate by IMAP UID (metadata is jsonb)
+        existing_comm = Communication.where("metadata @> ?", { imap_uid: imap_uid }.to_json).first
         next if existing_comm
 
         # Match recipient to Lead or Contact in allowed companies
