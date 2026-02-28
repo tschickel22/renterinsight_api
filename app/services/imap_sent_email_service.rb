@@ -253,24 +253,54 @@ class ImapSentEmailService
   end
 
   # Extract email body from email (handles multipart emails)
-  # Prefers HTML so the frontend can render it properly (signatures, formatting, etc.)
+  # Prefers plain text for clean display; falls back to sanitized HTML
   def self.extract_email_body(mail)
     if mail.multipart?
-      html_part = mail.html_part
       text_part = mail.text_part
+      html_part = mail.html_part
 
-      if html_part
-        html_part.decoded
-      elsif text_part
+      if text_part
         text_part.decoded
+      elsif html_part
+        sanitize_html_body(html_part.decoded)
       else
         mail.body.decoded
       end
     else
-      mail.body.decoded
+      content_type = mail.content_type.to_s.downcase
+      if content_type.include?('text/html')
+        sanitize_html_body(mail.body.decoded)
+      else
+        mail.body.decoded
+      end
     end
   rescue => e
     Rails.logger.warn "[ImapSync] Error extracting email body: #{e.message}"
     "(Could not extract email body)"
+  end
+
+  # Clean up HTML email body — remove Outlook VML, style blocks, head, and XML tags
+  def self.sanitize_html_body(html)
+    body = html.dup
+    # Extract just the <body> content if present
+    if body =~ /<body[^>]*>(.*)<\/body>/mi
+      body = $1
+    end
+    # Remove style blocks
+    body.gsub!(/<style[^>]*>.*?<\/style>/mi, '')
+    # Remove script blocks
+    body.gsub!(/<script[^>]*>.*?<\/script>/mi, '')
+    # Remove HTML comments (including Outlook conditional comments)
+    body.gsub!(/<!--.*?-->/m, '')
+    # Remove XML/VML namespace tags (o:p, v:shape, w:*, etc.)
+    body.gsub!(/<\/?[ovw]:[^>]*>/mi, '')
+    # Remove remaining HTML tags
+    body.gsub!(/<[^>]*>/, '')
+    # Clean up whitespace
+    body.gsub!(/&nbsp;/i, ' ')
+    body.gsub!(/\r\n?/, "\n")
+    body.gsub!(/[ \t]+/, ' ')
+    body.gsub!(/\n{3,}/, "\n\n")
+    body.strip
   end
 end
