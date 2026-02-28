@@ -9,7 +9,7 @@ module Api
       # GET /api/company/settings
       def show
         render json: {
-          communications: fetch_communications_settings(@company),
+          communications: mask_sensitive_fields(fetch_communications_settings(@company)),
           notifications: fetch_notifications_settings(@company),
           branding: fetch_branding_settings(@company),
           companyId: @company&.id
@@ -135,6 +135,8 @@ module Api
         else
           decrypted_settings[:fromEmail] || decrypted_settings[:from_email]
         end
+
+        Rails.logger.info "[send_test_email] Company #{@company.id}: provider=#{provider}, from=#{from_email}, is_oauth=#{is_oauth}"
         
         if from_email.blank?
           return render json: {
@@ -383,6 +385,14 @@ module Api
         decrypted
       end
       
+      def decrypt(encrypted_value)
+        return encrypted_value if encrypted_value.blank?
+        secret_key = ENV['SETTINGS_ENCRYPTION_KEY'] || Rails.application.secret_key_base
+        key = ActiveSupport::KeyGenerator.new(secret_key).generate_key('', 32)
+        crypt = ActiveSupport::MessageEncryptor.new(key)
+        crypt.decrypt_and_verify(encrypted_value)
+      end
+
       def decrypt_if_needed(value)
         return value unless value.present?
         return value unless value.to_s.start_with?('encrypted:')
@@ -509,9 +519,65 @@ module Api
         branding
       end
 
+      MASKED_PLACEHOLDER = '••••••••'
+
+      SENSITIVE_KEYS = {
+        'email' => %w[smtpPassword gmailClientSecret gmailRefreshToken sendgridApiKey awsSecretAccessKey],
+        'sms'   => %w[twilioAuthToken awsSecretAccessKey]
+      }.freeze
+
       def save_communications_settings(company, settings)
-        encrypted_settings = encrypt_sensitive_fields(settings, :communications)
+        cleaned_settings = clean_stale_email_fields(settings)
+        restored_settings = restore_masked_secrets(company, cleaned_settings)
+        encrypted_settings = encrypt_sensitive_fields(restored_settings, :communications)
         Setting.set('Company', company.id, 'communications', encrypted_settings)
+      end
+
+      # When the frontend sends back the masked placeholder, preserve the existing
+      # encrypted value from the DB so we don't overwrite secrets with "••••••••"
+      def restore_masked_secrets(company, settings)
+        existing = fetch_communications_settings(company)
+        return settings unless existing.is_a?(Hash)
+
+        restored = settings.deep_dup
+        SENSITIVE_KEYS.each do |section, keys|
+          next unless restored[section].is_a?(Hash)
+
+          keys.each do |key|
+            value = restored[section][key]
+            if value == MASKED_PLACEHOLDER || (value.present? && value.to_s.start_with?('encrypted:'))
+              # Preserve the existing encrypted value from DB
+              existing_value = existing.dig(section, key) || existing.dig(section.to_sym, key.to_sym)
+              restored[section][key] = existing_value if existing_value.present?
+            end
+          end
+        end
+
+        restored
+      end
+
+      # Remove stale fields from a previous provider when switching email providers
+      # e.g., clear OAuth fields when switching to SES, clear SMTP fields when switching to OAuth
+      def clean_stale_email_fields(settings)
+        return settings unless settings.is_a?(Hash) || settings.is_a?(ActionController::Parameters)
+
+        cleaned = settings.deep_dup
+        email = cleaned['email'] || cleaned[:email]
+        return cleaned unless email.is_a?(Hash) || email.is_a?(ActionController::Parameters)
+
+        provider = (email['provider'] || email[:provider]).to_s
+        oauth_keys = %w[oauthProvider oauthAccessToken oauthRefreshToken oauthExpiresAt oauthEmail oauthConnectedAt]
+        smtp_keys = %w[smtpHost smtpPort smtpUsername smtpPassword smtpAuthentication smtpEnableTls smtpEnableStarttls]
+
+        unless provider.start_with?('oauth_')
+          oauth_keys.each { |k| email.delete(k) }
+        end
+
+        if provider.start_with?('oauth_') || provider == 'aws_ses' || provider == 'sendgrid'
+          smtp_keys.each { |k| email.delete(k) }
+        end
+
+        cleaned
       end
 
       def save_notifications_settings(company, settings)
@@ -562,6 +628,28 @@ module Api
         key = ActiveSupport::KeyGenerator.new(secret_key).generate_key('', 32)
         crypt = ActiveSupport::MessageEncryptor.new(key)
         "encrypted:#{crypt.encrypt_and_sign(value)}"
+      end
+
+      # Replace encrypted secret values with a masked placeholder for the frontend
+      # so the UI shows "••••••••" instead of a blank field or raw encrypted string
+      def mask_sensitive_fields(settings)
+        return settings unless settings.is_a?(Hash)
+
+        masked = settings.deep_dup
+        SENSITIVE_KEYS.each do |section, keys|
+          sub = masked[section] || masked[section.to_sym]
+          next unless sub.is_a?(Hash)
+
+          keys.each do |key|
+            value = sub[key] || sub[key.to_sym]
+            if value.present?
+              k = sub.key?(key) ? key : key.to_sym
+              sub[k] = MASKED_PLACEHOLDER
+            end
+          end
+        end
+
+        masked
       end
 
       def render_missing_settings(channel)
