@@ -9,7 +9,7 @@ module Api
       # GET /api/platform/settings
       def show
         render json: {
-          communications: fetch_communications_settings,
+          communications: mask_sensitive_fields(fetch_communications_settings),
           notifications: fetch_notifications_settings,
           general: fetch_general_settings,
           branding: fetch_branding_settings,
@@ -188,10 +188,39 @@ module Api
         Setting.get_warranty_settings('Platform', 0)
       end
 
+      MASKED_PLACEHOLDER = '••••••••'
+
+      SENSITIVE_KEYS = {
+        'email' => %w[smtpPassword gmailClientSecret gmailRefreshToken sendgridApiKey awsSecretAccessKey],
+        'sms'   => %w[twilioAuthToken awsSecretAccessKey]
+      }.freeze
+
       def save_communications_settings(settings)
-        # Encrypt sensitive credentials before saving
-        encrypted_settings = encrypt_sensitive_fields(settings, :communications)
+        restored_settings = restore_masked_secrets(settings)
+        encrypted_settings = encrypt_sensitive_fields(restored_settings, :communications)
         Setting.set('Platform', 0, 'communications', encrypted_settings)
+      end
+
+      # When the frontend sends back the masked placeholder, preserve the existing
+      # encrypted value from the DB so we don't overwrite secrets with "••••••••"
+      def restore_masked_secrets(settings)
+        existing = fetch_communications_settings
+        return settings unless existing.is_a?(Hash)
+
+        restored = settings.deep_dup
+        SENSITIVE_KEYS.each do |section, keys|
+          next unless restored[section].is_a?(Hash)
+
+          keys.each do |key|
+            value = restored[section][key]
+            if value == MASKED_PLACEHOLDER || (value.present? && value.to_s.start_with?('encrypted:'))
+              existing_value = existing.dig(section, key) || existing.dig(section.to_sym, key.to_sym)
+              restored[section][key] = existing_value if existing_value.present?
+            end
+          end
+        end
+
+        restored
       end
 
       def save_notifications_settings(settings)
@@ -261,6 +290,27 @@ module Api
         key = ActiveSupport::KeyGenerator.new(secret_key).generate_key('', 32)
         crypt = ActiveSupport::MessageEncryptor.new(key)
         "encrypted:#{crypt.encrypt_and_sign(value)}"
+      end
+
+      # Replace encrypted secret values with a masked placeholder for the frontend
+      def mask_sensitive_fields(settings)
+        return settings unless settings.is_a?(Hash)
+
+        masked = settings.deep_dup
+        SENSITIVE_KEYS.each do |section, keys|
+          sub = masked[section] || masked[section.to_sym]
+          next unless sub.is_a?(Hash)
+
+          keys.each do |key|
+            value = sub[key] || sub[key.to_sym]
+            if value.present?
+              k = sub.key?(key) ? key : key.to_sym
+              sub[k] = MASKED_PLACEHOLDER
+            end
+          end
+        end
+
+        masked
       end
 
       def render_missing_settings(channel)

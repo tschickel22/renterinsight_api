@@ -174,8 +174,13 @@ class ImapSentEmailService
 
         next unless recipient_email
 
-        # Deduplicate by IMAP UID (metadata is jsonb)
-        existing_comm = Communication.where("metadata @> ?", { imap_uid: imap_uid }.to_json).first
+        # Deduplicate by IMAP UID (supports both jsonb and text metadata columns)
+        existing_comm = if Communication.columns_hash['metadata'].sql_type == 'jsonb'
+          Communication.where("metadata @> ?", { imap_uid: imap_uid }.to_json).first
+        else
+          Communication.where("metadata LIKE ? OR metadata LIKE ?",
+            "%\"imap_uid\":#{imap_uid}%", "%imap_uid=>#{imap_uid}%").first
+        end
         next if existing_comm
 
         # Match recipient to Lead or Contact in allowed companies
@@ -209,7 +214,7 @@ class ImapSentEmailService
               from: mail.from&.first,
               cc: mail.cc&.join(', '),
               bcc: mail.bcc&.join(', ')
-            }
+            }.to_json
           )
 
           synced << comm
@@ -247,16 +252,17 @@ class ImapSentEmailService
     ])
   end
 
-  # Extract plain text body from email (handles multipart emails)
+  # Extract email body from email (handles multipart emails)
+  # Prefers HTML so the frontend can render it properly (signatures, formatting, etc.)
   def self.extract_email_body(mail)
     if mail.multipart?
-      text_part = mail.text_part
       html_part = mail.html_part
+      text_part = mail.text_part
 
-      if text_part
+      if html_part
+        html_part.decoded
+      elsif text_part
         text_part.decoded
-      elsif html_part
-        html_part.decoded.gsub(/<[^>]*>/, '').strip
       else
         mail.body.decoded
       end
