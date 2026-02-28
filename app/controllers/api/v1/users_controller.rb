@@ -339,6 +339,55 @@ module Api
         }
       end
 
+      # POST /api/v1/users/:id/reset_mfa
+      def reset_mfa
+        @user = current_company.users.find(params[:id])
+
+        # Company admins cannot reset platform admin MFA
+        if @user.platform_admin? && !current_user.platform_admin?
+          return render json: { error: 'Cannot reset MFA for platform administrators' }, status: :forbidden
+        end
+
+        # Prevent users from resetting their own MFA this way (use normal disable flow)
+        if @user.id == current_user.id
+          return render json: { error: 'Use your account settings to manage your own MFA' }, status: :forbidden
+        end
+
+        @user.update!(
+          mfa_enabled: false,
+          mfa_secret: nil,
+          mfa_backup_codes: [],
+          mfa_verified_at: nil
+        )
+
+        Rails.logger.info("[MFA] Admin reset: user #{@user.id} MFA reset by #{current_user.id} (#{current_user.email})")
+
+        render json: {
+          success: true,
+          message: "MFA has been reset for #{@user.email}. They can re-enroll on next login."
+        }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'User not found' }, status: :not_found
+      rescue => e
+        Rails.logger.error("[MFA] Reset failed: #{e.message}")
+        render json: { error: 'Failed to reset MFA' }, status: :internal_server_error
+      end
+
+      # GET /api/v1/users/:id/mfa_status
+      def mfa_status
+        @user = current_company.users.find(params[:id])
+        return unless authorize_action!('users', 'read')
+
+        render json: {
+          user_id: @user.id,
+          mfa_enabled: @user.mfa_enabled || false,
+          mfa_method: @user.mfa_method || 'email',
+          mfa_verified_at: @user.mfa_verified_at
+        }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'User not found' }, status: :not_found
+      end
+
       private
 
       def set_user
@@ -374,7 +423,9 @@ module Api
           company_id: user.company_id,
           created_at: user.created_at,
           updated_at: user.updated_at,
-          deleted_at: user.deleted_at
+          deleted_at: user.deleted_at,
+          mfa_enabled: user.mfa_enabled || false,
+          mfa_method: user.mfa_method || 'email'
         }
 
         if include_locations

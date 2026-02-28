@@ -575,6 +575,8 @@ Rails.application.routes.draw do
       resources :users, only: %i[index show create update destroy] do
         member do
           post :restore
+          post :reset_mfa
+          get :mfa_status
           get :locations, action: :user_locations
           post :assign_location, path: 'assign-location'
           delete 'remove_location/:location_id', action: :remove_location, as: :remove_location
