@@ -69,7 +69,7 @@ module TwilioSmsService
   def self.send_via_master(to:, body:, from_number: nil, messaging_service_sid: nil)
     sid, token = master_credentials
     msid = messaging_service_sid || master_messaging_service_sid
-    from = from_number || ENV['TWILIO_PHONE_NUMBER']
+    from = from_number || ENV['TWILIO_PHONE_NUMBER'] || master_from_number
 
     send(
       to:                    to,
@@ -115,6 +115,17 @@ module TwilioSmsService
       rescue StandardError
         nil
       end
+  end
+
+  def self.master_from_number
+    begin
+      sms = Setting.find_by(scope_type: 'Platform', scope_id: 0, key: 'communications')
+              &.then { |s| s.value.is_a?(Hash) ? s.value : JSON.parse(s.value.to_s) }
+              &.dig('sms') || {}
+      sms['fromNumber'].presence
+    rescue StandardError
+      nil
+    end
   end
 
   def self.normalize_phone(phone)
