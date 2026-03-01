@@ -339,9 +339,12 @@ module Api
           { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },
           { key: 'source_id', label: 'Source', type: 'select', source: 'standard', required: false, protected: false,
             options: Source.for_company(@company.id).order(:name).pluck(:name) },
-          { key: 'budget_range', label: 'Budget Range', type: 'text', source: 'standard', required: false, protected: false },
-          { key: 'purchase_timeframe', label: 'Purchase Timeframe', type: 'text', source: 'standard', required: false, protected: false },
-          { key: 'rv_experience', label: 'RV Experience', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'budget_range', label: 'Budget Range', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['Under $50k', '$50k-$100k', '$100k-$150k', '$150k-$200k', '$200k+'] },
+          { key: 'purchase_timeframe', label: 'Purchase Timeframe', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['Immediate', '1-3 months', '3-6 months', '6-12 months', '12+ months'] },
+          { key: 'rv_experience', label: 'RV Experience', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['First Time Buyer', 'Some Experience', 'Experienced', 'Very Experienced'] },
           { key: 'interests_requirements', label: 'Interests/Requirements', type: 'longtext', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
         ]
