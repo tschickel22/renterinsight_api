@@ -44,7 +44,7 @@ class Api::V1::OauthEmailController < ApplicationController
               client_id:     client_id,
               response_type: 'code',
               redirect_uri:  REDIRECT_URI,
-              scope:         'offline_access https://outlook.office365.com/SMTP.Send https://outlook.office365.com/IMAP.AccessAsUser.All User.Read',
+              scope:         'offline_access https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read',
               state:         state,
               response_mode: 'query'
             }
@@ -101,7 +101,7 @@ class Api::V1::OauthEmailController < ApplicationController
       }
       # Microsoft requires scope in the token exchange when multiple resource domains are used
       if provider == 'microsoft'
-        token_params[:scope] = 'offline_access https://outlook.office365.com/SMTP.Send https://outlook.office365.com/IMAP.AccessAsUser.All User.Read'
+        token_params[:scope] = 'offline_access https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read'
       end
 
       tokens = http_post_form(token_url, token_params)
@@ -210,7 +210,7 @@ class Api::V1::OauthEmailController < ApplicationController
       end
 
       # Use the return_url stored in state so the user lands back where they started
-      return_url = state_data['return_url'].presence || '/settings/account?tab=email'
+      return_url = state_data['return_url'].presence || '/account-settings?tab=email'
       redirect_to "#{FRONTEND_URL}/oauth/email/callback?success=true&provider=#{URI.encode_www_form_component(provider)}&email=#{URI.encode_www_form_component(email.to_s)}&return_url=#{URI.encode_www_form_component(return_url)}",
                   allow_other_host: true
     rescue => e

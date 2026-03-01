@@ -362,7 +362,8 @@ class UserEmailConnection < ApplicationRecord
   end
 
   # Refresh OAuth token and persist
-  def refresh_oauth_token!
+  # scope: optional override scope string (e.g. for Graph API tokens)
+  def refresh_oauth_token!(scope: nil)
     oauth_type = provider == 'oauth_gmail' ? :google : :microsoft
 
     token_url = case oauth_type
@@ -376,29 +377,60 @@ class UserEmailConnection < ApplicationRecord
     client_secret = ENV["#{provider_name}_OAUTH_CLIENT_SECRET"] ||
                     Rails.application.credentials.dig(:oauth, oauth_type, :client_secret)
 
-    uri = URI(token_url)
-    req = Net::HTTP::Post.new(uri)
-    req.set_form_data(
+    form_data = {
       client_id:     client_id,
       client_secret: client_secret,
       refresh_token: oauth_refresh_token_encrypted,
       grant_type:    'refresh_token'
-    )
+    }
+    form_data[:scope] = scope if scope.present?
+
+    uri = URI(token_url)
+    req = Net::HTTP::Post.new(uri)
+    req.set_form_data(form_data)
     res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
     tokens = JSON.parse(res.body)
 
-    return nil if tokens['error'].present?
+    if tokens['error'].present?
+      Rails.logger.error "[UserEmailConnection#refresh_oauth_token!] Error: #{tokens['error']} - #{tokens['error_description']}"
+      return nil
+    end
 
-    # Persist new tokens
-    update!(
+    # Persist new tokens (refresh_token may rotate)
+    attrs = {
       oauth_token_encrypted: tokens['access_token'],
       oauth_expires_at: Time.current + tokens['expires_in'].to_i.seconds
-    )
+    }
+    attrs[:oauth_refresh_token_encrypted] = tokens['refresh_token'] if tokens['refresh_token'].present?
+    update!(attrs)
 
     tokens['access_token']
   rescue => e
     Rails.logger.error "[UserEmailConnection#refresh_oauth_token!] Failed: #{e.message}"
     nil
+  end
+
+  # Refresh token specifically for Microsoft Graph API scope
+  GRAPH_SEND_SCOPE = 'https://graph.microsoft.com/Mail.Send offline_access'.freeze
+  GRAPH_FULL_SCOPE = 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read offline_access'.freeze
+
+  def refresh_oauth_token_for_graph!
+    refresh_oauth_token!(scope: GRAPH_SEND_SCOPE)
+  end
+
+  def refresh_oauth_token_for_graph_read!
+    refresh_oauth_token!(scope: GRAPH_FULL_SCOPE)
+  end
+
+  # Get a valid Graph API access token, refreshing if expired
+  # Tries full scope (Send+Read) first, falls back to Send-only
+  def ensure_graph_token!
+    token = oauth_token_encrypted
+    if oauth_token_expired? && oauth_refresh_token_encrypted.present?
+      refreshed = refresh_oauth_token_for_graph_read! || refresh_oauth_token_for_graph!
+      token = refreshed if refreshed
+    end
+    token
   end
 
   private

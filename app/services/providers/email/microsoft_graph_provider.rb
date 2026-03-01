@@ -29,6 +29,17 @@ module Providers
 
         response = post_to_graph(access_token, payload)
 
+        # Handle 401 - token may have wrong audience (SMTP scope vs Graph scope)
+        # Retry once with a Graph-scoped token
+        if response.code.to_i == 401
+          Rails.logger.warn "[MicrosoftGraph] 401 Unauthorized - attempting Graph-scoped token refresh"
+          new_token = refresh_token_for_graph_scope!
+          if new_token
+            Rails.logger.info "[MicrosoftGraph] Retrying with Graph-scoped token"
+            response = post_to_graph(new_token, payload)
+          end
+        end
+
         if response.code.to_i == 202
           Rails.logger.info "✅ [MicrosoftGraph] Email sent successfully to #{to}"
           record_connection_usage!
@@ -55,6 +66,8 @@ module Providers
         raise ConfigurationError, "OAuth access token is required for Microsoft Graph" if config[:smtp_password].blank? && config[:oauth_access_token].blank?
       end
 
+      GRAPH_SCOPE = UserEmailConnection::GRAPH_SEND_SCOPE
+
       # Get a valid access token, refreshing if expired
       def ensure_valid_token!
         # The token may come from config as :smtp_password (legacy XOAUTH2 path)
@@ -63,10 +76,10 @@ module Providers
 
         # Check if the user connection has a refresh method
         if user_connection&.oauth_token_expired?
-          Rails.logger.info "[MicrosoftGraph] Token expired, refreshing..."
-          refreshed = user_connection.refresh_oauth_token!
+          Rails.logger.info "[MicrosoftGraph] Token expired, refreshing with Graph scope..."
+          refreshed = user_connection.refresh_oauth_token!(scope: GRAPH_SCOPE)
           if refreshed
-            Rails.logger.info "[MicrosoftGraph] Token refreshed successfully"
+            Rails.logger.info "[MicrosoftGraph] Token refreshed successfully with Graph scope"
             return refreshed
           else
             Rails.logger.warn "[MicrosoftGraph] Token refresh failed, using existing token"
@@ -74,6 +87,40 @@ module Providers
         end
 
         token
+      end
+
+      # Refresh token specifically for Graph API scope (used on 401 retry)
+      def refresh_token_for_graph_scope!
+        if user_connection&.oauth_refresh_token_encrypted.present?
+          user_connection.refresh_oauth_token_for_graph!
+        else
+          # Fall back to config-based refresh
+          refresh_token = config[:oauth_refresh_token] || config[:oauthRefreshToken]
+          return nil if refresh_token.blank?
+
+          client_id     = ENV['MICROSOFT_OAUTH_CLIENT_ID'] ||
+                          Rails.application.credentials.dig(:oauth, :microsoft, :client_id)
+          client_secret = ENV['MICROSOFT_OAUTH_CLIENT_SECRET'] ||
+                          Rails.application.credentials.dig(:oauth, :microsoft, :client_secret)
+
+          uri = URI('https://login.microsoftonline.com/common/oauth2/v2.0/token')
+          req = Net::HTTP::Post.new(uri)
+          req.set_form_data(
+            client_id:     client_id,
+            client_secret: client_secret,
+            refresh_token: refresh_token,
+            grant_type:    'refresh_token',
+            scope:         GRAPH_SCOPE
+          )
+          res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+          tokens = JSON.parse(res.body)
+          return nil if tokens['error'].present?
+
+          tokens['access_token']
+        end
+      rescue => e
+        Rails.logger.error "[MicrosoftGraph] Graph-scoped token refresh failed: #{e.message}"
+        nil
       end
 
       def user_connection

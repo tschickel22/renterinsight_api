@@ -773,19 +773,22 @@ module Api
         Rails.logger.error(e.backtrace.first(5).join("\n"))
       end
 
+      GRAPH_SCOPE = 'https://graph.microsoft.com/Mail.Send offline_access'.freeze
+
       # Send email via Microsoft Graph API (avoids SMTP port blocking / SMTP AUTH disabled)
       def send_email_via_microsoft_graph(email_params, config, reply_to: nil)
         oauth_email = config['oauthEmail'] || config[:oauthEmail] || config['fromEmail'] || config[:fromEmail]
         access_token = config['oauthAccessToken'] || config[:oauthAccessToken]
         oauth_provider = config['oauthProvider'] || config[:oauthProvider]
 
-        # Refresh token if near expiry
+        # Refresh token if near expiry (use Graph scope for Microsoft)
         oauth_expires = config['oauthExpiresAt'] || config[:oauthExpiresAt]
         if oauth_expires.present?
           expires_at = Time.parse(oauth_expires.to_s) rescue nil
           if expires_at && expires_at <= 5.minutes.from_now
             refresh_token = config['oauthRefreshToken'] || config[:oauthRefreshToken]
-            refreshed = refresh_oauth_access_token_for_send(oauth_provider, refresh_token)
+            graph_scope = oauth_provider.to_s == 'microsoft' ? GRAPH_SCOPE : nil
+            refreshed = refresh_oauth_access_token_for_send(oauth_provider, refresh_token, scope: graph_scope)
             access_token = refreshed if refreshed
           end
         end
@@ -822,6 +825,22 @@ module Api
           http.request(request)
         end
 
+        # Handle 401 - token may have wrong audience (SMTP scope vs Graph scope)
+        if response.code.to_i == 401
+          Rails.logger.warn "[send_email_via_microsoft_graph] 401 Unauthorized - refreshing with Graph scope"
+          refresh_token = config['oauthRefreshToken'] || config[:oauthRefreshToken]
+          new_token = refresh_oauth_access_token_for_send(oauth_provider, refresh_token, scope: GRAPH_SCOPE)
+          if new_token
+            request = Net::HTTP::Post.new(uri)
+            request['Authorization'] = "Bearer #{new_token}"
+            request['Content-Type'] = 'application/json'
+            request.body = payload.to_json
+            response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 15, read_timeout: 30) do |http|
+              http.request(request)
+            end
+          end
+        end
+
         if response.code.to_i == 202
           Rails.logger.info "[send_email_via_microsoft_graph] Success"
           { success: true, message_id: response['x-ms-request-id'] || "graph-#{SecureRandom.hex(8)}" }
@@ -840,7 +859,7 @@ module Api
         { success: false, error: e.message }
       end
 
-      def refresh_oauth_access_token_for_send(provider, refresh_token)
+      def refresh_oauth_access_token_for_send(provider, refresh_token, scope: nil)
         return nil if refresh_token.blank?
 
         token_url = case provider.to_s
@@ -854,14 +873,17 @@ module Api
         client_secret = ENV["#{provider.upcase}_OAUTH_CLIENT_SECRET"] ||
                         Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
 
-        uri = URI(token_url)
-        req = Net::HTTP::Post.new(uri)
-        req.set_form_data(
+        form_data = {
           client_id:     client_id,
           client_secret: client_secret,
           refresh_token: refresh_token,
           grant_type:    'refresh_token'
-        )
+        }
+        form_data[:scope] = scope if scope.present?
+
+        uri = URI(token_url)
+        req = Net::HTTP::Post.new(uri)
+        req.set_form_data(form_data)
         res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
         tokens = JSON.parse(res.body)
 
