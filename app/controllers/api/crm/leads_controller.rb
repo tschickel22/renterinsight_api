@@ -2,7 +2,7 @@ module Api
   module Crm
     class LeadsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score]
+      before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check]
 
       def index
         return unless authorize_action!('leads', 'read')
@@ -371,15 +371,21 @@ module Api
               Rails.logger.info "✅ [ConvertLead] Migrated #{activity_count} activities"
             end
             
-            # 5. MARK LEAD AS CONVERTED
+            # 5. COPY CUSTOM FIELD VALUES VIA MIGRATION MAPPINGS
+            cf_result = CustomFieldMigrationService.copy_values(
+              @lead, contact: contact, account: account, deal: deal
+            )
+            Rails.logger.info "🔄 [ConvertLead] Custom field migration: copied=#{cf_result[:copied]}, gaps=#{cf_result[:gaps].size}"
+
+            # 6. MARK LEAD AS CONVERTED
             @lead.update!(
               is_converted: true,
               converted_at: Time.current,
               converted_account_id: account.id
             )
-            
+
             Rails.logger.info "🎉 [ConvertLead] Conversion complete!"
-            
+
             # Return response
             render json: {
               account: {
@@ -405,7 +411,8 @@ module Api
                 expectedCloseDate: deal.expected_close_date,
                 accountId: deal.account_id,
                 contactId: deal.contact_id
-              } : nil
+              } : nil,
+              customFieldGaps: cf_result[:gaps]
             }, status: :ok
           end
           
@@ -414,6 +421,14 @@ module Api
           Rails.logger.error e.backtrace.first(10).join("\n")
           render json: { error: "Conversion failed: #{e.message}" }, status: :internal_server_error
         end
+      end
+
+      # GET /api/crm/leads/:id/conversion_integrity_check
+      def conversion_integrity_check
+        return unless authorize_action!('leads', 'read')
+
+        gaps = CustomFieldMigrationService.check_integrity(@lead)
+        render json: { gaps: gaps }
       end
 
       private

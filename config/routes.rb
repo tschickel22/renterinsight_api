@@ -1026,7 +1026,15 @@ Rails.application.routes.draw do
       end
 
       # ==================== CUSTOM FIELDS ====================
-      resources :custom_fields, only: [:index, :create, :update, :destroy]
+      resources :custom_fields, only: [:index, :create, :update, :destroy] do
+        member do
+          get :migrations
+          post :migrations, action: :create_migrations
+        end
+        collection do
+          get :migration_recommendations
+        end
+      end
 
       # ==================== CUSTOM FIELD FILE/IMAGE UPLOADS ====================
       resources :custom_field_uploads, only: [:create] do
@@ -1299,6 +1307,9 @@ Rails.application.routes.draw do
           # Scoring
           get :score, to: 'lead_scores#show'
           post 'score/calculate', to: 'lead_scores#calculate'
+
+          # Custom field migration integrity check
+          get :conversion_integrity_check
         end
 
         # Nested resources

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_01_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_01_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1149,6 +1149,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_01_000002) do
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
     t.index ["quickbooks_id"], name: "index_contacts_on_quickbooks_id"
+  end
+
+  create_table "custom_field_migrations", force: :cascade do |t|
+    t.bigint "source_custom_field_id", null: false
+    t.string "target_module", null: false
+    t.bigint "target_custom_field_id"
+    t.string "migration_type", default: "create_new", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_custom_field_migrations_on_company_id"
+    t.index ["source_custom_field_id", "target_module"], name: "idx_cf_migrations_source_target_module", unique: true
+    t.index ["source_custom_field_id"], name: "index_custom_field_migrations_on_source_custom_field_id"
+    t.index ["target_custom_field_id"], name: "index_custom_field_migrations_on_target_custom_field_id"
   end
 
   create_table "custom_field_permissions", force: :cascade do |t|
@@ -4049,6 +4063,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_01_000002) do
   add_foreign_key "contact_activities", "users"
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "contacts", "locations"
+  add_foreign_key "custom_field_migrations", "companies"
+  add_foreign_key "custom_field_migrations", "custom_fields", column: "source_custom_field_id"
+  add_foreign_key "custom_field_migrations", "custom_fields", column: "target_custom_field_id"
   add_foreign_key "custom_field_permissions", "custom_fields"
   add_foreign_key "custom_field_permissions", "roles"
   add_foreign_key "custom_fields", "companies"

@@ -7,6 +7,8 @@ class CustomField < ApplicationRecord
   
   has_many :custom_field_permissions, dependent: :destroy
   has_many :roles, through: :custom_field_permissions
+  has_many :outgoing_migrations, class_name: 'CustomFieldMigration', foreign_key: :source_custom_field_id, dependent: :destroy
+  has_many :incoming_migrations, class_name: 'CustomFieldMigration', foreign_key: :target_custom_field_id, dependent: :nullify
   
   # Validations
   validates :name, presence: true
@@ -143,6 +145,21 @@ class CustomField < ApplicationRecord
     permission.permission_level == 'write'
   end
   
+  # Returns recommended target modules for migrating a lead custom field
+  # based on keyword heuristics in the field label/name
+  def self.migration_recommendations(label, field_type = nil)
+    return %w[contacts accounts deals] if label.blank?
+
+    downcased = label.downcase
+
+    recommendations = []
+    recommendations << 'accounts' if %w[company revenue industry size employees website domain].any? { |kw| downcased.include?(kw) }
+    recommendations << 'contacts' if %w[title role linkedin birthday department personal].any? { |kw| downcased.include?(kw) }
+    recommendations << 'deals' if %w[budget timeline decision requirement close probability].any? { |kw| downcased.include?(kw) }
+
+    recommendations.empty? ? %w[contacts accounts deals] : recommendations.uniq
+  end
+
   def as_json(options = {})
     super(options.merge(
       only: [:id, :module, :name, :field_key, :field_type, :required, :default_value, :display_order, :section, :description, :placeholder, :is_active, :visibility],

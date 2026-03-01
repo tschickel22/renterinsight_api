@@ -4,7 +4,7 @@ module Api
   module V1
     class CustomFieldsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_custom_field, only: [:update, :destroy]
+      before_action :set_custom_field, only: [:update, :destroy, :migrations, :create_migrations]
 
       # GET /api/v1/custom_fields?module=leads
       def index
@@ -60,6 +60,59 @@ module Api
         render json: { message: 'Custom field deactivated' }
       end
 
+      # GET /api/v1/custom_fields/migration_recommendations?label=X&field_type=Y
+      def migration_recommendations
+        return unless authorize_action!('company_settings', 'read')
+
+        label = params[:label]
+        field_type = params[:field_type]
+
+        recommendations = CustomField.migration_recommendations(label, field_type)
+        render json: { recommendations: recommendations }
+      end
+
+      # GET /api/v1/custom_fields/:id/migrations
+      def migrations
+        return unless authorize_action!('company_settings', 'read')
+
+        migrations = @company.custom_field_migrations
+          .where(source_custom_field: @custom_field)
+          .includes(:source_custom_field, :target_custom_field)
+
+        render json: {
+          migrations: migrations.map { |m| migration_json(m) }
+        }
+      end
+
+      # POST /api/v1/custom_fields/:id/migrations
+      def create_migrations
+        return unless authorize_action!('company_settings', 'update')
+
+        unless @custom_field.module == 'leads'
+          render json: { error: 'Migrations can only be set up for lead custom fields' }, status: :unprocessable_entity
+          return
+        end
+
+        mappings = (params[:mappings] || []).map do |m|
+          {
+            target_module: m[:target_module],
+            migration_type: m[:migration_type],
+            target_custom_field_id: m[:target_custom_field_id]
+          }
+        end
+
+        result = CustomFieldMigrationService.setup_migrations(@custom_field, mappings, @company)
+
+        if result[:success]
+          render json: {
+            success: true,
+            migrations: result[:migrations].map { |m| migration_json(m) }
+          }, status: :created
+        else
+          render json: { success: false, errors: result[:errors] }, status: :unprocessable_entity
+        end
+      end
+
       private
 
       def set_custom_field
@@ -98,6 +151,21 @@ module Api
           validationRules: field.validation_rules,
           createdAt: field.created_at&.iso8601,
           updatedAt: field.updated_at&.iso8601
+        }
+      end
+
+      def migration_json(m)
+        {
+          id: m.id,
+          sourceCustomFieldId: m.source_custom_field_id,
+          sourceFieldLabel: m.source_custom_field&.label,
+          targetModule: m.target_module,
+          targetCustomFieldId: m.target_custom_field_id,
+          targetFieldLabel: m.target_custom_field&.label,
+          targetFieldKey: m.target_custom_field&.field_key,
+          migrationType: m.migration_type,
+          createdAt: m.created_at&.iso8601,
+          updatedAt: m.updated_at&.iso8601
         }
       end
     end
