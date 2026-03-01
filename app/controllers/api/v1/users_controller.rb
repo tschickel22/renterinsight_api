@@ -362,6 +362,21 @@ module Api
 
         Rails.logger.info("[MFA] Admin reset: user #{@user.id} MFA reset by #{current_user.id} (#{current_user.email})")
 
+        # Send email notification to the user whose MFA was reset
+        begin
+          reset_by_name = current_user.name.presence || current_user.email
+          MfaMailer.mfa_reset(
+            email: @user.email,
+            user_name: @user.name.presence || @user.email,
+            reset_by: reset_by_name,
+            company_name: current_company.name
+          ).deliver_later
+          Rails.logger.info("[MFA] Reset notification email queued for #{@user.email}")
+        rescue => mail_error
+          # Don't fail the reset if email fails
+          Rails.logger.error("[MFA] Failed to send reset notification email: #{mail_error.message}")
+        end
+
         render json: {
           success: true,
           message: "MFA has been reset for #{@user.email}. They can re-enroll on next login."

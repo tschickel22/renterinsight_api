@@ -38,13 +38,13 @@ module Api
           return
         end
         
-        # Use user's saved MFA method preference (email or sms)
-        # If not set, default to email
-        delivery_method = user.mfa_method || 'email'
-        
-        # Validate delivery method
-        unless %w[email sms].include?(delivery_method)
-          delivery_method = 'email'  # Fallback to email if invalid
+        # Use user's saved MFA method preference, but allow override for fallback
+        # This lets frontend request alternate method if primary delivery fails
+        requested_method = params[:delivery_method]
+        delivery_method = if requested_method.present? && %w[email sms].include?(requested_method)
+          requested_method
+        else
+          user.mfa_method || 'email'
         end
 
         # Request MFA code

@@ -23,11 +23,24 @@ module Api
           if user.mfa_enabled?
             # Generate temporary token for MFA verification
             temp_token = JsonWebToken.generate_mfa_temp_token(user)
-            
+
+            primary_method = user.mfa_method || 'email'
+            has_phone = user.phone.present?
+            has_email = user.email.present?
+
+            # Determine if an alternate delivery method is available
+            alternate_method = if primary_method == 'sms' && has_email
+              'email'
+            elsif primary_method == 'email' && has_phone
+              'sms'
+            end
+
             render json: {
               success: true,
               mfa_required: true,
               temp_token: temp_token,
+              delivery_method: primary_method,
+              alternate_method: alternate_method,
               message: 'Please enter your authentication code'
             }, status: :ok
             return
