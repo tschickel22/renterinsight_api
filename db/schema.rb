@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_25_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_01_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1760,12 +1760,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_25_120000) do
     t.string "preferred_contact_method"
     t.text "interests_requirements"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.bigint "vehicle_id"
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["location_id"], name: "index_leads_on_location_id"
     t.index ["owner_id"], name: "index_leads_on_owner_id"
     t.index ["source_id"], name: "index_leads_on_source_id"
+    t.index ["vehicle_id"], name: "index_leads_on_vehicle_id"
   end
 
   create_table "listings", force: :cascade do |t|
@@ -4112,6 +4114,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_25_120000) do
   add_foreign_key "leads", "companies"
   add_foreign_key "leads", "locations"
   add_foreign_key "leads", "sources"
+  add_foreign_key "leads", "vehicles"
   add_foreign_key "listings", "companies"
   add_foreign_key "listings", "locations"
   add_foreign_key "listings", "vehicles"

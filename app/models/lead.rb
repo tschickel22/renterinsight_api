@@ -11,6 +11,7 @@ class Lead < ApplicationRecord
   belongs_to :converted_account, class_name: "Account", optional: true
   belongs_to :source, class_name: "Source", optional: true
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
+  belongs_to :vehicle, optional: true
 
   # Core CRM associations
   has_many :activities,           dependent: :destroy

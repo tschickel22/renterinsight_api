@@ -82,7 +82,7 @@ module Api
         # Count AFTER search filter (for pagination)
         filtered_count = leads.count
         
-        leads = leads.includes(:source, :owner).order(created_at: :desc)
+        leads = leads.includes(:source, :owner, :vehicle).order(created_at: :desc)
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -314,7 +314,8 @@ module Api
                 value: 0, # Will be updated when products/pricing added to deal
                 expected_close_date: deal_params[:close_date] || deal_params[:expected_close],
                 owner_id: current_user&.id,
-                description: deal_params[:description] || "Converted from lead ##{@lead.id}"
+                description: deal_params[:description] || "Converted from lead ##{@lead.id}",
+                vehicle_id: @lead.vehicle_id  # Carry over vehicle from lead
               )
               
               if deal.save
@@ -455,19 +456,19 @@ module Api
           if has_all_scope
             # User has company-wide access
             Rails.logger.info "[LeadsController#set_lead] User has leads:read:all - accessing any company lead"
-            @company.leads.includes(:source, :owner).find(params[:id])
+            @company.leads.includes(:source, :owner, :vehicle).find(params[:id])
           else
             # User is location-restricted
             location_ids = permission_service.accessible_location_ids
             Rails.logger.info "[LeadsController#set_lead] User has location scope - accessible_location_ids: #{location_ids.inspect}"
             if location_ids.any?
-              @company.leads.includes(:source, :owner).where(location_id: location_ids).find(params[:id])
+              @company.leads.includes(:source, :owner, :vehicle).where(location_id: location_ids).find(params[:id])
             else
-              @company.leads.includes(:source, :owner).find(params[:id])
+              @company.leads.includes(:source, :owner, :vehicle).find(params[:id])
             end
           end
         else
-          @company.leads.includes(:source, :owner).find(params[:id])
+          @company.leads.includes(:source, :owner, :vehicle).find(params[:id])
         end
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Lead not found or access denied' }, status: :not_found
@@ -482,7 +483,8 @@ module Api
                    :firstName, :lastName, :sourceId, :ownerId,
                    :budget_range, :budgetRange, :purchase_timeframe, :purchaseTimeframe,
                    :rv_experience, :rvExperience, :preferred_contact_method, :preferredContactMethod,
-                   :interests_requirements, :interestsRequirements]
+                   :interests_requirements, :interestsRequirements,
+                   :vehicle_id, :vehicleId]
 
         root = params.permit(*allowed, lead: {})
         nested = params[:lead].is_a?(ActionController::Parameters) ? params.require(:lead).permit(*allowed) : {}
@@ -504,7 +506,8 @@ module Api
           purchase_timeframe: raw['purchase_timeframe'] || raw['purchaseTimeframe'],
           rv_experience: raw['rv_experience'] || raw['rvExperience'],
           preferred_contact_method: raw['preferred_contact_method'] || raw['preferredContactMethod'],
-          interests_requirements: raw['interests_requirements'] || raw['interestsRequirements']
+          interests_requirements: raw['interests_requirements'] || raw['interestsRequirements'],
+          vehicle_id: (raw['vehicle_id'] || raw['vehicleId']).presence&.to_i
         }.compact
       end
 
@@ -580,6 +583,19 @@ module Api
           rvExperience: l.respond_to?(:rv_experience) ? l.rv_experience : nil,
           preferredContactMethod: l.respond_to?(:preferred_contact_method) ? l.preferred_contact_method : nil,
           interestsRequirements: l.respond_to?(:interests_requirements) ? l.interests_requirements : nil,
+          vehicleId: l.vehicle_id,
+          vehicle: l.vehicle ? {
+            id: l.vehicle.id,
+            inventoryId: l.vehicle.inventory_id,
+            displayName: l.vehicle.display_name,
+            year: l.vehicle.year,
+            make: l.vehicle.make,
+            model: l.vehicle.model,
+            status: l.vehicle.status,
+            listingType: l.vehicle.listing_type,
+            salePrice: l.vehicle.sale_price,
+            msrp: l.vehicle.msrp
+          } : nil,
           customFieldValues: l.respond_to?(:custom_field_values) ? l.custom_field_values : {},
           createdAt: l.created_at,
           updatedAt: l.updated_at

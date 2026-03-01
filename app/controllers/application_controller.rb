@@ -15,9 +15,10 @@ class ApplicationController < ActionController::API
   # This allows models to access current context without explicit passing
   def set_current_attributes
     Current.user = current_user
+    Current.original_user = original_user
     Current.company_id = current_company_id
     Current.location_id = current_location_id
-    
+
     if Rails.env.development? && Current.location_id.present?
       Rails.logger.info "📍 [Current] Location context set: #{Current.location_id}"
     end
@@ -62,15 +63,19 @@ class ApplicationController < ActionController::API
   def authenticate
     # Extract token from Authorization header
     header = request.headers['Authorization']
-    
+
     if header.present?
       token = header.split(' ').last
       decoded = JsonWebToken.decode(token)
-      
+
       if decoded
         # Valid JWT token found
         @current_user_id = decoded[:user_id]
         @current_company_id = decoded[:company_id] || request.headers['X-Company-Id']&.to_i
+
+        # Check for impersonation header (platform admins only)
+        resolve_impersonation
+
         return
       else
         # Token decode failed (expired or invalid)
@@ -79,18 +84,28 @@ class ApplicationController < ActionController::API
         return
       end
     end
-    
+
     # No valid token - return unauthorized
     Rails.logger.warn "[ApplicationController] No authorization header present"
     render json: { error: 'Unauthorized - Missing authorization header' }, status: :unauthorized
   end
 
   def current_company_id
+    # When impersonating, default to the impersonated user's company
+    if impersonating?
+      # Still allow X-Company-ID override for multi-company users
+      context_company_id = request.headers['X-Company-ID']&.to_i || request.headers['X-Company-Context']&.to_i
+      if context_company_id.present? && context_company_id > 0
+        return context_company_id
+      end
+      return @impersonated_user.company_id
+    end
+
     # For platform_admin/tenant/super_admin users, allow override via X-Company-ID header (platform admin switching)
     if current_user&.role.in?(['platform_admin', 'tenant', 'super_admin', 'admin'])
       # Try both X-Company-ID and X-Company-Context for backward compatibility
       context_company_id = request.headers['X-Company-ID']&.to_i || request.headers['X-Company-Context']&.to_i
-      
+
       if context_company_id.present? && context_company_id > 0
         Rails.logger.info "[ApplicationController] Platform admin #{current_user.email} switching to company #{context_company_id}"
         # Verify the platform admin has access to this company
@@ -98,7 +113,7 @@ class ApplicationController < ActionController::API
         return context_company_id
       end
     end
-    
+
     # Otherwise use the company from JWT token or user's company
     company_id = @current_company_id || current_user&.company_id
     Rails.logger.info "[ApplicationController] Using company_id #{company_id} for user #{current_user&.email}"
@@ -107,22 +122,39 @@ class ApplicationController < ActionController::API
 
   def current_user
     return @current_user if defined?(@current_user)
-    
+
+    # When impersonating, current_user returns the impersonated user
+    if @impersonated_user
+      @current_user = @impersonated_user
+      return @current_user
+    end
+
     # Load user from JWT token
     if @current_user_id
       @current_user = User.find_by(id: @current_user_id)
-      
+
       unless @current_user
         Rails.logger.error("JWT token contains invalid user_id: #{@current_user_id}")
         render json: { error: 'Unauthorized - User not found' }, status: :unauthorized
         return nil
       end
-      
+
       return @current_user
     end
-    
+
     # No authenticated user
     nil
+  end
+
+  # Returns the real authenticated user (platform admin) during impersonation,
+  # or current_user when not impersonating. Use this for security checks.
+  def original_user
+    @original_user || current_user
+  end
+
+  # Whether the current request is an impersonation
+  def impersonating?
+    @impersonated_user.present?
   end
   
   # Portal authentication helpers
@@ -440,6 +472,56 @@ class ApplicationController < ActionController::API
   
   private
   
+  # Resolve impersonation from JWT claim or X-Impersonated-User-ID header.
+  # JWT claim (impersonated_by) is set when the impersonation token is issued.
+  # Header fallback allows the frontend to also pass the target user ID explicitly.
+  # Sets @impersonated_user and @original_user when valid.
+  def resolve_impersonation
+    header = request.headers['Authorization']
+    return unless header.present?
+
+    token = header.split(' ').last
+    decoded = JsonWebToken.decode(token)
+    return unless decoded
+
+    # Method 1: JWT-based impersonation (impersonated_by claim in token)
+    if decoded[:impersonated_by].present?
+      admin_user = User.find_by(id: decoded[:impersonated_by])
+      return unless admin_user&.platform_admin? || admin_user&.super_admin?
+
+      target = User.find_by(id: decoded[:user_id])
+      return unless target
+
+      @original_user = admin_user
+      @impersonated_user = target
+      Rails.logger.info "🎭 [Impersonation] #{admin_user.email} (ID: #{admin_user.id}) acting as #{target.email} (ID: #{target.id})"
+      return
+    end
+
+    # Method 2: Header-based impersonation (X-Impersonated-User-ID)
+    impersonated_id = request.headers['X-Impersonated-User-ID']&.to_i
+    return unless impersonated_id.present? && impersonated_id > 0
+
+    real_user = User.find_by(id: @current_user_id)
+    return unless real_user
+    return unless real_user.platform_admin? || real_user.super_admin?
+
+    target = User.find_by(id: impersonated_id)
+    unless target
+      Rails.logger.warn "[Impersonation] Target user #{impersonated_id} not found"
+      return
+    end
+
+    if target.inactive? || target.suspended?
+      Rails.logger.warn "[Impersonation] Target user #{impersonated_id} is inactive/suspended"
+      return
+    end
+
+    @original_user = real_user
+    @impersonated_user = target
+    Rails.logger.info "🎭 [Impersonation] #{real_user.email} (ID: #{real_user.id}) acting as #{target.email} (ID: #{target.id})"
+  end
+
   # Legacy authorization fallback for non-RBAC companies
   #
   # @param resource_key [String] Resource identifier
@@ -465,11 +547,13 @@ class ApplicationController < ActionController::API
   #
   # @return [Boolean] true if authorized, renders error and returns false if not
   def require_platform_admin!
-    unless current_user&.platform_admin? || current_user&.super_admin?
+    # Use original_user so platform admin guards work during impersonation
+    admin = original_user
+    unless admin&.platform_admin? || admin&.super_admin?
       Rails.logger.warn(
-        "[Authorization] User #{current_user&.id} denied platform admin access"
+        "[Authorization] User #{admin&.id} denied platform admin access"
       )
-      render json: { 
+      render json: {
         error: 'Forbidden - Platform admin access required'
       }, status: :forbidden
       return false

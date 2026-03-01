@@ -14,7 +14,7 @@
 #   Current.location_filtered? 
 #
 class Current < ActiveSupport::CurrentAttributes
-  attribute :user, :company_id, :location_id
+  attribute :user, :original_user, :company_id, :location_id
   
   # Check if we're filtering by a specific location
   def location_filtered?

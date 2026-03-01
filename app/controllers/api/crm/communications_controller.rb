@@ -1264,7 +1264,7 @@ module Api
       end
 
       def build_email_metadata(email_params, config = {})
-        {
+        meta = {
           provider: config[:provider] || 'smtp',
           template_id: email_params[:template_id],
           to: email_params[:to],
@@ -1275,12 +1275,14 @@ module Api
           from_name: config[:fromName],
           sender_user_id: current_user&.id,
           assigned_user_id: @lead&.assigned_user_id
-        }.compact
+        }
+        meta[:impersonated_by] = original_user.id if impersonating?
+        meta.compact
       end
 
       # Build SMS metadata
       def build_sms_metadata(sms_params, config = {})
-        {
+        meta = {
           provider: config[:provider] || 'twilio',
           template_id: sms_params[:template_id],
           to: sms_params[:to],
@@ -1288,7 +1290,9 @@ module Api
           from_number: config[:fromNumber],
           sender_user_id: current_user&.id,
           assigned_user_id: @lead&.assigned_user_id
-        }.compact
+        }
+        meta[:impersonated_by] = original_user.id if impersonating?
+        meta.compact
       end
 
       # Strong parameters for generic log creation

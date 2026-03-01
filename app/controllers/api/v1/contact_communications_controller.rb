@@ -113,6 +113,7 @@ module Api
             metadata: {
               message_sid:       result[:message_sid],
               sender_user_id:    current_user&.id,
+              impersonated_by:   (impersonating? ? original_user.id : nil),
               assigned_user_id:  @contact.try(:assigned_user_id),
               messaging_service: sms_cfg[:twilio_messaging_service_sid].present?
             }.compact

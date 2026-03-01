@@ -45,9 +45,11 @@ module Api
           }, status: :forbidden
         end
         
+        admin = original_user
+
         # Log impersonation start
-        Rails.logger.info "🎭 [IMPERSONATION] Platform admin #{current_user.email} (ID: #{current_user.id}) is impersonating #{target_user.email} (ID: #{target_user.id})"
-        
+        Rails.logger.info "🎭 [IMPERSONATION] Platform admin #{admin.email} (ID: #{admin.id}) is impersonating #{target_user.email} (ID: #{target_user.id})"
+
         # Track login activity
         LoginActivity.record_login(
           user_id: target_user.id,
@@ -55,15 +57,19 @@ module Api
           ip_address: request.remote_ip,
           user_agent: request.user_agent
         )
-        
-        # Return full user context (same as login response)
+
+        # Generate impersonation token — authenticates as target user with audit trail
+        impersonation_token = JsonWebToken.generate_impersonation_token(target_user, admin)
+
+        # Return full user context (same shape as login response so frontend can swap tokens)
         render json: {
           success: true,
           impersonation: true,
+          token: impersonation_token,
           original_user: {
-            id: current_user.id,
-            email: current_user.email,
-            name: current_user.name
+            id: admin.id,
+            email: admin.email,
+            name: admin.name
           },
           user: build_user_response(target_user)
         }, status: :ok
@@ -79,14 +85,20 @@ module Api
       # POST /api/auth/stop_impersonation
       # Stop impersonating and return to original admin context
       def destroy
+        admin = original_user
+
         # Log impersonation end
-        Rails.logger.info "🎭 [IMPERSONATION] Platform admin #{current_user.email} (ID: #{current_user.id}) stopped impersonation"
-        
-        # Return original platform admin context
+        Rails.logger.info "🎭 [IMPERSONATION] Platform admin #{admin.email} (ID: #{admin.id}) stopped impersonation"
+
+        # Generate fresh token for the original admin
+        admin_token = JsonWebToken.generate_access_token(admin)
+
+        # Return original platform admin context with their token
         render json: {
           success: true,
           message: 'Impersonation stopped',
-          user: build_user_response(current_user)
+          token: admin_token,
+          user: build_user_response(admin)
         }, status: :ok
       rescue StandardError => e
         Rails.logger.error("Stop impersonation error: #{e.message}")
@@ -99,7 +111,8 @@ module Api
       private
       
       def require_platform_admin!
-        unless current_user.platform_admin? || current_user.super_admin?
+        admin = original_user
+        unless admin&.platform_admin? || admin&.super_admin?
           render json: {
             success: false,
             error: 'Only platform administrators can impersonate users'

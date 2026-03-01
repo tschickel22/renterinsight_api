@@ -61,6 +61,28 @@ class JsonWebToken
     encode(payload, STANDARD_EXP.from_now)
   end
   
+  # Generate an impersonation access token
+  # Contains the target user's identity plus impersonated_by for audit trail
+  # @param target_user [User] The user being impersonated
+  # @param admin_user [User] The platform admin performing impersonation
+  # @return [String] The encoded impersonation token
+  def self.generate_impersonation_token(target_user, admin_user)
+    payload = {
+      user_id: target_user.id,
+      email: target_user.email,
+      role: target_user.role,
+      type: 'access',
+      impersonated_by: admin_user.id
+    }
+
+    # Include company_id for non-platform users
+    if target_user.company_id.present? && !target_user.platform_admin?
+      payload[:company_id] = target_user.company_id
+    end
+
+    encode(payload, STANDARD_EXP.from_now)
+  end
+
   # Generate a refresh token for a user
   # @param user [User] The user to generate a token for
   # @return [String] The encoded refresh token

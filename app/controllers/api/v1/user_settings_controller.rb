@@ -316,6 +316,9 @@ module Api
         if decoded[:user_id]
           @current_user_id = decoded[:user_id]
           @current_company_id = decoded[:company_id]
+
+          # Check for impersonation header (platform admins only)
+          resolve_impersonation
         elsif decoded[:buyer_portal_access_id]
           @current_portal_buyer_id = decoded[:buyer_portal_access_id]
         else
@@ -327,10 +330,14 @@ module Api
         end
       end
 
-      # Override to use cached ID
+      # Override to use cached ID, with impersonation support
       def current_user
         return @current_user if @current_user.present?
-        @current_user = @current_user_id ? User.find_by(id: @current_user_id) : nil
+        if @impersonated_user
+          @current_user = @impersonated_user
+        else
+          @current_user = @current_user_id ? User.find_by(id: @current_user_id) : nil
+        end
       end
 
       # Override to use cached ID
