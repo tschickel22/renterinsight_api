@@ -217,7 +217,8 @@ module Api
         
         # Configure ActionMailer based on provider
         provider = (email_config['provider'] || email_config[:provider] || 'smtp').to_sym
-        
+        send_result = nil
+
         case provider
         when :smtp
           configure_action_mailer_smtp(email_config)
@@ -227,19 +228,28 @@ module Api
           configure_action_mailer_ses(email_config)
         when :sendgrid
           configure_action_mailer_sendgrid(email_config)
-        when :oauth_microsoft, :oauth_google
+        when :oauth_microsoft
+          # Microsoft 365: use Graph API (SMTP blocked on Render / M365 SMTP AUTH disabled)
+          send_result = send_email_via_microsoft_graph(
+            email_params.merge(content: enhanced_body),
+            email_config,
+            reply_to: communication&.reply_to
+          )
+        when :oauth_google
           configure_action_mailer_oauth(email_config)
         else
           Rails.logger.warn "[Platform::CommunicationsController] Unknown email provider: #{provider}, falling back to SMTP"
           configure_action_mailer_smtp(email_config)
         end
-        
-        # Send email via ActionMailer with enhanced body
-        send_result = send_email_via_action_mailer(
-          email_params.merge(content: enhanced_body), 
-          email_config,
-          reply_to: communication&.reply_to
-        )
+
+        # For non-Graph paths, send via ActionMailer
+        unless send_result
+          send_result = send_email_via_action_mailer(
+            email_params.merge(content: enhanced_body),
+            email_config,
+            reply_to: communication&.reply_to
+          )
+        end
         
         unless send_result[:success]
           # Mark communication as failed if it was created
@@ -761,6 +771,73 @@ module Api
       rescue StandardError => e
         Rails.logger.error("❌ Failed to configure ActionMailer OAuth: #{e.message}")
         Rails.logger.error(e.backtrace.first(5).join("\n"))
+      end
+
+      # Send email via Microsoft Graph API (avoids SMTP port blocking / SMTP AUTH disabled)
+      def send_email_via_microsoft_graph(email_params, config, reply_to: nil)
+        oauth_email = config['oauthEmail'] || config[:oauthEmail] || config['fromEmail'] || config[:fromEmail]
+        access_token = config['oauthAccessToken'] || config[:oauthAccessToken]
+        oauth_provider = config['oauthProvider'] || config[:oauthProvider]
+
+        # Refresh token if near expiry
+        oauth_expires = config['oauthExpiresAt'] || config[:oauthExpiresAt]
+        if oauth_expires.present?
+          expires_at = Time.parse(oauth_expires.to_s) rescue nil
+          if expires_at && expires_at <= 5.minutes.from_now
+            refresh_token = config['oauthRefreshToken'] || config[:oauthRefreshToken]
+            refreshed = refresh_oauth_access_token_for_send(oauth_provider, refresh_token)
+            access_token = refreshed if refreshed
+          end
+        end
+
+        unless oauth_email.present? && access_token.present?
+          return { success: false, error: "Microsoft Graph not configured: email=#{oauth_email.present?}, token=#{access_token.present?}" }
+        end
+
+        from_name = config['fromName'] || config[:fromName] || oauth_email
+        is_html = email_params[:content]&.include?('<') && (email_params[:content]&.include?('</') || email_params[:content]&.include?('/>'))
+
+        message = {
+          subject: email_params[:subject],
+          body: { contentType: is_html ? 'HTML' : 'Text', content: email_params[:content] },
+          from: { emailAddress: { address: oauth_email, name: from_name } },
+          toRecipients: Array(email_params[:to]).flat_map { |a| a.to_s.split(',').map(&:strip) }.reject(&:blank?).map { |e| { emailAddress: { address: e } } }
+        }
+
+        message[:ccRecipients] = email_params[:cc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:cc].present?
+        message[:bccRecipients] = email_params[:bcc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:bcc].present?
+        message[:replyTo] = reply_to.to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if reply_to.present?
+
+        payload = { message: message, saveToSentItems: true }
+
+        Rails.logger.info "[send_email_via_microsoft_graph] Sending to #{email_params[:to]} as #{oauth_email}"
+
+        uri = URI('https://graph.microsoft.com/v1.0/me/sendMail')
+        request = Net::HTTP::Post.new(uri)
+        request['Authorization'] = "Bearer #{access_token}"
+        request['Content-Type'] = 'application/json'
+        request.body = payload.to_json
+
+        response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 15, read_timeout: 30) do |http|
+          http.request(request)
+        end
+
+        if response.code.to_i == 202
+          Rails.logger.info "[send_email_via_microsoft_graph] Success"
+          { success: true, message_id: response['x-ms-request-id'] || "graph-#{SecureRandom.hex(8)}" }
+        else
+          error_msg = begin
+            JSON.parse(response.body).dig('error', 'message')
+          rescue
+            response.body.to_s.truncate(200)
+          end
+          Rails.logger.error "[send_email_via_microsoft_graph] Failed (#{response.code}): #{error_msg}"
+          { success: false, error: "Microsoft Graph API error (#{response.code}): #{error_msg}" }
+        end
+      rescue => e
+        Rails.logger.error "[send_email_via_microsoft_graph] Exception: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
+        { success: false, error: e.message }
       end
 
       def refresh_oauth_access_token_for_send(provider, refresh_token)

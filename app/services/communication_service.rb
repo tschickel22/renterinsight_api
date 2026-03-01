@@ -462,7 +462,9 @@ class CommunicationService
         Providers::Email::GmailRelayProvider
       when :aws_ses
         Providers::Email::AwsSesProvider
-      when :oauth_microsoft, :oauth_google
+      when :oauth_microsoft
+        Providers::Email::MicrosoftGraphProvider
+      when :oauth_google
         Providers::Email::SmtpProvider
       else
         raise ProviderError, "Unknown email provider: #{provider}"
@@ -485,8 +487,10 @@ class CommunicationService
     
     # Check if user has their own email connection configured (EMAIL ONLY)
     if channel == 'email' && user&.has_email_connection?
-      Rails.logger.info "[CommunicationService] Using user #{user.id} email connection for provider"
-      return :smtp  # User connections always use SMTP
+      connection = user.default_email_connection
+      provider_key = connection&.provider&.to_sym || :smtp
+      Rails.logger.info "[CommunicationService] Using user #{user.id} email connection (#{provider_key}) for provider"
+      return provider_key
     end
     
     # Get provider from CommunicationSettingsService (respects Location → Company → Platform waterfall)

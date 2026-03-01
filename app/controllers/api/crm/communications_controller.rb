@@ -579,7 +579,11 @@ module Api
         reply_to = generate_reply_to_address
 
         # Route based on connection type (SMTP vs OAuth)
-        if connection&.oauth_provider?
+        if connection&.provider == 'oauth_outlook'
+          # Microsoft 365: use Graph API (SMTP blocked on Render / M365 SMTP AUTH disabled)
+          send_result = send_email_via_microsoft_graph(email_params, connection, reply_to: reply_to)
+          used_provider = 'microsoft_graph'
+        elsif connection&.oauth_provider?
           oauth_config = {
             oauthProvider: connection.provider == 'oauth_gmail' ? 'google' : 'microsoft',
             oauthEmail: connection.email_address,
@@ -680,7 +684,9 @@ module Api
           send_email_via_sendgrid(email_params, config)
         when :aws_ses
           send_email_via_aws_ses(email_params, config)
-        when :oauth_microsoft, :oauth_google
+        when :oauth_microsoft
+          send_email_via_graph_from_config(email_params, config, reply_to: reply_to)
+        when :oauth_google
           send_email_via_oauth_smtp(email_params, config, reply_to: reply_to)
         else
           { success: false, error: "Unknown email provider: #{provider}" }
@@ -811,6 +817,140 @@ module Api
         { success: true, message_id: mail.message_id }
       rescue => e
         Rails.logger.error "[send_email_via_oauth_smtp] Exception: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
+        { success: false, error: e.message }
+      end
+
+      # Send email via Microsoft Graph from a config hash (company/platform-level OAuth Microsoft)
+      def send_email_via_graph_from_config(email_params, config, reply_to: nil)
+        oauth_email = config[:oauthEmail] || config['oauthEmail'] || config[:fromEmail] || config['fromEmail']
+        access_token = config[:oauthAccessToken] || config['oauthAccessToken']
+
+        # Refresh token if near expiry
+        oauth_expires = config[:oauthExpiresAt] || config['oauthExpiresAt']
+        if oauth_expires.present?
+          expires_at = Time.parse(oauth_expires.to_s) rescue nil
+          if expires_at && expires_at <= 5.minutes.from_now
+            oauth_provider = config[:oauthProvider] || config['oauthProvider']
+            refresh_token = config[:oauthRefreshToken] || config['oauthRefreshToken']
+            refreshed = refresh_oauth_access_token_for_send(oauth_provider, refresh_token)
+            access_token = refreshed if refreshed
+          end
+        end
+
+        unless oauth_email.present? && access_token.present?
+          return { success: false, error: "Microsoft Graph not configured: email=#{oauth_email.present?}, token=#{access_token.present?}" }
+        end
+
+        from_name = config[:fromName] || config['fromName'] || oauth_email
+        # Build a minimal connection-like context and delegate
+        mock_params = email_params.merge(to: email_params[:to])
+        is_html = email_params[:content]&.include?('<') && (email_params[:content]&.include?('</') || email_params[:content]&.include?('/>'))
+
+        message = {
+          subject: email_params[:subject],
+          body: { contentType: is_html ? 'HTML' : 'Text', content: email_params[:content] },
+          from: { emailAddress: { address: oauth_email, name: from_name } },
+          toRecipients: Array(email_params[:to]).flat_map { |a| a.to_s.split(',').map(&:strip) }.reject(&:blank?).map { |e| { emailAddress: { address: e } } }
+        }
+
+        message[:ccRecipients] = email_params[:cc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:cc].present?
+        message[:bccRecipients] = email_params[:bcc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:bcc].present?
+        message[:replyTo] = reply_to.to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if reply_to.present?
+
+        payload = { message: message, saveToSentItems: true }
+
+        Rails.logger.info "[send_email_via_graph_from_config] Sending to #{email_params[:to]} as #{oauth_email}"
+
+        uri = URI('https://graph.microsoft.com/v1.0/me/sendMail')
+        request = Net::HTTP::Post.new(uri)
+        request['Authorization'] = "Bearer #{access_token}"
+        request['Content-Type'] = 'application/json'
+        request.body = payload.to_json
+
+        response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 15, read_timeout: 30) do |http|
+          http.request(request)
+        end
+
+        if response.code.to_i == 202
+          Rails.logger.info "[send_email_via_graph_from_config] Success"
+          { success: true, message_id: response['x-ms-request-id'] || "graph-#{SecureRandom.hex(8)}" }
+        else
+          error_msg = begin
+            JSON.parse(response.body).dig('error', 'message')
+          rescue
+            response.body.to_s.truncate(200)
+          end
+          Rails.logger.error "[send_email_via_graph_from_config] Failed (#{response.code}): #{error_msg}"
+          { success: false, error: "Microsoft Graph API error (#{response.code}): #{error_msg}" }
+        end
+      rescue => e
+        Rails.logger.error "[send_email_via_graph_from_config] Exception: #{e.message}"
+        { success: false, error: e.message }
+      end
+
+      # Send email via Microsoft Graph API (avoids SMTP port blocking and SMTP AUTH issues)
+      def send_email_via_microsoft_graph(email_params, connection, reply_to: nil)
+        Rails.logger.info "[send_email_via_microsoft_graph] Sending to #{email_params[:to]} as #{connection.email_address}"
+
+        # Ensure valid token
+        access_token = connection.oauth_token_encrypted
+        if connection.oauth_token_expired?
+          refreshed = connection.refresh_oauth_token!
+          access_token = refreshed if refreshed
+        end
+
+        unless access_token.present?
+          return { success: false, error: 'No valid OAuth access token for Microsoft Graph' }
+        end
+
+        from_name = connection.display_name || current_user.full_name
+        is_html = email_params[:content]&.include?('<') && (email_params[:content]&.include?('</') || email_params[:content]&.include?('/>'))
+
+        message = {
+          subject: email_params[:subject],
+          body: {
+            contentType: is_html ? 'HTML' : 'Text',
+            content: email_params[:content]
+          },
+          from: {
+            emailAddress: { address: connection.email_address, name: from_name }
+          },
+          toRecipients: Array(email_params[:to]).flat_map { |a| a.to_s.split(',').map(&:strip) }.reject(&:blank?).map { |e| { emailAddress: { address: e } } }
+        }
+
+        message[:ccRecipients] = email_params[:cc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:cc].present?
+        message[:bccRecipients] = email_params[:bcc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:bcc].present?
+        message[:replyTo] = reply_to.to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if reply_to.present?
+
+        payload = { message: message, saveToSentItems: true }
+
+        uri = URI('https://graph.microsoft.com/v1.0/me/sendMail')
+        request = Net::HTTP::Post.new(uri)
+        request['Authorization'] = "Bearer #{access_token}"
+        request['Content-Type'] = 'application/json'
+        request.body = payload.to_json
+
+        response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 15, read_timeout: 30) do |http|
+          http.request(request)
+        end
+
+        if response.code.to_i == 202
+          Rails.logger.info "[send_email_via_microsoft_graph] Success"
+          connection.record_usage!
+          { success: true, message_id: response['x-ms-request-id'] || "graph-#{SecureRandom.hex(8)}" }
+        else
+          error_msg = begin
+            JSON.parse(response.body).dig('error', 'message')
+          rescue
+            response.body.to_s.truncate(200)
+          end
+          Rails.logger.error "[send_email_via_microsoft_graph] Failed (#{response.code}): #{error_msg}"
+          connection.record_error!(error_msg)
+          { success: false, error: "Microsoft Graph API error (#{response.code}): #{error_msg}" }
+        end
+      rescue => e
+        Rails.logger.error "[send_email_via_microsoft_graph] Exception: #{e.message}"
         Rails.logger.error e.backtrace.first(5).join("\n")
         { success: false, error: e.message }
       end

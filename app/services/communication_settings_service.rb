@@ -204,6 +204,7 @@ class CommunicationSettingsService
 
       base_config.merge(
         provider: connection.provider,
+        oauth_access_token: access_token,
         smtp_host: smtp_host,
         smtp_port: smtp_port,
         smtp_username: connection.email_address,
