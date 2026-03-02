@@ -324,6 +324,15 @@ class ImapSentEmailService
         cc_addresses = (msg['ccRecipients'] || []).map { |r| r.dig('emailAddress', 'address') }.compact.join(', ')
         bcc_addresses = (msg['bccRecipients'] || []).map { |r| r.dig('emailAddress', 'address') }.compact.join(', ')
 
+        # Also check if platform already sent this email (matches by to_address + sent_at window)
+        platform_sent = Communication.where(
+          communicable: communicable,
+          channel: 'email',
+          direction: 'outbound',
+          to_address: recipient_email
+        ).where(sent_at: (sent_time - 30.seconds)..(sent_time + 30.seconds)).exists?
+        next if platform_sent
+
         comm = Communication.create!(
           communicable: communicable,
           company_id: communicable.company_id,
@@ -344,7 +353,7 @@ class ImapSentEmailService
             from: from_email_address,
             cc: cc_addresses.presence,
             bcc: bcc_addresses.presence
-          }.compact.to_json
+          }.compact
         )
 
         synced << comm
@@ -469,7 +478,7 @@ class ImapSentEmailService
               from: mail.from&.first,
               cc: mail.cc&.join(', '),
               bcc: mail.bcc&.join(', ')
-            }.to_json
+            }.compact
           )
 
           synced << comm

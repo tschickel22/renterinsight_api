@@ -6,12 +6,16 @@ Rails.application.config.after_initialize do
   ActiveSupport.on_load(:active_record) do
     if defined?(Rails::Server) || defined?(Puma::Server)
       Thread.new do
+        # Wait for Rails to fully boot before starting scheduler
+        sleep 30
+        
         loop do
           begin
-            sleep 600 # 10 minutes in seconds (syncs emails from last 30 minutes)
-            
             # Run the sync job
             SyncAllUsersSentEmailsJob.perform_now
+            
+            # Sleep until next run (10 minutes)
+            sleep 600
             
             Rails.logger.info "[EmailSync] Scheduled sync completed at #{Time.current}"
           rescue => e

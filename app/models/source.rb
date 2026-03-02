@@ -3,6 +3,6 @@ class Source < ApplicationRecord
   has_many :leads, dependent: :nullify
   has_many :deals, dependent: :nullify
   
-  scope :for_company, ->(company_id) { where(company_id: [company_id, nil]) }
+  scope :for_company, ->(company_id) { where(company_id: company_id) }
   scope :active, -> { where(is_active: [true, nil]) }
 end

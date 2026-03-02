@@ -139,7 +139,17 @@ module Api
         
         Rails.logger.info "🔍 [ContactsController#create] Final location_id before save: #{@contact.location_id}"
 
-        if @contact.save
+        # Validate only required fields that are visible in active layout
+        layout_errors = validate_visible_required_fields('contacts', @contact)
+        if layout_errors.any?
+          Rails.logger.error "[ContactsController#create] Layout validation failed: #{layout_errors.join(', ')}"
+          render json: {
+            errors: layout_errors
+          }, status: :unprocessable_entity
+          return
+        end
+
+        if @contact.save(validate: false)  # Skip model validations, we validated above
           # Handle tags if provided
           handle_tags(@contact, tag_names) if tag_names.is_a?(Array) && tag_names.any?
 
@@ -168,14 +178,25 @@ module Api
           update_attrs = update_attrs.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
         end
         
-        if @contact.update(update_attrs)
-          # Handle tags if provided
-          handle_tags(@contact, tag_names) if tag_names
+        # Apply attributes to contact
+        @contact.assign_attributes(update_attrs)
 
-          render json: contact_json(@contact, detailed: true)
-        else
-          render json: { errors: @contact.errors.full_messages }, status: :unprocessable_entity
+        # Validate only required fields that are visible in active layout
+        layout_errors = validate_visible_required_fields('contacts', @contact)
+        if layout_errors.any?
+          Rails.logger.error "[ContactsController#update] Layout validation failed: #{layout_errors.join(', ')}"
+          render json: {
+            errors: layout_errors
+          }, status: :unprocessable_entity
+          return
         end
+
+        @contact.save!(validate: false)  # Skip model validations, we validated above
+        
+        # Handle tags if provided
+        handle_tags(@contact, tag_names) if tag_names
+
+        render json: contact_json(@contact, detailed: true)
       rescue => e
         Rails.logger.error "Error in contacts#update: #{e.message}"
         render json: { error: e.message }, status: :internal_server_error
@@ -342,7 +363,14 @@ module Api
           @contact.location_id ||= location_ids.first if location_ids.any?
         end
 
-        if @contact.save
+        # Validate only required fields that are visible in active layout
+        layout_errors = validate_visible_required_fields('contacts', @contact)
+        if layout_errors.any?
+          render json: { errors: layout_errors }, status: :unprocessable_entity
+          return
+        end
+
+        if @contact.save(validate: false)  # Skip model validations, we validated above
           Rails.logger.info "✅ [ContactsController] Quick-created contact: #{@contact.id} for company: #{@company.id}"
           render json: {
             success: true,

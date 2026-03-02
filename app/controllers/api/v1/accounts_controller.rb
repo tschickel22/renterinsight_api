@@ -113,7 +113,17 @@ module Api
           @account.website = nil
         end
         
-        if @account.save
+        # Validate only required fields that are visible in active layout
+        layout_errors = validate_visible_required_fields('accounts', @account)
+        if layout_errors.any?
+          Rails.logger.error "[AccountsController#create] Layout validation failed: #{layout_errors.join(', ')}"
+          render json: {
+            errors: layout_errors
+          }, status: :unprocessable_entity
+          return
+        end
+        
+        if @account.save(validate: false)  # Skip model validations, we validated above
           # Handle tags
           if params[:tags].present?
             tag_names = params[:tags].is_a?(Array) ? params[:tags] : params[:tags].split(',')
@@ -162,41 +172,55 @@ module Api
           update_attrs = update_attrs.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
         end
         
-        if @account.update(update_attrs)
-          # Handle tags if provided
-          if params.key?(:tags)
-            # Clear existing tags
-            TagAssignment.where(entity_type: 'Account', entity_id: @account.id).destroy_all
-            
-            # Add new tags
-            if params[:tags].present?
-              tag_names = params[:tags].is_a?(Array) ? params[:tags] : params[:tags].split(',')
-              tag_names.each do |tag_name|
-                # Find or create tag within company scope
-                tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
-                  new_tag.color = '#6B7280'
-                  new_tag.is_active = true
-                  new_tag.created_by = current_user&.id&.to_s || 'system'
-                end
-                
-                # Create tag assignment using polymorphic association
-                TagAssignment.create!(
-                  tag: tag,
-                  entity_type: 'Account',
-                  entity_id: @account.id,
-                  company_id: @company.id,
-                  assigned_by: current_user&.id&.to_s || 'system',
-                  assigned_at: Time.current
-                )
+        # Apply attributes to account
+        @account.assign_attributes(update_attrs)
+
+        # Validate only required fields that are visible in active layout
+        layout_errors = validate_visible_required_fields('accounts', @account)
+        if layout_errors.any?
+          Rails.logger.error "[AccountsController#update] Layout validation failed: #{layout_errors.join(', ')}"
+          render json: {
+            errors: layout_errors
+          }, status: :unprocessable_entity
+          return
+        end
+
+        @account.save!(validate: false)  # Skip model validations, we validated above
+        
+        # Handle tags if provided
+        if params.key?(:tags)
+          # Clear existing tags
+          TagAssignment.where(entity_type: 'Account', entity_id: @account.id).destroy_all
+          
+          # Add new tags
+          if params[:tags].present?
+            tag_names = params[:tags].is_a?(Array) ? params[:tags] : params[:tags].split(',')
+            tag_names.each do |tag_name|
+              # Find or create tag within company scope
+              tag = @company.tags.find_or_create_by!(name: tag_name.strip) do |new_tag|
+                new_tag.color = '#6B7280'
+                new_tag.is_active = true
+                new_tag.created_by = current_user&.id&.to_s || 'system'
               end
+              
+              # Create tag assignment using polymorphic association
+              TagAssignment.create!(
+                tag: tag,
+                entity_type: 'Account',
+                entity_id: @account.id,
+                company_id: @company.id,
+                assigned_by: current_user&.id&.to_s || 'system',
+                assigned_at: Time.current
+              )
             end
           end
-          
-          @account.reload
-          render json: @account.as_json
-        else
-          render json: { errors: @account.errors.full_messages }, status: :unprocessable_entity
         end
+        
+        @account.reload
+        render json: @account.as_json
+      rescue => e
+        Rails.logger.error "Error in accounts#update: #{e.message}"
+        render json: { error: e.message }, status: :internal_server_error
       end
 
       # DELETE /api/v1/accounts/:id

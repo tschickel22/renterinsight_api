@@ -23,15 +23,19 @@ class TemplateRenderingService
       template_string # Return original on error
     end
     
-    # Build context from Lead, Account, Quote, or User objects
-    def build_context_from_record(record)
+    # Build context from Lead, Account, Contact, Quote, or User objects
+    # @param record [ActiveRecord::Base] The record to build context from
+    # @param sending_user [User] Optional user who is sending the communication (for rep fields)
+    def build_context_from_record(record, sending_user: nil)
       case record
       when Lead
-        build_lead_context(record)
+        build_lead_context(record, sending_user: sending_user)
+      when Contact
+        build_contact_context(record, sending_user: sending_user)
       when Account
-        build_account_context(record)
+        build_account_context(record, sending_user: sending_user)
       when Quote
-        build_quote_context(record)
+        build_quote_context(record, sending_user: sending_user)
       when User
         build_user_context(record)
       else
@@ -106,7 +110,15 @@ class TemplateRenderingService
     end
     
     # Build context for Lead
-    def build_lead_context(lead)
+    def build_lead_context(lead, sending_user: nil)
+      # Get the owner/assigned user for rep fields
+      # Priority: sending_user (person clicking send) > lead.owner > first active user
+      rep_user = sending_user || lead.owner || lead.company&.users&.active&.first
+      
+      # Get location for company_name (Location Name with Company fallback)
+      location = lead.location || rep_user&.location
+      company = lead.company
+      
       {
         'lead' => object_to_hash(lead),
         'first_name' => lead.first_name,
@@ -114,28 +126,103 @@ class TemplateRenderingService
         'email' => lead.email,
         'phone' => lead.phone,
         'full_name' => "#{lead.first_name} #{lead.last_name}".strip,
-        'company_name' => lead.company&.name
+        
+        # 🔧 FIX: Company name uses Location name with Company fallback
+        'company_name' => location&.name || company&.name || '',
+        'location_name' => location&.name || '',
+        
+        # 🔧 FIX: Rep fields from User account settings
+        'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
+        'rep_email' => rep_user&.email || '',
+        'rep_phone' => rep_user&.phone || '',
+        
+        # 🔧 FIX: Website URL from Company Settings > Domain
+        'website_url' => company&.domain || company&.website || ''
       }
     end
     
     # Build context for Account
-    def build_account_context(account)
+    def build_account_context(account, sending_user: nil)
+      # Get the owner/assigned user for rep fields
+      # Priority: sending_user (person clicking send) > account.owner > first active user
+      rep_user = sending_user || account.owner || account.company&.users&.active&.first
+      
+      # Get location for company_name (Location Name with Company fallback)
+      location = account.location || rep_user&.location
+      company = account.company
+      
       {
         'account' => object_to_hash(account),
         'name' => account.name,
         'email' => account.email,
         'phone' => account.phone,
-        'company_name' => account.company&.name
+        
+        # 🔧 FIX: Company name uses Location name with Company fallback
+        'company_name' => location&.name || company&.name || '',
+        'location_name' => location&.name || '',
+        
+        # 🔧 FIX: Rep fields from User account settings
+        'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
+        'rep_email' => rep_user&.email || '',
+        'rep_phone' => rep_user&.phone || '',
+        
+        # 🔧 FIX: Website URL from Company Settings > Domain
+        'website_url' => company&.domain || company&.website || ''
+      }
+    end
+    
+    # Build context for Contact
+    def build_contact_context(contact, sending_user: nil)
+      # Get the owner/assigned user for rep fields
+      # Priority: sending_user (person clicking send) > contact.owner > first active user
+      rep_user = sending_user || contact.owner || contact.company&.users&.active&.first
+      
+      # Get location for company_name (Location Name with Company fallback)
+      location = contact.location || rep_user&.location
+      company = contact.company
+      
+      {
+        'contact' => object_to_hash(contact),
+        'first_name' => contact.first_name,
+        'last_name' => contact.last_name,
+        'email' => contact.email,
+        'phone' => contact.phone,
+        'full_name' => "#{contact.first_name} #{contact.last_name}".strip,
+        
+        # 🔧 FIX: Company name uses Location name with Company fallback
+        'company_name' => location&.name || company&.name || '',
+        'location_name' => location&.name || '',
+        
+        # 🔧 FIX: Rep fields from User account settings
+        'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
+        'rep_email' => rep_user&.email || '',
+        'rep_phone' => rep_user&.phone || '',
+        
+        # 🔧 FIX: Website URL from Company Settings > Domain
+        'website_url' => company&.domain || company&.website || ''
       }
     end
     
     # Build context for Quote
-    def build_quote_context(quote)
+    def build_quote_context(quote, sending_user: nil)
+      # Get rep user from sending_user or quote owner
+      rep_user = sending_user || quote.owner || quote.company&.users&.active&.first
+      location = quote.location || rep_user&.location
+      company = quote.company
+      
       {
         'quote' => object_to_hash(quote),
         'quote_number' => quote.id,
         'total' => format_currency(quote.total),
-        'account_name' => quote.account&.name
+        'account_name' => quote.account&.name,
+        
+        # Add rep fields for quotes too
+        'company_name' => location&.name || company&.name || '',
+        'location_name' => location&.name || '',
+        'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
+        'rep_email' => rep_user&.email || '',
+        'rep_phone' => rep_user&.phone || '',
+        'website_url' => company&.domain || company&.website || ''
       }
     end
     

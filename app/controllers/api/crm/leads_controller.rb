@@ -146,7 +146,18 @@ module Api
           l.location_id ||= location_ids.first if location_ids.any?
         end
 
-        if l.save
+        # Validate only required fields that are visible in active layout
+        layout_errors = validate_visible_required_fields('leads', l)
+        if layout_errors.any?
+          Rails.logger.error "[LeadsController#create] Layout validation failed: #{layout_errors.join(', ')}"
+          render json: {
+            error: 'Validation failed',
+            details: layout_errors
+          }, status: :unprocessable_entity
+          return
+        end
+
+        if l.save(validate: false)  # Skip model validations, we validated above
           Rails.logger.info "[LeadsController#create] Lead created successfully: ID=#{l.id}"
           render json: lead_json(l), status: :created
         else
@@ -193,7 +204,21 @@ module Api
           update_attrs = update_attrs.merge(custom_field_values: (@lead.custom_field_values || {}).merge(custom_field_values_param))
         end
 
-        @lead.update!(update_attrs)
+        # Apply attributes to lead
+        @lead.assign_attributes(update_attrs)
+
+        # Validate only required fields that are visible in active layout
+        layout_errors = validate_visible_required_fields('leads', @lead)
+        if layout_errors.any?
+          Rails.logger.error "[LeadsController#update] Layout validation failed: #{layout_errors.join(', ')}"
+          render json: {
+            error: 'Validation failed',
+            details: layout_errors
+          }, status: :unprocessable_entity
+          return
+        end
+
+        @lead.save!(validate: false)  # Skip model validations, we validated above
 
         Rails.logger.info "[LeadUpdate] AFTER: lead_id=#{@lead.id}, owner_id=#{@lead.owner_id}, location_id=#{@lead.location_id}, is_converted=#{@lead.is_converted}"
 
@@ -612,6 +637,7 @@ module Api
             msrp: l.vehicle.msrp
           } : nil,
           customFieldValues: l.respond_to?(:custom_field_values) ? l.custom_field_values : {},
+          score: calculate_lead_score(l),
           createdAt: l.created_at,
           updatedAt: l.updated_at
         }

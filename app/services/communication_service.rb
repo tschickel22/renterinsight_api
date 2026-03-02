@@ -142,8 +142,8 @@ class CommunicationService
     if template
       template_obj = template.is_a?(CommunicationTemplate) ? template : CommunicationTemplate.find(template)
       
-      # Build context from communicable
-      context = TemplateRenderingService.build_context_from_record(communicable)
+      # Build context from communicable - pass sending user for rep fields
+      context = TemplateRenderingService.build_context_from_record(communicable, sending_user: @sending_user)
       context.merge!(template_context) if template_context.present?
       
       # Render template

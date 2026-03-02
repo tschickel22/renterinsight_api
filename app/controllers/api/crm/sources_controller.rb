@@ -1,5 +1,5 @@
 # frozen_string_literal: true
-# Sources are now company-scoped for proper multi-tenant isolation
+# Sources are company-scoped for proper multi-tenant isolation
 
 module Api
   module Crm
@@ -12,12 +12,12 @@ module Api
         delete_actions: [:destroy]
 
       before_action :set_company_scope
+      before_action :set_company_id
       before_action :set_source, only: [:show, :update, :destroy, :stats]
 
       # GET /api/crm/sources
       def index
-        # Company-scoped sources (includes company sources + global sources with nil company_id)
-        sources = Source.for_company(@company.id).order(:name)
+        sources = company_sources.order(:name)
         render json: sources.map { |s| source_json(s) }, status: :ok
       end
 
@@ -29,20 +29,20 @@ module Api
       # POST /api/crm/sources
       def create
         name = params[:name] || params.dig(:source, :name)
-        
+
         if name.blank?
           return render json: { error: 'Name is required' }, status: :unprocessable_entity
         end
-        
-        # Create source within current company
-        source = @company.sources.new(source_params)
-        
+
+        source = company_sources.new(source_params)
+        source.company_id = @company_id
+
         if source.save
           render json: source_json(source), status: :created
         else
-          render json: { 
+          render json: {
             ok: false,
-            errors: source.errors.full_messages 
+            errors: source.errors.full_messages
           }, status: :unprocessable_entity
         end
       end
@@ -52,9 +52,9 @@ module Api
         if @source.update(source_params)
           render json: source_json(@source), status: :ok
         else
-          render json: { 
+          render json: {
             ok: false,
-            errors: @source.errors.full_messages 
+            errors: @source.errors.full_messages
           }, status: :unprocessable_entity
         end
       end
@@ -69,14 +69,13 @@ module Api
 
       # GET /api/crm/sources/:id/stats
       def stats
-        # STRICT TENANT ISOLATION: Only count leads from current company
-        leads_count = @company.leads.where(source_id: @source.id).count
-        deals_count = @company.deals.where(source_id: @source.id).count
-        
-        # Calculate conversion rate: deals / leads * 100 (or 0 if no leads)
+        leads_scope = @company.leads.where(source_id: @source.id)
+        deals_scope = @company.deals.where(source_id: @source.id)
+
+        leads_count = leads_scope.count
+        deals_count = deals_scope.count
         conversion_rate = leads_count > 0 ? (deals_count.to_f / leads_count * 100).round(1) : 0.0
-        
-        # FIXED: Use field names that match frontend expectations
+
         render json: {
           leads: leads_count,
           deals: deals_count,
@@ -91,25 +90,36 @@ module Api
           render json: { error: 'Authentication required' }, status: :unauthorized
           return
         end
-        
+
         company_id = current_company_id
-        
+
         unless company_id.present?
           render json: { error: 'No company context' }, status: :forbidden
           return
         end
-        
+
         @company = ::Company.find_by(id: company_id)
-        
+
         if @company.nil?
           render json: { error: 'Company not found' }, status: :not_found
           return
         end
       end
 
+      def set_company_id
+        @company_id = request.headers['X-Company-ID'].presence&.to_i || @company&.id
+      end
+
+      def company_sources
+        if @company_id.present?
+          Source.where(company_id: @company_id)
+        else
+          Source.none
+        end
+      end
+
       def set_source
-        # Company-scoped sources (includes company sources + global sources)
-        @source = Source.for_company(@company.id).find_by(id: params[:id])
+        @source = company_sources.find_by(id: params[:id])
         unless @source
           render json: { error: 'Source not found or access denied' }, status: :not_found
           return

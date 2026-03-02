@@ -334,6 +334,7 @@ module Api
           { key: 'last_name', label: 'Last Name', type: 'text', source: 'standard', required: true, protected: true },
           { key: 'email', label: 'Email', type: 'email', source: 'standard', required: true, protected: true },
           { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: true, protected: true },
+          { key: 'created_at', label: 'Lead Created', type: 'datetime', source: 'standard', required: false, protected: false },
           { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false,
             options: %w[new contacted qualified proposal negotiation won lost] },
           { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },

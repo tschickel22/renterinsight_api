@@ -561,4 +561,93 @@ class ApplicationController < ActionController::API
     true
   end
 
+  # Get visible field keys from active page layout for a module
+  # Used to validate only fields that are actually in the user's form
+  #
+  # @param module_name [String] Module name (e.g., 'leads', 'contacts', 'accounts')
+  # @return [Array<String>] Array of visible field keys (snake_case)
+  def visible_layout_fields(module_name)
+    return [] unless @company.present?
+    
+    layout = @company.page_layouts.for_module(module_name).find_by(layout_type: 'detail')
+    return [] unless layout&.layout_data.present?
+    
+    sections = layout.layout_data['sections'] || []
+    visible_keys = []
+    
+    sections.each do |section|
+      fields = section['fields'] || []
+      fields.each do |field|
+        # Only include fields that are explicitly marked as visible
+        visible_keys << field['key'] if field['visible'] != false && field['key'].present?
+      end
+    end
+    
+    visible_keys
+  rescue => e
+    Rails.logger.warn "[visible_layout_fields] Error loading layout for #{module_name}: #{e.message}"
+    [] # On error, return empty array (fail open - allow all fields)
+  end
+
+  # Validate required fields that are visible in active layout
+  # Returns array of error messages for missing required fields
+  #
+  # @param module_name [String] Module name (e.g., 'leads', 'contacts')
+  # @param record [ActiveRecord::Base] Record to validate
+  # @return [Array<String>] Error messages for missing fields
+  def validate_visible_required_fields(module_name, record)
+    visible_keys = visible_layout_fields(module_name)
+    errors = []
+    
+    # If no layout or no visible fields, skip validation (fail open)
+    return errors if visible_keys.empty?
+    
+    # Get field definitions for this module
+    field_definitions = get_standard_field_definitions(module_name)
+    
+    field_definitions.each do |field_def|
+      key = field_def[:key]
+      
+      # Only validate if: 1) field is required AND 2) field is visible in layout
+      next unless field_def[:required] && visible_keys.include?(key)
+      
+      # Check if value is present in the record
+      value = record.send(key) rescue nil
+      
+      if value.blank?
+        label = field_def[:label] || key.titleize
+        errors << "#{label} is required"
+      end
+    end
+    
+    errors
+  end
+
+  # Get standard field definitions for a module
+  # @param module_name [String] Module name
+  # @return [Array<Hash>] Field definitions
+  def get_standard_field_definitions(module_name)
+    case module_name
+    when 'leads'
+      [
+        { key: 'first_name', label: 'First Name', required: true },
+        { key: 'last_name', label: 'Last Name', required: true },
+        { key: 'email', label: 'Email', required: true },
+        { key: 'phone', label: 'Phone', required: true },
+      ]
+    when 'contacts'
+      [
+        { key: 'first_name', label: 'First Name', required: true },
+        { key: 'last_name', label: 'Last Name', required: true },
+        { key: 'email', label: 'Email', required: true },
+      ]
+    when 'accounts'
+      [
+        { key: 'name', label: 'Name', required: true },
+      ]
+    else
+      []
+    end
+  end
+
 end
