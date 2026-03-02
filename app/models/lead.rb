@@ -17,6 +17,7 @@ class Lead < ApplicationRecord
   has_many :activities,           dependent: :destroy
   has_many :reminders,            dependent: :destroy
   has_many :lead_activities,      dependent: :destroy
+  has_many :lead_scores,          dependent: :destroy
   has_many :ai_insights,          dependent: :destroy
   has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
 
