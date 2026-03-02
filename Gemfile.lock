@@ -369,6 +369,12 @@ GEM
     ruby_http_client (3.6.0)
     rubyzip (3.2.2)
     securerandom (0.4.1)
+    selenium-webdriver (4.41.0)
+      base64 (~> 0.2)
+      logger (~> 1.4)
+      rexml (~> 3.2, >= 3.2.5)
+      rubyzip (>= 1.2.2, < 4.0)
+      websocket (~> 1.0)
     sendgrid-ruby (6.7.0)
       ruby_http_client (~> 3.4)
     shoulda-matchers (6.5.0)
@@ -429,6 +435,7 @@ GEM
     unicode-emoji (4.1.0)
     uri (1.0.3)
     useragent (0.16.11)
+    websocket (1.2.11)
     websocket-driver (0.8.0)
       base64
       websocket-extensions (>= 0.1.0)
@@ -475,6 +482,7 @@ DEPENDENCIES
   rotp (~> 6.3)
   rspec-rails
   rubocop-rails-omakase
+  selenium-webdriver
   sendgrid-ruby
   shoulda-matchers
   sidekiq

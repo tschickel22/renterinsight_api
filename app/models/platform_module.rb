@@ -11,6 +11,7 @@ class PlatformModule
     'crm.contacts' => { name: 'Contact Management', category: 'CRM & Sales', icon: 'UserCircle', description: 'Contact database and communication' },
     'crm.deals' => { name: 'Sales Pipeline', category: 'CRM & Sales', icon: 'TrendingUp', description: 'Deal tracking and sales process' },
     'crm.quotes' => { name: 'Quote Builder', category: 'CRM & Sales', icon: 'FileText', description: 'Professional quote generation' },
+    'sales.configurator' => { name: 'Home Configurator', category: 'CRM & Sales', icon: 'Home', description: 'Configure and quote manufactured homes' },
     
     # Inventory & Operations
     'inventory.vehicles' => { name: 'Inventory Management', category: 'Inventory & Operations', icon: 'Package', description: 'Vehicle and unit inventory tracking' },
@@ -77,7 +78,7 @@ class PlatformModule
       admin.settings admin.users
     ],
     professional: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures
       finance.loans finance.agreements finance.invoices finance.documents finance.applications
@@ -86,7 +87,7 @@ class PlatformModule
       admin.settings admin.users admin.locations
     ],
     enterprise: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures marketing.website marketing.syndication
       finance.loans finance.agreements finance.invoices finance.documents finance.applications

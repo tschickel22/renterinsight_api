@@ -16,6 +16,10 @@ class Part < ApplicationRecord
   has_many :inventory_transactions, dependent: :restrict_with_error
   has_many :reorder_rules, dependent: :destroy
   # NOTE: purchase_order_lines will be added in Phase 2A
+
+  # Configurator associations
+  belongs_to :factory, optional: true
+  belongs_to :floor_plan, optional: true
   
   # Validations
   validates :company_id, presence: true
@@ -33,6 +37,7 @@ class Part < ApplicationRecord
   scope :in_category, ->(category_id) { where(category_id: category_id) }
   scope :serialized, -> { where(is_serialized: true) }
   scope :lot_tracked, -> { where(is_lot_tracked: true) }
+  scope :configured_homes, -> { where(is_configured_home: true) }
   scope :with_inventory, -> {
     left_joins(:stock_balances)
       .select('parts.*, COALESCE(SUM(stock_balances.on_hand), 0) as total_on_hand')

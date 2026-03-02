@@ -13,6 +13,10 @@ class Manufacturer < ApplicationRecord
   has_many :manufacturer_ar_transactions
   has_many :location_manufacturers
   has_many :company_manufacturers
+
+  # Configurator associations
+  has_many :factories, dependent: :destroy
+  has_many :floor_plans, dependent: :destroy
   
   # Validations
   validates :name, presence: true, length: { maximum: 255 }
@@ -29,6 +33,7 @@ class Manufacturer < ApplicationRecord
   scope :global_warranty, -> { where(company_id: nil) }
   scope :by_name, -> { order(:name) }
   scope :alphabetical, -> { order(:name) }
+  scope :scraper_enabled, -> { where(scraper_enabled: true) }
   
   # Callbacks
   before_validation :normalize_fields

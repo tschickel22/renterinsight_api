@@ -104,3 +104,6 @@ gem "roo", "~> 3.0"
 
 # PDF merging for multi-document agreements
 gem 'combine_pdf', '~> 1.0'
+
+# Web scraping for floor plan data
+gem 'selenium-webdriver'

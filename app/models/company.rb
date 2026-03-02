@@ -61,6 +61,12 @@ class Company < ApplicationRecord
   has_many :inventory_transactions, dependent: :destroy
   has_many :stock_balances, dependent: :destroy
   has_many :reorder_rules, dependent: :destroy
+  # Configurator Associations
+  has_many :company_floor_plans, dependent: :destroy
+  has_many :floor_plans, through: :company_floor_plans
+  has_many :configurations, dependent: :destroy
+  has_many :company_floor_plan_option_overrides, dependent: :destroy
+
   # Website Builder Associations
   has_many :websites, dependent: :destroy
   has_many :sites, dependent: :destroy
