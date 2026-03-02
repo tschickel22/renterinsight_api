@@ -20,45 +20,79 @@ module Api
       private
 
       def public_configuration_json(config)
+        company = config.company
+        fp = config.floor_plan
+
+        # Build selected options grouped by category
+        selected_options_grouped = config.selected_options
+                                        .includes(:option_category)
+                                        .group_by { |opt| opt.option_category }
+                                        .sort_by { |cat, _| cat.display_order }
+                                        .map do |category, options|
+          {
+            category_id: category.id,
+            category_name: category.name,
+            options: options.map { |opt|
+              {
+                id: opt.id,
+                name: opt.name,
+                description: opt.description,
+                price_impact_low: opt.price_impact_low,
+                price_impact_high: opt.price_impact_high
+              }
+            }
+          }
+        end
+
+        # Determine if pricing is fixed or range
+        has_fixed_pricing = (config.price_range_low.present? &&
+                             config.price_range_high.present? &&
+                             config.price_range_low == config.price_range_high)
+
+        # Company branding
+        branding = company.branding_settings rescue {}
+
         {
           configuration: {
             id: config.id,
             name: config.name,
+            status: config.status,
+            notes: config.notes,
+            created_at: config.created_at,
             floor_plan: {
-              name: config.floor_plan.name,
-              model_code: config.floor_plan.model_code,
-              manufacturer: config.floor_plan.manufacturer.name,
-              beds: config.floor_plan.beds,
-              baths: config.floor_plan.baths,
-              sqft: config.floor_plan.sqft,
-              images: config.floor_plan.images_array
+              name: fp.name,
+              model_code: fp.model_code,
+              manufacturer_name: fp.manufacturer&.name,
+              bedrooms: fp.beds,
+              bathrooms: fp.baths,
+              sqft: fp.sqft,
+              width_ft: fp.width_ft,
+              length_ft: fp.length_ft,
+              sections: fp.sections,
+              description: fp.description,
+              primary_image_url: fp.primary_image_url,
+              floor_plan_image_url: fp.floor_plan_image_url,
+              images: fp.images_array
             },
-            selected_options: config.selected_options
-                                    .includes(:option_category)
-                                    .group_by { |opt| opt.option_category.name }
-                                    .map do |category_name, options|
-              {
-                category: category_name,
-                options: options.map { |opt| { name: opt.name } }
-              }
-            end,
-            price_range: format_price_range(config.price_range_low, config.price_range_high),
-            note: 'Contact us for exact pricing and availability'
+            selected_options: selected_options_grouped,
+            pricing: {
+              total_price_low: config.price_range_low,
+              total_price_high: config.price_range_high,
+              base_price_low: config.base_price || config.price_range_low,
+              base_price_high: config.base_price || config.price_range_high,
+              options_total_low: config.options_total || 0,
+              options_total_high: config.options_total || 0,
+              has_fixed_pricing: has_fixed_pricing
+            }
           },
           company: {
-            name: config.company.name
+            name: company.name,
+            logo_url: branding.dig('logo_url') || company.logo_url,
+            phone: company.phone,
+            email: company.email,
+            website: company.website
           }
         }
-      end
-
-      def format_price_range(low, high)
-        return nil if low.nil? && high.nil?
-        "#{format_currency(low)} - #{format_currency(high)}"
-      end
-
-      def format_currency(amount)
-        return '$0' if amount.nil?
-        "$#{amount.to_i.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
       end
     end
   end

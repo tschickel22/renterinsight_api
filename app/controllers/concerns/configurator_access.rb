@@ -10,6 +10,9 @@ module ConfiguratorAccess
   private
 
   def check_configurator_access
+    # Platform admins always have access for testing/setup
+    return if current_user&.platform_admin?
+
     unless @company.has_module?('sales.configurator')
       render json: {
         error: 'Configurator not available',

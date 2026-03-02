@@ -108,6 +108,14 @@ Rails.application.routes.draw do
 
       # ==================== PUBLIC CONFIGURATION VIEWING ====================
       get 'configurations/:token', to: 'configurations#show', as: :public_configuration
+
+      # ==================== PUBLIC CONFIGURATOR (Anonymous Builder) ====================
+      scope 'configurator/:subdomain' do
+        get 'info', to: 'configurator#company_info'
+        get 'floor-plans', to: 'configurator#floor_plans'
+        get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
+        post 'submit', to: 'configurator#submit'
+      end
     end
     
     # ==================== PUBLIC INVOICE PAYMENTS (No Auth Required) ====================
@@ -1775,6 +1783,15 @@ Rails.application.routes.draw do
         member do
           get :download
         end
+      end
+
+      # Portal Home Configurator
+      scope 'configurator' do
+        get 'settings', to: 'configurator#settings'
+        get 'floor-plans', to: 'configurator#floor_plans'
+        get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
+        post 'submit', to: 'configurator#submit'
+        get 'my-configurations', to: 'configurator#my_configurations'
       end
     end
   end

@@ -36,6 +36,7 @@ module Api
           'agreementSigning' => true,
           'financeApplications' => true,
           'serviceRequests' => false,
+          'configurator' => false,
           'settings' => true
         }
         
