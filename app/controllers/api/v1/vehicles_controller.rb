@@ -1059,6 +1059,7 @@ module Api
         # Map camelCase to snake_case fields
         field_mappings = {
           listingType: :listing_type,
+          type: :listing_type,           # Overrides listingType if both sent (import sends listingType='rent' + type='rv'/'manufactured_home')
           serialNumber: :serial_number,
           homeType: :home_type,
           salePrice: :sale_price,
