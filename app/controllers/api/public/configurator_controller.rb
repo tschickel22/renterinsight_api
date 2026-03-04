@@ -16,10 +16,11 @@ module Api
         render json: {
           company: {
             name: @company.name,
-            logo_url: branding.dig('logo_url') || @company.logo_url,
-            phone: @company.phone,
-            email: @company.email,
-            website: @company.website
+            subdomain: @company.subdomain,
+            logo_url: branding.dig('logo_url'),
+            phone: branding.dig('phone'),
+            email: branding.dig('email'),
+            website: branding.dig('website') || @company.domain
           },
           settings: {
             show_pricing: configurator_settings['show_public_pricing'] != false,
@@ -81,34 +82,39 @@ module Api
         fp = cfp.floor_plan
         show_pricing = public_show_pricing?
 
-        categories = fp.option_categories.order(:display_order).includes(:floor_plan_options)
+        # all_options_by_category merges factory-scoped, series-scoped, and model-specific categories
+        all_categories = fp.all_options_by_category
 
         render json: {
           floor_plan: public_floor_plan_json(cfp, show_pricing),
-          option_categories: categories.map { |cat|
-            {
-              id: cat.id,
-              name: cat.name,
-              description: cat.description,
-              display_order: cat.display_order,
-              selection_type: cat.selection_type,
-              is_required: cat.is_required,
-              options: cat.floor_plan_options.order(:display_order).map { |opt|
+          option_categories: all_categories.map { |cat|
+            cat_data = {
+              id: cat[:id],
+              name: cat[:name],
+              category_key: cat[:category_key],
+              description: cat[:description],
+              display_order: cat[:display_order] || cat[:id],
+              allow_multiple_selections: cat[:allow_multiple_selections],
+              is_required: cat[:is_required],
+              options: cat[:options].map { |opt|
                 option_data = {
-                  id: opt.id,
-                  name: opt.name,
-                  description: opt.description,
-                  display_order: opt.display_order,
-                  is_default: opt.is_default,
-                  image_url: opt.image_url
+                  id: opt[:id],
+                  name: opt[:name],
+                  description: opt[:description],
+                  display_order: opt[:display_order],
+                  is_default: opt[:is_default],
+                  image_url: opt[:image_url]
                 }
                 if show_pricing
-                  option_data[:price_impact_low] = opt.price_impact_low
-                  option_data[:price_impact_high] = opt.price_impact_high
+                  option_data[:price_dealer] = opt[:price_dealer]
+                  option_data[:price_retail] = opt[:price_retail]
+                  option_data[:price_impact_low] = opt[:price_impact_low]
+                  option_data[:price_impact_high] = opt[:price_impact_high]
                 end
                 option_data
               }
             }
+            cat_data
           },
           show_pricing: show_pricing
         }
@@ -171,8 +177,8 @@ module Api
       def set_company_from_subdomain
         subdomain = params[:subdomain]
 
-        @company = Company.find_by(subdomain: subdomain, status: 'active')
-        @company ||= Company.find_by(id: subdomain, status: 'active') # Fallback to ID for dev/testing
+        @company = ::Company.find_by(subdomain: subdomain, status: 'active')
+        @company ||= ::Company.find_by(id: subdomain, status: 'active') # Fallback to ID for dev/testing
 
         unless @company
           render json: { error: 'Company not found' }, status: :not_found
@@ -204,8 +210,8 @@ module Api
         }
 
         if show_pricing
-          data[:base_price_low] = cfp.base_price_low || fp.base_price_low
-          data[:base_price_high] = cfp.base_price_high || fp.base_price_high
+          data[:base_price_low] = cfp.dealer_cost || fp.base_price_low
+          data[:base_price_high] = cfp.retail_price || fp.base_price_high
         end
 
         data

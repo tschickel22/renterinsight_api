@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_03_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1512,6 +1512,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
     t.index ["company_id"], name: "index_field_option_overrides_on_company_id"
   end
 
+  create_table "floor_plan_option_applicabilities", force: :cascade do |t|
+    t.bigint "floor_plan_id", null: false
+    t.bigint "floor_plan_option_id", null: false
+    t.boolean "is_default_for_model", default: false, null: false
+    t.decimal "price_dealer_override", precision: 10, scale: 2
+    t.decimal "price_retail_override", precision: 10, scale: 2
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["floor_plan_id", "floor_plan_option_id"], name: "idx_fp_option_applicability_unique", unique: true
+    t.index ["floor_plan_id"], name: "index_floor_plan_option_applicabilities_on_floor_plan_id"
+    t.index ["floor_plan_option_id"], name: "idx_on_floor_plan_option_id_e985b29c0c"
+    t.index ["is_default_for_model"], name: "idx_on_is_default_for_model_2782a513db"
+  end
+
   create_table "floor_plan_options", force: :cascade do |t|
     t.bigint "option_category_id", null: false
     t.string "name", null: false
@@ -1524,9 +1538,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
     t.boolean "is_default", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "option_code"
+    t.decimal "price_dealer", precision: 10, scale: 2
+    t.decimal "price_retail", precision: 10, scale: 2
+    t.string "swatch_image_url"
+    t.string "material_type"
+    t.string "dimensions"
+    t.string "series_restriction"
+    t.bigint "factory_id"
+    t.boolean "is_standard_included", default: false, null: false
+    t.index ["factory_id", "option_code"], name: "index_floor_plan_options_on_factory_id_and_option_code"
+    t.index ["factory_id"], name: "index_floor_plan_options_on_factory_id"
     t.index ["is_default"], name: "index_floor_plan_options_on_is_default"
+    t.index ["is_standard_included"], name: "index_floor_plan_options_on_is_standard_included"
     t.index ["option_category_id", "display_order"], name: "idx_on_option_category_id_display_order_92fbf53154"
     t.index ["option_category_id"], name: "index_floor_plan_options_on_option_category_id"
+    t.index ["option_code"], name: "index_floor_plan_options_on_option_code"
+    t.index ["series_restriction"], name: "index_floor_plan_options_on_series_restriction"
   end
 
   create_table "floor_plans", force: :cascade do |t|
@@ -1551,10 +1579,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
     t.datetime "last_scraped_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "net_price", precision: 10, scale: 2
+    t.string "box_size"
+    t.string "home_type", default: "hud"
+    t.string "s3_folder_path"
+    t.string "virtual_tour_url"
+    t.string "spec_sheet_url"
+    t.date "price_effective_date"
+    t.string "brand"
+    t.index ["brand"], name: "index_floor_plans_on_brand"
     t.index ["factory_id"], name: "index_floor_plans_on_factory_id"
+    t.index ["home_type"], name: "index_floor_plans_on_home_type"
     t.index ["is_active"], name: "index_floor_plans_on_is_active"
     t.index ["manufacturer_id", "model_code"], name: "index_floor_plans_on_manufacturer_id_and_model_code", unique: true
     t.index ["manufacturer_id"], name: "index_floor_plans_on_manufacturer_id"
+    t.index ["net_price"], name: "index_floor_plans_on_net_price"
     t.index ["series"], name: "index_floor_plans_on_series"
   end
 
@@ -2440,7 +2479,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
   end
 
   create_table "option_categories", force: :cascade do |t|
-    t.bigint "floor_plan_id", null: false
+    t.bigint "floor_plan_id"
     t.string "name", null: false
     t.text "description"
     t.integer "display_order", default: 0
@@ -2448,8 +2487,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
     t.boolean "allow_multiple_selections", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "scope", default: "factory", null: false
+    t.string "category_key"
+    t.string "series"
+    t.bigint "factory_id"
+    t.index ["category_key"], name: "index_option_categories_on_category_key"
+    t.index ["factory_id", "category_key"], name: "index_option_categories_on_factory_id_and_category_key"
+    t.index ["factory_id"], name: "index_option_categories_on_factory_id"
     t.index ["floor_plan_id", "display_order"], name: "index_option_categories_on_floor_plan_id_and_display_order"
     t.index ["floor_plan_id"], name: "index_option_categories_on_floor_plan_id"
+    t.index ["scope"], name: "index_option_categories_on_scope"
   end
 
   create_table "page_layouts", force: :cascade do |t|
@@ -4267,6 +4314,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
   add_foreign_key "deals", "users", column: "secondary_salesperson_id"
   add_foreign_key "factories", "manufacturers"
   add_foreign_key "field_option_overrides", "companies"
+  add_foreign_key "floor_plan_option_applicabilities", "floor_plan_options"
+  add_foreign_key "floor_plan_option_applicabilities", "floor_plans"
+  add_foreign_key "floor_plan_options", "factories"
   add_foreign_key "floor_plan_options", "option_categories"
   add_foreign_key "floor_plans", "factories"
   add_foreign_key "floor_plans", "manufacturers"
@@ -4338,6 +4388,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_000001) do
   add_foreign_key "nurture_sequences", "companies"
   add_foreign_key "nurture_steps", "nurture_sequences"
   add_foreign_key "nurture_steps", "templates"
+  add_foreign_key "option_categories", "factories"
   add_foreign_key "option_categories", "floor_plans"
   add_foreign_key "part_categories", "companies"
   add_foreign_key "part_categories", "part_categories", column: "parent_id"

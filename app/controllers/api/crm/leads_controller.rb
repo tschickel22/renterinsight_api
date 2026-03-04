@@ -82,7 +82,7 @@ module Api
         # Count AFTER search filter (for pagination)
         filtered_count = leads.count
         
-        leads = leads.includes(:source, :owner, :vehicle).order(created_at: :desc)
+        leads = leads.includes(:source, :owner, :vehicle, :lead_scores).order(created_at: :desc)
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -637,7 +637,7 @@ module Api
             msrp: l.vehicle.msrp
           } : nil,
           customFieldValues: l.respond_to?(:custom_field_values) ? l.custom_field_values : {},
-          score: calculate_lead_score(l),
+          score: l.lead_scores.max_by(&:updated_at)&.score,
           createdAt: l.created_at,
           updatedAt: l.updated_at
         }

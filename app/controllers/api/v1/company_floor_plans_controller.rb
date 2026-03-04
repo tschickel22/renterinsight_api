@@ -33,7 +33,10 @@ module Api
       def create
         return unless authorize_action!('configurator', 'create')
 
-        floor_plan = FloorPlan.find(params[:floor_plan_id])
+        floor_plan_id = params.dig(:company_floor_plan, :floor_plan_id) || params[:floor_plan_id]
+        return render json: { error: 'floor_plan_id is required' }, status: :unprocessable_entity if floor_plan_id.blank?
+
+        floor_plan = FloorPlan.find(floor_plan_id)
 
         company_floor_plan = @company.company_floor_plans.find_or_initialize_by(
           floor_plan: floor_plan
@@ -102,8 +105,8 @@ module Api
           },
           floor_plan: {
             id: fp.id,
-            beds: fp.beds,
-            baths: fp.baths,
+            bedrooms: fp.beds,
+            bathrooms: fp.baths,
             sqft: fp.sqft,
             series: fp.series,
             images: fp.images_array&.first(1) || []

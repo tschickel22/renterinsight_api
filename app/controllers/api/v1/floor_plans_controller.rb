@@ -58,7 +58,7 @@ module Api
       private
 
       def floor_plan_json(floor_plan, in_company_catalog)
-        {
+        data = {
           id: floor_plan.id,
           name: floor_plan.name,
           model_code: floor_plan.model_code,
@@ -73,27 +73,35 @@ module Api
             city: floor_plan.factory.city,
             state: floor_plan.factory.state
           } : nil,
-          beds: floor_plan.beds,
-          baths: floor_plan.baths,
+          bedrooms: floor_plan.beds,
+          bathrooms: floor_plan.baths,
           sqft: floor_plan.sqft,
           dimensions: "#{floor_plan.width_feet}' x #{floor_plan.length_feet}'",
           images: floor_plan.images_array || [],
+          primary_image_url: floor_plan.primary_image_url,
+          spec_sheet_url: floor_plan.spec_sheet_url,
           base_price_range: {
             low: floor_plan.base_price_low,
             high: floor_plan.base_price_high
           },
+          net_price: floor_plan.net_price,
           suggested_retail_range: {
             low: floor_plan.suggested_retail_low,
             high: floor_plan.suggested_retail_high
           },
           in_company_catalog: in_company_catalog
         }
+
+        # Only include sections when present to avoid "null-Section" badge in frontend
+        data[:sections] = floor_plan.sections if floor_plan.sections.present?
+
+        data
       end
 
       def floor_plan_detail_json(floor_plan)
         floor_plan_json(floor_plan, @company.floor_plans.exists?(floor_plan.id)).merge(
           specifications: floor_plan.specifications,
-          options_by_category: floor_plan.options_by_category
+          options_by_category: floor_plan.all_options_by_category
         )
       end
     end
