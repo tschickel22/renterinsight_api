@@ -374,8 +374,12 @@ module Api
           { key: 'date_sold', label: 'Date Sold', type: 'date', source: 'standard', required: false, protected: false, visibility: 'internal' },
 
           # Pricing (external)
-          { key: 'sale_price', label: 'Sale Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
-          { key: 'msrp', label: 'MSRP', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
+          { key: 'msrp', label: 'Home Price', type: 'currency', source: 'standard', required: false, protected: true, visibility: 'both', description: 'The base price of the home before packages and add-ons' },
+          { key: 'sale_price', label: 'Sale Price (Legacy)', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Legacy field — use Home Price instead' },
+          { key: 'special_discount_enabled', label: 'Special Discount', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enable a special discounted price for this unit' },
+          { key: 'discount_type', label: 'Discount Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both', options: ['% of Home Price', '$ Flat Amount', '% of Total w/ Packages'], description: '% of Home Price, flat $ off, or % of Total (Home Price + packages)' },
+          { key: 'discount_value', label: 'Discount Value', type: 'number', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enter percentage or dollar amount' },
+          { key: 'discounted_price', label: 'Discounted Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Calculated sale price after discount is applied' },
           { key: 'rent_price', label: 'Rent Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
           { key: 'rent_to_own_price', label: 'Rent-to-Own Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
           { key: 'deposit_amount', label: 'Deposit Amount', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
@@ -534,8 +538,7 @@ module Api
 
           # Other flags
           { key: 'sale_pending', label: 'Sale Pending', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'repo', label: 'Repo', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'package_type', label: 'Package Type', type: 'text', source: 'standard', required: false, protected: false, visibility: 'both' }
+          { key: 'repo', label: 'Repo', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'internal' }
         ]
       end
 

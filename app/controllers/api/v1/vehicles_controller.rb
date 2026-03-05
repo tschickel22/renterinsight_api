@@ -284,7 +284,9 @@ module Api
         images_html = ''
         if @vehicle.images.present? && @vehicle.images.any?
           images_html = '<h2>Photos</h2><div class="image-gallery">'
-          @vehicle.images.each do |img_url|
+          @vehicle.images.each do |img_entry|
+            img_url = img_entry.is_a?(Hash) ? (img_entry['url'] || img_entry[:url]) : img_entry
+            next if img_url.blank?
             full_url = img_url.start_with?('http') ? img_url : "http://#{request.host}:#{request.port}#{img_url}"
             images_html += "<div class='gallery-item'><img src='#{full_url}' alt='Vehicle Photo' /></div>"
           end
@@ -1177,6 +1179,11 @@ module Api
           floorPlanRate: :floor_plan_rate,
           targetGross: :target_gross,
           minimumPrice: :minimum_price,
+          # Special Discount
+          specialDiscountEnabled: :special_discount_enabled,
+          discountType: :discount_type,
+          discountValue: :discount_value,
+          discountedPrice: :discounted_price,
           # Custom field values (Page Layout Editor)
           customFieldValues: :custom_field_values
         }
@@ -1189,23 +1196,68 @@ module Api
         end
         
         # Copy direct fields (already in snake_case or same in both)
+        # CRITICAL: direct_fields must include ALL snake_case field names that inline edit sends.
+        # The camelCase mappings above only handle keys like `serialNumber` -> :serial_number.
+        # Inline edit sends snake_case directly (e.g., `serial_number`), so it must also be here.
         direct_fields = [
-          :vin, :year, :make, :model, :trim, :color, :status,
-          :description, :notes, :mileage, :condition,
-          :bedrooms, :bathrooms, :length, :width, :sleeps, :weight,
+          # Core fields
+          :vin, :year, :make, :model, :trim, :color, :status, :inventory_id,
+          :description, :notes, :mileage, :condition, :listing_type,
+          :serial_number, :home_type,
+          # Dimensions
+          :bedrooms, :bathrooms, :length, :width, :sleeps, :weight, :square_feet,
           :width1, :length1, :width2, :length2, :width3, :length3,
-          :sections,  # CRITICAL: Number of sections for manufactured homes (1, 2, or 3)
-          :garage, :carport, :deck, :patio, :fireplace, :msrp, :cost,
-          :transmission, :features, :images, :videos, :appliances,
-          :awning, :generator, :utilities, :terms,
-          :repo, :refrigerator, :microwave, :oven, :dishwasher,
-          :thermopane, :gutters, :shutters, :skylight, :pantry,
-          :basement,
-          # CRITICAL: Location fields must be in direct_fields to be copied to transformed
+          :sections,
+          # MH amenities & construction
+          :garage, :carport, :deck, :patio, :fireplace, :central_air,
+          :has_storage, :thermopane, :gutters, :shutters, :skylight, :pantry,
+          :basement, :cathedral_ceiling, :ceiling_fan, :walkin_closet,
+          :laundry_room, :sun_room, :garden_tub,
+          :exterior_material, :roof_material, :roof_type, :siding_type,
+          :insulation_type, :ceiling_type, :wall_type,
+          :flooring_type, :heating_type, :cooling_type, :water_heater_type,
+          :dwelling_type, :foundation_type, :master_bedroom_location,
+          # MH appliances
+          :garbage_disposal, :refrigerator, :microwave, :oven, :dishwasher,
+          :clothes_washer, :clothes_dryer,
+          # Pricing & terms
+          :msrp, :cost, :sale_price, :rent_price, :rent_to_own_price,
+          :deposit_amount, :lot_rent, :price_currency, :utilities, :terms,
+          :repo, :sale_pending, :package_type,
+          # Cost details
+          :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
+          :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          # Special Discount
+          :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
+          # RV fields
+          :body_style, :fuel_type, :transmission, :mileage_unit,
+          :exterior_color, :interior_color, :vehicle_interior_type,
+          :vehicle_configuration, :rv_type, :slide_outs, :number_of_doors,
+          :seating_capacity, :awning, :generator,
+          # RV syndication fields
+          :rv_class, :engine_make, :engine_type, :sleeping_capacity,
+          :num_air_conditioners, :slideouts, :awnings,
+          :fresh_water_capacity, :gray_water_capacity, :black_water_capacity,
+          :propane_capacity, :dry_weight, :gross_weight, :hitch_weight,
+          :cargo_capacity, :leveling_jacks, :self_contained, :solar_panels,
+          :backup_camera, :satellite_tv, :generator_make, :generator_hours,
+          :generator_fuel_type, :special_features, :overlay_text,
+          # Seller
+          :seller_name, :seller_phone, :seller_address_street,
+          :seller_address_city, :seller_address_state, :seller_address_zip,
+          # Media
+          :photo_url, :virtual_tour, :sales_photo, :listing_url,
+          :video_url, :virtual_tour_url,
+          :features, :images, :videos, :appliances, :floor_plan_images,
+          # Location
           :location_id, :use_location_address,
-          # CRITICAL: Allow snake_case location fields from frontend (MH form sends these directly)
           :location_city, :location_state, :location_zip,
-          :floor_plan_images
+          :location_type, :community_key, :community_name, :county_name,
+          :address1, :address2,
+          # Dates
+          :date_in_stock, :date_sold,
+          # Custom fields
+          :custom_field_values
         ]
         
         direct_fields.each do |field|
@@ -1261,6 +1313,8 @@ module Api
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
           :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          # Special Discount
+          :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
           # Location ID and address override
           :location_id,
           :use_location_address,
@@ -1284,14 +1338,12 @@ module Api
           value.to_f % 1 == 0 ? value.to_i : value.to_f
         end
         
-        # Convert image URLs
+        # Convert image URLs - handle both plain string URLs and Hash objects (S3 uploads)
         full_image_urls = (vehicle.images || []).map do |url|
-          if url.start_with?('http')
-            url  # Already a full URL
-          else
-            "#{base_url}#{url}"  # Convert relative to full URL
-          end
-        end
+          raw = url.is_a?(Hash) ? (url['url'] || url[:url]) : url
+          next nil if raw.blank?
+          raw.start_with?('http') ? raw : "#{base_url}#{raw}"
+        end.compact
         
         json = {
           id: vehicle.id.to_s,
@@ -1329,6 +1381,10 @@ module Api
           msrp: vehicle.msrp&.to_f,
           cost: vehicle.cost&.to_f,
           priceCurrency: vehicle.price_currency,
+          specialDiscountEnabled: vehicle.respond_to?(:special_discount_enabled) ? vehicle.special_discount_enabled : false,
+          discountType: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,
+          discountValue: vehicle.respond_to?(:discount_value) ? vehicle.discount_value&.to_f : nil,
+          discountedPrice: vehicle.respond_to?(:discounted_price) ? vehicle.discounted_price&.to_f : nil,
           listingUrl: vehicle.listing_url,
           sellerName: vehicle.seller_name,
           sellerPhone: vehicle.seller_phone,
@@ -1337,7 +1393,22 @@ module Api
           sellerAddressState: vehicle.seller_address_state,
           sellerAddressZip: vehicle.seller_address_zip,
           # Custom field values (Page Layout Editor)
-          customFieldValues: vehicle.custom_field_values || {}
+          customFieldValues: vehicle.custom_field_values || {},
+          # Packages
+          inventoryPackages: vehicle.inventory_packages.ordered.map { |p|
+            {
+              id: p.id,
+              vehicleId: p.vehicle_id,
+              packageTemplateId: p.package_template_id,
+              name: p.name,
+              description: p.description,
+              price: p.price&.to_f,
+              includeInTotal: p.include_in_total,
+              showPriceInMarketing: p.show_price_in_marketing,
+              position: p.position
+            }
+          },
+          totalHomePrice: vehicle.total_home_price
         }
 
         # Add type-specific fields
@@ -1398,7 +1469,7 @@ module Api
             virtualTourUrl: vehicle.virtual_tour_url,
             specialFeatures: vehicle.special_features,
             overlayText: vehicle.overlay_text,
-            floorPlanImages: (vehicle.floor_plan_images || []).map { |url| url.start_with?('http') ? url : "#{base_url}#{url}" },
+            floorPlanImages: (vehicle.floor_plan_images || []).map { |u| raw = u.is_a?(Hash) ? (u['url'] || u[:url]) : u; raw.blank? ? nil : (raw.start_with?('http') ? raw : "#{base_url}#{raw}") }.compact,
             # RBAC Cost Detail Fields - NEW
             dealerCost: vehicle.dealer_cost&.to_f,
             freightCost: vehicle.freight_cost&.to_f,
@@ -1461,7 +1532,7 @@ module Api
             videoUrl: vehicle.video_url,
             virtualTourUrl: vehicle.virtual_tour_url,
             salesPhoto: vehicle.sales_photo,
-            floorPlanImages: (vehicle.floor_plan_images || []).map { |url| url.start_with?('http') ? url : "#{base_url}#{url}" },
+            floorPlanImages: (vehicle.floor_plan_images || []).map { |u| raw = u.is_a?(Hash) ? (u['url'] || u[:url]) : u; raw.blank? ? nil : (raw.start_with?('http') ? raw : "#{base_url}#{raw}") }.compact,
             # Pricing & terms
             utilities: vehicle.utilities&.to_f,
             terms: vehicle.terms,

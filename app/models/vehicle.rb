@@ -11,6 +11,7 @@ class Vehicle < ApplicationRecord
   has_many :quotes, dependent: :nullify
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
+  has_many :inventory_packages, dependent: :destroy
   
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
@@ -104,6 +105,9 @@ class Vehicle < ApplicationRecord
     update!(is_deleted: false, deleted_at: nil)
   end
 
+  # Auto-compute discounted sale price when discount fields change
+  before_save :compute_discounted_price
+
   # Display helpers
   def display_name
     "#{year} #{make} #{model}#{trim.present? ? " #{trim}" : ''}"
@@ -125,6 +129,13 @@ class Vehicle < ApplicationRecord
 
   def price_display
     sale_price || rent_price
+  end
+
+  # Computed total: sale_price + all packages that are included_in_total
+  def total_home_price
+    base = sale_price.to_f
+    package_total = inventory_packages.included_in_total.sum(:price).to_f
+    base + package_total
   end
 
   def is_rv?
@@ -193,6 +204,43 @@ class Vehicle < ApplicationRecord
     random = SecureRandom.hex(3).upcase
     
     self.inventory_id = "#{prefix}-#{timestamp}-#{random}"
+  end
+
+  # Compute discounted price and auto-write to sale_price for marketing views
+  def compute_discounted_price
+    return unless respond_to?(:special_discount_enabled)
+
+    # If discount is disabled, clear the computed prices
+    unless special_discount_enabled
+      self.discounted_price = nil
+      self.sale_price = nil if special_discount_enabled_changed?
+      return
+    end
+
+    return if discount_type.blank? || discount_value.blank? || discount_value.to_f <= 0
+
+    base = msrp.to_f
+    return if base <= 0
+
+    # Calculate total home price (base + included packages)
+    package_total = inventory_packages.where(include_in_total: true).sum(:price).to_f
+    total_with_packages = base + package_total
+
+    computed = case discount_type
+              when '% of Home Price'
+                base - (base * (discount_value.to_f / 100.0))
+              when '$ Flat Amount'
+                total_with_packages - discount_value.to_f
+              when '% of Total w/ Packages'
+                total_with_packages - (total_with_packages * (discount_value.to_f / 100.0))
+              else
+                nil
+              end
+
+    if computed && computed > 0
+      self.discounted_price = computed.round(2)
+      self.sale_price = computed.round(2)  # Feeds marketing/public views
+    end
   end
 
   # Fire custom lifecycle webhook events on status transitions

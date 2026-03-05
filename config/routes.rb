@@ -386,6 +386,21 @@ Rails.application.routes.draw do
         
         # Vehicle image uploads
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
+        
+        # Vehicle packages (Package Builder)
+        resources :packages, controller: 'inventory_packages' do
+          collection do
+            post :reorder
+            post :apply_template
+          end
+        end
+      end
+      
+      # ==================== PACKAGE TEMPLATES ====================
+      resources :package_templates do
+        collection do
+          post :reorder
+        end
       end
       
       # ==================== LISTINGS ====================

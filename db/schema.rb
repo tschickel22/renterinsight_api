@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_03_000004) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_05_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1636,6 +1636,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_03_000004) do
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
   end
 
+  create_table "inventory_packages", force: :cascade do |t|
+    t.bigint "vehicle_id", null: false
+    t.bigint "package_template_id"
+    t.string "name", null: false
+    t.text "description"
+    t.decimal "price", precision: 12, scale: 2, default: "0.0"
+    t.boolean "include_in_total", default: true, null: false
+    t.boolean "show_price_in_marketing", default: false, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["package_template_id"], name: "index_inventory_packages_on_package_template_id"
+    t.index ["vehicle_id", "position"], name: "index_inventory_packages_on_vehicle_id_and_position"
+    t.index ["vehicle_id"], name: "index_inventory_packages_on_vehicle_id"
+  end
+
   create_table "inventory_transactions", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "part_id", null: false
@@ -2497,6 +2513,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_03_000004) do
     t.index ["floor_plan_id", "display_order"], name: "index_option_categories_on_floor_plan_id_and_display_order"
     t.index ["floor_plan_id"], name: "index_option_categories_on_floor_plan_id"
     t.index ["scope"], name: "index_option_categories_on_scope"
+  end
+
+  create_table "package_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.decimal "default_price", precision: 12, scale: 2, default: "0.0"
+    t.boolean "include_in_total", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "applicable_to", default: "all", null: false
+    t.index ["company_id", "applicable_to"], name: "index_package_templates_on_company_id_and_applicable_to"
+    t.index ["company_id", "is_active"], name: "index_package_templates_on_company_id_and_is_active"
+    t.index ["company_id", "position"], name: "index_package_templates_on_company_id_and_position"
+    t.index ["company_id"], name: "index_package_templates_on_company_id"
   end
 
   create_table "page_layouts", force: :cascade do |t|
@@ -3971,6 +4004,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_03_000004) do
     t.integer "sections"
     t.json "floor_plan_images", default: [], null: false
     t.jsonb "custom_field_values", default: {}, null: false
+    t.boolean "special_discount_enabled", default: false
+    t.string "discount_type"
+    t.decimal "discount_value", precision: 12, scale: 2
+    t.decimal "discounted_price", precision: 12, scale: 2
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -4324,6 +4361,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_03_000004) do
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_forms", "users", column: "notified_user_id"
   add_foreign_key "intake_submissions", "leads"
+  add_foreign_key "inventory_packages", "package_templates"
+  add_foreign_key "inventory_packages", "vehicles"
   add_foreign_key "inventory_transactions", "bins"
   add_foreign_key "inventory_transactions", "companies"
   add_foreign_key "inventory_transactions", "inventory_transactions", column: "source_transaction_id"
@@ -4390,6 +4429,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_03_000004) do
   add_foreign_key "nurture_steps", "templates"
   add_foreign_key "option_categories", "factories"
   add_foreign_key "option_categories", "floor_plans"
+  add_foreign_key "package_templates", "companies"
   add_foreign_key "part_categories", "companies"
   add_foreign_key "part_categories", "part_categories", column: "parent_id"
   add_foreign_key "part_categories", "users", column: "created_by_id"

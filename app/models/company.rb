@@ -13,6 +13,8 @@ class Company < ApplicationRecord
   has_many :field_option_overrides, dependent: :destroy
   has_many :leads, dependent: :destroy
   has_many :vehicles, dependent: :destroy
+  has_many :package_templates, dependent: :destroy
+  has_many :inventory_packages, through: :vehicles
   has_many :listings, dependent: :destroy
   has_many :syndication_partners, dependent: :destroy
   has_many :land_parcels, dependent: :destroy
