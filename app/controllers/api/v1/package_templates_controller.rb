@@ -23,6 +23,16 @@ module Api
           templates = templates.where(applicable_to: [vt, 'all'])
         end
 
+        # Filter by visibility scope: inventory UI only sees 'inventory' + 'all'
+        # Deals/invoices/quotes see everything
+        if params[:scope].present?
+          scope = params[:scope].downcase
+          if scope == 'inventory'
+            templates = templates.where(visibility_scope: ['inventory', 'all', nil])
+          end
+          # 'finance' and 'all' scopes see everything — no filter needed
+        end
+
         render json: templates.map { |t| template_json(t) }
       end
 
@@ -74,7 +84,7 @@ module Api
         raw = params.require(:package_template).to_unsafe_h
         normalized = raw.transform_keys { |k| k.to_s.underscore }
         ActionController::Parameters.new(normalized).permit(
-          :name, :description, :default_price, :include_in_total, :is_active, :position, :applicable_to, :taxable, :tax_rate
+          :name, :description, :default_price, :cost, :include_in_total, :is_active, :position, :applicable_to, :visibility_scope, :taxable, :tax_rate
         )
       end
 
@@ -84,10 +94,12 @@ module Api
           name: template.name,
           description: template.description,
           defaultPrice: template.default_price&.to_f,
+          cost: template.respond_to?(:cost) ? template.cost&.to_f : nil,
           includeInTotal: template.include_in_total,
           position: template.position,
           isActive: template.is_active,
           applicableTo: template.applicable_to || 'all',
+          visibilityScope: template.respond_to?(:visibility_scope) ? (template.visibility_scope || 'all') : 'all',
           taxable: template.respond_to?(:taxable) ? (template.taxable || false) : false,
           taxRate: template.respond_to?(:tax_rate) ? template.tax_rate&.to_f : nil,
           createdAt: template.created_at,

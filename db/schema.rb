@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_05_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_05_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1649,6 +1649,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_05_000002) do
     t.datetime "updated_at", null: false
     t.boolean "taxable", default: false
     t.decimal "tax_rate", precision: 5, scale: 3
+    t.decimal "cost", precision: 12, scale: 2
     t.index ["package_template_id"], name: "index_inventory_packages_on_package_template_id"
     t.index ["vehicle_id", "position"], name: "index_inventory_packages_on_vehicle_id_and_position"
     t.index ["vehicle_id"], name: "index_inventory_packages_on_vehicle_id"
@@ -2530,6 +2531,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_05_000002) do
     t.string "applicable_to", default: "all", null: false
     t.boolean "taxable", default: false
     t.decimal "tax_rate", precision: 5, scale: 3
+    t.decimal "cost", precision: 12, scale: 2
+    t.string "visibility_scope", default: "all"
     t.index ["company_id", "applicable_to"], name: "index_package_templates_on_company_id_and_applicable_to"
     t.index ["company_id", "is_active"], name: "index_package_templates_on_company_id_and_is_active"
     t.index ["company_id", "position"], name: "index_package_templates_on_company_id_and_position"

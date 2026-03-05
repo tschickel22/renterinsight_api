@@ -15,6 +15,7 @@ class PackageTemplate < ApplicationRecord
       name: name,
       description: description,
       price: default_price,
+      cost: cost,
       include_in_total: include_in_total,
       show_price_in_marketing: false,
       taxable: taxable || false,

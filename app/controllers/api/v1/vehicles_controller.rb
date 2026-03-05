@@ -1403,6 +1403,7 @@ module Api
               name: p.name,
               description: p.description,
               price: p.price&.to_f,
+              cost: p.respond_to?(:cost) ? p.cost&.to_f : nil,
               includeInTotal: p.include_in_total,
               showPriceInMarketing: p.show_price_in_marketing,
               taxable: p.respond_to?(:taxable) ? (p.taxable || false) : false,
