@@ -1405,6 +1405,8 @@ module Api
               price: p.price&.to_f,
               includeInTotal: p.include_in_total,
               showPriceInMarketing: p.show_price_in_marketing,
+              taxable: p.respond_to?(:taxable) ? (p.taxable || false) : false,
+              taxRate: p.respond_to?(:tax_rate) ? p.tax_rate&.to_f : nil,
               position: p.position
             }
           },

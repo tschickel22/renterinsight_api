@@ -431,7 +431,9 @@ module Api
           calculator_include_setup_fee: false,
           calculator_default_setup_fee: 0,
           calculator_loan_term_options: [120, 180, 240, 300, 360],
-          calculator_disclaimer_text: 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.'
+          calculator_disclaimer_text: 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.',
+          # Sales Tax
+          default_sales_tax_rate: 0.0
         }
       end
     end

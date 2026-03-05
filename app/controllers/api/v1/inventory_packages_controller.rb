@@ -91,7 +91,7 @@ module Api
         raw = params.require(:inventory_package).to_unsafe_h
         normalized = raw.transform_keys { |k| k.to_s.underscore }
         ActionController::Parameters.new(normalized).permit(
-          :name, :description, :price, :include_in_total, :show_price_in_marketing, :position, :package_template_id
+          :name, :description, :price, :include_in_total, :show_price_in_marketing, :taxable, :tax_rate, :position, :package_template_id
         )
       end
 
@@ -105,6 +105,8 @@ module Api
           price: pkg.price&.to_f,
           includeInTotal: pkg.include_in_total,
           showPriceInMarketing: pkg.show_price_in_marketing,
+          taxable: pkg.respond_to?(:taxable) ? (pkg.taxable || false) : false,
+          taxRate: pkg.respond_to?(:tax_rate) ? pkg.tax_rate&.to_f : nil,
           position: pkg.position,
           createdAt: pkg.created_at,
           updatedAt: pkg.updated_at
