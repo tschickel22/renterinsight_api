@@ -133,3 +133,20 @@ ActiveRecordBase.connection.active
 /vendor/bundle/
 
 /config/credentials/development.key
+
+# Utility scripts with credentials / temp files
+backfill_decatur_manifest.rb
+decatur_to_s3.rb
+box_to_s3.*
+box_to_s3_*.py
+box_downloads/
+discover_folders.py
+run_dutch_upload.py
+explore_decatur*.rb
+get_decatur_xlsx.rb
+count_decatur.rb
+peek*.rb
+upload_box_pdfs_to_s3.rb
+manifest.json
+progress.json
+seed_stderr.log

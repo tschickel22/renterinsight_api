@@ -64,9 +64,9 @@ class PageLayout < ApplicationRecord
             { key: 'value', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'probability', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'deal_type', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'vertical', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'lead_source', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'owner_id', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'owner_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'created_at', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {
@@ -76,25 +76,8 @@ class PageLayout < ApplicationRecord
           collapsed: false,
           fields: [
             { key: 'expected_close_date', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'actual_close_date', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'delivery_date', type: 'standard', visible: true, required: false, width: 1 }
-          ]
-        },
-        {
-          id: 'deal_economics',
-          title: 'Deal Economics',
-          columns: 2,
-          collapsed: false,
-          fields: [
-            { key: 'selling_price', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'unit_cost', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'trade_allowance', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'trade_payoff', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'accessories_total', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'doc_fee', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'delivery_fee', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'setup_fee', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'skirting_fee', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'delivery_date', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'actual_close_date', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {
@@ -104,18 +87,7 @@ class PageLayout < ApplicationRecord
           collapsed: false,
           fields: [
             { key: 'win_reason', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'loss_reason', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'competitor', type: 'standard', visible: true, required: false, width: 1 }
-          ]
-        },
-        {
-          id: 'deal_notes',
-          title: 'Notes & Description',
-          columns: 1,
-          collapsed: false,
-          fields: [
-            { key: 'description', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'notes', type: 'standard', visible: true, required: false, width: 1 }
+            { key: 'loss_reason', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {

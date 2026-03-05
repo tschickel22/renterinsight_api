@@ -173,8 +173,15 @@ module Api
           new_vehicle.serial_number = new_identifier
         end
         
-        # Generate a new inventory ID
-        new_vehicle.inventory_id = generate_inventory_id
+        # Let the model generate a fresh inventory ID (clear the dup'd one)
+        new_vehicle.inventory_id = nil
+        
+        # Clear public_id so a new unique one is generated (unique constraint)
+        new_vehicle.public_id = nil
+        
+        # Clear QuickBooks sync so clone gets its own QB record
+        new_vehicle.quickbooks_id = nil
+        new_vehicle.quickbooks_synced_at = nil
         
         # Reset status to available for the clone
         new_vehicle.status = 'available'
@@ -185,6 +192,10 @@ module Api
         
         # Clear any sale-related fields
         new_vehicle.sale_pending = false
+        
+        # Clear discount fields so compute_discounted_price doesn't interfere
+        new_vehicle.special_discount_enabled = false if new_vehicle.respond_to?(:special_discount_enabled)
+        new_vehicle.discounted_price = nil if new_vehicle.respond_to?(:discounted_price)
         
         # Duplicate arrays (features, images, etc.)
         new_vehicle.features = @vehicle.features&.dup || []
@@ -198,6 +209,10 @@ module Api
         else
           render json: { errors: new_vehicle.errors.full_messages }, status: :unprocessable_entity
         end
+      rescue => e
+        Rails.logger.error "[VehiclesController] Clone failed: #{e.message}"
+        Rails.logger.error e.backtrace&.first(10)&.join("\n")
+        render json: { error: "Clone failed: #{e.message}" }, status: :internal_server_error
       end
 
       # POST /api/v1/vehicles/:id/share

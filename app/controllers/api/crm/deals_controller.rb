@@ -318,6 +318,11 @@ module Api
             rescue => e
               Rails.logger.error "Failed to create stage history: #{e.message}"
             end
+
+            # Auto-set actual_close_date when deal is won
+            if @deal.stage&.downcase == 'closed_won' && @deal.actual_close_date.blank?
+              @deal.update_column(:actual_close_date, Date.today)
+            end
           end
           
           render json: deal_json(@deal, detailed: true)
@@ -351,6 +356,11 @@ module Api
             )
           rescue => e
             Rails.logger.error "Failed to create stage history: #{e.message}"
+          end
+
+          # Auto-set actual_close_date when deal is won
+          if new_stage&.downcase == 'closed_won' && @deal.actual_close_date.blank?
+            @deal.update_column(:actual_close_date, Date.today)
           end
           
           render json: deal_json(@deal, detailed: true)

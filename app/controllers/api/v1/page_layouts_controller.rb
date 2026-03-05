@@ -246,6 +246,7 @@ module Api
             options: %w[rv manufactured_home other] },
           { key: 'lead_source', label: 'Lead Source', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'owner_id', label: 'Owner / Sales Rep', type: 'user', source: 'standard', required: false, protected: false },
+          { key: 'created_at', label: 'Date Created', type: 'date', source: 'standard', required: false, protected: true },
           { key: 'quantity', label: 'Quantity', type: 'number', source: 'standard', required: false, protected: false },
           # Note: source_id, account_id, contact_id, vehicle_id are relationship/lookup fields
           # managed via DealForm only — not supported as inline-editable layout fields
@@ -388,7 +389,7 @@ module Api
 
           # Cost Details (internal only)
           { key: 'cost', label: 'Invoice Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'dealer_cost', label: 'Dealer Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
+          { key: 'dealer_cost', label: 'Home Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Your cost for the home from the manufacturer' },
           { key: 'freight_cost', label: 'Freight Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
           { key: 'pdi_cost', label: 'PDI Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
           { key: 'total_cost', label: 'Total Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
