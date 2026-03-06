@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_05_000003) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_05_230002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -995,6 +995,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_05_000003) do
     t.jsonb "pipeline_stages"
     t.string "sms_provisioning_mode", default: "platform", null: false
     t.integer "sms_monthly_limit", default: 2000, null: false
+    t.string "phone"
+    t.string "email"
+    t.string "address_line1"
+    t.string "address_line2"
+    t.string "city"
+    t.string "state"
+    t.string "zip_code"
+    t.string "country", default: "US"
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
@@ -1481,6 +1489,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_05_000003) do
     t.index ["won_at"], name: "index_deals_on_won_at"
   end
 
+  create_table "draw_schedule_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.boolean "is_default", default: false
+    t.jsonb "draws", default: []
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_default"], name: "idx_draw_templates_company_default"
+    t.index ["company_id"], name: "index_draw_schedule_templates_on_company_id"
+  end
+
   create_table "factories", force: :cascade do |t|
     t.bigint "manufacturer_id", null: false
     t.string "name", null: false
@@ -1770,10 +1790,38 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_05_000003) do
     t.string "itemable_type"
     t.integer "itemable_id"
     t.string "commission_type", default: "full_commission"
+    t.string "category"
+    t.decimal "cost", precision: 10, scale: 2, default: "0.0"
+    t.boolean "taxable", default: false
+    t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
+    t.text "notes"
     t.index ["invoice_id", "position"], name: "index_invoice_items_on_invoice_id_and_position"
     t.index ["invoice_id"], name: "index_invoice_items_on_invoice_id"
     t.index ["itemable_type", "itemable_id"], name: "index_invoice_items_on_itemable_type_and_itemable_id"
     t.index ["listing_id"], name: "index_invoice_items_on_listing_id"
+  end
+
+  create_table "invoice_notes_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "notes", null: false
+    t.boolean "is_default", default: false
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_invoice_notes_templates_on_company_id"
+  end
+
+  create_table "invoice_terms_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "terms", null: false
+    t.boolean "is_default", default: false
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_default"], name: "idx_terms_templates_company_default"
+    t.index ["company_id"], name: "index_invoice_terms_templates_on_company_id"
   end
 
   create_table "invoices", force: :cascade do |t|
@@ -1814,6 +1862,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_05_000003) do
     t.string "public_token"
     t.integer "sales_rep_id"
     t.integer "quote_id"
+    t.jsonb "draw_schedule", default: {}
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"

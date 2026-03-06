@@ -458,13 +458,34 @@ Rails.application.routes.draw do
           post :send_sms
           post :mark_paid
           post :cancel
+          post :finalize
           get :pdf
+          get :draw_schedule_pdf
           post :mark_inventory_used, path: 'mark-inventory-used'  # Manual inventory override
         end
         
         collection do
           get :stats
           post :convert_from_quote, path: 'convert-from-quote'  # Quote → Invoice conversion
+        end
+      end
+
+      resources :draw_schedule_templates do
+        member do
+          post :set_default
+          get :preview
+        end
+      end
+
+      resources :invoice_terms_templates do
+        member do
+          post :set_default
+        end
+      end
+
+      resources :invoice_notes_templates do
+        member do
+          post :set_default
         end
       end
       

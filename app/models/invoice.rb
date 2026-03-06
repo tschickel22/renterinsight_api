@@ -29,7 +29,7 @@ class Invoice < ApplicationRecord
   
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
   validates :invoice_date, presence: true
-  validates :status, inclusion: { in: %w[draft sent viewed partial paid overdue cancelled] }
+  validates :status, inclusion: { in: %w[draft finalized sent viewed partial paid overdue cancelled] }
   
   scope :for_current_location, -> { 
     Current.location_filtered? ? where(location_id: Current.location_id) : all 
@@ -134,9 +134,18 @@ class Invoice < ApplicationRecord
     "#{base_url}/invoice/#{public_token}"
   end
   
+  # Mark as finalized (real invoice, not yet sent)
+  def finalize!
+    update(status: 'finalized') if draft?
+  end
+
+  def finalized?
+    status == 'finalized'
+  end
+
   # Mark as sent
   def mark_as_sent!
-    update(status: 'sent', sent_at: Time.current) if draft?
+    update(status: 'sent', sent_at: Time.current) if draft? || finalized?
   end
   
   # Mark as viewed
@@ -233,7 +242,19 @@ class Invoice < ApplicationRecord
   
   def calculate_totals
     self.subtotal = invoice_items.sum(&:amount)
-    self.tax_amount = (subtotal * (tax_rate || 0) / 100).round(2)
+    
+    # Per-item tax: if any items have taxable flag set, use per-item calculation
+    # Otherwise fall back to invoice-level tax_rate on full subtotal (legacy behavior)
+    has_per_item_tax = invoice_items.any? { |item| item.taxable? }
+    
+    if has_per_item_tax
+      # Sum tax only on taxable items, each using its own tax_rate (or invoice default)
+      self.tax_amount = invoice_items.sum { |item| item.tax_amount }.round(2)
+    else
+      # Legacy: apply invoice-level tax_rate to entire subtotal
+      self.tax_amount = (subtotal * (tax_rate || 0) / 100).round(2)
+    end
+    
     self.total = subtotal + tax_amount
     self.amount_due = total - (amount_paid || 0)
   end

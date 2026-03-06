@@ -511,7 +511,7 @@ module Api
             end
             # Find deals associated with this contact
             if @company.respond_to?(:deals)
-              deals = @company.deals.where(contact_id: contact.id).where(is_deleted: [false, nil])
+              deals = @company.deals.where(contact_id: contact.id).where(deleted_at: nil)
               result[:deals] = deals.map { |d| { id: d.id, name: d.respond_to?(:title) ? d.title : d.name, stage: d.respond_to?(:stage) ? d.stage : nil } }
             end
           end
@@ -522,7 +522,7 @@ module Api
             contacts = @company.contacts.where(account_id: account.id).where(is_deleted: [false, nil]).limit(50)
             result[:contacts] = contacts.map { |c| { id: c.id, name: [c.first_name, c.last_name].compact.join(' '), email: c.email, phone: c.phone } }
             if @company.respond_to?(:deals)
-              deals = @company.deals.where(account_id: account.id).where(is_deleted: [false, nil])
+              deals = @company.deals.where(account_id: account.id).where(deleted_at: nil)
               result[:deals] = deals.map { |d| { id: d.id, name: d.respond_to?(:title) ? d.title : d.name, stage: d.respond_to?(:stage) ? d.stage : nil } }
             end
           end

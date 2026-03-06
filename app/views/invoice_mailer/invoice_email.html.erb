@@ -2,133 +2,99 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { text-align: center; padding: 20px 0; border-bottom: 2px solid #e5e7eb; }
-    .logo { max-width: 200px; height: auto; }
-    .invoice-details { margin: 30px 0; }
-    .invoice-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    .invoice-table th { background: #f3f4f6; padding: 12px; text-align: left; border-bottom: 2px solid #e5e7eb; }
-    .invoice-table td { padding: 12px; border-bottom: 1px solid #e5e7eb; }
-    .total-row { font-weight: bold; font-size: 1.1em; background: #f9fafb; }
-    .pay-button { display: inline-block; background: #dc2626; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
-    .footer { text-align: center; padding: 20px 0; color: #6b7280; font-size: 0.9em; border-top: 1px solid #e5e7eb; margin-top: 40px; }
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background: #f5f5f5; }
+    .wrapper { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+    .card { background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header { padding: 30px 30px 20px; border-bottom: 2px solid #2563EB; }
+    .logo { max-width: 180px; height: auto; margin-bottom: 10px; }
+    .company-name { font-size: 18px; font-weight: bold; color: #333; }
+    .body { padding: 30px; }
+    .greeting { font-size: 16px; margin-bottom: 20px; }
+    .amount-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0; }
+    .amount-label { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .amount-value { font-size: 32px; font-weight: bold; color: #1e293b; }
+    .details-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; border-bottom: 1px solid #f1f5f9; }
+    .details-label { color: #64748b; }
+    .details-value { font-weight: 600; color: #1e293b; }
+    .cta-wrapper { text-align: center; margin: 30px 0 10px; }
+    .cta-button { display: inline-block; background: #2563EB; color: #ffffff !important; padding: 14px 40px; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: bold; }
+    .note { font-size: 13px; color: #94a3b8; text-align: center; margin-top: 10px; }
+    .footer { padding: 20px 30px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #f1f5f9; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <% if @company.try(:logo_url).present? || @company.try(:logo).present? %>
-        <img src="<%= @company.try(:logo_url) || @company.try(:logo) %>" alt="<%= @company.name %>" class="logo">
-      <% else %>
-        <h1><%= @company.name %></h1>
-      <% end %>
-    </div>
-    
-    <div class="invoice-details">
-      <h2>Invoice <%= @invoice.invoice_number %></h2>
-      
-      <p><strong>Date:</strong> <%= @invoice.invoice_date.strftime('%B %d, %Y') %></p>
-      <% if @invoice.due_date %>
-        <p><strong>Due Date:</strong> <%= @invoice.due_date.strftime('%B %d, %Y') %></p>
-      <% end %>
-      
-      <p><strong>Bill To:</strong><br>
-      <%= @contact.full_name %><br>
-      <%= @contact.email %></p>
-      
-      <% if @location %>
-        <p><strong>From:</strong><br>
-        <%= @location.name %><br>
-        <% if @location.address_line1.present? %>
-          <%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %>
+  <div class="wrapper">
+    <div class="card">
+      <!-- Header -->
+      <div class="header">
+        <% if @company.try(:logo_url).present? || @company.try(:logo).present? %>
+          <img src="<%= @company.try(:logo_url) || @company.try(:logo) %>" alt="<%= @company.name %>" class="logo"><br>
+        <% else %>
+          <div class="company-name"><%= @company.name %></div>
         <% end %>
+        <% if @location && @location.name != @company.name %>
+          <div style="font-size: 13px; color: #64748b;"><%= @location.name %></div>
+        <% end %>
+      </div>
+
+      <!-- Body -->
+      <div class="body">
+        <p class="greeting">
+          Hi <%= @contact.first_name %>,
         </p>
-      <% end %>
-    </div>
-    
-    <table class="invoice-table">
-      <thead>
-        <tr>
-          <th>Description</th>
-          <th style="text-align: right;">Quantity</th>
-          <th style="text-align: right;">Rate</th>
-          <th style="text-align: right;">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        <% @invoice.invoice_items.each do |item| %>
+
+        <p style="font-size: 15px; color: #475569;">
+          You have received an invoice from <strong><%= @location&.name || @company.name %></strong>. Please review the details below and click the button to view your full invoice<%= ' or make a payment' if @payments_enabled %>.
+        </p>
+
+        <!-- Amount Due -->
+        <div class="amount-box">
+          <div class="amount-label">Amount Due</div>
+          <div class="amount-value"><%= number_to_currency(@invoice.amount_due) %></div>
+        </div>
+
+        <!-- Key Details -->
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin: 20px 0;">
           <tr>
-            <td><%= item.description %></td>
-            <td style="text-align: right;"><%= number_with_precision(item.quantity, precision: 2) %></td>
-            <td style="text-align: right;"><%= number_to_currency(item.rate) %></td>
-            <td style="text-align: right;"><%= number_to_currency(item.amount) %></td>
+            <td style="padding: 8px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #f1f5f9;">Invoice Number</td>
+            <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;"><%= @invoice.invoice_number %></td>
           </tr>
-        <% end %>
-        
-        <tr>
-          <td colspan="3" style="text-align: right;"><strong>Subtotal:</strong></td>
-          <td style="text-align: right;"><%= number_to_currency(@invoice.subtotal) %></td>
-        </tr>
-        
-        <% if @invoice.tax_amount > 0 %>
           <tr>
-            <td colspan="3" style="text-align: right;"><strong>Tax (<%= @invoice.tax_rate %>%):</strong></td>
-            <td style="text-align: right;"><%= number_to_currency(@invoice.tax_amount) %></td>
+            <td style="padding: 8px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #f1f5f9;">Invoice Date</td>
+            <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;"><%= @invoice.invoice_date.strftime('%B %d, %Y') %></td>
           </tr>
-        <% end %>
-        
-        <tr class="total-row">
-          <td colspan="3" style="text-align: right;"><strong>Total:</strong></td>
-          <td style="text-align: right;"><%= number_to_currency(@invoice.total) %></td>
-        </tr>
-        
-        <% if @invoice.amount_paid > 0 %>
+          <% if @invoice.due_date %>
           <tr>
-            <td colspan="3" style="text-align: right;"><strong>Amount Paid:</strong></td>
-            <td style="text-align: right;"><%= number_to_currency(@invoice.amount_paid) %></td>
+            <td style="padding: 8px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #f1f5f9;">Due Date</td>
+            <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;"><%= @invoice.due_date.strftime('%B %d, %Y') %></td>
           </tr>
-        <% end %>
-        
-        <tr class="total-row">
-          <td colspan="3" style="text-align: right;"><strong>Amount Due:</strong></td>
-          <td style="text-align: right;"><%= number_to_currency(@invoice.amount_due) %></td>
-        </tr>
-      </tbody>
-    </table>
-    
-    <% if @invoice.notes.present? %>
-      <div style="margin: 20px 0;">
-        <strong>Notes:</strong><br>
-        <%= simple_format(@invoice.notes) %>
+          <% end %>
+          <tr>
+            <td style="padding: 8px 0; font-size: 14px; color: #64748b;">Total</td>
+            <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right;"><%= number_to_currency(@invoice.total) %></td>
+          </tr>
+        </table>
+
+        <!-- CTA Button -->
+        <div class="cta-wrapper">
+          <a href="<%= @payment_link %>" class="cta-button"><%= @payments_enabled ? 'View & Pay Invoice' : 'View Invoice' %></a>
+        </div>
+        <p class="note">You can view the full invoice details<%= ', print, or make a payment online' if @payments_enabled %><%= ' or print a copy' unless @payments_enabled %>.</p>
       </div>
-    <% end %>
-    
-    <div style="text-align: center;">
-      <a href="<%= @payment_link %>" class="pay-button">Pay Invoice Online</a>
-    </div>
-    
-    <% if @invoice.terms.present? %>
-      <div style="margin: 20px 0; font-size: 0.9em;">
-        <strong>Payment Terms:</strong><br>
-        <%= simple_format(@invoice.terms) %>
+
+      <!-- Footer -->
+      <div class="footer">
+        <p><strong><%= @company.name %></strong></p>
+        <% if @location.present? %>
+          <% if @location.phone.present? %><p><%= @location.phone %></p><% end %>
+          <% if @location.address_line1.present? %>
+            <p><%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %></p>
+          <% end %>
+          <% if @location.email.present? %><p><%= @location.email %></p><% end %>
+        <% end %>
       </div>
-    <% end %>
-    
-    <div class="footer">
-      <p><%= @company.name %></p>
-      <% if @location.present? %>
-        <% if @location.address_line1.present? %>
-          <p><%= [@location.address_line1, @location.city, @location.state, @location.zip_code].compact.join(', ') %></p>
-        <% end %>
-        <% if @location.phone.present? %>
-          <p>Phone: <%= @location.phone %></p>
-        <% end %>
-        <% if @location.email.present? %>
-          <p>Email: <%= @location.email %></p>
-        <% end %>
-      <% end %>
     </div>
   </div>
 </body>

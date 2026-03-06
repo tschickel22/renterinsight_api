@@ -14,6 +14,11 @@ class InvoiceItem < ApplicationRecord
     in: %w[full_commission parts_only labor_only no_commission],
     allow_nil: true
   }
+  validates :category, inclusion: {
+    in: %w[home land package basement service fee accessory product other custom],
+    allow_nil: true,
+    allow_blank: true
+  }
   
   before_validation :calculate_amount
   before_validation :set_default_commission_type, on: :create
@@ -27,6 +32,19 @@ class InvoiceItem < ApplicationRecord
     'custom' => 'Custom',
     'part' => 'Part',
     'labor' => 'Labor'
+  }.freeze
+  
+  CATEGORIES = {
+    'home' => 'Home/Unit',
+    'land' => 'Land',
+    'package' => 'Package/Add-On',
+    'basement' => 'Basement/Foundation',
+    'service' => 'Service',
+    'fee' => 'Fee',
+    'accessory' => 'Accessory',
+    'product' => 'Product',
+    'other' => 'Other',
+    'custom' => 'Custom'
   }.freeze
   
   COMMISSION_TYPES = {
@@ -44,6 +62,18 @@ class InvoiceItem < ApplicationRecord
   # Check if this is a parts/inventory item
   def is_inventory_item?
     itemable_type.present? && ['Part', 'Vehicle', 'LandParcel'].include?(itemable_type)
+  end
+
+  # Per-item tax amount (uses item-level tax_rate if taxable)
+  def tax_amount
+    return 0.0 unless taxable?
+    effective_rate = (tax_rate.present? && tax_rate > 0) ? tax_rate : (invoice&.tax_rate || 0)
+    ((amount || 0) * effective_rate / 100.0).round(2)
+  end
+
+  # Profit per item
+  def profit
+    (amount || 0) - ((cost || 0) * (quantity || 1))
   end
   
   private

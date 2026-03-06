@@ -35,6 +35,20 @@ module Api
         rescue => e
           Rails.logger.error("[AgreementMergeFields] Deal lookup failed: #{e.message}")
         end
+
+        begin
+          if params[:invoice_id].present?
+            @invoice = @company.invoices.find_by(id: params[:invoice_id])
+          elsif @deal.present?
+            # Auto-detect invoice with draw schedule from linked deal
+            @invoice = @company.invoices.where(deal_id: @deal.id)
+                                        .where.not(draw_schedule: [nil, {}])
+                                        .order(created_at: :desc).first
+            @invoice ||= @company.invoices.where(deal_id: @deal.id).order(created_at: :desc).first
+          end
+        rescue => e
+          Rails.logger.error("[AgreementMergeFields] Invoice lookup failed: #{e.message}")
+        end
       end
 
       def merge_field_definitions
@@ -73,6 +87,17 @@ module Api
               { key: 'deal.stage', label: 'Deal Stage', type: 'text', value: @deal.respond_to?(:stage) ? @deal.stage : nil },
               { key: 'deal.close_date', label: 'Expected Close Date', type: 'date', value: @deal ? (@deal.respond_to?(:expected_close_date) ? @deal.expected_close_date : @deal.try(:close_date)) : nil },
               { key: 'deal.probability', label: 'Probability', type: 'text', value: @deal.respond_to?(:probability) ? @deal.probability : nil }
+            ]
+          },
+          invoice: {
+            available: @invoice.present?,
+            fields: [
+              { key: 'invoice.number', label: 'Invoice Number', type: 'text', value: @invoice&.invoice_number },
+              { key: 'invoice.date', label: 'Invoice Date', type: 'date', value: @invoice&.invoice_date&.strftime('%m/%d/%Y') },
+              { key: 'invoice.due_date', label: 'Due Date', type: 'date', value: @invoice&.due_date&.strftime('%m/%d/%Y') },
+              { key: 'invoice.total', label: 'Total', type: 'currency', value: @invoice&.total },
+              { key: 'invoice.amount_due', label: 'Amount Due', type: 'currency', value: @invoice&.amount_due },
+              { key: 'invoice.draw_schedule_text', label: 'Draw Schedule', type: 'text', value: @invoice ? format_draw_schedule(@invoice) : nil }
             ]
           },
           company: {
@@ -121,6 +146,28 @@ module Api
             ]
           }
         }
+      end
+
+      def format_draw_schedule(invoice)
+        return nil unless invoice.draw_schedule.present? && invoice.draw_schedule['draws'].present?
+
+        draws = invoice.draw_schedule['draws'].sort_by { |d| d['position'] || 0 }
+        template_name = invoice.draw_schedule['template_name']
+        h = ActionController::Base.helpers
+
+        lines = []
+        lines << "Payment Draw Schedule#{template_name.present? ? " (#{template_name})" : ''}"
+        lines << "Invoice: #{invoice.invoice_number} | Total: #{h.number_to_currency(invoice.total)}"
+        lines << ''
+
+        draws.each_with_index do |draw, i|
+          pct = "#{draw['percentage']}%"
+          amt = h.number_to_currency(draw['amount'])
+          desc = draw['description'] || "Draw #{i + 1}"
+          lines << "Draw #{i + 1}: #{pct} - #{desc} - #{amt}"
+        end
+
+        lines.join("\n")
       end
     end
   end

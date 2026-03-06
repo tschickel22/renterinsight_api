@@ -134,6 +134,29 @@ class AgreementService
       end
     end
 
+    # Invoice fields (explicit invoice_id, or auto-detect from deal)
+    invoice = nil
+    if entity_ids[:invoice_id].present?
+      invoice = @company.invoices.find_by(id: entity_ids[:invoice_id])
+    elsif entity_ids[:deal_id].present?
+      # Auto-find first invoice with a draw schedule from this deal
+      invoice = @company.invoices.where(deal_id: entity_ids[:deal_id])
+                                 .where.not(draw_schedule: [nil, {}])
+                                 .order(created_at: :desc).first
+      # Fallback to any invoice on the deal
+      invoice ||= @company.invoices.where(deal_id: entity_ids[:deal_id]).order(created_at: :desc).first
+    end
+    if invoice
+      values.merge!(
+        'invoice.number' => invoice.invoice_number,
+        'invoice.date' => invoice.invoice_date&.strftime('%m/%d/%Y'),
+        'invoice.due_date' => invoice.due_date&.strftime('%m/%d/%Y'),
+        'invoice.total' => invoice.total&.to_s,
+        'invoice.amount_due' => invoice.amount_due&.to_s,
+        'invoice.draw_schedule_text' => format_draw_schedule_text(invoice)
+      )
+    end
+
     # Account fields
     if entity_ids[:account_id].present?
       account = @company.accounts.find_by(id: entity_ids[:account_id])
@@ -250,6 +273,14 @@ class AgreementService
         { key: 'deal.stage', label: 'Stage', type: 'text' },
         { key: 'deal.expected_close_date', label: 'Expected Close', type: 'date' }
       ],
+      invoice: [
+        { key: 'invoice.number', label: 'Invoice Number', type: 'text' },
+        { key: 'invoice.date', label: 'Invoice Date', type: 'date' },
+        { key: 'invoice.due_date', label: 'Due Date', type: 'date' },
+        { key: 'invoice.total', label: 'Total', type: 'currency' },
+        { key: 'invoice.amount_due', label: 'Amount Due', type: 'currency' },
+        { key: 'invoice.draw_schedule_text', label: 'Draw Schedule', type: 'text' }
+      ],
       account: [
         { key: 'account.name', label: 'Account Name', type: 'text' },
         { key: 'account.account_number', label: 'Account Number', type: 'text' },
@@ -279,5 +310,29 @@ class AgreementService
         { key: 'today.year', label: 'Current Year', type: 'text' }
       ]
     }
+  end
+
+  private
+
+  def format_draw_schedule_text(invoice)
+    return nil unless invoice.draw_schedule.present? && invoice.draw_schedule['draws'].present?
+
+    draws = invoice.draw_schedule['draws'].sort_by { |d| d['position'] || 0 }
+    template_name = invoice.draw_schedule['template_name']
+    h = ActionController::Base.helpers
+
+    lines = []
+    lines << "Payment Draw Schedule#{template_name.present? ? " (#{template_name})" : ''}" 
+    lines << "Invoice: #{invoice.invoice_number} | Total: #{h.number_to_currency(invoice.total)}"
+    lines << ''
+
+    draws.each_with_index do |draw, i|
+      pct = "#{draw['percentage']}%"
+      amt = h.number_to_currency(draw['amount'])
+      desc = draw['description'] || "Draw #{i + 1}"
+      lines << "Draw #{i + 1}: #{pct} - #{desc} - #{amt}"
+    end
+
+    lines.join("\n")
   end
 end

@@ -44,6 +44,9 @@ class Company < ApplicationRecord
   has_many :payments, dependent: :destroy
   has_many :loans, dependent: :destroy
   has_many :invoices, dependent: :destroy
+  has_many :draw_schedule_templates, dependent: :destroy
+  has_many :invoice_terms_templates, dependent: :destroy
+  has_many :invoice_notes_templates, dependent: :destroy
   
   # Tasks Module
   has_many :tasks, dependent: :destroy

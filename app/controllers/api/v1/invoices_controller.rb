@@ -1,6 +1,6 @@
 class Api::V1::InvoicesController < ApplicationController
   before_action :set_company_scope
-  before_action :set_invoice, only: [:show, :update, :destroy, :send_invoice, :send_sms, :mark_paid, :cancel, :pdf]
+  before_action :set_invoice, only: [:show, :update, :destroy, :send_invoice, :send_sms, :mark_paid, :cancel, :pdf, :draw_schedule_pdf, :finalize]
   
   def index
     return unless authorize_action!('finance', 'read')
@@ -33,6 +33,7 @@ class Api::V1::InvoicesController < ApplicationController
       end
     end
     invoices = invoices.where(contact_id: params[:contact_id]) if params[:contact_id].present?
+    invoices = invoices.where(deal_id: params[:deal_id]) if params[:deal_id].present?
     
     # Date range filter
     if params[:start_date].present?
@@ -60,7 +61,7 @@ class Api::V1::InvoicesController < ApplicationController
       )
     end
     
-    invoices = invoices.includes(:contact, :location, :invoice_items)
+    invoices = invoices.includes(:contact, :location, :invoice_items, :deal)
                        .order(invoice_date: :desc)
     
     # Serialize with recipient information
@@ -126,6 +127,21 @@ class Api::V1::InvoicesController < ApplicationController
       type: 'application/pdf',
       disposition: 'attachment'
   end
+
+  def draw_schedule_pdf
+    return unless authorize_action!('finance', 'read')
+
+    unless @invoice.draw_schedule.present? && @invoice.draw_schedule['draws'].present?
+      return render json: { error: 'No draw schedule on this invoice' }, status: :unprocessable_entity
+    end
+
+    pdf_content = generate_draw_schedule_pdf(@invoice)
+
+    send_data pdf_content,
+      filename: "DrawSchedule-#{@invoice.invoice_number}.pdf",
+      type: 'application/pdf',
+      disposition: 'attachment'
+  end
   
   def send_invoice
     return unless authorize_action!('finance', 'update')
@@ -175,7 +191,7 @@ class Api::V1::InvoicesController < ApplicationController
     end
     
     # Only mark as sent if currently draft and at least one method succeeded
-    if sent_methods.any? && @invoice.draft?
+    if sent_methods.any? && (@invoice.draft? || @invoice.finalized?)
       @invoice.mark_as_sent!
     end
     
@@ -235,6 +251,20 @@ class Api::V1::InvoicesController < ApplicationController
     
     if @invoice.update(status: 'cancelled')
       render json: @invoice
+    else
+      render json: { errors: @invoice.errors }, status: :unprocessable_entity
+    end
+  end
+
+  def finalize
+    return unless authorize_action!('finance', 'update')
+    
+    unless @invoice.draft?
+      return render json: { error: 'Only draft invoices can be finalized' }, status: :unprocessable_entity
+    end
+    
+    if @invoice.finalize!
+      render json: { message: 'Invoice finalized', invoice: serialize_invoice(@invoice.reload) }
     else
       render json: { errors: @invoice.errors }, status: :unprocessable_entity
     end
@@ -392,9 +422,12 @@ class Api::V1::InvoicesController < ApplicationController
       :contact_id, :location_id, :listing_id, :deal_id, :quote_id, :sales_rep_id,
       :invoice_date, :due_date, :tax_rate,
       :notes, :terms, :footer_text,
+      draw_schedule: {},
       invoice_items_attributes: [
         :id, :item_type, :description, :quantity, :rate, :amount, :listing_id, :position,
-        :itemable_type, :itemable_id, :commission_type, :_destroy
+        :itemable_type, :itemable_id, :commission_type,
+        :category, :cost, :taxable, :tax_rate, :notes,
+        :_destroy
       ]
     )
   end
@@ -474,7 +507,10 @@ class Api::V1::InvoicesController < ApplicationController
       contact_id: invoice.contact_id,
       location_id: invoice.location_id,
       sales_rep_id: invoice.sales_rep_id,  # CRITICAL: Include sales_rep_id so it persists on edit
+      deal_id: invoice.deal_id,
+      deal: invoice.deal_id.present? ? serialize_deal_reference(invoice) : nil,
       quote_id: invoice.quote_id,
+      draw_schedule: invoice.draw_schedule,
       invoice_items: begin
         (invoice.invoice_items || []).map { |item| serialize_invoice_item(item) }
       rescue => e
@@ -487,6 +523,7 @@ class Api::V1::InvoicesController < ApplicationController
         Rails.logger.error "❌ [serialize_invoice] Error serializing payments: #{e.message}"
         []
       end,
+      payments_enabled: invoice.company.external_payments_id.present?,
       created_at: invoice.created_at,
       updated_at: invoice.updated_at
     }
@@ -499,6 +536,24 @@ class Api::V1::InvoicesController < ApplicationController
     raise
   end
   
+  def serialize_deal_reference(invoice)
+    deal = invoice.deal
+    return nil unless deal
+    {
+      id: deal.id,
+      deal_number: deal.deal_number,
+      name: deal.name,
+      stage: deal.stage,
+      value: deal.value,
+      customer_name: deal.customer_name,
+      contact_id: deal.contact_id,
+      vehicle_id: deal.vehicle_id
+    }
+  rescue => e
+    Rails.logger.error "[serialize_deal_reference] Error: #{e.message}"
+    nil
+  end
+
   def serialize_invoice_item(item)
     {
       id: item.id,
@@ -506,11 +561,17 @@ class Api::V1::InvoicesController < ApplicationController
       description: item.description,
       quantity: item.quantity,
       rate: item.rate,
-      amount: item.amount,  # Fixed: InvoiceItem uses 'amount' not 'total'
+      amount: item.amount,
       position: item.position,
-      itemable_type: item.itemable_type,  # CRITICAL: Include for inventory items
-      itemable_id: item.itemable_id,      # CRITICAL: Include for inventory items
-      commission_type: item.commission_type  # CRITICAL: Include for sales rep commission
+      itemable_type: item.itemable_type,
+      itemable_id: item.itemable_id,
+      commission_type: item.commission_type,
+      category: item.category,
+      cost: item.cost,
+      taxable: item.taxable,
+      tax_rate: item.tax_rate,
+      tax_amount: item.tax_amount,
+      notes: item.notes
     }
   end
   
@@ -561,136 +622,492 @@ class Api::V1::InvoicesController < ApplicationController
       recipient_type: invoice.recipient_type,
       recipient: recipient_data,
       contact: recipient_data&.dig(:type) == 'Contact' ? recipient_data : nil,
+      draw_schedule: invoice.draw_schedule,
+      deal_id: invoice.deal_id,
+      deal: invoice.deal_id.present? ? serialize_deal_reference(invoice) : nil,
       created_at: invoice.created_at,
       updated_at: invoice.updated_at
     }
+  end
+
+  # Resolve branding for invoice: logo, address, colors based on company setting
+  def resolve_invoice_branding(invoice)
+    company = invoice.company
+    location = invoice.location
+    loan_settings = company.loan_settings || {}
+    source_pref = loan_settings['invoice_branding_source'] || 'location'
+    
+    # Resolve branding settings (location → company fallback)
+    branding = {}
+    if source_pref == 'location' && location.present?
+      loc_branding = Setting.get('Location', location.id, 'branding') rescue {} || {}
+      branding = loc_branding if loc_branding.present? && loc_branding.any?
+    end
+    
+    # Fallback to company branding
+    if branding.blank?
+      branding = Setting.get('Company', company.id, 'branding') rescue {} || {}
+    end
+    
+    # Resolve logo URL - convert relative paths to absolute
+    raw_logo = branding['logo'].presence
+    if raw_logo.present? && !raw_logo.start_with?('http://', 'https://')
+      api_base = ENV['RAILS_API_URL'] || ENV['API_URL'] || 'https://localhost:3001'
+      logo_url = "#{api_base}#{raw_logo}"
+    else
+      logo_url = raw_logo
+    end
+    
+    # Resolve address based on preference
+    if source_pref == 'company'
+      # Use company's own contact info (new fields), fallback to location
+      address = {
+        name: company.name,
+        phone: company.phone.presence || location&.phone,
+        email: company.email.presence || location&.email,
+        line1: company.address_line1.presence || location&.address_line1,
+        city: company.city.presence || location&.city,
+        state: company.state.presence || location&.state,
+        zip: company.zip_code.presence || location&.zip_code
+      }
+    else
+      # Use location info, fallback to company
+      address = {
+        name: location&.name || company.name,
+        phone: location&.phone.presence || company.phone,
+        email: location&.email.presence || company.email,
+        line1: location&.address_line1.presence || company.address_line1,
+        city: location&.city.presence || company.city,
+        state: location&.state.presence || company.state,
+        zip: location&.zip_code.presence || company.zip_code
+      }
+    end
+    
+    # Resolve accent color (strip # for Prawn)
+    primary_color = (branding['primaryColor'] || branding['primary_color'] || '#2563EB').to_s.delete('#')
+    
+    { logo_url: logo_url, address: address, accent: primary_color, company_name: company.name }
+  end
+
+  # Load image data - tries local disk first (for /uploads/ paths), then HTTP
+  def load_image_data(url)
+    # Check if it's a local upload path - read from disk directly
+    # This avoids HTTP self-request which can deadlock in dev
+    if url.present? && url.include?('/uploads/')
+      relative_path = url.sub(%r{^https?://[^/]+}, '') # Strip host if present
+      upload_base = ENV['UPLOAD_PATH'] || Rails.root.join('public', 'uploads')
+      # relative_path is like /uploads/19/logos/company/uuid.png
+      local_path = File.join(upload_base.to_s.sub(/\/uploads$/, ''), relative_path.sub(/^\//, ''))
+      
+      # Also try just the uploads subdirectory
+      alt_path = File.join(upload_base.to_s, relative_path.sub(%r{^/uploads/}, ''))
+      
+      if File.exist?(local_path)
+        Rails.logger.info "[Invoice PDF] Loading logo from disk: #{local_path}"
+        return File.binread(local_path)
+      elsif File.exist?(alt_path)
+        Rails.logger.info "[Invoice PDF] Loading logo from disk (alt): #{alt_path}"
+        return File.binread(alt_path)
+      else
+        Rails.logger.warn "[Invoice PDF] Local file not found: #{local_path} or #{alt_path}"
+      end
+    end
+    
+    # Fall back to HTTP download (for S3 URLs, external URLs)
+    return nil unless url.present? && url.start_with?('http://', 'https://')
+    download_image_http(url)
+  end
+
+  # Download image via HTTP with redirect following (for S3 signed URLs)
+  def download_image_http(url, max_redirects: 3)
+    uri = URI.parse(url)
+    redirects = 0
+    
+    loop do
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = (uri.scheme == 'https')
+      http.verify_mode = OpenSSL::SSL::VERIFY_NONE if !Rails.env.production?
+      http.open_timeout = 5
+      http.read_timeout = 10
+      
+      request = Net::HTTP::Get.new(uri.request_uri)
+      response = http.request(request)
+      
+      case response
+      when Net::HTTPSuccess
+        return response.body
+      when Net::HTTPRedirection
+        redirects += 1
+        raise "Too many redirects" if redirects > max_redirects
+        uri = URI.parse(response['location'])
+      else
+        raise "HTTP #{response.code}: #{response.message}"
+      end
+    end
   end
 
   def generate_invoice_pdf(invoice)
     require 'prawn'
     require 'prawn/table'
     
-    Prawn::Document.new(page_size: 'LETTER', margin: 50) do |pdf|
-      # Company/Location Header
-      company = invoice.company
-      location = invoice.location
+    h = ActionController::Base.helpers
+    company = invoice.company
+    contact = invoice.contact
+    brand = resolve_invoice_branding(invoice)
+    accent = brand[:accent]
+    addr = brand[:address]
+    
+    Prawn::Document.new(page_size: 'LETTER', margin: [50, 50, 60, 50]) do |pdf|
       
-      pdf.text company.name, size: 20, style: :bold
-      if location
-        pdf.text location.name, size: 12
-        pdf.text "#{location.address_line1}, #{location.city}, #{location.state} #{location.zip_code}", size: 10 if location.address_line1
-        pdf.text "Phone: #{location.phone}", size: 10 if location.phone
-        pdf.text "Email: #{location.email}", size: 10 if location.email
-      end
+      # ── HEADER: Logo (left) + Address (right) ──
+      header_top = pdf.cursor
       
-      pdf.move_down 30
-      
-      # Invoice Title
-      pdf.text "INVOICE ##{invoice.invoice_number}", size: 24, style: :bold, align: :center
-      pdf.move_down 20
-      
-      # Invoice Details Grid
-      details_data = [
-        ['Invoice Date:', invoice.invoice_date.strftime('%m/%d/%Y'), 'Due Date:', invoice.due_date&.strftime('%m/%d/%Y') || 'N/A'],
-        ['Status:', invoice.status.titleize, 'Amount Due:', ActionController::Base.helpers.number_to_currency(invoice.amount_due)]
-      ]
-      
-      pdf.table(details_data, cell_style: { borders: [], padding: 5 }, column_widths: [100, 150, 100, 150]) do
-        cells.style do |c|
-          c.font_style = :bold if c.column.even?
+      # Try to load logo
+      logo_loaded = false
+      if brand[:logo_url].present?
+        begin
+          logo_data = load_image_data(brand[:logo_url])
+          if logo_data.present?
+            pdf.image StringIO.new(logo_data), fit: [150, 60], position: :left
+            logo_loaded = true
+          end
+        rescue => e
+          Rails.logger.warn "[Invoice PDF] Failed to load logo from #{brand[:logo_url]}: #{e.message}"
         end
       end
       
+      unless logo_loaded
+        pdf.text brand[:company_name], size: 18, style: :bold
+      end
+      
+      logo_bottom = pdf.cursor
+      
+      # Address block (right-aligned)
+      pdf.bounding_box([pdf.bounds.right - 200, header_top], width: 200) do
+        pdf.text addr[:name], size: 11, style: :bold, align: :right
+        pdf.text addr[:phone], size: 9, align: :right if addr[:phone].present?
+        pdf.text addr[:line1], size: 9, align: :right if addr[:line1].present?
+        city_state = [addr[:city], addr[:state], addr[:zip]].compact.join(', ')
+        pdf.text city_state, size: 9, align: :right if city_state.present?
+        pdf.text addr[:email], size: 9, align: :right if addr[:email].present?
+      end
+      
+      pdf.move_cursor_to [logo_bottom, pdf.cursor].min - 5
+      
+      # Accent line
+      pdf.stroke_color accent
+      pdf.line_width = 1.5
+      pdf.stroke_horizontal_rule
+      pdf.stroke_color '000000'
       pdf.move_down 20
       
-      # Bill To Section
-      pdf.text 'Bill To:', size: 14, style: :bold
-      pdf.move_down 5
+      # ── METADATA GRID: Billed To | Date | Invoice # | Amount Due ──
+      meta_top = pdf.cursor
+      col_w = (pdf.bounds.width / 4.0).floor
       
-      if invoice.contact
-        pdf.text "#{invoice.contact.first_name} #{invoice.contact.last_name}", size: 12
-        pdf.text invoice.contact.email, size: 10 if invoice.contact.email
-        pdf.text invoice.contact.phone, size: 10 if invoice.contact.phone
-        if invoice.contact.respond_to?(:address_line1) && invoice.contact.address_line1
-          pdf.text "#{invoice.contact.address_line1}", size: 10
-          pdf.text "#{invoice.contact.city}, #{invoice.contact.state} #{invoice.contact.zip_code}", size: 10 if invoice.contact.city
-        end
-      elsif invoice.recipient_type == 'Manufacturer'
-        manufacturer = Manufacturer.find_by(id: invoice.recipient_id)
-        if manufacturer
-          pdf.text manufacturer.name, size: 12
+      # Billed To
+      pdf.bounding_box([0, meta_top], width: col_w * 1.3) do
+        pdf.text 'Billed To', size: 8, color: accent
+        if contact
+          pdf.text "#{contact.first_name} #{contact.last_name}", size: 10, style: :bold
+          pdf.text contact.street, size: 9 if contact.street.present?
+          city_line = [contact.city, contact.state, contact.zip].compact.join(', ')
+          pdf.text city_line, size: 9 if city_line.present?
+        elsif invoice.recipient_type == 'Manufacturer'
+          manufacturer = Manufacturer.find_by(id: invoice.recipient_id)
+          pdf.text manufacturer&.name || 'Manufacturer', size: 10, style: :bold
         end
       end
       
-      pdf.move_down 20
+      # Date of Issue
+      pdf.bounding_box([col_w * 1.3, meta_top], width: col_w * 0.7) do
+        pdf.text 'Date of Issue', size: 8, color: accent
+        pdf.text invoice.invoice_date.strftime('%m/%d/%Y'), size: 10
+        pdf.move_down 6
+        pdf.text 'Due Date', size: 8, color: accent
+        pdf.text(invoice.due_date&.strftime('%m/%d/%Y') || 'N/A', size: 10)
+      end
       
-      # Line Items Table
-      items_data = [['Description', 'Qty', 'Rate', 'Amount']]
+      # Invoice Number
+      pdf.bounding_box([col_w * 2, meta_top], width: col_w * 0.8) do
+        pdf.text 'Invoice Number', size: 8, color: accent
+        pdf.text invoice.invoice_number, size: 10
+      end
       
-      invoice.invoice_items.each do |item|
+      # Amount Due
+      pdf.bounding_box([col_w * 2.8, meta_top], width: col_w * 1.2) do
+        pdf.text 'Amount Due (USD)', size: 8, color: accent
+        pdf.text h.number_to_currency(invoice.amount_due), size: 20, style: :bold
+      end
+      
+      pdf.move_cursor_to meta_top - 60
+      pdf.move_down 15
+      
+      # ── LINE ITEMS TABLE ──
+      has_per_item_tax = invoice.invoice_items.any?(&:taxable?)
+      
+      items_data = []
+      items_data << ['Description', 'Rate', 'Qty', 'Line Total']
+      
+      invoice.invoice_items.order(:position, :id).each do |item|
+        # Build description with optional notes and tax indicator
+        desc_parts = []
+        desc_parts << item.description
+        desc_parts << item.notes if item.notes.present?
+        desc_text = desc_parts.join("\n")
+        
+        rate_text = h.number_to_currency(item.rate)
+        rate_text += "\n+Sales Tax" if item.taxable?
+        
         items_data << [
-          item.description,
-          item.quantity.to_s,
-          ActionController::Base.helpers.number_to_currency(item.rate),
-          ActionController::Base.helpers.number_to_currency(item.amount)
+          desc_text,
+          rate_text,
+          item.quantity.to_i == item.quantity ? item.quantity.to_i.to_s : item.quantity.to_s,
+          h.number_to_currency(item.amount)
         ]
       end
       
-      pdf.table(items_data, header: true,
-                cell_style: { padding: 8 }) do
-        row(0).font_style = :bold
-        row(0).background_color = 'EEEEEE'
-        columns(1..3).align = :right
-      end
+      desc_col_w = pdf.bounds.width - 250
       
-      pdf.move_down 20
-      
-      # Totals Section
-      totals_x = pdf.bounds.right - 250
-      
-      pdf.bounding_box([totals_x, pdf.cursor], width: 250) do
-        totals_data = [
-          ['Subtotal:', ActionController::Base.helpers.number_to_currency(invoice.subtotal)],
-          ["Tax (#{invoice.tax_rate}%):", ActionController::Base.helpers.number_to_currency(invoice.tax_amount)],
-          ['Total:', ActionController::Base.helpers.number_to_currency(invoice.total)]
-        ]
+      pdf.table(items_data, header: true, width: pdf.bounds.width,
+                column_widths: { 0 => desc_col_w, 1 => 90, 2 => 50, 3 => 110 },
+                cell_style: { padding: [8, 6], size: 9, border_width: 0, border_color: 'DDDDDD' }) do |t|
+        # Header row
+        t.row(0).font_style = :bold
+        t.row(0).size = 9
+        t.row(0).text_color = accent
+        t.row(0).border_bottom_width = 1
+        t.row(0).border_bottom_color = accent
         
-        if invoice.amount_paid > 0
-          totals_data << ['Amount Paid:', "(#{ActionController::Base.helpers.number_to_currency(invoice.amount_paid)})"]
-          totals_data << ['Amount Due:', ActionController::Base.helpers.number_to_currency(invoice.amount_due)]
+        # Data rows - bottom border only
+        (1..t.row_length - 1).each do |i|
+          t.row(i).border_bottom_width = 0.5
+          t.row(i).border_bottom_color = 'EEEEEE'
         end
         
-        pdf.table(totals_data, cell_style: { borders: [], padding: 5 }, column_widths: [150, 100]) do
-          columns(1).align = :right
-          row(-1).font_style = :bold if invoice.amount_paid > 0
-          row(-3).font_style = :bold unless invoice.amount_paid > 0
+        # Right-align numeric columns
+        t.columns(1..3).align = :right
+      end
+      
+      pdf.move_down 15
+      
+      # ── TOTALS ──
+      totals_x = pdf.bounds.right - 240
+      
+      pdf.bounding_box([totals_x, pdf.cursor], width: 240) do
+        totals = []
+        totals << ['Subtotal', h.number_to_currency(invoice.subtotal)]
+        
+        if has_per_item_tax
+          taxable_sub = invoice.invoice_items.select(&:taxable?).sum(&:amount)
+          totals << ["Sales Tax (#{invoice.tax_rate}%)", h.number_to_currency(invoice.tax_amount)]
+          totals << ['#Sales Tax', h.number_to_currency(taxable_sub)] if taxable_sub != invoice.subtotal
+        else
+          totals << ["Tax (#{invoice.tax_rate}%)", h.number_to_currency(invoice.tax_amount)]
+        end
+        
+        pdf.table(totals, cell_style: { borders: [], padding: [4, 6], size: 9 },
+                  column_widths: [140, 100]) do |t|
+          t.columns(0).align = :right
+          t.columns(1).align = :right
+        end
+        
+        # Total line (with top border)
+        pdf.table(
+          [['Total', h.number_to_currency(invoice.total)]],
+          cell_style: { borders: [:top], border_color: accent, padding: [6, 6], size: 11 },
+          column_widths: [140, 100]
+        ) do |t|
+          t.columns(0).align = :right
+          t.columns(0).font_style = :bold
+          t.columns(1).align = :right
+          t.columns(1).font_style = :bold
+        end
+        
+        # Amount Paid + Amount Due (if applicable)
+        if invoice.amount_paid.to_f > 0
+          paid_due = [
+            ['Amount Paid', h.number_to_currency(invoice.amount_paid)],
+          ]
+          pdf.table(paid_due, cell_style: { borders: [], padding: [4, 6], size: 9 },
+                    column_widths: [140, 100]) do |t|
+            t.columns(0..1).align = :right
+          end
+          
+          # Amount Due with accent
+          pdf.table(
+            [['Amount Due (USD)', h.number_to_currency(invoice.amount_due)]],
+            cell_style: { borders: [:top], border_color: accent, padding: [6, 6], size: 12 },
+            column_widths: [140, 100]
+          ) do |t|
+            t.columns(0).align = :right
+            t.columns(0).text_color = accent
+            t.columns(0).font_style = :bold
+            t.columns(1).align = :right
+            t.columns(1).font_style = :bold
+          end
         end
       end
       
-      pdf.move_down 30
+      # ── DRAW SCHEDULE (if included on invoice) ──
+      if invoice.draw_schedule.present? && invoice.draw_schedule['draws'].present? && invoice.draw_schedule['include_on_invoice'] != false
+        pdf.move_down 25
+        pdf.text 'Payment Draw Schedule', size: 11, style: :bold
+        pdf.move_down 5
+        
+        schedule = invoice.draw_schedule
+        draw_data = schedule['draws'].sort_by { |d| d['position'] || 0 }.map do |draw|
+          ["#{draw['percentage']}%", draw['description'], h.number_to_currency(draw['amount'])]
+        end
+        
+        pdf.table(draw_data, cell_style: { borders: [], padding: [4, 6], size: 9 },
+                  column_widths: [50, pdf.bounds.width - 160, 110]) do |t|
+          t.columns(0).font_style = :bold
+          t.columns(2).align = :right
+        end
+      end
       
-      # Notes
+      # ── NOTES ──
       if invoice.notes.present?
-        pdf.text 'Notes:', size: 12, style: :bold
-        pdf.text invoice.notes, size: 10
-        pdf.move_down 10
+        pdf.move_down 25
+        pdf.text 'Notes', size: 10, style: :bold, color: accent
+        pdf.move_down 3
+        pdf.text invoice.notes, size: 9
       end
       
-      # Terms
+      # ── TERMS ──
       if invoice.terms.present?
-        pdf.text 'Payment Terms:', size: 12, style: :bold
-        pdf.text invoice.terms, size: 10
-        pdf.move_down 10
+        pdf.move_down 15
+        pdf.text 'Terms', size: 10, style: :bold, color: accent
+        pdf.move_down 3
+        pdf.text invoice.terms, size: 9
       end
       
-      # Footer
+      # ── FOOTER ──
       if invoice.footer_text.present?
         pdf.move_down 20
-        pdf.text invoice.footer_text, size: 9, align: :center, color: '666666'
+        pdf.text invoice.footer_text, size: 8, align: :center, color: '999999'
       end
       
       # Page numbers
-      pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, 0], align: :right, size: 9
+      pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, 0], align: :right, size: 8, color: '999999'
+    end.render
+  end
+
+  def generate_draw_schedule_pdf(invoice)
+    require 'prawn'
+    require 'prawn/table'
+
+    h = ActionController::Base.helpers
+    brand = resolve_invoice_branding(invoice)
+    accent = brand[:accent]
+    addr = brand[:address]
+    contact = invoice.contact
+    schedule = invoice.draw_schedule
+    draws = (schedule['draws'] || []).sort_by { |d| d['position'] || 0 }
+
+    Prawn::Document.new(page_size: 'LETTER', margin: [50, 50, 60, 50]) do |pdf|
+
+      # ── HEADER ──
+      header_top = pdf.cursor
+      logo_loaded = false
+      if brand[:logo_url].present?
+        begin
+          logo_data = load_image_data(brand[:logo_url])
+          pdf.image StringIO.new(logo_data), fit: [150, 60], position: :left
+          logo_loaded = true
+        rescue => e
+          Rails.logger.warn "[Draw Schedule PDF] Failed to load logo: #{e.message}"
+        end
+      end
+      pdf.text brand[:company_name], size: 18, style: :bold unless logo_loaded
+      logo_bottom = pdf.cursor
+
+      pdf.bounding_box([pdf.bounds.right - 200, header_top], width: 200) do
+        pdf.text addr[:name], size: 11, style: :bold, align: :right
+        pdf.text addr[:phone], size: 9, align: :right if addr[:phone].present?
+        pdf.text addr[:line1], size: 9, align: :right if addr[:line1].present?
+        city_state = [addr[:city], addr[:state], addr[:zip]].compact.join(', ')
+        pdf.text city_state, size: 9, align: :right if city_state.present?
+      end
+
+      pdf.move_cursor_to [logo_bottom, pdf.cursor].min - 5
+      pdf.stroke_color accent
+      pdf.line_width = 1.5
+      pdf.stroke_horizontal_rule
+      pdf.stroke_color '000000'
+      pdf.move_down 25
+
+      # ── TITLE ──
+      pdf.text 'Loan Disbursement Schedule', size: 20, style: :bold, color: accent
+      pdf.move_down 5
+      pdf.text schedule['template_name'] || 'Payment Draw Schedule', size: 11, color: '666666'
+      pdf.move_down 20
+
+      # ── REFERENCE INFO ──
+      col_w = (pdf.bounds.width / 3.0).floor
+      meta_top = pdf.cursor
+
+      pdf.bounding_box([0, meta_top], width: col_w) do
+        pdf.text 'Invoice', size: 8, color: accent
+        pdf.text invoice.invoice_number, size: 11, style: :bold
+        pdf.move_down 8
+        pdf.text 'Date', size: 8, color: accent
+        pdf.text invoice.invoice_date.strftime('%m/%d/%Y'), size: 10
+      end
+
+      pdf.bounding_box([col_w, meta_top], width: col_w) do
+        pdf.text 'Buyer', size: 8, color: accent
+        if contact
+          pdf.text "#{contact.first_name} #{contact.last_name}", size: 11, style: :bold
+          pdf.text contact.street, size: 9 if contact.respond_to?(:street) && contact.street.present?
+          city_line = [contact.city, contact.state, contact.zip].compact.join(', ')
+          pdf.text city_line, size: 9 if city_line.present?
+        end
+      end
+
+      pdf.bounding_box([col_w * 2, meta_top], width: col_w) do
+        pdf.text 'Total Amount', size: 8, color: accent
+        pdf.text h.number_to_currency(invoice.total), size: 18, style: :bold
+      end
+
+      pdf.move_cursor_to meta_top - 70
+      pdf.move_down 20
+
+      # ── DRAW TABLE ──
+      table_data = [['Draw #', 'Description', '%', 'Amount']]
+
+      draws.each_with_index do |draw, i|
+        table_data << [
+          "Draw #{i + 1}",
+          draw['description'] || '',
+          "#{draw['percentage']}%",
+          h.number_to_currency(draw['amount'])
+        ]
+      end
+
+      # Total row
+      total_pct = draws.sum { |d| d['percentage'].to_f }
+      total_amt = draws.sum { |d| d['amount'].to_f }
+      table_data << ['', 'Total', "#{total_pct.round(1)}%", h.number_to_currency(total_amt)]
+
+      pdf.table(table_data, header: true, width: pdf.bounds.width,
+                column_widths: { 0 => 70, 2 => 55, 3 => 110 },
+                cell_style: { padding: [10, 8], size: 10, border_width: 0.5, border_color: 'DDDDDD' }) do |t|
+        t.row(0).font_style = :bold
+        t.row(0).text_color = 'FFFFFF'
+        t.row(0).background_color = accent
+        t.row(0).border_color = accent
+
+        # Last row (total) - bold with top border
+        t.row(-1).font_style = :bold
+        t.row(-1).border_top_width = 2
+        t.row(-1).border_top_color = accent
+
+        t.columns(2..3).align = :right
+      end
+
+      pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, 0], align: :right, size: 8, color: '999999'
     end.render
   end
 end

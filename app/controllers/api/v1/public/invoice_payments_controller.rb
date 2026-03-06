@@ -6,24 +6,79 @@ class Api::V1::Public::InvoicePaymentsController < ApplicationController
     # Mark as viewed if first time
     @invoice.mark_as_viewed! unless @invoice.viewed_at
     
-    # Get company/location branding (handle missing attributes gracefully)
+    # Resolve branding based on company setting (location vs company)
+    company = @invoice.company
+    location = @invoice.location
+    loan_settings = company.loan_settings || {}
+    source_pref = loan_settings['invoice_branding_source'] || 'location'
+    
+    # Resolve branding settings with fallback
+    brand_settings = {}
+    if source_pref == 'location' && location.present?
+      brand_settings = Setting.get('Location', location.id, 'branding') rescue {} || {}
+    end
+    brand_settings = Setting.get('Company', company.id, 'branding') rescue {} if brand_settings.blank?
+    brand_settings ||= {}
+    
+    # Resolve address based on preference
+    if source_pref == 'company'
+      address_parts = [company.address_line1.presence || location&.address_line1,
+                       company.city.presence || location&.city,
+                       company.state.presence || location&.state,
+                       company.zip_code.presence || location&.zip_code].compact
+      display_name = company.name
+      display_phone = company.phone.presence || location&.phone
+      display_email = company.email.presence || location&.email
+    else
+      address_parts = location ? [location.address_line1, location.city, location.state, location.zip_code].compact : 
+                                [company.address_line1, company.city, company.state, company.zip_code].compact
+      display_name = location&.name || company.name
+      display_phone = location&.phone.presence || company.phone
+      display_email = location&.email.presence || company.email
+    end
+    
+    # Resolve logo URL - convert relative paths to absolute
+    raw_logo = brand_settings['logo']
+    if raw_logo.present? && !raw_logo.start_with?('http://', 'https://')
+      api_base = ENV['RAILS_API_URL'] || ENV['API_URL'] || 'https://localhost:3001'
+      resolved_logo = "#{api_base}#{raw_logo}"
+    else
+      resolved_logo = raw_logo
+    end
+    
     branding = {
-      company_name: @invoice.company.name,
-      company_logo: @invoice.company.try(:logo_url) || @invoice.company.try(:logo),
-      company_address: format_address(@invoice.company),
-      location_name: @invoice.location&.name,
-      location_address: @invoice.location ? format_address(@invoice.location) : nil
+      company_name: display_name,
+      company_logo: resolved_logo,
+      company_address: address_parts.join(', '),
+      company_phone: display_phone,
+      company_email: display_email,
+      location_name: location&.name,
+      location_address: address_parts.join(', '),
+      primary_color: brand_settings['primaryColor'] || brand_settings['primary_color']
     }
     
     render json: {
-      invoice: @invoice.as_json(include: [:invoice_items]),
-      contact: @invoice.contact.as_json(only: [:id, :first_name, :last_name, :email, :phone]),
+      invoice: @invoice.as_json(
+        only: [:id, :invoice_number, :invoice_date, :due_date, :status,
+               :subtotal, :tax_rate, :tax_amount, :total, :amount_paid, :amount_due,
+               :notes, :terms, :draw_schedule]
+      ).merge(
+        'invoice_items' => @invoice.invoice_items.order(:position, :id).map { |item|
+          item.as_json(only: [:id, :description, :quantity, :rate, :amount, :category, :taxable, :notes])
+        }
+      ),
+      contact: @invoice.contact.as_json(only: [:id, :first_name, :last_name, :email, :phone, :street, :city, :state, :zip]),
       branding: branding,
-      payment_url: @invoice.payment_url
+      payment_url: @invoice.payment_url,
+      payments_enabled: @invoice.company.external_payments_id.present?
     }
   end
   
   def process_payment
+    unless @invoice.company.external_payments_id.present?
+      return render json: { error: 'Online payments are not enabled for this account. Please contact the business directly.' }, status: :unprocessable_entity
+    end
+
     payment_method_params = params.require(:payment_method).permit(
       :payment_type, :billing_first_name, :billing_last_name,
       :billing_street, :billing_city, :billing_state, :billing_zip,

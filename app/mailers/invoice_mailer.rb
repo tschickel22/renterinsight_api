@@ -32,6 +32,7 @@ class InvoiceMailer < ApplicationMailer
     
     # Payment link for template
     @payment_link = @invoice.payment_url
+    @payments_enabled = @company.external_payments_id.present?
     
     mail(
       to: @contact.email,

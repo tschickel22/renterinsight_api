@@ -249,7 +249,8 @@ module Api
 
         render json: {
           loan_settings: settings,
-          defaults: default_loan_settings
+          defaults: default_loan_settings,
+          payments_enabled: @company.external_payments_id.present?
         }
       end
 

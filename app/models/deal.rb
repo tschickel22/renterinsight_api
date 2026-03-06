@@ -172,11 +172,15 @@ class Deal < ApplicationRecord
   # VALUE CALCULATIONS
   # ============================================================================
   
-  # Calculate total deal value including selling price and all products
+  # Calculate total deal value from line items (products).
+  # If products exist, use their total. Otherwise fall back to selling_price or manual value.
   def calculated_value
-    base_value = selling_price || 0
     products_total = deal_products.sum(:total)
-    (base_value + products_total).round(2)
+    if products_total > 0
+      products_total.round(2)
+    else
+      (selling_price || value || 0).to_f.round(2)
+    end
   end
   
   # ============================================================================
