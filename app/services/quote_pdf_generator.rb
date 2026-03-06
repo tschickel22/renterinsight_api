@@ -2,6 +2,7 @@
 
 require 'prawn'
 require 'prawn/table'
+require 'net/http'
 
 class QuotePdfGenerator
   def initialize(quote)
@@ -9,32 +10,28 @@ class QuotePdfGenerator
     @company = quote.company
     @account = quote.account
     @contact = quote.contact
+    @location = quote.location
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: 'LETTER', margin: 50)
+    brand = resolve_branding
+    accent = brand[:accent]
 
-    # Header with company logo/name
-    add_header(pdf)
-    pdf.move_down 30
+    pdf = Prawn::Document.new(page_size: 'LETTER', margin: [50, 50, 60, 50])
 
-    # Quote metadata
-    add_quote_info(pdf)
-    pdf.move_down 30
-
-    # Line items table
-    add_line_items(pdf)
+    add_header(pdf, brand)
     pdf.move_down 20
-
-    # Totals
-    add_totals(pdf)
-    pdf.move_down 30
-
-    # Notes
-    add_notes(pdf) if @quote.notes.present?
+    add_quote_info(pdf, accent)
     pdf.move_down 20
+    add_line_items(pdf, accent)
+    pdf.move_down 20
+    add_totals(pdf, accent)
 
-    # Footer
+    if @quote.notes.present?
+      pdf.move_down 25
+      add_notes(pdf, accent)
+    end
+
     add_footer(pdf)
 
     pdf.render
@@ -42,134 +39,234 @@ class QuotePdfGenerator
 
   private
 
-  def add_header(pdf)
-    # Company name/logo
-    pdf.font_size(24) do
-      pdf.text @company.name, style: :bold
+  # ── BRANDING RESOLUTION (same pattern as invoices) ──
+  def resolve_branding
+    loan_settings = @company.loan_settings || {}
+    source_pref = loan_settings['invoice_branding_source'] || 'location'
+    location = @location
+
+    # Resolve branding settings (location → company fallback)
+    branding = {}
+    if source_pref == 'location' && location.present?
+      branding = Setting.get('Location', location.id, 'branding') rescue {} || {}
     end
-    
-    pdf.font_size(10) do
-      pdf.text @company.phone if @company.phone.present?
-      pdf.text @company.email if @company.email.present?
-      pdf.text @company.website if @company.website.present?
+    if branding.blank?
+      branding = Setting.get('Company', @company.id, 'branding') rescue {} || {}
     end
+    branding ||= {}
+
+    # Logo URL
+    logo_url = branding['logo'].presence
+
+    # Address from location or first active location
+    addr_source = location || @company.locations.where(active: true).first
+    address = {
+      name: source_pref == 'company' ? @company.name : (location&.name || @company.name),
+      phone: addr_source&.phone,
+      email: addr_source&.email,
+      line1: addr_source&.respond_to?(:address_line1) ? addr_source.address_line1 : nil,
+      city: addr_source&.city,
+      state: addr_source&.state,
+      zip: addr_source&.respond_to?(:zip_code) ? addr_source.zip_code : nil
+    }
+
+    # Accent color (strip # for Prawn)
+    accent = (branding['primaryColor'] || branding['primary_color'] || '#2563EB').to_s.delete('#')
+
+    { logo_url: logo_url, address: address, accent: accent, company_name: @company.name }
   end
 
-  def add_quote_info(pdf)
-    # Quote number and dates
-    pdf.font_size(18) do
-      pdf.text "Quote ##{@quote.quote_number || @quote.id}", style: :bold
+  # ── LOGO LOADING ──
+  def load_logo(url)
+    return nil unless url.present?
+
+    # Try local file first (for /uploads/ paths)
+    if url.include?('/uploads/')
+      relative_path = url.sub(%r{^https?://[^/]+}, '')
+      upload_base = ENV['UPLOAD_PATH'] || Rails.root.join('public', 'uploads')
+      local_path = File.join(upload_base.to_s.sub(/\/uploads$/, ''), relative_path.sub(/^\//, ''))
+      alt_path = File.join(upload_base.to_s, relative_path.sub(%r{^/uploads/}, ''))
+
+      return File.binread(local_path) if File.exist?(local_path)
+      return File.binread(alt_path) if File.exist?(alt_path)
     end
-    
-    pdf.move_down 15
-    
-    # Two-column layout for quote info
-    pdf.font_size(10) do
-      quote_data = [
-        ['Quote Date:', @quote.created_at.strftime('%B %d, %Y')],
-        ['Valid Until:', @quote.valid_until.strftime('%B %d, %Y')],
-        ['Status:', @quote.status.titleize]
-      ]
-      
-      customer_data = [
-        ['Customer:', @account&.name || 'N/A'],
-        ['Contact:', @contact ? "#{@contact.first_name} #{@contact.last_name}" : 'N/A'],
-        ['Email:', @contact&.email || 'N/A'],
-        ['Phone:', @contact&.phone || 'N/A']
-      ]
-      
-      pdf.table([quote_data, customer_data].transpose, 
-        width: pdf.bounds.width,
-        column_widths: [pdf.bounds.width / 4, pdf.bounds.width / 4, pdf.bounds.width / 4, pdf.bounds.width / 4],
-        cell_style: { borders: [], padding: [2, 5] }
-      )
+
+    # HTTP download with redirect following
+    return nil unless url.start_with?('http://', 'https://')
+    uri = URI.parse(url)
+    redirects = 0
+    loop do
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = (uri.scheme == 'https')
+      http.open_timeout = 5
+      http.read_timeout = 10
+      response = http.request(Net::HTTP::Get.new(uri.request_uri))
+      case response
+      when Net::HTTPSuccess then return response.body
+      when Net::HTTPRedirection
+        redirects += 1
+        return nil if redirects > 3
+        uri = URI.parse(response['location'])
+      else return nil
+      end
     end
+  rescue => e
+    Rails.logger.warn "[QuotePDF] Failed to load logo: #{e.message}"
+    nil
   end
 
-  def add_line_items(pdf)
-    pdf.font_size(12) do
-      pdf.text 'Line Items', style: :bold
+  # ── HEADER ──
+  def add_header(pdf, brand)
+    header_top = pdf.cursor
+    accent = brand[:accent]
+    addr = brand[:address]
+
+    # Logo or company name (left)
+    logo_loaded = false
+    if brand[:logo_url].present?
+      begin
+        logo_data = load_logo(brand[:logo_url])
+        if logo_data
+          pdf.image StringIO.new(logo_data), fit: [150, 60], position: :left
+          logo_loaded = true
+        end
+      rescue => e
+        Rails.logger.warn "[QuotePDF] Logo render error: #{e.message}"
+      end
     end
-    
-    pdf.move_down 10
-    
-    # Prepare table data
+    pdf.text brand[:company_name], size: 18, style: :bold unless logo_loaded
+
+    logo_bottom = pdf.cursor
+
+    # Address block (right-aligned)
+    pdf.bounding_box([pdf.bounds.right - 200, header_top], width: 200) do
+      pdf.text addr[:name], size: 11, style: :bold, align: :right
+      pdf.text addr[:phone], size: 9, align: :right if addr[:phone].present?
+      pdf.text addr[:line1], size: 9, align: :right if addr[:line1].present?
+      city_state = [addr[:city], addr[:state], addr[:zip]].compact.join(', ')
+      pdf.text city_state, size: 9, align: :right if city_state.present?
+      pdf.text addr[:email], size: 9, align: :right if addr[:email].present?
+    end
+
+    pdf.move_cursor_to [logo_bottom, pdf.cursor].min - 5
+    pdf.stroke_color accent
+    pdf.line_width = 1.5
+    pdf.stroke_horizontal_rule
+    pdf.stroke_color '000000'
+  end
+
+  # ── QUOTE INFO (4 columns, no overlap) ──
+  def add_quote_info(pdf, accent)
+    meta_top = pdf.cursor
+    w = pdf.bounds.width
+
+    # Column 1: Billed To (35%)
+    pdf.bounding_box([0, meta_top], width: w * 0.35) do
+      pdf.text 'Billed To', size: 8, color: accent
+      if @contact
+        pdf.text "#{@contact.first_name} #{@contact.last_name}".strip, size: 11, style: :bold
+        pdf.text @contact.email, size: 9 if @contact.email.present?
+        pdf.text @contact.phone, size: 9 if @contact.phone.present?
+      elsif @account
+        pdf.text @account.name, size: 11, style: :bold
+      end
+    end
+
+    # Column 2: Dates (20%)
+    pdf.bounding_box([w * 0.35, meta_top], width: w * 0.20) do
+      pdf.text 'Quote Date', size: 8, color: accent
+      pdf.text @quote.created_at.strftime('%m/%d/%Y'), size: 10
+      if @quote.valid_until.present?
+        pdf.move_down 8
+        pdf.text 'Valid Until', size: 8, color: accent
+        pdf.text @quote.valid_until.strftime('%m/%d/%Y'), size: 10
+      end
+    end
+
+    # Column 3: Quote Number (20%)
+    pdf.bounding_box([w * 0.55, meta_top], width: w * 0.20) do
+      pdf.text 'Quote Number', size: 8, color: accent
+      pdf.text (@quote.quote_number || "##{@quote.id}"), size: 10, style: :bold
+    end
+
+    # Column 4: Total (25%, right-aligned)
+    pdf.bounding_box([w * 0.75, meta_top], width: w * 0.25) do
+      pdf.text 'Quote Total', size: 8, color: accent, align: :right
+      pdf.text format_currency(@quote.total || 0), size: 20, style: :bold, align: :right
+    end
+
+    pdf.move_cursor_to meta_top - 70
+  end
+
+  # ── LINE ITEMS ──
+  def add_line_items(pdf, accent)
     items = @quote.items || []
-    
-    table_data = [
-      ['Description', 'Qty', 'Unit Price', 'Discount', 'Total']
-    ]
-    
+
+    table_data = [['Description', 'Qty', 'Unit Price', 'Discount', 'Total']]
+
     items.each do |item|
-      table_data << [
-        item['description'] || '',
-        item['quantity'] || 0,
-        format_currency(item['unit_price'] || 0),
-        format_currency(item['discount'] || 0),
-        format_currency(item['total'] || 0)
-      ]
+      desc = item['description'] || item['name'] || ''
+      qty = item['quantity'] || item['qty'] || 1
+      price = item['unit_price'] || item['unitPrice'] || item['rate'] || 0
+      discount = item['discount'] || 0
+      total = item['total'] || item['line_total'] || item['lineTotal'] || 0
+
+      table_data << [desc, qty.to_s, format_currency(price), format_currency(discount), format_currency(total)]
     end
-    
-    pdf.table(table_data,
-      width: pdf.bounds.width,
-      header: true,
-      row_colors: ['FFFFFF', 'F5F5F5'],
-      cell_style: { borders: [:bottom], border_color: 'CCCCCC', padding: [8, 10] }
-    ) do
-      row(0).font_style = :bold
-      row(0).background_color = 'E5E5E5'
-      columns(1..4).align = :right
+
+    if table_data.length <= 1
+      pdf.text 'No line items', size: 10, color: '999999', style: :italic
+      return
+    end
+
+    pdf.table(table_data, header: true, width: pdf.bounds.width,
+              cell_style: { padding: [8, 6], size: 10, border_width: 0.5, border_color: 'DDDDDD' }) do |t|
+      t.row(0).font_style = :bold
+      t.row(0).text_color = 'FFFFFF'
+      t.row(0).background_color = accent
+      t.row(0).border_color = accent
+      t.columns(1..4).align = :right
     end
   end
 
-  def add_totals(pdf)
-    # Right-aligned totals
+  # ── TOTALS ──
+  def add_totals(pdf, accent)
     totals_data = [
-      ['Subtotal:', format_currency(@quote.subtotal)],
-      ['Tax:', format_currency(@quote.tax)],
-      ['', ''],
-      ['Total:', format_currency(@quote.total)]
+      ['Subtotal', format_currency(@quote.subtotal || 0)],
+      ['Tax', format_currency(@quote.tax || 0)],
+      ['Total', format_currency(@quote.total || 0)]
     ]
-    
-    pdf.table(totals_data,
-      position: :right,
-      width: 250,
-      cell_style: { borders: [], padding: [5, 10] }
-    ) do
-      columns(0).font_style = :bold
-      columns(1).align = :right
-      row(3).font_style = :bold
-      row(3).size = 14
-      row(3).borders = [:top]
-      row(3).border_width = 2
+
+    pdf.table(totals_data, position: :right, width: 220,
+              cell_style: { borders: [], padding: [6, 8], size: 10 }) do |t|
+      t.columns(0).font_style = :bold
+      t.columns(1).align = :right
+      t.row(-1).font_style = :bold
+      t.row(-1).size = 14
+      t.row(-1).borders = [:top]
+      t.row(-1).border_width = 2
+      t.row(-1).border_color = accent
     end
   end
 
-  def add_notes(pdf)
-    pdf.font_size(12) do
-      pdf.text 'Notes:', style: :bold
-    end
-    
+  # ── NOTES ──
+  def add_notes(pdf, accent)
+    pdf.text 'Notes', size: 11, style: :bold, color: accent
     pdf.move_down 5
-    
-    pdf.font_size(10) do
-      pdf.text @quote.notes
-    end
+    pdf.text @quote.notes, size: 10
   end
 
+  # ── FOOTER ──
   def add_footer(pdf)
-    pdf.move_down 40
-    
-    pdf.font_size(8) do
-      pdf.text_box 'Thank you for your business!',
-        at: [0, 50],
-        width: pdf.bounds.width,
-        align: :center,
-        style: :italic
+    pdf.repeat(:all) do
+      pdf.bounding_box([0, 30], width: pdf.bounds.width, height: 20) do
+        pdf.font_size(8) { pdf.text 'Thank you for your business!', align: :center, style: :italic, color: '999999' }
+      end
     end
+    pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, 0], align: :right, size: 8, color: '999999'
   end
 
   def format_currency(amount)
-    "$#{sprintf('%.2f', amount)}"
+    "$#{sprintf('%.2f', amount.to_f)}"
   end
 end
