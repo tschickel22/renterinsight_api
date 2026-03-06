@@ -127,7 +127,8 @@ module Api
 
         # Copy template data if template_id provided
         if params.dig(:agreement, :agreement_template_id).present?
-          template = @company.agreement_templates.active.find_by(id: params[:agreement][:agreement_template_id])
+          template = AgreementTemplate.available_for_company(@company)
+                      .find_by(id: params[:agreement][:agreement_template_id])
           if template
             agreement.agreement_template = template
             agreement.content = template.content if agreement.content.blank?
@@ -136,6 +137,11 @@ module Api
             agreement.field_placements = template.field_placements if agreement.field_placements.blank?
             agreement.merge_field_values = template.merge_fields if agreement.merge_field_values.blank?
           end
+        end
+
+        # Snapshot deal line items if deal is linked
+        if agreement.deal_id.present?
+          agreement.optional_equipment_snapshot = build_equipment_snapshot(agreement.deal_id)
         end
 
         if agreement.save
@@ -157,6 +163,13 @@ module Api
 
         unless @agreement.can_edit?
           return render json: { error: 'Agreement can only be edited in draft status' }, status: :unprocessable_entity
+        end
+
+        # Merge custom field values (don't replace)
+        if params[:agreement][:custom_field_values].present?
+          existing = @agreement.custom_field_values || {}
+          merged = existing.merge(params[:agreement][:custom_field_values].to_unsafe_h)
+          params[:agreement][:custom_field_values] = merged
         end
 
         if @agreement.update(agreement_params)
@@ -691,6 +704,8 @@ module Api
         permitted[:merge_field_placements] = raw[:merge_field_placements] if raw[:merge_field_placements].present?
         permitted[:metadata] = raw[:metadata] if raw[:metadata].present?
         permitted[:document_urls] = raw[:document_urls] if raw[:document_urls].present?
+        permitted[:custom_field_values] = raw[:custom_field_values] if raw[:custom_field_values].present?
+        permitted[:optional_equipment_snapshot] = raw[:optional_equipment_snapshot] if raw[:optional_equipment_snapshot].present?
 
         permitted
       end
@@ -746,6 +761,27 @@ module Api
         end
       end
 
+      def build_equipment_snapshot(deal_id)
+        deal = @company.deals.find_by(id: deal_id)
+        return [] unless deal
+
+        items = deal.deal_line_items&.where(is_deleted: [false, nil])&.order(:position) || []
+        items.map do |item|
+          {
+            description: item.description || item.name,
+            amount: item.price.to_f,
+            cost: item.cost.to_f,
+            taxable: item.taxable || false,
+            category: item.category,
+            quantity: item.quantity || 1,
+            line_total: (item.price.to_f * (item.quantity || 1)).round(2)
+          }
+        end
+      rescue => e
+        Rails.logger.error("Failed to snapshot deal equipment: #{e.message}")
+        []
+      end
+
       def agreement_json(agreement, detailed: false)
         data = {
           id: agreement.id,
@@ -777,6 +813,8 @@ module Api
             .select { |s| s.role == 'signer' }
             .sort_by(&:signing_order)
             .map(&:name),
+          custom_field_values: agreement.custom_field_values,
+          optional_equipment_snapshot: agreement.optional_equipment_snapshot,
           created_at: agreement.created_at,
           updated_at: agreement.updated_at
         }

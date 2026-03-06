@@ -8,7 +8,7 @@ module Api
       def index
         return unless authorize_action!('agreements', 'read')
 
-        templates = @company.agreement_templates.active
+        templates = AgreementTemplate.available_for_company(@company, state_code: params[:state_code])
 
         # Filters
         templates = templates.by_status(params[:status]) if params[:status].present?
@@ -128,7 +128,7 @@ module Api
       private
 
       def set_template
-        @template = @company.agreement_templates.active.find(params[:id])
+        @template = AgreementTemplate.available_for_company(@company).find(params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Template not found' }, status: :not_found
       end
@@ -137,7 +137,9 @@ module Api
         permitted = params.require(:agreement_template).permit(
           :name, :description, :category, :agreement_category_id,
           :document_url, :content, :template_type, :status, :location_id,
-          default_signers: [:role, :label, :order_index]
+          :state_code, :form_type, :form_number, :page_count,
+          default_signers: [:role, :label, :order_index],
+          custom_field_definitions: []
         )
 
         # Handle JSON array fields that can't be expressed in permit() syntax
@@ -159,6 +161,11 @@ module Api
           permitted[:document_urls] = params[:agreement_template][:document_urls]
         end
 
+        if params[:agreement_template][:custom_field_definitions].present?
+          raw = params[:agreement_template][:custom_field_definitions]
+          permitted[:custom_field_definitions] = raw.is_a?(Array) ? raw.map { |fd| fd.respond_to?(:to_unsafe_h) ? fd.to_unsafe_h : fd } : raw
+        end
+
         permitted
       end
 
@@ -174,6 +181,11 @@ module Api
           status: template.status,
           version: template.version,
           is_system_template: template.is_system_template,
+          state_code: template.state_code,
+          form_type: template.form_type,
+          form_number: template.form_number,
+          is_platform_template: template.is_platform_template,
+          page_count: template.page_count,
           created_at: template.created_at,
           updated_at: template.updated_at
         }
@@ -188,7 +200,8 @@ module Api
             merge_field_placements: template.merge_field_placements,
             default_signers: template.default_signers,
             location_id: template.location_id,
-            created_by_id: template.created_by_id
+            created_by_id: template.created_by_id,
+            custom_field_definitions: template.custom_field_definitions
           )
         end
 

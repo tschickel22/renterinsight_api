@@ -208,6 +208,39 @@ class Agreement < ApplicationRecord
     new_agreement
   end
 
+  def snapshot_deal_equipment!
+    return unless deal_id.present?
+
+    deal = company.deals.find_by(id: deal_id)
+    return unless deal
+
+    line_items = deal.deal_line_items&.where(is_deleted: [false, nil])&.order(:position) || []
+
+    snapshot = line_items.map do |item|
+      {
+        description: item.description || item.name,
+        amount: item.price.to_f,
+        cost: item.cost.to_f,
+        taxable: item.taxable || false,
+        category: item.category,
+        quantity: item.quantity || 1,
+        line_total: (item.price.to_f * (item.quantity || 1)).round(2)
+      }
+    end
+
+    update_column(:optional_equipment_snapshot, snapshot)
+    snapshot
+  end
+
+  def merge_custom_field_values!(new_values)
+    return if new_values.blank?
+
+    existing = custom_field_values || {}
+    merged = existing.merge(new_values.stringify_keys)
+    update_column(:custom_field_values, merged)
+    merged
+  end
+
   private
 
   def generate_agreement_number
