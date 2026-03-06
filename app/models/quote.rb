@@ -7,12 +7,20 @@ class Quote < ApplicationRecord
   # Quote Statuses
   STATUSES = %w[draft sent viewed accepted rejected expired].freeze
   
+  # Item categories (mirrors invoice_items)
+  ITEM_CATEGORIES = %w[home land accessory product service fee package basement other].freeze
+
+  # Categories that default to taxable
+  TAXABLE_CATEGORIES = %w[home land package accessory product].freeze
+
   # Associations
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
-  belongs_to :vehicle, optional: true  # Added vehicle relationship
+  belongs_to :vehicle, optional: true
+  belongs_to :deal, optional: true
+  belongs_to :sales_rep, class_name: 'User', optional: true
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   has_many :quote_inventory_usages, dependent: :destroy
   
@@ -36,8 +44,9 @@ class Quote < ApplicationRecord
   scope :by_vehicle, ->(vehicle_id) { where(vehicle_id: vehicle_id) }
   scope :valid, -> { where('valid_until IS NULL OR valid_until >= ?', Date.current) }
   scope :expired, -> { where('valid_until < ?', Date.current) }
+  scope :by_deal, ->(deal_id) { where(deal_id: deal_id) }
   scope :search, ->(query) do
-    where('quote_number ILIKE ? OR notes ILIKE ?', "%#{query}%", "%#{query}%")
+    where('quote_number ILIKE ? OR notes ILIKE ? OR terms ILIKE ?', "%#{query}%", "%#{query}%", "%#{query}%")
   end
   scope :recent, -> { order(created_at: :desc) }
   
@@ -160,11 +169,17 @@ class Quote < ApplicationRecord
       'contactId' => contact_id&.to_s,
       'customerId' => customer_id,
       'vehicleId' => vehicle_id&.to_s,
+      'dealId' => deal_id&.to_s,
+      'salesRepId' => sales_rep_id&.to_s,
       'status' => status,
       'subtotal' => subtotal,
       'tax' => tax,
+      'taxRate' => tax_rate,
       'total' => total,
       'notes' => notes,
+      'terms' => terms,
+      'pricingDisplay' => pricing_display || 'detailed',
+      'drawSchedule' => draw_schedule,
       'sent_at' => sent_at,
       'last_sent_at' => last_sent_at,
       'resend_count' => resend_count || 0,
@@ -176,10 +191,12 @@ class Quote < ApplicationRecord
       'items' => serialize_items(items),
       'lineItems' => serialize_items(items),
       
-      # Add account, contact, and vehicle names
+      # Add account, contact, vehicle, and deal names
       'accountName' => account&.name,
       'contactName' => contact ? "#{contact.first_name} #{contact.last_name}".strip : nil,
       'vehicleName' => vehicle&.display_name,
+      'dealName' => deal&.name,
+      'salesRepName' => sales_rep ? "#{sales_rep.first_name} #{sales_rep.last_name}".strip : nil,
       
       # Format dates
       'validUntil' => valid_until,
@@ -225,6 +242,15 @@ class Quote < ApplicationRecord
         year: vehicle.year,
         make: vehicle.make,
         model: vehicle.model
+      }
+    end
+
+    if options[:include_deal] && deal
+      json['deal'] = {
+        id: deal.id.to_s,
+        name: deal.name,
+        value: deal.value,
+        stage: deal.stage
       }
     end
     
@@ -324,20 +350,39 @@ class Quote < ApplicationRecord
   def calculate_totals
     return unless items.is_a?(Array) && items.any?
     
-    # Calculate subtotal from items
-    self.subtotal = items.sum do |item|
-      next 0 unless item.is_a?(Hash)
+    # Calculate subtotal from items (sum of all item totals)
+    calculated_subtotal = 0.0
+    calculated_tax = 0.0
+    effective_tax_rate = (self.tax_rate || 0).to_f
+    
+    items.each do |item|
+      next unless item.is_a?(Hash)
       
       quantity = (item['quantity'] || item[:quantity]).to_f
       unit_price = (item['unitPrice'] || item['unit_price'] || item[:unitPrice] || item[:unit_price]).to_f
-      quantity * unit_price
+      discount = (item['discount'] || item[:discount]).to_f
+      discount_type = (item['discountType'] || item['discount_type'] || item[:discountType] || item[:discount_type]).to_s
+      
+      item_subtotal = quantity * unit_price
+      item_discount = discount_type == 'percentage' ? item_subtotal * (discount / 100.0) : discount
+      item_total = item_subtotal - item_discount
+      calculated_subtotal += item_total
+      
+      # Per-item taxable check — if the item has a 'taxable' flag, use it
+      item_taxable = item['taxable'] || item[:taxable]
+      if item_taxable == true || item_taxable == 'true'
+        # Use item-level tax_rate if present, otherwise fall back to quote-level
+        item_tax_rate = (item['taxRate'] || item['tax_rate'] || item[:taxRate] || item[:tax_rate])&.to_f
+        rate = (item_tax_rate.present? && item_tax_rate > 0) ? item_tax_rate : effective_tax_rate
+        calculated_tax += item_total * (rate / 100.0)
+      end
     end
     
-    # Tax is set separately or calculated
-    self.tax ||= 0.0
-    
-    # Calculate total
-    self.total = subtotal + tax
+    # Only recalculate if frontend didn't send explicit values
+    # Frontend sends subtotal/tax/total — use them if present and reasonable
+    self.subtotal = self.subtotal.present? && self.subtotal > 0 ? self.subtotal : calculated_subtotal
+    self.tax = self.tax.present? && self.tax >= 0 ? self.tax : calculated_tax
+    self.total = self.subtotal + self.tax
   end
   
   def check_expiration

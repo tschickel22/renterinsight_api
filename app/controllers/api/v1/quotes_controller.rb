@@ -35,12 +35,13 @@ module Api
           @quotes = @quotes.where(location_id: Current.location_id)
         end
         
-        @quotes = @quotes.includes(:account, :contact)
+        @quotes = @quotes.includes(:account, :contact, :deal)
         
         # Apply filters
         @quotes = @quotes.by_account(params[:account_id]) if params[:account_id].present?
         @quotes = @quotes.by_contact(params[:contact_id]) if params[:contact_id].present?
         @quotes = @quotes.by_customer(params[:customer_id]) if params[:customer_id].present?
+        @quotes = @quotes.by_deal(params[:deal_id]) if params[:deal_id].present?
         @quotes = @quotes.by_status(params[:status]) if params[:status].present?
         @quotes = @quotes.search(params[:search]) if params[:search].present?
         
@@ -73,7 +74,7 @@ module Api
       def show
         return unless authorize_action!('finance', 'read')
         
-        render json: @quote.as_json(include_account: true, include_contact: true, include_inventory: true)
+        render json: @quote.as_json(include_account: true, include_contact: true, include_inventory: true, include_deal: true)
       end
 
       # POST /api/v1/quotes
@@ -106,12 +107,18 @@ module Api
           'contact_id',
           'customer_id',
           'vehicle_id',
+          'deal_id',
+          'sales_rep_id',
           'status',
           'subtotal',
           'tax',
+          'tax_rate',
           'total',
           'valid_until',
           'notes',
+          'terms',
+          'pricing_display',
+          'draw_schedule',
           'items',
           'custom_fields'
         )
@@ -172,12 +179,18 @@ module Api
           'contact_id',
           'customer_id',
           'vehicle_id',
+          'deal_id',
+          'sales_rep_id',
           'status',
           'subtotal',
           'tax',
+          'tax_rate',
           'total',
           'valid_until',
           'notes',
+          'terms',
+          'pricing_display',
+          'draw_schedule',
           'items',
           'custom_fields'
         )
@@ -486,15 +499,17 @@ module Api
         
         # Generate CSV
         csv_data = CSV.generate(headers: true) do |csv|
-          csv << ['Quote Number', 'Status', 'Account', 'Contact', 'Subtotal', 'Tax', 'Total', 'Valid Until', 'Created Date']
+          csv << ['Quote Number', 'Status', 'Account', 'Contact', 'Deal', 'Subtotal', 'Tax Rate', 'Tax', 'Total', 'Valid Until', 'Created Date']
           
-          quotes.find_each do |quote|
+          quotes.includes(:deal).find_each do |quote|
             csv << [
               quote.quote_number,
               quote.status,
               quote.account&.name,
               quote.contact ? "#{quote.contact.first_name} #{quote.contact.last_name}" : '',
+              quote.deal&.title,
               quote.subtotal,
+              quote.tax_rate,
               quote.tax,
               quote.total,
               quote.valid_until,

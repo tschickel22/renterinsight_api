@@ -27,6 +27,7 @@ class Deal < ApplicationRecord
   has_one :win_loss_report, dependent: :destroy
   has_many :activities, class_name: 'DealActivity', dependent: :destroy
   has_many :commission_payments, dependent: :destroy
+  has_many :quotes, dependent: :nullify
   has_many :service_tickets, dependent: :nullify
   
   # Tags (polymorphic association)

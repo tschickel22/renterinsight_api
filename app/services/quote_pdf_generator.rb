@@ -17,7 +17,7 @@ class QuotePdfGenerator
     brand = resolve_branding
     accent = brand[:accent]
 
-    pdf = Prawn::Document.new(page_size: 'LETTER', margin: [50, 50, 60, 50])
+    pdf = Prawn::Document.new(page_size: 'LETTER', margin: [50, 50, 80, 50])
 
     add_header(pdf, brand)
     pdf.move_down 20
@@ -30,6 +30,13 @@ class QuotePdfGenerator
     if @quote.notes.present?
       pdf.move_down 25
       add_notes(pdf, accent)
+    end
+
+    # Terms & Conditions (from dedicated column or custom_fields fallback)
+    terms_text = @quote.terms.presence || @quote.custom_fields&.dig('termsConditions').presence
+    if terms_text.present?
+      pdf.move_down 20
+      add_terms(pdf, accent, terms_text)
     end
 
     add_footer(pdf)
@@ -201,23 +208,47 @@ class QuotePdfGenerator
   # ── LINE ITEMS ──
   def add_line_items(pdf, accent)
     items = @quote.items || []
+    return pdf.text('No line items', size: 10, color: '999999', style: :italic) if items.empty?
 
-    table_data = [['Description', 'Qty', 'Unit Price', 'Discount', 'Total']]
+    # Check if ANY item has a non-zero discount
+    has_discounts = items.any? do |item|
+      d = (item['discount'] || item['Discount'] || 0).to_f
+      d > 0
+    end
+
+    # Build header row based on whether discounts exist
+    if has_discounts
+      table_data = [['Description', 'Qty', 'Unit Price', 'Discount', 'Total']]
+    else
+      table_data = [['Description', 'Qty', 'Unit Price', 'Total']]
+    end
 
     items.each do |item|
       desc = item['description'] || item['name'] || ''
       qty = item['quantity'] || item['qty'] || 1
       price = item['unit_price'] || item['unitPrice'] || item['rate'] || 0
-      discount = item['discount'] || 0
+      discount = (item['discount'] || 0).to_f
       total = item['total'] || item['line_total'] || item['lineTotal'] || 0
 
-      table_data << [desc, qty.to_s, format_currency(price), format_currency(discount), format_currency(total)]
+      # Add taxable indicator
+      taxable = item['taxable'] == true || item['taxable'] == 'true'
+      desc += ' +Tax' if taxable
+
+      row = [desc, qty.to_s, format_currency(price)]
+      row << format_currency(discount) if has_discounts
+      row << format_currency(total)
+      table_data << row
+
+      # Add item notes as a sub-row if present
+      item_notes = item['notes'] || item['Notes'] || ''
+      if item_notes.present?
+        col_span = has_discounts ? 5 : 4
+        table_data << [{ content: item_notes, colspan: col_span, text_color: '666666', font_style: :italic, size: 8 }]
+      end
     end
 
-    if table_data.length <= 1
-      pdf.text 'No line items', size: 10, color: '999999', style: :italic
-      return
-    end
+    num_cols = has_discounts ? 5 : 4
+    right_cols = has_discounts ? (1..4) : (1..3)
 
     pdf.table(table_data, header: true, width: pdf.bounds.width,
               cell_style: { padding: [8, 6], size: 10, border_width: 0.5, border_color: 'DDDDDD' }) do |t|
@@ -225,27 +256,62 @@ class QuotePdfGenerator
       t.row(0).text_color = 'FFFFFF'
       t.row(0).background_color = accent
       t.row(0).border_color = accent
-      t.columns(1..4).align = :right
+      t.columns(right_cols).align = :right
     end
   end
 
   # ── TOTALS ──
   def add_totals(pdf, accent)
-    totals_data = [
-      ['Subtotal', format_currency(@quote.subtotal || 0)],
-      ['Tax', format_currency(@quote.tax || 0)],
-      ['Total', format_currency(@quote.total || 0)]
-    ]
+    cf = @quote.custom_fields || {}
+    overall_discount = (cf['overallDiscount'] || cf['overall_discount'] || 0).to_f
+    shipping_cost = (cf['shippingCost'] || cf['shipping_cost'] || 0).to_f
+    deposit_required = cf['depositRequired'] || cf['deposit_required']
+    deposit_amount = (cf['depositAmount'] || cf['deposit_amount'] || 0).to_f
 
-    pdf.table(totals_data, position: :right, width: 220,
+    totals_data = []
+
+    # Items subtotal (before overall discount)
+    items_subtotal = (@quote.subtotal || 0).to_f + overall_discount - shipping_cost
+    if overall_discount > 0 || shipping_cost > 0
+      totals_data << ['Items Subtotal', format_currency(items_subtotal)]
+    end
+
+    # Overall discount
+    if overall_discount > 0
+      discount_label = 'Overall Discount'
+      dv = cf['discountValue'] || cf['discount_value']
+      dt = cf['discountType'] || cf['discount_type']
+      if dt == 'percentage' && dv.present?
+        discount_label = "Discount (#{dv}%)"
+      end
+      totals_data << [discount_label, "-#{format_currency(overall_discount)}"]
+    end
+
+    # Shipping
+    if shipping_cost > 0
+      totals_data << ['Shipping/Delivery', format_currency(shipping_cost)]
+    end
+
+    totals_data << ['Subtotal', format_currency(@quote.subtotal || 0)]
+    totals_data << ['Tax', format_currency(@quote.tax || 0)]
+    totals_data << ['Total', format_currency(@quote.total || 0)]
+
+    # Deposit
+    if deposit_required && deposit_amount > 0
+      totals_data << ['Deposit Required', format_currency(deposit_amount)]
+    end
+
+    pdf.table(totals_data, position: :right, width: 250,
               cell_style: { borders: [], padding: [6, 8], size: 10 }) do |t|
       t.columns(0).font_style = :bold
       t.columns(1).align = :right
-      t.row(-1).font_style = :bold
-      t.row(-1).size = 14
-      t.row(-1).borders = [:top]
-      t.row(-1).border_width = 2
-      t.row(-1).border_color = accent
+      # Style the Total row (second to last, or last if no deposit)
+      total_row_idx = deposit_required && deposit_amount > 0 ? -2 : -1
+      t.row(total_row_idx).font_style = :bold
+      t.row(total_row_idx).size = 14
+      t.row(total_row_idx).borders = [:top]
+      t.row(total_row_idx).border_width = 2
+      t.row(total_row_idx).border_color = accent
     end
   end
 
@@ -256,17 +322,27 @@ class QuotePdfGenerator
     pdf.text @quote.notes, size: 10
   end
 
+  # ── TERMS & CONDITIONS ──
+  def add_terms(pdf, accent, terms_text)
+    pdf.text 'Terms & Conditions', size: 11, style: :bold, color: accent
+    pdf.move_down 5
+    pdf.text terms_text, size: 8, color: '444444'
+  end
+
   # ── FOOTER ──
   def add_footer(pdf)
     pdf.repeat(:all) do
-      pdf.bounding_box([0, 30], width: pdf.bounds.width, height: 20) do
+      pdf.bounding_box([0, -25], width: pdf.bounds.width, height: 20) do
         pdf.font_size(8) { pdf.text 'Thank you for your business!', align: :center, style: :italic, color: '999999' }
       end
     end
-    pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, 0], align: :right, size: 8, color: '999999'
+    pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, -45], align: :right, size: 8, color: '999999'
   end
 
   def format_currency(amount)
-    "$#{sprintf('%.2f', amount.to_f)}"
+    number = amount.to_f
+    whole, decimal = sprintf('%.2f', number).split('.')
+    whole_with_commas = whole.reverse.scan(/\d{1,3}/).join(',').reverse
+    "$#{whole_with_commas}.#{decimal}"
   end
 end

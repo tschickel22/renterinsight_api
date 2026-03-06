@@ -24,13 +24,32 @@ module Api
 
       def create
         tag_data = params[:tag] || params
-        # Create tag within current company
+        # Normalize tag_type: ensure it's always an array
+        raw_type = tag_data[:type] || tag_data[:entityType] || tag_data[:tag_type]
+        tag_type_arr = case raw_type
+                       when Array then raw_type
+                       when String then raw_type.present? ? [raw_type] : []
+                       else []
+                       end
+
+        # Try find_or_create to handle unique constraint gracefully
+        tag = @company.tags.find_by(name: tag_data[:name]&.strip)
+        if tag
+          # Tag exists — update attributes if needed and return it
+          tag.update(
+            color:     tag_data[:color].presence || tag.color,
+            is_active: tag_data.key?(:is_active) ? tag_data[:is_active] : tag.is_active
+          )
+          render json: tag_json(tag), status: :ok
+          return
+        end
+
         tag = @company.tags.new(
-          name:        tag_data[:name],
+          name:        tag_data[:name]&.strip,
           description: tag_data[:description],
           color:       tag_data[:color].presence || '#6B7280',
           category:    tag_data[:category],
-          tag_type:    tag_data[:type] || [],
+          tag_type:    tag_type_arr,
           is_active:   tag_data.key?(:is_active) ? tag_data[:is_active] : true,
           is_system:   tag_data[:is_system] || false,
           created_by:  current_user&.id&.to_s || 'system'
@@ -40,6 +59,10 @@ module Api
         else
           render json: { errors: tag.errors.full_messages }, status: :unprocessable_entity
         end
+      rescue ActiveRecord::RecordNotUnique
+        # Race condition: tag was created between find_by and save
+        tag = @company.tags.find_by!(name: tag_data[:name]&.strip)
+        render json: tag_json(tag), status: :ok
       end
 
       def update

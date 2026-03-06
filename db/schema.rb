@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_05_230002) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_06_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3041,16 +3041,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_05_230002) do
     t.integer "company_id"
     t.bigint "location_id"
     t.string "public_token"
+    t.integer "deal_id"
+    t.text "terms"
+    t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
+    t.integer "sales_rep_id"
+    t.string "pricing_display", default: "detailed"
+    t.jsonb "draw_schedule", default: {}
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"
     t.index ["contact_id"], name: "index_quotes_on_contact_id"
     t.index ["created_at"], name: "index_quotes_on_created_at"
     t.index ["customer_id"], name: "index_quotes_on_customer_id"
+    t.index ["deal_id"], name: "index_quotes_on_deal_id"
     t.index ["is_deleted"], name: "index_quotes_on_is_deleted"
     t.index ["location_id"], name: "index_quotes_on_location_id"
     t.index ["public_token"], name: "index_quotes_on_public_token", unique: true
     t.index ["quote_number"], name: "index_quotes_on_quote_number", unique: true
+    t.index ["sales_rep_id"], name: "index_quotes_on_sales_rep_id"
     t.index ["status"], name: "index_quotes_on_status"
     t.index ["valid_until"], name: "index_quotes_on_valid_until"
     t.index ["vehicle_id"], name: "index_quotes_on_vehicle_id"
