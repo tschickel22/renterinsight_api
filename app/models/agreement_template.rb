@@ -58,14 +58,14 @@ class AgreementTemplate < ApplicationRecord
   end
 
   # Class method: Get templates available to a company (company + matching platform templates)
+  # When state_code is explicitly passed, filter platform templates to that state.
+  # Otherwise, show ALL platform templates — user picks the right state form.
   def self.available_for_company(company, state_code: nil)
-    state = state_code || company.locations&.first&.state || company.state
-
     company_templates = where(company_id: company.id, is_deleted: false)
                           .where(is_platform_template: [false, nil])
 
     platform_templates = where(is_platform_template: true, is_deleted: false, status: 'active')
-    platform_templates = platform_templates.where(state_code: state) if state.present?
+    platform_templates = platform_templates.where(state_code: state_code) if state_code.present?
 
     where(id: company_templates.select(:id))
       .or(where(id: platform_templates.select(:id)))
