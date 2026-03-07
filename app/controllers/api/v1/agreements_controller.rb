@@ -5,7 +5,10 @@ module Api
       before_action :set_agreement, only: [
         :show, :update, :destroy, :send_agreement, :void, :remind, :remind_signer,
         :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature,
-        :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment
+        :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
+        :calculate,
+        :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
+        :validate_formula_field
       ]
 
       # GET /api/v1/agreements
@@ -145,6 +148,9 @@ module Api
         end
 
         if agreement.save
+          # Copy template's custom_field_definitions to the agreement
+          agreement.initialize_field_definitions_from_template!
+
           # Create initial signers if provided
           sync_signers(agreement) if params.dig(:agreement, :signers).present?
 
@@ -474,6 +480,51 @@ module Api
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
+      # POST /api/v1/agreements/:id/calculate
+      # Runs FormulaEngine against field definitions (agreement-level first, template fallback).
+      # Does NOT persist — returns calculated values for frontend display.
+      def calculate
+        return unless authorize_action!('agreements', 'read')
+
+        field_defs = @agreement.custom_field_definitions.presence ||
+                     @agreement.agreement_template&.custom_field_definitions
+
+        unless field_defs.present?
+          return render json: { error: 'No field definitions found on agreement or template' }, status: :unprocessable_entity
+        end
+
+        input_values = (@agreement.custom_field_values || {}).merge(
+          (params[:custom_field_values] || {}).to_unsafe_h
+        )
+
+        engine = FormulaEngine.new
+        calculated = engine.evaluate(field_defs, input_values)
+
+        render json: { calculated_values: calculated }
+      rescue FormulaEngine::CircularDependencyError, FormulaEngine::InvalidFormulaError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # POST /api/v1/agreements/preview_calculate
+      # Same as calculate but works without an agreement (for the builder wizard before save).
+      def preview_calculate
+        return unless authorize_action!('agreements', 'read')
+
+        template = AgreementTemplate.available_for_company(@company).find_by(id: params[:template_id])
+        unless template&.custom_field_definitions.present?
+          return render json: { error: 'Template not found or has no field definitions' }, status: :unprocessable_entity
+        end
+
+        input_values = (params[:custom_field_values] || {}).to_unsafe_h
+
+        engine = FormulaEngine.new
+        calculated = engine.evaluate(template.custom_field_definitions, input_values)
+
+        render json: { calculated_values: calculated }
+      rescue FormulaEngine::CircularDependencyError, FormulaEngine::InvalidFormulaError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       # GET /api/v1/agreements/stats
       def stats
         return unless authorize_action!('agreements', 'read')
@@ -564,6 +615,149 @@ module Api
       rescue => e
         Rails.logger.error "Error in agreements#entity_context: #{e.message}"
         render json: { contacts: [], account: nil, deals: [] }
+      end
+
+      # === Agreement-Level Custom Field CRUD ===
+
+      # GET /api/v1/agreements/:id/custom_fields
+      def list_custom_fields
+        return unless authorize_action!('agreements', 'read')
+
+        definitions = @agreement.custom_field_definitions || []
+        engine = FormulaEngine.new
+        all_keys = definitions.map { |d| d['key'] || d[:key] }
+
+        grouped = definitions.group_by { |d| (d['group'] || d[:group] || 'general').to_s }
+        grouped.transform_values! do |fields|
+          fields.map do |field|
+            f = field.stringify_keys
+            if f['formula'].present? && f['formula'].start_with?('=')
+              validation = engine.validate_formula(f['formula'], all_keys)
+              f.merge('formula_valid' => validation[:valid], 'formula_error' => validation[:error])
+            else
+              f
+            end
+          end
+        end
+
+        render json: { grouped_fields: grouped, all_fields: definitions }
+      end
+
+      # POST /api/v1/agreements/:id/custom_fields
+      def add_custom_field
+        return unless authorize_action!('agreements', 'update')
+
+        unless @agreement.can_edit?
+          return render json: { error: 'Custom fields can only be added in draft status' }, status: :unprocessable_entity
+        end
+
+        field_params = agreement_custom_field_params
+        definitions = (@agreement.custom_field_definitions || []).map(&:stringify_keys)
+
+        key = field_params['key'].presence || "cf_#{field_params['label'].to_s.parameterize(separator: '_')}"
+        field_params['key'] = key
+
+        if definitions.any? { |d| d['key'] == key }
+          return render json: { error: "Field key '#{key}' already exists" }, status: :unprocessable_entity
+        end
+
+        unless FormulaEngine::VALID_FIELD_TYPES.include?(field_params['type'])
+          return render json: { error: "Invalid field type '#{field_params['type']}'. Valid types: #{FormulaEngine::VALID_FIELD_TYPES.join(', ')}" }, status: :unprocessable_entity
+        end
+
+        if field_params['formula'].present?
+          # Include custom field keys + standard merge field keys (for vehicle.price, deal.amount, etc.)
+          all_keys = definitions.map { |d| d['key'] } + [key]
+          all_keys += standard_merge_field_keys
+          validation = FormulaEngine.new.validate_formula(field_params['formula'], all_keys)
+          unless validation[:valid]
+            return render json: { error: "Invalid formula: #{validation[:error]}" }, status: :unprocessable_entity
+          end
+        end
+
+        definitions << field_params
+        @agreement.update!(custom_field_definitions: definitions)
+
+        render json: { custom_field_definitions: @agreement.custom_field_definitions }, status: :created
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # PATCH /api/v1/agreements/:id/custom_fields/:field_key
+      def update_custom_field
+        return unless authorize_action!('agreements', 'update')
+
+        unless @agreement.can_edit?
+          return render json: { error: 'Custom fields can only be updated in draft status' }, status: :unprocessable_entity
+        end
+
+        definitions = (@agreement.custom_field_definitions || []).map(&:stringify_keys)
+        field_index = definitions.index { |d| d['key'] == params[:field_key] }
+
+        unless field_index
+          return render json: { error: "Field '#{params[:field_key]}' not found" }, status: :not_found
+        end
+
+        updates = agreement_custom_field_params.except('key')
+
+        if updates['formula'].present?
+          all_keys = definitions.map { |d| d['key'] }
+          all_keys += standard_merge_field_keys
+          validation = FormulaEngine.new.validate_formula(updates['formula'], all_keys)
+          unless validation[:valid]
+            return render json: { error: "Invalid formula: #{validation[:error]}" }, status: :unprocessable_entity
+          end
+        end
+
+        if updates['type'].present? && !FormulaEngine::VALID_FIELD_TYPES.include?(updates['type'])
+          return render json: { error: "Invalid field type '#{updates['type']}'" }, status: :unprocessable_entity
+        end
+
+        definitions[field_index] = definitions[field_index].merge(updates)
+        @agreement.update!(custom_field_definitions: definitions)
+
+        render json: { custom_field_definitions: @agreement.custom_field_definitions }
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # DELETE /api/v1/agreements/:id/custom_fields/:field_key
+      def remove_custom_field
+        return unless authorize_action!('agreements', 'update')
+
+        unless @agreement.can_edit?
+          return render json: { error: 'Custom fields can only be removed in draft status' }, status: :unprocessable_entity
+        end
+
+        definitions = (@agreement.custom_field_definitions || []).map(&:stringify_keys)
+        original_count = definitions.length
+        definitions.reject! { |d| d['key'] == params[:field_key] }
+
+        if definitions.length == original_count
+          return render json: { error: "Field '#{params[:field_key]}' not found" }, status: :not_found
+        end
+
+        @agreement.update!(custom_field_definitions: definitions)
+
+        # Optionally remove the orphaned value
+        if params[:remove_value] == 'true' && @agreement.custom_field_values&.key?(params[:field_key])
+          values = @agreement.custom_field_values.except(params[:field_key])
+          @agreement.update_column(:custom_field_values, values)
+        end
+
+        render json: { custom_field_definitions: @agreement.custom_field_definitions }
+      end
+
+      # POST /api/v1/agreements/:id/custom_fields/validate_formula
+      def validate_formula_field
+        return unless authorize_action!('agreements', 'read')
+
+        formula = params[:formula].to_s
+        definitions = @agreement.custom_field_definitions || []
+        all_keys = definitions.map { |d| d['key'] || d[:key] }
+
+        result = FormulaEngine.new.validate_formula(formula, all_keys)
+        render json: result
       end
 
       # === Nested Signer Actions ===
@@ -710,6 +904,25 @@ module Api
         permitted
       end
 
+      # Standard merge field keys that are valid in formula references
+      # These are the dotted keys from AgreementMergeFieldsController
+      def standard_merge_field_keys
+        %w[
+          vehicle.price deal.amount deal.probability
+          invoice.total invoice.amount_due
+          vehicle.bedrooms vehicle.bathrooms vehicle.length vehicle.width vehicle.year
+        ]
+      end
+
+      def agreement_custom_field_params
+        raw = params[:custom_field] || params[:custom_field_definition] || {}
+        raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+        raw.stringify_keys.slice(
+          'key', 'label', 'type', 'group', 'page', 'required', 'position',
+          'formula', 'options', 'format_as', 'placeholder', 'filled_by', 'merge_from'
+        )
+      end
+
       def signer_params
         params.require(:signer).permit(:name, :email, :phone, :role, :signing_order, :signable_type, :signable_id)
       end
@@ -825,6 +1038,7 @@ module Api
             document_url: agreement.document_url,
             sealed_document_url: agreement.sealed_document_url,
             document_urls: agreement.document_urls,
+            custom_field_definitions: agreement.custom_field_definitions,
             template_id: agreement.agreement_template_id,
             template_name: agreement.agreement_template&.name,
             field_placements: agreement.field_placements,

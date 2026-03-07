@@ -1118,6 +1118,12 @@ Rails.application.routes.draw do
         member do
           post :duplicate
           post :preview
+          get 'custom_fields', to: 'agreement_templates#list_custom_fields'
+          post 'custom_fields', to: 'agreement_templates#add_custom_field'
+          post 'custom_fields/reorder', to: 'agreement_templates#reorder_custom_fields'
+          post 'custom_fields/validate_formula', to: 'agreement_templates#validate_formula'
+          patch 'custom_fields/:field_key', to: 'agreement_templates#update_custom_field'
+          delete 'custom_fields/:field_key', to: 'agreement_templates#remove_custom_field'
         end
       end
 
@@ -1133,11 +1139,18 @@ Rails.application.routes.draw do
           get :download
           get :certificate
           post :prepare_signature
+          post :calculate
+          get 'custom_fields', to: 'agreements#list_custom_fields'
+          post 'custom_fields', to: 'agreements#add_custom_field'
+          post 'custom_fields/validate_formula', to: 'agreements#validate_formula_field'
+          patch 'custom_fields/:field_key', to: 'agreements#update_custom_field'
+          delete 'custom_fields/:field_key', to: 'agreements#remove_custom_field'
         end
 
         collection do
           get :stats
           get :entity_context
+          post :preview_calculate
         end
 
         # Nested signers

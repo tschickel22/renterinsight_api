@@ -241,6 +241,17 @@ class Agreement < ApplicationRecord
     merged
   end
 
+  # Copy field definitions from the linked template (if not already set)
+  def initialize_field_definitions_from_template!
+    return unless agreement_template_id.present?
+    return if custom_field_definitions.present?
+
+    template = agreement_template
+    return unless template&.custom_field_definitions.present?
+
+    update_column(:custom_field_definitions, template.custom_field_definitions)
+  end
+
   private
 
   def generate_agreement_number
