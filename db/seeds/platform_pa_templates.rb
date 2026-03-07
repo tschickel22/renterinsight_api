@@ -65,7 +65,7 @@ FORM_500_PAGE1_FIELDS = [
   { key: 'insulation_floors_type', label: 'Floors Type', type: 'text', group: 'insulation', page: 1, filled_by: 'preparer', position: 9 },
 
   # ---- GROUP: pricing (Financial Summary) ----
-  { key: 'base_price', label: 'Base Price of Unit', type: 'currency', group: 'pricing', page: 1, required: true, filled_by: 'preparer', position: 1, format_as: 'currency' },
+  { key: 'base_price', label: 'Base Price of Unit', type: 'currency', group: 'pricing', page: 1, required: true, filled_by: 'preparer', position: 1, format_as: 'currency', merge_from: 'vehicle.price' },
   { key: 'optional_equipment_total', label: 'Optional Equipment', type: 'currency', group: 'pricing', page: 1, filled_by: 'preparer', position: 2, format_as: 'currency', placeholder: 'Auto-calculated from deal line items' },
   { key: 'sub_total_1', label: 'Sub-Total', type: 'currency', group: 'pricing', page: 1, filled_by: 'preparer', position: 3, format_as: 'currency', formula: '=base_price + optional_equipment_total' },
   { key: 'sales_tax', label: 'Sales Tax', type: 'currency', group: 'pricing', page: 1, filled_by: 'preparer', position: 4, format_as: 'currency' },
