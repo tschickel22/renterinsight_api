@@ -37,6 +37,26 @@ module Api
         end
 
         begin
+          if @deal.present?
+            @vehicle = nil
+            if @deal.respond_to?(:vehicle_id) && @deal.vehicle_id.present?
+              @vehicle = @company.vehicles.find_by(id: @deal.vehicle_id)
+            end
+            if @vehicle.nil? && @deal.respond_to?(:deal_line_items)
+              vehicle_item = @deal.deal_line_items
+                                  .where(is_deleted: [false, nil])
+                                  .where(category: ['home', 'vehicle', 'unit', 'rv'])
+                                  .first
+              if vehicle_item&.respond_to?(:vehicle_id) && vehicle_item.vehicle_id.present?
+                @vehicle = @company.vehicles.find_by(id: vehicle_item.vehicle_id)
+              end
+            end
+          end
+        rescue => e
+          Rails.logger.error("[AgreementMergeFields] Vehicle lookup failed: #{e.message}")
+        end
+
+        begin
           if params[:invoice_id].present?
             @invoice = @company.invoices.find_by(id: params[:invoice_id])
           elsif @deal.present?
@@ -62,7 +82,12 @@ module Api
               { key: 'contact.email', label: 'Email', type: 'text', value: @contact&.email },
               { key: 'contact.phone', label: 'Phone', type: 'text', value: @contact&.phone },
               { key: 'contact.title', label: 'Title', type: 'text', value: @contact.respond_to?(:title) ? @contact.title : nil },
-              { key: 'contact.company_name', label: 'Company Name', type: 'text', value: @contact ? (@contact.respond_to?(:company_name) ? @contact.company_name : @contact.account&.name) : nil }
+              { key: 'contact.company_name', label: 'Company Name', type: 'text', value: @contact ? (@contact.respond_to?(:company_name) ? @contact.company_name : @contact.account&.name) : nil },
+              { key: 'contact.street', label: 'Street Address', type: 'text', value: @contact.try(:street) || @contact.try(:address) },
+              { key: 'contact.city', label: 'City', type: 'text', value: @contact.try(:city) },
+              { key: 'contact.state', label: 'State', type: 'text', value: @contact.try(:state) },
+              { key: 'contact.zip', label: 'ZIP Code', type: 'text', value: @contact.try(:zip) || @contact.try(:postal_code) },
+              { key: 'contact.mobile_phone', label: 'Mobile Phone', type: 'text', value: @contact.try(:mobile_phone) || @contact.try(:cell_phone) }
             ]
           },
           account: {
@@ -86,7 +111,27 @@ module Api
               { key: 'deal.amount', label: 'Deal Amount', type: 'currency', value: @deal ? (@deal.respond_to?(:amount) ? @deal.amount : @deal.try(:value)) : nil },
               { key: 'deal.stage', label: 'Deal Stage', type: 'text', value: @deal.respond_to?(:stage) ? @deal.stage : nil },
               { key: 'deal.close_date', label: 'Expected Close Date', type: 'date', value: @deal ? (@deal.respond_to?(:expected_close_date) ? @deal.expected_close_date : @deal.try(:close_date)) : nil },
-              { key: 'deal.probability', label: 'Probability', type: 'text', value: @deal.respond_to?(:probability) ? @deal.probability : nil }
+              { key: 'deal.probability', label: 'Probability', type: 'text', value: @deal.respond_to?(:probability) ? @deal.probability : nil },
+              { key: 'deal.owner_name', label: 'Sales Person', type: 'text', value: @deal ? (@deal.respond_to?(:owner) ? [@deal.owner&.first_name, @deal.owner&.last_name].compact.join(' ').presence : @deal.try(:assigned_to_name)) : nil }
+            ]
+          },
+          vehicle: {
+            available: @vehicle.present?,
+            fields: [
+              { key: 'vehicle.make', label: 'Make', type: 'text', value: @vehicle.try(:make) },
+              { key: 'vehicle.model', label: 'Model', type: 'text', value: @vehicle.try(:model) },
+              { key: 'vehicle.year', label: 'Year', type: 'text', value: @vehicle.try(:year)&.to_s },
+              { key: 'vehicle.vin', label: 'VIN / Serial Number', type: 'text', value: @vehicle.try(:vin) || @vehicle.try(:serial_number) },
+              { key: 'vehicle.stock_number', label: 'Stock Number', type: 'text', value: @vehicle.try(:stock_number) },
+              { key: 'vehicle.condition', label: 'New/Used', type: 'text', value: @vehicle.try(:condition)&.titleize },
+              { key: 'vehicle.sections', label: 'Sections (Single/Double)', type: 'text', value: @vehicle.try(:sections) },
+              { key: 'vehicle.bedrooms', label: 'Bedrooms', type: 'text', value: @vehicle.try(:bedrooms)&.to_s },
+              { key: 'vehicle.bathrooms', label: 'Bathrooms', type: 'text', value: @vehicle.try(:bathrooms)&.to_s || @vehicle.try(:baths)&.to_s },
+              { key: 'vehicle.length', label: 'Length', type: 'text', value: @vehicle.try(:length)&.to_s },
+              { key: 'vehicle.width', label: 'Width', type: 'text', value: @vehicle.try(:width)&.to_s },
+              { key: 'vehicle.exterior_color', label: 'Exterior Color', type: 'text', value: @vehicle.try(:exterior_color) || @vehicle.try(:color) },
+              { key: 'vehicle.interior_color', label: 'Interior Color', type: 'text', value: @vehicle.try(:interior_color) },
+              { key: 'vehicle.price', label: 'Price', type: 'currency', value: @vehicle.try(:price) || @vehicle.try(:msrp) || @vehicle.try(:sale_price) }
             ]
           },
           invoice: {
