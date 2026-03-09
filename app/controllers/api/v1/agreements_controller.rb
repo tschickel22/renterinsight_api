@@ -6,7 +6,7 @@ module Api
         :show, :update, :destroy, :send_agreement, :void, :remind, :remind_signer,
         :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature,
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
-        :calculate,
+        :calculate, :vision_scan,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
         :validate_formula_field
       ]
@@ -617,6 +617,71 @@ module Api
         render json: { contacts: [], account: nil, deals: [] }
       end
 
+      # === AI Vision Scan ===
+
+      # POST /api/v1/agreements/:id/vision_scan
+      # Sends the agreement PDF to Claude Vision API to auto-detect form fields
+      #
+      # Usage limits: Tracked per company per month via audit logs.
+      # Default: 50 scans/month. Configurable via Company setting 'ai_scan_monthly_limit'.
+      # Cost: ~$0.03/page (Claude Sonnet input + output tokens)
+      #
+      def vision_scan
+        return unless authorize_action!('agreements', 'update')
+
+        unless @agreement.document_url.present?
+          return render json: { error: 'No PDF document uploaded for this agreement' }, status: :unprocessable_entity
+        end
+
+        api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
+        unless api_key.present?
+          return render json: { error: 'AI scanning is not configured. Please add an Anthropic API key.' }, status: :service_unavailable
+        end
+
+        # Check monthly usage limits
+        usage = ai_scan_usage
+        if usage[:remaining] <= 0
+          return render json: {
+            error: "Monthly AI scan limit reached (#{usage[:limit]} scans). Resets #{usage[:resets_at]}.",
+            usage: usage
+          }, status: :too_many_requests
+        end
+
+        begin
+          service = AgreementVisionScanService.new(api_key)
+          result = service.scan(@agreement.document_url, max_pages: params[:max_pages]&.to_i || 16)
+
+          # Log successful scan for usage tracking
+          AgreementAuditLog.log!(@agreement, 'vision_scan', performed_by: current_user, metadata: {
+            pages_scanned: result[:pages_scanned],
+            total_pages: result[:total_pages],
+            fields_detected: result[:fields]&.length || 0,
+            scanned_at: Time.current.iso8601
+          })
+
+          updated_usage = ai_scan_usage
+
+          render json: {
+            fields: result[:fields],
+            pages_scanned: result[:pages_scanned],
+            total_pages: result[:total_pages],
+            usage: updated_usage,
+          }
+        rescue AgreementVisionScanService::ScanError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue => e
+          Rails.logger.error "[VisionScan] Unexpected error: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+          render json: { error: 'Vision scan failed unexpectedly. Please try again.' }, status: :internal_server_error
+        end
+      end
+
+      # GET /api/v1/agreements/ai_scan_usage
+      # Returns current month's AI scan usage for the company
+      def ai_scan_usage_info
+        return unless authorize_action!('agreements', 'read')
+        render json: { usage: ai_scan_usage }
+      end
+
       # === Agreement-Level Custom Field CRUD ===
 
       # GET /api/v1/agreements/:id/custom_fields
@@ -874,6 +939,41 @@ module Api
       end
 
       private
+
+      # Calculate AI scan usage for the current company this month
+      def ai_scan_usage
+        month_start = Time.current.beginning_of_month
+        month_end = Time.current.end_of_month
+
+        # Count scans this month across all company agreements
+        company_agreement_ids = @company.agreements.pluck(:id)
+        scans_this_month = AgreementAuditLog.where(
+          agreement_id: company_agreement_ids,
+          action: 'vision_scan'
+        ).where('created_at >= ?', month_start).count
+
+        # Configurable limit: check company setting, default 50/month
+        limit = 50
+        begin
+          custom_limit = Setting.get('Company', @company.id, 'ai_scan_monthly_limit', nil)
+          limit = custom_limit.to_i if custom_limit.present? && custom_limit.to_i > 0
+        rescue => e
+          Rails.logger.debug "[VisionScan] Could not read ai_scan_monthly_limit setting: #{e.message}"
+        end
+
+        # Platform admins get unlimited scans
+        if current_user&.role == 'platform_admin'
+          limit = [limit, 999].max
+        end
+
+        {
+          used: scans_this_month,
+          limit: limit,
+          remaining: [limit - scans_this_month, 0].max,
+          resets_at: month_end.strftime('%B %d, %Y'),
+          month: Time.current.strftime('%B %Y'),
+        }
+      end
 
       def set_agreement
         @agreement = @company.agreements.active.find(params[:id])

@@ -1128,6 +1128,9 @@ Rails.application.routes.draw do
       end
 
       resources :agreements do
+        collection do
+          get :ai_scan_usage, to: 'agreements#ai_scan_usage_info'
+        end
         member do
           post :send_agreement
           post :void
@@ -1140,6 +1143,7 @@ Rails.application.routes.draw do
           get :certificate
           post :prepare_signature
           post :calculate
+          post :vision_scan
           get 'custom_fields', to: 'agreements#list_custom_fields'
           post 'custom_fields', to: 'agreements#add_custom_field'
           post 'custom_fields/validate_formula', to: 'agreements#validate_formula_field'

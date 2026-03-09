@@ -105,5 +105,8 @@ gem "roo", "~> 3.0"
 # PDF merging for multi-document agreements
 gem 'combine_pdf', '~> 1.0'
 
+# PDF text extraction with position data (for AI vision scan field placement)
+gem 'pdf-reader', '~> 2.12'
+
 # Web scraping for floor plan data
 gem 'selenium-webdriver'

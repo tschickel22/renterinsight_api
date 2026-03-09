@@ -31,7 +31,7 @@ module Public
           content: @agreement.content,
           content_type: @agreement.content_type || (@agreement.document_urls.present? ? 'upload' : 'editor'),
           field_placements: @agreement.merge_field_placements,
-          merge_field_values: @agreement.merge_field_values,
+          merge_field_values: build_combined_merge_values,
           message_to_signers: @agreement.message_to_signers,
           expires_at: @agreement.expires_at,
           created_at: @agreement.created_at
@@ -180,6 +180,88 @@ module Public
       end
 
       branding
+    end
+
+    # Combine ALL value sources into one hash for the signing view:
+    # 1. Live-resolved merge fields from linked entities (most reliable)
+    # 2. Stored merge_field_values (fallback)
+    # 3. Custom field values with 'custom.' prefix
+    def build_combined_merge_values
+      combined = {}
+      company = @agreement.company
+
+      # 1. Resolve live values from linked entities
+      contact = company.contacts.find_by(id: @agreement.contact_id) if @agreement.contact_id.present?
+      account = company.accounts.find_by(id: @agreement.account_id) if @agreement.account_id.present?
+      deal = company.deals.find_by(id: @agreement.deal_id) if @agreement.deal_id.present?
+      vehicle = nil
+      if deal&.respond_to?(:vehicle_id) && deal.vehicle_id.present?
+        vehicle = company.vehicles.find_by(id: deal.vehicle_id)
+      end
+
+      if contact
+        combined['contact.first_name'] = contact.first_name.to_s
+        combined['contact.last_name'] = contact.last_name.to_s
+        combined['contact.full_name'] = [contact.first_name, contact.last_name].compact.join(' ')
+        combined['contact.email'] = contact.email.to_s
+        combined['contact.phone'] = contact.phone.to_s
+        combined['contact.mobile_phone'] = (contact.try(:mobile_phone) || contact.try(:cell_phone)).to_s
+        combined['contact.street'] = (contact.try(:street) || contact.try(:address)).to_s
+        combined['contact.city'] = contact.try(:city).to_s
+        combined['contact.state'] = contact.try(:state).to_s
+        combined['contact.zip'] = (contact.try(:zip) || contact.try(:postal_code)).to_s
+      end
+
+      if account
+        combined['account.name'] = account.name.to_s
+      end
+
+      if deal
+        combined['deal.name'] = (deal.respond_to?(:title) ? deal.title : deal.name).to_s
+        combined['deal.amount'] = (deal.respond_to?(:amount) ? deal.amount : deal.try(:value)).to_s
+        combined['deal.owner_name'] = deal.respond_to?(:owner) ? [deal.owner&.first_name, deal.owner&.last_name].compact.join(' ') : ''
+      end
+
+      if vehicle
+        combined['vehicle.make'] = vehicle.try(:make).to_s
+        combined['vehicle.model'] = vehicle.try(:model).to_s
+        combined['vehicle.year'] = vehicle.try(:year).to_s
+        combined['vehicle.vin'] = (vehicle.try(:vin) || vehicle.try(:serial_number)).to_s
+        combined['vehicle.stock_number'] = vehicle.try(:stock_number).to_s
+        combined['vehicle.condition'] = vehicle.try(:condition)&.titleize.to_s
+        combined['vehicle.sections'] = vehicle.try(:sections).to_s
+        combined['vehicle.bedrooms'] = vehicle.try(:bedrooms).to_s
+        combined['vehicle.bathrooms'] = (vehicle.try(:bathrooms) || vehicle.try(:baths)).to_s
+        combined['vehicle.length'] = vehicle.try(:length).to_s
+        combined['vehicle.width'] = vehicle.try(:width).to_s
+        combined['vehicle.exterior_color'] = (vehicle.try(:exterior_color) || vehicle.try(:color)).to_s
+        combined['vehicle.price'] = (vehicle.try(:price) || vehicle.try(:msrp) || vehicle.try(:sale_price)).to_s
+      end
+
+      combined['company.name'] = company.name.to_s
+      combined['company.email'] = company.try(:email).to_s
+      combined['company.phone'] = company.try(:phone).to_s
+      combined['date.today'] = Date.today.strftime('%m/%d/%Y')
+      combined['date.current_year'] = Date.today.year.to_s
+
+      # 2. Merge stored values (fill in anything not resolved live)
+      if @agreement.merge_field_values.present?
+        @agreement.merge_field_values.each do |key, value|
+          next if value.nil? || value.to_s.strip.empty?
+          combined[key] = value.to_s unless combined[key].present?
+        end
+      end
+
+      # 3. Add custom field values with 'custom.' prefix
+      if @agreement.custom_field_values.present?
+        @agreement.custom_field_values.each do |key, value|
+          next if value.nil? || value.to_s.strip.empty?
+          combined["custom.#{key}"] = value.to_s
+        end
+      end
+
+      # Remove empty string values
+      combined.reject { |_, v| v.blank? }
     end
 
     def merge_brand!(target, source)

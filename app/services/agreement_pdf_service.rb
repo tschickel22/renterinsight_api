@@ -177,37 +177,90 @@ class AgreementPdfService
     }
   end
 
-  # Build map of field_key → resolved value for merge fields
+  # Build map of field_key → resolved value for ALL field types
+  # Mirrors build_combined_merge_values in AgreementSigningController
   def build_values_map
     values = {}
 
-    # From merge_field_values (resolved at send time or from signer input)
-    if @agreement.merge_field_values.is_a?(Hash)
-      @agreement.merge_field_values.each { |k, v| values[k.to_s] = v.to_s }
+    # 1. Resolve live from linked entities
+    contact = @company.contacts.find_by(id: @agreement.contact_id) if @agreement.contact_id.present?
+    account = @company.accounts.find_by(id: @agreement.account_id) if @agreement.account_id.present?
+    deal = @company.deals.find_by(id: @agreement.deal_id) if @agreement.deal_id.present?
+    vehicle = nil
+    if deal&.respond_to?(:vehicle_id) && deal.vehicle_id.present?
+      vehicle = @company.vehicles.find_by(id: deal.vehicle_id)
     end
 
-    # System fields
+    if contact
+      values['contact.first_name'] = contact.first_name.to_s
+      values['contact.last_name'] = contact.last_name.to_s
+      values['contact.full_name'] = [contact.first_name, contact.last_name].compact.join(' ')
+      values['contact.name'] = values['contact.full_name']
+      values['contact.email'] = contact.email.to_s
+      values['contact.phone'] = contact.phone.to_s
+      values['contact.mobile_phone'] = (contact.try(:mobile_phone) || contact.try(:cell_phone)).to_s
+      values['contact.street'] = (contact.try(:street) || contact.try(:address)).to_s
+      values['contact.city'] = contact.try(:city).to_s
+      values['contact.state'] = contact.try(:state).to_s
+      values['contact.zip'] = (contact.try(:zip) || contact.try(:postal_code)).to_s
+    end
+
+    if account
+      values['account.name'] = account.name.to_s
+    end
+
+    if deal
+      values['deal.name'] = (deal.respond_to?(:title) ? deal.title : deal.name).to_s
+      values['deal.amount'] = (deal.respond_to?(:amount) ? deal.amount : deal.try(:value)).to_s
+      values['deal.owner_name'] = deal.respond_to?(:owner) ? [deal.owner&.first_name, deal.owner&.last_name].compact.join(' ') : ''
+    end
+
+    if vehicle
+      values['vehicle.make'] = vehicle.try(:make).to_s
+      values['vehicle.model'] = vehicle.try(:model).to_s
+      values['vehicle.year'] = vehicle.try(:year).to_s
+      values['vehicle.vin'] = (vehicle.try(:vin) || vehicle.try(:serial_number)).to_s
+      values['vehicle.stock_number'] = vehicle.try(:stock_number).to_s
+      values['vehicle.condition'] = vehicle.try(:condition)&.titleize.to_s
+      values['vehicle.sections'] = vehicle.try(:sections).to_s
+      values['vehicle.bedrooms'] = vehicle.try(:bedrooms).to_s
+      values['vehicle.bathrooms'] = (vehicle.try(:bathrooms) || vehicle.try(:baths)).to_s
+      values['vehicle.length'] = vehicle.try(:length).to_s
+      values['vehicle.width'] = vehicle.try(:width).to_s
+      values['vehicle.exterior_color'] = (vehicle.try(:exterior_color) || vehicle.try(:color)).to_s
+      values['vehicle.price'] = (vehicle.try(:price) || vehicle.try(:msrp) || vehicle.try(:sale_price)).to_s
+    end
+
+    values['company.name'] = @company.name.to_s
+    values['company.email'] = @company.try(:email).to_s
+    values['company.phone'] = @company.try(:phone).to_s
+    values['date.today'] = Date.today.strftime('%m/%d/%Y')
+    values['date.current_year'] = Date.today.year.to_s
+
+    # System/agreement fields
     values['agreement.agreement_number'] = @agreement.agreement_number.to_s
     values['agreement.title'] = @agreement.title.to_s
     values['agreement.created_at'] = @agreement.created_at&.strftime('%m/%d/%Y').to_s
     values['agreement.completed_at'] = @agreement.completed_at&.strftime('%m/%d/%Y').to_s
 
-    # Contact fields
-    if @agreement.contact.present?
-      c = @agreement.contact
-      values['contact.first_name'] = c.respond_to?(:first_name) ? c.first_name.to_s : ''
-      values['contact.last_name'] = c.respond_to?(:last_name) ? c.last_name.to_s : ''
-      values['contact.email'] = c.email.to_s if c.respond_to?(:email)
-      values['contact.phone'] = c.phone.to_s if c.respond_to?(:phone)
-      values['contact.name'] = [c.respond_to?(:first_name) ? c.first_name : '', c.respond_to?(:last_name) ? c.last_name : ''].compact.join(' ')
+    # 2. Merge stored merge_field_values (fill gaps)
+    if @agreement.merge_field_values.is_a?(Hash)
+      @agreement.merge_field_values.each do |k, v|
+        next if v.nil? || v.to_s.strip.empty?
+        values[k.to_s] = v.to_s unless values[k.to_s].present?
+      end
     end
 
-    # Account fields
-    if @agreement.account.present?
-      values['account.name'] = @agreement.account.name.to_s
+    # 3. Custom field values with 'custom.' prefix
+    if @agreement.custom_field_values.is_a?(Hash)
+      @agreement.custom_field_values.each do |k, v|
+        next if v.nil?
+        values["custom.#{k}"] = v.to_s
+      end
     end
 
-    Rails.logger.info("[AgreementPdfService] Values map: #{values.keys.join(', ')}")
+    values.reject! { |_, v| v.blank? }
+    Rails.logger.info("[AgreementPdfService] Values map: #{values.size} entries (#{values.keys.first(10).join(', ')}...)")
     values
   end
 
@@ -265,7 +318,10 @@ class AgreementPdfService
 
       Rails.logger.debug("[AgreementPdfService] Stamping: type=#{field_type} key=#{field_key} signer=#{signer_idx} at (#{x_pt.round(1)}, #{y_pt.round(1)}) #{w_pt.round(1)}x#{h_pt.round(1)}")
 
-      applied = case field_type
+      # Look up value from multiple sources
+      value = values_map[field_key] || values_map[p[:id].to_s] || ''
+
+      applied = case field_type.downcase
       when 'signature'
         stamp_signature(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
       when 'initials'
@@ -276,18 +332,10 @@ class AgreementPdfService
         stamp_signer_name(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
       when 'signer_email'
         stamp_signer_email(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
-      when 'text_input', 'custom_text'
-        value = values_map[p[:id].to_s] || values_map[field_key] || ''
-        stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value)
-      when 'date_input', 'custom_date'
-        value = values_map[p[:id].to_s] || values_map[field_key] || ''
-        stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value)
       when 'checkbox', 'custom_checkbox'
-        value = values_map[p[:id].to_s] || values_map[field_key]
         stamp_checkbox(pdf, x_pt, y_pt, w_pt, h_pt, value)
       else
-        # Generic merge field
-        value = values_map[field_key] || values_map[p[:id].to_s] || ''
+        # All other types: text, currency, number, date, text_input, custom_text, etc.
         stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value) if value.present?
       end
 
@@ -389,7 +437,8 @@ class AgreementPdfService
   end
 
   def stamp_checkbox(pdf, x, y, w, h, value)
-    checked = value.to_s.downcase.in?(%w[true yes 1 on checked])
+    # Handle various truthy formats from frontend
+    checked = value.present? && value.to_s.downcase.strip.in?(%w[true yes 1 on checked ✓ ✔ x])
     return false unless checked
 
     pdf.fill_color '1a6b1a'
