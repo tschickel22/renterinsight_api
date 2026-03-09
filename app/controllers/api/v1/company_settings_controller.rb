@@ -12,6 +12,8 @@ module Api
       before_action :authorize_branding_update!, only: [:update_branding]
       before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
       before_action :authorize_settings_update!, only: [:show_portal_modules, :update_portal_modules]
+      before_action :authorize_settings_read!, only: [:show_form_states]
+      before_action :authorize_settings_update!, only: [:update_form_states]
 
       # GET /api/v1/company_settings/operational
       def show_operational
@@ -241,6 +243,65 @@ module Api
         render json: {
           errors: [e.message]
         }, status: :unprocessable_entity
+      end
+
+      # GET /api/v1/company_settings/form_states
+      # Returns the states this company operates in (for filtering platform form templates)
+      def show_form_states
+        # Get allowed states from company column
+        allowed = @company.allowed_form_states || []
+
+        # Auto-detect from company and location addresses
+        auto_detected = []
+        auto_detected << @company.state if @company.state.present?
+        @company.locations.where(is_deleted: [false, nil]).each do |loc|
+          auto_detected << loc.state if loc.state.present?
+        end
+        auto_detected = auto_detected.compact.map(&:upcase).uniq.sort
+
+        # Check current location override
+        current_location_states = []
+        current_location_name = nil
+        if Current.location_id.present?
+          loc = @company.locations.find_by(id: Current.location_id)
+          if loc
+            current_location_states = loc.respond_to?(:allowed_form_states) ? (loc.allowed_form_states || []) : []
+            current_location_name = loc.name
+          end
+        end
+
+        # Effective states follow the resolution chain
+        effective = current_location_states.any? ? current_location_states :
+                    allowed.any? ? allowed : auto_detected
+
+        render json: {
+          allowed_form_states: allowed,
+          auto_detected_states: auto_detected,
+          using_auto_detect: allowed.empty? && current_location_states.empty?,
+          effective_states: effective,
+          current_location_states: current_location_states,
+          current_location_name: current_location_name
+        }
+      end
+
+      # PATCH /api/v1/company_settings/form_states
+      def update_form_states
+        states = params[:allowed_form_states]
+        unless states.is_a?(Array)
+          return render json: { error: 'allowed_form_states must be an array' }, status: :unprocessable_entity
+        end
+
+        # Validate and normalize: uppercase 2-letter codes only
+        cleaned = states.map { |s| s.to_s.strip.upcase }.select { |s| s.match?(/\A[A-Z]{2}\z/) }.uniq.sort
+
+        @company.update!(allowed_form_states: cleaned)
+
+        render json: {
+          allowed_form_states: @company.allowed_form_states,
+          message: "Updated to #{cleaned.length} state(s): #{cleaned.join(', ')}"
+        }
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # GET /api/v1/company_settings/loan

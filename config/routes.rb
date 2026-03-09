@@ -152,6 +152,8 @@ Rails.application.routes.draw do
         patch 'portal_modules', action: :update_portal_modules
         patch :save_communication_settings
         delete :clear_communication_settings
+        get 'form_states', action: :show_form_states
+        patch 'form_states', action: :update_form_states
       end
       
       # ==================== GLOBAL SEARCH ====================
@@ -1115,9 +1117,15 @@ Rails.application.routes.draw do
       resources :agreement_categories, only: [:index, :create, :update, :destroy]
 
       resources :agreement_templates do
+        collection do
+          post :multi_state_create
+          patch :multi_state_update
+          get :state_groups
+        end
         member do
           post :duplicate
           post :preview
+          post :vision_scan
           get 'custom_fields', to: 'agreement_templates#list_custom_fields'
           post 'custom_fields', to: 'agreement_templates#add_custom_field'
           post 'custom_fields/reorder', to: 'agreement_templates#reorder_custom_fields'
