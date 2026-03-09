@@ -69,7 +69,9 @@ class AgreementTemplate < ApplicationRecord
     company_templates = where(company_id: company.id, is_deleted: false)
                           .where(is_platform_template: [false, nil])
 
+    # Exclude master templates — only state copies are shown to users
     platform_templates = where(is_platform_template: true, is_deleted: false, status: 'active')
+                           .where(is_master: [false, nil])
 
     effective_states = resolve_effective_states(company, state_code: state_code)
 

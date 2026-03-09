@@ -1120,6 +1120,7 @@ Rails.application.routes.draw do
         collection do
           post :multi_state_create
           patch :multi_state_update
+          delete :delete_group
           get :state_groups
         end
         member do

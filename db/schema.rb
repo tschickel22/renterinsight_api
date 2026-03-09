@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_09_110001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -300,6 +300,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_110001) do
     t.jsonb "custom_field_definitions", default: [], null: false
     t.integer "page_count"
     t.string "template_group_id"
+    t.boolean "is_master", default: false, null: false
     t.index ["agreement_category_id"], name: "index_agreement_templates_on_agreement_category_id"
     t.index ["company_id", "category"], name: "idx_agr_templates_company_category"
     t.index ["company_id", "status", "is_deleted"], name: "idx_agr_templates_company_status"
@@ -309,6 +310,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_110001) do
     t.index ["is_platform_template", "state_code", "status"], name: "idx_platform_templates_state_lookup"
     t.index ["location_id"], name: "index_agreement_templates_on_location_id"
     t.index ["state_code"], name: "idx_agr_templates_state_code"
+    t.index ["template_group_id", "is_master"], name: "idx_templates_group_master"
     t.index ["template_group_id", "state_code"], name: "idx_agr_templates_group_state", unique: true
     t.index ["template_group_id"], name: "idx_agr_templates_group"
   end

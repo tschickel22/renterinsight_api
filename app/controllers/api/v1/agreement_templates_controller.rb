@@ -18,6 +18,7 @@ module Api
           company_templates = AgreementTemplate.where(company_id: @company.id, is_deleted: false)
                                 .where(is_platform_template: [false, nil])
           platform_templates = AgreementTemplate.where(is_platform_template: true, is_deleted: false)
+                                .where(is_master: [false, nil])  # Masters not shown in picker
           platform_templates = platform_templates.where(state_code: params[:state_code]) if params[:state_code].present?
           templates = AgreementTemplate.where(id: company_templates.select(:id))
                        .or(AgreementTemplate.where(id: platform_templates.select(:id)))
@@ -346,22 +347,37 @@ module Api
               group_id: t.template_group_id,
               form_number: t.form_number,
               form_type: t.form_type,
-              name: t.name.gsub(/ - [A-Z]{2}$/, ''),
+              name: nil,
+              master_id: nil,
               states: [],
               total_states: 0,
               created_at: t.created_at,
               updated_at: t.updated_at
             }
-            groups[t.template_group_id][:states] << {
-              id: t.id,
-              state_code: t.state_code,
-              status: t.status,
-              page_count: t.page_count,
-              custom_fields_count: (t.custom_field_definitions || []).length,
-              field_placements_count: (t.field_placements || []).length + (t.merge_field_placements || []).length,
-              updated_at: t.updated_at
-            }
-            groups[t.template_group_id][:total_states] += 1
+
+            if t.is_master?
+              # Master template — use its name as the group name, store its ID
+              groups[t.template_group_id][:master_id] = t.id
+              groups[t.template_group_id][:name] = t.name
+            else
+              # State copy — add to states list
+              groups[t.template_group_id][:states] << {
+                id: t.id,
+                state_code: t.state_code,
+                status: t.status,
+                page_count: t.page_count,
+                custom_fields_count: (t.custom_field_definitions || []).length,
+                field_placements_count: (t.field_placements || []).length + (t.merge_field_placements || []).length,
+                updated_at: t.updated_at
+              }
+              groups[t.template_group_id][:total_states] += 1
+            end
+
+            # Fallback name from state copies if no master yet (legacy groups)
+            if groups[t.template_group_id][:name].nil? && !t.is_master?
+              groups[t.template_group_id][:name] = t.name.gsub(/ - [A-Z]{2}$/, '')
+            end
+
             if t.updated_at > groups[t.template_group_id][:updated_at]
               groups[t.template_group_id][:updated_at] = t.updated_at
             end
@@ -401,14 +417,38 @@ module Api
           return render json: { error: "Invalid state codes: #{invalid.join(', ')}" }, status: :unprocessable_entity
         end
 
-        group_id = "form_#{SecureRandom.hex(6)}_#{Time.current.strftime('%Y%m%d')}"
+        existing_group_id = params[:template_group_id].presence
+        group_id = existing_group_id || "form_#{SecureRandom.hex(6)}_#{Time.current.strftime('%Y%m%d')}"
         base_params = multi_state_template_params
         base_name = base_params[:name] || 'Form 500'
 
         created = []
         errors_list = []
+        master_id = nil
 
         ActiveRecord::Base.transaction do
+          # Create master record for new groups (not when adding states to existing group)
+          if existing_group_id.blank?
+            master = AgreementTemplate.new(base_params.except(:name))
+            master.company_id = @company.id
+            master.name = base_name
+            master.state_code = nil
+            master.is_platform_template = true
+            master.is_master = true
+            master.template_group_id = group_id
+            master.status = 'draft'
+            master.created_by = current_user
+            master.save!
+            master_id = master.id
+          else
+            # Find existing master to copy fields from
+            existing_master = AgreementTemplate.find_by(
+              template_group_id: existing_group_id, is_master: true, is_deleted: false
+            )
+            master_id = existing_master&.id
+          end
+
+          # Create state copies
           state_codes.each do |sc|
             sc = sc.upcase
             state_name = US_STATE_CODES[sc] || sc
@@ -418,7 +458,7 @@ module Api
               state_code: sc,
               form_number: base_params[:form_number],
               is_deleted: false
-            ).first
+            ).where(is_master: [false, nil]).first
 
             if existing
               errors_list << { state_code: sc, error: "Template already exists for #{state_name} (ID: #{existing.id})" }
@@ -430,6 +470,7 @@ module Api
             template.name = "#{base_name} - #{sc}"
             template.state_code = sc
             template.is_platform_template = true
+            template.is_master = false
             template.template_group_id = group_id
             template.status = 'draft'
             template.created_by = current_user
@@ -446,6 +487,7 @@ module Api
 
         render json: {
           group_id: group_id,
+          master_id: master_id,
           created: created,
           errors: errors_list,
           message: "Created #{created.length} template(s)#{errors_list.any? ? ", #{errors_list.length} skipped" : ''}"
@@ -491,10 +533,15 @@ module Api
           begin
             attrs = update_data.dup
             if rename_base.present?
-              attrs['name'] = "#{rename_base} - #{template.state_code}"
+              if template.is_master?
+                # Master gets the base name (no state suffix)
+                attrs['name'] = rename_base
+              elsif template.state_code.present?
+                attrs['name'] = "#{rename_base} - #{template.state_code}"
+              end
             end
             template.update!(attrs.symbolize_keys)
-            updated << { id: template.id, state_code: template.state_code, name: template.name }
+            updated << { id: template.id, state_code: template.state_code, name: template.name, is_master: template.is_master? }
           rescue => e
             errors_list << { id: template.id, state_code: template.state_code, error: e.message }
           end
@@ -504,6 +551,37 @@ module Api
           updated: updated,
           errors: errors_list,
           message: "Updated #{updated.length} template(s)#{errors_list.any? ? ", #{errors_list.length} failed" : ''}"
+        }
+      end
+
+      # DELETE /api/v1/agreement_templates/delete_group
+      # Soft-deletes all templates in a group, or specific template_ids
+      def delete_group
+        return unless authorize_action!('agreements', 'delete')
+        unless current_user&.role.in?(%w[platform_admin tenant super_admin])
+          return render json: { error: 'Platform admin access required' }, status: :forbidden
+        end
+
+        templates = if params[:template_ids].present?
+          AgreementTemplate.where(id: params[:template_ids], is_deleted: false)
+        elsif params[:group_id].present?
+          AgreementTemplate.where(template_group_id: params[:group_id], is_deleted: false)
+        else
+          return render json: { error: 'template_ids or group_id required' }, status: :unprocessable_entity
+        end
+
+        if templates.empty?
+          return render json: { error: 'No templates found' }, status: :not_found
+        end
+
+        count = templates.count
+        states = templates.pluck(:state_code).compact
+        templates.update_all(is_deleted: true, updated_at: Time.current)
+
+        render json: {
+          deleted_count: count,
+          deleted_states: states,
+          message: "Deleted #{count} template(s): #{states.join(', ')}"
         }
       end
 
@@ -588,6 +666,8 @@ module Api
           form_type: template.form_type,
           form_number: template.form_number,
           is_platform_template: template.is_platform_template,
+          is_master: template.is_master?,
+          template_group_id: template.template_group_id,
           page_count: template.page_count,
           created_at: template.created_at,
           updated_at: template.updated_at
