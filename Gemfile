@@ -105,6 +105,10 @@ gem "roo", "~> 3.0"
 # PDF merging for multi-document agreements
 gem 'combine_pdf', '~> 1.0'
 
+# Puma memory management — auto-restart workers that exceed memory limits
+# Prevents OOM kills on Render Starter (512MB)
+gem 'puma_worker_killer', '~> 0.3'
+
 # PDF text extraction with position data (for AI vision scan field placement)
 gem 'pdf-reader', '~> 2.12'
 
