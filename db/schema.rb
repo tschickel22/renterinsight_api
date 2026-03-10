@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_10_010001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1232,6 +1232,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
     t.boolean "is_deleted", default: false, null: false
     t.string "company_name"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.string "delivery_street"
+    t.string "delivery_city"
+    t.string "delivery_state"
+    t.string "delivery_zip"
+    t.string "delivery_country"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
@@ -1475,6 +1480,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
     t.bigint "secondary_salesperson_id"
     t.string "deal_number"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.string "billing_street"
+    t.string "billing_city"
+    t.string "billing_state"
+    t.string "billing_zip"
+    t.string "billing_country"
+    t.string "delivery_street"
+    t.string "delivery_city"
+    t.string "delivery_state"
+    t.string "delivery_zip"
+    t.string "delivery_country"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -1518,6 +1533,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "is_default"], name: "idx_draw_templates_company_default"
     t.index ["company_id"], name: "index_draw_schedule_templates_on_company_id"
+  end
+
+  create_table "entity_buyers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "contact_id", null: false
+    t.string "buyable_type", null: false
+    t.bigint "buyable_id", null: false
+    t.string "role", default: "co_buyer", null: false
+    t.integer "position", default: 0
+    t.text "notes"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["buyable_type", "buyable_id"], name: "index_entity_buyers_on_buyable"
+    t.index ["company_id", "buyable_type", "buyable_id"], name: "index_entity_buyers_on_company_buyable"
+    t.index ["company_id"], name: "index_entity_buyers_on_company_id"
+    t.index ["contact_id", "buyable_type", "buyable_id"], name: "index_entity_buyers_on_contact_buyable", unique: true, where: "(is_deleted = false)"
+    t.index ["contact_id"], name: "index_entity_buyers_on_contact_id"
   end
 
   create_table "factories", force: :cascade do |t|
@@ -1882,6 +1915,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
     t.integer "sales_rep_id"
     t.integer "quote_id"
     t.jsonb "draw_schedule", default: {}
+    t.string "billing_street"
+    t.string "billing_city"
+    t.string "billing_state"
+    t.string "billing_zip"
+    t.string "billing_country"
+    t.string "delivery_street"
+    t.string "delivery_city"
+    t.string "delivery_state"
+    t.string "delivery_zip"
+    t.string "delivery_country"
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -2032,6 +2076,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
     t.text "interests_requirements"
     t.jsonb "custom_field_values", default: {}, null: false
     t.bigint "vehicle_id"
+    t.string "street"
+    t.string "city"
+    t.string "state"
+    t.string "zip"
+    t.string "country"
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
@@ -3067,6 +3116,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
     t.integer "sales_rep_id"
     t.string "pricing_display", default: "detailed"
     t.jsonb "draw_schedule", default: {}
+    t.string "billing_street"
+    t.string "billing_city"
+    t.string "billing_state"
+    t.string "billing_zip"
+    t.string "billing_country"
+    t.string "delivery_street"
+    t.string "delivery_city"
+    t.string "delivery_state"
+    t.string "delivery_zip"
+    t.string "delivery_country"
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["account_id"], name: "index_quotes_on_account_id"
     t.index ["company_id", "location_id"], name: "index_quotes_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_quotes_on_company_id"
@@ -4433,6 +4493,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_09_120001) do
   add_foreign_key "deals", "users", column: "primary_salesperson_id"
   add_foreign_key "deals", "users", column: "sales_manager_id"
   add_foreign_key "deals", "users", column: "secondary_salesperson_id"
+  add_foreign_key "entity_buyers", "companies"
+  add_foreign_key "entity_buyers", "contacts"
   add_foreign_key "factories", "manufacturers"
   add_foreign_key "field_option_overrides", "companies"
   add_foreign_key "floor_plan_option_applicabilities", "floor_plan_options"

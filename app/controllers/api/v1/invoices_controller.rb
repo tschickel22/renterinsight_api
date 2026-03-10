@@ -422,6 +422,11 @@ class Api::V1::InvoicesController < ApplicationController
       :contact_id, :location_id, :listing_id, :deal_id, :quote_id, :sales_rep_id,
       :invoice_date, :due_date, :tax_rate,
       :notes, :terms, :footer_text,
+      # Addresses (billing + delivery)
+      :billing_street, :billing_city, :billing_state, :billing_zip, :billing_country,
+      :delivery_street, :delivery_city, :delivery_state, :delivery_zip, :delivery_country,
+      # Custom fields
+      custom_field_values: {},
       draw_schedule: {},
       invoice_items_attributes: [
         :id, :item_type, :description, :quantity, :rate, :amount, :listing_id, :position,

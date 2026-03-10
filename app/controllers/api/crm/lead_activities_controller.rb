@@ -254,6 +254,11 @@ module Api
           id: activity.id,
           leadId: activity.lead_id,
           userId: activity.user_id,
+          user: activity.user ? {
+            id: activity.user.id,
+            name: activity.user.name,
+            email: activity.user.email
+          } : nil,
           assignedToId: activity.assigned_to_id,
           assignedTo: activity.assigned_to ? {
             id: activity.assigned_to.id,

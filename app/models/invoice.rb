@@ -1,4 +1,6 @@
 class Invoice < ApplicationRecord
+  include Addressable
+  include Buyable
   include WebhookNotifiable
 
   belongs_to :company

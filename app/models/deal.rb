@@ -1,4 +1,6 @@
 class Deal < ApplicationRecord
+  include Addressable
+  include Buyable
   include LocationAware
   include NotifiableDeal
   include WebhookNotifiable

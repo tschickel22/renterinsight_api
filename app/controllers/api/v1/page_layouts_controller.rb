@@ -250,6 +250,18 @@ module Api
           { key: 'quantity', label: 'Quantity', type: 'number', source: 'standard', required: false, protected: false },
           # Note: source_id, account_id, contact_id, vehicle_id are relationship/lookup fields
           # managed via DealForm only — not supported as inline-editable layout fields
+          # Billing Address
+          { key: 'billing_street', label: 'Billing Street', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_city', label: 'Billing City', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_state', label: 'Billing State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_zip', label: 'Billing Zip', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'billing_country', label: 'Billing Country', type: 'text', source: 'standard', required: false, protected: false },
+          # Delivery Address
+          { key: 'delivery_street', label: 'Delivery Street', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_city', label: 'Delivery City', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_state', label: 'Delivery State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_zip', label: 'Delivery Zip', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_country', label: 'Delivery Country', type: 'text', source: 'standard', required: false, protected: false },
           # Economics
           { key: 'selling_price', label: 'Selling Price', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'unit_cost', label: 'Unit Cost', type: 'currency', source: 'standard', required: false, protected: false },
@@ -314,7 +326,7 @@ module Api
           { key: 'title', label: 'Job Title', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'department', label: 'Department', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'company_name', label: 'Company Name', type: 'text', source: 'standard', required: false, protected: false },
-          { key: 'account_id', label: 'Account', type: 'select', source: 'standard', required: false, protected: false },
+          { key: 'account_id', label: 'Account', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },
           { key: 'is_primary', label: 'Primary Contact', type: 'boolean', source: 'standard', required: false, protected: false },
           { key: 'street', label: 'Street', type: 'text', source: 'standard', required: false, protected: false },
@@ -322,6 +334,12 @@ module Api
           { key: 'state', label: 'State', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'zip', label: 'Zip', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'country', label: 'Country', type: 'text', source: 'standard', required: false, protected: false },
+          # Delivery Address
+          { key: 'delivery_street', label: 'Delivery Street', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_city', label: 'Delivery City', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_state', label: 'Delivery State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_zip', label: 'Delivery Zip', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'delivery_country', label: 'Delivery Country', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'opt_out_email', label: 'Opt Out Email', type: 'boolean', source: 'standard', required: false, protected: false },
           { key: 'opt_out_sms', label: 'Opt Out SMS', type: 'boolean', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
@@ -349,7 +367,13 @@ module Api
             options: ['First Time Buyer', 'Some Experience', 'Experienced', 'Very Experienced'] },
           { key: 'vehicle_id', label: 'Interested Vehicle', type: 'vehicle_picker', source: 'standard', required: false, protected: false },
           { key: 'interests_requirements', label: 'Interests/Requirements', type: 'longtext', source: 'standard', required: false, protected: false },
-          { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
+          { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false },
+          # Address
+          { key: 'street', label: 'Street', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'city', label: 'City', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'state', label: 'State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'zip', label: 'Zip', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'country', label: 'Country', type: 'text', source: 'standard', required: false, protected: false }
         ]
       end
 

@@ -70,6 +70,32 @@ class PageLayout < ApplicationRecord
           ]
         },
         {
+          id: 'billing_address',
+          title: 'Billing Address',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'billing_street', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'billing_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'billing_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'billing_zip', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'billing_country', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'delivery_address',
+          title: 'Delivery Address',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'delivery_street', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'delivery_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_zip', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_country', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
           id: 'deal_dates',
           title: 'Dates',
           columns: 2,
@@ -210,16 +236,29 @@ class PageLayout < ApplicationRecord
           ]
         },
         {
-          id: 'address',
-          title: 'Address',
+          id: 'billing_address',
+          title: 'Billing Address',
           columns: 2,
           collapsed: false,
           fields: [
-            { key: 'street', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'street', type: 'standard', visible: true, required: false, width: 2 },
             { key: 'city', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'state', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'zip', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'country', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'delivery_address',
+          title: 'Delivery Address',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'delivery_street', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'delivery_city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_zip', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'delivery_country', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {
@@ -1045,6 +1084,19 @@ class PageLayout < ApplicationRecord
             { key: 'purchase_timeframe', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'rv_experience', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'vehicle_id', type: 'standard', visible: true, required: false, width: 2 }
+          ]
+        },
+        {
+          id: 'address',
+          title: 'Address',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'street', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'city', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'zip', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'country', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {

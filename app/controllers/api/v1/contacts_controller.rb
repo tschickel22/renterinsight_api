@@ -768,7 +768,13 @@ module Api
           :city,
           :state,
           :zip,
-          :country
+          :country,
+          # Delivery address
+          :delivery_street,
+          :delivery_city,
+          :delivery_state,
+          :delivery_zip,
+          :delivery_country
         )
       end
 
@@ -794,6 +800,12 @@ module Api
           :state,
           :zip,
           :country,
+          # Delivery address
+          :delivery_street,
+          :delivery_city,
+          :delivery_state,
+          :delivery_zip,
+          :delivery_country,
           tags: []
         )
       end
@@ -861,6 +873,11 @@ module Api
           state: contact.state,
           zip: contact.zip,
           country: contact.country,
+          deliveryStreet: contact.delivery_street,
+          deliveryCity: contact.delivery_city,
+          deliveryState: contact.delivery_state,
+          deliveryZip: contact.delivery_zip,
+          deliveryCountry: contact.delivery_country,
           accountName: contact.account&.name,
           customFieldValues: contact.respond_to?(:custom_field_values) ? contact.custom_field_values : {},
           createdAt: contact.created_at,

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Quote < ApplicationRecord
+  include Addressable
+  include Buyable
   include Communicable
   include LocationAware
   include WebhookNotifiable

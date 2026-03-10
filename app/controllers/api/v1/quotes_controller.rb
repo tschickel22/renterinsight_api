@@ -120,7 +120,10 @@ module Api
           'pricing_display',
           'draw_schedule',
           'items',
-          'custom_fields'
+          'custom_fields',
+          # Addresses (billing + delivery)
+          'billing_street', 'billing_city', 'billing_state', 'billing_zip', 'billing_country',
+          'delivery_street', 'delivery_city', 'delivery_state', 'delivery_zip', 'delivery_country'
         )
         
         @quote = @company.quotes.new(safe_params)
@@ -192,7 +195,10 @@ module Api
           'pricing_display',
           'draw_schedule',
           'items',
-          'custom_fields'
+          'custom_fields',
+          # Addresses (billing + delivery)
+          'billing_street', 'billing_city', 'billing_state', 'billing_zip', 'billing_country',
+          'delivery_street', 'delivery_city', 'delivery_state', 'delivery_zip', 'delivery_country'
         )
         
         if @quote.update(safe_params)

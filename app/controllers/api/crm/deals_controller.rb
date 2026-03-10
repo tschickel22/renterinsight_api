@@ -258,6 +258,29 @@ module Api
         
         # Auto-assign owner to current user if not specified
         deal.owner_id ||= current_user&.id
+        deal.user_id ||= current_user&.id
+
+        # Copy addresses from contact or account if not already set
+        if deal.billing_street.blank?
+          if deal.contact_id.present?
+            contact = @company.contacts.find_by(id: deal.contact_id)
+            PipelineCopyService.contact_to_deal(contact, deal) if contact
+          elsif deal.account_id.present?
+            account = @company.accounts.find_by(id: deal.account_id)
+            if account
+              deal.billing_street  ||= account.billing_street
+              deal.billing_city    ||= account.billing_city
+              deal.billing_state   ||= account.billing_state
+              deal.billing_zip     ||= account.billing_postal_code
+              deal.billing_country ||= account.billing_country
+              deal.delivery_street  ||= account.shipping_street
+              deal.delivery_city    ||= account.shipping_city
+              deal.delivery_state   ||= account.shipping_state
+              deal.delivery_zip     ||= account.shipping_postal_code
+              deal.delivery_country ||= account.shipping_country
+            end
+          end
+        end
         
         # Auto-assign location from selector (if user selected a specific location)
         deal.location_id ||= Current.location_id if Current.location_id.present?
@@ -561,6 +584,9 @@ module Api
           :commission_plan_id,
           # Deal Participants (for commission calculation)
           :sales_manager_id, :finance_manager_id, :desk_manager_id, :secondary_salesperson_id,
+          # Addresses (billing + delivery)
+          :billing_street, :billing_city, :billing_state, :billing_zip, :billing_country,
+          :delivery_street, :delivery_city, :delivery_state, :delivery_zip, :delivery_country,
           # Custom fields (JSONB column - merged in update action, never replaced)
           custom_field_values: {}
           # NOTE: company_id is intentionally excluded - it should never change after creation
@@ -586,6 +612,8 @@ module Api
           accountName: deal.account&.name,
           contactId: deal.contact_id,
           contactName: deal.contact ? "#{deal.contact.first_name} #{deal.contact.last_name}".strip : nil,
+          contactEmail: deal.contact&.email,
+          contactPhone: deal.contact&.phone,
           vehicleId: deal.vehicle_id,
           vehicleName: deal.vehicle&.display_name,
           vehicleInventoryId: deal.vehicle&.inventory_id,
@@ -637,6 +665,18 @@ module Api
           dealType: deal.deal_type,
           vertical: deal.vertical,
           quantity: deal.quantity,
+          
+          # Addresses
+          billingStreet: deal.billing_street,
+          billingCity: deal.billing_city,
+          billingState: deal.billing_state,
+          billingZip: deal.billing_zip,
+          billingCountry: deal.billing_country,
+          deliveryStreet: deal.delivery_street,
+          deliveryCity: deal.delivery_city,
+          deliveryState: deal.delivery_state,
+          deliveryZip: deal.delivery_zip,
+          deliveryCountry: deal.delivery_country,
           
           # Commission plan info
           commissionPlanId: deal.commission_plan_id,

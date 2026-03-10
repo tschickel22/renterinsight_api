@@ -524,7 +524,9 @@ module Api
                    :budget_range, :budgetRange, :purchase_timeframe, :purchaseTimeframe,
                    :rv_experience, :rvExperience, :preferred_contact_method, :preferredContactMethod,
                    :interests_requirements, :interestsRequirements,
-                   :vehicle_id, :vehicleId]
+                   :vehicle_id, :vehicleId,
+                   # Address fields
+                   :street, :city, :state, :zip, :country]
 
         root = params.permit(*allowed, lead: {})
         nested = params[:lead].is_a?(ActionController::Parameters) ? params.require(:lead).permit(*allowed) : {}
@@ -547,7 +549,13 @@ module Api
           rv_experience: raw['rv_experience'] || raw['rvExperience'],
           preferred_contact_method: raw['preferred_contact_method'] || raw['preferredContactMethod'],
           interests_requirements: raw['interests_requirements'] || raw['interestsRequirements'],
-          vehicle_id: (raw['vehicle_id'] || raw['vehicleId']).presence&.to_i
+          vehicle_id: (raw['vehicle_id'] || raw['vehicleId']).presence&.to_i,
+          # Address
+          street:  raw['street'],
+          city:    raw['city'],
+          state:   raw['state'],
+          zip:     raw['zip'],
+          country: raw['country']
         }.compact
       end
 

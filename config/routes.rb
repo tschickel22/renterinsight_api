@@ -1102,6 +1102,17 @@ Rails.application.routes.draw do
         end
       end
 
+      # ==================== ENTITY BUYERS (Co-Buyers, Guarantors, Cosigners) ====================
+      resources :deals, only: [] do
+        resources :buyers, controller: 'entity_buyers', only: [:index, :create, :update, :destroy]
+      end
+      resources :quotes, only: [] do
+        resources :buyers, controller: 'entity_buyers', only: [:index, :create, :update, :destroy]
+      end
+      resources :invoices, only: [] do
+        resources :buyers, controller: 'entity_buyers', only: [:index, :create, :update, :destroy]
+      end
+
       # ==================== PAGE LAYOUTS ====================
       get 'page_layouts/:module_name', to: 'page_layouts#show'
       patch 'page_layouts/:module_name', to: 'page_layouts#update'
