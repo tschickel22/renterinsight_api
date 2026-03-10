@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_10_010001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_10_120001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1021,6 +1021,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_10_010001) do
     t.string "zip_code"
     t.string "country", default: "US"
     t.jsonb "allowed_form_states", default: [], null: false
+    t.jsonb "state_tax_rates", default: {}, null: false
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"

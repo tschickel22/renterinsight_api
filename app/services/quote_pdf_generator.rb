@@ -174,8 +174,24 @@ class QuotePdfGenerator
         pdf.text "#{@contact.first_name} #{@contact.last_name}".strip, size: 11, style: :bold
         pdf.text @contact.email, size: 9 if @contact.email.present?
         pdf.text @contact.phone, size: 9 if @contact.phone.present?
+
+        # Address waterfall: contact delivery → contact main → account billing
+        addr = resolve_billed_to_address
+        if addr[:street].present?
+          pdf.text addr[:street], size: 9
+          city_line = [addr[:city], addr[:state]].compact.reject(&:blank?).join(', ')
+          city_line += " #{addr[:zip]}" if addr[:zip].present?
+          pdf.text city_line, size: 9 if city_line.present?
+        end
       elsif @account
         pdf.text @account.name, size: 11, style: :bold
+        # Account billing address
+        if @account.billing_street.present?
+          pdf.text @account.billing_street, size: 9
+          city_line = [@account.billing_city, @account.billing_state].compact.reject(&:blank?).join(', ')
+          city_line += " #{@account.billing_postal_code}" if @account.billing_postal_code.present?
+          pdf.text city_line, size: 9 if city_line.present?
+        end
       end
     end
 
@@ -202,7 +218,7 @@ class QuotePdfGenerator
       pdf.text format_currency(@quote.total || 0), size: 20, style: :bold, align: :right
     end
 
-    pdf.move_cursor_to meta_top - 70
+    pdf.move_cursor_to meta_top - 100
   end
 
   # ── LINE ITEMS ──
@@ -337,6 +353,41 @@ class QuotePdfGenerator
       end
     end
     pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, -45], align: :right, size: 8, color: '999999'
+  end
+
+  # Resolve billed-to address: contact delivery → contact main → account billing
+  def resolve_billed_to_address
+    # 1. Contact delivery address (ship-to)
+    if @contact&.respond_to?(:delivery_street) && @contact.delivery_street.present?
+      return {
+        street: @contact.delivery_street,
+        city: @contact.delivery_city,
+        state: @contact.delivery_state,
+        zip: @contact.delivery_zip
+      }
+    end
+
+    # 2. Contact main address
+    if @contact&.respond_to?(:street) && @contact.street.present?
+      return {
+        street: @contact.street,
+        city: @contact.city,
+        state: @contact.state,
+        zip: @contact.zip
+      }
+    end
+
+    # 3. Account billing address
+    if @account&.respond_to?(:billing_street) && @account.billing_street.present?
+      return {
+        street: @account.billing_street,
+        city: @account.billing_city,
+        state: @account.billing_state,
+        zip: @account.billing_postal_code
+      }
+    end
+
+    { street: nil, city: nil, state: nil, zip: nil }
   end
 
   def format_currency(amount)

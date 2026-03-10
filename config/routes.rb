@@ -154,6 +154,7 @@ Rails.application.routes.draw do
         delete :clear_communication_settings
         get 'form_states', action: :show_form_states
         patch 'form_states', action: :update_form_states
+        get 'tax_rate_for_state', action: :tax_rate_for_state
       end
       
       # ==================== GLOBAL SEARCH ====================

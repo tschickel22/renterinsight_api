@@ -274,13 +274,22 @@ module Api
         effective = current_location_states.any? ? current_location_states :
                     allowed.any? ? allowed : auto_detected
 
+        # State-level tax rates
+        state_tax_rates = @company.respond_to?(:state_tax_rates) ? (@company.state_tax_rates || {}) : {}
+
+        # Default sales tax rate (fallback when no state match)
+        loan_settings = @company.loan_settings || {}
+        default_sales_tax_rate = loan_settings['default_sales_tax_rate'] || loan_settings[:default_sales_tax_rate] || 0.0
+
         render json: {
           allowed_form_states: allowed,
           auto_detected_states: auto_detected,
           using_auto_detect: allowed.empty? && current_location_states.empty?,
           effective_states: effective,
           current_location_states: current_location_states,
-          current_location_name: current_location_name
+          current_location_name: current_location_name,
+          state_tax_rates: state_tax_rates,
+          default_sales_tax_rate: default_sales_tax_rate
         }
       end
 
@@ -294,14 +303,62 @@ module Api
         # Validate and normalize: uppercase 2-letter codes only
         cleaned = states.map { |s| s.to_s.strip.upcase }.select { |s| s.match?(/\A[A-Z]{2}\z/) }.uniq.sort
 
-        @company.update!(allowed_form_states: cleaned)
+        updates = { allowed_form_states: cleaned }
+
+        # Handle state_tax_rates if provided
+        if params[:state_tax_rates].present?
+          tax_rates = {}
+          params[:state_tax_rates].to_unsafe_h.each do |state_code, rate|
+            code = state_code.to_s.strip.upcase
+            next unless code.match?(/\A[A-Z]{2}\z/)
+            tax_rates[code] = rate.to_f
+          end
+          # Only keep rates for selected states
+          tax_rates = tax_rates.select { |k, _| cleaned.include?(k) }
+          updates[:state_tax_rates] = tax_rates
+        end
+
+        # Handle default_sales_tax_rate if provided
+        if params.key?(:default_sales_tax_rate)
+          loan_settings = @company.loan_settings || {}
+          loan_settings['default_sales_tax_rate'] = params[:default_sales_tax_rate].to_f
+          updates[:loan_settings] = loan_settings
+        end
+
+        @company.update!(updates)
 
         render json: {
           allowed_form_states: @company.allowed_form_states,
+          state_tax_rates: @company.respond_to?(:state_tax_rates) ? (@company.state_tax_rates || {}) : {},
+          default_sales_tax_rate: (@company.loan_settings || {})['default_sales_tax_rate'] || 0.0,
           message: "Updated to #{cleaned.length} state(s): #{cleaned.join(', ')}"
         }
       rescue => e
         render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # GET /api/v1/company_settings/tax_rate_for_state?state=WV
+      # Returns the effective tax rate for a given state code
+      # Used by invoice/deal forms to auto-populate based on delivery address
+      def tax_rate_for_state
+        state_code = params[:state].to_s.strip.upcase
+
+        if state_code.blank? || !state_code.match?(/\A[A-Z]{2}\z/)
+          return render json: { error: 'Valid 2-letter state code required' }, status: :unprocessable_entity
+        end
+
+        state_tax_rates = @company.respond_to?(:state_tax_rates) ? (@company.state_tax_rates || {}) : {}
+        loan_settings = @company.loan_settings || {}
+        default_rate = loan_settings['default_sales_tax_rate'] || loan_settings[:default_sales_tax_rate] || 0.0
+
+        # Look up state-specific rate, fall back to default
+        rate = state_tax_rates[state_code] || default_rate
+
+        render json: {
+          state: state_code,
+          tax_rate: rate.to_f,
+          source: state_tax_rates.key?(state_code) ? 'state' : 'default'
+        }
       end
 
       # GET /api/v1/company_settings/loan
