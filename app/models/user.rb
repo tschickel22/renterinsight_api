@@ -282,6 +282,13 @@ class User < ApplicationRecord
     # Determine tier from role if not specified
     effective_tier = tier || role.tier || 'company'
 
+    # DB CHECK CONSTRAINT: tier='location' requires location_id IS NOT NULL
+    # If assigning a location-tier role without a specific location, promote to 'company' tier
+    # so the user gets the permissions company-wide (common for Sales Rep, Service Tech, etc.)
+    if effective_tier == 'location' && location_id.blank?
+      effective_tier = 'company'
+    end
+
     # Check if assignment already exists
     existing = user_role_assignments.find_by(
       role_id: role.id,
@@ -319,15 +326,14 @@ class User < ApplicationRecord
     role = find_role_by_identifier(role_identifier)
     return nil unless role
 
-    effective_tier = tier || role.tier || 'company'
-
     ActiveRecord::Base.transaction do
-      # Remove existing company-tier assignments for this company
-      removed = user_role_assignments.where(company_id: target_company_id, tier: effective_tier).destroy_all
-      Rails.logger.info "🔄 [RBAC] Removed #{removed.count} existing #{effective_tier}-tier role(s) for user #{id}"
+      # Remove ALL existing role assignments for this company (regardless of tier)
+      # This ensures clean replacement when switching between company and location-tier roles
+      removed = user_role_assignments.where(company_id: target_company_id).where(location_id: nil).destroy_all
+      Rails.logger.info "🔄 [RBAC] Removed #{removed.count} existing role(s) for user #{id} in company #{target_company_id}"
 
-      # Assign the new role
-      assign_rbac_role(role_identifier, company_id: target_company_id, tier: effective_tier, assigned_by: assigned_by)
+      # Assign the new role (assign_rbac_role handles tier promotion for location roles without location_id)
+      assign_rbac_role(role_identifier, company_id: target_company_id, assigned_by: assigned_by)
     end
   end
 
@@ -383,7 +389,18 @@ class User < ApplicationRecord
       'Location Administrator' => 'location_admin',
       'location_administrator' => 'location_admin',
       'Location Manager' => 'location_manager',
-      'Location Staff' => 'location_staff'
+      'Location Staff' => 'location_staff',
+      'Service Technician' => 'service_tech',
+      'service_technician' => 'service_tech',
+      'Sales Representative' => 'sales_rep',
+      'sales_representative' => 'sales_rep',
+      'sales_rep' => 'sales_rep',
+      'Finance Staff' => 'finance_staff',
+      'finance_staff' => 'finance_staff',
+      'CRM Specialist' => 'crm_specialist',
+      'crm_specialist' => 'crm_specialist',
+      'Inventory Manager' => 'inventory_manager',
+      'inventory_manager' => 'inventory_manager'
     }
 
     # Try mapped key first
