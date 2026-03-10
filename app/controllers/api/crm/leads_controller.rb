@@ -288,6 +288,12 @@ module Api
               a.notes = @lead.notes
               a.location_id = location_id
               a.account_type = 'converted_lead' if a.respond_to?(:account_type=)
+              # Copy lead address → account billing address
+              a.billing_street      = @lead.street
+              a.billing_city        = @lead.city
+              a.billing_state       = @lead.state
+              a.billing_postal_code = @lead.zip
+              a.billing_country     = @lead.country
             end
 
             Rails.logger.info "✅ [ConvertLead] Account #{account.previously_new_record? ? 'created' : 'reused'}: #{account.id}"
@@ -309,7 +315,13 @@ module Api
                 account_id: account.id,
                 company_id: @lead.company_id,
                 location_id: location_id,
-                notes: "Converted from lead ##{@lead.id}"
+                notes: "Converted from lead ##{@lead.id}",
+                # Copy lead address → contact billing address
+                street: @lead.street,
+                city: @lead.city,
+                state: @lead.state,
+                zip: @lead.zip,
+                country: @lead.country
               )
               
               if contact.save
@@ -339,8 +351,15 @@ module Api
                 value: 0, # Will be updated when products/pricing added to deal
                 expected_close_date: deal_params[:close_date] || deal_params[:expected_close],
                 owner_id: current_user&.id,
+                user_id: current_user&.id,
                 description: deal_params[:description] || "Converted from lead ##{@lead.id}",
-                vehicle_id: @lead.vehicle_id  # Carry over vehicle from lead
+                vehicle_id: @lead.vehicle_id,  # Carry over vehicle from lead
+                # Copy lead address → deal billing address
+                billing_street: @lead.street,
+                billing_city: @lead.city,
+                billing_state: @lead.state,
+                billing_zip: @lead.zip,
+                billing_country: @lead.country
               )
               
               if deal.save
@@ -644,6 +663,12 @@ module Api
             salePrice: l.vehicle.sale_price,
             msrp: l.vehicle.msrp
           } : nil,
+          # Address
+          street: l.street,
+          city: l.city,
+          state: l.state,
+          zip: l.zip,
+          country: l.country,
           customFieldValues: l.respond_to?(:custom_field_values) ? l.custom_field_values : {},
           score: l.lead_scores.max_by(&:updated_at)&.score,
           createdAt: l.created_at,
