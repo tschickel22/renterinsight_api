@@ -558,6 +558,9 @@ class Public::InventoryController < ApplicationController
       # Custom fields (public visibility only)
       custom_fields: public_custom_fields_for(vehicle),
 
+      # Total price (includes add-ons and discounts)
+      total_home_price: vehicle.total_home_price,
+
       # Computed fields
       display_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".strip,
       full_location: [vehicle.location_city, vehicle.location_state].compact.join(', '),
@@ -568,7 +571,31 @@ class Public::InventoryController < ApplicationController
   # JSON for vehicle detail view (full payload)
   def vehicle_detail_json(vehicle)
     # Include all list fields plus additional details
+    # Include inventory packages (add-ons)
+    packages_data = (vehicle.inventory_packages&.ordered || []).map { |pkg|
+      {
+        id: pkg.id,
+        name: pkg.name,
+        description: pkg.description,
+        price: pkg.price&.to_f,
+        include_in_total: pkg.include_in_total,
+        show_price_in_marketing: pkg.show_price_in_marketing,
+        taxable: pkg.respond_to?(:taxable) ? (pkg.taxable || false) : false
+      }
+    }
+
     vehicle_list_json(vehicle).merge(
+      # Total price with add-ons and discounts
+      total_home_price: vehicle.total_home_price,
+      # Pre-discount total (base + packages before any discount)
+      total_price_before_discount: (vehicle.msrp || vehicle.sale_price || 0).to_f + (vehicle.inventory_packages&.where(include_in_total: true)&.sum(:price) || 0).to_f,
+      msrp: vehicle.msrp&.to_f,
+      special_discount_enabled: vehicle.respond_to?(:special_discount_enabled) ? vehicle.special_discount_enabled : false,
+      discount_type: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,
+      discount_value: vehicle.respond_to?(:discount_value) ? vehicle.discount_value : nil,
+      discounted_price: vehicle.respond_to?(:discounted_price) ? vehicle.discounted_price&.to_f : nil,
+      inventory_packages: packages_data,
+
       # Full description
       description: vehicle.description,
       features: vehicle.features || [],

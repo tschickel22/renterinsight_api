@@ -365,7 +365,7 @@ module Api
             options: ['Immediate', '1-3 months', '3-6 months', '6-12 months', '12+ months'] },
           { key: 'rv_experience', label: 'RV Experience', type: 'select', source: 'standard', required: false, protected: false,
             options: ['First Time Buyer', 'Some Experience', 'Experienced', 'Very Experienced'] },
-          { key: 'vehicle_id', label: 'Interested Vehicle', type: 'vehicle_picker', source: 'standard', required: false, protected: false },
+          { key: 'vehicle_id', label: 'Interested Home', type: 'vehicle_picker', source: 'standard', required: false, protected: false },
           { key: 'interests_requirements', label: 'Interests/Requirements', type: 'longtext', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false },
           # Address
