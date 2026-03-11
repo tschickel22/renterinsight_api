@@ -662,6 +662,8 @@ module Api
           salePrice: vehicle.sale_price&.to_f,
           rentPrice: vehicle.rent_price&.to_f,
           msrp: vehicle.msrp&.to_f,
+          specialDiscountEnabled: vehicle.respond_to?(:special_discount_enabled) ? vehicle.special_discount_enabled : false,
+          discountedPrice: vehicle.respond_to?(:discounted_price) ? vehicle.discounted_price&.to_f : nil,
           description: vehicle.description,
           features: vehicle.features || [],
           images: full_image_urls,
@@ -704,6 +706,22 @@ module Api
           insulationType: vehicle.respond_to?(:insulation_type) ? vehicle.insulation_type : nil,
           ceilingType: vehicle.respond_to?(:ceiling_type) ? vehicle.ceiling_type : nil,
           wallType: vehicle.respond_to?(:wall_type) ? vehicle.wall_type : nil,
+          # Inventory packages (add-ons)
+          inventoryPackages: (vehicle.inventory_packages&.ordered || []).map { |pkg|
+            {
+              id: pkg.id,
+              name: pkg.name,
+              description: pkg.description,
+              price: pkg.price&.to_f,
+              includeInTotal: pkg.include_in_total,
+              showPriceInMarketing: pkg.show_price_in_marketing,
+              taxable: pkg.respond_to?(:taxable) ? (pkg.taxable || false) : false
+            }
+          },
+          # Total home price including add-ons and discounts
+          totalHomePrice: vehicle.total_home_price,
+          # Total price before any discounts (msrp + packages)
+          totalPriceBeforeDiscount: (vehicle.msrp || vehicle.sale_price || 0).to_f + (vehicle.inventory_packages&.where(include_in_total: true)&.sum(:price) || 0).to_f,
           # Amenities (boolean flags)
           amenities: {
             fireplace: vehicle.respond_to?(:fireplace) ? vehicle.fireplace : nil,

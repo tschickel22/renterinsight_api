@@ -54,7 +54,7 @@ module Api
         }
         
         # Calculate total values BEFORE search filter
-        total_sale_value = vehicles.sum(:sale_price).to_f
+        total_sale_value = vehicles.includes(:inventory_packages).sum { |v| v.total_home_price.to_f }
         total_rent_value = vehicles.sum(:rent_price).to_f
         
         # Count by type BEFORE search filter
@@ -689,7 +689,7 @@ module Api
           },
           by_status: vehicles.group(:status).count,
           total_value: {
-            sale: vehicles.sum(:sale_price).to_f,
+            sale: vehicles.includes(:inventory_packages).sum { |v| v.total_home_price.to_f },
             rent: vehicles.sum(:rent_price).to_f
           }
         }

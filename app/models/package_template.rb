@@ -17,7 +17,7 @@ class PackageTemplate < ApplicationRecord
       price: default_price,
       cost: cost,
       include_in_total: include_in_total,
-      show_price_in_marketing: false,
+      show_price_in_marketing: show_price_in_marketing.nil? ? true : show_price_in_marketing,
       taxable: taxable || false,
       tax_rate: tax_rate,
       position: position

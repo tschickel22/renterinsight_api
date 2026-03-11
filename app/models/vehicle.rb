@@ -133,9 +133,22 @@ class Vehicle < ApplicationRecord
 
   # Computed total: sale_price + all packages that are included_in_total
   def total_home_price
-    base = sale_price.to_f
     package_total = inventory_packages.included_in_total.sum(:price).to_f
-    base + package_total
+
+    if respond_to?(:special_discount_enabled) && special_discount_enabled && discounted_price.present?
+      # When discount includes packages in its calculation, don't add them again
+      case discount_type
+      when '$ Flat Amount', '% of Total w/ Packages'
+        discounted_price.to_f
+      else
+        # '% of Home Price' discounts base MSRP only — add packages on top
+        discounted_price.to_f + package_total
+      end
+    else
+      # No discount: use MSRP as base, fall back to sale_price, add packages
+      base = msrp.to_f > 0 ? msrp.to_f : sale_price.to_f
+      base + package_total
+    end
   end
 
   def is_rv?

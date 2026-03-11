@@ -84,7 +84,7 @@ module Api
         raw = params.require(:package_template).to_unsafe_h
         normalized = raw.transform_keys { |k| k.to_s.underscore }
         ActionController::Parameters.new(normalized).permit(
-          :name, :description, :default_price, :cost, :include_in_total, :is_active, :position, :applicable_to, :visibility_scope, :taxable, :tax_rate
+          :name, :description, :default_price, :cost, :include_in_total, :is_active, :position, :applicable_to, :visibility_scope, :taxable, :tax_rate, :show_price_in_marketing
         )
       end
 
@@ -102,6 +102,7 @@ module Api
           visibilityScope: template.respond_to?(:visibility_scope) ? (template.visibility_scope || 'all') : 'all',
           taxable: template.respond_to?(:taxable) ? (template.taxable || false) : false,
           taxRate: template.respond_to?(:tax_rate) ? template.tax_rate&.to_f : nil,
+          showPriceInMarketing: template.respond_to?(:show_price_in_marketing) ? (template.show_price_in_marketing.nil? ? true : template.show_price_in_marketing) : true,
           createdAt: template.created_at,
           updatedAt: template.updated_at
         }
