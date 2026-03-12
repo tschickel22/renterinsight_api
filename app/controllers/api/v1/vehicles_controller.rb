@@ -1292,6 +1292,7 @@ module Api
           salePending: :sale_pending,
           # Media
           photoURL: :photo_url,
+          photoUrl: :photo_url,
           virtualTour: :virtual_tour,
           salesPhoto: :sales_photo,
           floorPlanImages: :floor_plan_images,
