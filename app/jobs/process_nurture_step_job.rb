@@ -40,8 +40,12 @@ class ProcessNurtureStepJob < ApplicationJob
     when 'wait'
       # Wait steps are handled by scheduling
       Rails.logger.info "[Nurture] Wait step #{current_step.id} - waiting #{current_step.wait_days} days"
+    when 'task'
+      # Create a task/activity for the entity
+      Rails.logger.info "[Nurture] Creating task for step #{current_step.id}"
+      create_task_activity(entity, current_step)
     when 'call'
-      # Create a reminder/task for manual call
+      # Legacy: treat call steps as task creation
       Rails.logger.info "[Nurture] Creating call task for step #{current_step.id}"
       create_call_reminder(entity, current_step)
     else
@@ -248,6 +252,69 @@ class ProcessNurtureStepJob < ApplicationJob
     Rails.logger.info "[Nurture] ✅ Call activity created for Contact #{contact.id}"
   rescue => e
     Rails.logger.error "[Nurture] Failed to create contact call activity: #{e.message}"
+  end
+
+  # ---- Task step: create a task activity on the entity ----
+
+  def create_task_activity(entity, step)
+    entity_type = entity.class.name
+    user = entity.respond_to?(:owner) ? entity.owner : nil
+    user ||= entity.company.users.where(is_active: true).first if entity.respond_to?(:company)
+    unless user
+      Rails.logger.warn "[Nurture] No user found for task assignment on #{entity_type} #{entity.id}"
+      return
+    end
+
+    due_date = Time.current + ((step.wait_days || 0) > 0 ? step.wait_days.days : 1.hour)
+    subject = step.subject.presence || step.body.presence || "Nurture Task: #{entity_name(entity)}"
+    description = step.body.presence || 'Task created by nurture sequence'
+
+    task_attrs = {
+      user: user,
+      assigned_to: user,
+      activity_type: 'task',
+      subject: subject,
+      description: description,
+      status: 'pending',
+      priority: 'medium',
+      due_date: due_date,
+      reminder_time: Time.current,
+      reminder_method: ['popup'],
+      reminder_sent: false,
+      metadata: {
+        nurture_step_id: step.id,
+        nurture_sequence_id: step.nurture_sequence_id,
+        source: 'nurture_sequence'
+      }
+    }
+
+    case entity_type
+    when 'Lead'
+      LeadActivity.create!(task_attrs.merge(lead: entity))
+    when 'Contact'
+      ContactActivity.create!(task_attrs.merge(contact: entity))
+    when 'Account'
+      AccountActivity.create!(task_attrs.merge(account: entity))
+    when 'Deal'
+      DealActivity.create!(task_attrs.merge(deal: entity))
+    else
+      Rails.logger.warn "[Nurture] Task creation not supported for #{entity_type}"
+      return
+    end
+
+    Rails.logger.info "[Nurture] ✅ Task activity created for #{entity_type} #{entity.id}: #{subject}"
+  rescue => e
+    Rails.logger.error "[Nurture] Failed to create task activity for #{entity.class.name} #{entity.id}: #{e.message}"
+  end
+
+  def entity_name(entity)
+    if entity.respond_to?(:first_name)
+      "#{entity.first_name} #{entity.last_name}".strip
+    elsif entity.respond_to?(:name)
+      entity.name
+    else
+      "#{entity.class.name} #{entity.id}"
+    end
   end
 
   # Build merge field context from any entity

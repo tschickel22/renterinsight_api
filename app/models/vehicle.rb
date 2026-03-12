@@ -80,7 +80,11 @@ class Vehicle < ApplicationRecord
   scope :available_to_order, -> { active.where(status: 'available_to_order') }
   scope :in_inventory, -> { active.where.not(status: 'available_to_order') }  # Exclude catalog items from inventory counts
   scope :by_type, ->(type) { where(listing_type: type) }
-  scope :by_status, ->(status) { where(status: status) }
+  scope :by_status, ->(status) {
+    # Support comma-separated status values (e.g., 'available,available_to_order')
+    statuses = status.is_a?(Array) ? status : status.to_s.split(',').map(&:strip)
+    where(status: statuses)
+  }
   scope :by_year, ->(year) { where(year: year) }
   scope :by_make, ->(make) { where('LOWER(make) = ?', make.to_s.downcase) }
   scope :by_model, ->(model) { where('LOWER(model) = ?', model.to_s.downcase) }

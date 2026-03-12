@@ -58,7 +58,7 @@ module Api
         
         # Pagination
         page = params[:page]&.to_i || 1
-        per_page = [params[:per_page]&.to_i || 25, 100].min
+        per_page = [params[:per_page]&.to_i || 25, 500].min  # Allow up to 500 for dropdown pickers
         total_count = parcels.count
         parcels = parcels.offset((page - 1) * per_page).limit(per_page)
         

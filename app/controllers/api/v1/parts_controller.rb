@@ -75,7 +75,7 @@ module Api
 
         # Pagination
         page = (params[:page] || 1).to_i
-        per_page = [(params[:per_page] || 50).to_i, 200].min
+        per_page = [(params[:per_page] || 50).to_i, 500].min  # Allow up to 500 for dropdown pickers
         parts = parts.offset((page - 1) * per_page).limit(per_page)
 
         # Include stock levels

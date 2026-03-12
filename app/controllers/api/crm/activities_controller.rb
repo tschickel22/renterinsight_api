@@ -11,7 +11,12 @@ module Api
       # GET /api/crm/leads/activities
       # Collection endpoint for all lead activities
       def lead_activities
-        activities = @company.leads.includes(:lead_activities => [:user, :assigned_to])
+        # Filter out converted leads (they're done) and respect location filtering
+        leads_scope = @company.leads.where(is_converted: [false, nil])
+        leads_scope = leads_scope.where(location_id: [Current.location_id, nil]) if Current.location_filtered?
+        
+        activities = leads_scope
+                              .includes(:lead_activities => [:user, :assigned_to])
                               .flat_map(&:lead_activities)
         
         # Filter by activity_type if provided
@@ -38,7 +43,12 @@ module Api
       # GET /api/crm/accounts/activities
       # Collection endpoint for all account activities
       def account_activities
-        activities = @company.accounts.includes(:activities => [:user, :assigned_to])
+        # Filter out deleted accounts and respect location filtering
+        accounts_scope = @company.accounts.where(is_deleted: [false, nil])
+        accounts_scope = accounts_scope.where(location_id: [Current.location_id, nil]) if Current.location_filtered?
+        
+        activities = accounts_scope
+                              .includes(:activities => [:user, :assigned_to])
                               .flat_map(&:activities)
         
         # Filter by activity_type if provided
@@ -65,7 +75,12 @@ module Api
       # GET /api/crm/contacts/activities
       # Collection endpoint for all contact activities
       def contact_activities
-        activities = @company.contacts.includes(:contact_activities => [:user, :assigned_to])
+        # Filter out deleted contacts and respect location filtering
+        contacts_scope = @company.contacts.where(is_deleted: [false, nil])
+        contacts_scope = contacts_scope.where(location_id: [Current.location_id, nil]) if Current.location_filtered?
+        
+        activities = contacts_scope
+                              .includes(:contact_activities => [:user, :assigned_to])
                               .flat_map(&:contact_activities)
         
         # Filter by activity_type if provided
@@ -92,7 +107,12 @@ module Api
       # GET /api/crm/deals/activities
       # Collection endpoint for all deal activities
       def deal_activities
-        activities = @company.deals.includes(:activities => [:user, :assigned_to])
+        # Deals don't have is_deleted - respect location filtering
+        deals_scope = @company.deals
+        deals_scope = deals_scope.where(location_id: [Current.location_id, nil]) if Current.location_filtered?
+        
+        activities = deals_scope
+                              .includes(:activities => [:user, :assigned_to])
                               .flat_map(&:activities)
         
         # Filter by activity_type if provided
