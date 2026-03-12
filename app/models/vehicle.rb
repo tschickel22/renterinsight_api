@@ -4,6 +4,9 @@ class Vehicle < ApplicationRecord
   include LocationAware
   include WebhookNotifiable
   
+  # Virtual attribute for import: accepts URL string, converts to floor_plan_images array
+  attr_accessor :floor_plan_url
+
   # Associations
   belongs_to :company, optional: true
   belongs_to :location, optional: true
@@ -16,6 +19,9 @@ class Vehicle < ApplicationRecord
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
+
+  # Inventory features (Option B - individual searchable/filterable records)
+  has_many :inventory_features, dependent: :destroy
 
   # Vehicle types
   TYPES = %w[rv manufactured_home].freeze
@@ -46,7 +52,7 @@ class Vehicle < ApplicationRecord
   ENGINE_TYPES = ['V6', 'V8', 'V10', 'I4', 'I6', 'Diesel', 'Other'].freeze
 
   # Validations
-  validates :inventory_id, presence: true, uniqueness: { scope: :company_id }
+  validates :inventory_id, presence: true, uniqueness: { scope: :company_id, conditions: -> { where(is_deleted: [false, nil]) } }
   validates :listing_type, presence: true, inclusion: { in: TYPES }
   validates :status, presence: true, inclusion: { in: STATUSES }
   validates :year, :make, :model, presence: true
@@ -60,7 +66,7 @@ class Vehicle < ApplicationRecord
   # MH-specific validations
   # FIX: Removed strict numericality validation to allow "4+" values
   with_options if: -> { listing_type == 'manufactured_home' } do
-    validates :serial_number, presence: true, uniqueness: { scope: :company_id }
+    validates :serial_number, presence: true, uniqueness: { scope: :company_id, conditions: -> { where(is_deleted: [false, nil]) } }
     validates :bedrooms, :bathrooms, presence: true
     # Bedrooms and bathrooms are validated in normalize_bedroom_bathroom_values callback
   end
@@ -95,6 +101,8 @@ class Vehicle < ApplicationRecord
   before_validation :normalize_bedroom_bathroom_values  # FIX: Added to handle "4+" values
   before_validation :generate_inventory_id, on: :create
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
+  after_save :sync_inventory_features, if: :saved_change_to_features?
+  before_save :process_media_urls
 
   # Soft delete
   def soft_delete!
@@ -184,11 +192,63 @@ class Vehicle < ApplicationRecord
   def normalize_fields
     self.make = make&.titleize
     self.model = model&.titleize
-    self.status = status&.downcase
+    self.status = normalize_status(status)
     self.listing_type = listing_type&.downcase
+
+    # MH: Auto-copy vin to serial_number if serial_number is blank
+    if listing_type == 'manufactured_home' && serial_number.blank? && vin.present?
+      self.serial_number = vin
+    end
+
+    # Auto-copy dealer_cost to cost if cost is blank (Invoice Cost = Cost in UI)
+    if cost.blank? && dealer_cost.present?
+      self.cost = dealer_cost
+    end
   end
 
   # FIX: New method to handle "4+" bedroom/bathroom values
+  # Process photo_url (pipe-delimited → images array) and floor_plan_url → floor_plan_images
+  def process_media_urls
+    # Split pipe-delimited photo_url into images array
+    if photo_url.present? && photo_url.include?('|')
+      urls = photo_url.split('|').map(&:strip).reject(&:blank?)
+      self.photo_url = urls.first
+      self.images = urls.map { |url| { 'url' => url } } if images.blank? || images.empty?
+    end
+
+    # Convert floor_plan_url string → floor_plan_images array
+    if floor_plan_url.present? && (floor_plan_images.blank? || floor_plan_images.empty?)
+      fp_urls = floor_plan_url.to_s.split('|').map(&:strip).reject(&:blank?)
+      self.floor_plan_images = fp_urls.map { |url| { 'url' => url } }
+    end
+
+    # If no photos but floor plans exist, copy first floor plan as primary photo
+    if photo_url.blank? && floor_plan_images.present? && floor_plan_images.any?
+      first_fp = floor_plan_images.first
+      fp_url = first_fp.is_a?(Hash) ? (first_fp['url'] || first_fp[:url]) : first_fp
+      self.photo_url = fp_url if fp_url.present?
+      self.images = [{ 'url' => fp_url }] if (images.blank? || images.empty?) && fp_url.present?
+    end
+  end
+
+  def normalize_status(raw)
+    return 'available' if raw.blank?
+    mapped = {
+      'active' => 'available',
+      'in stock' => 'available',
+      'for sale' => 'available',
+      'on hold' => 'reserved',
+      'under contract' => 'pending',
+      'available to order' => 'available_to_order',
+      'availabletoorder' => 'available_to_order',
+      'to order' => 'available_to_order',
+      'catalog' => 'available_to_order',
+      'on order' => 'available_to_order',
+    }
+    downcased = raw.to_s.strip.downcase
+    mapped[downcased] || (STATUSES.include?(downcased) ? downcased : 'available')
+  end
+
   def normalize_bedroom_bathroom_values
     return unless listing_type == 'manufactured_home'
     
@@ -259,6 +319,30 @@ class Vehicle < ApplicationRecord
   # Fire custom lifecycle webhook events on status transitions
   # WebhookNotifiable handles generic vehicle.created/updated/deleted
   # This adds vehicle.sold and vehicle.archived for specific transitions.
+  # Sync the features JSON array → inventory_features table (Option B)
+  # Runs whenever the features column changes, keeping both in sync.
+  def sync_inventory_features
+    return unless company_id.present?
+    return unless features.is_a?(Array)
+
+    existing_names = inventory_features.pluck(:name).map(&:downcase)
+    new_names = features.map(&:strip).reject(&:blank?)
+
+    # Add new features not yet in the table
+    new_names.each do |name|
+      next if existing_names.include?(name.downcase)
+      inventory_features.create(name: name, company_id: company_id, is_standard: true)
+    rescue ActiveRecord::RecordInvalid
+      # Skip duplicates
+    end
+
+    # Remove standard features no longer in the array (keep custom ones)
+    if new_names.any?
+      stale = inventory_features.standard.where.not('LOWER(name) IN (?)', new_names.map(&:downcase))
+      stale.destroy_all
+    end
+  end
+
   def fire_lifecycle_webhooks
     event = case status
             when 'sold' then 'vehicle.sold'

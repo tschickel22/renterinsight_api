@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_11_120001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_12_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1707,6 +1707,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_11_120001) do
     t.boolean "lead_created", default: false
     t.bigint "lead_id"
     t.index ["submitted_at"], name: "index_intake_submissions_on_submitted_at"
+  end
+
+  create_table "inventory_features", force: :cascade do |t|
+    t.bigint "vehicle_id", null: false
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "category"
+    t.boolean "is_standard", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "idx_inv_features_category"
+    t.index ["company_id", "name"], name: "idx_inv_features_company_name"
+    t.index ["company_id"], name: "index_inventory_features_on_company_id"
+    t.index ["vehicle_id", "name"], name: "idx_inv_features_vehicle_name", unique: true
+    t.index ["vehicle_id"], name: "index_inventory_features_on_vehicle_id"
   end
 
   create_table "inventory_packages", force: :cascade do |t|
@@ -4154,6 +4169,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_11_120001) do
     t.string "discount_type"
     t.decimal "discount_value", precision: 12, scale: 2
     t.decimal "discounted_price", precision: 12, scale: 2
+    t.string "insulation_r_roof", comment: "Roof insulation R-value (e.g. R-28, R-40)"
+    t.string "insulation_r_wall", comment: "Wall insulation R-value (e.g. R-11, R-19)"
+    t.string "insulation_r_floor", comment: "Floor insulation R-value (e.g. R-11)"
+    t.string "floor_joist_size", comment: "Floor joist dimensions (e.g. 2x6, 2x8, 2x10)"
+    t.string "electrical_service", comment: "Electrical service rating (e.g. 100 AMP, 200 AMP)"
+    t.decimal "modular_conversion_cost", precision: 10, scale: 2, comment: "Cost for modular conversion package"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
@@ -4509,6 +4530,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_11_120001) do
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_forms", "users", column: "notified_user_id"
   add_foreign_key "intake_submissions", "leads"
+  add_foreign_key "inventory_features", "companies"
+  add_foreign_key "inventory_features", "vehicles"
   add_foreign_key "inventory_packages", "package_templates"
   add_foreign_key "inventory_packages", "vehicles"
   add_foreign_key "inventory_transactions", "bins"

@@ -32,8 +32,12 @@ module Api
           @company.vehicles.active
         end
         
-        # Apply strict location filter - only vehicles explicitly assigned to selected location
-        if Current.location_filtered?
+        # Apply location filter - skip if 'all_locations' param sent
+        if params[:all_locations].present? && params[:all_locations] == 'true'
+          # Show all locations - no location filter applied
+        elsif params[:location_id].present? && params[:location_id] != 'all'
+          vehicles = vehicles.where(location_id: params[:location_id])
+        elsif Current.location_filtered?
           vehicles = vehicles.where(location_id: Current.location_id)
         end
         
@@ -44,10 +48,18 @@ module Api
         vehicles = vehicles.by_make(params[:make]) if params[:make].present?
         vehicles = vehicles.by_model(params[:model]) if params[:model].present?
         
+        # Advanced MH filters
+        vehicles = vehicles.where(bedrooms: params[:bedrooms]) if params[:bedrooms].present?
+        vehicles = vehicles.where(bathrooms: params[:bathrooms]) if params[:bathrooms].present?
+        vehicles = vehicles.where('sale_price >= ?', params[:min_price].to_f) if params[:min_price].present?
+        vehicles = vehicles.where('sale_price <= ?', params[:max_price].to_f) if params[:max_price].present?
+        vehicles = vehicles.where(home_type: params[:home_type]) if params[:home_type].present?
+        
         # Count stats BEFORE search filter (stats tiles show ALL vehicles)
         all_vehicles_count = vehicles.count
         status_counts = {
           available: vehicles.available.count,
+          available_to_order: vehicles.available_to_order.count,
           reserved: vehicles.reserved.count,
           sold: vehicles.sold.count,
           pending: vehicles.pending.count
@@ -81,7 +93,7 @@ module Api
         # Pagination
         page = params[:page]&.to_i || 1
         per_page = [params[:per_page]&.to_i || 25, 100].min
-        vehicles = vehicles.offset((page - 1) * per_page).limit(per_page)
+        vehicles = vehicles.includes(:location).offset((page - 1) * per_page).limit(per_page)
 
         render json: {
           vehicles: vehicles.map { |v| vehicle_json(v) },
@@ -104,27 +116,79 @@ module Api
       end
 
       def create
-        vehicle = @company.vehicles.new(vehicle_params)
-
-        # Handle custom_field_values on create (same merge pattern as update)
-        custom_field_values_param = params[:vehicle]&.dig(:custom_field_values) || params[:vehicle]&.dig(:customFieldValues)
-        if custom_field_values_param.present?
-          vehicle.custom_field_values = custom_field_values_param.to_unsafe_h
+        vp = vehicle_params
+        
+        # UPSERT: If VIN/serial already exists for this company, update instead of fail
+        # Check active records first, then soft-deleted (to restore them)
+        existing = nil
+        serial = vp[:serial_number].presence || vp[:vin].presence
+        if serial.present?
+          existing = @company.vehicles.where(is_deleted: [false, nil]).find_by(serial_number: serial)
+          existing ||= @company.vehicles.where(is_deleted: [false, nil]).find_by(vin: serial)
+          # Also check soft-deleted records (restore instead of failing on uniqueness)
+          existing ||= @company.vehicles.where(is_deleted: true).find_by(serial_number: serial)
+          existing ||= @company.vehicles.where(is_deleted: true).find_by(vin: serial)
         end
         
-        # Auto-assign location from selector (if user selected a specific location)
-        vehicle.location_id ||= Current.location_id if Current.location_id.present?
-        
-        # RBAC fallback: Location-tier users auto-assign to their first location if no selector
-        if vehicle.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
-          location_ids = permission_service.accessible_location_ids
-          vehicle.location_id ||= location_ids.first if location_ids.any?
-        end
-
-        if vehicle.save
-          render json: { vehicle: vehicle_json(vehicle, detailed: true) }, status: :created
+        if existing
+          # Update existing vehicle with new data (skip nil values to preserve existing data)
+          update_attrs = vp.to_h.reject { |_k, v| v.nil? || v == '' }
+          
+          # Restore soft-deleted records
+          update_attrs[:is_deleted] = false if existing.is_deleted?
+          
+          # Assign location: CSV locationId/locationName > current location selector
+          resolved_loc, loc_error = resolve_import_location_id
+          if loc_error
+            render json: { errors: [loc_error] }, status: :unprocessable_entity
+            return
+          end
+          update_attrs[:location_id] = resolved_loc if resolved_loc.present?
+          
+          # Handle custom_field_values merge
+          custom_field_values_param = params[:vehicle]&.dig(:custom_field_values) || params[:vehicle]&.dig(:customFieldValues)
+          if custom_field_values_param.present?
+            existing_custom = existing.custom_field_values || {}
+            update_attrs[:custom_field_values] = existing_custom.merge(custom_field_values_param.to_unsafe_h)
+          end
+          
+          if existing.update(update_attrs)
+            render json: { vehicle: vehicle_json(existing, detailed: true), upsert: 'updated' }, status: :ok
+          else
+            Rails.logger.error "[VehiclesController#create] Update failed for #{existing.make} #{existing.model}: #{existing.errors.full_messages.join(', ')}"
+            render json: { errors: existing.errors.full_messages }, status: :unprocessable_entity
+          end
         else
-          render json: { errors: vehicle.errors.full_messages }, status: :unprocessable_entity
+          # Create new vehicle
+          vehicle = @company.vehicles.new(vp)
+
+          # Handle custom_field_values on create
+          custom_field_values_param = params[:vehicle]&.dig(:custom_field_values) || params[:vehicle]&.dig(:customFieldValues)
+          if custom_field_values_param.present?
+            vehicle.custom_field_values = custom_field_values_param.to_unsafe_h
+          end
+          
+          # Assign location: CSV locationId/locationName > current location selector > RBAC fallback
+          resolved_loc, loc_error = resolve_import_location_id
+          if loc_error
+            render json: { errors: [loc_error] }, status: :unprocessable_entity
+            return
+          end
+          vehicle.location_id ||= resolved_loc if resolved_loc.present?
+          
+          # RBAC fallback: Location-tier users auto-assign to their first location if no selector
+          if vehicle.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
+            location_ids = permission_service.accessible_location_ids
+            vehicle.location_id ||= location_ids.first if location_ids.any?
+          end
+
+          if vehicle.save
+            render json: { vehicle: vehicle_json(vehicle, detailed: true), upsert: 'created' }, status: :created
+          else
+            Rails.logger.error "[VehiclesController#create] Validation failed for #{vehicle.make} #{vehicle.model}: #{vehicle.errors.full_messages.join(', ')}"
+            Rails.logger.error "[VehiclesController#create] listing_type=#{vehicle.listing_type} status=#{vehicle.status} vin=#{vehicle.vin} serial=#{vehicle.serial_number} bedrooms=#{vehicle.bedrooms} bathrooms=#{vehicle.bathrooms}"
+            render json: { errors: vehicle.errors.full_messages }, status: :unprocessable_entity
+          end
         end
       end
 
@@ -795,22 +859,64 @@ module Api
       end
 
       def import
-        # Handle CSV import
         return render json: { error: 'No file provided' }, status: :bad_request unless params[:file]
 
         require 'csv'
-        
+
         file = params[:file]
         imported = []
         errors = []
+        row_number = 1
 
         CSV.foreach(file.path, headers: true, header_converters: :symbol) do |row|
-          vehicle = @company.vehicles.new(csv_row_to_params(row))
-          
-          if vehicle.save
-            imported << vehicle
-          else
-            errors << { row: row.to_h, errors: vehicle.errors.full_messages }
+          row_number += 1
+          begin
+            vehicle = @company.vehicles.new(csv_row_to_params(row))
+
+            if vehicle.save
+              # Option B: Split features on semicolons into individual records
+              features_raw = row[:features] || row[:Features]
+              if features_raw.present?
+                feature_names = features_raw.to_s.split(';').map(&:strip).reject(&:blank?)
+                feature_names.each do |feature_name|
+                  vehicle.inventory_features.create(
+                    name: feature_name,
+                    company_id: @company.id,
+                    is_standard: true
+                  )
+                rescue ActiveRecord::RecordInvalid
+                  # Skip duplicates silently
+                end
+
+                # Also store as JSON array for backward compatibility
+                vehicle.update_column(:features, feature_names)
+              end
+
+              # Split photo URLs on pipe into images array
+              photo_raw = row[:photo_url] || row[:photoUrl] || row[:Photo_URL]
+              if photo_raw.present? && photo_raw.to_s.include?('|')
+                urls = photo_raw.to_s.split('|').map(&:strip).reject(&:blank?)
+                vehicle.update_columns(
+                  photo_url: urls.first,
+                  images: urls.map { |url| { 'url' => url } }
+                )
+              elsif photo_raw.present?
+                vehicle.update_column(:photo_url, photo_raw.to_s.strip)
+              end
+
+              # Floor plan URL → floor_plan_images array
+              fp_raw = row[:floor_plan_url] || row[:floorPlanUrl] || row[:Floor_Plan_URL]
+              if fp_raw.present?
+                fp_urls = fp_raw.to_s.split('|').map(&:strip).reject(&:blank?)
+                vehicle.update_column(:floor_plan_images, fp_urls.map { |url| { 'url' => url } })
+              end
+
+              imported << vehicle
+            else
+              errors << { row: row_number, errors: vehicle.errors.full_messages }
+            end
+          rescue => e
+            errors << { row: row_number, errors: [e.message] }
           end
         end
 
@@ -900,6 +1006,37 @@ module Api
       end
 
       private
+
+      # Resolve location from import params: locationId > locationName > Current.location_id
+      # Returns [location_id, error_message]
+      def resolve_import_location_id
+        # 1. Direct location_id from CSV
+        loc_id = params[:vehicle]&.dig(:locationId) || params[:vehicle]&.dig(:location_id)
+        if loc_id.present?
+          loc = @company.locations.find_by(id: loc_id)
+          if loc
+            return [loc.id, nil]
+          else
+            available = @company.locations.pluck(:id, :name).map { |id, name| "#{id}: #{name}" }.join(', ')
+            return [nil, "Location ID #{loc_id} not found. Available: #{available}"]
+          end
+        end
+        
+        # 2. Location name lookup from CSV
+        loc_name = params[:vehicle]&.dig(:locationName) || params[:vehicle]&.dig(:location_name)
+        if loc_name.present?
+          loc = @company.locations.where('name ILIKE ?', loc_name.to_s.strip).first
+          if loc
+            return [loc.id, nil]
+          else
+            available = @company.locations.pluck(:name).join(', ')
+            return [nil, "Location '#{loc_name}' not found. Available: #{available}"]
+          end
+        end
+        
+        # 3. No location specified in CSV — fall back to current location selector
+        [Current.location_id, nil]
+      end
 
       def generate_inventory_id
         # Generate a new unique inventory ID
@@ -1093,6 +1230,7 @@ module Api
           dateInStock: :date_in_stock,
           dateSold: :date_sold,
           inventoryId: :inventory_id,
+          stockNumber: :inventory_id,
           mileageUnit: :mileage_unit,
           exteriorColor: :exterior_color,
           interiorColor: :interior_color,
@@ -1200,7 +1338,16 @@ module Api
           discountValue: :discount_value,
           discountedPrice: :discounted_price,
           # Custom field values (Page Layout Editor)
-          customFieldValues: :custom_field_values
+          customFieldValues: :custom_field_values,
+          # MH Standard Columns
+          insulationRRoof: :insulation_r_roof,
+          insulationRWall: :insulation_r_wall,
+          insulationRFloor: :insulation_r_floor,
+          floorJoistSize: :floor_joist_size,
+          electricalService: :electrical_service,
+          modularConversionCost: :modular_conversion_cost,
+          # Media: floor plan URL string → virtual attr → floor_plan_images array
+          floorPlanUrl: :floor_plan_url
         }
         
         # Copy and transform camelCase fields
@@ -1272,7 +1419,12 @@ module Api
           # Dates
           :date_in_stock, :date_sold,
           # Custom fields
-          :custom_field_values
+          :custom_field_values,
+          # MH Standard Columns
+          :insulation_r_roof, :insulation_r_wall, :insulation_r_floor,
+          :floor_joist_size, :electrical_service, :modular_conversion_cost,
+          # Media: virtual attr
+          :floor_plan_url
         ]
         
         direct_fields.each do |field|
@@ -1334,6 +1486,10 @@ module Api
           :location_id,
           :use_location_address,
           :sections,  # NEW: Number of sections for manufactured homes
+          # MH Standard Columns
+          :insulation_r_roof, :insulation_r_wall, :insulation_r_floor,
+          :floor_joist_size, :electrical_service, :modular_conversion_cost,
+          :floor_plan_url,  # Virtual attr: URL string → floor_plan_images array in model callback
           # Arrays
           features: [], images: [], videos: [], appliances: [], floor_plan_images: []
           # NOTE: custom_field_values is handled directly in update action (not here)
@@ -1377,9 +1533,10 @@ module Api
           description: vehicle.description,
           notes: vehicle.notes,
           location: {
-            city: vehicle.location_city,
-            state: vehicle.location_state,
-            zip: vehicle.location_zip
+            city: vehicle.location_city.presence || vehicle.location&.city,
+            state: vehicle.location_state.presence || vehicle.location&.state,
+            zip: vehicle.location_zip.presence || vehicle.location&.zip_code,
+            name: vehicle.location&.name
           },
           # Location fields for form
           locationId: vehicle.location_id,
@@ -1584,7 +1741,18 @@ module Api
             oven: vehicle.oven,
             dishwasher: vehicle.dishwasher,
             clothesWasher: vehicle.clothes_washer,
-            clothesDryer: vehicle.clothes_dryer
+            clothesDryer: vehicle.clothes_dryer,
+            # MH Standard Columns
+            insulationRRoof: vehicle.insulation_r_roof,
+            insulationRWall: vehicle.insulation_r_wall,
+            insulationRFloor: vehicle.insulation_r_floor,
+            floorJoistSize: vehicle.floor_joist_size,
+            electricalService: vehicle.electrical_service,
+            modularConversionCost: vehicle.modular_conversion_cost&.to_f,
+            # Inventory features (Option B)
+            inventoryFeatures: vehicle.inventory_features.order(:name).map { |f|
+              { id: f.id, name: f.name, category: f.category, isStandard: f.is_standard }
+            }
           })
         end
 
@@ -1617,29 +1785,143 @@ module Api
       end
 
       def csv_row_to_params(row)
-        # Map CSV columns to vehicle params
-        # This is a basic mapping - can be enhanced based on actual CSV structure
         {
-          listing_type: row[:type] || row[:listing_type],
+          listing_type: row[:type] || row[:listing_type] || 'manufactured_home',
           status: row[:status] || 'available',
-          inventory_id: row[:inventory_id] || row[:stock_number],
+          inventory_id: row[:inventory_id] || row[:stock_number] || row[:stockNumber],
           year: row[:year],
           make: row[:make],
           model: row[:model],
           trim: row[:trim],
           color: row[:color],
-          sale_price: row[:sale_price] || row[:price],
-          rent_price: row[:rent_price],
+          condition: row[:condition] || 'new',
+          sale_price: row[:sale_price] || row[:salePrice] || row[:price],
+          rent_price: row[:rent_price] || row[:rentPrice],
+          rent_to_own_price: row[:rent_to_own_price] || row[:rentToOwnPrice],
+          deposit_amount: row[:deposit_amount] || row[:depositAmount],
+          msrp: row[:msrp],
+          cost: row[:cost],
+          dealer_cost: row[:dealer_cost] || row[:dealerCost],
+          freight_cost: row[:freight_cost] || row[:freightCost],
+          pdi_cost: row[:pdi_cost] || row[:pdiCost],
+          total_cost: row[:total_cost] || row[:totalCost],
+          holdback_amount: row[:holdback_amount] || row[:holdbackAmount],
+          floor_plan_rate: row[:floor_plan_rate] || row[:floorPlanRate],
+          target_gross: row[:target_gross] || row[:targetGross],
+          minimum_price: row[:minimum_price] || row[:minimumPrice],
+          price_currency: row[:price_currency] || row[:priceCurrency] || 'USD',
           description: row[:description],
-          vin: row[:vin],
-          serial_number: row[:serial_number],
+          notes: row[:notes],
+          vin: row[:vin] || row[:vin_hud_label],
+          serial_number: row[:serial_number] || row[:serialNumber],
           mileage: row[:mileage],
           bedrooms: row[:bedrooms],
           bathrooms: row[:bathrooms],
-          location_city: row[:city],
-          location_state: row[:state],
-          location_zip: row[:zip]
+          home_type: row[:home_type] || row[:homeType],
+          sections: row[:sections],
+          dwelling_type: row[:dwelling_type] || row[:dwellingType],
+          width: row[:width],
+          length: row[:length],
+          square_feet: row[:square_feet] || row[:squareFeet],
+          width1: row[:width1],
+          length1: row[:length1],
+          width2: row[:width2],
+          length2: row[:length2],
+          width3: row[:width3],
+          length3: row[:length3],
+          # Construction
+          roof_type: row[:roof_type] || row[:roofType],
+          roof_material: row[:roof_material] || row[:roofMaterial],
+          siding_type: row[:siding_type] || row[:sidingType],
+          exterior_material: row[:exterior_material] || row[:exteriorMaterial],
+          ceiling_type: row[:ceiling_type] || row[:ceilingType],
+          wall_type: row[:wall_type] || row[:wallType],
+          flooring_type: row[:flooring_type] || row[:flooringType],
+          insulation_type: row[:insulation_type] || row[:insulationType],
+          foundation_type: row[:foundation_type] || row[:foundationType],
+          # Systems
+          heating_type: row[:heating_type] || row[:heatingType],
+          cooling_type: row[:cooling_type] || row[:coolingType],
+          water_heater_type: row[:water_heater_type] || row[:waterHeaterType],
+          # NEW MH standard columns
+          insulation_r_roof: row[:insulation_r_roof] || row[:insulationRRoof] || row[:insulation_r_value_roof],
+          insulation_r_wall: row[:insulation_r_wall] || row[:insulationRWall] || row[:insulation_r_value_wall],
+          insulation_r_floor: row[:insulation_r_floor] || row[:insulationRFloor] || row[:insulation_r_value_floor],
+          floor_joist_size: row[:floor_joist_size] || row[:floorJoistSize],
+          electrical_service: row[:electrical_service] || row[:electricalService],
+          modular_conversion_cost: row[:modular_conversion_cost] || row[:modularConversionCost],
+          # Appliances (booleans)
+          refrigerator: parse_csv_bool(row[:refrigerator]),
+          microwave: parse_csv_bool(row[:microwave]),
+          oven: parse_csv_bool(row[:oven]),
+          dishwasher: parse_csv_bool(row[:dishwasher]),
+          garbage_disposal: parse_csv_bool(row[:garbage_disposal] || row[:garbageDisposal]),
+          clothes_washer: parse_csv_bool(row[:clothes_washer] || row[:clothesWasher]),
+          clothes_dryer: parse_csv_bool(row[:clothes_dryer] || row[:clothesDryer]),
+          # Amenities (booleans)
+          central_air: parse_csv_bool(row[:central_air] || row[:centralAir]),
+          ceiling_fan: parse_csv_bool(row[:ceiling_fan] || row[:ceilingFan]),
+          cathedral_ceiling: parse_csv_bool(row[:cathedral_ceiling] || row[:cathedralCeiling]),
+          skylight: parse_csv_bool(row[:skylight]),
+          fireplace: parse_csv_bool(row[:fireplace]),
+          walkin_closet: parse_csv_bool(row[:walkin_closet] || row[:walkinCloset]),
+          laundry_room: parse_csv_bool(row[:laundry_room] || row[:laundryRoom]),
+          pantry: parse_csv_bool(row[:pantry]),
+          garden_tub: parse_csv_bool(row[:garden_tub] || row[:gardenTub]),
+          sun_room: parse_csv_bool(row[:sun_room] || row[:sunRoom]),
+          basement: parse_csv_bool(row[:basement]),
+          garage: parse_csv_bool(row[:garage]),
+          carport: parse_csv_bool(row[:carport]),
+          deck: parse_csv_bool(row[:deck]),
+          patio: parse_csv_bool(row[:patio]),
+          has_storage: parse_csv_bool(row[:has_storage] || row[:hasStorage]),
+          thermopane: parse_csv_bool(row[:thermopane]),
+          gutters: parse_csv_bool(row[:gutters]),
+          shutters: parse_csv_bool(row[:shutters]),
+          master_bedroom_location: row[:master_bedroom_location] || row[:masterBedroomLocation],
+          # Location
+          location_city: row[:city] || row[:location_city] || row[:locationCity],
+          location_state: row[:state] || row[:location_state] || row[:locationState],
+          location_zip: row[:zip] || row[:location_zip] || row[:locationZip],
+          address1: row[:address1],
+          address2: row[:address2],
+          county_name: row[:county_name] || row[:countyName],
+          community_name: row[:community_name] || row[:communityName],
+          community_key: row[:community_key] || row[:communityKey],
+          location_type: row[:location_type] || row[:locationType],
+          lot_rent: row[:lot_rent] || row[:lotRent],
+          # Seller
+          seller_name: row[:seller_name] || row[:sellerName],
+          seller_phone: row[:seller_phone] || row[:sellerPhone],
+          seller_address_street: row[:seller_address_street] || row[:sellerAddressStreet],
+          seller_address_city: row[:seller_address_city] || row[:sellerAddressCity],
+          seller_address_state: row[:seller_address_state] || row[:sellerAddressState],
+          seller_address_zip: row[:seller_address_zip] || row[:sellerAddressZip],
+          # Media
+          listing_url: row[:listing_url] || row[:listingUrl],
+          virtual_tour: row[:virtual_tour] || row[:virtualTour],
+          video_url: row[:video_url] || row[:videoUrl],
+          virtual_tour_url: row[:virtual_tour_url] || row[:virtualTourUrl],
+          special_features: row[:special_features] || row[:specialFeatures],
+          overlay_text: row[:overlay_text] || row[:overlayText],
+          # Dates
+          date_in_stock: row[:date_in_stock] || row[:dateInStock],
+          date_sold: row[:date_sold] || row[:dateSold],
+          # Misc
+          sale_pending: parse_csv_bool(row[:sale_pending] || row[:salePending]),
+          repo: parse_csv_bool(row[:repo]),
+          package_type: row[:package_type] || row[:packageType],
+          utilities: row[:utilities],
+          terms: row[:terms],
         }.compact
+      end
+
+      def parse_csv_bool(val)
+        return nil if val.nil?
+        str = val.to_s.strip.downcase
+        return true if ['true', '1', 'yes', 'y'].include?(str)
+        return false if ['false', '0', 'no', 'n'].include?(str)
+        nil
       end
     end
   end
