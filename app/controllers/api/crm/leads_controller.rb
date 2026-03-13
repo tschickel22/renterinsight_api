@@ -4,6 +4,12 @@ module Api
       before_action :set_company_scope
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check]
 
+      # Dead-end statuses excluded from "All Active" view.
+      # Any status NOT in this list (including custom statuses) is considered active.
+      EXCLUDED_STATUSES = %w[
+        closed_lost lost_lead not_qualified junk_lead
+      ].freeze
+
       def index
         return unless authorize_action!('leads', 'read')
         
@@ -39,43 +45,52 @@ module Api
         # Apply location selector filter (if user selected a specific location)
         leads = leads.for_current_location
         
-        # Count stats BEFORE search filter (stats tiles should show ALL leads)
+        # Count stats BEFORE any filtering (stats tiles show global counts)
         all_leads_count = leads.count
+        active_count = leads.where.not(status: EXCLUDED_STATUSES).count
+        inactive_count = leads.where(status: EXCLUDED_STATUSES).count
         status_counts = {
+          total: all_leads_count,
+          active: active_count,
+          inactive: inactive_count,
           new: leads.where(status: 'new').count,
           qualified: leads.where(status: 'qualified').count,
           contacted: leads.where(status: 'contacted').count,
-          proposal: leads.where(status: 'proposal').count
+          proposal: leads.where(status: 'proposal').count,
+          engaged: leads.where(status: 'engaged').count,
+          showing_scheduled: leads.where(status: 'showing_scheduled').count,
+          application_submitted: leads.where(status: 'application_submitted').count,
         }
         
-        # Calculate percentage changes (compare to previous periods)
-        # Total leads: compare to last month
+        # Calculate percentage changes
         last_month_start = 1.month.ago.beginning_of_month
         last_month_end = 1.month.ago.end_of_month
         last_month_total = leads.where(created_at: last_month_start..last_month_end).count
         total_change_pct = calculate_percentage_change(last_month_total, all_leads_count)
         
-        # New leads: compare to last week
         last_week_start = 1.week.ago.beginning_of_week
         last_week_end = 1.week.ago.end_of_week
         this_week_new = leads.where(status: 'new', created_at: Time.current.beginning_of_week..Time.current).count
         last_week_new = leads.where(status: 'new', created_at: last_week_start..last_week_end).count
         new_change_pct = calculate_percentage_change(last_week_new, this_week_new)
         
-        # Qualified: compare to last month
         this_month_qualified = leads.where(status: 'qualified', created_at: Time.current.beginning_of_month..Time.current).count
         last_month_qualified = leads.where(status: 'qualified', created_at: last_month_start..last_month_end).count
         qualified_change_pct = calculate_percentage_change(last_month_qualified, this_month_qualified)
         
-        # Contacted: no comparison (just "In progress")
         contacted_subtitle = 'In progress'
         
-        # Apply search filter (searches first_name, last_name, email, phone)
+        # Apply status category filter (active = exclude dead-ends, includes custom statuses)
+        if params[:status_category] == 'active'
+          leads = leads.where.not(status: EXCLUDED_STATUSES)
+        end
+
+        # Apply search filter (includes status for custom status search)
         if params[:search].present?
           search_term = "%#{params[:search]}%"
           leads = leads.where(
-            "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ?",
-            search_term, search_term, search_term, search_term
+            "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR status ILIKE ?",
+            search_term, search_term, search_term, search_term, search_term
           )
         end
         
@@ -99,7 +114,6 @@ module Api
             per_page: per_page,
             total_pages: (filtered_count.to_f / per_page).ceil,
             stats: status_counts.merge(
-              total: all_leads_count,
               changes: {
                 total: total_change_pct,
                 new: new_change_pct,

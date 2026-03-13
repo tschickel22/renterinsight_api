@@ -355,7 +355,15 @@ module Api
           { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: true, protected: true },
           { key: 'created_at', label: 'Lead Created', type: 'datetime', source: 'standard', required: false, protected: false },
           { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false,
-            options: %w[new contacted qualified proposal negotiation won lost] },
+            options: %w[new not_contacted attempted_to_contact contact_in_future contacted engaged pre_qualified qualified showing_scheduled proposal negotiation application_submitted closed_won closed_lost lost_lead not_qualified junk_lead],
+            option_labels: {
+              'new' => 'New', 'not_contacted' => 'Not Contacted', 'attempted_to_contact' => 'Attempted to Contact',
+              'contact_in_future' => 'Contact in Future', 'contacted' => 'Contacted', 'engaged' => 'Engaged',
+              'pre_qualified' => 'Pre-Qualified', 'qualified' => 'Qualified', 'showing_scheduled' => 'Showing Scheduled',
+              'proposal' => 'Proposal', 'negotiation' => 'Negotiation', 'application_submitted' => 'Application Submitted',
+              'closed_won' => 'Closed Won', 'closed_lost' => 'Closed Lost', 'lost_lead' => 'Lost Lead',
+              'not_qualified' => 'Not Qualified', 'junk_lead' => 'Junk Lead'
+            } },
           { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },
           { key: 'source_id', label: 'Source', type: 'select', source: 'standard', required: false, protected: false,
             options: Source.for_company(@company.id).order(:name).pluck(:name) },
