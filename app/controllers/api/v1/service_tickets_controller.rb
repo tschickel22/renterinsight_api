@@ -85,18 +85,8 @@ module Api
         end
         
         if @service_ticket.save
-          # Notify assigned user
-          if @service_ticket.assigned_to.present?
-            assigned_user = User.find_by(id: @service_ticket.assigned_to)
-            if assigned_user
-              trigger_notification(
-                :service_ticket_assigned,
-                recipient: assigned_user,
-                notifiable: @service_ticket,
-                message: "Service ticket ##{@service_ticket.id} '#{@service_ticket.title}' has been assigned to you."
-              )
-            end
-          end
+          # Assignment notification handled by model callback (NotifiableServiceTicket)
+          # which also checks skip_notifications and prevents self-notification
           
           render json: { data: serialize_ticket(@service_ticket) }, status: :created
         else
@@ -112,17 +102,22 @@ module Api
         old_status = @service_ticket.status
         old_assigned_to = @service_ticket.assigned_to
         
+        # Set model-level flag to skip after_update callbacks for bulk operations
+        @service_ticket.skip_notifications = true if params[:skip_notification].present?
+
         if @service_ticket.update(service_ticket_params)
-          # Skip notifications for bulk updates (e.g., Task Center bulk edit)
+          # Assignment/reassignment notifications handled by model callback (NotifiableServiceTicket)
+          # which also checks skip_notifications and prevents self-notification.
+          # Controller only handles status-change notifications that the model doesn't cover.
           unless params[:skip_notification].present?
-            # Notify on status change to completed
+            # Notify contact owner on completion (model handles creator notification separately)
             if old_status != 'completed' && @service_ticket.status == 'completed'
-              # Notify the account/contact owner if exists
               if @service_ticket.contact_id.present?
                 contact = Contact.find_by(id: @service_ticket.contact_id)
                 if contact && contact.owner_id.present?
                   owner = User.find_by(id: contact.owner_id)
-                  if owner
+                  # Never notify yourself
+                  if owner && owner.id != current_user&.id
                     trigger_notification(
                       :service_ticket_completed,
                       recipient: owner,
@@ -132,11 +127,12 @@ module Api
                   end
                 end
               end
-            # Notify on other status changes
+            # Notify assigned user on other status changes
             elsif old_status != @service_ticket.status
               if @service_ticket.assigned_to.present?
                 assigned_user = User.find_by(id: @service_ticket.assigned_to)
-                if assigned_user
+                # Never notify yourself
+                if assigned_user && assigned_user.id != current_user&.id
                   trigger_notification(
                     :service_ticket_updated,
                     recipient: assigned_user,
@@ -144,19 +140,6 @@ module Api
                     message: "Service ticket ##{@service_ticket.id} status changed from #{old_status} to #{@service_ticket.status}."
                   )
                 end
-              end
-            end
-            
-            # Notify on reassignment
-            if old_assigned_to != @service_ticket.assigned_to && @service_ticket.assigned_to.present?
-              new_assignee = User.find_by(id: @service_ticket.assigned_to)
-              if new_assignee
-                trigger_notification(
-                  :service_ticket_assigned,
-                  recipient: new_assignee,
-                  notifiable: @service_ticket,
-                  message: "Service ticket ##{@service_ticket.id} '#{@service_ticket.title}' has been assigned to you."
-                )
               end
             end
           end

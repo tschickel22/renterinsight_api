@@ -191,6 +191,7 @@ module Api
           start_time: activity.start_time&.iso8601,
           end_time: activity.end_time&.iso8601,
           completed_at: activity.completed_at&.iso8601,
+          metadata: activity.try(:metadata),
           created_at: activity.created_at&.iso8601,
           updated_at: activity.updated_at&.iso8601
         }.merge(entity_data)
