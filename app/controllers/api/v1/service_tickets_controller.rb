@@ -113,48 +113,51 @@ module Api
         old_assigned_to = @service_ticket.assigned_to
         
         if @service_ticket.update(service_ticket_params)
-          # Notify on status change to completed
-          if old_status != 'completed' && @service_ticket.status == 'completed'
-            # Notify the account/contact owner if exists
-            if @service_ticket.contact_id.present?
-              contact = Contact.find_by(id: @service_ticket.contact_id)
-              if contact && contact.owner_id.present?
-                owner = User.find_by(id: contact.owner_id)
-                if owner
+          # Skip notifications for bulk updates (e.g., Task Center bulk edit)
+          unless params[:skip_notification].present?
+            # Notify on status change to completed
+            if old_status != 'completed' && @service_ticket.status == 'completed'
+              # Notify the account/contact owner if exists
+              if @service_ticket.contact_id.present?
+                contact = Contact.find_by(id: @service_ticket.contact_id)
+                if contact && contact.owner_id.present?
+                  owner = User.find_by(id: contact.owner_id)
+                  if owner
+                    trigger_notification(
+                      :service_ticket_completed,
+                      recipient: owner,
+                      notifiable: @service_ticket,
+                      message: "Service ticket ##{@service_ticket.id} '#{@service_ticket.title}' has been completed."
+                    )
+                  end
+                end
+              end
+            # Notify on other status changes
+            elsif old_status != @service_ticket.status
+              if @service_ticket.assigned_to.present?
+                assigned_user = User.find_by(id: @service_ticket.assigned_to)
+                if assigned_user
                   trigger_notification(
-                    :service_ticket_completed,
-                    recipient: owner,
+                    :service_ticket_updated,
+                    recipient: assigned_user,
                     notifiable: @service_ticket,
-                    message: "Service ticket ##{@service_ticket.id} '#{@service_ticket.title}' has been completed."
+                    message: "Service ticket ##{@service_ticket.id} status changed from #{old_status} to #{@service_ticket.status}."
                   )
                 end
               end
             end
-          # Notify on other status changes
-          elsif old_status != @service_ticket.status
-            if @service_ticket.assigned_to.present?
-              assigned_user = User.find_by(id: @service_ticket.assigned_to)
-              if assigned_user
+            
+            # Notify on reassignment
+            if old_assigned_to != @service_ticket.assigned_to && @service_ticket.assigned_to.present?
+              new_assignee = User.find_by(id: @service_ticket.assigned_to)
+              if new_assignee
                 trigger_notification(
-                  :service_ticket_updated,
-                  recipient: assigned_user,
+                  :service_ticket_assigned,
+                  recipient: new_assignee,
                   notifiable: @service_ticket,
-                  message: "Service ticket ##{@service_ticket.id} status changed from #{old_status} to #{@service_ticket.status}."
+                  message: "Service ticket ##{@service_ticket.id} '#{@service_ticket.title}' has been assigned to you."
                 )
               end
-            end
-          end
-          
-          # Notify on reassignment
-          if old_assigned_to != @service_ticket.assigned_to && @service_ticket.assigned_to.present?
-            new_assignee = User.find_by(id: @service_ticket.assigned_to)
-            if new_assignee
-              trigger_notification(
-                :service_ticket_assigned,
-                recipient: new_assignee,
-                notifiable: @service_ticket,
-                message: "Service ticket ##{@service_ticket.id} '#{@service_ticket.title}' has been assigned to you."
-              )
             end
           end
           
