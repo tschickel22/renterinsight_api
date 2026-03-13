@@ -93,7 +93,9 @@ module Api
         
         # STRICT TENANT ISOLATION: Create account within current company
         @account = @company.accounts.new(account_params)
-        @account.owner_id = current_user&.id
+        
+        # Auto-assign owner to current user if not explicitly set
+        @account.owner_id ||= current_user&.id
         
         # Auto-assign location from selector (if user selected a specific location)
         @account.location_id ||= Current.location_id if Current.location_id.present?
