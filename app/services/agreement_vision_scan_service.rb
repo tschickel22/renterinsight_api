@@ -47,10 +47,14 @@ class AgreementVisionScanService
     fields = call_claude_with_positions(pdf_base64, text_map, pages_to_scan)
     Rails.logger.info "[VisionScan] Detected #{fields.length} fields"
 
+    page_classifications = classify_pages(fields, total_pages)
+    Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages: #{page_classifications.map { |p| "#{p[:page]}=#{p[:type]}" }.join(', ')}"
+
     {
       fields: fields,
       pages_scanned: pages_to_scan,
       total_pages: total_pages,
+      page_classifications: page_classifications,
     }
   end
 
@@ -326,6 +330,68 @@ class AgreementVisionScanService
       height: [[field["height"].to_f, 1.5].max, 8].min.round(1),
       required: field["required"] == true,
     }
+  end
+
+  # ─── Page Classification ───────────────────────────────────────────────────────
+
+  def classify_pages(fields, total_pages)
+    # Build per-page field type sets
+    page_data = {}
+    fields.each do |f|
+      p = f[:page] || 1
+      page_data[p] ||= { signatures: 0, initials: 0, checkboxes: 0, data_fields: 0, labels: [] }
+      case f[:type]
+      when 'signature'
+        page_data[p][:signatures] += 1
+      when 'initials'
+        page_data[p][:initials] += 1
+      when 'checkbox'
+        page_data[p][:checkboxes] += 1
+        page_data[p][:data_fields] += 1
+      else
+        page_data[p][:data_fields] += 1
+      end
+      page_data[p][:labels] << f[:label]
+    end
+
+    (1..total_pages).map do |page_num|
+      info = page_data[page_num] || { signatures: 0, initials: 0, checkboxes: 0, data_fields: 0, labels: [] }
+      has_sigs = info[:signatures] > 0
+      has_initials = info[:initials] > 0
+      has_data = info[:data_fields] > 0
+
+      page_type = if has_data && (has_sigs || has_initials)
+                    'hybrid'
+                  elsif has_data
+                    'data_page'
+                  elsif has_sigs || has_initials
+                    'signature_page'
+                  else
+                    'signature_page' # Pages with no detected fields are likely disclosure/signature pages
+                  end
+
+      # Generate a title from first few field labels or fallback
+      title = if info[:labels].any?
+                first_label = info[:labels].first.to_s
+                if first_label.length > 40
+                  first_label[0..37] + '...'
+                else
+                  first_label
+                end
+              else
+                "Page #{page_num}"
+              end
+
+      {
+        page: page_num,
+        type: page_type,
+        title: title,
+        has_signatures: has_sigs,
+        has_initials: has_initials,
+        has_data_fields: has_data,
+        field_count: (info[:signatures] + info[:initials] + info[:data_fields]),
+      }
+    end
   end
 
   def deduplicate_positions(fields)

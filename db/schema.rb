@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_12_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_13_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -301,6 +301,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_12_000001) do
     t.integer "page_count"
     t.string "template_group_id"
     t.boolean "is_master", default: false, null: false
+    t.jsonb "cached_scan_results"
+    t.datetime "scan_performed_at"
     t.index ["agreement_category_id"], name: "index_agreement_templates_on_agreement_category_id"
     t.index ["company_id", "category"], name: "idx_agr_templates_company_category"
     t.index ["company_id", "status", "is_deleted"], name: "idx_agr_templates_company_status"

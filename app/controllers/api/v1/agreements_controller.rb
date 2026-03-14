@@ -1078,16 +1078,16 @@ module Api
         deal = @company.deals.find_by(id: deal_id)
         return [] unless deal
 
-        items = deal.deal_line_items&.where(is_deleted: [false, nil])&.order(:position) || []
+        items = deal.deal_products.order(:created_at)
         items.map do |item|
           {
-            description: item.description || item.name,
-            amount: item.price.to_f,
-            cost: item.cost.to_f,
-            taxable: item.taxable || false,
-            category: item.category,
+            description: item.product_name || item.notes,
+            amount: item.unit_price.to_f,
+            discount: item.discount.to_f,
+            tax: item.tax.to_f,
+            total: item.total.to_f,
             quantity: item.quantity || 1,
-            line_total: (item.price.to_f * (item.quantity || 1)).round(2)
+            line_total: item.total.to_f
           }
         end
       rescue => e

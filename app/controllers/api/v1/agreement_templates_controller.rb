@@ -3,7 +3,7 @@ module Api
     class AgreementTemplatesController < ApplicationController
       before_action :set_company_scope
       before_action :set_template, only: [
-        :show, :update, :destroy, :duplicate, :preview, :vision_scan,
+        :show, :update, :destroy, :duplicate, :preview, :vision_scan, :cached_scan, :clear_scan_cache, :save_scan_mappings,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
         :reorder_custom_fields, :validate_formula
       ]
@@ -305,6 +305,21 @@ module Api
           return render json: { error: 'No PDF document uploaded for this template' }, status: :unprocessable_entity
         end
 
+        # Return cached results unless force_rescan is requested
+        unless params[:force_rescan] == true || params[:force_rescan] == 'true'
+          if @template.cached_scan_results.present?
+            return render json: {
+              fields: @template.cached_scan_results['fields'] || [],
+              pages_scanned: @template.cached_scan_results['pages_scanned'] || 0,
+              total_pages: @template.cached_scan_results['total_pages'] || 0,
+              page_classifications: @template.cached_scan_results['page_classifications'] || [],
+              mappings: @template.cached_scan_results['mappings'],
+              cached: true,
+              scan_performed_at: @template.scan_performed_at
+            }
+          end
+        end
+
         api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
         unless api_key.present?
           return render json: { error: 'AI scanning is not configured. Please add an Anthropic API key.' }, status: :service_unavailable
@@ -314,10 +329,24 @@ module Api
           service = AgreementVisionScanService.new(api_key)
           result = service.scan(@template.document_url, max_pages: params[:max_pages]&.to_i || 16)
 
+          # Cache the scan results on the template
+          @template.update_columns(
+            cached_scan_results: {
+              'fields' => result[:fields],
+              'pages_scanned' => result[:pages_scanned],
+              'total_pages' => result[:total_pages],
+              'page_classifications' => result[:page_classifications]
+            },
+            scan_performed_at: Time.current
+          )
+
           render json: {
             fields: result[:fields],
             pages_scanned: result[:pages_scanned],
             total_pages: result[:total_pages],
+            page_classifications: result[:page_classifications],
+            cached: false,
+            scan_performed_at: @template.scan_performed_at
           }
         rescue AgreementVisionScanService::ScanError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -325,6 +354,54 @@ module Api
           Rails.logger.error "[VisionScan Template] #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
           render json: { error: 'Vision scan failed. Please try again.' }, status: :internal_server_error
         end
+      end
+
+      # GET /api/v1/agreement_templates/:id/cached_scan
+      def cached_scan
+        return unless authorize_action!('agreements', 'read')
+
+        unless @template.cached_scan_results.present?
+          return render json: { error: 'No cached scan results. Run a scan first.' }, status: :not_found
+        end
+
+        render json: {
+          fields: @template.cached_scan_results['fields'] || [],
+          pages_scanned: @template.cached_scan_results['pages_scanned'] || 0,
+          total_pages: @template.cached_scan_results['total_pages'] || 0,
+          page_classifications: @template.cached_scan_results['page_classifications'] || [],
+          mappings: @template.cached_scan_results['mappings'],
+          cached: true,
+          scan_performed_at: @template.scan_performed_at
+        }
+      end
+
+      # PATCH /api/v1/agreement_templates/:id/save_scan_mappings
+      def save_scan_mappings
+        return unless authorize_action!('agreements', 'update')
+
+        unless @template.cached_scan_results.present?
+          return render json: { error: 'No cached scan results. Run a scan first.' }, status: :not_found
+        end
+
+        mappings = params[:mappings]
+        unless mappings.is_a?(Array)
+          return render json: { error: 'mappings must be an array' }, status: :unprocessable_entity
+        end
+
+        # Merge mappings into existing cache
+        updated_cache = @template.cached_scan_results.dup
+        updated_cache['mappings'] = mappings.map { |m| m.respond_to?(:to_unsafe_h) ? m.to_unsafe_h : m.to_h }
+        @template.update_columns(cached_scan_results: updated_cache)
+
+        render json: { message: 'Mappings saved', mapping_count: mappings.length }
+      end
+
+      # DELETE /api/v1/agreement_templates/:id/clear_scan_cache
+      def clear_scan_cache
+        return unless authorize_action!('agreements', 'update')
+
+        @template.update_columns(cached_scan_results: nil, scan_performed_at: nil)
+        render json: { message: 'Scan cache cleared' }
       end
 
       # GET /api/v1/agreement_templates/state_groups
@@ -684,7 +761,9 @@ module Api
             default_signers: template.default_signers,
             location_id: template.location_id,
             created_by_id: template.created_by_id,
-            custom_field_definitions: template.custom_field_definitions
+            custom_field_definitions: template.custom_field_definitions,
+            has_cached_scan: template.cached_scan_results.present?,
+            scan_performed_at: template.scan_performed_at
           )
         end
 
