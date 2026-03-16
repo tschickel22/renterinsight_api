@@ -50,7 +50,12 @@ class Company < ApplicationRecord
   
   # Tasks Module
   has_many :tasks, dependent: :destroy
-  
+
+  # Project Management Module
+  has_many :projects, dependent: :destroy
+  has_many :project_templates, dependent: :destroy
+  has_many :project_phases, dependent: :destroy
+
   # Warranty & Service Module Associations
   has_many :company_manufacturers, dependent: :destroy
   has_many :manufacturers, through: :company_manufacturers

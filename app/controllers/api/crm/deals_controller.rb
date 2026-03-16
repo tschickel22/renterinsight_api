@@ -704,7 +704,7 @@ module Api
           products_array = []
           
           # Add primary vehicle from selling_price if present
-          if deal.selling_price.present? && deal.selling_price > 0
+          if deal.selling_price.present? && deal.selling_price > 0 && deal.deal_products.empty?
             products_array << {
               id: 'primary-vehicle',
               productId: deal.vehicle_id,

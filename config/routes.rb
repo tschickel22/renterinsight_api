@@ -129,7 +129,14 @@ Rails.application.routes.draw do
         end
       end
     end
-    
+
+    # ==================== PUBLIC PROJECT PROGRESS (No Auth Required) ====================
+    namespace :v1 do
+      namespace :public do
+        get 'project-progress/:token', to: 'project_progress#show', as: :public_project_progress
+      end
+    end
+
     scope path: 'f' do
       get ':public_id', to: '/public/forms#show'
       post ':public_id/submit', to: '/public/forms#submit'
@@ -239,7 +246,21 @@ Rails.application.routes.draw do
           get :stats
         end
       end
-      
+
+      # ==================== PROJECTS ====================
+      resources :projects do
+        member do
+          post :advance_phase
+          post :skip_phase
+        end
+      end
+
+      resources :project_templates, path: 'project-templates' do
+        member do
+          post :duplicate
+        end
+      end
+
       # ==================== CALENDAR ====================
       scope path: 'calendar', controller: 'calendar' do
         get 'events'
@@ -1855,6 +1876,9 @@ Rails.application.routes.draw do
         end
       end
       
+      # Portal Project Progress
+      resources :projects, only: [:index, :show]
+
       # Portal Service Tickets
       resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
 

@@ -31,7 +31,8 @@ class Deal < ApplicationRecord
   has_many :commission_payments, dependent: :destroy
   has_many :quotes, dependent: :nullify
   has_many :service_tickets, dependent: :nullify
-  
+  has_one :project, dependent: :nullify
+
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments

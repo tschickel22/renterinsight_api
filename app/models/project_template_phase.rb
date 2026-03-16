@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+class ProjectTemplatePhase < ApplicationRecord
+  belongs_to :project_template, counter_cache: :phase_count
+
+  # Validations
+  validates :name, presence: true
+  validates :position, presence: true, numericality: { greater_than_or_equal_to: 0 }
+
+  # Scopes
+  scope :ordered, -> { order(:position) }
+  scope :client_visible, -> { where(visible_to_client: true) }
+end

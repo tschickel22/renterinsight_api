@@ -4,7 +4,7 @@ class DealProduct < ApplicationRecord
   
   validates :product_name, presence: true
   validates :quantity, numericality: { greater_than: 0 }
-  validates :unit_price, numericality: { greater_than_or_equal_to: 0 }
+  validates :unit_price, numericality: true  # Allow negative values for discounts/credits
   validates :discount_type, inclusion: { in: %w[fixed percentage], message: "%{value} is not a valid discount type" }, allow_nil: false
   
   before_save :calculate_total

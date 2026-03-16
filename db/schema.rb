@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_15_140000) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_16_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1494,6 +1494,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_15_140000) do
     t.string "delivery_state"
     t.string "delivery_zip"
     t.string "delivery_country"
+    t.bigint "project_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -1502,6 +1503,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_15_140000) do
     t.index ["company_id", "deal_number"], name: "index_deals_on_company_id_and_deal_number", unique: true
     t.index ["company_id", "delivery_date"], name: "index_deals_on_company_and_delivery"
     t.index ["company_id", "location_id"], name: "index_deals_on_company_id_and_location_id"
+    t.index ["company_id", "project_id"], name: "idx_deals_company_project"
     t.index ["company_id"], name: "index_deals_on_company_id"
     t.index ["contact_id"], name: "index_deals_on_contact_id"
     t.index ["custom_field_values"], name: "index_deals_on_custom_field_values", using: :gin
@@ -1514,6 +1516,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_15_140000) do
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["owner_id"], name: "index_deals_on_owner_id"
     t.index ["primary_salesperson_id", "delivery_date"], name: "index_deals_on_salesperson_and_delivery"
+    t.index ["project_id"], name: "index_deals_on_project_id"
     t.index ["sales_manager_id"], name: "index_deals_on_sales_manager_id"
     t.index ["secondary_salesperson_id"], name: "index_deals_on_secondary_salesperson_id"
     t.index ["source_id"], name: "index_deals_on_source_id"
@@ -2919,6 +2922,129 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_15_140000) do
     t.index ["owner_type", "owner_id"], name: "index_portal_documents_on_owner"
     t.index ["related_to_type", "related_to_id"], name: "index_portal_documents_on_related_to"
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
+  end
+
+  create_table "project_phases", force: :cascade do |t|
+    t.bigint "project_id", null: false
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.integer "position", default: 0, null: false
+    t.string "status", default: "not_started", null: false
+    t.boolean "is_required", default: true
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.date "estimated_start_date"
+    t.date "estimated_completion_date"
+    t.integer "estimated_days"
+    t.boolean "visible_to_client", default: true
+    t.boolean "notify_client_on_start", default: false
+    t.boolean "notify_client_on_complete", default: true
+    t.boolean "client_notified_start", default: false
+    t.boolean "client_notified_complete", default: false
+    t.text "notes"
+    t.text "client_notes"
+    t.string "icon"
+    t.string "color"
+    t.bigint "completed_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "idx_project_phases_company_status"
+    t.index ["company_id"], name: "index_project_phases_on_company_id"
+    t.index ["project_id", "position"], name: "idx_project_phases_project_position"
+    t.index ["project_id", "status"], name: "idx_project_phases_project_status"
+    t.index ["project_id"], name: "index_project_phases_on_project_id"
+    t.index ["status"], name: "idx_project_phases_status"
+  end
+
+  create_table "project_template_phases", force: :cascade do |t|
+    t.bigint "project_template_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.integer "position", default: 0, null: false
+    t.boolean "visible_to_client", default: true
+    t.boolean "is_required", default: true
+    t.boolean "notify_client_on_start", default: false
+    t.boolean "notify_client_on_complete", default: true
+    t.integer "estimated_days"
+    t.string "icon"
+    t.string "color"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_template_id", "position"], name: "idx_template_phases_template_position"
+    t.index ["project_template_id"], name: "index_project_template_phases_on_project_template_id"
+  end
+
+  create_table "project_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "name", null: false
+    t.text "description"
+    t.string "template_type", default: "standard"
+    t.boolean "is_default", default: false
+    t.boolean "is_active", default: true
+    t.boolean "is_deleted", default: false
+    t.integer "phase_count", default: 0
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_active"], name: "idx_project_templates_company_active"
+    t.index ["company_id", "is_default"], name: "idx_project_templates_company_default"
+    t.index ["company_id", "template_type"], name: "idx_project_templates_company_type"
+    t.index ["company_id"], name: "index_project_templates_on_company_id"
+    t.index ["location_id"], name: "index_project_templates_on_location_id"
+  end
+
+  create_table "projects", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "deal_id"
+    t.bigint "project_template_id"
+    t.string "name", null: false
+    t.string "project_number"
+    t.text "description"
+    t.string "status", default: "active", null: false
+    t.bigint "current_phase_id"
+    t.integer "phase_count", default: 0
+    t.integer "completed_phase_count", default: 0
+    t.integer "progress_percent", default: 0
+    t.date "started_at"
+    t.date "estimated_completion_date"
+    t.date "actual_completion_date"
+    t.string "customer_name"
+    t.string "customer_email"
+    t.string "customer_phone"
+    t.string "home_make"
+    t.string "home_model"
+    t.string "home_serial_number"
+    t.bigint "vehicle_id"
+    t.string "delivery_street"
+    t.string "delivery_city"
+    t.string "delivery_state"
+    t.string "delivery_zip"
+    t.bigint "owner_id"
+    t.bigint "created_by_id"
+    t.boolean "client_visible", default: true
+    t.string "client_access_token"
+    t.boolean "is_deleted", default: false
+    t.jsonb "custom_field_values", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["client_access_token"], name: "idx_projects_client_token", unique: true
+    t.index ["company_id", "location_id"], name: "idx_projects_company_location"
+    t.index ["company_id", "project_number"], name: "idx_projects_company_number", unique: true
+    t.index ["company_id", "status"], name: "idx_projects_company_status"
+    t.index ["company_id"], name: "index_projects_on_company_id"
+    t.index ["current_phase_id"], name: "idx_projects_current_phase"
+    t.index ["custom_field_values"], name: "idx_projects_custom_fields", using: :gin
+    t.index ["deal_id"], name: "idx_projects_deal"
+    t.index ["deal_id"], name: "index_projects_on_deal_id"
+    t.index ["is_deleted"], name: "idx_projects_deleted"
+    t.index ["location_id"], name: "index_projects_on_location_id"
+    t.index ["owner_id"], name: "idx_projects_owner"
+    t.index ["project_template_id"], name: "index_projects_on_project_template_id"
+    t.index ["status"], name: "idx_projects_status"
+    t.index ["vehicle_id"], name: "idx_projects_vehicle"
   end
 
   create_table "purchase_order_lines", force: :cascade do |t|
@@ -4512,6 +4638,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_15_140000) do
   add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
   add_foreign_key "deals", "locations"
+  add_foreign_key "deals", "projects"
   add_foreign_key "deals", "sources"
   add_foreign_key "deals", "users"
   add_foreign_key "deals", "users", column: "desk_manager_id"
@@ -4621,6 +4748,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_15_140000) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "project_phases", "companies"
+  add_foreign_key "project_phases", "projects"
+  add_foreign_key "project_template_phases", "project_templates"
+  add_foreign_key "project_templates", "companies"
+  add_foreign_key "project_templates", "locations"
+  add_foreign_key "projects", "companies"
+  add_foreign_key "projects", "deals"
+  add_foreign_key "projects", "locations"
+  add_foreign_key "projects", "project_templates"
   add_foreign_key "purchase_order_lines", "parts"
   add_foreign_key "purchase_order_lines", "purchase_orders"
   add_foreign_key "purchase_orders", "companies"
