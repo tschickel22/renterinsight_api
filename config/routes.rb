@@ -1142,6 +1142,9 @@ Rails.application.routes.draw do
           get :cached_scan
           patch :save_scan_mappings
           delete :clear_scan_cache
+          post :upload_example_document
+          delete :remove_example_document
+          post :smart_scan
           get 'custom_fields', to: 'agreement_templates#list_custom_fields'
           post 'custom_fields', to: 'agreement_templates#add_custom_field'
           post 'custom_fields/reorder', to: 'agreement_templates#reorder_custom_fields'

@@ -58,6 +58,66 @@ class AgreementVisionScanService
     }
   end
 
+  # Smart Scan: Compare empty template PDF against a filled example PDF
+  # Returns enhanced fields with example_value, inferred_type, formula, is_repeated
+  def smart_scan(empty_pdf_url, filled_pdf_url, max_pages: MAX_PAGES)
+    raise ScanError, "No empty PDF URL provided" if empty_pdf_url.blank?
+    raise ScanError, "No filled PDF URL provided" if filled_pdf_url.blank?
+    @scan_mode = :smart
+
+    Rails.logger.info "[SmartScan] Starting comparison scan"
+    Rails.logger.info "[SmartScan]   Empty:  #{empty_pdf_url.truncate(80)}"
+    Rails.logger.info "[SmartScan]   Filled: #{filled_pdf_url.truncate(80)}"
+
+    empty_data = download_pdf(empty_pdf_url)
+    filled_data = download_pdf(filled_pdf_url)
+
+    [empty_data, filled_data].each_with_index do |data, i|
+      label = i == 0 ? 'Empty' : 'Filled'
+      if data.bytesize > PDF_MAX_SIZE
+        raise ScanError, "#{label} PDF is too large (#{(data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
+      end
+    end
+
+    # Extract text positions from both
+    empty_text_map = extract_text_with_positions(empty_data)
+    filled_text_map = extract_text_with_positions(filled_data)
+    total_pages = [empty_text_map.keys.max || 1, filled_text_map.keys.max || 1].max
+    pages_to_scan = [max_pages, total_pages].min
+
+    Rails.logger.info "[SmartScan] Empty: #{empty_text_map.values.sum(&:length)} text items, Filled: #{filled_text_map.values.sum(&:length)} text items, #{total_pages} pages"
+
+    empty_b64 = Base64.strict_encode64(empty_data)
+    filled_b64 = Base64.strict_encode64(filled_data)
+
+    fields = call_claude_smart_scan(empty_b64, filled_b64, empty_text_map, filled_text_map, pages_to_scan)
+    Rails.logger.info "[SmartScan] Detected #{fields.length} fields with example values"
+
+    page_classifications = classify_pages(fields, total_pages)
+
+    # Detect repeated fields (same example_value on multiple pages)
+    value_pages = {}
+    fields.each do |f|
+      val = f[:example_value].to_s.strip.downcase
+      next if val.blank? || val.length < 2
+      value_pages[val] ||= []
+      value_pages[val] << f[:page]
+    end
+    repeated_values = value_pages.select { |_, pages| pages.uniq.length > 1 }.keys.to_set
+    fields.each do |f|
+      val = f[:example_value].to_s.strip.downcase
+      f[:is_repeated] = repeated_values.include?(val)
+    end
+
+    {
+      fields: fields,
+      pages_scanned: pages_to_scan,
+      total_pages: total_pages,
+      page_classifications: page_classifications,
+      scan_type: 'smart',
+    }
+  end
+
   private
 
   # ─── PDF Text Extraction ──────────────────────────────────────────────────────
@@ -246,6 +306,159 @@ class AgreementVisionScanService
   end
 
   # ─── Response Parsing ─────────────────────────────────────────────────────────
+
+  def call_claude_smart_scan(empty_b64, filled_b64, empty_text_map, filled_text_map, pages_to_scan)
+    empty_ref = build_position_reference(empty_text_map, pages_to_scan)
+    filled_ref = build_position_reference(filled_text_map, pages_to_scan)
+
+    prompt = <<~PROMPT
+      I have TWO versions of the same PDF form:
+      1. DOCUMENT 1 (first PDF): The EMPTY/blank template
+      2. DOCUMENT 2 (second PDF): A COMPLETED version with real data filled in
+
+      I have extracted text positions from both. Coordinates are percentages (x=0 left edge, y=0 top edge).
+
+      EMPTY TEMPLATE TEXT POSITIONS:
+      #{empty_ref}
+
+      FILLED DOCUMENT TEXT POSITIONS:
+      #{filled_ref}
+
+      YOUR TASK: Compare the two documents to identify every fillable field. For each field:
+      1. Find the field label and input area position (from the EMPTY template)
+      2. Find the actual value written in that field (from the FILLED document)
+      3. Infer the data type from the actual value
+      4. Detect if the field appears to be calculated from other fields
+
+      TYPE INFERENCE RULES:
+      - Values like "$177,166.00" or "5,314.98" -> currency
+      - Values like "02/25/2026" or "12/15/2025" -> date
+      - Values like "3" or "68" (small integers in dimension/count context) -> number
+      - Values like "33" next to "R-VALUE" -> number
+      - Checked boxes (filled checkbox, X mark, checkmark) -> checkbox
+      - Signature lines with names -> signature
+      - Everything else -> text
+
+      FORMULA DETECTION:
+      - If SUB-TOTAL = BASE PRICE + OPTIONAL EQUIPMENT, output formula: "=base_price_of_unit+optional_equipment"
+      - If CASH PURCHASE PRICE = SUB-TOTAL + SALES TAX, output formula: "=sub_total+sales_tax"
+      - If NET ALLOWANCE = TRADE_IN_ALLOWANCE - LESS_BAL_DUE, output formula: "=trade_in_allowance-less_bal_due"
+      - If LESS TOTAL CREDITS = DOWN PAYMENT + CASH AS AGREED + NET ALLOWANCE, output formula accordingly
+      - Only include formula if you are confident the math checks out with the actual values
+
+      POSITIONING RULES (same as standard scan):
+      - For "Label: ________" patterns: INPUT starts AFTER the label text
+      - For table cells: INPUT is in the value column, not the label column
+      - Checkboxes: width/height about 2.5
+      - NEVER stack multiple fields at the same x,y
+
+      For each field provide:
+      - key: unique snake_case (e.g. "buyer_name")
+      - label: exact label text from empty form
+      - type: text|currency|number|percentage|date|checkbox|signature (INFERRED from filled value)
+      - group: buyer|unit|pricing|delivery|insulation|optional_equipment|remarks|trade_in|shipping|signatures|terms|general
+      - page: 1-indexed page number
+      - x: INPUT AREA x position (percentage, 0-100) from EMPTY template
+      - y: INPUT AREA y position (percentage, 0-100) from EMPTY template
+      - width: field width as percentage
+      - height: field height as percentage
+      - required: true/false
+      - example_value: the actual value from the FILLED document (string, or null if blank)
+      - inferred_type: the type you inferred from the example value (same options as type)
+      - formula: calculation formula if detected (e.g. "=base_price+optional_equipment"), or null
+
+      CRITICAL: Output ONLY a JSON array. No explanation. Start with [ end with ].
+
+      [
+        {"key":"buyer_name","label":"BUYER(S)","type":"text","group":"buyer","page":1,"x":15,"y":12,"width":35,"height":2.8,"required":true,"example_value":"Faith E Locy and Luke Wagner","inferred_type":"text","formula":null},
+        {"key":"base_price_of_unit","label":"BASE PRICE OF UNIT","type":"currency","group":"pricing","page":1,"x":85,"y":38,"width":12,"height":2.8,"required":true,"example_value":"177,166.00","inferred_type":"currency","formula":null},
+        {"key":"sub_total","label":"SUB-TOTAL","type":"currency","group":"pricing","page":1,"x":85,"y":44,"width":12,"height":2.8,"required":true,"example_value":"271,166.00","inferred_type":"currency","formula":"=base_price_of_unit+optional_equipment"}
+      ]
+    PROMPT
+
+    body = {
+      model: CLAUDE_MODEL,
+      max_tokens: 16000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "base64", media_type: "application/pdf", data: empty_b64 },
+            },
+            {
+              type: "document",
+              source: { type: "base64", media_type: "application/pdf", data: filled_b64 },
+            },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    }
+
+    uri = URI(CLAUDE_API_URL)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 180  # 3 min - two PDFs take longer
+    http.open_timeout = 30
+
+    request = Net::HTTP::Post.new(uri)
+    request["Content-Type"] = "application/json"
+    request["x-api-key"] = @api_key
+    request["anthropic-version"] = "2023-06-01"
+    request.body = body.to_json
+
+    Rails.logger.info "[SmartScan] Sending 2 PDFs + position data to Claude (#{(empty_b64.length + filled_b64.length) / 1024}KB total)"
+
+    response = http.request(request)
+
+    unless response.code == "200"
+      error_body = JSON.parse(response.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{response.code}"
+      Rails.logger.error "[SmartScan] Claude API error: #{error_msg}"
+      raise ScanError, "Smart scan failed: #{error_msg}"
+    end
+
+    result = JSON.parse(response.body)
+    text_content = result["content"]&.find { |c| c["type"] == "text" }&.fetch("text", "")
+
+    parse_smart_response(text_content)
+  end
+
+  # Parse smart scan response - same as standard but preserves extra fields
+  def parse_smart_response(text)
+    fields = parse_response(text)
+
+    # Re-parse the raw JSON to get example_value, inferred_type, formula
+    # parse_response strips these, so we extract them from the raw text
+    raw_fields = extract_raw_json_fields(text)
+
+    fields.each_with_index do |field, idx|
+      raw = raw_fields[idx] if raw_fields
+      if raw
+        field[:example_value] = raw["example_value"]
+        field[:inferred_type] = raw["inferred_type"].to_s.presence
+        field[:formula] = raw["formula"].to_s.presence
+      else
+        field[:example_value] = nil
+        field[:inferred_type] = nil
+        field[:formula] = nil
+      end
+      field[:is_repeated] = false  # Will be set by smart_scan caller
+    end
+
+    fields
+  end
+
+  # Extract raw JSON array from response text (before normalize_field strips extra keys)
+  def extract_raw_json_fields(text)
+    json_str = text.strip
+    json_str = json_str.gsub(/```json?\s*/i, '').gsub(/```/, '').strip if json_str.include?('```')
+    json_str = $1 if !json_str.start_with?('[') && json_str =~ /(\[\s*\{.*\}\s*\])/m
+    return nil unless json_str.start_with?('[')
+    JSON.parse(json_str) rescue nil
+  end
 
   def parse_response(text)
     json_str = text.strip

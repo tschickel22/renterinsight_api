@@ -5,7 +5,9 @@ module Api
       before_action :set_template, only: [
         :show, :update, :destroy, :duplicate, :preview, :vision_scan, :cached_scan, :clear_scan_cache, :save_scan_mappings,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
-        :reorder_custom_fields, :validate_formula
+        :reorder_custom_fields, :validate_formula,
+        :upload_example_document, :remove_example_document,
+        :smart_scan
       ]
 
       # GET /api/v1/agreement_templates
@@ -404,6 +406,151 @@ module Api
         render json: { message: 'Scan cache cleared' }
       end
 
+      # POST /api/v1/agreement_templates/:id/upload_example_document
+      # Upload a filled/completed example PDF for smart scan comparison
+      def upload_example_document
+        return unless authorize_action!('agreements', 'update')
+
+        file = params[:document] || params[:file]
+        unless file.present?
+          return render json: { error: 'No file provided' }, status: :unprocessable_entity
+        end
+
+        # Validate file type — PDF only for example documents
+        ext = File.extname(file.original_filename).downcase
+        unless file.content_type == 'application/pdf' || ext == '.pdf'
+          return render json: { error: 'Only PDF files are allowed for example documents' }, status: :unprocessable_entity
+        end
+
+        if file.size > 25.megabytes
+          return render json: { error: 'File size exceeds maximum (25MB)' }, status: :unprocessable_entity
+        end
+
+        begin
+          s3_service = S3UploadService.new
+          folder = "agreements/#{@company.id}/example_documents"
+          s3_result = s3_service.upload(file, folder: folder)
+
+          # Optionally delete old example document from S3
+          if @template.example_document_url.present?
+            begin
+              old_key = extract_s3_key(@template.example_document_url)
+              s3_service.delete(old_key) if old_key.present?
+            rescue => e
+              Rails.logger.warn "[ExampleDoc] Failed to delete old example doc: #{e.message}"
+            end
+          end
+
+          @template.update!(example_document_url: s3_result[:url])
+
+          render json: {
+            example_document_url: s3_result[:url],
+            s3_key: s3_result[:key],
+            filename: file.original_filename,
+            size: s3_result[:size],
+            content_type: 'application/pdf'
+          }, status: :ok
+        rescue => e
+          Rails.logger.error "[ExampleDoc] Upload failed: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+          render json: { error: "Upload failed: #{e.message}" }, status: :internal_server_error
+        end
+      end
+
+      # DELETE /api/v1/agreement_templates/:id/remove_example_document
+      # Remove the filled/completed example PDF
+      def remove_example_document
+        return unless authorize_action!('agreements', 'update')
+
+        unless @template.example_document_url.present?
+          return render json: { error: 'No example document to remove' }, status: :not_found
+        end
+
+        begin
+          # Delete from S3
+          s3_key = extract_s3_key(@template.example_document_url)
+          if s3_key.present?
+            s3_service = S3UploadService.new
+            s3_service.delete(s3_key)
+          end
+        rescue => e
+          Rails.logger.warn "[ExampleDoc] Failed to delete from S3: #{e.message}"
+        end
+
+        @template.update!(example_document_url: nil)
+        render json: { message: 'Example document removed' }
+      end
+
+      # POST /api/v1/agreement_templates/:id/smart_scan
+      # Compare empty template against filled example for enhanced field detection
+      def smart_scan
+        return unless authorize_action!('agreements', 'update')
+
+        unless @template.document_url.present?
+          return render json: { error: 'No PDF document uploaded for this template' }, status: :unprocessable_entity
+        end
+
+        unless @template.example_document_url.present?
+          return render json: { error: 'No example document uploaded. Upload a filled PDF first.' }, status: :unprocessable_entity
+        end
+
+        # Return cached smart scan results unless force_rescan
+        unless params[:force_rescan] == true || params[:force_rescan] == 'true'
+          if @template.cached_scan_results.present? && @template.cached_scan_results['scan_type'] == 'smart'
+            return render json: {
+              fields: @template.cached_scan_results['fields'] || [],
+              pages_scanned: @template.cached_scan_results['pages_scanned'] || 0,
+              total_pages: @template.cached_scan_results['total_pages'] || 0,
+              page_classifications: @template.cached_scan_results['page_classifications'] || [],
+              mappings: @template.cached_scan_results['mappings'],
+              scan_type: 'smart',
+              cached: true,
+              scan_performed_at: @template.scan_performed_at
+            }
+          end
+        end
+
+        api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
+        unless api_key.present?
+          return render json: { error: 'AI scanning is not configured. Please add an Anthropic API key.' }, status: :service_unavailable
+        end
+
+        begin
+          service = AgreementVisionScanService.new(api_key)
+          result = service.smart_scan(
+            @template.document_url,
+            @template.example_document_url,
+            max_pages: params[:max_pages]&.to_i || 16
+          )
+
+          # Cache the smart scan results
+          @template.update_columns(
+            cached_scan_results: {
+              'fields' => result[:fields],
+              'pages_scanned' => result[:pages_scanned],
+              'total_pages' => result[:total_pages],
+              'page_classifications' => result[:page_classifications],
+              'scan_type' => 'smart'
+            },
+            scan_performed_at: Time.current
+          )
+
+          render json: {
+            fields: result[:fields],
+            pages_scanned: result[:pages_scanned],
+            total_pages: result[:total_pages],
+            page_classifications: result[:page_classifications],
+            scan_type: 'smart',
+            cached: false,
+            scan_performed_at: @template.scan_performed_at
+          }
+        rescue AgreementVisionScanService::ScanError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue => e
+          Rails.logger.error "[SmartScan Template] #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+          render json: { error: 'Smart scan failed. Please try again.' }, status: :internal_server_error
+        end
+      end
+
       # GET /api/v1/agreement_templates/state_groups
       def state_groups
         return unless authorize_action!('agreements', 'read')
@@ -755,6 +902,7 @@ module Api
             content: template.content,
             document_url: template.document_url,
             document_urls: template.document_urls,
+            example_document_url: template.example_document_url,
             merge_fields: template.merge_fields,
             field_placements: template.field_placements,
             merge_field_placements: template.merge_field_placements,
@@ -821,6 +969,21 @@ module Api
           end
         end
         values
+      end
+
+      # Extract S3 key from a full S3 URL
+      def extract_s3_key(url)
+        return nil if url.blank?
+        uri = URI.parse(url)
+        # S3 URLs: https://bucket.s3.region.amazonaws.com/key or https://s3.region.amazonaws.com/bucket/key
+        path = uri.path.sub(/\A\//, '') # Remove leading slash
+        # If using virtual-hosted style, path IS the key
+        # If using path-style, strip the bucket name prefix
+        bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
+        path.sub(/\A#{Regexp.escape(bucket)}\//, '')
+      rescue => e
+        Rails.logger.warn "[ExampleDoc] Failed to extract S3 key from #{url}: #{e.message}"
+        nil
       end
     end
   end
