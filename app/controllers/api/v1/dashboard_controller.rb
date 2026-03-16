@@ -175,6 +175,8 @@ class Api::V1::DashboardController < ApplicationController
     when 'recent_activities'
       # Recent activities across modules
       service.recent_activities
+    when 'project_phase_tasks'
+      service.project_phase_tasks
     when 'upcoming_tasks'
       # Upcoming tasks
       service.upcoming_tasks

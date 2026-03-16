@@ -817,6 +817,46 @@ class DashboardMetricsService
     }
   end
 
+  # ==================== PROJECT PHASE TASKS CARD ====================
+  # Returns pending sub-tasks across all active projects for this company
+  def project_phase_tasks
+    items = []
+
+    if defined?(ProjectPhaseTask)
+      tasks = ProjectPhaseTask
+        .joins(project_phase: { project: {} })
+        .where(
+          project_phase_tasks: { status: 'pending', company_id: @company.id },
+          projects: { status: 'active', is_deleted: [false, nil] }
+        )
+        .includes(project_phase: :project)
+        .order('projects.created_at DESC, project_phases.position ASC, project_phase_tasks.position ASC')
+        .limit(20)
+
+      items = tasks.map do |task|
+        phase   = task.project_phase
+        project = phase.project
+        {
+          id:            task.id,
+          name:          task.name,
+          phase_id:      phase.id,
+          phase_name:    phase.name,
+          phase_status:  phase.status,
+          project_id:    project.id,
+          project_name:  project.name,
+          project_number: project.project_number,
+          deal_id:       project.deal_id,
+          is_required:   task.is_required
+        }
+      end
+    end
+
+    { tasks: items, total: items.size }
+  rescue StandardError => e
+    Rails.logger.error "[ProjectPhaseTasks] Error: #{e.message}"
+    { tasks: [], total: 0 }
+  end
+
   # ==================== UPCOMING TASKS CARD ====================
   # Returns: { tasks, drill_down_url }
   # Each task: { id, title, due_date, priority, assigned_to, entity_type, entity_id }

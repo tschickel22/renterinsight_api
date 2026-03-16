@@ -4,11 +4,11 @@ module Api
   module V1
     class ProjectsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_project, only: %i[show update destroy advance_phase skip_phase]
+      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task]
 
       # GET /api/v1/projects
       def index
-        return unless authorize_action!('projects', 'read')
+        return unless authorize_action!('deals', 'read')
 
         projects = @company.projects.not_deleted
 
@@ -22,8 +22,10 @@ module Api
           end
         end
 
-        # Location selector filter
-        projects = projects.for_current_location
+        # Location selector filter — skip when all_locations=true (e.g. deal project lookup)
+        unless params[:all_locations] == 'true'
+          projects = projects.for_current_location
+        end
 
         # Stats BEFORE search (for tiles)
         all_count = projects.count
@@ -85,7 +87,7 @@ module Api
 
       # GET /api/v1/projects/:id
       def show
-        return unless authorize_action!('projects', 'read')
+        return unless authorize_action!('deals', 'read')
 
         render json: {
           project: @project.as_json(
@@ -97,19 +99,24 @@ module Api
                      client_visible client_access_token custom_field_values created_at updated_at],
             methods: [:current_phase_name, :progress_display, :home_display_name, :delivery_address_display]
           ),
-          phases: @project.project_phases.ordered.as_json(
+          phases: @project.project_phases.ordered.includes(:project_phase_tasks).as_json(
             only: %i[id name description position status is_required
                      started_at completed_at estimated_start_date estimated_completion_date estimated_days
                      visible_to_client notify_client_on_start notify_client_on_complete
                      notes client_notes icon color completed_by_id created_at updated_at],
-            methods: [:status_display, :overdue?, :duration_days]
+            methods: [:status_display, :overdue?, :duration_days, :task_progress_percent, :tasks_summary],
+            include: {
+              project_phase_tasks: {
+                only: %i[id name position status is_required completed_at completed_by_id]
+              }
+            }
           )
         }
       end
 
       # POST /api/v1/projects
       def create
-        return unless authorize_action!('projects', 'create')
+        return unless authorize_action!('deals', 'create')
 
         if params[:template_id].present? && params[:deal_id].present?
           # Create from template + deal
@@ -125,7 +132,7 @@ module Api
 
       # PATCH /api/v1/projects/:id
       def update
-        return unless authorize_action!('projects', 'update')
+        return unless authorize_action!('deals', 'update')
 
         # Merge custom_field_values (Section 24 pattern)
         if params[:project][:custom_field_values].present?
@@ -147,7 +154,7 @@ module Api
 
       # DELETE /api/v1/projects/:id
       def destroy
-        return unless authorize_action!('projects', 'delete')
+        return unless authorize_action!('deals', 'delete')
 
         @project.update!(is_deleted: true)
         render json: { message: 'Project deleted' }
@@ -155,7 +162,7 @@ module Api
 
       # POST /api/v1/projects/:id/advance_phase
       def advance_phase
-        return unless authorize_action!('projects', 'update')
+        return unless authorize_action!('deals', 'update')
 
         result = @project.advance_phase!(completed_by: current_user)
 
@@ -174,9 +181,58 @@ module Api
         end
       end
 
+      # POST /api/v1/projects/:id/set_phase_status
+      def set_phase_status
+        return unless authorize_action!('deals', 'update')
+
+        phase = @project.project_phases.find_by(id: params[:phase_id])
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        new_status = params[:status]
+        return render(json: { error: 'Status is required' }, status: :bad_request) if new_status.blank?
+
+        result = @project.set_phase_status!(phase, new_status, changed_by: current_user)
+
+        if result[:error]
+          render json: { error: result[:error] }, status: :unprocessable_entity
+        else
+          render json: {
+            message: "Phase '#{phase.name}' set to #{new_status.humanize}",
+            phase: result[:phase].as_json(
+              only: %i[id name position status started_at completed_at completed_by_id]
+            ),
+            project: @project.reload.as_json(
+              only: %i[id status progress_percent completed_phase_count phase_count current_phase_id actual_completion_date],
+              methods: [:current_phase_name]
+            )
+          }
+        end
+      end
+
+      # POST /api/v1/projects/:id/undo_advance
+      def undo_advance
+        return unless authorize_action!('deals', 'update')
+
+        result = @project.undo_last_advance!(undone_by: current_user)
+
+        if result[:error]
+          render json: { error: result[:error] }, status: :unprocessable_entity
+        else
+          render json: {
+            message: "Phase '#{result[:restored_phase].name}' restored to in progress",
+            restored_phase: result[:restored_phase].as_json(only: %i[id name status started_at]),
+            reverted_phase: result[:reverted_phase]&.as_json(only: %i[id name status]),
+            project: @project.reload.as_json(
+              only: %i[id status progress_percent completed_phase_count current_phase_id actual_completion_date],
+              methods: [:current_phase_name]
+            )
+          }
+        end
+      end
+
       # POST /api/v1/projects/:id/skip_phase
       def skip_phase
-        return unless authorize_action!('projects', 'update')
+        return unless authorize_action!('deals', 'update')
 
         phase = @project.project_phases.find_by(id: params[:phase_id])
         return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
@@ -194,6 +250,160 @@ module Api
             )
           }
         end
+      end
+
+      # POST /api/v1/projects/:id/toggle_task
+      # Body: { phase_id: N, task_id: N }
+      def toggle_task
+        return unless authorize_action!('deals', 'update')
+
+        phase = @project.project_phases.find_by(id: params[:phase_id])
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        task = phase.project_phase_tasks.find_by(id: params[:task_id])
+        return render(json: { error: 'Task not found' }, status: :not_found) unless task
+
+        if task.status == 'completed'
+          task.reopen!
+        else
+          task.complete!(by: current_user)
+          # Auto-advance phase to in_progress when first task is checked
+          if phase.status == 'not_started'
+            phase.update!(status: 'in_progress', started_at: phase.started_at || Time.current)
+            @project.recalc_current_phase!
+            @project.update_progress_cache!
+            @project.save!
+          end
+        end
+
+        render json: {
+          task: task.as_json(only: %i[id name status completed_at]),
+          phase: phase.reload.as_json(
+            only: %i[id status started_at],
+            methods: %i[task_progress_percent tasks_summary]
+          ),
+          project: @project.reload.as_json(
+            only: %i[id progress_percent completed_phase_count current_phase_id]
+          )
+        }
+      end
+
+      # GET /api/v1/projects/grid
+      # Template-aware grid for the Project Summary page
+      def grid
+        return unless authorize_action!('deals', 'read')
+
+        template_id = params[:template_id]
+        return render(json: { error: 'template_id is required' }, status: :bad_request) if template_id.blank?
+
+        template = @company.project_templates.active.find_by(id: template_id)
+        return render(json: { error: 'Template not found' }, status: :not_found) unless template
+
+        template_phases = template.project_template_phases.order(:position)
+
+        projects = @company.projects.not_deleted
+                           .where(project_template_id: template_id)
+                           .includes(:project_phases, :location, deal: [:account, :contact])
+
+        unless params[:include_completed] == 'true'
+          projects = projects.where.not(status: 'completed')
+        end
+
+        projects = projects.where(location_id: params[:location_id]) if params[:location_id].present?
+
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          projects = location_ids.any? ? projects.where(location_id: location_ids) : projects.none
+        end
+
+        page        = (params[:page] || 1).to_i
+        per_page    = [(params[:per_page] || 100).to_i, 500].min
+        total_count = projects.count
+        projects    = projects.order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
+
+        project_rows = projects.map do |project|
+          phase_map = {}
+          project.project_phases.includes(:project_phase_tasks).each do |ph|
+            task_pct = ph.task_progress_percent  # nil if no tasks, 0-100 if tasks exist
+            pct = if ph.status == 'completed' || ph.status == 'skipped'
+                    100
+                  elsif task_pct.present?
+                    # Use task completion % when tasks exist
+                    task_pct
+                  elsif ph.status == 'in_progress'
+                    if ph.started_at && ph.estimated_days.to_i > 0
+                      elapsed = ((Time.current - ph.started_at) / 1.day).round
+                      [(elapsed.to_f / ph.estimated_days * 100).round, 99].min
+                    else
+                      50
+                    end
+                  else
+                    0
+                  end
+            phase_map[ph.position] = { status: ph.status, progress_percent: pct }
+          end
+
+          deal = project.deal
+          {
+            id:                    project.id,
+            project_number:        project.project_number,
+            status:                project.status,
+            progress_percent:      project.progress_percent,
+            completed_phase_count: project.completed_phase_count,
+            phase_count:           project.phase_count,
+            current_phase_name:    project.current_phase_name,
+            deal: deal ? { id: deal.id, name: deal.name, deal_number: deal.deal_number, value: deal.calculated_value } : nil,
+            account: deal&.account ? { id: deal.account.id, name: deal.account.name } : nil,
+            contact: deal&.contact ? { id: deal.contact.id, full_name: [deal.contact.first_name, deal.contact.last_name].compact.join(' ') } : nil,
+            location: project.location ? { id: project.location.id, name: project.location.name } : nil,
+            phases: template_phases.map do |tp|
+              pd = phase_map[tp.position] || {}
+              { template_phase_id: tp.id, position: tp.position, status: pd[:status] || 'not_started', progress_percent: pd[:progress_percent] || 0 }
+            end
+          }
+        end
+
+        render json: {
+          template: { id: template.id, name: template.name, phases: template_phases.as_json(only: %i[id name position color icon]) },
+          projects: project_rows,
+          meta: { total: total_count, page: page, per_page: per_page, total_pages: (total_count.to_f / per_page).ceil }
+        }
+      end
+
+      # GET /api/v1/projects/summary
+      def summary
+        return unless authorize_action!('deals', 'read')
+
+        projects = @company.projects.not_deleted
+
+        # RBAC location filtering
+        if current_user.uses_rbac?
+          unless current_user.effective_admin?
+            location_ids = permission_service.accessible_location_ids
+            projects = location_ids.any? ?
+              projects.where("location_id IN (?) OR location_id IS NULL", location_ids) :
+              projects
+          end
+        end
+
+        # Location selector filter
+        projects = projects.for_current_location
+
+        active_projects = projects.where(status: 'active')
+
+        render json: {
+          total: projects.count,
+          active: active_projects.count,
+          completed: projects.where(status: 'completed').count,
+          on_hold: projects.where(status: 'on_hold').count,
+          cancelled: projects.where(status: 'cancelled').count,
+          avg_progress: active_projects.average(:progress_percent)&.round(1) || 0,
+          overdue: active_projects.where("estimated_completion_date < ?", Date.current).count,
+          recent: projects.order(created_at: :desc).limit(5).as_json(
+            only: %i[id name project_number status progress_percent customer_name current_phase_id created_at],
+            methods: [:current_phase_name, :home_display_name]
+          )
+        }
       end
 
       private

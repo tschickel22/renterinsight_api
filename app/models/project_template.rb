@@ -79,9 +79,9 @@ class ProjectTemplate < ApplicationRecord
 
     project.save!
 
-    # Create phases from template
+    # Create phases from template (with tasks)
     project_template_phases.each do |template_phase|
-      project.project_phases.create!(
+      phase = project.project_phases.create!(
         company: company,
         name: template_phase.name,
         description: template_phase.description,
@@ -95,6 +95,16 @@ class ProjectTemplate < ApplicationRecord
         icon: template_phase.icon,
         color: template_phase.color
       )
+      # Copy tasks from template phase
+      template_phase.project_template_phase_tasks.ordered.each do |task|
+        phase.project_phase_tasks.create!(
+          company: company,
+          name: task.name,
+          position: task.position,
+          is_required: task.is_required,
+          status: 'pending'
+        )
+      end
     end
 
     # Update cached counts and set first phase

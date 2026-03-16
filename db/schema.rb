@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_16_000006) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2924,6 +2924,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_000006) do
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
   end
 
+  create_table "project_phase_tasks", force: :cascade do |t|
+    t.bigint "project_phase_id", null: false
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.integer "position", default: 0, null: false
+    t.string "status", default: "pending", null: false
+    t.boolean "is_required", default: false
+    t.datetime "completed_at"
+    t.bigint "completed_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_project_phase_tasks_on_company_id"
+    t.index ["completed_by_id"], name: "index_project_phase_tasks_on_completed_by_id"
+    t.index ["project_phase_id", "position"], name: "idx_project_phase_tasks_phase_position"
+    t.index ["project_phase_id"], name: "index_project_phase_tasks_on_project_phase_id"
+  end
+
   create_table "project_phases", force: :cascade do |t|
     t.bigint "project_id", null: false
     t.bigint "company_id", null: false
@@ -2955,6 +2972,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_000006) do
     t.index ["project_id", "status"], name: "idx_project_phases_project_status"
     t.index ["project_id"], name: "index_project_phases_on_project_id"
     t.index ["status"], name: "idx_project_phases_status"
+  end
+
+  create_table "project_template_phase_tasks", force: :cascade do |t|
+    t.bigint "project_template_phase_id", null: false
+    t.string "name", null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "is_required", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_template_phase_id", "position"], name: "idx_template_phase_tasks_phase_position"
+    t.index ["project_template_phase_id"], name: "idx_on_project_template_phase_id_9658b0b17b"
   end
 
   create_table "project_template_phases", force: :cascade do |t|
@@ -4748,8 +4776,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_000006) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "project_phase_tasks", "companies"
+  add_foreign_key "project_phase_tasks", "project_phases"
+  add_foreign_key "project_phase_tasks", "users", column: "completed_by_id"
   add_foreign_key "project_phases", "companies"
   add_foreign_key "project_phases", "projects"
+  add_foreign_key "project_template_phase_tasks", "project_template_phases"
   add_foreign_key "project_template_phases", "project_templates"
   add_foreign_key "project_templates", "companies"
   add_foreign_key "project_templates", "locations"

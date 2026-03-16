@@ -73,6 +73,110 @@ class Project < ApplicationRecord
     { success: true, completed_phase: current, next_phase: next_phase }
   end
 
+  # Set a specific phase to a given status (manual control)
+  def set_phase_status!(phase, new_status, changed_by: nil)
+    return { error: 'Phase not found in this project' } unless phase.project_id == id
+    return { error: 'Invalid status' } unless ProjectPhase::STATUSES.include?(new_status)
+
+    old_status = phase.status
+
+    ActiveRecord::Base.transaction do
+      case new_status
+      when 'completed'
+        phase.update!(
+          status: 'completed',
+          completed_at: Time.current,
+          completed_by_id: changed_by&.id,
+          started_at: phase.started_at || Time.current
+        )
+      when 'in_progress'
+        phase.update!(
+          status: 'in_progress',
+          started_at: phase.started_at || Time.current,
+          completed_at: nil,
+          completed_by_id: nil
+        )
+      when 'not_started'
+        phase.update!(
+          status: 'not_started',
+          started_at: nil,
+          completed_at: nil,
+          completed_by_id: nil
+        )
+      end
+
+      # Recalculate current_phase_id: prefer in_progress, else first not_started
+      recalc_current_phase!
+
+      # If all phases done, mark project complete
+      remaining = project_phases.where.not(status: %w[completed skipped]).count
+      if remaining == 0
+        self.status = 'completed'
+        self.actual_completion_date = Date.current
+      elsif status == 'completed'
+        self.status = 'active'
+        self.actual_completion_date = nil
+      end
+
+      update_progress_cache!
+      save!
+    end
+
+    { success: true, phase: phase.reload, old_status: old_status }
+  end
+
+  # Recalculate current_phase_id based on phase statuses
+  def recalc_current_phase!
+    in_progress = project_phases.find_by(status: 'in_progress')
+    if in_progress
+      self.current_phase_id = in_progress.id
+    else
+      first_pending = project_phases.where(status: 'not_started').order(:position).first
+      self.current_phase_id = first_pending&.id
+    end
+  end
+
+  # Undo the last phase advancement (revert most recently completed phase)
+  def undo_last_advance!(undone_by: nil)
+    phases = project_phases.order(:position)
+
+    # Find the most recently completed phase
+    last_completed = phases.where(status: 'completed').order(completed_at: :desc).first
+    return { error: 'No completed phases to undo' } unless last_completed
+
+    # Find the current in-progress phase (the one that was started after the completion)
+    current_in_progress = phases.find_by(status: 'in_progress')
+
+    ActiveRecord::Base.transaction do
+      # Reset the current in-progress phase back to not_started (if there is one)
+      if current_in_progress
+        current_in_progress.update!(
+          status: 'not_started',
+          started_at: nil
+        )
+      end
+
+      # Revert the last completed phase back to in_progress
+      last_completed.update!(
+        status: 'in_progress',
+        completed_at: nil,
+        completed_by_id: nil
+      )
+
+      # Restore project status if it was marked completed
+      if status == 'completed'
+        self.status = 'active'
+        self.actual_completion_date = nil
+      end
+
+      self.current_phase_id = last_completed.id
+      update_progress_cache!
+      save!
+    end
+
+    { success: true, restored_phase: last_completed, reverted_phase: current_in_progress }
+  end
+
   # Skip a phase (mark as skipped, don't advance)
   def skip_phase!(phase, skipped_by: nil)
     return { error: 'Phase not found in this project' } unless phase.project_id == id

@@ -6,12 +6,24 @@ module Api
       before_action :set_company_scope
       before_action :set_template, only: %i[show update destroy duplicate]
 
+      PHASE_ONLY_FIELDS = %i[id name position visible_to_client is_required estimated_days icon color].freeze
+      PHASE_TASK_FIELDS = %i[id name position is_required].freeze
+
+      def phases_json(phases)
+        phases.includes(:project_template_phase_tasks).as_json(
+          only: %i[id name description position visible_to_client is_required
+                   notify_client_on_start notify_client_on_complete estimated_days icon color],
+          include: {
+            project_template_phase_tasks: { only: PHASE_TASK_FIELDS }
+          }
+        )
+      end
+
       # GET /api/v1/project_templates
       def index
-        return unless authorize_action!('project_templates', 'read')
+        return unless authorize_action!('deals', 'read')
 
         templates = @company.project_templates.where(is_deleted: [false, nil])
-
         templates = templates.by_type(params[:template_type]) if params[:template_type].present?
         templates = templates.where(is_active: true) if params[:active_only] == 'true'
 
@@ -23,75 +35,41 @@ module Api
         templates = templates.order(:name)
 
         render json: {
-          items: templates.as_json(
-            only: %i[id name description template_type is_default is_active phase_count location_id created_at updated_at],
-            include: {
-              project_template_phases: {
-                only: %i[id name position visible_to_client is_required estimated_days icon color]
-              }
-            }
-          )
+          items: templates.map do |t|
+            t.as_json(only: %i[id name description template_type is_default is_active phase_count location_id created_at updated_at])
+              .merge('project_template_phases' => phases_json(t.project_template_phases.ordered))
+          end
         }
       end
 
       # GET /api/v1/project_templates/:id
       def show
-        return unless authorize_action!('project_templates', 'read')
+        return unless authorize_action!('deals', 'read')
 
         render json: {
           template: @template.as_json(
-            only: %i[id name description template_type is_default is_active phase_count location_id created_at updated_at],
-            include: {
-              project_template_phases: {
-                only: %i[id name description position visible_to_client is_required
-                         notify_client_on_start notify_client_on_complete estimated_days icon color]
-              }
-            }
-          )
+            only: %i[id name description template_type is_default is_active phase_count location_id created_at updated_at]
+          ).merge('project_template_phases' => phases_json(@template.project_template_phases.ordered))
         }
       end
 
       # POST /api/v1/project_templates
       def create
-        return unless authorize_action!('project_templates', 'create')
+        return unless authorize_action!('deals', 'create')
 
         template = @company.project_templates.build(template_params)
         template.created_by_id = current_user.id
 
         ActiveRecord::Base.transaction do
           template.save!
-
-          # Create phases if provided
-          if params[:phases].is_a?(Array)
-            params[:phases].each_with_index do |phase_data, index|
-              template.project_template_phases.create!(
-                name: phase_data[:name],
-                description: phase_data[:description],
-                position: phase_data[:position] || index,
-                visible_to_client: phase_data[:visible_to_client] != false,
-                is_required: phase_data[:is_required] != false,
-                notify_client_on_start: phase_data[:notify_client_on_start] || false,
-                notify_client_on_complete: phase_data[:notify_client_on_complete] != false,
-                estimated_days: phase_data[:estimated_days],
-                icon: phase_data[:icon],
-                color: phase_data[:color]
-              )
-            end
-          end
-
+          build_phases!(template, params[:phases]) if params[:phases].is_a?(Array)
           template.reload
           template.update_column(:phase_count, template.project_template_phases.count)
         end
 
         render json: {
-          template: template.as_json(
-            only: %i[id name description template_type is_default is_active phase_count created_at],
-            include: {
-              project_template_phases: {
-                only: %i[id name position visible_to_client is_required estimated_days icon color]
-              }
-            }
-          )
+          template: template.as_json(only: %i[id name description template_type is_default is_active phase_count created_at])
+            .merge('project_template_phases' => phases_json(template.project_template_phases.ordered))
         }, status: :created
 
       rescue ActiveRecord::RecordInvalid => e
@@ -100,44 +78,22 @@ module Api
 
       # PATCH /api/v1/project_templates/:id
       def update
-        return unless authorize_action!('project_templates', 'update')
+        return unless authorize_action!('deals', 'update')
 
         ActiveRecord::Base.transaction do
           @template.update!(template_params)
 
-          # Replace phases if provided (full replacement — simpler for template editing)
           if params[:phases].is_a?(Array)
             @template.project_template_phases.destroy_all
-
-            params[:phases].each_with_index do |phase_data, index|
-              @template.project_template_phases.create!(
-                name: phase_data[:name],
-                description: phase_data[:description],
-                position: phase_data[:position] || index,
-                visible_to_client: phase_data[:visible_to_client] != false,
-                is_required: phase_data[:is_required] != false,
-                notify_client_on_start: phase_data[:notify_client_on_start] || false,
-                notify_client_on_complete: phase_data[:notify_client_on_complete] != false,
-                estimated_days: phase_data[:estimated_days],
-                icon: phase_data[:icon],
-                color: phase_data[:color]
-              )
-            end
-
+            build_phases!(@template, params[:phases])
             @template.reload
             @template.update_column(:phase_count, @template.project_template_phases.count)
           end
         end
 
         render json: {
-          template: @template.as_json(
-            only: %i[id name description template_type is_default is_active phase_count updated_at],
-            include: {
-              project_template_phases: {
-                only: %i[id name position visible_to_client is_required estimated_days icon color]
-              }
-            }
-          )
+          template: @template.as_json(only: %i[id name description template_type is_default is_active phase_count updated_at])
+            .merge('project_template_phases' => phases_json(@template.project_template_phases.ordered))
         }
 
       rescue ActiveRecord::RecordInvalid => e
@@ -146,7 +102,7 @@ module Api
 
       # DELETE /api/v1/project_templates/:id
       def destroy
-        return unless authorize_action!('project_templates', 'delete')
+        return unless authorize_action!('deals', 'delete')
 
         @template.update!(is_deleted: true, is_active: false)
         render json: { message: 'Template deleted' }
@@ -154,20 +110,14 @@ module Api
 
       # POST /api/v1/project_templates/:id/duplicate
       def duplicate
-        return unless authorize_action!('project_templates', 'create')
+        return unless authorize_action!('deals', 'create')
 
         new_template = @template.duplicate!(new_name: params[:name])
         new_template.update!(created_by_id: current_user.id)
 
         render json: {
-          template: new_template.as_json(
-            only: %i[id name description template_type is_default is_active phase_count created_at],
-            include: {
-              project_template_phases: {
-                only: %i[id name position visible_to_client is_required estimated_days icon color]
-              }
-            }
-          )
+          template: new_template.as_json(only: %i[id name description template_type is_default is_active phase_count created_at])
+            .merge('project_template_phases' => phases_json(new_template.project_template_phases.ordered))
         }, status: :created
       end
 
@@ -182,8 +132,36 @@ module Api
       def template_params
         params.require(:project_template).permit(
           :name, :description, :template_type, :is_default, :is_active, :location_id
-          # NEVER permit: :company_id
         )
+      end
+
+      # Build phases (and their tasks) from params array
+      def build_phases!(template, phases_data)
+        phases_data.each_with_index do |phase_data, index|
+          phase = template.project_template_phases.create!(
+            name:                      phase_data[:name],
+            description:               phase_data[:description],
+            position:                  phase_data[:position] || index,
+            visible_to_client:         phase_data[:visible_to_client] != false,
+            is_required:               phase_data[:is_required] != false,
+            notify_client_on_start:    phase_data[:notify_client_on_start] || false,
+            notify_client_on_complete: phase_data[:notify_client_on_complete] != false,
+            estimated_days:            phase_data[:estimated_days],
+            icon:                      phase_data[:icon],
+            color:                     phase_data[:color]
+          )
+
+          # Create sub-tasks if provided
+          next unless phase_data[:tasks].is_a?(Array)
+          phase_data[:tasks].each_with_index do |task_data, tidx|
+            next if task_data[:name].blank?
+            phase.project_template_phase_tasks.create!(
+              name:        task_data[:name],
+              position:    task_data[:position] || tidx,
+              is_required: task_data[:is_required] || false
+            )
+          end
+        end
       end
     end
   end

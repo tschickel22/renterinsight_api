@@ -6,6 +6,7 @@ class ProjectPhase < ApplicationRecord
   belongs_to :project
   belongs_to :company
   belongs_to :completed_by, class_name: 'User', foreign_key: 'completed_by_id', optional: true
+  has_many :project_phase_tasks, -> { order(:position) }, dependent: :destroy
 
   # Validations
   validates :name, presence: true
@@ -49,6 +50,21 @@ class ProjectPhase < ApplicationRecord
   def duration_days
     return nil unless started_at && completed_at
     ((completed_at - started_at) / 1.day).round
+  end
+
+  # Calculate % complete based on tasks (if any), otherwise 0 or 100
+  def task_progress_percent
+    tasks = project_phase_tasks
+    return nil if tasks.empty?  # nil means no tasks defined
+    total = tasks.count
+    done  = tasks.where(status: 'completed').count
+    total > 0 ? ((done.to_f / total) * 100).round : 0
+  end
+
+  def tasks_summary
+    tasks = project_phase_tasks
+    return nil if tasks.empty?
+    { total: tasks.count, completed: tasks.where(status: 'completed').count }
   end
 
   def overdue?

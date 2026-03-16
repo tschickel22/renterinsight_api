@@ -249,9 +249,20 @@ Rails.application.routes.draw do
 
       # ==================== PROJECTS ====================
       resources :projects do
+        collection do
+          get :summary
+          get :grid
+        end
         member do
           post :advance_phase
+          post :undo_advance
+          post :set_phase_status
           post :skip_phase
+          post :toggle_task   # POST body: { phase_id:, task_id: }
+        end
+        # Nested phase tasks (CRUD only — toggle uses project member action above)
+        resources :phases, only: [] do
+          resources :tasks, controller: 'project_phase_tasks', only: [:index, :create, :update, :destroy]
         end
       end
 

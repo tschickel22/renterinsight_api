@@ -2,6 +2,7 @@
 
 class ProjectTemplatePhase < ApplicationRecord
   belongs_to :project_template, counter_cache: :phase_count
+  has_many :project_template_phase_tasks, -> { order(:position) }, dependent: :destroy
 
   # Validations
   validates :name, presence: true
