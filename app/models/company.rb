@@ -124,6 +124,7 @@ class Company < ApplicationRecord
   
   # Callbacks
   after_create :create_default_location
+  after_create :seed_default_project_templates
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
   
@@ -524,6 +525,14 @@ class Company < ApplicationRecord
   end
   
   # Create default location after company creation
+  def seed_default_project_templates
+    ProjectTemplate.seed_defaults!(self)
+    Rails.logger.info "✅ [Company#seed_default_project_templates] Seeded default project templates for Company #{id} (#{name})"
+  rescue => e
+    Rails.logger.error "❌ [Company#seed_default_project_templates] Failed to seed templates for Company #{id}: #{e.message}"
+    nil
+  end
+
   def create_default_location
     Rails.logger.info "🏢 [Company#create_default_location] Creating default location for Company #{id} (#{name})"
     
