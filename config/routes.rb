@@ -356,6 +356,7 @@ Rails.application.routes.draw do
           get :stats
           get :branding_preview  # Preview branding before sync
           get 'by_token/:token', action: :by_token  # ⭐ PUBLIC - Preview website by token
+          get 'by_slug_public/:slug', action: :by_slug_public  # ⭐ PUBLIC - Preview website by slug (Safari compatible)
           get 'by_slug/:slug', action: :by_slug  # Authenticated preview by slug
         end
         

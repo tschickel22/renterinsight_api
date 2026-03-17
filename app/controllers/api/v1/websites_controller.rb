@@ -3,9 +3,9 @@
 
 class Api::V1::WebsitesController < ApplicationController
   # Public preview endpoint - no auth required
-  skip_before_action :authenticate, only: [:by_token]
+  skip_before_action :authenticate, only: [:by_token, :by_slug_public]
   
-  before_action :set_company_scope, except: [:by_token]
+  before_action :set_company_scope, except: [:by_token, :by_slug_public]
   before_action :set_website, only: [:show, :update, :destroy, :publish, :unpublish, :sync_branding]
 
   def index
@@ -379,6 +379,59 @@ class Api::V1::WebsitesController < ApplicationController
     render json: website_json
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Preview not found' }, status: :not_found
+  end
+
+  # GET /api/v1/websites/by_slug_public/:slug
+  # PUBLIC endpoint - no auth required. Used by /s/:slug preview in new tabs (Safari compatibility)
+  def by_slug_public
+    @website = Website.joins(:company)
+                      .where(slug: params[:slug], is_deleted: [false, nil])
+                      .first!
+
+    website_json = @website.as_json(
+      include: {
+        website_pages: {
+          only: [:id, :title, :slug, :path, :is_visible, :order, :blocks, :show_in_nav, :show_in_footer, :page_order],
+          methods: [:full_path]
+        }
+      },
+      methods: [:full_theme]
+    )
+
+    # Include recent published blog posts for blogList blocks
+    published_posts = @website.blog_posts
+                              .where(is_deleted: [false, nil])
+                              .where(status: :published)
+                              .where('published_at <= ?', Time.current)
+                              .order(published_at: :desc)
+                              .limit(12)
+
+    website_json['blog_posts'] = published_posts.as_json(
+      only: [:id, :title, :slug, :excerpt, :featured_image_url, :featured_image_alt,
+             :published_at, :view_count],
+      include: {
+        author: { only: [:id, :first_name, :last_name] },
+        blog_categories: { only: [:id, :name, :slug] }
+      },
+      methods: [:reading_time]
+    )
+
+    website_json['blog_categories'] = @website.blog_categories
+                                              .where(is_deleted: [false, nil])
+                                              .order(:order, :name)
+                                              .as_json(only: [:id, :name, :slug], methods: [:posts_count])
+
+    website_json['calculator_settings'] = build_calculator_settings(@website.company)
+
+    website_json['inventory_embed_config'] = {
+      token: @website.company.public_inventory_token,
+      company_id: @website.company.id,
+      enabled: @website.company.public_inventory_enabled || false
+    }
+
+    render json: website_json
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Website not found' }, status: :not_found
   end
 
   # GET /api/v1/websites/by_slug/:slug
