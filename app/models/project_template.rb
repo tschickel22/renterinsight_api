@@ -117,6 +117,87 @@ class ProjectTemplate < ApplicationRecord
     project
   end
 
+  # ============================================================================
+  # CLASS METHOD: Seed default templates for a company
+  # ============================================================================
+  def self.seed_defaults!(company)
+    Rails.logger.info "[ProjectTemplate] Seeding default templates for Company #{company.id} (#{company.name})"
+
+    # Standard Manufactured Home
+    standard = company.project_templates.find_or_create_by!(name: 'Standard Manufactured Home') do |t|
+      t.description = 'Full lifecycle for a new manufactured home purchase with land prep, delivery, and installation'
+      t.template_type = 'land_home'
+      t.is_default = true
+      t.is_active = true
+      t.created_by_id = company.users.first&.id
+    end
+    standard_phases = [
+      { name: 'Finance Application',          position: 0,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Landmark',       color: '#6366f1', description: 'Loan application submitted and under review' },
+      { name: 'Purchase Agreement Signed',    position: 1,  estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'FileSignature',  color: '#8b5cf6', description: 'Purchase agreement executed by all parties' },
+      { name: 'Home Ordered / In Production', position: 2,  estimated_days: 60,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Factory',        color: '#a855f7', description: 'Home ordered from manufacturer and in production' },
+      { name: 'Home Arrives at Dealer',       position: 3,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Truck',          color: '#3b82f6', description: 'Home delivered to dealer lot for inspection' },
+      { name: 'Receiving Inspection (PDI)',   position: 4,  estimated_days: 3,   visible_to_client: false, is_required: true,  notify_client_on_start: false, notify_client_on_complete: false, icon: 'ClipboardCheck', color: '#0ea5e9', description: 'Pre-delivery inspection and quality check' },
+      { name: 'Land Prep & Permits',          position: 5,  estimated_days: 30,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Shovel',         color: '#14b8a6', description: 'Foundation, utilities, and building permits' },
+      { name: 'Home Delivered to Site',       position: 6,  estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'MapPin',         color: '#22c55e', description: 'Home transported and placed on foundation' },
+      { name: 'Installation & Set',           position: 7,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Wrench',         color: '#84cc16', description: 'Leveling, blocking, skirting, and exterior finish' },
+      { name: 'Utility Connections',          position: 8,  estimated_days: 10,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Zap',            color: '#eab308', description: 'Electrical, plumbing, HVAC, water, sewer hookups' },
+      { name: 'Interior Finish',              position: 9,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'PaintBucket',    color: '#f97316', description: 'Drywall marriage line, trim, carpet, appliances' },
+      { name: 'Final Inspection',             position: 10, estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'ShieldCheck',    color: '#ef4444', description: 'County or state building inspector sign-off' },
+      { name: 'Punch List & Walk-Through',    position: 11, estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'ListChecks',     color: '#ec4899', description: 'Buyer walk-through and punch list items' },
+      { name: 'Closing & Handoff',            position: 12, estimated_days: 3,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'KeyRound',       color: '#10b981', description: 'Final payment, keys delivered, warranty docs provided' },
+      { name: 'Warranty Period',              position: 13, estimated_days: 365, visible_to_client: true,  is_required: false, notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Shield',         color: '#6b7280', description: '12-month manufacturer warranty coverage' },
+    ]
+    standard.project_template_phases.destroy_all
+    standard_phases.each { |p| standard.project_template_phases.create!(p) }
+    standard.update_column(:phase_count, standard_phases.size)
+
+    # Factory Order (No Install)
+    factory = company.project_templates.find_or_create_by!(name: 'Factory Order (No Install)') do |t|
+      t.description = 'Factory-direct order where buyer handles their own installation. Home sold FOB dealer lot.'
+      t.template_type = 'factory_order'
+      t.is_default = false
+      t.is_active = true
+      t.created_by_id = company.users.first&.id
+    end
+    factory_phases = [
+      { name: 'Finance Application',        position: 0, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Landmark',      color: '#6366f1', description: 'Loan application submitted and under review' },
+      { name: 'Purchase Agreement Signed',  position: 1, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'FileSignature', color: '#8b5cf6', description: 'Purchase agreement and disclosures signed' },
+      { name: 'Construction Authorized',    position: 2, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Hammer',        color: '#a855f7', description: 'Buyer authorizes factory to begin construction' },
+      { name: 'Color & Option Selections',  position: 3, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Palette',       color: '#3b82f6', description: 'Interior and exterior color selections' },
+      { name: 'Home In Production',         position: 4, estimated_days: 60, visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Factory',       color: '#0ea5e9', description: 'Home under construction at factory' },
+      { name: 'Home Completed',             position: 5, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'CircleCheck',   color: '#22c55e', description: 'Home completed and ready for transport' },
+      { name: 'Balance Due & Payment',      position: 6, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'DollarSign',    color: '#eab308', description: 'Remaining balance due before delivery' },
+      { name: 'Transport Scheduled',        position: 7, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Truck',         color: '#f97316', description: 'Home scheduled for transport to buyer site' },
+      { name: 'Delivered & Title Transfer', position: 8, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'KeyRound',      color: '#10b981', description: 'Home delivered, title/MSO transferred' },
+    ]
+    factory.project_template_phases.destroy_all
+    factory_phases.each { |p| factory.project_template_phases.create!(p) }
+    factory.update_column(:phase_count, factory_phases.size)
+
+    # Used / Pre-Owned Home
+    used = company.project_templates.find_or_create_by!(name: 'Used / Pre-Owned Home') do |t|
+      t.description = 'Shorter lifecycle for used/pre-owned home sales with refurbishment and delivery'
+      t.template_type = 'used_home'
+      t.is_default = false
+      t.is_active = true
+      t.created_by_id = company.users.first&.id
+    end
+    used_phases = [
+      { name: 'Purchase Agreement Signed', position: 0, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'FileSignature', color: '#8b5cf6', description: 'Purchase agreement signed' },
+      { name: 'Finance Approved',          position: 1, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'Landmark',      color: '#6366f1', description: 'Financing approved or cash verified' },
+      { name: 'Refurbishment',             position: 2, estimated_days: 21, visible_to_client: true, is_required: false, notify_client_on_start: true,  notify_client_on_complete: true, icon: 'Wrench',        color: '#3b82f6', description: 'Repairs and upgrades to prepare home for sale' },
+      { name: 'Site Preparation',          position: 3, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'Shovel',        color: '#14b8a6', description: 'Foundation and site work at delivery location' },
+      { name: 'Delivery & Set',            position: 4, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true, icon: 'Truck',         color: '#22c55e', description: 'Home delivered and placed on foundation' },
+      { name: 'Final Inspection',          position: 5, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'ShieldCheck',   color: '#ef4444', description: 'Inspection and walk-through' },
+      { name: 'Closing & Handoff',         position: 6, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'KeyRound',      color: '#10b981', description: 'Keys delivered, warranty docs provided' },
+    ]
+    used.project_template_phases.destroy_all
+    used_phases.each { |p| used.project_template_phases.create!(p) }
+    used.update_column(:phase_count, used_phases.size)
+
+    Rails.logger.info "[ProjectTemplate] Seeded 3 default templates for Company #{company.id}"
+  end
+
   private
 
   def update_phase_count
