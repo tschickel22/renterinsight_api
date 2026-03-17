@@ -554,6 +554,7 @@ Rails.application.routes.draw do
         collection do
           get :stats
           get :templates
+          post :bulk_share
         end
       end
       
