@@ -18,6 +18,11 @@ class WebsitePage < ApplicationRecord
   scope :visible_in_footer, -> { where(show_in_footer: true) }
   scope :top_level, -> { where(parent_page_id: nil) }
   
+  # Returns the page path (used by as_json methods: [:full_path])
+  def full_path
+    path
+  end
+
   # Visibility
   def show!
     update!(is_visible: true)

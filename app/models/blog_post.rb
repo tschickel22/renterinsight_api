@@ -54,6 +54,13 @@ class BlogPost < ApplicationRecord
     text.truncate(200, separator: ' ')
   end
   
+  # Estimated reading time in minutes based on word count
+  def reading_time
+    return 1 unless content.present?
+    words = ActionView::Base.full_sanitizer.sanitize(content).split.size
+    [(words / 200.0).ceil, 1].max
+  end
+
   # View tracking
   def increment_views!
     increment!(:view_count)

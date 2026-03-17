@@ -32,6 +32,17 @@ class Website < ApplicationRecord
     Current.location_filtered? ? where(location_id: Current.location_id) : all 
   }
   
+  # Returns theme with defaults merged in
+  def full_theme
+    defaults = {
+      'primary_color' => '#3b82f6',
+      'secondary_color' => '#8b5cf6',
+      'accent_color' => '#f59e0b',
+      'font_family' => 'Inter'
+    }
+    defaults.merge(theme || {})
+  end
+
   # Publishing workflow
   def publish!
     update!(status: :published, published_at: Time.current)
