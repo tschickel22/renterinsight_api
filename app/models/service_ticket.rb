@@ -42,6 +42,7 @@ class ServiceTicket < ApplicationRecord
   belongs_to :portal_user, class_name: 'BuyerPortalAccess', optional: true
   has_one :warranty_claim_owned, class_name: 'WarrantyClaim', foreign_key: :service_ticket_id, dependent: :restrict_with_error
   has_many :invoices, as: :source, dependent: :nullify
+  has_many :contractor_assignments, as: :assignable, dependent: :destroy
   
   # User assignment (assigned_to stores user_id as string)
   def assigned_to_user

@@ -274,6 +274,28 @@ class Api::V1::SearchController < ApplicationController
       Rails.logger.error("Search agreements error: #{e.message}")
     end
 
+    # Operations - Contractors
+    begin
+      contractors = @company.contractors
+                           .where(is_deleted: [false, nil])
+                           .where("name ILIKE ? OR contact_name ILIKE ? OR email ILIKE ? OR trade_type ILIKE ?",
+                                  "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                           .limit(5)
+
+      results += contractors.map do |contractor|
+        {
+          id: contractor.id,
+          type: 'contractor',
+          title: contractor.name,
+          subtitle: contractor.contact_name || contractor.email,
+          badge: contractor.trade_type&.titleize,
+          score: calculate_score(query, contractor.name, contractor.contact_name, contractor.email, contractor.trade_type)
+        }
+      end
+    rescue => e
+      Rails.logger.error("Search contractors error: #{e.message}")
+    end
+
     # Sort by relevance score (higher = better match)
     results.sort_by! { |r| -r[:score] }
     

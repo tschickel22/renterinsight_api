@@ -9,7 +9,7 @@ module Api
       # Uploads a file to S3 for use in custom field values (file/image types)
       # Params: file (multipart), module (string), entity_id (integer), field_key (string)
       def create
-        return unless authorize_action!('crm', 'update')
+        return unless authorize_upload!
 
         unless params[:file].present?
           return render json: { error: 'No file provided' }, status: :unprocessable_entity
@@ -59,7 +59,7 @@ module Api
       # Removes a file from S3
       # Params: s3_key (string)
       def destroy
-        return unless authorize_action!('crm', 'update')
+        return unless authorize_upload!
 
         s3_key = params[:s3_key]
         unless s3_key.present?
@@ -79,6 +79,30 @@ module Api
           Rails.logger.error "Custom field file delete failed: #{e.message}"
           render json: { error: "Delete failed: #{e.message}" }, status: :internal_server_error
         end
+      end
+
+      private
+
+      # Module-aware authorization: check 'update' permission on the resource
+      # that corresponds to the module param (contractors, leads, contacts, etc.)
+      def authorize_upload!
+        resource_key = upload_resource_key
+        authorize_action!(resource_key, 'update')
+      end
+
+      # Map module param to RBAC resource key
+      def upload_resource_key
+        module_map = {
+          'contractors' => 'contractors',
+          'leads'       => 'leads',
+          'contacts'    => 'contacts',
+          'accounts'    => 'accounts',
+          'deals'       => 'crm',
+          'quotes'      => 'quotes',
+          'vehicles'    => 'inventory',
+          'parts'       => 'parts',
+        }
+        module_map[params[:module]] || 'crm'
       end
     end
   end

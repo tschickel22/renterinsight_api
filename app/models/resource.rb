@@ -117,6 +117,9 @@ public
       # Configurator (position 155)
       { key: 'configurator', name: 'Home Configurator', category: 'operations', description: 'Configure and quote manufactured homes', position: 155 },
 
+      # Contractors (position 163)
+      { key: 'contractors', name: 'Contractors', category: 'operations', description: 'Manage contractors, assignments, and portal access', position: 163 },
+
       # Warranty Resources (position 160-165)
       { key: 'warranty_claims', name: 'Warranty Claims', category: 'operations', description: 'Manage warranty claims and submissions to manufacturers', position: 160 },
       { key: 'manufacturer_ar', name: 'Manufacturer AR', category: 'operations', description: 'Track and manage manufacturer accounts receivable', position: 161 },

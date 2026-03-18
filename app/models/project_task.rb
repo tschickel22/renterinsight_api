@@ -9,6 +9,7 @@ class ProjectTask < ApplicationRecord
   has_many :checklists, class_name: 'ProjectTaskChecklist', dependent: :destroy
   has_many :dependencies, class_name: 'ProjectTaskDependency', foreign_key: :task_id, dependent: :destroy
   has_many :dependents, class_name: 'ProjectTaskDependency', foreign_key: :depends_on_id, dependent: :destroy
+  has_many :contractor_assignments, as: :assignable, dependent: :destroy
 
   validates :title, presence: true
   validates :status, inclusion: { in: %w[pending in_progress completed blocked skipped] }

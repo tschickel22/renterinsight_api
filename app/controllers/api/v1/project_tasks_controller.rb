@@ -6,7 +6,7 @@ module Api
       before_action :set_company_scope
       before_action :set_project
       before_action :set_phase, only: [:index, :create, :reorder]
-      before_action :set_task, only: [:show, :update, :destroy, :update_status]
+      before_action :set_task, only: [:show, :update, :destroy, :update_status, :assign_contractor, :unassign_contractor]
 
       # GET /api/v1/projects/:project_id/phases/:project_phase_id/tasks
       def index
@@ -86,6 +86,40 @@ module Api
         return unless authorize_action!('projects', 'delete')
         @task.update(is_deleted: true)
         render json: { message: 'Task deleted' }
+      end
+
+      # POST /api/v1/projects/:project_id/tasks/:id/assign_contractor
+      def assign_contractor
+        return unless authorize_action!('contractors', 'create')
+
+        contractor = @company.contractors.not_deleted.find(params[:contractor_id])
+        assignment = @task.contractor_assignments.build(
+          contractor: contractor,
+          company: @company,
+          assigned_by: current_user,
+          status: 'assigned',
+          assigned_at: Time.current,
+          notes: params[:notes]
+        )
+
+        if assignment.save
+          render json: { message: 'Contractor assigned', assignment_id: assignment.id }, status: :created
+        else
+          render json: { errors: assignment.errors.full_messages }, status: :unprocessable_entity
+        end
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Contractor not found' }, status: :not_found
+      end
+
+      # DELETE /api/v1/projects/:project_id/tasks/:id/unassign_contractor
+      def unassign_contractor
+        return unless authorize_action!('contractors', 'delete')
+
+        assignment = @task.contractor_assignments.find_by!(contractor_id: params[:contractor_id])
+        assignment.destroy
+        head :no_content
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Assignment not found' }, status: :not_found
       end
 
       # POST /api/v1/projects/:project_id/phases/:project_phase_id/tasks/reorder

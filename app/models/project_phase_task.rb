@@ -7,6 +7,9 @@ class ProjectPhaseTask < ApplicationRecord
   belongs_to :company
   belongs_to :completed_by, class_name: 'User', optional: true
 
+  # Polymorphic contractor assignments (Phase 2B)
+  has_many :contractor_assignments, as: :assignable, dependent: :destroy
+
   validates :name, presence: true
   validates :status, inclusion: { in: STATUSES }
 

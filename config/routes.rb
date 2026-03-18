@@ -259,6 +259,8 @@ Rails.application.routes.draw do
           post :set_phase_status
           post :skip_phase
           post :toggle_task   # POST body: { phase_id:, task_id: }
+          post :assign_phase_task_contractor     # POST body: { phase_id:, task_id:, contractor_id: }
+          delete :unassign_phase_task_contractor  # DELETE body: { phase_id:, task_id:, contractor_id: }
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
         resources :phases, only: [] do
@@ -275,6 +277,8 @@ Rails.application.routes.draw do
         resources :project_tasks, controller: 'project_tasks', only: [:show, :update, :destroy], as: :project_task_detail do
           member do
             patch :update_status
+            post :assign_contractor
+            delete :unassign_contractor
           end
 
           resources :checklists, controller: 'project_task_checklists', only: [:create, :update, :destroy] do
@@ -333,6 +337,8 @@ Rails.application.routes.draw do
           post :generate_customer_invoice, path: 'generate-customer-invoice'
           post :generate_warranty_claim, path: 'generate-warranty-claim'
           post :generate_both, path: 'generate-both'
+          post :assign_contractor, path: 'assign-contractor'
+          delete :unassign_contractor, path: 'unassign-contractor'
         end
         
         collection do
@@ -340,6 +346,15 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== CONTRACTORS ====================
+      resources :contractors do
+        collection do
+          get :stats
+        end
+
+        resources :contractor_assignments, only: [:index, :create, :update, :destroy]
+      end
+
       # ==================== WARRANTY SYSTEM ====================
       # Manufacturers
       resources :manufacturers, only: [:index, :show]
@@ -1945,6 +1960,33 @@ Rails.application.routes.draw do
         get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
         post 'submit', to: 'configurator#submit'
         get 'my-configurations', to: 'configurator#my_configurations'
+      end
+    end
+  end
+
+  # ==================== CONTRACTOR PORTAL ====================
+  namespace :api do
+    namespace :contractor do
+      # Authentication
+      post 'sessions/magic_link', to: 'sessions#magic_link'
+      post 'sessions/verify', to: 'sessions#verify'
+
+      # Dashboard
+      get 'dashboard', to: 'dashboard#index'
+
+      # Tasks
+      resources :tasks, only: [:index, :show] do
+        member do
+          patch :update_status
+          patch :toggle_checklist_item
+        end
+      end
+
+      # Service Tickets
+      resources :service_tickets, only: [:index, :show], path: 'service-tickets' do
+        member do
+          patch :update_status
+        end
       end
     end
   end

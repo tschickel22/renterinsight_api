@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_18_000007) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_18_000010) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1250,6 +1250,60 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_18_000007) do
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
     t.index ["quickbooks_id"], name: "index_contacts_on_quickbooks_id"
+  end
+
+  create_table "contractor_assignments", force: :cascade do |t|
+    t.bigint "contractor_id", null: false
+    t.string "assignable_type", null: false
+    t.bigint "assignable_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "assigned_by_id"
+    t.string "status", default: "assigned"
+    t.datetime "assigned_at"
+    t.datetime "accepted_at"
+    t.datetime "completed_at"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
+    t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
+    t.index ["company_id"], name: "index_contractor_assignments_on_company_id"
+    t.index ["contractor_id"], name: "index_contractor_assignments_on_contractor_id"
+    t.index ["status"], name: "index_contractor_assignments_on_status"
+  end
+
+  create_table "contractors", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "contact_name"
+    t.string "email"
+    t.string "phone"
+    t.string "trade_type", default: "general"
+    t.string "license_number"
+    t.string "license_state"
+    t.date "license_expiry"
+    t.string "insurance_provider"
+    t.string "insurance_policy_number"
+    t.date "insurance_expiry"
+    t.boolean "bonded", default: false
+    t.decimal "bond_amount", precision: 10, scale: 2
+    t.date "bond_expiry"
+    t.decimal "hourly_rate", precision: 10, scale: 2
+    t.text "notes"
+    t.string "status", default: "active"
+    t.decimal "rating", precision: 3, scale: 2
+    t.boolean "is_deleted", default: false
+    t.jsonb "custom_field_values", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "portal_access_token"
+    t.datetime "portal_token_expires_at"
+    t.datetime "last_portal_login_at"
+    t.index ["company_id"], name: "index_contractors_on_company_id"
+    t.index ["email"], name: "index_contractors_on_email"
+    t.index ["portal_access_token"], name: "index_contractors_on_portal_access_token", unique: true
+    t.index ["status"], name: "index_contractors_on_status"
+    t.index ["trade_type"], name: "index_contractors_on_trade_type"
   end
 
   create_table "custom_field_migrations", force: :cascade do |t|
@@ -4755,6 +4809,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_18_000007) do
   add_foreign_key "contact_activities", "users"
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "contacts", "locations"
+  add_foreign_key "contractor_assignments", "companies"
+  add_foreign_key "contractor_assignments", "contractors"
+  add_foreign_key "contractor_assignments", "users", column: "assigned_by_id"
+  add_foreign_key "contractors", "companies"
   add_foreign_key "custom_field_migrations", "companies"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "source_custom_field_id"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "target_custom_field_id"
