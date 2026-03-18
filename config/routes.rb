@@ -263,8 +263,44 @@ Rails.application.routes.draw do
         # Nested phase tasks (CRUD only — toggle uses project member action above)
         resources :phases, only: [] do
           resources :tasks, controller: 'project_phase_tasks', only: [:index, :create, :update, :destroy]
+          # Phase 2A: Rich project tasks (with checklists, dependencies, etc.)
+          resources :project_tasks, controller: 'project_tasks', only: [:index, :create] do
+            collection do
+              post :reorder
+            end
+          end
+        end
+
+        # Phase 2A: Project tasks (show/update/destroy at project level)
+        resources :project_tasks, controller: 'project_tasks', only: [:show, :update, :destroy], as: :project_task_detail do
+          member do
+            patch :update_status
+          end
+
+          resources :checklists, controller: 'project_task_checklists', only: [:create, :update, :destroy] do
+            member do
+              post :add_item
+            end
+          end
+
+          resources :checklist_items, controller: 'project_task_checklists', only: [] do
+            member do
+              patch :toggle_item
+              delete :delete_item
+            end
+          end
+        end
+
+        # Phase 2A: Notification preferences
+        resources :notification_preferences, controller: 'project_notification_preferences', only: [:index, :create, :update, :destroy] do
+          collection do
+            post :auto_setup
+          end
         end
       end
+
+      # Phase 2A: Offline sync
+      post 'offline_sync', to: 'offline_sync#create'
 
       resources :project_templates, path: 'project-templates' do
         member do

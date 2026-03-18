@@ -95,7 +95,7 @@ class ProjectTemplate < ApplicationRecord
         icon: template_phase.icon,
         color: template_phase.color
       )
-      # Copy tasks from template phase
+      # Copy simple tasks from template phase
       template_phase.project_template_phase_tasks.ordered.each do |task|
         phase.project_phase_tasks.create!(
           company: company,
@@ -104,6 +104,34 @@ class ProjectTemplate < ApplicationRecord
           is_required: task.is_required,
           status: 'pending'
         )
+      end
+
+      # Copy rich tasks from default_tasks JSON (Phase 2A)
+      # Handles both seed format (title/checklist) and editor format (name/checklist_items)
+      (template_phase.default_tasks || []).each_with_index do |task_data, task_idx|
+        task_data = task_data.with_indifferent_access
+        task_title = task_data[:title] || task_data[:name]
+        next if task_title.blank?
+
+        rich_task = phase.tasks.create!(
+          company: company,
+          project: project,
+          title: task_title,
+          description: task_data[:description],
+          task_type: task_data[:task_type] || 'general',
+          estimated_hours: task_data[:estimated_hours],
+          position: task_data[:position] || task_idx,
+          status: 'pending',
+          priority: 'medium'
+        )
+
+        checklist_items = task_data[:checklist] || task_data[:checklist_items] || []
+        if checklist_items.present? && checklist_items.is_a?(Array)
+          checklist = rich_task.checklists.create!(title: 'Checklist', position: 0)
+          checklist_items.each_with_index do |item_title, item_idx|
+            checklist.items.create!(title: item_title, position: item_idx)
+          end
+        end
       end
     end
 

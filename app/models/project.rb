@@ -14,6 +14,8 @@ class Project < ApplicationRecord
   belongs_to :created_by, class_name: 'User', foreign_key: 'created_by_id', optional: true
 
   has_many :project_phases, -> { order(:position) }, dependent: :destroy
+  has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
+  has_many :notification_preferences, class_name: 'ProjectNotificationPreference', dependent: :destroy
 
   # Validations
   validates :name, presence: true
@@ -225,7 +227,12 @@ class Project < ApplicationRecord
     )
   end
 
-  # Start the project (set first phase to in_progress)
+  # Phase 2A: Called by ProjectTask after_save to update project progress
+  # Delegates to update_progress_cache! which counts completed phases
+  def recalculate_completion!
+    update_progress_cache!
+  end
+
   def start!
     first_phase = project_phases.order(:position).first
     return unless first_phase && first_phase.status == 'not_started'

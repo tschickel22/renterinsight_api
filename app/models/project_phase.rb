@@ -7,6 +7,7 @@ class ProjectPhase < ApplicationRecord
   belongs_to :company
   belongs_to :completed_by, class_name: 'User', foreign_key: 'completed_by_id', optional: true
   has_many :project_phase_tasks, -> { order(:position) }, dependent: :destroy
+  has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
 
   # Validations
   validates :name, presence: true
@@ -88,21 +89,20 @@ class ProjectPhase < ApplicationRecord
     end
   end
 
+  after_save :notify_status_change, if: :saved_change_to_status?
+
   private
 
-  # ============================================================================
-  # NOTIFICATIONS (placeholder — will use existing CommunicationService)
-  # ============================================================================
+  def notify_status_change
+    ProjectNotificationService.notify_phase_change(self, status_before_last_save, status)
+  end
 
   def send_start_notification!
-    # TODO: Wire to CommunicationService when building notification triggers
-    # For now, just mark as notified so we don't double-send later
     update_column(:client_notified_start, true)
     Rails.logger.info "[ProjectPhase] Phase '#{name}' started for project #{project_id} — notification queued"
   end
 
   def send_completion_notification!
-    # TODO: Wire to CommunicationService when building notification triggers
     update_column(:client_notified_complete, true)
     Rails.logger.info "[ProjectPhase] Phase '#{name}' completed for project #{project_id} — notification queued"
   end
