@@ -107,12 +107,24 @@ class ProjectTemplate < ApplicationRecord
       end
 
       # Copy rich tasks from default_tasks JSON (Phase 2A)
+      # Creates BOTH ProjectPhaseTask (for progress tracker display) AND ProjectTask (for rich detail)
       # Handles both seed format (title/checklist) and editor format (name/checklist_items)
+      simple_task_position = phase.project_phase_tasks.count  # Start after any existing simple tasks
       (template_phase.default_tasks || []).each_with_index do |task_data, task_idx|
         task_data = task_data.with_indifferent_access
         task_title = task_data[:title] || task_data[:name]
         next if task_title.blank?
 
+        # Create simple ProjectPhaseTask (shown in ProjectProgressTracker)
+        phase.project_phase_tasks.create!(
+          company: company,
+          name: task_title,
+          position: simple_task_position + task_idx,
+          is_required: true,
+          status: 'pending'
+        )
+
+        # Create rich ProjectTask (with checklists, task type, hours)
         rich_task = phase.tasks.create!(
           company: company,
           project: project,
