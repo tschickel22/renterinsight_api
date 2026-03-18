@@ -95,15 +95,22 @@ class ProjectTemplate < ApplicationRecord
         icon: template_phase.icon,
         color: template_phase.color
       )
-      # Copy simple tasks from template phase
-      template_phase.project_template_phase_tasks.ordered.each do |task|
-        phase.project_phase_tasks.create!(
-          company: company,
-          name: task.name,
-          position: task.position,
-          is_required: task.is_required,
-          status: 'pending'
-        )
+      # Copy tasks from template phase
+      # If default_tasks JSON exists, use it (creates both simple + rich tasks)
+      # Otherwise fall back to project_template_phase_tasks (simple only)
+      has_default_tasks = template_phase.default_tasks.present? && template_phase.default_tasks.is_a?(Array) && template_phase.default_tasks.any?
+
+      unless has_default_tasks
+        # Legacy path: copy simple tasks from template phase records
+        template_phase.project_template_phase_tasks.ordered.each do |task|
+          phase.project_phase_tasks.create!(
+            company: company,
+            name: task.name,
+            position: task.position,
+            is_required: task.is_required,
+            status: 'pending'
+          )
+        end
       end
 
       # Copy rich tasks from default_tasks JSON (Phase 2A)
