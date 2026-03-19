@@ -248,7 +248,7 @@ class AgreementVisionScanService
 
     body = {
       model: CLAUDE_MODEL,
-      max_tokens: 16000,
+      max_tokens: 64000,
       messages: [
         {
           role: "user",
@@ -266,7 +266,7 @@ class AgreementVisionScanService
     uri = URI(CLAUDE_API_URL)
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
-    http.read_timeout = 120
+    http.read_timeout = 180
     http.open_timeout = 30
 
     request = Net::HTTP::Post.new(uri)
@@ -378,7 +378,7 @@ class AgreementVisionScanService
 
     body = {
       model: CLAUDE_MODEL,
-      max_tokens: 16000,
+      max_tokens: 64000,
       messages: [
         {
           role: "user",
