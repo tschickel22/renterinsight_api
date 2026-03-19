@@ -449,6 +449,13 @@ class Public::InventoryController < ApplicationController
     branding
   end
   
+  # Extract plain URL strings from images array
+  # Images can be stored as [{"url"=>"https://..."}, ...] or ["https://...", ...]
+  def extract_image_urls(images)
+    return [] if images.blank?
+    images.map { |img| img.is_a?(Hash) ? (img['url'] || img[:url]) : img }.compact
+  end
+
   # Cached public custom field definitions (avoids N+1 on list endpoints)
   def public_custom_field_definitions
     @_public_cf_defs ||= begin
@@ -542,10 +549,10 @@ class Public::InventoryController < ApplicationController
       location_city: vehicle.location&.city,
       location_state: vehicle.location&.state,
       
-      # Images (using database column - it's a JSON array)
-      primary_image_url: vehicle.images&.first,
-      image_urls: vehicle.images || [],
-      floor_plan_images: vehicle.floor_plan_images || [],
+      # Images (extract URL strings from hash objects if needed)
+      primary_image_url: extract_image_urls(vehicle.images).first,
+      image_urls: extract_image_urls(vehicle.images),
+      floor_plan_images: extract_image_urls(vehicle.floor_plan_images),
       
       # Media flags for list view icons
       has_virtual_tour: vehicle.virtual_tour_url.present?,
@@ -603,7 +610,7 @@ class Public::InventoryController < ApplicationController
       # Media links
       virtual_tour_url: vehicle.virtual_tour_url,
       video_url: vehicle.video_url,
-      floor_plan_images: vehicle.floor_plan_images || [],
+      floor_plan_images: extract_image_urls(vehicle.floor_plan_images),
       
       # Identifiers
       vin: vehicle.vin,

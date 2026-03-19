@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1250,6 +1250,60 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
     t.index ["quickbooks_id"], name: "index_contacts_on_quickbooks_id"
+  end
+
+  create_table "contractor_assignments", force: :cascade do |t|
+    t.bigint "contractor_id", null: false
+    t.string "assignable_type", null: false
+    t.bigint "assignable_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "assigned_by_id"
+    t.string "status", default: "assigned"
+    t.datetime "assigned_at"
+    t.datetime "accepted_at"
+    t.datetime "completed_at"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
+    t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
+    t.index ["company_id"], name: "index_contractor_assignments_on_company_id"
+    t.index ["contractor_id"], name: "index_contractor_assignments_on_contractor_id"
+    t.index ["status"], name: "index_contractor_assignments_on_status"
+  end
+
+  create_table "contractors", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "contact_name"
+    t.string "email"
+    t.string "phone"
+    t.string "trade_type", default: "general"
+    t.string "license_number"
+    t.string "license_state"
+    t.date "license_expiry"
+    t.string "insurance_provider"
+    t.string "insurance_policy_number"
+    t.date "insurance_expiry"
+    t.boolean "bonded", default: false
+    t.decimal "bond_amount", precision: 10, scale: 2
+    t.date "bond_expiry"
+    t.decimal "hourly_rate", precision: 10, scale: 2
+    t.text "notes"
+    t.string "status", default: "active"
+    t.decimal "rating", precision: 3, scale: 2
+    t.boolean "is_deleted", default: false
+    t.jsonb "custom_field_values", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "portal_access_token"
+    t.datetime "portal_token_expires_at"
+    t.datetime "last_portal_login_at"
+    t.index ["company_id"], name: "index_contractors_on_company_id"
+    t.index ["email"], name: "index_contractors_on_email"
+    t.index ["portal_access_token"], name: "index_contractors_on_portal_access_token", unique: true
+    t.index ["status"], name: "index_contractors_on_status"
+    t.index ["trade_type"], name: "index_contractors_on_trade_type"
   end
 
   create_table "custom_field_migrations", force: :cascade do |t|
@@ -2637,6 +2691,26 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
   end
 
+  create_table "offline_sync_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "device_id"
+    t.string "sync_status", default: "pending"
+    t.integer "total_operations", default: 0
+    t.integer "successful_operations", default: 0
+    t.integer "failed_operations", default: 0
+    t.jsonb "operations", default: []
+    t.jsonb "errors", default: []
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "user_id"], name: "index_offline_sync_logs_on_company_id_and_user_id"
+    t.index ["company_id"], name: "index_offline_sync_logs_on_company_id"
+    t.index ["device_id"], name: "index_offline_sync_logs_on_device_id"
+    t.index ["user_id"], name: "index_offline_sync_logs_on_user_id"
+  end
+
   create_table "option_categories", force: :cascade do |t|
     t.bigint "floor_plan_id"
     t.string "name", null: false
@@ -2924,6 +2998,33 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
   end
 
+  create_table "project_notification_preferences", force: :cascade do |t|
+    t.bigint "project_id", null: false
+    t.bigint "company_id", null: false
+    t.string "recipient_type", null: false
+    t.bigint "recipient_id", null: false
+    t.string "recipient_email"
+    t.string "recipient_phone"
+    t.boolean "notify_phase_started", default: true
+    t.boolean "notify_phase_completed", default: true
+    t.boolean "notify_task_assigned", default: true
+    t.boolean "notify_task_completed", default: false
+    t.boolean "notify_inspection_scheduled", default: true
+    t.boolean "notify_inspection_passed", default: true
+    t.boolean "notify_inspection_failed", default: true
+    t.boolean "notify_milestone_reached", default: true
+    t.boolean "notify_payment_due", default: true
+    t.boolean "notify_daily_summary", default: false
+    t.boolean "via_email", default: true
+    t.boolean "via_sms", default: false
+    t.boolean "is_active", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_project_notification_preferences_on_company_id"
+    t.index ["project_id", "recipient_type", "recipient_id"], name: "idx_proj_notif_prefs_unique", unique: true
+    t.index ["project_id"], name: "index_project_notification_preferences_on_project_id"
+  end
+
   create_table "project_phase_tasks", force: :cascade do |t|
     t.bigint "project_phase_id", null: false
     t.bigint "company_id", null: false
@@ -2935,6 +3036,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
     t.bigint "completed_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "assigned_to_id"
+    t.boolean "visible_to_client", default: false, null: false
+    t.boolean "client_actionable", default: false, null: false
+    t.datetime "client_acknowledged_at"
+    t.string "client_acknowledged_by"
+    t.integer "estimated_days"
+    t.date "estimated_start_date"
+    t.date "estimated_completion_date"
+    t.index ["assigned_to_id"], name: "index_project_phase_tasks_on_assigned_to_id"
     t.index ["company_id"], name: "index_project_phase_tasks_on_company_id"
     t.index ["completed_by_id"], name: "index_project_phase_tasks_on_completed_by_id"
     t.index ["project_phase_id", "position"], name: "idx_project_phase_tasks_phase_position"
@@ -2974,6 +3084,72 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
     t.index ["status"], name: "idx_project_phases_status"
   end
 
+  create_table "project_task_checklist_items", force: :cascade do |t|
+    t.bigint "project_task_checklist_id", null: false
+    t.string "title", null: false
+    t.boolean "completed", default: false
+    t.integer "position", default: 0
+    t.bigint "completed_by_id"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["completed_by_id"], name: "index_project_task_checklist_items_on_completed_by_id"
+    t.index ["project_task_checklist_id", "position"], name: "idx_checklist_items_on_checklist_and_position"
+    t.index ["project_task_checklist_id"], name: "idx_on_project_task_checklist_id_23434b401a"
+  end
+
+  create_table "project_task_checklists", force: :cascade do |t|
+    t.bigint "project_task_id", null: false
+    t.string "title", null: false
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_task_id", "position"], name: "index_project_task_checklists_on_project_task_id_and_position"
+    t.index ["project_task_id"], name: "index_project_task_checklists_on_project_task_id"
+  end
+
+  create_table "project_task_dependencies", force: :cascade do |t|
+    t.bigint "task_id", null: false
+    t.bigint "depends_on_id", null: false
+    t.string "dependency_type", default: "finish_to_start"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["depends_on_id"], name: "index_project_task_dependencies_on_depends_on_id"
+    t.index ["task_id", "depends_on_id"], name: "idx_task_deps_unique", unique: true
+    t.index ["task_id"], name: "index_project_task_dependencies_on_task_id"
+  end
+
+  create_table "project_tasks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "project_id", null: false
+    t.bigint "project_phase_id", null: false
+    t.bigint "assigned_to_id"
+    t.string "title", null: false
+    t.text "description"
+    t.string "status", default: "pending"
+    t.string "priority", default: "medium"
+    t.integer "position", default: 0
+    t.date "due_date"
+    t.date "started_at"
+    t.date "completed_at"
+    t.decimal "estimated_hours", precision: 8, scale: 2
+    t.decimal "actual_hours", precision: 8, scale: 2
+    t.decimal "estimated_cost", precision: 10, scale: 2
+    t.decimal "actual_cost", precision: 10, scale: 2
+    t.string "task_type"
+    t.boolean "is_deleted", default: false
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assigned_to_id"], name: "index_project_tasks_on_assigned_to_id"
+    t.index ["company_id", "is_deleted"], name: "index_project_tasks_on_company_id_and_is_deleted"
+    t.index ["company_id"], name: "index_project_tasks_on_company_id"
+    t.index ["project_id", "status"], name: "index_project_tasks_on_project_id_and_status"
+    t.index ["project_id"], name: "index_project_tasks_on_project_id"
+    t.index ["project_phase_id", "position"], name: "index_project_tasks_on_project_phase_id_and_position"
+    t.index ["project_phase_id"], name: "index_project_tasks_on_project_phase_id"
+  end
+
   create_table "project_template_phase_tasks", force: :cascade do |t|
     t.bigint "project_template_phase_id", null: false
     t.string "name", null: false
@@ -2981,6 +3157,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
     t.boolean "is_required", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "visible_to_client", default: false, null: false
+    t.boolean "client_actionable", default: false, null: false
+    t.integer "estimated_days"
     t.index ["project_template_phase_id", "position"], name: "idx_template_phase_tasks_phase_position"
     t.index ["project_template_phase_id"], name: "idx_on_project_template_phase_id_9658b0b17b"
   end
@@ -2999,6 +3178,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
     t.string "color"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "default_tasks", default: []
     t.index ["project_template_id", "position"], name: "idx_template_phases_template_position"
     t.index ["project_template_id"], name: "index_project_template_phases_on_project_template_id"
   end
@@ -4641,6 +4821,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
   add_foreign_key "contact_activities", "users"
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "contacts", "locations"
+  add_foreign_key "contractor_assignments", "companies"
+  add_foreign_key "contractor_assignments", "contractors"
+  add_foreign_key "contractor_assignments", "users", column: "assigned_by_id"
+  add_foreign_key "contractors", "companies"
   add_foreign_key "custom_field_migrations", "companies"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "source_custom_field_id"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "target_custom_field_id"
@@ -4756,6 +4940,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
   add_foreign_key "nurture_sequences", "companies"
   add_foreign_key "nurture_steps", "nurture_sequences"
   add_foreign_key "nurture_steps", "templates"
+  add_foreign_key "offline_sync_logs", "companies"
+  add_foreign_key "offline_sync_logs", "users"
   add_foreign_key "option_categories", "factories"
   add_foreign_key "option_categories", "floor_plans"
   add_foreign_key "package_templates", "companies"
@@ -4776,11 +4962,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_16_202410) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "project_notification_preferences", "companies"
+  add_foreign_key "project_notification_preferences", "projects"
   add_foreign_key "project_phase_tasks", "companies"
   add_foreign_key "project_phase_tasks", "project_phases"
+  add_foreign_key "project_phase_tasks", "users", column: "assigned_to_id", on_delete: :nullify
   add_foreign_key "project_phase_tasks", "users", column: "completed_by_id"
   add_foreign_key "project_phases", "companies"
   add_foreign_key "project_phases", "projects"
+  add_foreign_key "project_task_checklist_items", "project_task_checklists"
+  add_foreign_key "project_task_checklist_items", "users", column: "completed_by_id"
+  add_foreign_key "project_task_checklists", "project_tasks"
+  add_foreign_key "project_task_dependencies", "project_tasks", column: "depends_on_id"
+  add_foreign_key "project_task_dependencies", "project_tasks", column: "task_id"
+  add_foreign_key "project_tasks", "companies"
+  add_foreign_key "project_tasks", "project_phases"
+  add_foreign_key "project_tasks", "projects"
+  add_foreign_key "project_tasks", "users", column: "assigned_to_id"
   add_foreign_key "project_template_phase_tasks", "project_template_phases"
   add_foreign_key "project_template_phases", "project_templates"
   add_foreign_key "project_templates", "companies"

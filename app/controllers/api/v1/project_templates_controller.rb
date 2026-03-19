@@ -7,16 +7,18 @@ module Api
       before_action :set_template, only: %i[show update destroy duplicate]
 
       PHASE_ONLY_FIELDS = %i[id name position visible_to_client is_required estimated_days icon color].freeze
-      PHASE_TASK_FIELDS = %i[id name position is_required].freeze
+      PHASE_TASK_FIELDS = %i[id name position is_required visible_to_client client_actionable estimated_days].freeze
 
       def phases_json(phases)
-        phases.includes(:project_template_phase_tasks).as_json(
-          only: %i[id name description position visible_to_client is_required
-                   notify_client_on_start notify_client_on_complete estimated_days icon color],
-          include: {
-            project_template_phase_tasks: { only: PHASE_TASK_FIELDS }
-          }
-        )
+        phases.includes(:project_template_phase_tasks).map do |phase|
+          phase.as_json(
+            only: %i[id name description position visible_to_client is_required
+                     notify_client_on_start notify_client_on_complete estimated_days icon color],
+            include: {
+              project_template_phase_tasks: { only: PHASE_TASK_FIELDS }
+            }
+          ).merge('default_tasks' => phase.default_tasks || [])
+        end
       end
 
       # GET /api/v1/project_templates
@@ -136,8 +138,26 @@ module Api
       end
 
       # Build phases (and their tasks) from params array
+      # Saves to BOTH systems:
+      #   - project_template_phase_tasks table (Phase 1 backward compat)
+      #   - default_tasks JSONB column (Phase 2A rich tasks used by create_project!)
       def build_phases!(template, phases_data)
         phases_data.each_with_index do |phase_data, index|
+          # Build default_tasks JSON from the rich task data
+          rich_tasks = []
+          if phase_data[:tasks].is_a?(Array)
+            phase_data[:tasks].each_with_index do |task_data, tidx|
+              next if task_data[:name].blank?
+              rich_tasks << {
+                'name' => task_data[:name],
+                'task_type' => task_data[:task_type] || 'task',
+                'position' => task_data[:position] || tidx,
+                'estimated_hours' => task_data[:estimated_hours],
+                'checklist_items' => task_data[:checklist_items] || []
+              }
+            end
+          end
+
           phase = template.project_template_phases.create!(
             name:                      phase_data[:name],
             description:               phase_data[:description],
@@ -148,17 +168,21 @@ module Api
             notify_client_on_complete: phase_data[:notify_client_on_complete] != false,
             estimated_days:            phase_data[:estimated_days],
             icon:                      phase_data[:icon],
-            color:                     phase_data[:color]
+            color:                     phase_data[:color],
+            default_tasks:             rich_tasks
           )
 
-          # Create sub-tasks if provided
+          # Also create Phase 1 simple tasks for backward compat
           next unless phase_data[:tasks].is_a?(Array)
           phase_data[:tasks].each_with_index do |task_data, tidx|
             next if task_data[:name].blank?
             phase.project_template_phase_tasks.create!(
-              name:        task_data[:name],
-              position:    task_data[:position] || tidx,
-              is_required: task_data[:is_required] || false
+              name:              task_data[:name],
+              position:          task_data[:position] || tidx,
+              is_required:       task_data[:is_required] || false,
+              visible_to_client: task_data[:visible_to_client] || false,
+              client_actionable: task_data[:client_actionable] || false,
+              estimated_days:    task_data[:estimated_days]
             )
           end
         end

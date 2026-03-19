@@ -19,7 +19,8 @@ class PageLayout < ApplicationRecord
     'deals' => %w[name deal_number].freeze,
     'inventory' => %w[inventory_id year make model listing_type].freeze,
     'inventory_rv' => %w[inventory_id year make model listing_type].freeze,
-    'inventory_mh' => %w[inventory_id year make model listing_type].freeze
+    'inventory_mh' => %w[inventory_id year make model listing_type].freeze,
+    'contractors' => %w[name].freeze
   }.freeze
 
   LAYOUT_TYPES = %w[detail edit list].freeze
@@ -43,6 +44,8 @@ class PageLayout < ApplicationRecord
       default_inventory_rv_layout
     when 'inventory_mh'
       default_inventory_mh_layout
+    when 'contractors'
+      default_contractors_layout
     else
       { sections: [] }
     end
@@ -1045,6 +1048,81 @@ class PageLayout < ApplicationRecord
         },
 
         # === CUSTOM FIELDS ===
+        {
+          id: 'custom_fields',
+          title: 'Custom Fields',
+          columns: 2,
+          collapsed: false,
+          fields: []
+        }
+      ]
+    }
+  end
+
+  private_class_method def self.default_contractors_layout
+    {
+      sections: [
+        # Overview tab fields
+        {
+          id: 'contact_info',
+          title: 'Contact Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'name', type: 'standard', visible: true, required: true, width: 1 },
+            { key: 'contact_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'email', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'phone', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'trade_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'status', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'hourly_rate', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'rating', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'notes_section',
+          title: 'Notes',
+          columns: 1,
+          collapsed: false,
+          fields: [
+            { key: 'notes', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        # Credentials & Insurance tab fields
+        {
+          id: 'license_info',
+          title: 'License',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'license_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'license_state', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'license_expiry', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'insurance_info',
+          title: 'Insurance',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'insurance_provider', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'insurance_policy_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'insurance_expiry', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'bond_info',
+          title: 'Bond',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'bonded', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'bond_amount', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'bond_expiry', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        # Custom fields — admin can add to any section, or create new ones
         {
           id: 'custom_fields',
           title: 'Custom Fields',

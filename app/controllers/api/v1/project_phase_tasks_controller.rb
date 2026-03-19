@@ -11,8 +11,13 @@ module Api
       # GET /api/v1/projects/:project_id/phases/:phase_id/tasks
       def index
         return unless authorize_action!('deals', 'read')
-        tasks = @phase.project_phase_tasks.ordered
-        render json: tasks.as_json(only: %i[id name position status is_required completed_at completed_by_id created_at updated_at])
+        tasks = @phase.project_phase_tasks.ordered.includes(:assigned_to)
+        render json: tasks.as_json(
+          only: %i[id name position status is_required completed_at completed_by_id
+                   assigned_to_id visible_to_client client_actionable client_acknowledged_at client_acknowledged_by
+                   created_at updated_at],
+          include: { assigned_to: { only: %i[id first_name last_name email] } }
+        )
       end
 
       # POST /api/v1/projects/:project_id/phases/:phase_id/tasks
@@ -22,7 +27,10 @@ module Api
         task.company = @company
         task.position = @phase.project_phase_tasks.count
         if task.save
-          render json: task.as_json(only: %i[id name position status is_required completed_at created_at]), status: :created
+          render json: task.as_json(
+            only: %i[id name position status is_required assigned_to_id visible_to_client client_actionable completed_at created_at],
+            include: { assigned_to: { only: %i[id first_name last_name email] } }
+          ), status: :created
         else
           render json: { errors: task.errors.full_messages }, status: :unprocessable_entity
         end
@@ -32,7 +40,10 @@ module Api
       def update
         return unless authorize_action!('deals', 'update')
         if @task.update(task_params)
-          render json: @task.as_json(only: %i[id name position status is_required completed_at updated_at])
+          render json: @task.as_json(
+            only: %i[id name position status is_required assigned_to_id visible_to_client client_actionable completed_at updated_at],
+            include: { assigned_to: { only: %i[id first_name last_name email] } }
+          )
         else
           render json: { errors: @task.errors.full_messages }, status: :unprocessable_entity
         end
@@ -101,7 +112,8 @@ module Api
       end
 
       def task_params
-        params.require(:task).permit(:name, :position, :is_required)
+        params.require(:task).permit(:name, :position, :is_required, :assigned_to_id, :visible_to_client, :client_actionable,
+                                     :estimated_days, :estimated_start_date, :estimated_completion_date)
       end
     end
   end

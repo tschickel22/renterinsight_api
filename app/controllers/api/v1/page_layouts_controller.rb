@@ -195,9 +195,37 @@ module Api
           inventory_standard_fields.reject { |f| mh_only_field_keys.include?(f[:key]) }
         when 'inventory_mh'
           inventory_standard_fields.reject { |f| rv_only_field_keys.include?(f[:key]) }
+        when 'contractors'
+          contractors_standard_fields
         else
           []
         end
+      end
+
+      def contractors_standard_fields
+        protected_keys = PageLayout::PROTECTED_FIELDS['contractors'] || []
+        [
+          { key: 'name', label: 'Company Name', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('name') },
+          { key: 'contact_name', label: 'Contact Name', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'email', label: 'Email', type: 'email', source: 'standard', required: false, protected: false },
+          { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: false, protected: false },
+          { key: 'trade_type', label: 'Trade Type', type: 'select', source: 'standard', required: false, protected: false,
+            options: %w[general electrical plumbing hvac foundation transport skirting roofing other] },
+          { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false,
+            options: %w[active inactive suspended] },
+          { key: 'hourly_rate', label: 'Hourly Rate', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'rating', label: 'Rating', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'license_number', label: 'License Number', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'license_state', label: 'License State', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'license_expiry', label: 'License Expiry', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'insurance_provider', label: 'Insurance Provider', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'insurance_policy_number', label: 'Insurance Policy Number', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'insurance_expiry', label: 'Insurance Expiry', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'bonded', label: 'Bonded', type: 'boolean', source: 'standard', required: false, protected: false },
+          { key: 'bond_amount', label: 'Bond Amount', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'bond_expiry', label: 'Bond Expiry', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
+        ]
       end
 
       def rv_only_field_keys

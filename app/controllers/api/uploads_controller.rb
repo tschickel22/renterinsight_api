@@ -28,6 +28,20 @@ module Api
       Rails.logger.info "📁 [UploadsController] Serving file: #{file_path}"
       
       unless File.exist?(full_path)
+        # File not found locally - try S3 redirect (handles files uploaded before S3 migration)
+        if s3_available?
+          s3_key = "uploads/#{file_path}"
+          s3_service = S3UploadService.new
+          if s3_service.exists?(s3_key)
+            bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
+            region = ENV['AWS_REGION'] || 'us-west-2'
+            s3_url = "https://#{bucket}.s3.#{region}.amazonaws.com/#{s3_key}"
+            Rails.logger.info "🔄 [UploadsController] Redirecting to S3: #{s3_url}"
+            redirect_to s3_url, allow_other_host: true, status: :moved_permanently
+            return
+          end
+        end
+        
         Rails.logger.error "❌ [UploadsController] File not found: #{full_path}"
         render json: { error: 'File not found' }, status: :not_found
         return
@@ -184,14 +198,44 @@ module Api
         raise StandardError, "File size exceeds maximum allowed (#{max_size / 1.megabyte}MB)"
       end
       
-      extension = File.extname(file.original_filename)
-      filename = "#{SecureRandom.uuid}#{extension}"
-      # Use persistent disk in production, local path in development
-      upload_base = ENV['UPLOAD_PATH'] || Rails.root.join('public', 'uploads')
-      
       # Use location_id if provided (for location-specific uploads)
       # Otherwise use company_id (for company-wide uploads)
       folder_id = location_id.present? ? location_id : @company.id
+      
+      # Use S3 when AWS credentials are available (staging/production)
+      # Fall back to local disk for development
+      if s3_available?
+        upload_to_s3(file, category, folder_id)
+      else
+        upload_to_local(file, category, folder_id)
+      end
+    end
+
+    def s3_available?
+      ENV['AWS_ACCESS_KEY_ID'].present? && ENV['AWS_SECRET_ACCESS_KEY'].present? && ENV['AWS_S3_BUCKET'].present?
+    end
+
+    def upload_to_s3(file, category, folder_id)
+      s3_service = S3UploadService.new
+      folder = "uploads/#{folder_id}/#{category}"
+      
+      result = s3_service.upload(file, folder: folder)
+      
+      Rails.logger.info "☁️ [UploadsController] Uploaded to S3: #{result[:url]}"
+      
+      {
+        url: result[:url],
+        path: result[:key]
+      }
+    rescue => e
+      Rails.logger.error "S3 upload failed, falling back to local: #{e.message}"
+      upload_to_local(file, category, folder_id)
+    end
+
+    def upload_to_local(file, category, folder_id)
+      extension = File.extname(file.original_filename)
+      filename = "#{SecureRandom.uuid}#{extension}"
+      upload_base = ENV['UPLOAD_PATH'] || Rails.root.join('public', 'uploads')
       
       path = "#{folder_id}/#{category}/#{filename}"
       full_path = File.join(upload_base, path)

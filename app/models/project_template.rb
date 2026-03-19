@@ -96,14 +96,67 @@ class ProjectTemplate < ApplicationRecord
         color: template_phase.color
       )
       # Copy tasks from template phase
-      template_phase.project_template_phase_tasks.ordered.each do |task|
+      # If default_tasks JSON exists, use it (creates both simple + rich tasks)
+      # Otherwise fall back to project_template_phase_tasks (simple only)
+      has_default_tasks = template_phase.default_tasks.present? && template_phase.default_tasks.is_a?(Array) && template_phase.default_tasks.any?
+
+      unless has_default_tasks
+        # Legacy path: copy simple tasks from template phase records
+        template_phase.project_template_phase_tasks.ordered.each do |task|
+          phase.project_phase_tasks.create!(
+            company: company,
+            name: task.name,
+            position: task.position,
+            is_required: task.is_required,
+            visible_to_client: task.visible_to_client,
+            client_actionable: task.client_actionable,
+            estimated_days: task.estimated_days,
+            status: 'pending'
+          )
+        end
+      end
+
+      # Copy rich tasks from default_tasks JSON (Phase 2A)
+      # Creates BOTH ProjectPhaseTask (for progress tracker display) AND ProjectTask (for rich detail)
+      # Handles both seed format (title/checklist) and editor format (name/checklist_items)
+      simple_task_position = phase.project_phase_tasks.count  # Start after any existing simple tasks
+      (template_phase.default_tasks || []).each_with_index do |task_data, task_idx|
+        task_data = task_data.with_indifferent_access
+        task_title = task_data[:title] || task_data[:name]
+        next if task_title.blank?
+
+        # Create simple ProjectPhaseTask (shown in ProjectProgressTracker)
         phase.project_phase_tasks.create!(
           company: company,
-          name: task.name,
-          position: task.position,
-          is_required: task.is_required,
+          name: task_title,
+          position: simple_task_position + task_idx,
+          is_required: true,
+          visible_to_client: task_data[:visible_to_client] || false,
+          client_actionable: task_data[:client_actionable] || false,
+          estimated_days: task_data[:estimated_days],
           status: 'pending'
         )
+
+        # Create rich ProjectTask (with checklists, task type, hours)
+        rich_task = phase.tasks.create!(
+          company: company,
+          project: project,
+          title: task_title,
+          description: task_data[:description],
+          task_type: task_data[:task_type] || 'general',
+          estimated_hours: task_data[:estimated_hours],
+          position: task_data[:position] || task_idx,
+          status: 'pending',
+          priority: 'medium'
+        )
+
+        checklist_items = task_data[:checklist] || task_data[:checklist_items] || []
+        if checklist_items.present? && checklist_items.is_a?(Array)
+          checklist = rich_task.checklists.create!(title: 'Checklist', position: 0)
+          checklist_items.each_with_index do |item_title, item_idx|
+            checklist.items.create!(title: item_title, position: item_idx)
+          end
+        end
       end
     end
 
@@ -132,20 +185,100 @@ class ProjectTemplate < ApplicationRecord
       t.created_by_id = company.users.first&.id
     end
     standard_phases = [
-      { name: 'Finance Application',          position: 0,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Landmark',       color: '#6366f1', description: 'Loan application submitted and under review' },
-      { name: 'Purchase Agreement Signed',    position: 1,  estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'FileSignature',  color: '#8b5cf6', description: 'Purchase agreement executed by all parties' },
-      { name: 'Home Ordered / In Production', position: 2,  estimated_days: 60,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Factory',        color: '#a855f7', description: 'Home ordered from manufacturer and in production' },
-      { name: 'Home Arrives at Dealer',       position: 3,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Truck',          color: '#3b82f6', description: 'Home delivered to dealer lot for inspection' },
-      { name: 'Receiving Inspection (PDI)',   position: 4,  estimated_days: 3,   visible_to_client: false, is_required: true,  notify_client_on_start: false, notify_client_on_complete: false, icon: 'ClipboardCheck', color: '#0ea5e9', description: 'Pre-delivery inspection and quality check' },
-      { name: 'Land Prep & Permits',          position: 5,  estimated_days: 30,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Shovel',         color: '#14b8a6', description: 'Foundation, utilities, and building permits' },
-      { name: 'Home Delivered to Site',       position: 6,  estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'MapPin',         color: '#22c55e', description: 'Home transported and placed on foundation' },
-      { name: 'Installation & Set',           position: 7,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Wrench',         color: '#84cc16', description: 'Leveling, blocking, skirting, and exterior finish' },
-      { name: 'Utility Connections',          position: 8,  estimated_days: 10,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Zap',            color: '#eab308', description: 'Electrical, plumbing, HVAC, water, sewer hookups' },
-      { name: 'Interior Finish',              position: 9,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'PaintBucket',    color: '#f97316', description: 'Drywall marriage line, trim, carpet, appliances' },
-      { name: 'Final Inspection',             position: 10, estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'ShieldCheck',    color: '#ef4444', description: 'County or state building inspector sign-off' },
-      { name: 'Punch List & Walk-Through',    position: 11, estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'ListChecks',     color: '#ec4899', description: 'Buyer walk-through and punch list items' },
-      { name: 'Closing & Handoff',            position: 12, estimated_days: 3,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'KeyRound',       color: '#10b981', description: 'Final payment, keys delivered, warranty docs provided' },
-      { name: 'Warranty Period',              position: 13, estimated_days: 365, visible_to_client: true,  is_required: false, notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Shield',         color: '#6b7280', description: '12-month manufacturer warranty coverage' },
+      { name: 'Finance Application',          position: 0,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Landmark',       color: '#6366f1', description: 'Loan application submitted and under review',
+        default_tasks: [
+          { title: 'Submit loan application', task_type: 'general', estimated_hours: 2, checklist: ['Collect buyer financials', 'Run credit check', 'Submit to lender'] },
+          { title: 'Receive pre-approval', task_type: 'milestone', estimated_hours: 1 },
+        ] },
+      { name: 'Purchase Agreement Signed',    position: 1,  estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'FileSignature',  color: '#8b5cf6', description: 'Purchase agreement executed by all parties',
+        default_tasks: [
+          { title: 'Prepare purchase agreement', task_type: 'general', estimated_hours: 2, checklist: ['Buyer info complete', 'Home specs confirmed', 'Pricing finalized', 'Trade-in documented'] },
+          { title: 'Buyer signs PA', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Collect deposit', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Home Ordered / In Production', position: 2,  estimated_days: 60,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Factory',        color: '#a855f7', description: 'Home ordered from manufacturer and in production',
+        default_tasks: [
+          { title: 'Submit factory order', task_type: 'general', estimated_hours: 2 },
+          { title: 'Color and option selections', task_type: 'general', estimated_hours: 4, checklist: ['Interior colors', 'Cabinet style', 'Countertops', 'Flooring', 'Siding and shingles', 'Appliances'] },
+          { title: 'Confirm production schedule', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Monitor production status', task_type: 'general', estimated_hours: 2 },
+        ] },
+      { name: 'Home Arrives at Dealer',       position: 3,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Truck',          color: '#3b82f6', description: 'Home delivered to dealer lot for inspection',
+        default_tasks: [
+          { title: 'Schedule transport from factory', task_type: 'general', estimated_hours: 2 },
+          { title: 'Receive home on lot', task_type: 'milestone', estimated_hours: 4 },
+          { title: 'Verify serial numbers and docs', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Receiving Inspection (PDI)',   position: 4,  estimated_days: 3,   visible_to_client: false, is_required: true,  notify_client_on_start: false, notify_client_on_complete: false, icon: 'ClipboardCheck', color: '#0ea5e9', description: 'Pre-delivery inspection and quality check',
+        default_tasks: [
+          { title: 'Exterior inspection', task_type: 'inspection_required', estimated_hours: 2, checklist: ['Roof condition', 'Siding intact', 'Windows sealed', 'No transport damage'] },
+          { title: 'Interior inspection', task_type: 'inspection_required', estimated_hours: 2, checklist: ['Walls and ceiling', 'Flooring', 'Plumbing fixtures', 'Electrical panels', 'Appliances'] },
+          { title: 'Document deficiencies', task_type: 'general', estimated_hours: 1 },
+          { title: 'Submit warranty claims', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Land Prep & Permits',          position: 5,  estimated_days: 30,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Shovel',         color: '#14b8a6', description: 'Foundation, utilities, and building permits',
+        default_tasks: [
+          { title: 'Site evaluation and soil test', task_type: 'general', estimated_hours: 4, checklist: ['Soil bearing test', 'Drainage assessment', 'Grade evaluation', 'Access road check'] },
+          { title: 'Building permit application', task_type: 'permit_required', estimated_hours: 2, checklist: ['Submit site plan', 'Submit foundation details', 'Submit utility plans', 'Pay permit fees'] },
+          { title: 'Foundation construction', task_type: 'inspection_required', estimated_hours: 40, checklist: ['Forms set', 'Rebar placed', 'Concrete poured', 'Cure time complete', 'Anchors installed'] },
+          { title: 'Foundation inspection', task_type: 'inspection_required', estimated_hours: 2 },
+          { title: 'Utility trenching', task_type: 'general', estimated_hours: 16, checklist: ['Water line', 'Sewer line', 'Electric conduit', 'Gas line'] },
+        ] },
+      { name: 'Home Delivered to Site',       position: 6,  estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'MapPin',         color: '#22c55e', description: 'Home transported and placed on foundation',
+        default_tasks: [
+          { title: 'Verify delivery path clearance', task_type: 'general', estimated_hours: 2, checklist: ['Road width ok', 'No low wires', 'Turn radius clear', 'Ground firm'] },
+          { title: 'Home delivery and placement', task_type: 'milestone', estimated_hours: 8 },
+          { title: 'Level and anchor home', task_type: 'general', estimated_hours: 8, checklist: ['Pier/block placement', 'Home leveled', 'Tie-downs secured'] },
+          { title: 'Remove tires and axles', task_type: 'general', estimated_hours: 4 },
+        ] },
+      { name: 'Installation & Set',           position: 7,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Wrench',         color: '#84cc16', description: 'Leveling, blocking, skirting, and exterior finish',
+        default_tasks: [
+          { title: 'Section joining and marriage line', task_type: 'general', estimated_hours: 16, checklist: ['Sections aligned', 'Gaskets sealed', 'Roof ridge connected', 'Floor alignment verified'] },
+          { title: 'Skirting installation', task_type: 'general', estimated_hours: 12, checklist: ['Material installed', 'Access panels placed', 'Ventilation adequate'] },
+          { title: 'Steps and deck', task_type: 'general', estimated_hours: 16 },
+          { title: 'Exterior trim', task_type: 'general', estimated_hours: 8 },
+        ] },
+      { name: 'Utility Connections',          position: 8,  estimated_days: 10,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Zap',            color: '#eab308', description: 'Electrical, plumbing, HVAC, water, sewer hookups',
+        default_tasks: [
+          { title: 'Electrical connections', task_type: 'inspection_required', estimated_hours: 8, checklist: ['Panel connected', 'Crossovers done', 'All circuits tested', 'GFCI verified'] },
+          { title: 'Electrical inspection', task_type: 'inspection_required', estimated_hours: 2 },
+          { title: 'Plumbing connections', task_type: 'inspection_required', estimated_hours: 8, checklist: ['Water connected', 'Sewer connected', 'Crossovers done', 'Fixtures tested'] },
+          { title: 'Plumbing inspection', task_type: 'inspection_required', estimated_hours: 2 },
+          { title: 'HVAC installation', task_type: 'general', estimated_hours: 12, checklist: ['AC unit installed', 'Ductwork connected', 'Thermostat set', 'System tested'] },
+        ] },
+      { name: 'Interior Finish',              position: 9,  estimated_days: 14,  visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'PaintBucket',    color: '#f97316', description: 'Drywall marriage line, trim, carpet, appliances',
+        default_tasks: [
+          { title: 'Drywall marriage line close-up', task_type: 'general', estimated_hours: 16, checklist: ['Tape and texture seams', 'Repair transport cracks', 'Touch-up paint'] },
+          { title: 'Interior trim', task_type: 'general', estimated_hours: 16 },
+          { title: 'Carpet installation', task_type: 'general', estimated_hours: 8 },
+          { title: 'Appliance install and test', task_type: 'general', estimated_hours: 8, checklist: ['Range connected', 'Refrigerator placed', 'Dishwasher connected', 'Washer/dryer hookups'] },
+          { title: 'Final cleaning', task_type: 'general', estimated_hours: 8 },
+        ] },
+      { name: 'Final Inspection',             position: 10, estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'ShieldCheck',    color: '#ef4444', description: 'County or state building inspector sign-off',
+        default_tasks: [
+          { title: 'Schedule final inspection', task_type: 'general', estimated_hours: 1 },
+          { title: 'Final building inspection', task_type: 'inspection_required', estimated_hours: 4 },
+          { title: 'Certificate of occupancy', task_type: 'milestone', estimated_hours: 1 },
+        ] },
+      { name: 'Punch List & Walk-Through',    position: 11, estimated_days: 7,   visible_to_client: true,  is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'ListChecks',     color: '#ec4899', description: 'Buyer walk-through and punch list items',
+        default_tasks: [
+          { title: 'Buyer walkthrough', task_type: 'general', estimated_hours: 4, checklist: ['All systems functioning', 'Cosmetic items noted', 'Punch list created', 'Keys provided'] },
+          { title: 'Complete punch list items', task_type: 'general', estimated_hours: 8 },
+          { title: 'Warranty docs reviewed', task_type: 'general', estimated_hours: 1, checklist: ['Manufacturer warranty', '30-day cosmetic window', '12-month start date'] },
+        ] },
+      { name: 'Closing & Handoff',            position: 12, estimated_days: 3,   visible_to_client: true,  is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'KeyRound',       color: '#10b981', description: 'Final payment, keys delivered, warranty docs provided',
+        default_tasks: [
+          { title: 'Final payment collection', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Title transfer', task_type: 'general', estimated_hours: 2 },
+          { title: 'Warranty registration', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Warranty Period',              position: 13, estimated_days: 365, visible_to_client: true,  is_required: false, notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Shield',         color: '#6b7280', description: '12-month manufacturer warranty coverage',
+        default_tasks: [
+          { title: 'Record warranty start date', task_type: 'general', estimated_hours: 1 },
+          { title: 'Schedule 30-day follow-up', task_type: 'general', estimated_hours: 1 },
+          { title: 'Schedule 6-month check-in', task_type: 'general', estimated_hours: 1 },
+          { title: 'Schedule 11-month walk-through', task_type: 'general', estimated_hours: 1 },
+        ] },
     ]
     standard.project_template_phases.destroy_all
     standard_phases.each { |p| standard.project_template_phases.create!(p) }
@@ -160,15 +293,56 @@ class ProjectTemplate < ApplicationRecord
       t.created_by_id = company.users.first&.id
     end
     factory_phases = [
-      { name: 'Finance Application',        position: 0, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Landmark',      color: '#6366f1', description: 'Loan application submitted and under review' },
-      { name: 'Purchase Agreement Signed',  position: 1, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'FileSignature', color: '#8b5cf6', description: 'Purchase agreement and disclosures signed' },
-      { name: 'Construction Authorized',    position: 2, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Hammer',        color: '#a855f7', description: 'Buyer authorizes factory to begin construction' },
-      { name: 'Color & Option Selections',  position: 3, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Palette',       color: '#3b82f6', description: 'Interior and exterior color selections' },
-      { name: 'Home In Production',         position: 4, estimated_days: 60, visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Factory',       color: '#0ea5e9', description: 'Home under construction at factory' },
-      { name: 'Home Completed',             position: 5, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'CircleCheck',   color: '#22c55e', description: 'Home completed and ready for transport' },
-      { name: 'Balance Due & Payment',      position: 6, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'DollarSign',    color: '#eab308', description: 'Remaining balance due before delivery' },
-      { name: 'Transport Scheduled',        position: 7, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Truck',         color: '#f97316', description: 'Home scheduled for transport to buyer site' },
-      { name: 'Delivered & Title Transfer', position: 8, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'KeyRound',      color: '#10b981', description: 'Home delivered, title/MSO transferred' },
+      { name: 'Finance Application',        position: 0, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Landmark',      color: '#6366f1', description: 'Loan application submitted and under review',
+        default_tasks: [
+          { title: 'Submit loan application', task_type: 'general', estimated_hours: 2, checklist: ['Collect buyer financials', 'Run credit check', 'Submit to lender'] },
+          { title: 'Receive pre-approval', task_type: 'milestone', estimated_hours: 1 },
+        ] },
+      { name: 'Purchase Agreement Signed',  position: 1, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'FileSignature', color: '#8b5cf6', description: 'Purchase agreement and disclosures signed',
+        default_tasks: [
+          { title: 'Prepare purchase agreement', task_type: 'general', estimated_hours: 2, checklist: ['Buyer info complete', 'Home specs confirmed', 'Pricing finalized'] },
+          { title: 'Buyer signs PA', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Collect deposit', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Construction Authorized',    position: 2, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Hammer',        color: '#a855f7', description: 'Buyer authorizes factory to begin construction',
+        default_tasks: [
+          { title: 'Buyer authorizes construction', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Down payment confirmed non-refundable', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Color & Option Selections',  position: 3, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'Palette',       color: '#3b82f6', description: 'Interior and exterior color selections',
+        default_tasks: [
+          { title: 'Interior color selections', task_type: 'general', estimated_hours: 2, checklist: ['Walls', 'Trim', 'Doors', 'Cabinets', 'Countertops'] },
+          { title: 'Exterior color selections', task_type: 'general', estimated_hours: 2, checklist: ['Siding', 'Shingles', 'Trim color', 'Shutters'] },
+          { title: 'Appliance selections', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Home In Production',         position: 4, estimated_days: 60, visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Factory',       color: '#0ea5e9', description: 'Home under construction at factory',
+        default_tasks: [
+          { title: 'Submit factory order', task_type: 'general', estimated_hours: 2 },
+          { title: 'Confirm production schedule', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Monitor production status', task_type: 'general', estimated_hours: 2 },
+        ] },
+      { name: 'Home Completed',             position: 5, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'CircleCheck',   color: '#22c55e', description: 'Home completed and ready for transport',
+        default_tasks: [
+          { title: 'Factory completion confirmed', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Quality photos from factory', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Balance Due & Payment',      position: 6, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'DollarSign',    color: '#eab308', description: 'Remaining balance due before delivery',
+        default_tasks: [
+          { title: 'Generate final invoice', task_type: 'general', estimated_hours: 1 },
+          { title: 'Collect remaining balance', task_type: 'milestone', estimated_hours: 1 },
+        ] },
+      { name: 'Transport Scheduled',        position: 7, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true,  icon: 'Truck',         color: '#f97316', description: 'Home scheduled for transport to buyer site',
+        default_tasks: [
+          { title: 'Book transport company', task_type: 'general', estimated_hours: 2 },
+          { title: 'Arrange highway escorts', task_type: 'general', estimated_hours: 1 },
+          { title: 'Confirm delivery date with buyer', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Delivered & Title Transfer', position: 8, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true,  icon: 'KeyRound',      color: '#10b981', description: 'Home delivered, title/MSO transferred',
+        default_tasks: [
+          { title: 'Home delivered to buyer', task_type: 'milestone', estimated_hours: 4 },
+          { title: 'MSO/title transfer', task_type: 'general', estimated_hours: 2 },
+          { title: 'Tires and axles bill of sale', task_type: 'general', estimated_hours: 1 },
+        ] },
     ]
     factory.project_template_phases.destroy_all
     factory_phases.each { |p| factory.project_template_phases.create!(p) }
@@ -183,13 +357,47 @@ class ProjectTemplate < ApplicationRecord
       t.created_by_id = company.users.first&.id
     end
     used_phases = [
-      { name: 'Purchase Agreement Signed', position: 0, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'FileSignature', color: '#8b5cf6', description: 'Purchase agreement signed' },
-      { name: 'Finance Approved',          position: 1, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'Landmark',      color: '#6366f1', description: 'Financing approved or cash verified' },
-      { name: 'Refurbishment',             position: 2, estimated_days: 21, visible_to_client: true, is_required: false, notify_client_on_start: true,  notify_client_on_complete: true, icon: 'Wrench',        color: '#3b82f6', description: 'Repairs and upgrades to prepare home for sale' },
-      { name: 'Site Preparation',          position: 3, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'Shovel',        color: '#14b8a6', description: 'Foundation and site work at delivery location' },
-      { name: 'Delivery & Set',            position: 4, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true, icon: 'Truck',         color: '#22c55e', description: 'Home delivered and placed on foundation' },
-      { name: 'Final Inspection',          position: 5, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'ShieldCheck',   color: '#ef4444', description: 'Inspection and walk-through' },
-      { name: 'Closing & Handoff',         position: 6, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'KeyRound',      color: '#10b981', description: 'Keys delivered, warranty docs provided' },
+      { name: 'Purchase Agreement Signed', position: 0, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'FileSignature', color: '#8b5cf6', description: 'Purchase agreement signed',
+        default_tasks: [
+          { title: 'Prepare purchase agreement', task_type: 'general', estimated_hours: 2, checklist: ['Buyer info complete', 'Home specs confirmed', 'Pricing finalized', 'Trade-in documented'] },
+          { title: 'Buyer signs PA', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Collect deposit', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Finance Approved',          position: 1, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'Landmark',      color: '#6366f1', description: 'Financing approved or cash verified',
+        default_tasks: [
+          { title: 'Lender approval received', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Verify loan terms with buyer', task_type: 'general', estimated_hours: 1 },
+        ] },
+      { name: 'Refurbishment',             position: 2, estimated_days: 21, visible_to_client: true, is_required: false, notify_client_on_start: true,  notify_client_on_complete: true, icon: 'Wrench',        color: '#3b82f6', description: 'Repairs and upgrades to prepare home for sale',
+        default_tasks: [
+          { title: 'Assess repair needs', task_type: 'general', estimated_hours: 4, checklist: ['Structural check', 'Plumbing check', 'Electrical check', 'Cosmetic assessment'] },
+          { title: 'Complete repairs', task_type: 'general', estimated_hours: 20 },
+          { title: 'Quality inspection after repairs', task_type: 'inspection_required', estimated_hours: 2 },
+        ] },
+      { name: 'Site Preparation',          position: 3, estimated_days: 14, visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'Shovel',        color: '#14b8a6', description: 'Foundation and site work at delivery location',
+        default_tasks: [
+          { title: 'Grade and level site', task_type: 'general', estimated_hours: 8 },
+          { title: 'Foundation work', task_type: 'inspection_required', estimated_hours: 24 },
+          { title: 'Utility rough-ins', task_type: 'general', estimated_hours: 16 },
+        ] },
+      { name: 'Delivery & Set',            position: 4, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: true,  notify_client_on_complete: true, icon: 'Truck',         color: '#22c55e', description: 'Home delivered and placed on foundation',
+        default_tasks: [
+          { title: 'Deliver and place home', task_type: 'milestone', estimated_hours: 8 },
+          { title: 'Level, anchor, and skirt', task_type: 'general', estimated_hours: 12 },
+          { title: 'Utility connections', task_type: 'inspection_required', estimated_hours: 16 },
+        ] },
+      { name: 'Final Inspection',          position: 5, estimated_days: 7,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'ShieldCheck',   color: '#ef4444', description: 'Inspection and walk-through',
+        default_tasks: [
+          { title: 'Schedule final inspection', task_type: 'general', estimated_hours: 1 },
+          { title: 'Final building inspection', task_type: 'inspection_required', estimated_hours: 4 },
+          { title: 'Buyer walkthrough', task_type: 'general', estimated_hours: 4, checklist: ['All systems functioning', 'Cosmetic items noted', 'Punch list created', 'Keys provided'] },
+        ] },
+      { name: 'Closing & Handoff',         position: 6, estimated_days: 3,  visible_to_client: true, is_required: true,  notify_client_on_start: false, notify_client_on_complete: true, icon: 'KeyRound',      color: '#10b981', description: 'Keys delivered, warranty docs provided',
+        default_tasks: [
+          { title: 'Final payment collection', task_type: 'milestone', estimated_hours: 1 },
+          { title: 'Title transfer', task_type: 'general', estimated_hours: 2 },
+          { title: 'Warranty registration', task_type: 'general', estimated_hours: 1 },
+        ] },
     ]
     used.project_template_phases.destroy_all
     used_phases.each { |p| used.project_template_phases.create!(p) }

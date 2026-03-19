@@ -7,6 +7,7 @@ class ProjectPhase < ApplicationRecord
   belongs_to :company
   belongs_to :completed_by, class_name: 'User', foreign_key: 'completed_by_id', optional: true
   has_many :project_phase_tasks, -> { order(:position) }, dependent: :destroy
+  has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
 
   # Validations
   validates :name, presence: true
@@ -52,6 +53,40 @@ class ProjectPhase < ApplicationRecord
     ((completed_at - started_at) / 1.day).round
   end
 
+  # ============================================================================
+  # ROLL-UP FROM TASKS (task-level dates roll up to phase)
+  # ============================================================================
+
+  # Sum of task estimated_days, falls back to phase's own estimated_days
+  def computed_estimated_days
+    tasks = project_phase_tasks
+    if tasks.any? && tasks.where.not(estimated_days: nil).exists?
+      tasks.sum(:estimated_days)
+    else
+      estimated_days
+    end
+  end
+
+  # Earliest task start date, falls back to phase's own
+  def computed_start_date
+    tasks = project_phase_tasks
+    if tasks.any? && tasks.where.not(estimated_start_date: nil).exists?
+      tasks.minimum(:estimated_start_date)
+    else
+      estimated_start_date
+    end
+  end
+
+  # Latest task completion date, falls back to phase's own
+  def computed_completion_date
+    tasks = project_phase_tasks
+    if tasks.any? && tasks.where.not(estimated_completion_date: nil).exists?
+      tasks.maximum(:estimated_completion_date)
+    else
+      estimated_completion_date
+    end
+  end
+
   # Calculate % complete based on tasks (if any), otherwise 0 or 100
   def task_progress_percent
     tasks = project_phase_tasks
@@ -68,14 +103,16 @@ class ProjectPhase < ApplicationRecord
   end
 
   def overdue?
-    return false unless estimated_completion_date
+    due = computed_completion_date
+    return false unless due
     return false if status.in?(%w[completed skipped])
-    estimated_completion_date < Date.current
+    due < Date.current
   end
 
   def days_until_estimated_completion
-    return nil unless estimated_completion_date
-    (estimated_completion_date - Date.current).to_i
+    due = computed_completion_date
+    return nil unless due
+    (due - Date.current).to_i
   end
 
   def status_display
@@ -88,21 +125,20 @@ class ProjectPhase < ApplicationRecord
     end
   end
 
+  after_save :notify_status_change, if: :saved_change_to_status?
+
   private
 
-  # ============================================================================
-  # NOTIFICATIONS (placeholder — will use existing CommunicationService)
-  # ============================================================================
+  def notify_status_change
+    ProjectNotificationService.notify_phase_change(self, status_before_last_save, status)
+  end
 
   def send_start_notification!
-    # TODO: Wire to CommunicationService when building notification triggers
-    # For now, just mark as notified so we don't double-send later
     update_column(:client_notified_start, true)
     Rails.logger.info "[ProjectPhase] Phase '#{name}' started for project #{project_id} — notification queued"
   end
 
   def send_completion_notification!
-    # TODO: Wire to CommunicationService when building notification triggers
     update_column(:client_notified_complete, true)
     Rails.logger.info "[ProjectPhase] Phase '#{name}' completed for project #{project_id} — notification queued"
   end

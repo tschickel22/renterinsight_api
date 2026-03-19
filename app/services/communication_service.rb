@@ -462,9 +462,9 @@ class CommunicationService
         Providers::Email::GmailRelayProvider
       when :aws_ses
         Providers::Email::AwsSesProvider
-      when :oauth_microsoft
+      when :oauth_microsoft, :oauth_outlook
         Providers::Email::MicrosoftGraphProvider
-      when :oauth_google
+      when :oauth_google, :oauth_gmail
         Providers::Email::SmtpProvider
       else
         raise ProviderError, "Unknown email provider: #{provider}"

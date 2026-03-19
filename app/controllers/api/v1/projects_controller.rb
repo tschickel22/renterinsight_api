@@ -4,7 +4,7 @@ module Api
   module V1
     class ProjectsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task]
+      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task assign_phase_task_contractor unassign_phase_task_contractor assign_phase_task_user unassign_phase_task_user]
 
       # GET /api/v1/projects
       def index
@@ -99,15 +99,31 @@ module Api
                      client_visible client_access_token custom_field_values created_at updated_at],
             methods: [:current_phase_name, :progress_display, :home_display_name, :delivery_address_display]
           ),
-          phases: @project.project_phases.ordered.includes(:project_phase_tasks).as_json(
+          phases: @project.project_phases.ordered.includes(project_phase_tasks: [:assigned_to, { contractor_assignments: :contractor }]).as_json(
             only: %i[id name description position status is_required
                      started_at completed_at estimated_start_date estimated_completion_date estimated_days
                      visible_to_client notify_client_on_start notify_client_on_complete
                      notes client_notes icon color completed_by_id created_at updated_at],
-            methods: [:status_display, :overdue?, :duration_days, :task_progress_percent, :tasks_summary],
+            methods: [:status_display, :overdue?, :duration_days, :task_progress_percent, :tasks_summary,
+                      :computed_estimated_days, :computed_start_date, :computed_completion_date],
             include: {
               project_phase_tasks: {
-                only: %i[id name position status is_required completed_at completed_by_id]
+                only: %i[id name position status is_required completed_at completed_by_id
+                         assigned_to_id visible_to_client client_actionable client_acknowledged_at client_acknowledged_by
+                         estimated_days estimated_start_date estimated_completion_date],
+                include: {
+                  assigned_to: {
+                    only: %i[id first_name last_name email]
+                  },
+                  contractor_assignments: {
+                    only: %i[id status assigned_at],
+                    include: {
+                      contractor: {
+                        only: %i[id name contact_name trade_type phone email]
+                      }
+                    }
+                  }
+                }
               }
             }
           )
@@ -286,6 +302,119 @@ module Api
             only: %i[id progress_percent completed_phase_count current_phase_id]
           )
         }
+      end
+
+      # POST /api/v1/projects/:id/assign_phase_task_contractor
+      # Body: { phase_id:, task_id:, contractor_id:, notes: }
+      def assign_phase_task_contractor
+        return unless authorize_action!('contractors', 'create')
+
+        phase = @project.project_phases.find_by(id: params[:phase_id])
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        task = phase.project_phase_tasks.find_by(id: params[:task_id])
+        return render(json: { error: 'Task not found' }, status: :not_found) unless task
+
+        contractor = @company.contractors.not_deleted.find(params[:contractor_id])
+
+        # Check if already assigned
+        existing = task.contractor_assignments.find_by(contractor_id: contractor.id)
+        if existing
+          return render(json: { error: 'Contractor already assigned to this task' }, status: :unprocessable_entity)
+        end
+
+        assignment = task.contractor_assignments.build(
+          contractor: contractor,
+          company: @company,
+          assigned_by: current_user,
+          status: 'assigned',
+          assigned_at: Time.current,
+          notes: params[:notes]
+        )
+
+        if assignment.save
+          render json: {
+            message: 'Contractor assigned',
+            assignment: {
+              id: assignment.id,
+              contractorId: contractor.id,
+              contractorName: contractor.name,
+              contactName: contractor.contact_name,
+              tradeType: contractor.trade_type,
+              status: assignment.status,
+              assignedAt: assignment.assigned_at
+            }
+          }, status: :created
+        else
+          render json: { errors: assignment.errors.full_messages }, status: :unprocessable_entity
+        end
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Contractor not found' }, status: :not_found
+      end
+
+      # DELETE /api/v1/projects/:id/unassign_phase_task_contractor
+      # Body: { phase_id:, task_id:, contractor_id: }
+      def unassign_phase_task_contractor
+        return unless authorize_action!('contractors', 'delete')
+
+        phase = @project.project_phases.find_by(id: params[:phase_id])
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        task = phase.project_phase_tasks.find_by(id: params[:task_id])
+        return render(json: { error: 'Task not found' }, status: :not_found) unless task
+
+        assignment = task.contractor_assignments.find_by!(contractor_id: params[:contractor_id])
+        assignment.destroy
+        head :no_content
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Assignment not found' }, status: :not_found
+      end
+
+      # POST /api/v1/projects/:id/assign_phase_task_user
+      # Body: { phase_id:, task_id:, user_id: }
+      def assign_phase_task_user
+        return unless authorize_action!('deals', 'update')
+
+        phase = @project.project_phases.find_by(id: params[:phase_id])
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        task = phase.project_phase_tasks.find_by(id: params[:task_id])
+        return render(json: { error: 'Task not found' }, status: :not_found) unless task
+
+        user = @company.users.find_by(id: params[:user_id])
+        return render(json: { error: 'User not found' }, status: :not_found) unless user
+
+        task.update!(assigned_to: user)
+
+        render json: {
+          message: 'User assigned',
+          task: {
+            id: task.id,
+            name: task.name,
+            assignedToId: user.id,
+            assignedTo: {
+              id: user.id,
+              firstName: user.first_name,
+              lastName: user.last_name,
+              email: user.email
+            }
+          }
+        }
+      end
+
+      # DELETE /api/v1/projects/:id/unassign_phase_task_user
+      # Body: { phase_id:, task_id: }
+      def unassign_phase_task_user
+        return unless authorize_action!('deals', 'update')
+
+        phase = @project.project_phases.find_by(id: params[:phase_id])
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        task = phase.project_phase_tasks.find_by(id: params[:task_id])
+        return render(json: { error: 'Task not found' }, status: :not_found) unless task
+
+        task.update!(assigned_to: nil)
+        head :no_content
       end
 
       # GET /api/v1/projects/grid

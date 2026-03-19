@@ -7,7 +7,7 @@ module Api
       before_action :set_brochure, only: [:show, :update, :destroy, :share]
       before_action :authorize_read!, only: [:index, :show, :stats]
       before_action :authorize_create!, only: [:create]
-      before_action :authorize_update!, only: [:update, :share]
+      before_action :authorize_update!, only: [:update, :share, :bulk_share]
       before_action :authorize_delete!, only: [:destroy]
       skip_before_action :authenticate, only: [:public_view]
 
@@ -260,6 +260,79 @@ module Api
           Rails.logger.error e.backtrace.join("\n")
           render json: { success: false, error: e.message }, status: :internal_server_error
         end
+      end
+
+      # POST /api/v1/brochures/bulk_share
+      # Bulk send a brochure to multiple leads
+      def bulk_share
+        brochure_id = params[:brochure_id]
+        lead_ids = params[:lead_ids] || []
+        custom_message = params[:custom_message]
+        delivery_methods = params[:delivery_methods] || ['email']
+
+        if brochure_id.blank? || lead_ids.empty?
+          return render json: { error: 'brochure_id and lead_ids are required' }, status: :bad_request
+        end
+
+        brochure = @company.brochures.find_by(id: brochure_id)
+        return render json: { error: 'Brochure not found' }, status: :not_found unless brochure
+
+        leads = @company.leads.where(id: lead_ids, is_converted: [false, nil])
+        if leads.empty?
+          return render json: { error: 'No valid leads found' }, status: :not_found
+        end
+
+        sent_count = 0
+        skipped_count = 0
+        failed_count = 0
+        errors = []
+
+        leads.find_each do |lead|
+          email = lead.email
+          if email.blank?
+            skipped_count += 1
+            next
+          end
+
+          begin
+            service = BrochureSendingService.new(brochure)
+            result = service.send(
+              delivery_methods: delivery_methods.map(&:to_s),
+              to_email: email,
+              to_phone: lead.phone,
+              custom_message: custom_message,
+              user: current_user
+            )
+
+            if result[:sent].any?
+              sent_count += 1
+              brochure.increment_share_count!
+
+              # Create lead share activity
+              begin
+                create_lead_share_activity(lead.id, result, { 'to_email' => email, 'custom_message' => custom_message })
+              rescue => e
+                Rails.logger.warn "[BulkShare] Activity creation failed for lead #{lead.id}: #{e.message}"
+              end
+            else
+              failed_count += 1
+              errors << "Lead #{lead.id} (#{email}): #{result[:errors].first}"
+            end
+          rescue => e
+            failed_count += 1
+            errors << "Lead #{lead.id} (#{email}): #{e.message}"
+            Rails.logger.error "[BulkShare] Error sending to lead #{lead.id}: #{e.message}"
+          end
+        end
+
+        render json: {
+          success: sent_count > 0,
+          sent_count: sent_count,
+          skipped_count: skipped_count,
+          failed_count: failed_count,
+          total: leads.count,
+          errors: errors.first(10)  # Cap at 10 error messages
+        }
       end
 
       # GET /b/:public_id (public endpoint)

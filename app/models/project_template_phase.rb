@@ -11,4 +11,8 @@ class ProjectTemplatePhase < ApplicationRecord
   # Scopes
   scope :ordered, -> { order(:position) }
   scope :client_visible, -> { where(visible_to_client: true) }
+
+  # Phase 2A: default_tasks is a JSONB column with rich task blueprints
+  # Format: [{ title: "...", description: "...", task_type: "...", position: 0,
+  #            estimated_hours: 4, checklist: ["item 1", "item 2"] }]
 end

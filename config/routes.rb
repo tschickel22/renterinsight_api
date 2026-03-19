@@ -259,12 +259,54 @@ Rails.application.routes.draw do
           post :set_phase_status
           post :skip_phase
           post :toggle_task   # POST body: { phase_id:, task_id: }
+          post :assign_phase_task_contractor     # POST body: { phase_id:, task_id:, contractor_id: }
+          delete :unassign_phase_task_contractor  # DELETE body: { phase_id:, task_id:, contractor_id: }
+          post :assign_phase_task_user            # POST body: { phase_id:, task_id:, user_id: }
+          delete :unassign_phase_task_user        # DELETE body: { phase_id:, task_id: }
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
-        resources :phases, only: [] do
+        resources :phases, only: [:update], controller: 'project_phases' do
           resources :tasks, controller: 'project_phase_tasks', only: [:index, :create, :update, :destroy]
+          # Phase 2A: Rich project tasks (with checklists, dependencies, etc.)
+          resources :project_tasks, controller: 'project_tasks', only: [:index, :create] do
+            collection do
+              post :reorder
+            end
+          end
+        end
+
+        # Phase 2A: Project tasks (show/update/destroy at project level)
+        resources :project_tasks, controller: 'project_tasks', only: [:show, :update, :destroy], as: :project_task_detail do
+          member do
+            patch :update_status
+            post :assign_contractor
+            delete :unassign_contractor
+          end
+
+          resources :checklists, controller: 'project_task_checklists', only: [:create, :update, :destroy] do
+            member do
+              post :add_item
+            end
+          end
+
+          resources :checklist_items, controller: 'project_task_checklists', only: [] do
+            member do
+              patch :toggle_item
+              delete :delete_item
+            end
+          end
+        end
+
+        # Phase 2A: Notification preferences
+        resources :notification_preferences, controller: 'project_notification_preferences', only: [:index, :create, :update, :destroy] do
+          collection do
+            post :auto_setup
+          end
         end
       end
+
+      # Phase 2A: Offline sync
+      post 'offline_sync', to: 'offline_sync#create'
 
       resources :project_templates, path: 'project-templates' do
         member do
@@ -297,6 +339,8 @@ Rails.application.routes.draw do
           post :generate_customer_invoice, path: 'generate-customer-invoice'
           post :generate_warranty_claim, path: 'generate-warranty-claim'
           post :generate_both, path: 'generate-both'
+          post :assign_contractor, path: 'assign-contractor'
+          delete :unassign_contractor, path: 'unassign-contractor'
         end
         
         collection do
@@ -304,6 +348,15 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== CONTRACTORS ====================
+      resources :contractors do
+        collection do
+          get :stats
+        end
+
+        resources :contractor_assignments, only: [:index, :create, :update, :destroy]
+      end
+
       # ==================== WARRANTY SYSTEM ====================
       # Manufacturers
       resources :manufacturers, only: [:index, :show]
@@ -356,6 +409,7 @@ Rails.application.routes.draw do
           get :stats
           get :branding_preview  # Preview branding before sync
           get 'by_token/:token', action: :by_token  # ⭐ PUBLIC - Preview website by token
+          get 'by_slug_public/:slug', action: :by_slug_public  # ⭐ PUBLIC - Preview website by slug (Safari compatible)
           get 'by_slug/:slug', action: :by_slug  # Authenticated preview by slug
         end
         
@@ -553,6 +607,7 @@ Rails.application.routes.draw do
         collection do
           get :stats
           get :templates
+          post :bulk_share
         end
       end
       
@@ -1888,7 +1943,11 @@ Rails.application.routes.draw do
       end
       
       # Portal Project Progress
-      resources :projects, only: [:index, :show]
+      resources :projects, only: [:index, :show] do
+        member do
+          post :acknowledge_task  # POST body: { phase_id:, task_id: }
+        end
+      end
 
       # Portal Service Tickets
       resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
@@ -1907,6 +1966,33 @@ Rails.application.routes.draw do
         get 'floor-plans/:id', to: 'configurator#floor_plan_detail'
         post 'submit', to: 'configurator#submit'
         get 'my-configurations', to: 'configurator#my_configurations'
+      end
+    end
+  end
+
+  # ==================== CONTRACTOR PORTAL ====================
+  namespace :api do
+    namespace :contractor do
+      # Authentication
+      post 'sessions/magic_link', to: 'sessions#magic_link'
+      post 'sessions/verify', to: 'sessions#verify'
+
+      # Dashboard
+      get 'dashboard', to: 'dashboard#index'
+
+      # Tasks
+      resources :tasks, only: [:index, :show] do
+        member do
+          patch :update_status
+          patch :toggle_checklist_item
+        end
+      end
+
+      # Service Tickets
+      resources :service_tickets, only: [:index, :show], path: 'service-tickets' do
+        member do
+          patch :update_status
+        end
       end
     end
   end

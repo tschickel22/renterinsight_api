@@ -4,7 +4,7 @@ module Api
   module V1
     class ServiceTicketsController < ApplicationController
       before_action :set_company
-      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :mark_warranty_suspected, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both]
+      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :mark_warranty_suspected, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both, :assign_contractor, :unassign_contractor]
       
       # GET /api/v1/service-tickets
       def index
@@ -346,6 +346,51 @@ module Api
         end
       end
       
+      # POST /api/v1/service-tickets/:id/assign-contractor
+      def assign_contractor
+        return unless authorize_action!('contractors', 'create')
+
+        contractor = @company.contractors.where(status: 'active').where(is_deleted: [false, nil]).find(params[:contractor_id])
+
+        existing = @service_ticket.contractor_assignments.find_by(contractor_id: contractor.id)
+        if existing
+          return render json: { error: 'Contractor already assigned to this ticket' }, status: :unprocessable_entity
+        end
+
+        assignment = @service_ticket.contractor_assignments.build(
+          contractor: contractor,
+          company: @company,
+          assigned_by: current_user,
+          status: 'assigned',
+          assigned_at: Time.current,
+          notes: params[:notes]
+        )
+
+        if assignment.save
+          render json: {
+            data: serialize_ticket(@service_ticket.reload, include_attachments: false)
+          }, status: :created
+        else
+          render json: { errors: assignment.errors.full_messages }, status: :unprocessable_entity
+        end
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Contractor not found' }, status: :not_found
+      end
+
+      # DELETE /api/v1/service-tickets/:id/unassign-contractor
+      def unassign_contractor
+        return unless authorize_action!('contractors', 'delete')
+
+        assignment = @service_ticket.contractor_assignments.find_by!(contractor_id: params[:contractor_id])
+        assignment.destroy
+
+        render json: {
+          data: serialize_ticket(@service_ticket.reload, include_attachments: false)
+        }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Assignment not found' }, status: :not_found
+      end
+
       # GET /api/v1/service-tickets/stats
       def stats
       return unless authorize_action!('service', 'read')
@@ -529,7 +574,25 @@ module Api
         
         # Include warranty claim details if present
         data[:warrantyClaim] = ticket.warranty_claim_owned ? serialize_warranty_claim(ticket.warranty_claim_owned) : nil
-        
+
+        # Contractor assignments (Phase 2B)
+        data[:contractorAssignments] = ticket.contractor_assignments.includes(:contractor).map do |ca|
+          {
+            id: ca.id,
+            status: ca.status,
+            assignedAt: ca.assigned_at,
+            notes: ca.notes,
+            contractor: {
+              id: ca.contractor.id,
+              name: ca.contractor.name,
+              contactName: ca.contractor.contact_name,
+              tradeType: ca.contractor.trade_type,
+              phone: ca.contractor.phone,
+              email: ca.contractor.email
+            }
+          }
+        end
+
         data
       end
       
