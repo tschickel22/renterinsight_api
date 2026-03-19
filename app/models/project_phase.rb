@@ -53,6 +53,40 @@ class ProjectPhase < ApplicationRecord
     ((completed_at - started_at) / 1.day).round
   end
 
+  # ============================================================================
+  # ROLL-UP FROM TASKS (task-level dates roll up to phase)
+  # ============================================================================
+
+  # Sum of task estimated_days, falls back to phase's own estimated_days
+  def computed_estimated_days
+    tasks = project_phase_tasks
+    if tasks.any? && tasks.where.not(estimated_days: nil).exists?
+      tasks.sum(:estimated_days)
+    else
+      estimated_days
+    end
+  end
+
+  # Earliest task start date, falls back to phase's own
+  def computed_start_date
+    tasks = project_phase_tasks
+    if tasks.any? && tasks.where.not(estimated_start_date: nil).exists?
+      tasks.minimum(:estimated_start_date)
+    else
+      estimated_start_date
+    end
+  end
+
+  # Latest task completion date, falls back to phase's own
+  def computed_completion_date
+    tasks = project_phase_tasks
+    if tasks.any? && tasks.where.not(estimated_completion_date: nil).exists?
+      tasks.maximum(:estimated_completion_date)
+    else
+      estimated_completion_date
+    end
+  end
+
   # Calculate % complete based on tasks (if any), otherwise 0 or 100
   def task_progress_percent
     tasks = project_phase_tasks
@@ -69,14 +103,16 @@ class ProjectPhase < ApplicationRecord
   end
 
   def overdue?
-    return false unless estimated_completion_date
+    due = computed_completion_date
+    return false unless due
     return false if status.in?(%w[completed skipped])
-    estimated_completion_date < Date.current
+    due < Date.current
   end
 
   def days_until_estimated_completion
-    return nil unless estimated_completion_date
-    (estimated_completion_date - Date.current).to_i
+    due = computed_completion_date
+    return nil unless due
+    (due - Date.current).to_i
   end
 
   def status_display

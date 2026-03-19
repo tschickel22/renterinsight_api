@@ -44,6 +44,41 @@ module Api
         }
       end
 
+      # POST /api/portal/projects/:id/acknowledge_task
+      # Body: { phase_id:, task_id: }
+      def acknowledge_task
+        project = find_portal_project(params[:id])
+        return render(json: { error: 'Project not found' }, status: :not_found) unless project
+
+        phase = project.project_phases.find_by(id: params[:phase_id], visible_to_client: true)
+        return render(json: { error: 'Phase not found' }, status: :not_found) unless phase
+
+        task = phase.project_phase_tasks.find_by(id: params[:task_id], visible_to_client: true, client_actionable: true)
+        return render(json: { error: 'Task not found or not actionable' }, status: :not_found) unless task
+
+        if task.client_acknowledged_at.present?
+          return render(json: { error: 'Already acknowledged' }, status: :unprocessable_entity)
+        end
+
+        buyer = current_portal_buyer&.buyer
+        buyer_name = buyer.respond_to?(:full_name) ? buyer.full_name : (buyer&.email || 'Client')
+
+        task.update!(
+          client_acknowledged_at: Time.current,
+          client_acknowledged_by: buyer_name
+        )
+
+        render json: {
+          success: true,
+          task: {
+            id: task.id,
+            name: task.name,
+            acknowledgedAt: task.client_acknowledged_at,
+            acknowledgedBy: task.client_acknowledged_by
+          }
+        }
+      end
+
       private
 
       def find_portal_project(id)
@@ -83,6 +118,11 @@ module Api
       end
 
       def serialize_phase(phase, project)
+        client_tasks = phase.project_phase_tasks
+                            .where(visible_to_client: true)
+                            .order(:position)
+                            .map { |task| serialize_client_task(task) }
+
         {
           id: phase.id,
           name: phase.name,
@@ -97,7 +137,21 @@ module Api
           icon: phase.icon,
           color: phase.color,
           isCurrent: phase.id == project.current_phase_id,
-          overdue: phase.overdue?
+          overdue: phase.overdue?,
+          tasks: client_tasks
+        }
+      end
+
+      def serialize_client_task(task)
+        {
+          id: task.id,
+          name: task.name,
+          status: task.status,
+          isRequired: task.is_required,
+          clientActionable: task.client_actionable,
+          acknowledgedAt: task.client_acknowledged_at,
+          acknowledgedBy: task.client_acknowledged_by,
+          completedAt: task.completed_at
         }
       end
     end

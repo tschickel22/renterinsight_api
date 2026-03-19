@@ -261,9 +261,11 @@ Rails.application.routes.draw do
           post :toggle_task   # POST body: { phase_id:, task_id: }
           post :assign_phase_task_contractor     # POST body: { phase_id:, task_id:, contractor_id: }
           delete :unassign_phase_task_contractor  # DELETE body: { phase_id:, task_id:, contractor_id: }
+          post :assign_phase_task_user            # POST body: { phase_id:, task_id:, user_id: }
+          delete :unassign_phase_task_user        # DELETE body: { phase_id:, task_id: }
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
-        resources :phases, only: [] do
+        resources :phases, only: [:update], controller: 'project_phases' do
           resources :tasks, controller: 'project_phase_tasks', only: [:index, :create, :update, :destroy]
           # Phase 2A: Rich project tasks (with checklists, dependencies, etc.)
           resources :project_tasks, controller: 'project_tasks', only: [:index, :create] do
@@ -1941,7 +1943,11 @@ Rails.application.routes.draw do
       end
       
       # Portal Project Progress
-      resources :projects, only: [:index, :show]
+      resources :projects, only: [:index, :show] do
+        member do
+          post :acknowledge_task  # POST body: { phase_id:, task_id: }
+        end
+      end
 
       # Portal Service Tickets
       resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'

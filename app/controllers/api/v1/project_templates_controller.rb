@@ -7,7 +7,7 @@ module Api
       before_action :set_template, only: %i[show update destroy duplicate]
 
       PHASE_ONLY_FIELDS = %i[id name position visible_to_client is_required estimated_days icon color].freeze
-      PHASE_TASK_FIELDS = %i[id name position is_required].freeze
+      PHASE_TASK_FIELDS = %i[id name position is_required visible_to_client client_actionable estimated_days].freeze
 
       def phases_json(phases)
         phases.includes(:project_template_phase_tasks).map do |phase|
@@ -177,9 +177,12 @@ module Api
           phase_data[:tasks].each_with_index do |task_data, tidx|
             next if task_data[:name].blank?
             phase.project_template_phase_tasks.create!(
-              name:        task_data[:name],
-              position:    task_data[:position] || tidx,
-              is_required: task_data[:is_required] || false
+              name:              task_data[:name],
+              position:          task_data[:position] || tidx,
+              is_required:       task_data[:is_required] || false,
+              visible_to_client: task_data[:visible_to_client] || false,
+              client_actionable: task_data[:client_actionable] || false,
+              estimated_days:    task_data[:estimated_days]
             )
           end
         end

@@ -108,6 +108,9 @@ class ProjectTemplate < ApplicationRecord
             name: task.name,
             position: task.position,
             is_required: task.is_required,
+            visible_to_client: task.visible_to_client,
+            client_actionable: task.client_actionable,
+            estimated_days: task.estimated_days,
             status: 'pending'
           )
         end
@@ -128,6 +131,9 @@ class ProjectTemplate < ApplicationRecord
           name: task_title,
           position: simple_task_position + task_idx,
           is_required: true,
+          visible_to_client: task_data[:visible_to_client] || false,
+          client_actionable: task_data[:client_actionable] || false,
+          estimated_days: task_data[:estimated_days],
           status: 'pending'
         )
 

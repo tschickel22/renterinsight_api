@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_18_000010) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3036,6 +3036,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_18_000010) do
     t.bigint "completed_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "assigned_to_id"
+    t.boolean "visible_to_client", default: false, null: false
+    t.boolean "client_actionable", default: false, null: false
+    t.datetime "client_acknowledged_at"
+    t.string "client_acknowledged_by"
+    t.integer "estimated_days"
+    t.date "estimated_start_date"
+    t.date "estimated_completion_date"
+    t.index ["assigned_to_id"], name: "index_project_phase_tasks_on_assigned_to_id"
     t.index ["company_id"], name: "index_project_phase_tasks_on_company_id"
     t.index ["completed_by_id"], name: "index_project_phase_tasks_on_completed_by_id"
     t.index ["project_phase_id", "position"], name: "idx_project_phase_tasks_phase_position"
@@ -3148,6 +3157,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_18_000010) do
     t.boolean "is_required", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "visible_to_client", default: false, null: false
+    t.boolean "client_actionable", default: false, null: false
+    t.integer "estimated_days"
     t.index ["project_template_phase_id", "position"], name: "idx_template_phase_tasks_phase_position"
     t.index ["project_template_phase_id"], name: "idx_on_project_template_phase_id_9658b0b17b"
   end
@@ -4954,6 +4966,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_18_000010) do
   add_foreign_key "project_notification_preferences", "projects"
   add_foreign_key "project_phase_tasks", "companies"
   add_foreign_key "project_phase_tasks", "project_phases"
+  add_foreign_key "project_phase_tasks", "users", column: "assigned_to_id", on_delete: :nullify
   add_foreign_key "project_phase_tasks", "users", column: "completed_by_id"
   add_foreign_key "project_phases", "companies"
   add_foreign_key "project_phases", "projects"
