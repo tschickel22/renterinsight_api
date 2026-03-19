@@ -5,6 +5,7 @@ class WebhookDeliveryJob < ApplicationJob
 
   retry_on StandardError, wait: :polynomially_longer, attempts: 5
   discard_on ActiveRecord::RecordNotFound
+  discard_on ActiveRecord::RecordInvalid  # Don't retry validation errors (e.g. invalid events on endpoint)
 
   def perform(delivery_id)
     delivery = WebhookDelivery.find(delivery_id)

@@ -5,6 +5,9 @@ class Lead < ApplicationRecord
   include LocationAware
   include NotifiableLead
   include WebhookNotifiable
+
+  # Transient flag — set to true to suppress assignment notifications (e.g. bulk edits)
+  attr_accessor :skip_notifications
   
   belongs_to :company
   belongs_to :location, optional: true

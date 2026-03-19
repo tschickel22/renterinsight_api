@@ -97,7 +97,7 @@ module Api
         # Count AFTER search filter (for pagination)
         filtered_count = leads.count
         
-        leads = leads.includes(:source, :owner, :vehicle, :lead_scores).order(created_at: :desc)
+        leads = leads.includes(:source, :owner, :vehicle, :lead_scores, :tags).order(created_at: :desc)
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -217,6 +217,9 @@ module Api
         if custom_field_values_param.present?
           update_attrs = update_attrs.merge(custom_field_values: (@lead.custom_field_values || {}).merge(custom_field_values_param))
         end
+
+        # Suppress notifications for bulk operations (frontend sends skip_notifications: true)
+        @lead.skip_notifications = ActiveModel::Type::Boolean.new.cast(params[:skip_notifications])
 
         # Apply attributes to lead
         @lead.assign_attributes(update_attrs)
@@ -685,6 +688,7 @@ module Api
           country: l.country,
           customFieldValues: l.respond_to?(:custom_field_values) ? l.custom_field_values : {},
           score: l.lead_scores.max_by(&:updated_at)&.score,
+          tags: l.tags.map { |t| { id: t.id, name: t.name, color: t.respond_to?(:color) ? t.color : nil } },
           createdAt: l.created_at,
           updatedAt: l.updated_at
         }

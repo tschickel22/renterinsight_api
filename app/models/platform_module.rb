@@ -46,6 +46,7 @@ class PlatformModule
     'management.tasks' => { name: 'Task Center', category: 'Management', icon: 'CheckSquare', description: 'Task management and workflow' },
     'management.calendar' => { name: 'Calendar Scheduling', category: 'Management', icon: 'Calendar', description: 'Appointment and event scheduling' },
     'management.contractors' => { name: 'Contractor Management', category: 'Management', icon: 'Briefcase', description: 'External contractor coordination' },
+    'management.projects' => { name: 'Project Management', category: 'Management', icon: 'FolderKanban', description: 'Project tracking with phases, tasks, and client visibility' },
     'management.workflows' => { name: 'Workflow Automation', category: 'Management', icon: 'GitBranch', description: 'Business process automation' },
     'management.territories' => { name: 'Territory Management', category: 'Management', icon: 'MapPin', description: 'Sales territory assignment and tracking' },
     
@@ -93,7 +94,7 @@ class PlatformModule
       finance.loans finance.agreements finance.invoices finance.documents finance.applications
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 
-      management.calendar management.contractors management.workflows management.territories
+      management.calendar management.contractors management.projects management.workflows management.territories
       admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks
     ]
   }.freeze

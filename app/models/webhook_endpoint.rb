@@ -11,7 +11,7 @@ class WebhookEndpoint < ApplicationRecord
   validates :events, presence: true
   validates :secret, presence: true
   validates :status, presence: true, inclusion: { in: %w[active inactive] }
-  validate :validate_events, if: -> { events.present? }
+  validate :validate_events, if: -> { events.present? && events_changed? }
 
   # Scopes
   scope :active, -> { where(status: "active") }
@@ -81,20 +81,23 @@ class WebhookEndpoint < ApplicationRecord
   end
 
   def deactivate!
-    update!(status: "inactive")
+    update_columns(status: "inactive")
   end
 
   def activate!
-    update!(status: "active", failure_count: 0)
+    update_columns(status: "active", failure_count: 0)
   end
 
   def record_failure!
-    increment!(:failure_count)
+    # Use update_columns to skip validations - prevents retry storm when
+    # existing endpoints have events not yet in the YAML config
+    self.class.where(id: id).update_all("failure_count = COALESCE(failure_count, 0) + 1")
+    reload
     deactivate! if failure_count >= 10
   end
 
   def record_success!
-    update!(failure_count: 0, last_triggered_at: Time.current)
+    update_columns(failure_count: 0, last_triggered_at: Time.current)
   end
 
   def sign_payload(payload)
@@ -116,6 +119,7 @@ class WebhookEndpoint < ApplicationRecord
   end
   
   # Validate that all events are valid (exist in available_events list)
+  # Only runs when events are actually changed (not on failure_count updates)
   def validate_events
     return if events.blank?
     
