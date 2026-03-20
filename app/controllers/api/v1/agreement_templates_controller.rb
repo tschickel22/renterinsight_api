@@ -519,7 +519,7 @@ module Api
           result = service.smart_scan(
             @template.document_url,
             @template.example_document_url,
-            max_pages: params[:max_pages]&.to_i || 16
+            max_pages: params[:max_pages]&.to_i || 5
           )
 
           # Cache the smart scan results
@@ -843,7 +843,7 @@ module Api
           :name, :description, :category, :agreement_category_id,
           :document_url, :content, :template_type, :status, :location_id,
           :state_code, :form_type, :form_number, :page_count,
-          default_signers: [:role, :label, :order_index],
+          default_signers: [:role, :label, :order_index, :user_id, :user_name, :user_email],
           custom_field_definitions: []
         )
 

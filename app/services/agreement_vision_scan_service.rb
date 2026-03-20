@@ -223,13 +223,15 @@ class AgreementVisionScanService
       - For table rows like "Manufacturer | [blank cell]": the INPUT is in the blank cell to the right of the label. If "Manufacturer" is at x:28 and the table's value column starts at x:42, the input is at x:42.
       - For checkboxes "☐ Joint Tenants": the checkbox is at the SAME x,y as the text or slightly left of it. Width and height should be about 2.5.
       - For signature lines "SIGNED X ________": the input starts after "X" and spans to the right.
+      - For INITIALS patterns like "x____ x____" or "X______ X______" or "Initials Initials": these are TWO separate initials fields side by side (one per buyer/signer). Create TWO initials fields — one for each "x____" block. The first one is for Buyer 1/Signer 1, the second for Buyer 2/Signer 2. Use type "initials" with width ~6, height ~3.
+      - For company representative/manager signature lines like "By ___ Factory Direct Homes Center Representative" or "Factory Direct Homes Center MANAGER": these are counter-signer signature fields. Use type "signature" with group "signatures" and label them clearly (e.g. "Company Rep signature", "Manager signature").
       - For stacked table fields (Manufacturer, Model, Serial No. etc.): each field should be at the SAME x position but DIFFERENT y positions, matching the rows in the table.
       - NEVER stack multiple fields at the same x,y — each field must have a UNIQUE y position.
 
       For each field provide:
       - key: unique snake_case (e.g. "buyer_name")
       - label: exact label text
-      - type: text|currency|number|percentage|date|checkbox|signature
+      - type: text|currency|number|percentage|date|checkbox|signature|initials
       - group: buyer|unit|pricing|delivery|signatures|general|terms
       - page: 1-indexed page number
       - x: INPUT AREA x position (percentage, 0-100)
@@ -350,12 +352,14 @@ class AgreementVisionScanService
       - For "Label: ________" patterns: INPUT starts AFTER the label text
       - For table cells: INPUT is in the value column, not the label column
       - Checkboxes: width/height about 2.5
+      - For INITIALS patterns like "x____ x____" or "X______ X______": these are TWO separate initials fields (one per signer). Use type "initials" with width ~6, height ~3.
+      - For company rep/manager signature lines ("By ___ Representative", "By ___ MANAGER"): counter-signer signatures. Use type "signature" with group "signatures".
       - NEVER stack multiple fields at the same x,y
 
       For each field provide:
       - key: unique snake_case (e.g. "buyer_name")
       - label: exact label text from empty form
-      - type: text|currency|number|percentage|date|checkbox|signature (INFERRED from filled value)
+      - type: text|currency|number|percentage|date|checkbox|signature|initials (INFERRED from filled value)
       - group: buyer|unit|pricing|delivery|insulation|optional_equipment|remarks|trade_in|shipping|signatures|terms|general
       - page: 1-indexed page number
       - x: INPUT AREA x position (percentage, 0-100) from EMPTY template
@@ -521,7 +525,7 @@ class AgreementVisionScanService
     key = "cf_#{key}" unless key.start_with?("cf_")
 
     type = field["type"].to_s.strip.downcase
-    type = "text" unless %w[text currency number percentage date select checkbox signature].include?(type)
+    type = "text" unless %w[text currency number percentage date select checkbox signature initials].include?(type)
 
     group = field["group"].to_s.strip.downcase
     group = "general" unless %w[buyer delivery unit insulation pricing optional_equipment remarks trade_in shipping signatures terms general].include?(group)
