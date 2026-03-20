@@ -10,12 +10,16 @@ class Project < ApplicationRecord
   belongs_to :deal, optional: true
   belongs_to :project_template, optional: true
   belongs_to :vehicle, optional: true
+  belongs_to :land_parcel, optional: true
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   belongs_to :created_by, class_name: 'User', foreign_key: 'created_by_id', optional: true
 
   has_many :project_phases, -> { order(:position) }, dependent: :destroy
   has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
   has_many :notification_preferences, class_name: 'ProjectNotificationPreference', dependent: :destroy
+  has_many :project_cost_items, dependent: :destroy
+  has_many :project_material_usages, dependent: :destroy
+  has_many :project_documents, dependent: :destroy
 
   # Validations
   validates :name, presence: true
@@ -266,6 +270,38 @@ class Project < ApplicationRecord
   def delivery_address_display
     parts = [delivery_street, delivery_city, delivery_state, delivery_zip].compact.reject(&:blank?)
     parts.join(', ')
+  end
+
+  # ============================================================================
+  # COST TRACKING
+  # ============================================================================
+
+  def recalculate_costs!
+    items = project_cost_items.not_deleted
+    totals = items.group(:cost_type).sum(:amount)
+
+    update_columns(
+      labor_cost: totals['labor'] || 0,
+      materials_cost: totals['materials'] || 0,
+      subcontractor_cost: totals['subcontractor'] || 0,
+      other_cost: (totals.except('labor', 'materials', 'subcontractor').values.sum),
+      actual_cost: items.sum(:amount)
+    )
+  end
+
+  def budget_variance
+    return nil unless budget_amount
+    budget_amount - (actual_cost || 0)
+  end
+
+  def budget_variance_percentage
+    return nil unless budget_amount && budget_amount > 0
+    ((budget_variance / budget_amount) * 100).round(1)
+  end
+
+  def over_budget?
+    return false unless budget_amount
+    (actual_cost || 0) > budget_amount
   end
 
   private

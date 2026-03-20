@@ -8,6 +8,9 @@ class ProjectPhase < ApplicationRecord
   belongs_to :completed_by, class_name: 'User', foreign_key: 'completed_by_id', optional: true
   has_many :project_phase_tasks, -> { order(:position) }, dependent: :destroy
   has_many :tasks, class_name: 'ProjectTask', dependent: :destroy
+  has_many :project_cost_items, dependent: :destroy
+  has_many :project_material_usages, dependent: :destroy
+  has_many :project_documents, as: :documentable, dependent: :destroy
 
   # Validations
   validates :name, presence: true
@@ -123,6 +126,10 @@ class ProjectPhase < ApplicationRecord
     when 'skipped' then 'Skipped'
     else status&.titleize
     end
+  end
+
+  def recalculate_costs!
+    update_column(:actual_cost, project_cost_items.not_deleted.sum(:amount))
   end
 
   after_save :notify_status_change, if: :saved_change_to_status?

@@ -10,6 +10,9 @@ class ProjectTask < ApplicationRecord
   has_many :dependencies, class_name: 'ProjectTaskDependency', foreign_key: :task_id, dependent: :destroy
   has_many :dependents, class_name: 'ProjectTaskDependency', foreign_key: :depends_on_id, dependent: :destroy
   has_many :contractor_assignments, as: :assignable, dependent: :destroy
+  has_many :project_cost_items, dependent: :destroy
+  has_many :project_material_usages, dependent: :destroy
+  has_many :project_documents, as: :documentable, dependent: :destroy
 
   validates :title, presence: true
   validates :status, inclusion: { in: %w[pending in_progress completed blocked skipped] }

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_20_130002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1299,8 +1299,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
     t.string "portal_access_token"
     t.datetime "portal_token_expires_at"
     t.datetime "last_portal_login_at"
+    t.boolean "is_vendor", default: false
     t.index ["company_id"], name: "index_contractors_on_company_id"
     t.index ["email"], name: "index_contractors_on_email"
+    t.index ["is_vendor"], name: "index_contractors_on_is_vendor"
     t.index ["portal_access_token"], name: "index_contractors_on_portal_access_token", unique: true
     t.index ["status"], name: "index_contractors_on_status"
     t.index ["trade_type"], name: "index_contractors_on_trade_type"
@@ -2998,6 +3000,108 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
   end
 
+  create_table "project_cost_items", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "project_id", null: false
+    t.bigint "project_phase_id"
+    t.bigint "project_task_id"
+    t.string "cost_type", null: false
+    t.string "category"
+    t.string "description", null: false
+    t.string "vendor_name"
+    t.string "invoice_number"
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.decimal "quantity", precision: 10, scale: 2, default: "1.0"
+    t.decimal "unit_price", precision: 12, scale: 2
+    t.date "date"
+    t.string "status", default: "pending"
+    t.datetime "paid_at"
+    t.bigint "approved_by_id"
+    t.text "notes"
+    t.string "receipt_url"
+    t.string "receipt_s3_key"
+    t.bigint "part_id"
+    t.bigint "inventory_transaction_id"
+    t.boolean "is_deleted", default: false
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "contractor_id"
+    t.index ["approved_by_id"], name: "index_project_cost_items_on_approved_by_id"
+    t.index ["company_id"], name: "index_project_cost_items_on_company_id"
+    t.index ["contractor_id"], name: "index_project_cost_items_on_contractor_id"
+    t.index ["cost_type"], name: "index_project_cost_items_on_cost_type"
+    t.index ["date"], name: "index_project_cost_items_on_date"
+    t.index ["inventory_transaction_id"], name: "index_project_cost_items_on_inventory_transaction_id"
+    t.index ["part_id"], name: "index_project_cost_items_on_part_id"
+    t.index ["project_id"], name: "index_project_cost_items_on_project_id"
+    t.index ["project_phase_id"], name: "index_project_cost_items_on_project_phase_id"
+    t.index ["project_task_id"], name: "index_project_cost_items_on_project_task_id"
+    t.index ["status"], name: "index_project_cost_items_on_status"
+  end
+
+  create_table "project_documents", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "project_id", null: false
+    t.string "documentable_type"
+    t.bigint "documentable_id"
+    t.bigint "uploaded_by_id"
+    t.string "title", null: false
+    t.text "description"
+    t.string "category", null: false
+    t.string "file_url", null: false
+    t.string "file_s3_key", null: false
+    t.string "file_name", null: false
+    t.integer "file_size"
+    t.string "content_type"
+    t.boolean "is_deleted", default: false
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_project_documents_on_category"
+    t.index ["company_id"], name: "index_project_documents_on_company_id"
+    t.index ["documentable_type", "documentable_id"], name: "index_project_documents_on_documentable"
+    t.index ["project_id"], name: "index_project_documents_on_project_id"
+    t.index ["uploaded_by_id"], name: "index_project_documents_on_uploaded_by_id"
+  end
+
+  create_table "project_material_usages", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "project_id", null: false
+    t.bigint "project_phase_id"
+    t.bigint "project_task_id"
+    t.bigint "part_id", null: false
+    t.bigint "location_id", null: false
+    t.bigint "bin_id"
+    t.decimal "quantity_allocated", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "quantity_checked_out", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "quantity_used", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "quantity_returned", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "unit_cost", precision: 12, scale: 2
+    t.string "status", default: "allocated"
+    t.datetime "checked_out_at"
+    t.bigint "checked_out_by_id"
+    t.datetime "used_at"
+    t.bigint "used_by_id"
+    t.datetime "returned_at"
+    t.bigint "returned_by_id"
+    t.text "notes"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bin_id"], name: "index_project_material_usages_on_bin_id"
+    t.index ["checked_out_by_id"], name: "index_project_material_usages_on_checked_out_by_id"
+    t.index ["company_id"], name: "index_project_material_usages_on_company_id"
+    t.index ["location_id"], name: "index_project_material_usages_on_location_id"
+    t.index ["part_id"], name: "index_project_material_usages_on_part_id"
+    t.index ["project_id"], name: "index_project_material_usages_on_project_id"
+    t.index ["project_phase_id"], name: "index_project_material_usages_on_project_phase_id"
+    t.index ["project_task_id"], name: "index_project_material_usages_on_project_task_id"
+    t.index ["returned_by_id"], name: "index_project_material_usages_on_returned_by_id"
+    t.index ["status"], name: "index_project_material_usages_on_status"
+    t.index ["used_by_id"], name: "index_project_material_usages_on_used_by_id"
+  end
+
   create_table "project_notification_preferences", force: :cascade do |t|
     t.bigint "project_id", null: false
     t.bigint "company_id", null: false
@@ -3076,6 +3180,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
     t.bigint "completed_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "estimated_budget", precision: 12, scale: 2
+    t.decimal "actual_cost", precision: 12, scale: 2, default: "0.0"
     t.index ["company_id", "status"], name: "idx_project_phases_company_status"
     t.index ["company_id"], name: "index_project_phases_on_company_id"
     t.index ["project_id", "position"], name: "idx_project_phases_project_position"
@@ -3238,6 +3344,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
     t.jsonb "custom_field_values", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "budget_amount", precision: 12, scale: 2
+    t.decimal "actual_cost", precision: 12, scale: 2, default: "0.0"
+    t.decimal "labor_cost", precision: 12, scale: 2, default: "0.0"
+    t.decimal "materials_cost", precision: 12, scale: 2, default: "0.0"
+    t.decimal "subcontractor_cost", precision: 12, scale: 2, default: "0.0"
+    t.decimal "other_cost", precision: 12, scale: 2, default: "0.0"
+    t.bigint "land_parcel_id"
     t.index ["client_access_token"], name: "idx_projects_client_token", unique: true
     t.index ["company_id", "location_id"], name: "idx_projects_company_location"
     t.index ["company_id", "project_number"], name: "idx_projects_company_number", unique: true
@@ -3248,6 +3361,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
     t.index ["deal_id"], name: "idx_projects_deal"
     t.index ["deal_id"], name: "index_projects_on_deal_id"
     t.index ["is_deleted"], name: "idx_projects_deleted"
+    t.index ["land_parcel_id"], name: "index_projects_on_land_parcel_id"
     t.index ["location_id"], name: "index_projects_on_location_id"
     t.index ["owner_id"], name: "idx_projects_owner"
     t.index ["project_template_id"], name: "index_projects_on_project_template_id"
@@ -4962,6 +5076,27 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "project_cost_items", "companies"
+  add_foreign_key "project_cost_items", "contractors", on_delete: :nullify
+  add_foreign_key "project_cost_items", "inventory_transactions", on_delete: :nullify
+  add_foreign_key "project_cost_items", "parts", on_delete: :nullify
+  add_foreign_key "project_cost_items", "project_phases"
+  add_foreign_key "project_cost_items", "project_tasks"
+  add_foreign_key "project_cost_items", "projects"
+  add_foreign_key "project_cost_items", "users", column: "approved_by_id", on_delete: :nullify
+  add_foreign_key "project_documents", "companies"
+  add_foreign_key "project_documents", "projects"
+  add_foreign_key "project_documents", "users", column: "uploaded_by_id", on_delete: :nullify
+  add_foreign_key "project_material_usages", "bins", on_delete: :nullify
+  add_foreign_key "project_material_usages", "companies"
+  add_foreign_key "project_material_usages", "locations"
+  add_foreign_key "project_material_usages", "parts"
+  add_foreign_key "project_material_usages", "project_phases"
+  add_foreign_key "project_material_usages", "project_tasks"
+  add_foreign_key "project_material_usages", "projects"
+  add_foreign_key "project_material_usages", "users", column: "checked_out_by_id", on_delete: :nullify
+  add_foreign_key "project_material_usages", "users", column: "returned_by_id", on_delete: :nullify
+  add_foreign_key "project_material_usages", "users", column: "used_by_id", on_delete: :nullify
   add_foreign_key "project_notification_preferences", "companies"
   add_foreign_key "project_notification_preferences", "projects"
   add_foreign_key "project_phase_tasks", "companies"
@@ -4985,6 +5120,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_19_200000) do
   add_foreign_key "project_templates", "locations"
   add_foreign_key "projects", "companies"
   add_foreign_key "projects", "deals"
+  add_foreign_key "projects", "land_parcels", on_delete: :nullify
   add_foreign_key "projects", "locations"
   add_foreign_key "projects", "project_templates"
   add_foreign_key "purchase_order_lines", "parts"

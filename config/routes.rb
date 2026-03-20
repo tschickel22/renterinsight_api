@@ -303,6 +303,26 @@ Rails.application.routes.draw do
             post :auto_setup
           end
         end
+
+        # Phase 2D: Cost tracking, materials, documents
+        resources :cost_items, controller: 'project_cost_items' do
+          collection do
+            get :summary
+          end
+        end
+
+        resources :materials, controller: 'project_material_usages' do
+          member do
+            post :check_out
+            post :mark_used
+            post :return_parts
+          end
+          collection do
+            get :search_parts
+          end
+        end
+
+        resources :documents, controller: 'project_documents'
       end
 
       # Phase 2A: Offline sync
@@ -352,6 +372,7 @@ Rails.application.routes.draw do
       resources :contractors do
         collection do
           get :stats
+          get :vendors
         end
 
         resources :contractor_assignments, only: [:index, :create, :update, :destroy]
