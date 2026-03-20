@@ -58,6 +58,60 @@ class AgreementVisionScanService
     }
   end
 
+  # V2 scan removed — per-page approach re-sends full PDF each time,
+  # which exceeds rate limits (16 pages × 100K tokens = 1.6M tokens/min vs 30K limit).
+  # Keeping V1 as the sole scan method.
+  def scan_v2(pdf_url, max_pages: MAX_PAGES)
+    # Fallback to V1
+    scan(pdf_url, max_pages: max_pages)
+  end
+
+  def scan_v2_disabled(pdf_url, max_pages: MAX_PAGES)
+    raise ScanError, "No PDF URL provided" if pdf_url.blank?
+
+    Rails.logger.info "[VisionScan V2] Starting two-phase focused scan of: #{pdf_url}"
+
+    pdf_data = download_pdf(pdf_url)
+    Rails.logger.info "[VisionScan V2] PDF downloaded: #{pdf_data.bytesize} bytes"
+
+    if pdf_data.bytesize > PDF_MAX_SIZE
+      raise ScanError, "PDF is too large (#{(pdf_data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
+    end
+
+    text_map = extract_text_with_positions(pdf_data)
+    total_pages = text_map.keys.max || 1
+    pages_to_scan = [max_pages, total_pages].min
+    Rails.logger.info "[VisionScan V2] #{total_pages} pages, scanning #{pages_to_scan}"
+
+    pdf_base64 = Base64.strict_encode64(pdf_data)
+
+    # ── Phase 1: Context scan (full document → field inventory + formulas) ──
+    field_inventory = phase1_context_scan(pdf_base64, text_map, pages_to_scan)
+    Rails.logger.info "[VisionScan V2] Phase 1 complete: #{field_inventory.length} fields identified"
+
+    # Group inventory by page
+    fields_by_page = field_inventory.group_by { |f| f["page"] }
+
+    # ── Phase 2: Per-page focused placement (same PDF + one page's text positions) ──
+    placed_fields = phase2_focused_placement(pdf_base64, text_map, fields_by_page, pages_to_scan)
+    Rails.logger.info "[VisionScan V2] Phase 2 complete: #{placed_fields.length} fields placed"
+
+    # Normalize
+    normalized = placed_fields.map.with_index { |f, i| normalize_field(f, i) }.compact
+    normalized = deduplicate_positions(normalized)
+
+    page_classifications = classify_pages(normalized, total_pages)
+    Rails.logger.info "[VisionScan V2] Done: #{normalized.length} fields across #{pages_to_scan} pages"
+
+    {
+      fields: normalized,
+      pages_scanned: pages_to_scan,
+      total_pages: total_pages,
+      page_classifications: page_classifications,
+      scan_type: 'v2_focused',
+    }
+  end
+
   # Smart Scan: Compare empty template PDF against a filled example PDF
   # Returns enhanced fields with example_value, inferred_type, formula, is_repeated
   def smart_scan(empty_pdf_url, filled_pdf_url, max_pages: MAX_PAGES)
@@ -623,6 +677,252 @@ class AgreementVisionScanService
       field
     end
   end
+
+  # ─── V2: Phase 1 — Context Scan (full document, field inventory) ────────────
+
+  def phase1_context_scan(pdf_base64, text_map, pages_to_scan)
+    position_ref = build_position_reference(text_map, pages_to_scan)
+
+    prompt = <<~PROMPT
+      I need you to identify ALL FILLABLE FORM FIELDS in this PDF document.
+      This is Phase 1 of a two-phase scan. In this phase, focus on IDENTIFYING fields
+      (what they are, what type, what formulas connect them). Do NOT worry about precise
+      x/y positioning — that will be done separately using page images.
+
+      TEXT POSITIONS (for reference only):
+      #{position_ref}
+
+      SCAN EVERY PAGE from 1 through #{pages_to_scan}. Identify:
+      - Text input fields (name, address, phone, serial number, etc.)
+      - Currency fields (prices, totals, payments)
+      - Date fields
+      - Checkboxes
+      - Signature lines (for each signer: company rep, manager, buyer 1, buyer 2)
+      - Initials fields (x____ x____ patterns = TWO fields, one per signer)
+      - Table row fields (appliances, colors, addendum line items)
+
+      FOOTER SIGNATURES: Most pages have 4 signature blocks at the bottom:
+        "By ___ Representative" + "SIGNED X ___ BUYER 1" + Date
+        "By ___ MANAGER" + "SIGNED X ___ BUYER 2" + Date
+      Detect ALL of these on EVERY page where they appear.
+
+      FORMULA DETECTION (CRITICAL — this is the main reason for the full-document scan):
+      - Identify pricing calculations: Sub Total = Retail Price - Discounts
+      - Total = Sub Total 2 + Freight + Setup + Taxes
+      - Unpaid Balance = Total - Down Payment - Additional Payment
+      - Any other mathematical relationships between fields
+
+      For each field provide:
+      - key: unique snake_case. For repeating footers, prefix with p{page_number}_
+      - label: exact label text from the form
+      - type: text|currency|number|percentage|date|checkbox|signature|initials
+      - group: buyer|unit|pricing|delivery|signatures|general|terms
+      - page: 1-indexed page number
+      - formula: calculation formula if applicable (e.g. "=cf_retail_price-cf_factory_discount"), or null
+      - required: true/false
+
+      NOTE: Do NOT include x, y, width, height — those will be determined in Phase 2.
+
+      Output ONLY a JSON array. No explanation.
+
+      [
+        {"key":"cf_buyer1_name","label":"BUYER 1","type":"text","group":"buyer","page":1,"formula":null,"required":true},
+        {"key":"cf_total","label":"Total","type":"currency","group":"pricing","page":1,"formula":"=cf_subtotal2+cf_freight+cf_setup+cf_taxes","required":true},
+        {"key":"cf_p3_buyer1_sig","label":"Buyer 1 Signature","type":"signature","group":"signatures","page":3,"formula":null,"required":true}
+      ]
+    PROMPT
+
+    body = {
+      model: CLAUDE_MODEL,
+      max_tokens: 64000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf_base64 } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    }
+
+    result = call_claude_api(body, "Phase1")
+    fields = extract_json_array(result)
+    Rails.logger.info "[VisionScan V2] Phase 1 found #{fields.length} fields"
+    fields
+  end
+
+  # ─── V2: Phase 2 — Focused Per-Page Placement (same V1 approach, one page at a time) ───
+
+  def phase2_focused_placement(pdf_base64, text_map, fields_by_page, pages_to_scan)
+    all_placed = []
+    mutex = Mutex.new
+    threads = []
+    semaphore = Queue.new
+    3.times { semaphore.push(true) }  # Max 3 concurrent API calls
+
+    (1..pages_to_scan).each do |page_num|
+      page_fields = fields_by_page[page_num]
+      next unless page_fields&.any?
+
+      page_text = text_map[page_num]
+      unless page_text&.any?
+        # No text positions for this page — use defaults from Phase 1
+        page_fields.each { |f| f["x"] ||= 10; f["y"] ||= 10; f["width"] ||= 15; f["height"] ||= 3 }
+        mutex.synchronize { all_placed.concat(page_fields) }
+        next
+      end
+
+      threads << Thread.new(page_num, page_fields, page_text) do |pn, pf, pt|
+        semaphore.pop  # Wait for slot
+        begin
+          placed = phase2_place_single_page(pdf_base64, pn, pf, pt)
+          mutex.synchronize { all_placed.concat(placed) }
+        rescue => e
+          Rails.logger.error "[VisionScan V2] Phase 2 page #{pn} failed: #{e.message}"
+          pf.each { |f| f["x"] ||= 10; f["y"] ||= 10; f["width"] ||= 15; f["height"] ||= 3 }
+          mutex.synchronize { all_placed.concat(pf) }
+        ensure
+          semaphore.push(true)  # Release slot
+        end
+      end
+    end
+
+    threads.each(&:join)
+    all_placed
+  end
+
+  def phase2_place_single_page(pdf_base64, page_num, page_fields, page_text_items)
+    # Build text reference for just this ONE page
+    sorted = page_text_items.sort_by { |i| [i[:y], i[:x]] }
+    text_ref = sorted.map { |item| "  [x:#{item[:x]}, y:#{item[:y]}] \"#{item[:text]}\"" }.join("\n")
+
+    # Build field list from Phase 1 inventory
+    field_list = page_fields.map { |f|
+      parts = "- #{f['key']}: \"#{f['label']}\" (type: #{f['type']}, group: #{f['group']})"
+      parts += " [formula: #{f['formula']}]" if f['formula'].present?
+      parts
+    }.join("\n")
+
+    # Use the EXACT same V1 prompt style, but focused on just this page
+    prompt = <<~PROMPT
+      I need you to place form fields on PAGE #{page_num} of this PDF document.
+      I already know WHAT fields exist (listed below). Your job is to determine exact x, y, width, height.
+
+      TEXT POSITIONS FOR PAGE #{page_num} (extracted from PDF, coordinates are % of page dimensions, x=0 left, y=0 top):
+      #{text_ref}
+
+      FIELDS TO PLACE ON THIS PAGE:
+      #{field_list}
+
+      POSITIONING RULES:
+      - For "Label: ________" patterns: the INPUT starts AFTER the label text.
+      - For table rows like "Manufacturer | [blank cell]": the INPUT is in the blank cell to the right.
+      - For checkboxes: place at the SAME x,y as the checkbox text or slightly left. Width/height about 2.5.
+      - For signature lines "SIGNED X ________": the input starts after "X" and spans to the right.
+      - For INITIALS patterns "x____ x____": TWO separate fields side by side. Width ~6, height ~3.
+      - For stacked table fields: each at the SAME x but DIFFERENT y matching the table rows.
+      - NEVER stack multiple fields at the same x,y.
+
+      For each field, provide:
+      - key: (same as listed above)
+      - label: (same as listed above)
+      - type: (same as listed above)
+      - group: (same as listed above)
+      - page: #{page_num}
+      - x: INPUT AREA x position (percentage, 0-100)
+      - y: INPUT AREA y position (percentage, 0-100)
+      - width: field width (text: 15-30, checkbox: 2.5, signature: 25-35, currency: 10-15)
+      - height: field height (most: 2.5-3, checkbox: 2.5, signature: 4-5)
+      - required: true/false
+      - formula: (preserve from field list above, or null)
+
+      Output ONLY a JSON array. No explanation.
+    PROMPT
+
+    body = {
+      model: CLAUDE_MODEL,
+      max_tokens: 16000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf_base64 } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    }
+
+    result = call_claude_api(body, "Phase2-p#{page_num}")
+    placed = extract_json_array(result)
+
+    # Merge formula data from Phase 1 (Claude may drop it)
+    phase1_by_key = page_fields.index_by { |f| f["key"] }
+    placed.each do |f|
+      p1 = phase1_by_key[f["key"]]
+      if p1
+        f["formula"] ||= p1["formula"]
+        f["group"] ||= p1["group"]
+      end
+    end
+
+    Rails.logger.info "[VisionScan V2] Phase 2 page #{page_num}: placed #{placed.length}/#{page_fields.length} fields"
+    placed
+  end
+
+  # ─── V2: Shared API helper ─────────────────────────────────────────────
+
+  def call_claude_api(body, label = "API")
+    uri = URI(CLAUDE_API_URL)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 120
+    http.open_timeout = 30
+
+    request = Net::HTTP::Post.new(uri)
+    request["Content-Type"] = "application/json"
+    request["x-api-key"] = @api_key
+    request["anthropic-version"] = "2023-06-01"
+    request.body = body.to_json
+
+    Rails.logger.info "[VisionScan V2] #{label} — calling Claude API"
+    response = http.request(request)
+
+    unless response.code == "200"
+      error_body = JSON.parse(response.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{response.code}"
+      Rails.logger.error "[VisionScan V2] #{label} error: #{error_msg}"
+      raise ScanError, "#{label} failed: #{error_msg}"
+    end
+
+    result = JSON.parse(response.body)
+    result["content"]&.find { |c| c["type"] == "text" }&.fetch("text", "")
+  end
+
+  def extract_json_array(text)
+    json_str = text.strip
+    json_str = json_str.gsub(/```json?\s*/i, '').gsub(/```/, '').strip if json_str.include?('```')
+    json_str = $1 if !json_str.start_with?('[') && json_str =~ /(\[\s*\{.*\}\s*\])/m
+
+    return [] unless json_str.present? && json_str.start_with?('[')
+
+    begin
+      fields = JSON.parse(json_str)
+    rescue JSON::ParserError
+      # Try to fix truncated JSON
+      last_brace = json_str.rindex('}')
+      if last_brace
+        fields = JSON.parse(json_str[0..last_brace] + ']') rescue []
+      else
+        fields = []
+      end
+    end
+
+    fields.is_a?(Array) ? fields : []
+  end
+
+  # ───────────────────────────────────────────────────────────────────────────
 
   def download_pdf(url)
     uri = URI(url)

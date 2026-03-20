@@ -329,7 +329,14 @@ module Api
 
         begin
           service = AgreementVisionScanService.new(api_key)
-          result = service.scan(@template.document_url, max_pages: params[:max_pages]&.to_i || 16)
+          scan_version = params[:scan_version].to_s
+          max_pages = params[:max_pages]&.to_i || 16
+
+          result = if scan_version == 'v2'
+                     service.scan_v2(@template.document_url, max_pages: max_pages)
+                   else
+                     service.scan(@template.document_url, max_pages: max_pages)
+                   end
 
           # Cache the scan results on the template
           @template.update_columns(
