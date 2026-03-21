@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
-# AgreementVisionScanService - Hybrid PDF text extraction + Claude AI
+# AgreementVisionScanService - Hybrid PDF structure extraction + Claude AI
 #
-# Approach: Extract text positions from PDF, send to Claude along with the PDF,
-# Claude uses the exact coordinates to place fields precisely.
-# A small Y-offset calibration corrects for the consistent downward shift
-# between PDF coordinate space and browser rendering.
+# Pipeline:
+#   1. Extract text positions from PDF (PositionReceiver)
+#   2. Extract blank lines, boxes, rectangles from PDF drawing ops (GraphicsReceiver)
+#   3. Fix coordinates using CropBox (not MediaBox) for proper page dimensions
+#   4. Send PDF + structured position data + detected blanks to Claude
+#   5. Claude classifies fields semantically — geometry is pre-solved
+#   6. Normalize with confidence scoring and stable field keys
 #
 class AgreementVisionScanService
   class ScanError < StandardError; end
@@ -15,9 +18,15 @@ class AgreementVisionScanService
   MAX_PAGES = 16
   PDF_MAX_SIZE = 25_000_000
 
-  # Calibration offsets (browser rendering vs PDF coords)
-  Y_OFFSET = -2.0       # Fields render ~2% too low
+  # Calibration offsets (pdf-reader coords vs PDF.js browser rendering)
+  # These compensate for a systematic rendering difference, NOT a coordinate space issue
+  Y_OFFSET = -2.0          # Fields render ~2% too low in browser vs PDF coords
   CHECKBOX_X_OFFSET = -1.5  # Checkboxes render ~1.5% too far right
+
+  # Minimum line width (as % of page) to be considered a blank input line
+  MIN_LINE_WIDTH_PCT = 3.0
+  # Maximum vertical gap (as % of page) between a label and a blank line to associate them
+  MAX_LABEL_LINE_GAP_PCT = 3.0
 
   def initialize(api_key)
     @api_key = api_key
@@ -26,7 +35,7 @@ class AgreementVisionScanService
   def scan(pdf_url, max_pages: MAX_PAGES)
     raise ScanError, "No PDF URL provided" if pdf_url.blank?
 
-    Rails.logger.info "[VisionScan] Starting hybrid scan of: #{pdf_url}"
+    Rails.logger.info "[VisionScan] Starting enhanced scan of: #{pdf_url}"
 
     pdf_data = download_pdf(pdf_url)
     Rails.logger.info "[VisionScan] PDF downloaded: #{pdf_data.bytesize} bytes"
@@ -35,20 +44,29 @@ class AgreementVisionScanService
       raise ScanError, "PDF is too large (#{(pdf_data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
     end
 
-    # Step 1: Extract text with positions using pdf-reader
-    text_map = extract_text_with_positions(pdf_data)
-    total_pages = text_map.keys.max || 1
+    # Step 1: Extract text positions + page dimensions (using CropBox)
+    text_map, page_dimensions = extract_text_with_positions(pdf_data)
+    total_pages = page_dimensions.keys.max || 1
     pages_to_scan = [max_pages, total_pages].min
     total_items = text_map.values.sum { |items| items.length }
     Rails.logger.info "[VisionScan] Extracted #{total_items} text items across #{total_pages} pages"
 
-    # Step 2: Send PDF + text position data to Claude
+    # Step 2: Extract blank lines and boxes from PDF drawing operations
+    blank_lines = extract_blank_lines(pdf_data, page_dimensions)
+    total_blanks = blank_lines.values.sum { |items| items.length }
+    Rails.logger.info "[VisionScan] Detected #{total_blanks} blank lines/boxes across #{blank_lines.keys.length} pages"
+
+    # Step 3: Send PDF + text positions + detected blanks to Claude
     pdf_base64 = Base64.strict_encode64(pdf_data)
-    fields = call_claude_with_positions(pdf_base64, text_map, pages_to_scan)
+    fields = call_claude_with_positions(pdf_base64, text_map, blank_lines, pages_to_scan)
     Rails.logger.info "[VisionScan] Detected #{fields.length} fields"
 
+    # Step 4: Post-placement validation — fix overlaps with printed text, snap to blanks
+    fields = validate_placements(fields, text_map, blank_lines)
+    Rails.logger.info "[VisionScan] Validated #{fields.length} fields"
+
     page_classifications = classify_pages(fields, total_pages)
-    Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages: #{page_classifications.map { |p| "#{p[:page]}=#{p[:type]}" }.join(', ')}"
+    Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages"
 
     {
       fields: fields,
@@ -58,70 +76,12 @@ class AgreementVisionScanService
     }
   end
 
-  # V2 scan removed — per-page approach re-sends full PDF each time,
-  # which exceeds rate limits (16 pages × 100K tokens = 1.6M tokens/min vs 30K limit).
-  # Keeping V1 as the sole scan method.
-  def scan_v2(pdf_url, max_pages: MAX_PAGES)
-    # Fallback to V1
-    scan(pdf_url, max_pages: max_pages)
-  end
-
-  def scan_v2_disabled(pdf_url, max_pages: MAX_PAGES)
-    raise ScanError, "No PDF URL provided" if pdf_url.blank?
-
-    Rails.logger.info "[VisionScan V2] Starting two-phase focused scan of: #{pdf_url}"
-
-    pdf_data = download_pdf(pdf_url)
-    Rails.logger.info "[VisionScan V2] PDF downloaded: #{pdf_data.bytesize} bytes"
-
-    if pdf_data.bytesize > PDF_MAX_SIZE
-      raise ScanError, "PDF is too large (#{(pdf_data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
-    end
-
-    text_map = extract_text_with_positions(pdf_data)
-    total_pages = text_map.keys.max || 1
-    pages_to_scan = [max_pages, total_pages].min
-    Rails.logger.info "[VisionScan V2] #{total_pages} pages, scanning #{pages_to_scan}"
-
-    pdf_base64 = Base64.strict_encode64(pdf_data)
-
-    # ── Phase 1: Context scan (full document → field inventory + formulas) ──
-    field_inventory = phase1_context_scan(pdf_base64, text_map, pages_to_scan)
-    Rails.logger.info "[VisionScan V2] Phase 1 complete: #{field_inventory.length} fields identified"
-
-    # Group inventory by page
-    fields_by_page = field_inventory.group_by { |f| f["page"] }
-
-    # ── Phase 2: Per-page focused placement (same PDF + one page's text positions) ──
-    placed_fields = phase2_focused_placement(pdf_base64, text_map, fields_by_page, pages_to_scan)
-    Rails.logger.info "[VisionScan V2] Phase 2 complete: #{placed_fields.length} fields placed"
-
-    # Normalize
-    normalized = placed_fields.map.with_index { |f, i| normalize_field(f, i) }.compact
-    normalized = deduplicate_positions(normalized)
-
-    page_classifications = classify_pages(normalized, total_pages)
-    Rails.logger.info "[VisionScan V2] Done: #{normalized.length} fields across #{pages_to_scan} pages"
-
-    {
-      fields: normalized,
-      pages_scanned: pages_to_scan,
-      total_pages: total_pages,
-      page_classifications: page_classifications,
-      scan_type: 'v2_focused',
-    }
-  end
-
   # Smart Scan: Compare empty template PDF against a filled example PDF
-  # Returns enhanced fields with example_value, inferred_type, formula, is_repeated
   def smart_scan(empty_pdf_url, filled_pdf_url, max_pages: MAX_PAGES)
     raise ScanError, "No empty PDF URL provided" if empty_pdf_url.blank?
     raise ScanError, "No filled PDF URL provided" if filled_pdf_url.blank?
-    @scan_mode = :smart
 
     Rails.logger.info "[SmartScan] Starting comparison scan"
-    Rails.logger.info "[SmartScan]   Empty:  #{empty_pdf_url.truncate(80)}"
-    Rails.logger.info "[SmartScan]   Filled: #{filled_pdf_url.truncate(80)}"
 
     empty_data = download_pdf(empty_pdf_url)
     filled_data = download_pdf(filled_pdf_url)
@@ -133,13 +93,10 @@ class AgreementVisionScanService
       end
     end
 
-    # Extract text positions from both
-    empty_text_map = extract_text_with_positions(empty_data)
-    filled_text_map = extract_text_with_positions(filled_data)
+    empty_text_map, _ = extract_text_with_positions(empty_data)
+    filled_text_map, _ = extract_text_with_positions(filled_data)
     total_pages = [empty_text_map.keys.max || 1, filled_text_map.keys.max || 1].max
     pages_to_scan = [max_pages, total_pages].min
-
-    Rails.logger.info "[SmartScan] Empty: #{empty_text_map.values.sum(&:length)} text items, Filled: #{filled_text_map.values.sum(&:length)} text items, #{total_pages} pages"
 
     empty_b64 = Base64.strict_encode64(empty_data)
     filled_b64 = Base64.strict_encode64(filled_data)
@@ -149,7 +106,7 @@ class AgreementVisionScanService
 
     page_classifications = classify_pages(fields, total_pages)
 
-    # Detect repeated fields (same example_value on multiple pages)
+    # Detect repeated fields
     value_pages = {}
     fields.each do |f|
       val = f[:example_value].to_s.strip.downcase
@@ -172,21 +129,49 @@ class AgreementVisionScanService
     }
   end
 
+  # V2 scan disabled — falls back to V1
+  def scan_v2(pdf_url, max_pages: MAX_PAGES)
+    scan(pdf_url, max_pages: max_pages)
+  end
+
   private
 
-  # ─── PDF Text Extraction ──────────────────────────────────────────────────────
+  # ─── PDF Text Extraction (with CropBox fix) ───────────────────────────────────
 
   def extract_text_with_positions(pdf_data)
     text_map = {}
+    page_dimensions = {}
 
     begin
       reader = PDF::Reader.new(StringIO.new(pdf_data))
 
       reader.pages.each_with_index do |page, idx|
         page_num = idx + 1
-        page_w = page.width.to_f
-        page_h = page.height.to_f
+
+        # Use CropBox if available (visible area), otherwise MediaBox (full page)
+        # This is critical — MediaBox can include non-visible margins
+        crop_box = page.attributes[:CropBox] || page.attributes[:MediaBox]
+        media_box = page.attributes[:MediaBox]
+
+        if crop_box.is_a?(Array) && crop_box.length == 4
+          origin_x = crop_box[0].to_f
+          origin_y = crop_box[1].to_f
+          page_w = (crop_box[2].to_f - origin_x).abs
+          page_h = (crop_box[3].to_f - origin_y).abs
+        else
+          origin_x = 0.0
+          origin_y = 0.0
+          page_w = page.width.to_f
+          page_h = page.height.to_f
+        end
+
         next if page_w == 0 || page_h == 0
+
+        page_dimensions[page_num] = {
+          width: page_w, height: page_h,
+          origin_x: origin_x, origin_y: origin_y,
+          has_crop_box: page.attributes[:CropBox].present?
+        }
 
         items = []
         receiver = PositionReceiver.new
@@ -194,19 +179,103 @@ class AgreementVisionScanService
 
         receiver.runs.each do |run|
           next if run[:text].nil? || run[:text].strip.empty?
-          x_pct = (run[:x] / page_w * 100).round(1)
-          y_pct = (100 - (run[:y] / page_h * 100)).round(1) # PDF y is bottom-up
-          items << { text: run[:text].strip, x: x_pct, y: y_pct }
+          # Convert from PDF coords (origin at bottom-left of CropBox) to percentages (origin top-left)
+          x_pct = ((run[:x] - origin_x) / page_w * 100).round(1)
+          y_pct = (100 - ((run[:y] - origin_y) / page_h * 100)).round(1)
+          # Clamp to valid range
+          x_pct = [[x_pct, 0].max, 100].min
+          y_pct = [[y_pct, 0].max, 100].min
+          items << { text: run[:text].strip, x: x_pct, y: y_pct, font_size: run[:font_size] }
         end
 
         text_map[page_num] = items if items.any?
       end
     rescue => e
-      Rails.logger.warn "[VisionScan] pdf-reader failed: #{e.message}"
+      Rails.logger.warn "[VisionScan] pdf-reader text extraction failed: #{e.message}"
     end
 
-    text_map
+    [text_map, page_dimensions]
   end
+
+  # ─── PDF Blank Line / Box Detection (GraphicsReceiver) ─────────────────────────
+
+  def extract_blank_lines(pdf_data, page_dimensions)
+    blank_map = {}
+
+    begin
+      reader = PDF::Reader.new(StringIO.new(pdf_data))
+
+      reader.pages.each_with_index do |page, idx|
+        page_num = idx + 1
+        dims = page_dimensions[page_num]
+        next unless dims
+
+        receiver = GraphicsReceiver.new
+        page.walk(receiver)
+
+        blanks = []
+
+        # Process horizontal lines
+        receiver.lines.each do |line|
+          # Only keep horizontal lines (y1 ~= y2)
+          next unless (line[:y1] - line[:y2]).abs < 2.0
+
+          x1_pct = ((line[:x1] - dims[:origin_x]) / dims[:width] * 100).round(1)
+          x2_pct = ((line[:x2] - dims[:origin_x]) / dims[:width] * 100).round(1)
+          y_pct = (100 - ((line[:y1] - dims[:origin_y]) / dims[:height] * 100)).round(1)
+
+          width_pct = (x2_pct - x1_pct).abs
+          next if width_pct < MIN_LINE_WIDTH_PCT  # Skip tiny lines
+
+          x_start = [x1_pct, x2_pct].min
+          x_start = [[x_start, 0].max, 100].min
+          y_pct = [[y_pct, 0].max, 100].min
+
+          blanks << {
+            type: 'line',
+            x: x_start.round(1),
+            y: y_pct.round(1),
+            width: width_pct.round(1),
+            height: 0.3  # Lines are thin
+          }
+        end
+
+        # Process rectangles (form boxes)
+        receiver.rectangles.each do |rect|
+          x_pct = ((rect[:x] - dims[:origin_x]) / dims[:width] * 100).round(1)
+          y_pct_bottom = ((rect[:y] - dims[:origin_y]) / dims[:height] * 100)
+          rect_h_pct = (rect[:h] / dims[:height] * 100)
+          y_pct = (100 - y_pct_bottom - rect_h_pct).round(1)  # Convert to top-left origin
+          w_pct = (rect[:w] / dims[:width] * 100).round(1)
+          h_pct = rect_h_pct.round(1)
+
+          # Filter: must be at least 3% wide and less than 10% tall (not a border/frame)
+          next if w_pct < MIN_LINE_WIDTH_PCT
+          next if h_pct > 10  # Too tall = page border or section box
+          next if h_pct < 0.2 # Too thin = decorative line
+
+          x_pct = [[x_pct, 0].max, 100].min
+          y_pct = [[y_pct, 0].max, 100].min
+
+          blanks << {
+            type: 'box',
+            x: x_pct.round(1),
+            y: y_pct.round(1),
+            width: w_pct.round(1),
+            height: h_pct.round(1)
+          }
+        end
+
+        blank_map[page_num] = blanks if blanks.any?
+      end
+    rescue => e
+      Rails.logger.warn "[VisionScan] Graphics extraction failed: #{e.message}"
+    end
+
+    blank_map
+  end
+
+  # ─── PDF Receivers ─────────────────────────────────────────────────────────────
 
   class PositionReceiver
     attr_reader :runs
@@ -255,32 +324,133 @@ class AgreementVisionScanService
     def method_missing(*) = nil
   end
 
-  # ─── Claude API Call ──────────────────────────────────────────────────────────
+  class GraphicsReceiver
+    attr_reader :lines, :rectangles
 
-  def call_claude_with_positions(pdf_base64, text_map, pages_to_scan)
+    def initialize
+      @lines = []
+      @rectangles = []
+      @path_points = []  # Current path being built
+      @ctm = [1, 0, 0, 1, 0, 0]  # Current transformation matrix (identity)
+    end
+
+    # Path construction
+    def move_to(x, y)
+      tx, ty = transform(x, y)
+      @path_points = [{ x: tx, y: ty }]
+    end
+
+    def line_to(x, y)
+      tx, ty = transform(x, y)
+      @path_points << { x: tx, y: ty }
+    end
+
+    def rectangle(x, y, w, h)
+      tx, ty = transform(x, y)
+      tw = w * @ctm[0]  # Scale width by CTM
+      th = h * @ctm[3]  # Scale height by CTM
+      @rectangles << { x: tx, y: ty, w: tw.abs, h: th.abs }
+    end
+
+    # Path painting — capture when path is stroked (drawn)
+    def stroke
+      capture_lines_from_path
+      @path_points = []
+    end
+
+    def close_and_stroke
+      stroke
+    end
+
+    def fill
+      # Filled paths could be form boxes too
+      capture_lines_from_path
+      @path_points = []
+    end
+
+    def fill_and_stroke
+      capture_lines_from_path
+      @path_points = []
+    end
+
+    # Transformation matrix
+    def concatenate_matrix(a, b, c, d, e, f)
+      @ctm = [a, b, c, d, e, f]
+    end
+
+    def save_graphics_state
+      @saved_ctm = @ctm.dup
+    end
+
+    def restore_graphics_state
+      @ctm = @saved_ctm || [1, 0, 0, 1, 0, 0]
+    end
+
+    # Catch-all for unhandled callbacks
+    def respond_to_missing?(*, **) = true
+    def method_missing(*) = nil
+
+    private
+
+    def transform(x, y)
+      # Apply current transformation matrix
+      tx = @ctm[0] * x + @ctm[2] * y + @ctm[4]
+      ty = @ctm[1] * x + @ctm[3] * y + @ctm[5]
+      [tx, ty]
+    end
+
+    def capture_lines_from_path
+      return if @path_points.length < 2
+
+      # Extract line segments from path
+      @path_points.each_cons(2) do |p1, p2|
+        @lines << { x1: p1[:x], y1: p1[:y], x2: p2[:x], y2: p2[:y] }
+      end
+    end
+  end
+
+  # ─── Claude API Call (Enhanced with blank lines) ───────────────────────────────
+
+  def call_claude_with_positions(pdf_base64, text_map, blank_lines, pages_to_scan)
     position_ref = build_position_reference(text_map, pages_to_scan)
+    blanks_ref = build_blanks_reference(blank_lines, pages_to_scan)
 
     prompt = <<~PROMPT
       I need you to identify all FILLABLE FORM FIELDS in this PDF document — blank lines, empty input areas, checkboxes, and signature lines that a user needs to fill in.
 
-      I have extracted the exact text positions from the PDF. Each text item shows its coordinates as percentages of page width (x) and height (y), where x=0 is the left edge and y=0 is the top edge.
+      I have extracted two types of data from the PDF:
+      1. TEXT POSITIONS — where labels and text are located
+      2. DETECTED BLANK LINES AND BOXES — actual underlines and input boxes found in the PDF structure
+
+      Both use coordinates as percentages of page dimensions (x=0 left edge, y=0 top edge).
 
       TEXT POSITIONS:
       #{position_ref}
 
-      YOUR TASK: For each fillable field you find in the document, tell me:
-      1. The field label and type
-      2. WHERE THE INPUT AREA IS (not the label) — use the text positions above to calculate exact coordinates
+      #{blanks_ref.present? ? "DETECTED BLANK LINES AND BOXES (these are REAL input areas detected from PDF drawing operations):\n#{blanks_ref}" : "No blank lines/boxes were detected from PDF structure."}
 
-      POSITIONING RULES — THIS IS CRITICAL:
-      - For "Label: ________" patterns: the INPUT starts AFTER the label text. If the label "Date:" is at x:78, y:15, the input area starts at roughly x:84 (after "Date:" width) at the same y.
-      - For table rows like "Manufacturer | [blank cell]": the INPUT is in the blank cell to the right of the label. If "Manufacturer" is at x:28 and the table's value column starts at x:42, the input is at x:42.
-      - For checkboxes "☐ Joint Tenants": the checkbox is at the SAME x,y as the text or slightly left of it. Width and height should be about 2.5.
-      - For signature lines "SIGNED X ________": the input starts after "X" and spans to the right.
-      - For INITIALS patterns like "x____ x____" or "X______ X______" or "Initials Initials": these are TWO separate initials fields side by side (one per buyer/signer). Create TWO initials fields — one for each "x____" block. The first one is for Buyer 1/Signer 1, the second for Buyer 2/Signer 2. Use type "initials" with width ~6, height ~3.
-      - For company representative/manager signature lines like "By ___ Factory Direct Homes Center Representative" or "Factory Direct Homes Center MANAGER": these are counter-signer signature fields. Use type "signature" with group "signatures" and label them clearly (e.g. "Company Rep signature", "Manager signature").
-      - For stacked table fields (Manufacturer, Model, Serial No. etc.): each field should be at the SAME x position but DIFFERENT y positions, matching the rows in the table.
-      - NEVER stack multiple fields at the same x,y — each field must have a UNIQUE y position.
+      YOUR TASK: For each fillable field, tell me:
+      1. The field label and type
+      2. WHERE THE INPUT AREA IS — use the DETECTED BLANK LINES above when available, otherwise estimate from text positions
+
+      FIELD PLACEMENT RULES:
+      - If a DETECTED BLANK LINE or BOX exists near a label, USE ITS COORDINATES for the field position. These are more accurate than estimates.
+      - For "Label: ________" patterns: the INPUT starts AFTER the label text. The field x must be to the RIGHT of the label's last character.
+      - For table rows: the INPUT is in the value column, to the right of the label.
+      - For checkboxes "☐ text": the checkbox is at the same x,y as the text or slightly left. Width/height about 2.5.
+      - For signature lines "SIGNED X ________": the input starts after "X".
+      - For INITIALS "x____ x____": TWO separate fields side by side. Width ~6, height ~3.
+      - For company rep/manager signatures: use type "signature" with group "signatures".
+      - NEVER stack multiple fields at the same x,y.
+
+      CRITICAL OVERLAP RULE — FIELDS MUST NEVER COVER TEXT:
+      - A field box must ONLY cover blank/empty space — the underline, the blank cell, or the empty area.
+      - A field box must NEVER overlap or cover printed label text, headings, or other static content.
+      - For labeled blank lines like "Street Address" or "City" printed BELOW a line:
+        The input field goes ON the blank line ABOVE the label. Set the field y so it sits on the line, NOT on top of the label text below.
+      - For "Label: ______" on the same line: the field starts AFTER the colon/label, covering only the blank area.
+      - For table cells: the field covers only the empty cell, not the row label in the left column.
+      - Height must be minimal: use 2.5 for text/date/number, 2.2 for table cells, 2.5 for checkboxes, 4 for signatures. NEVER exceed 3.0 for text fields.
 
       For each field provide:
       - key: unique snake_case (e.g. "buyer_name")
@@ -288,17 +458,18 @@ class AgreementVisionScanService
       - type: text|currency|number|percentage|date|checkbox|signature|initials
       - group: buyer|unit|pricing|delivery|signatures|general|terms
       - page: 1-indexed page number
-      - x: INPUT AREA x position (percentage, 0-100)
-      - y: INPUT AREA y position (percentage, 0-100)
+      - x: INPUT AREA x position (percentage, 0-100) — must be on blank space, not on label text
+      - y: INPUT AREA y position (percentage, 0-100) — must be on blank space, not on label text
       - width: field width as percentage (text: 15-30, checkbox: 2.5, signature: 25-35, currency: 10-15)
-      - height: field height as percentage (most: 2.5-3, checkbox: 2.5, signature: 4-5)
+      - height: field height as percentage (text/date/number: 2.5, table cells: 2.2, checkbox: 2.5, signature: 4)
       - required: true/false
+      - confidence: 0.0-1.0 (how confident you are in the placement. 1.0 = matched a detected blank line exactly, 0.5 = estimated from text position, 0.3 = guessed)
 
       CRITICAL: Output ONLY a JSON array. No explanation. Start with [ end with ].
 
       [
-        {"key":"date","label":"Date","type":"date","group":"general","page":1,"x":84,"y":15,"width":14,"height":2.8,"required":true},
-        {"key":"buyer_name","label":"Buyer","type":"text","group":"buyer","page":1,"x":42,"y":22,"width":35,"height":2.8,"required":true}
+        {"key":"date","label":"Date","type":"date","group":"general","page":1,"x":84,"y":15,"width":14,"height":2.5,"required":true,"confidence":0.9},
+        {"key":"buyer_name","label":"Buyer","type":"text","group":"buyer","page":1,"x":42,"y":22,"width":35,"height":2.5,"required":true,"confidence":0.7}
       ]
     PROMPT
 
@@ -331,7 +502,7 @@ class AgreementVisionScanService
     request["anthropic-version"] = "2023-06-01"
     request.body = body.to_json
 
-    Rails.logger.info "[VisionScan] Sending PDF + position data to Claude"
+    Rails.logger.info "[VisionScan] Sending PDF + #{text_map.values.sum(&:length)} text items + #{blank_lines.values.sum(&:length)} blank lines to Claude"
 
     response = http.request(request)
 
@@ -361,7 +532,25 @@ class AgreementVisionScanService
     lines.join("\n")
   end
 
-  # ─── Response Parsing ─────────────────────────────────────────────────────────
+  def build_blanks_reference(blank_lines, max_pages)
+    lines = []
+    blank_lines.each do |page_num, blanks|
+      next if page_num > max_pages
+      next if blanks.empty?
+      lines << "=== PAGE #{page_num} BLANKS ==="
+      sorted = blanks.sort_by { |b| [b[:y], b[:x]] }
+      sorted.each do |blank|
+        if blank[:type] == 'line'
+          lines << "  [LINE x:#{blank[:x]}, y:#{blank[:y]}, width:#{blank[:width]}] — horizontal underline"
+        else
+          lines << "  [BOX x:#{blank[:x]}, y:#{blank[:y]}, width:#{blank[:width]}, height:#{blank[:height]}] — input box"
+        end
+      end
+    end
+    lines.join("\n")
+  end
+
+  # ─── Smart Scan (unchanged prompt, uses same structure) ────────────────────────
 
   def call_claude_smart_scan(empty_b64, filled_b64, empty_text_map, filled_text_map, pages_to_scan)
     empty_ref = build_position_reference(empty_text_map, pages_to_scan)
@@ -390,24 +579,20 @@ class AgreementVisionScanService
       - Values like "$177,166.00" or "5,314.98" -> currency
       - Values like "02/25/2026" or "12/15/2025" -> date
       - Values like "3" or "68" (small integers in dimension/count context) -> number
-      - Values like "33" next to "R-VALUE" -> number
       - Checked boxes (filled checkbox, X mark, checkmark) -> checkbox
       - Signature lines with names -> signature
       - Everything else -> text
 
       FORMULA DETECTION:
-      - If SUB-TOTAL = BASE PRICE + OPTIONAL EQUIPMENT, output formula: "=base_price_of_unit+optional_equipment"
-      - If CASH PURCHASE PRICE = SUB-TOTAL + SALES TAX, output formula: "=sub_total+sales_tax"
-      - If NET ALLOWANCE = TRADE_IN_ALLOWANCE - LESS_BAL_DUE, output formula: "=trade_in_allowance-less_bal_due"
-      - If LESS TOTAL CREDITS = DOWN PAYMENT + CASH AS AGREED + NET ALLOWANCE, output formula accordingly
-      - Only include formula if you are confident the math checks out with the actual values
+      - If SUB-TOTAL = BASE PRICE + OPTIONAL EQUIPMENT, output formula accordingly
+      - Only include formula if you are confident the math checks out
 
-      POSITIONING RULES (same as standard scan):
+      POSITIONING RULES:
       - For "Label: ________" patterns: INPUT starts AFTER the label text
       - For table cells: INPUT is in the value column, not the label column
       - Checkboxes: width/height about 2.5
-      - For INITIALS patterns like "x____ x____" or "X______ X______": these are TWO separate initials fields (one per signer). Use type "initials" with width ~6, height ~3.
-      - For company rep/manager signature lines ("By ___ Representative", "By ___ MANAGER"): counter-signer signatures. Use type "signature" with group "signatures".
+      - For INITIALS "x____ x____": TWO separate fields. Width ~6, height ~3.
+      - For company rep/manager signatures: type "signature", group "signatures"
       - NEVER stack multiple fields at the same x,y
 
       For each field provide:
@@ -422,16 +607,11 @@ class AgreementVisionScanService
       - height: field height as percentage
       - required: true/false
       - example_value: the actual value from the FILLED document (string, or null if blank)
-      - inferred_type: the type you inferred from the example value (same options as type)
-      - formula: calculation formula if detected (e.g. "=base_price+optional_equipment"), or null
+      - inferred_type: the type you inferred from the example value
+      - formula: calculation formula if detected, or null
+      - confidence: 0.0-1.0 (placement confidence)
 
       CRITICAL: Output ONLY a JSON array. No explanation. Start with [ end with ].
-
-      [
-        {"key":"buyer_name","label":"BUYER(S)","type":"text","group":"buyer","page":1,"x":15,"y":12,"width":35,"height":2.8,"required":true,"example_value":"Faith E Locy and Luke Wagner","inferred_type":"text","formula":null},
-        {"key":"base_price_of_unit","label":"BASE PRICE OF UNIT","type":"currency","group":"pricing","page":1,"x":85,"y":38,"width":12,"height":2.8,"required":true,"example_value":"177,166.00","inferred_type":"currency","formula":null},
-        {"key":"sub_total","label":"SUB-TOTAL","type":"currency","group":"pricing","page":1,"x":85,"y":44,"width":12,"height":2.8,"required":true,"example_value":"271,166.00","inferred_type":"currency","formula":"=base_price_of_unit+optional_equipment"}
-      ]
     PROMPT
 
     body = {
@@ -441,14 +621,8 @@ class AgreementVisionScanService
         {
           role: "user",
           content: [
-            {
-              type: "document",
-              source: { type: "base64", media_type: "application/pdf", data: empty_b64 },
-            },
-            {
-              type: "document",
-              source: { type: "base64", media_type: "application/pdf", data: filled_b64 },
-            },
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: empty_b64 } },
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: filled_b64 } },
             { type: "text", text: prompt },
           ],
         },
@@ -458,7 +632,7 @@ class AgreementVisionScanService
     uri = URI(CLAUDE_API_URL)
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
-    http.read_timeout = 180  # 3 min - two PDFs take longer
+    http.read_timeout = 180
     http.open_timeout = 30
 
     request = Net::HTTP::Post.new(uri)
@@ -467,7 +641,7 @@ class AgreementVisionScanService
     request["anthropic-version"] = "2023-06-01"
     request.body = body.to_json
 
-    Rails.logger.info "[SmartScan] Sending 2 PDFs + position data to Claude (#{(empty_b64.length + filled_b64.length) / 1024}KB total)"
+    Rails.logger.info "[SmartScan] Sending 2 PDFs + position data to Claude"
 
     response = http.request(request)
 
@@ -484,12 +658,10 @@ class AgreementVisionScanService
     parse_smart_response(text_content)
   end
 
-  # Parse smart scan response - same as standard but preserves extra fields
+  # ─── Response Parsing ─────────────────────────────────────────────────────────
+
   def parse_smart_response(text)
     fields = parse_response(text)
-
-    # Re-parse the raw JSON to get example_value, inferred_type, formula
-    # parse_response strips these, so we extract them from the raw text
     raw_fields = extract_raw_json_fields(text)
 
     fields.each_with_index do |field, idx|
@@ -503,13 +675,12 @@ class AgreementVisionScanService
         field[:inferred_type] = nil
         field[:formula] = nil
       end
-      field[:is_repeated] = false  # Will be set by smart_scan caller
+      field[:is_repeated] = false
     end
 
     fields
   end
 
-  # Extract raw JSON array from response text (before normalize_field strips extra keys)
   def extract_raw_json_fields(text)
     json_str = text.strip
     json_str = json_str.gsub(/```json?\s*/i, '').gsub(/```/, '').strip if json_str.include?('```')
@@ -521,17 +692,14 @@ class AgreementVisionScanService
   def parse_response(text)
     json_str = text.strip
 
-    # Handle markdown code fences with prose before/after
     if json_str.include?('```')
       if json_str =~ /```(?:json)?\s*\n?(\[.*?\])\s*\n?```/m
         json_str = $1
-        Rails.logger.info "[VisionScan] Extracted JSON from markdown code fences"
       else
         json_str = json_str.gsub(/```json?\s*/i, '').gsub(/```/, '').strip
       end
     end
 
-    # Handle prose instead of JSON
     if !json_str.start_with?('[') && !json_str.start_with?('{')
       lower = json_str.downcase
       if lower.include?('no fillable') || lower.include?('no form field') ||
@@ -550,7 +718,6 @@ class AgreementVisionScanService
     begin
       fields = JSON.parse(json_str)
     rescue JSON::ParserError
-      # Fix truncated JSON
       if json_str.start_with?('[')
         last_brace = json_str.rindex('}')
         if last_brace
@@ -575,7 +742,16 @@ class AgreementVisionScanService
   end
 
   def normalize_field(field, idx)
-    key = field["key"].to_s.strip.presence || "field_#{idx + 1}"
+    # Stable deterministic key: use label + page + approximate position
+    raw_key = field["key"].to_s.strip.presence
+    label = field["label"].to_s.strip.presence || "Field #{idx + 1}"
+    page = [(field["page"] || 1).to_i, 1].max
+
+    if raw_key.present?
+      key = raw_key
+    else
+      key = label.parameterize(separator: '_').first(30)
+    end
     key = "cf_#{key}" unless key.start_with?("cf_")
 
     type = field["type"].to_s.strip.downcase
@@ -584,38 +760,115 @@ class AgreementVisionScanService
     group = field["group"].to_s.strip.downcase
     group = "general" unless %w[buyer delivery unit insulation pricing optional_equipment remarks trade_in shipping signatures terms general].include?(group)
 
-    # Apply calibration offsets
+    # Apply calibration offsets (compensates for pdf-reader vs PDF.js rendering gap)
     raw_y = field["y"].to_f + Y_OFFSET
     raw_x = field["x"].to_f
     raw_x += CHECKBOX_X_OFFSET if type == 'checkbox'
 
+    # Confidence from Claude (0.0-1.0), default 0.5 if not provided
+    confidence = field["confidence"].to_f
+    confidence = 0.5 if confidence <= 0 || confidence > 1.0
+
     {
       key: key,
-      label: field["label"].to_s.strip.presence || "Field #{idx + 1}",
+      label: label,
       type: type,
       group: group,
-      page: [(field["page"] || 1).to_i, 1].max,
+      page: page,
       x: [[raw_x, 1].max, 95].min.round(1),
       y: [[raw_y, 1].max, 95].min.round(1),
       width: [[field["width"].to_f, 2].max, 50].min.round(1),
-      height: [[field["height"].to_f, 1.5].max, 8].min.round(1),
+      height: clamp_height(type, field["height"].to_f),
       required: field["required"] == true,
+      confidence: confidence.round(2),
     }
+  end
+
+  # ─── Post-Placement Validation (Conservative) ─────────────────────────────────
+
+  # Light validation: only penalizes confidence for fields overlapping long body text.
+  # Does NOT move fields — Claude's placement + blank-line data is more reliable than
+  # generic push-away logic. Labels (short text) near fields are expected and allowed.
+  def validate_placements(fields, text_map, blank_lines)
+    body_text_zones = build_body_text_zones(text_map)
+    adjustments = 0
+
+    fields.map do |field|
+      page = field[:page]
+      page_body = body_text_zones[page] || []
+
+      # Skip types that naturally overlap text
+      next field if %w[signature initials checkbox].include?(field[:type])
+
+      fx1 = field[:x]
+      fy1 = field[:y]
+      fx2 = fx1 + field[:width]
+      fy2 = fy1 + field[:height]
+
+      # Only check against BODY text (sentences/paragraphs), not short labels
+      heavy_overlaps = page_body.select do |tz|
+        rects_overlap?(fx1, fy1, fx2, fy2, tz[:x1], tz[:y1], tz[:x2], tz[:y2])
+      end
+
+      if heavy_overlaps.any?
+        # Don't move the field — just reduce confidence so user reviews it
+        field = field.dup
+        field[:confidence] = [field[:confidence] * 0.6, 0.15].max.round(2)
+        adjustments += 1
+        Rails.logger.debug "[Validator] Flagged '#{field[:label]}' — overlaps body text (#{heavy_overlaps.length} zones)"
+      end
+
+      field
+    end
+  end
+
+  # Build exclusion zones from BODY TEXT only (5+ words). Short labels are expected
+  # near fields and should NOT trigger corrections.
+  def build_body_text_zones(text_map)
+    zones = {}
+    text_map.each do |page_num, items|
+      page_zones = items.filter_map do |item|
+        text = item[:text].to_s.strip
+        word_count = text.split(/\s+/).length
+        next nil if word_count < 5  # Skip labels, headings, short text
+
+        est_width = text.length * 0.5
+        est_height = 1.6
+
+        { x1: item[:x], y1: item[:y], x2: item[:x] + est_width, y2: item[:y] + est_height, text: text }
+      end
+
+      zones[page_num] = page_zones if page_zones.any?
+    end
+    zones
+  end
+
+  def rects_overlap?(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2)
+    ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1
+  end
+
+  # Type-specific height clamping to prevent oversized fields
+  def clamp_height(type, raw_height)
+    max_h = case type
+            when 'signature' then 5.0
+            when 'initials' then 3.5
+            when 'checkbox' then 2.5
+            else 3.0  # text, date, number, currency, percentage
+            end
+    min_h = type == 'checkbox' ? 2.0 : 1.5
+    [[raw_height, min_h].max, max_h].min.round(1)
   end
 
   # ─── Page Classification ───────────────────────────────────────────────────────
 
   def classify_pages(fields, total_pages)
-    # Build per-page field type sets
     page_data = {}
     fields.each do |f|
       p = f[:page] || 1
       page_data[p] ||= { signatures: 0, initials: 0, checkboxes: 0, data_fields: 0, labels: [] }
       case f[:type]
-      when 'signature'
-        page_data[p][:signatures] += 1
-      when 'initials'
-        page_data[p][:initials] += 1
+      when 'signature' then page_data[p][:signatures] += 1
+      when 'initials' then page_data[p][:initials] += 1
       when 'checkbox'
         page_data[p][:checkboxes] += 1
         page_data[p][:data_fields] += 1
@@ -638,17 +891,12 @@ class AgreementVisionScanService
                   elsif has_sigs || has_initials
                     'signature_page'
                   else
-                    'signature_page' # Pages with no detected fields are likely disclosure/signature pages
+                    'signature_page'
                   end
 
-      # Generate a title from first few field labels or fallback
       title = if info[:labels].any?
                 first_label = info[:labels].first.to_s
-                if first_label.length > 40
-                  first_label[0..37] + '...'
-                else
-                  first_label
-                end
+                first_label.length > 40 ? first_label[0..37] + '...' : first_label
               else
                 "Page #{page_num}"
               end
@@ -677,252 +925,6 @@ class AgreementVisionScanService
       field
     end
   end
-
-  # ─── V2: Phase 1 — Context Scan (full document, field inventory) ────────────
-
-  def phase1_context_scan(pdf_base64, text_map, pages_to_scan)
-    position_ref = build_position_reference(text_map, pages_to_scan)
-
-    prompt = <<~PROMPT
-      I need you to identify ALL FILLABLE FORM FIELDS in this PDF document.
-      This is Phase 1 of a two-phase scan. In this phase, focus on IDENTIFYING fields
-      (what they are, what type, what formulas connect them). Do NOT worry about precise
-      x/y positioning — that will be done separately using page images.
-
-      TEXT POSITIONS (for reference only):
-      #{position_ref}
-
-      SCAN EVERY PAGE from 1 through #{pages_to_scan}. Identify:
-      - Text input fields (name, address, phone, serial number, etc.)
-      - Currency fields (prices, totals, payments)
-      - Date fields
-      - Checkboxes
-      - Signature lines (for each signer: company rep, manager, buyer 1, buyer 2)
-      - Initials fields (x____ x____ patterns = TWO fields, one per signer)
-      - Table row fields (appliances, colors, addendum line items)
-
-      FOOTER SIGNATURES: Most pages have 4 signature blocks at the bottom:
-        "By ___ Representative" + "SIGNED X ___ BUYER 1" + Date
-        "By ___ MANAGER" + "SIGNED X ___ BUYER 2" + Date
-      Detect ALL of these on EVERY page where they appear.
-
-      FORMULA DETECTION (CRITICAL — this is the main reason for the full-document scan):
-      - Identify pricing calculations: Sub Total = Retail Price - Discounts
-      - Total = Sub Total 2 + Freight + Setup + Taxes
-      - Unpaid Balance = Total - Down Payment - Additional Payment
-      - Any other mathematical relationships between fields
-
-      For each field provide:
-      - key: unique snake_case. For repeating footers, prefix with p{page_number}_
-      - label: exact label text from the form
-      - type: text|currency|number|percentage|date|checkbox|signature|initials
-      - group: buyer|unit|pricing|delivery|signatures|general|terms
-      - page: 1-indexed page number
-      - formula: calculation formula if applicable (e.g. "=cf_retail_price-cf_factory_discount"), or null
-      - required: true/false
-
-      NOTE: Do NOT include x, y, width, height — those will be determined in Phase 2.
-
-      Output ONLY a JSON array. No explanation.
-
-      [
-        {"key":"cf_buyer1_name","label":"BUYER 1","type":"text","group":"buyer","page":1,"formula":null,"required":true},
-        {"key":"cf_total","label":"Total","type":"currency","group":"pricing","page":1,"formula":"=cf_subtotal2+cf_freight+cf_setup+cf_taxes","required":true},
-        {"key":"cf_p3_buyer1_sig","label":"Buyer 1 Signature","type":"signature","group":"signatures","page":3,"formula":null,"required":true}
-      ]
-    PROMPT
-
-    body = {
-      model: CLAUDE_MODEL,
-      max_tokens: 64000,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf_base64 } },
-            { type: "text", text: prompt },
-          ],
-        },
-      ],
-    }
-
-    result = call_claude_api(body, "Phase1")
-    fields = extract_json_array(result)
-    Rails.logger.info "[VisionScan V2] Phase 1 found #{fields.length} fields"
-    fields
-  end
-
-  # ─── V2: Phase 2 — Focused Per-Page Placement (same V1 approach, one page at a time) ───
-
-  def phase2_focused_placement(pdf_base64, text_map, fields_by_page, pages_to_scan)
-    all_placed = []
-    mutex = Mutex.new
-    threads = []
-    semaphore = Queue.new
-    3.times { semaphore.push(true) }  # Max 3 concurrent API calls
-
-    (1..pages_to_scan).each do |page_num|
-      page_fields = fields_by_page[page_num]
-      next unless page_fields&.any?
-
-      page_text = text_map[page_num]
-      unless page_text&.any?
-        # No text positions for this page — use defaults from Phase 1
-        page_fields.each { |f| f["x"] ||= 10; f["y"] ||= 10; f["width"] ||= 15; f["height"] ||= 3 }
-        mutex.synchronize { all_placed.concat(page_fields) }
-        next
-      end
-
-      threads << Thread.new(page_num, page_fields, page_text) do |pn, pf, pt|
-        semaphore.pop  # Wait for slot
-        begin
-          placed = phase2_place_single_page(pdf_base64, pn, pf, pt)
-          mutex.synchronize { all_placed.concat(placed) }
-        rescue => e
-          Rails.logger.error "[VisionScan V2] Phase 2 page #{pn} failed: #{e.message}"
-          pf.each { |f| f["x"] ||= 10; f["y"] ||= 10; f["width"] ||= 15; f["height"] ||= 3 }
-          mutex.synchronize { all_placed.concat(pf) }
-        ensure
-          semaphore.push(true)  # Release slot
-        end
-      end
-    end
-
-    threads.each(&:join)
-    all_placed
-  end
-
-  def phase2_place_single_page(pdf_base64, page_num, page_fields, page_text_items)
-    # Build text reference for just this ONE page
-    sorted = page_text_items.sort_by { |i| [i[:y], i[:x]] }
-    text_ref = sorted.map { |item| "  [x:#{item[:x]}, y:#{item[:y]}] \"#{item[:text]}\"" }.join("\n")
-
-    # Build field list from Phase 1 inventory
-    field_list = page_fields.map { |f|
-      parts = "- #{f['key']}: \"#{f['label']}\" (type: #{f['type']}, group: #{f['group']})"
-      parts += " [formula: #{f['formula']}]" if f['formula'].present?
-      parts
-    }.join("\n")
-
-    # Use the EXACT same V1 prompt style, but focused on just this page
-    prompt = <<~PROMPT
-      I need you to place form fields on PAGE #{page_num} of this PDF document.
-      I already know WHAT fields exist (listed below). Your job is to determine exact x, y, width, height.
-
-      TEXT POSITIONS FOR PAGE #{page_num} (extracted from PDF, coordinates are % of page dimensions, x=0 left, y=0 top):
-      #{text_ref}
-
-      FIELDS TO PLACE ON THIS PAGE:
-      #{field_list}
-
-      POSITIONING RULES:
-      - For "Label: ________" patterns: the INPUT starts AFTER the label text.
-      - For table rows like "Manufacturer | [blank cell]": the INPUT is in the blank cell to the right.
-      - For checkboxes: place at the SAME x,y as the checkbox text or slightly left. Width/height about 2.5.
-      - For signature lines "SIGNED X ________": the input starts after "X" and spans to the right.
-      - For INITIALS patterns "x____ x____": TWO separate fields side by side. Width ~6, height ~3.
-      - For stacked table fields: each at the SAME x but DIFFERENT y matching the table rows.
-      - NEVER stack multiple fields at the same x,y.
-
-      For each field, provide:
-      - key: (same as listed above)
-      - label: (same as listed above)
-      - type: (same as listed above)
-      - group: (same as listed above)
-      - page: #{page_num}
-      - x: INPUT AREA x position (percentage, 0-100)
-      - y: INPUT AREA y position (percentage, 0-100)
-      - width: field width (text: 15-30, checkbox: 2.5, signature: 25-35, currency: 10-15)
-      - height: field height (most: 2.5-3, checkbox: 2.5, signature: 4-5)
-      - required: true/false
-      - formula: (preserve from field list above, or null)
-
-      Output ONLY a JSON array. No explanation.
-    PROMPT
-
-    body = {
-      model: CLAUDE_MODEL,
-      max_tokens: 16000,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf_base64 } },
-            { type: "text", text: prompt },
-          ],
-        },
-      ],
-    }
-
-    result = call_claude_api(body, "Phase2-p#{page_num}")
-    placed = extract_json_array(result)
-
-    # Merge formula data from Phase 1 (Claude may drop it)
-    phase1_by_key = page_fields.index_by { |f| f["key"] }
-    placed.each do |f|
-      p1 = phase1_by_key[f["key"]]
-      if p1
-        f["formula"] ||= p1["formula"]
-        f["group"] ||= p1["group"]
-      end
-    end
-
-    Rails.logger.info "[VisionScan V2] Phase 2 page #{page_num}: placed #{placed.length}/#{page_fields.length} fields"
-    placed
-  end
-
-  # ─── V2: Shared API helper ─────────────────────────────────────────────
-
-  def call_claude_api(body, label = "API")
-    uri = URI(CLAUDE_API_URL)
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = true
-    http.read_timeout = 120
-    http.open_timeout = 30
-
-    request = Net::HTTP::Post.new(uri)
-    request["Content-Type"] = "application/json"
-    request["x-api-key"] = @api_key
-    request["anthropic-version"] = "2023-06-01"
-    request.body = body.to_json
-
-    Rails.logger.info "[VisionScan V2] #{label} — calling Claude API"
-    response = http.request(request)
-
-    unless response.code == "200"
-      error_body = JSON.parse(response.body) rescue {}
-      error_msg = error_body.dig("error", "message") || "HTTP #{response.code}"
-      Rails.logger.error "[VisionScan V2] #{label} error: #{error_msg}"
-      raise ScanError, "#{label} failed: #{error_msg}"
-    end
-
-    result = JSON.parse(response.body)
-    result["content"]&.find { |c| c["type"] == "text" }&.fetch("text", "")
-  end
-
-  def extract_json_array(text)
-    json_str = text.strip
-    json_str = json_str.gsub(/```json?\s*/i, '').gsub(/```/, '').strip if json_str.include?('```')
-    json_str = $1 if !json_str.start_with?('[') && json_str =~ /(\[\s*\{.*\}\s*\])/m
-
-    return [] unless json_str.present? && json_str.start_with?('[')
-
-    begin
-      fields = JSON.parse(json_str)
-    rescue JSON::ParserError
-      # Try to fix truncated JSON
-      last_brace = json_str.rindex('}')
-      if last_brace
-        fields = JSON.parse(json_str[0..last_brace] + ']') rescue []
-      else
-        fields = []
-      end
-    end
-
-    fields.is_a?(Array) ? fields : []
-  end
-
-  # ───────────────────────────────────────────────────────────────────────────
 
   def download_pdf(url)
     uri = URI(url)
