@@ -307,21 +307,6 @@ module Api
           return render json: { error: 'No PDF document uploaded for this template' }, status: :unprocessable_entity
         end
 
-        # Return cached results unless force_rescan is requested
-        unless params[:force_rescan] == true || params[:force_rescan] == 'true'
-          if @template.cached_scan_results.present?
-            return render json: {
-              fields: @template.cached_scan_results['fields'] || [],
-              pages_scanned: @template.cached_scan_results['pages_scanned'] || 0,
-              total_pages: @template.cached_scan_results['total_pages'] || 0,
-              page_classifications: @template.cached_scan_results['page_classifications'] || [],
-              mappings: @template.cached_scan_results['mappings'],
-              cached: true,
-              scan_performed_at: @template.scan_performed_at
-            }
-          end
-        end
-
         api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
         unless api_key.present?
           return render json: { error: 'AI scanning is not configured. Please add an Anthropic API key.' }, status: :service_unavailable
@@ -349,13 +334,18 @@ module Api
             scan_performed_at: Time.current
           )
 
+          # Track page credits (AcroForm scans are free)
+          is_acroform = result[:fields]&.any? { |f| f[:source] == 'acroform' || f['source'] == 'acroform' }
+          track_scan_pages(result[:pages_scanned] || 0) unless is_acroform
+
           render json: {
             fields: result[:fields],
             pages_scanned: result[:pages_scanned],
             total_pages: result[:total_pages],
             page_classifications: result[:page_classifications],
             cached: false,
-            scan_performed_at: @template.scan_performed_at
+            scan_performed_at: @template.scan_performed_at,
+            usage: ai_scan_page_usage
           }
         rescue AgreementVisionScanService::ScanError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -369,6 +359,55 @@ module Api
       def cached_scan
         return unless authorize_action!('agreements', 'read')
 
+        # For AcroForm PDFs: always run a fresh scan (fast, free, no API tokens).
+        # This ensures code changes to field mapping logic take effect immediately
+        # without requiring users to manually clear cache.
+        if @template.document_url.present?
+          begin
+            pdf_data = Net::HTTP.get(URI(@template.document_url))
+            reader = PDF::Reader.new(StringIO.new(pdf_data))
+            root = reader.objects.deref(reader.objects.trailer[:Root])
+            has_acroform = root[:AcroForm].present?
+          rescue => e
+            Rails.logger.warn "[CachedScan] AcroForm check failed: #{e.message}"
+            has_acroform = false
+          end
+
+          if has_acroform
+            Rails.logger.info "[CachedScan] AcroForm PDF detected — running fresh scan (free, no tokens)"
+            api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
+            service = AgreementVisionScanService.new(api_key)
+            result = service.scan(@template.document_url, max_pages: 16)
+
+            # Preserve existing mappings if present
+            existing_mappings = @template.cached_scan_results&.dig('mappings')
+
+            cache_data = {
+              'fields' => result[:fields],
+              'pages_scanned' => result[:pages_scanned],
+              'total_pages' => result[:total_pages],
+              'page_classifications' => result[:page_classifications]
+            }
+            cache_data['mappings'] = existing_mappings if existing_mappings.present?
+
+            @template.update_columns(
+              cached_scan_results: cache_data,
+              scan_performed_at: Time.current
+            )
+
+            return render json: {
+              fields: result[:fields],
+              pages_scanned: result[:pages_scanned],
+              total_pages: result[:total_pages],
+              page_classifications: result[:page_classifications],
+              mappings: existing_mappings,
+              cached: false,
+              scan_performed_at: @template.scan_performed_at
+            }
+          end
+        end
+
+        # Non-AcroForm: return cached results (Vision scans are expensive)
         unless @template.cached_scan_results.present?
           return render json: { error: 'No cached scan results. Run a scan first.' }, status: :not_found
         end
@@ -500,22 +539,6 @@ module Api
           return render json: { error: 'No example document uploaded. Upload a filled PDF first.' }, status: :unprocessable_entity
         end
 
-        # Return cached smart scan results unless force_rescan
-        unless params[:force_rescan] == true || params[:force_rescan] == 'true'
-          if @template.cached_scan_results.present? && @template.cached_scan_results['scan_type'] == 'smart'
-            return render json: {
-              fields: @template.cached_scan_results['fields'] || [],
-              pages_scanned: @template.cached_scan_results['pages_scanned'] || 0,
-              total_pages: @template.cached_scan_results['total_pages'] || 0,
-              page_classifications: @template.cached_scan_results['page_classifications'] || [],
-              mappings: @template.cached_scan_results['mappings'],
-              scan_type: 'smart',
-              cached: true,
-              scan_performed_at: @template.scan_performed_at
-            }
-          end
-        end
-
         api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
         unless api_key.present?
           return render json: { error: 'AI scanning is not configured. Please add an Anthropic API key.' }, status: :service_unavailable
@@ -541,6 +564,9 @@ module Api
             scan_performed_at: Time.current
           )
 
+          # Smart scan sends 2 PDFs to Claude, so double the page cost
+          track_scan_pages((result[:pages_scanned] || 0) * 2)
+
           render json: {
             fields: result[:fields],
             pages_scanned: result[:pages_scanned],
@@ -548,7 +574,8 @@ module Api
             page_classifications: result[:page_classifications],
             scan_type: 'smart',
             cached: false,
-            scan_performed_at: @template.scan_performed_at
+            scan_performed_at: @template.scan_performed_at,
+            usage: ai_scan_page_usage
           }
         rescue AgreementVisionScanService::ScanError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -816,6 +843,12 @@ module Api
         }
       end
 
+      # GET /api/v1/agreement_templates/ai_scan_usage
+      def ai_scan_usage_info
+        return unless authorize_action!('agreements', 'read')
+        render json: { usage: ai_scan_page_usage }
+      end
+
       private
 
       US_STATE_CODES = {
@@ -918,7 +951,8 @@ module Api
             created_by_id: template.created_by_id,
             custom_field_definitions: template.custom_field_definitions,
             has_cached_scan: template.cached_scan_results.present?,
-            scan_performed_at: template.scan_performed_at
+            scan_performed_at: template.scan_performed_at,
+            is_acroform: template.cached_scan_results&.dig('fields')&.any? { |f| f['source'] == 'acroform' } || false
           )
         end
 
@@ -976,6 +1010,45 @@ module Api
           end
         end
         values
+      end
+
+      # ==================== AI Scan Page Credit Tracking ====================
+      # Uses Setting table to track cumulative pages scanned per month.
+      # AcroForm scans are free (0 credits). Vision scan costs pages_scanned.
+      # Smart scan costs pages_scanned * 2 (two PDFs sent to Claude).
+
+      def track_scan_pages(pages_scanned)
+        return if pages_scanned.to_i <= 0
+        key = "ai_scan_pages_#{Time.current.strftime('%Y_%m')}"
+        current = Setting.get('company', @company.id, key, '0').to_i
+        Setting.set('company', @company.id, key, (current + pages_scanned.to_i).to_s)
+        Rails.logger.info "[ScanUsage] Company #{@company.id}: +#{pages_scanned} pages (total: #{current + pages_scanned.to_i})"
+      end
+
+      def ai_scan_page_usage
+        key = "ai_scan_pages_#{Time.current.strftime('%Y_%m')}"
+        used = Setting.get('company', @company.id, key, '0').to_i
+
+        # Default 500 pages/month (~31 full 16-page docs)
+        limit = 500
+        begin
+          custom_limit = Setting.get('company', @company.id, 'ai_scan_monthly_page_limit', nil)
+          limit = custom_limit.to_i if custom_limit.present? && custom_limit.to_i > 0
+        rescue => e
+          Rails.logger.debug "[ScanUsage] Could not read page limit: #{e.message}"
+        end
+
+        # Platform admins get unlimited
+        limit = [limit, 99999].max if current_user&.role == 'platform_admin'
+
+        {
+          used: used,
+          limit: limit,
+          remaining: [limit - used, 0].max,
+          resets_at: Time.current.end_of_month.strftime('%B %d, %Y'),
+          month: Time.current.strftime('%B %Y'),
+          unit: 'pages'
+        }
       end
 
       # Extract S3 key from a full S3 URL

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_20_130002) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_21_100001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1551,6 +1551,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_20_130002) do
     t.string "delivery_zip"
     t.string "delivery_country"
     t.bigint "project_id"
+    t.decimal "dealer_discount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "sales_event_discount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "manager_discount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "preferred_payment_discount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "multi_unit_discount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "subtotal_1", precision: 15, scale: 2, default: "0.0"
+    t.decimal "subtotal_2", precision: 15, scale: 2, default: "0.0"
+    t.decimal "tax_amount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "total_amount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "down_payment", precision: 15, scale: 2, default: "0.0"
+    t.decimal "additional_payment", precision: 15, scale: 2, default: "0.0"
+    t.decimal "unpaid_balance", precision: 15, scale: 2, default: "0.0"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"

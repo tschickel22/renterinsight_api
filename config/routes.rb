@@ -1238,6 +1238,7 @@ Rails.application.routes.draw do
 
       resources :agreement_templates do
         collection do
+          get :ai_scan_usage, action: :ai_scan_usage_info
           post :multi_state_create
           patch :multi_state_update
           delete :delete_group
