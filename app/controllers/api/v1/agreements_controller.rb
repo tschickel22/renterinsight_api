@@ -136,8 +136,10 @@ module Api
             agreement.agreement_template = template
             agreement.content = template.content if agreement.content.blank?
             agreement.document_url = template.document_url if agreement.document_url.blank?
+            agreement.document_urls = template.document_urls if agreement.document_urls.blank?
             agreement.content_type = template.template_type if agreement.content_type.blank?
             agreement.field_placements = template.field_placements if agreement.field_placements.blank?
+            agreement.merge_field_placements = template.merge_field_placements if agreement.merge_field_placements.blank?
             agreement.merge_field_values = template.merge_fields if agreement.merge_field_values.blank?
           end
         end
