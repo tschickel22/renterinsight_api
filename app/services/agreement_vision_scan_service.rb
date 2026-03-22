@@ -1641,6 +1641,95 @@ class AgreementVisionScanService
     seen.values
   end
 
+  # ─── Section-Prefix Disambiguation for Custom Fields ───────────────────────
+  # Groups fields by page, finds duplicate labels among unmapped (custom/text-input)
+  # fields, and prefixes them with the nearest section header from OCR text data.
+  def disambiguate_custom_field_labels(fields, text_map)
+    # Only operate on custom fields (no merge_field = text-input fields)
+    custom_fields = fields.select { |f| f[:merge_field].nil? }
+    return fields if custom_fields.empty?
+
+    by_page = custom_fields.group_by { |f| f[:page] }
+    prefixed_count = 0
+
+    by_page.each do |page_num, page_fields|
+      # Find labels that appear more than once on this page
+      label_counts = page_fields.group_by { |f| f[:label] }
+      duplicate_labels = label_counts.select { |_label, group| group.length > 1 }
+      next if duplicate_labels.empty?
+
+      # Build section header index from OCR/text data for this page
+      page_text = text_map[page_num] || []
+      section_headers = extract_section_headers(page_text, page_fields)
+
+      duplicate_labels.each do |label, dupes|
+        dupes.each do |field|
+          section = find_section_for_field(field, section_headers)
+          if section.present?
+            field[:label] = "#{section} \u00B7 #{field[:label]}"
+            field[:section] = section
+            prefixed_count += 1
+          else
+            field[:label] = "Page #{page_num} \u00B7 #{field[:label]}"
+            field[:section] = "Page #{page_num}"
+            prefixed_count += 1
+          end
+        end
+      end
+
+      # Populate section metadata for non-duplicate custom fields too (Phase B)
+      label_counts.select { |_label, group| group.length == 1 }.each do |_label, group|
+        field = group.first
+        next if field[:section].present?
+        section = find_section_for_field(field, section_headers)
+        field[:section] = section if section.present?
+      end
+    end
+
+    Rails.logger.info "[AcroForm] Label disambiguation: prefixed #{prefixed_count} duplicate custom field labels with section context"
+    fields
+  end
+
+  # Extract section headers from page text: static text items that aren't AcroForm fields
+  # and match common section heading patterns (short, title-like text above groups of fields)
+  def extract_section_headers(page_text, page_fields)
+    return [] if page_text.blank?
+
+    # Collect Y positions of AcroForm fields to exclude text that overlaps with fields
+    field_positions = page_fields.map { |f| { x: f[:x].to_f, y: f[:y].to_f } }
+
+    page_text.select do |item|
+      text = item[:text].to_s.strip
+      next false if text.length < 3 || text.length > 50
+      # Section headers are short, title-like text (1-5 words, often ending with colon)
+      word_count = text.split(/\s+/).length
+      next false if word_count > 6
+      # Exclude items that are at the same position as an AcroForm field (those are field labels)
+      ix = item[:x].to_f
+      iy = item[:y].to_f
+      overlaps_field = field_positions.any? { |fp| (fp[:x] - ix).abs < 3 && (fp[:y] - iy).abs < 1.5 }
+      next false if overlaps_field
+      # Exclude common non-header patterns (page numbers, checkbox labels, single chars)
+      next false if text.match?(/^(Page\s+\d|[xX_\-\.]+|\d+)$/)
+      true
+    end.sort_by { |item| item[:y].to_f }
+  end
+
+  # Find the nearest section header ABOVE a field (by Y position)
+  def find_section_for_field(field, section_headers)
+    return nil if section_headers.blank?
+
+    fy = field[:y].to_f
+    # Find the last section header that appears above this field
+    nearest = section_headers.select { |h| h[:y].to_f < fy }.last
+    return nil unless nearest
+
+    # Only use if reasonably close (within 15% Y distance — same visual section)
+    return nil if (fy - nearest[:y].to_f) > 15
+
+    nearest[:text].to_s.strip.sub(/[:\s]+$/, '')
+  end
+
   # ─── Universal Initials Pairing ──────────────────────────────────────────
   # GENERIC: Works for ANY PDF template. Pairs initials fields by position:
   # On each page, group initials by Y-row (within 2% tolerance), sort by X.
@@ -2250,6 +2339,9 @@ class AgreementVisionScanService
 
     # Filter to scanned pages
     mapped = mapped.select { |f| f[:page] <= pages_to_scan }
+
+    # Disambiguate duplicate custom field labels using section headers from OCR/text data
+    mapped = disambiguate_custom_field_labels(mapped, text_map)
 
     page_classifications = classify_pages(mapped, total_pages)
 
