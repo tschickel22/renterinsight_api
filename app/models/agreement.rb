@@ -95,14 +95,11 @@ class Agreement < ApplicationRecord
     update!(status: STATUS_COMPLETED, completed_at: Time.current)
     AgreementAuditLog.log!(self, AgreementAuditLog::ACTION_COMPLETED)
 
-    # Use perform_now to ensure sealing happens immediately
-    # (perform_later requires Solid Queue worker running)
-    if defined?(SealAgreementJob)
-      if Rails.env.production? || Rails.env.staging?
-        SealAgreementJob.perform_later(id)
-      else
-        SealAgreementJob.perform_now(id)
-      end
+    # Seal the signed PDF: async in production/staging, sync in dev/test
+    if Rails.env.production? || Rails.env.staging?
+      SealAgreementJob.perform_later(id)
+    else
+      SealAgreementJob.perform_now(id)
     end
     true
   end

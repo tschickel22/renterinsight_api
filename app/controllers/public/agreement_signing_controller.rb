@@ -92,7 +92,16 @@ module Public
       end
 
       if result
-        render json: { success: true, agreement_status: @agreement.reload.status }
+        agreement = @agreement.reload
+        completed = agreement.status == Agreement::STATUS_COMPLETED
+        render json: {
+          success: true,
+          agreement_status: agreement.status,
+          completed: completed,
+          message: completed ?
+            'All signers have signed. Your completed document is ready for download.' :
+            'Thank you for signing! You will receive the fully signed document by email once all signers have completed.'
+        }
       else
         render json: { error: 'Unable to sign. This agreement may have already been signed or declined.' }, status: :unprocessable_entity
       end
@@ -114,14 +123,12 @@ module Public
 
     # GET /sign/:token/download
     def download
-      effective_url = @agreement.document_url.presence ||
-        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
-
-      url = @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present? ?
-        @agreement.sealed_document_url : effective_url
-
-      unless url.present?
-        return render json: { error: 'No document available' }, status: :not_found
+      unless @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present?
+        return render json: {
+          error: 'Document not ready yet',
+          message: 'The signed document will be available once all signers have completed. You will receive it by email.',
+          agreement_status: @agreement.status
+        }, status: :accepted
       end
 
       AgreementAuditLog.log!(
@@ -132,7 +139,7 @@ module Public
         performed_by: @signer
       )
 
-      render json: { url: url }
+      render json: { url: @agreement.sealed_document_url }
     end
 
     private
