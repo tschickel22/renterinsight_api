@@ -713,18 +713,6 @@ module Api
         }
       end
       
-      def absolute_url(path)
-        return path if path.blank?
-        return path if path.start_with?('http://', 'https://')
-        
-        base_url = if request.present?
-          "#{request.protocol}#{request.host_with_port}"
-        else
-          ENV['RAILS_API_URL'] || 'https://localhost:3001'
-        end
-        
-        "#{base_url}#{path}"
-      end
     end
   end
 end

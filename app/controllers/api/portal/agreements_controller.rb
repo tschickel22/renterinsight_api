@@ -89,7 +89,7 @@ module Api
       def portal_agreement_json(agreement)
         my_signer = agreement.agreement_signers.find_by(email: current_contact.email)
 
-        {
+        json = {
           id: agreement.id,
           title: agreement.title,
           agreement_number: agreement.agreement_number,
@@ -102,6 +102,14 @@ module Api
           my_signer_status: my_signer&.status,
           my_signer_role: my_signer&.role
         }
+
+        # Include signing URL if the signer still needs to sign
+        if my_signer && %w[pending viewed].include?(my_signer.status)
+          json[:signing_url] = my_signer.signing_url
+          json[:signing_access_token] = my_signer.access_token
+        end
+
+        json
       end
     end
   end

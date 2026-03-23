@@ -67,6 +67,53 @@ module Api
         # Set default priority if not provided
         ticket.priority ||= 'medium'
         
+        # Auto-assign to appropriate staff member (triggers notification via NotifiableServiceTicket)
+        # Fallback chain: Location setting → Contact owner → Account owner → First active user at company
+        assignee = nil
+
+        # Step 1: Check location-level default assignee setting
+        if ticket.location_id.present?
+          default_assignee_setting = Setting.get('Location', ticket.location_id, 'default_service_ticket_assignee')
+          if default_assignee_setting.present?
+            default_user_id = default_assignee_setting.is_a?(Hash) ? default_assignee_setting['user_id'] : default_assignee_setting
+            assignee = User.find_by(id: default_user_id, status: 'active') if default_user_id.present?
+            Rails.logger.info "[Portal ST Auto-Assign] Step 1 (location setting): #{assignee&.email || 'none'}"
+          end
+        end
+
+        # Step 2: Contact owner
+        unless assignee
+          contact = current_portal_user.buyer if current_portal_user.buyer_type == 'Contact'
+          assignee = contact&.owner if contact&.owner&.active?
+          Rails.logger.info "[Portal ST Auto-Assign] Step 2 (contact owner): #{assignee&.email || 'none'} (contact #{contact&.id} owner_id: #{contact&.owner_id})"
+        end
+
+        # Step 3: Account owner
+        unless assignee
+          assignee = account.owner if account.owner&.active?
+          Rails.logger.info "[Portal ST Auto-Assign] Step 3 (account owner): #{assignee&.email || 'none'} (account #{account.id} owner_id: #{account.owner_id})"
+        end
+
+        # Step 4: First active admin/manager at company (broad role match)
+        unless assignee
+          company = ::Company.find_by(id: current_portal_user.company_id)
+          if company
+            assignee = company.users
+              .where(status: 'active')
+              .where.not(role: ['client', 'portal'])
+              .order(:id)
+              .first
+            Rails.logger.info "[Portal ST Auto-Assign] Step 4 (first active staff): #{assignee&.email || 'none'} (role: #{assignee&.role})"
+          end
+        end
+        
+        if assignee
+          ticket.assigned_to = assignee.id.to_s
+          Rails.logger.info "[Portal ST Auto-Assign] ✅ Assigned to: #{assignee.email} (id: #{assignee.id})"
+        else
+          Rails.logger.warn "[Portal ST Auto-Assign] ⚠️ No assignee found for portal ticket"
+        end
+        
         if ticket.save
           # Handle file attachments if provided
           if params[:files].present?
@@ -74,9 +121,6 @@ module Api
               ticket.attachments.attach(file)
             end
           end
-          
-          # TODO: Send notification to company staff
-          # ServiceTicketNotificationJob.perform_later(ticket.id, 'created')
           
           render json: {
             success: true,

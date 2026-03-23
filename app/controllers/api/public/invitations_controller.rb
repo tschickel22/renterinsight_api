@@ -36,20 +36,8 @@ module Api
             platform_name = platform_general['platformName'] || platform_general[:platformName] || 'RenterInsight'
             logo_value = platform_branding_settings['logo'] || platform_branding_settings[:logo]
             
-            # Convert relative logo URLs to absolute URLs
-            frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
-            if logo_value.present?
-              if logo_value.start_with?('http://', 'https://')
-                logo_url = logo_value
-              else
-                logo_url = "#{frontend_url}#{logo_value.start_with?('/') ? logo_value : '/' + logo_value}"
-              end
-            else
-              logo_url = nil
-            end
-            
             company_branding = {
-              logo: logo_url,
+              logo: absolute_url(logo_value),
               primaryColor: platform_branding_settings['primaryColor'] || platform_branding_settings[:primaryColor] || '#3b82f6',
               secondaryColor: platform_branding_settings['secondaryColor'] || platform_branding_settings[:secondaryColor] || '#8b5cf6',
               fontFamily: platform_branding_settings['fontFamily'] || platform_branding_settings[:fontFamily] || 'Inter',
@@ -74,36 +62,9 @@ module Api
             
             Rails.logger.info "[INVITATION BRANDING] Company ID: #{invitation.company.id}, Branding: #{branding.inspect}"
             
-            # Convert relative logo URLs to absolute URLs for public pages
-            frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
-            logo_value = branding['logo']
-            portal_logo_value = branding['portalLogo']
-            
-            # Convert logo to absolute URL if it's a relative path
-            logo_url = if logo_value.present?
-              if logo_value.start_with?('http://', 'https://')
-                logo_value
-              else
-                "#{frontend_url}#{logo_value.start_with?('/') ? logo_value : '/' + logo_value}"
-              end
-            else
-              nil
-            end
-            
-            # Convert portal logo to absolute URL if it's a relative path
-            portal_logo_url = if portal_logo_value.present?
-              if portal_logo_value.start_with?('http://', 'https://')
-                portal_logo_value
-              else
-                "#{frontend_url}#{portal_logo_value.start_with?('/') ? portal_logo_value : '/' + portal_logo_value}"
-              end
-            else
-              nil
-            end
-            
             company_branding = {
-              logo: logo_url,
-              portalLogo: portal_logo_url,
+              logo: absolute_url(branding['logo']),
+              portalLogo: absolute_url(branding['portalLogo']),
               primaryColor: branding['primaryColor'] || '#3b82f6',
               secondaryColor: branding['secondaryColor'] || '#8b5cf6',
               fontFamily: branding['fontFamily'] || 'Inter',
@@ -255,7 +216,7 @@ module Api
       end
       
       private
-      
+
       # Build consistent user response with company subscription data
       def build_user_response(user)
         company = user.company

@@ -5,7 +5,7 @@ module Api
     before_action :set_company
     
     # RBAC Authorization - tenant_basic is accessible by any authenticated company user
-    before_action :authorize_settings_read!, only: [:tenant, :platform, :quotes, :custom_fields]
+    before_action :authorize_settings_read!, only: [:tenant, :platform, :quotes, :custom_fields, :show_scoped]
     before_action :authorize_settings_update!, only: [:update, :update_quotes]
     before_action :authorize_branding_read!, only: []  # No read-only branding endpoints here
     before_action :authorize_branding_update!, only: [:update_branding]
@@ -70,6 +70,32 @@ module Api
         error: 'Failed to load platform settings',
         details: Rails.env.development? ? e.message : nil
       }, status: :internal_server_error
+    end
+
+    # GET /api/settings/scoped?key=...&scope_type=...&scope_id=...
+    # Fetch a single setting by key + scope
+    def show_scoped
+      key = params[:key]
+      scope_type = params[:scope_type] || 'Company'
+      scope_id = params[:scope_id] || @company.id
+
+      unless key.present?
+        return render json: { error: 'key parameter is required' }, status: :unprocessable_entity
+      end
+
+      # Security: validate scope access
+      if scope_type == 'Company' && scope_id.to_s != @company.id.to_s
+        return render json: { error: 'Unauthorized' }, status: :forbidden
+      end
+
+      if scope_type == 'Location'
+        unless @company.locations.exists?(id: scope_id)
+          return render json: { error: 'Unauthorized: Location not found or access denied' }, status: :forbidden
+        end
+      end
+
+      value = Setting.get(scope_type, scope_id, key)
+      render json: { key: key, value: value }
     end
 
     # PATCH /api/settings (old format)
@@ -753,19 +779,6 @@ module Api
       end
       
       merged_branding
-    end
-
-    def absolute_url(path)
-      return path if path.blank?
-      return path if path.start_with?('http://', 'https://')
-      
-      base_url = if request.present?
-        "#{request.protocol}#{request.host_with_port}"
-      else
-        ENV['RAILS_API_URL'] || 'https://localhost:3001'
-      end
-      
-      "#{base_url}#{path}"
     end
 
     def serialize_custom_fields

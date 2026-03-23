@@ -164,8 +164,8 @@ module Api
               Rails.logger.info "[PORTAL VERIFY INVITATION] Company ID: #{company.id}, Branding: #{branding.inspect}"
               
               company_branding = {
-                logo: branding['logo'],
-                portalLogo: branding['portalLogo'],
+                logo: absolute_url(branding['logo']),
+                portalLogo: absolute_url(branding['portalLogo']),
                 primaryColor: branding['primaryColor'] || '#3b82f6',
                 secondaryColor: branding['secondaryColor'] || '#8b5cf6',
                 fontFamily: branding['fontFamily'] || 'Inter',

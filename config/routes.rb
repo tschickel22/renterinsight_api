@@ -1280,6 +1280,7 @@ Rails.application.routes.draw do
           post :prepare_signature
           post :calculate
           post :vision_scan
+          post :upload_signed_document
           get 'custom_fields', to: 'agreements#list_custom_fields'
           post 'custom_fields', to: 'agreements#add_custom_field'
           post 'custom_fields/validate_formula', to: 'agreements#validate_formula_field'
@@ -1430,6 +1431,8 @@ Rails.application.routes.draw do
     get 'settings/tenant_basic', to: 'settings#tenant_basic'  # Basic tenant info for all authenticated users
     get 'settings/tenant', to: 'settings#tenant'  # Full tenant settings (requires company_settings permission)
     get 'settings/platform', to: 'settings#platform'  # Get platform defaults
+    get 'settings/scoped', to: 'settings#show_scoped'  # Fetch a single setting by key + scope_type + scope_id
+    get 'settings', to: 'settings#show_scoped'          # GET /api/settings?key=...&scope_type=...&scope_id=...
     patch 'settings', to: 'settings#update'
     put 'settings', to: 'settings#update'  # Support PUT for company settings
     delete 'settings', to: 'settings#destroy'  # Reset to platform defaults
