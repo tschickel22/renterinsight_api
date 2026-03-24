@@ -1186,8 +1186,10 @@ module Api
         if detailed
           data.merge!(
             content: agreement.content,
-            document_url: agreement.document_url,
+            document_url: agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present? ?
+              agreement.sealed_document_url : agreement.document_url,
             sealed_document_url: agreement.sealed_document_url,
+            original_document_url: agreement.document_url,
             document_urls: agreement.document_urls,
             custom_field_definitions: agreement.custom_field_definitions,
             template_id: agreement.agreement_template_id,

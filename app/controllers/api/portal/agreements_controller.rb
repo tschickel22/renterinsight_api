@@ -99,12 +99,19 @@ module Api
       def portal_agreement_json(agreement)
         my_signer = agreement.agreement_signers.find_by(email: current_contact.email)
 
+        effective_doc_url = if agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present?
+          agreement.sealed_document_url
+        else
+          agreement.document_url
+        end
+
         json = {
           id: agreement.id,
           title: agreement.title,
           agreement_number: agreement.agreement_number,
           status: agreement.status,
           category: agreement.category,
+          document_url: effective_doc_url,
           sent_at: agreement.sent_at,
           completed_at: agreement.completed_at,
           expires_at: agreement.expires_at,

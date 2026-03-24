@@ -15,9 +15,13 @@ module Public
       # Resolve branding waterfall: Location → Company → Platform
       branding = resolve_branding(company, @agreement.location_id)
 
-      # Resolve effective document URL: merged PDF > single upload > first from array
-      effective_doc_url = @agreement.document_url.presence ||
-        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+      # Resolve effective document URL: sealed (completed) > merged PDF > single upload > first from array
+      effective_doc_url = if @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present?
+        @agreement.sealed_document_url
+      else
+        @agreement.document_url.presence ||
+          (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+      end
 
       render json: {
         agreement: {
