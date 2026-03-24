@@ -16,21 +16,31 @@ class SendAgreementReminderJob < ApplicationJob
     signing_link = "#{frontend_base}#{signer.signing_url}"
 
     begin
+      email_success = true
+      sms_success = true
+      last_error = nil
+
       # Email reminder
       if agreement.delivery_method != 'sms'
-        send_reminder_email(agreement, signer, signing_link, branding)
+        email_success, last_error = send_reminder_email(agreement, signer, signing_link, branding)
       end
 
       # SMS reminder
       if %w[sms both].include?(agreement.delivery_method) && signer.phone.present?
-        send_reminder_sms(agreement, signer, signing_link, branding)
+        sms_success, sms_error = send_reminder_sms(agreement, signer, signing_link, branding)
+        last_error = sms_error unless sms_success
       end
 
-      # Mark the reminder record as sent
+      # Mark the reminder record based on actual delivery result
       reminder = agreement.agreement_reminders
                    .where(agreement_signer_id: signer.id, status: 'pending')
                    .order(created_at: :desc).first
-      reminder&.update(sent_at: Time.current, status: 'sent')
+
+      if email_success || sms_success
+        reminder&.update(sent_at: Time.current, status: 'sent')
+      else
+        reminder&.update(status: 'failed', error_message: last_error || 'All delivery channels failed')
+      end
 
     rescue => e
       Rails.logger.error("[SendAgreementReminderJob] Failed for signer #{signer.email}: #{e.message}\n#{e.backtrace.first(3).join("\n")}")
@@ -64,8 +74,10 @@ class SendAgreementReminderJob < ApplicationJob
 
     if result[:success]
       Rails.logger.info("[SendAgreementReminderJob] ✅ Reminder email sent to #{signer.email} for #{agreement.agreement_number}")
+      return [true, nil]
     else
       Rails.logger.error("[SendAgreementReminderJob] ❌ Reminder email failed for #{signer.email}: #{result[:error]}")
+      return [false, result[:error]]
     end
   end
 
@@ -87,8 +99,10 @@ class SendAgreementReminderJob < ApplicationJob
 
     if result[:success]
       Rails.logger.info("[SendAgreementReminderJob] ✅ Reminder SMS sent to #{signer.phone}")
+      return [true, nil]
     else
       Rails.logger.error("[SendAgreementReminderJob] ❌ Reminder SMS failed for #{signer.phone}: #{result[:error]}")
+      return [false, result[:error]]
     end
   end
 

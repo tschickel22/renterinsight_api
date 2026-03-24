@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../../../../lib/aws_ses_delivery'
+
 module Providers
   module Email
     class AwsSesProvider < BaseProvider
@@ -13,10 +15,7 @@ module Providers
         Rails.logger.info "📧 Sending email via AWS SES to #{to} from #{from_address}"
         Rails.logger.info "📧 Reply-To: #{reply_to}" if reply_to.present?
         
-        # Configure ActionMailer to use AWS SES SDK
-        configure_aws_ses_sdk
-        
-        # Use CommunicationMailer.send_communication (same as Platform test email)
+        # Build the mail message
         mail = CommunicationMailer.send_communication(
           to: to,
           from_email: from_address,
@@ -28,6 +27,12 @@ module Providers
           reply_to: reply_to,
           file_attachments: attachments
         )
+        
+        # CRITICAL: Set delivery method PER-MESSAGE (thread-safe)
+        # Do NOT mutate global ActionMailer::Base settings
+        aws_config = build_aws_config
+        mail.delivery_method(AwsSesDelivery, aws_config)
+        Rails.logger.info "📧 Per-message AWS SES configured: region=#{aws_config[:region]}, key=#{aws_config[:access_key_id]&.first(8)}..."
         
         result = mail.deliver_now
         
@@ -46,30 +51,12 @@ module Providers
       
       private
       
-      def configure_aws_ses_sdk
-      # Require the custom delivery method (same as Platform Settings)
-      require_relative '../../../../lib/aws_ses_delivery'
-
-      # Register the custom AWS SES delivery method
-      ActionMailer::Base.add_delivery_method(:aws_ses_sdk, AwsSesDelivery)
-
-        # Get AWS credentials from config
-      aws_config = {
-        access_key_id: config[:aws_access_key_id],
-        secret_access_key: config[:aws_secret_access_key],
-        region: config[:aws_region] || 'us-west-2'
+      def build_aws_config
+        {
+          access_key_id: config[:aws_access_key_id],
+          secret_access_key: config[:aws_secret_access_key],
+          region: config[:aws_region] || 'us-west-2'
         }
-
-        # Configure ActionMailer to use AWS SES SDK (not SMTP)
-      ActionMailer::Base.delivery_method = :aws_ses_sdk  # Correct name!
-      ActionMailer::Base.aws_ses_sdk_settings = aws_config
-        ActionMailer::Base.perform_deliveries = true
-        ActionMailer::Base.raise_delivery_errors = true
-
-        Rails.logger.info "📧 ActionMailer AWS SES SDK configured: region=#{aws_config[:region]}, key=#{aws_config[:access_key_id]}"
-      rescue StandardError => e
-        Rails.logger.error "❌ Failed to configure AWS SES: #{e.message}"
-        raise
       end
     end
   end
