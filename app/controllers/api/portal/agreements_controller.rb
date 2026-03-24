@@ -53,8 +53,18 @@ module Api
       def download
         agreement = find_portal_agreement
 
-        url = agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present? ?
-          agreement.sealed_document_url : agreement.document_url
+        if agreement.status == Agreement::STATUS_COMPLETED
+          unless agreement.sealed_document_url.present?
+            return render json: {
+              error: 'Document is being sealed',
+              message: 'The signed document is being prepared. Please try again in a few moments.',
+              retry_after: 3
+            }, status: :accepted
+          end
+          url = agreement.sealed_document_url
+        else
+          url = agreement.document_url
+        end
 
         unless url.present?
           return render json: { error: 'No document available' }, status: :not_found

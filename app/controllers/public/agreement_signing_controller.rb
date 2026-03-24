@@ -131,14 +131,17 @@ module Public
         }, status: :accepted
       end
 
-      # Prefer sealed document; fall back to the original document URL
-      url = @agreement.sealed_document_url.presence ||
-        @agreement.document_url.presence ||
-        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
-
-      unless url.present?
-        return render json: { error: 'No document available' }, status: :not_found
+      # If completed but not yet sealed, the background job is still running
+      unless @agreement.sealed_document_url.present?
+        return render json: {
+          error: 'Document is being sealed',
+          message: 'The signed document is being prepared. Please try again in a few moments.',
+          agreement_status: @agreement.status,
+          retry_after: 3
+        }, status: :accepted
       end
+
+      url = @agreement.sealed_document_url
 
       AgreementAuditLog.log!(
         @agreement, AgreementAuditLog::ACTION_DOWNLOADED,

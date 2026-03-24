@@ -16,27 +16,27 @@ class SendAgreementReminderJob < ApplicationJob
     signing_link = "#{frontend_base}#{signer.signing_url}"
 
     begin
-      email_success = true
-      sms_success = true
-      last_error = nil
+      results = []  # Track [success, error] for each attempted channel
 
       # Email reminder
       if agreement.delivery_method != 'sms'
-        email_success, last_error = send_reminder_email(agreement, signer, signing_link, branding)
+        results << send_reminder_email(agreement, signer, signing_link, branding)
       end
 
       # SMS reminder
       if %w[sms both].include?(agreement.delivery_method) && signer.phone.present?
-        sms_success, sms_error = send_reminder_sms(agreement, signer, signing_link, branding)
-        last_error = sms_error unless sms_success
+        results << send_reminder_sms(agreement, signer, signing_link, branding)
       end
+
+      any_success = results.any? { |success, _| success }
+      last_error = results.select { |success, _| !success }.map { |_, err| err }.last
 
       # Mark the reminder record based on actual delivery result
       reminder = agreement.agreement_reminders
                    .where(agreement_signer_id: signer.id, status: 'pending')
                    .order(created_at: :desc).first
 
-      if email_success || sms_success
+      if any_success
         reminder&.update(sent_at: Time.current, status: 'sent')
       else
         reminder&.update(status: 'failed', error_message: last_error || 'All delivery channels failed')

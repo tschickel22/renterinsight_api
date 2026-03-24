@@ -447,11 +447,19 @@ module Api
       def download
         return unless authorize_action!('agreements', 'read')
 
-        effective_doc_url = @agreement.document_url.presence ||
-          (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
-
-        url = @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present? ?
-          @agreement.sealed_document_url : effective_doc_url
+        if @agreement.status == Agreement::STATUS_COMPLETED
+          unless @agreement.sealed_document_url.present?
+            return render json: {
+              error: 'Document is being sealed',
+              message: 'The signed document is being prepared. Please try again in a few moments.',
+              retry_after: 3
+            }, status: :accepted
+          end
+          url = @agreement.sealed_document_url
+        else
+          url = @agreement.document_url.presence ||
+            (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+        end
 
         unless url.present?
           return render json: { error: 'No document available' }, status: :not_found
