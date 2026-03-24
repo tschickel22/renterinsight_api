@@ -123,12 +123,21 @@ module Public
 
     # GET /sign/:token/download
     def download
-      unless @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present?
+      unless @agreement.status == Agreement::STATUS_COMPLETED
         return render json: {
           error: 'Document not ready yet',
           message: 'The signed document will be available once all signers have completed. You will receive it by email.',
           agreement_status: @agreement.status
         }, status: :accepted
+      end
+
+      # Prefer sealed document; fall back to the original document URL
+      url = @agreement.sealed_document_url.presence ||
+        @agreement.document_url.presence ||
+        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+
+      unless url.present?
+        return render json: { error: 'No document available' }, status: :not_found
       end
 
       AgreementAuditLog.log!(
@@ -139,7 +148,7 @@ module Public
         performed_by: @signer
       )
 
-      render json: { url: @agreement.sealed_document_url }
+      render json: { url: url }
     end
 
     private
