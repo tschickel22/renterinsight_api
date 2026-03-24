@@ -33,10 +33,13 @@ class Agreement < ApplicationRecord
     Current.location_filtered? ? where(location_id: Current.location_id) : all
   }
   scope :for_entity, ->(type, id) {
-    case type.to_s
+    case type.to_s.capitalize
     when 'Contact' then where(contact_id: id)
-    when 'Account' then where(account_id: id)
-    when 'Deal'    then where(deal_id: id)
+    when 'Account'
+      # Rollup: include agreements directly on the account OR on any of the account's contacts
+      contact_ids = Contact.where(account_id: id, is_deleted: [false, nil]).select(:id)
+      where(account_id: id).or(where(contact_id: contact_ids))
+    when 'Deal' then where(deal_id: id)
     else none
     end
   }
