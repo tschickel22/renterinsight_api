@@ -6,11 +6,13 @@ class Contractor < ApplicationRecord
 
   validates :name, presence: true
   validates :status, inclusion: { in: %w[active inactive suspended] }
-  validates :trade_type, inclusion: { in: %w[general electrical plumbing hvac foundation transport skirting roofing other] }
+  validates :trade_type, inclusion: { in: %w[general electrical plumbing hvac foundation transport skirting roofing materials_supplier freight_company equipment_rental lumber concrete appliances other] }
 
   scope :active, -> { where(status: 'active', is_deleted: [false, nil]) }
   scope :not_deleted, -> { where(is_deleted: [false, nil]) }
   scope :by_trade, ->(trade) { where(trade_type: trade) }
+  scope :vendors, -> { where(is_vendor: true) }
+  scope :contractors_only, -> { where(is_vendor: [false, nil]) }
 
   # Portal authentication
   def generate_portal_token!

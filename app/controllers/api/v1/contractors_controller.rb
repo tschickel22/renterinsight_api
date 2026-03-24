@@ -17,6 +17,9 @@ module Api
         active_count = contractors.active.count
         trade_type_counts = contractors.group(:trade_type).count
 
+        # Filter by vendor_only
+        contractors = contractors.vendors if params[:vendor_only] == 'true'
+
         # Filter by status
         contractors = contractors.where(status: params[:status]) if params[:status].present?
 
@@ -107,6 +110,22 @@ module Api
         head :no_content
       end
 
+      # GET /api/v1/contractors/vendors
+      def vendors
+        return unless authorize_action!('contractors', 'read')
+
+        vendors = @company.contractors.not_deleted.active.vendors
+
+        if params[:search].present?
+          search_term = "%#{params[:search]}%"
+          vendors = vendors.where("name ILIKE ? OR trade_type ILIKE ?", search_term, search_term)
+        end
+
+        render json: vendors.limit(50).map { |v|
+          { id: v.id, name: v.name, tradeType: v.trade_type }
+        }
+      end
+
       # GET /api/v1/contractors/stats
       def stats
         return unless authorize_action!('contractors', 'read')
@@ -135,7 +154,7 @@ module Api
           :license_number, :license_state, :license_expiry,
           :insurance_provider, :insurance_policy_number, :insurance_expiry,
           :bonded, :bond_amount, :bond_expiry,
-          :hourly_rate, :notes, :status, :rating
+          :hourly_rate, :notes, :status, :rating, :is_vendor
         )
         # NOTE: custom_field_values handled separately in update action
         # to support deep merge of document arrays
@@ -163,6 +182,7 @@ module Api
           notes: contractor.notes,
           status: contractor.status,
           rating: contractor.rating,
+          isVendor: contractor.is_vendor,
           customFieldValues: contractor.custom_field_values,
           createdAt: contractor.created_at,
           updatedAt: contractor.updated_at

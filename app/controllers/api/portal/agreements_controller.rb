@@ -53,8 +53,18 @@ module Api
       def download
         agreement = find_portal_agreement
 
-        url = agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present? ?
-          agreement.sealed_document_url : agreement.document_url
+        if agreement.status == Agreement::STATUS_COMPLETED
+          unless agreement.sealed_document_url.present?
+            return render json: {
+              error: 'Document is being sealed',
+              message: 'The signed document is being prepared. Please try again in a few moments.',
+              retry_after: 3
+            }, status: :accepted
+          end
+          url = agreement.sealed_document_url
+        else
+          url = agreement.document_url
+        end
 
         unless url.present?
           return render json: { error: 'No document available' }, status: :not_found
@@ -89,12 +99,19 @@ module Api
       def portal_agreement_json(agreement)
         my_signer = agreement.agreement_signers.find_by(email: current_contact.email)
 
-        {
+        effective_doc_url = if agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present?
+          agreement.sealed_document_url
+        else
+          agreement.document_url
+        end
+
+        json = {
           id: agreement.id,
           title: agreement.title,
           agreement_number: agreement.agreement_number,
           status: agreement.status,
           category: agreement.category,
+          document_url: effective_doc_url,
           sent_at: agreement.sent_at,
           completed_at: agreement.completed_at,
           expires_at: agreement.expires_at,
@@ -102,6 +119,14 @@ module Api
           my_signer_status: my_signer&.status,
           my_signer_role: my_signer&.role
         }
+
+        # Include signing URL if the signer still needs to sign
+        if my_signer && %w[pending viewed].include?(my_signer.status)
+          json[:signing_url] = my_signer.signing_url
+          json[:signing_access_token] = my_signer.access_token
+        end
+
+        json
       end
     end
   end

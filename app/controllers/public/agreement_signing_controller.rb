@@ -15,9 +15,13 @@ module Public
       # Resolve branding waterfall: Location → Company → Platform
       branding = resolve_branding(company, @agreement.location_id)
 
-      # Resolve effective document URL: merged PDF > single upload > first from array
-      effective_doc_url = @agreement.document_url.presence ||
-        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+      # Resolve effective document URL: sealed (completed) > merged PDF > single upload > first from array
+      effective_doc_url = if @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present?
+        @agreement.sealed_document_url
+      else
+        @agreement.document_url.presence ||
+          (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+      end
 
       render json: {
         agreement: {
@@ -92,7 +96,16 @@ module Public
       end
 
       if result
-        render json: { success: true, agreement_status: @agreement.reload.status }
+        agreement = @agreement.reload
+        completed = agreement.status == Agreement::STATUS_COMPLETED
+        render json: {
+          success: true,
+          agreement_status: agreement.status,
+          completed: completed,
+          message: completed ?
+            'All signers have signed. Your completed document is ready for download.' :
+            'Thank you for signing! You will receive the fully signed document by email once all signers have completed.'
+        }
       else
         render json: { error: 'Unable to sign. This agreement may have already been signed or declined.' }, status: :unprocessable_entity
       end
@@ -114,15 +127,25 @@ module Public
 
     # GET /sign/:token/download
     def download
-      effective_url = @agreement.document_url.presence ||
-        (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
-
-      url = @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present? ?
-        @agreement.sealed_document_url : effective_url
-
-      unless url.present?
-        return render json: { error: 'No document available' }, status: :not_found
+      unless @agreement.status == Agreement::STATUS_COMPLETED
+        return render json: {
+          error: 'Document not ready yet',
+          message: 'The signed document will be available once all signers have completed. You will receive it by email.',
+          agreement_status: @agreement.status
+        }, status: :accepted
       end
+
+      # If completed but not yet sealed, the background job is still running
+      unless @agreement.sealed_document_url.present?
+        return render json: {
+          error: 'Document is being sealed',
+          message: 'The signed document is being prepared. Please try again in a few moments.',
+          agreement_status: @agreement.status,
+          retry_after: 3
+        }, status: :accepted
+      end
+
+      url = @agreement.sealed_document_url
 
       AgreementAuditLog.log!(
         @agreement, AgreementAuditLog::ACTION_DOWNLOADED,

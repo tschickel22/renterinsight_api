@@ -13,10 +13,7 @@ module Providers
         Rails.logger.info "📧 Sending email via SMTP to #{to} from #{from_address}"
         Rails.logger.info "📧 Reply-To: #{reply_to}" if reply_to.present?
         
-        # Configure ActionMailer SMTP settings
-        configure_smtp_settings if smtp_configured?
-        
-        # Use CommunicationMailer.send_communication (same as Platform test email)
+        # Build the mail message
         mail = CommunicationMailer.send_communication(
           to: to,
           from_email: from_address,
@@ -28,6 +25,14 @@ module Providers
           reply_to: reply_to,
           file_attachments: attachments
         )
+        
+        # CRITICAL: Set delivery method PER-MESSAGE (thread-safe)
+        # Do NOT mutate global ActionMailer::Base.smtp_settings
+        if smtp_configured?
+          smtp_config = build_smtp_config
+          mail.delivery_method(:smtp, smtp_config)
+          Rails.logger.info "📧 Per-message SMTP configured: #{smtp_config[:address]}:#{smtp_config[:port]} (auth: #{smtp_config[:authentication]})"
+        end
         
         result = mail.deliver_now
         
@@ -50,8 +55,8 @@ module Providers
         config[:smtp_host].present? && config[:smtp_username].present?
       end
       
-      def configure_smtp_settings
-        smtp_config = {
+      def build_smtp_config
+        {
           address: config[:smtp_host],
           port: config[:smtp_port] || 587,
           domain: config[:smtp_domain] || 'localhost',
@@ -62,16 +67,6 @@ module Providers
           open_timeout: 5,
           read_timeout: 10
         }.compact
-        
-        ActionMailer::Base.delivery_method = :smtp
-        ActionMailer::Base.smtp_settings = smtp_config
-        ActionMailer::Base.perform_deliveries = true
-        ActionMailer::Base.raise_delivery_errors = true
-        
-        Rails.logger.info "📧 ActionMailer SMTP configured: #{smtp_config[:address]}:#{smtp_config[:port]}"
-      rescue StandardError => e
-        Rails.logger.error "❌ Failed to configure SMTP: #{e.message}"
-        raise
       end
     end
   end

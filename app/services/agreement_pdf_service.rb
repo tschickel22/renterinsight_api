@@ -1,7 +1,9 @@
 require 'open-uri'
 require 'tempfile'
+require 'open3'
 require 'combine_pdf'
 require 'prawn'
+require 'pdf/reader'
 
 class AgreementPdfService
   def initialize(agreement)
@@ -31,12 +33,21 @@ class AgreementPdfService
     source_pdf_data = download_pdf(source_url)
     unless source_pdf_data
       Rails.logger.error("[AgreementPdfService] Failed to download source PDF from #{source_url}")
-      @agreement.update!(sealed_document_url: source_url)
-      log_sealed!
-      return source_url
+      return nil
     end
 
     Rails.logger.info("[AgreementPdfService] Downloaded #{source_pdf_data.size} bytes")
+
+    # Build values/signatures maps before parsing — needed by both CombinePDF and qpdf paths
+    values_map = build_values_map
+    signatures_map = build_signatures_map
+    placements_by_page = placements.group_by { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }
+
+    Rails.logger.info("[AgreementPdfService] #{placements.size} placements, #{signatures_map.size} signers with signatures")
+
+    if placements.empty?
+      Rails.logger.info("[AgreementPdfService] No field placements — will still append audit certificate")
+    end
 
     begin
       # Load source PDF and free the raw bytes immediately — no need to hold both
@@ -45,20 +56,6 @@ class AgreementPdfService
       GC.compact rescue nil
       page_count = source_pdf.pages.count
       Rails.logger.info("[AgreementPdfService] Parsed PDF: #{page_count} pages")
-
-      # Build values map (merge field key → display value)
-      values_map = build_values_map
-      # Build signatures map (signer_index → { signature_url, typed_signature, font })
-      signatures_map = build_signatures_map
-
-      Rails.logger.info("[AgreementPdfService] #{placements.size} placements, #{signatures_map.size} signers with signatures")
-
-      if placements.empty?
-        Rails.logger.info("[AgreementPdfService] No field placements — will still append audit certificate")
-      end
-
-      # Group placements by page
-      placements_by_page = placements.group_by { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }
 
       # For each page that has placements, create an overlay and stamp it
       overlays_applied = 0
@@ -116,18 +113,29 @@ class AgreementPdfService
         sealed_url
       else
         Rails.logger.error("[AgreementPdfService] Failed to upload sealed PDF to S3")
-        @agreement.update!(sealed_document_url: source_url)
-        log_sealed!
-        source_url
+        nil
       end
+
+    rescue CombinePDF::ParsingError => e
+      Rails.logger.warn("[AgreementPdfService] CombinePDF cannot parse PDF: #{e.message}")
+      Rails.logger.info("[AgreementPdfService] Attempting qpdf fallback for Optional Content / complex PDF")
+
+      sealed_url = seal_with_qpdf(source_pdf_data, placements_by_page, values_map, signatures_map)
+      if sealed_url
+        @agreement.update!(sealed_document_url: sealed_url)
+        log_sealed!
+        Rails.logger.info("[AgreementPdfService] ✅ Sealed via qpdf fallback: #{sealed_url}")
+        return sealed_url
+      end
+
+      Rails.logger.error("[AgreementPdfService] qpdf fallback also failed — sealed_document_url left nil for retry")
+      nil
 
     rescue => e
       Rails.logger.error("[AgreementPdfService] Sealing failed: #{e.class}: #{e.message}")
       Rails.logger.error(e.backtrace.first(10).join("\n"))
-      # Fallback: use source as sealed
-      @agreement.update!(sealed_document_url: source_url)
-      log_sealed!
-      source_url
+      # Leave sealed_document_url nil so the job can retry
+      nil
     end
   end
 
@@ -558,6 +566,110 @@ class AgreementPdfService
       tmp.close rescue nil
       tmp.unlink rescue nil
     end
+  end
+
+  # ── qpdf fallback for PDFs that CombinePDF cannot parse ──────────────
+
+  def seal_with_qpdf(source_pdf_data, placements_by_page, values_map, signatures_map)
+    qpdf_path = `which qpdf 2>/dev/null`.strip
+    if qpdf_path.empty?
+      Rails.logger.error("[AgreementPdfService] qpdf not installed — cannot fall back")
+      return nil
+    end
+    Rails.logger.info("[AgreementPdfService] qpdf found at #{qpdf_path}")
+
+    Dir.mktmpdir('seal') do |tmpdir|
+      source_path = File.join(tmpdir, 'source.pdf')
+      File.binwrite(source_path, source_pdf_data)
+
+      # Flatten AcroForm fields and Optional Content before overlaying —
+      # qpdf --flatten-annotations=all removes interactive form widgets so
+      # they don't interfere with the overlay or produce duplicate visuals.
+      flat_path = File.join(tmpdir, 'flattened.pdf')
+      stdout, stderr, status = Open3.capture3(
+        'qpdf', source_path, '--flatten-annotations=all', flat_path
+      )
+      if status.success?
+        Rails.logger.info("[AgreementPdfService] qpdf: flattened annotations/AcroForm OK")
+        current_path = flat_path
+      else
+        # --flatten-annotations may not be supported on older qpdf; continue with original
+        Rails.logger.warn("[AgreementPdfService] qpdf flatten failed (#{status.exitstatus}): #{stderr.strip}; proceeding with original")
+        current_path = source_path
+      end
+
+      # Use pdf-reader to get page dimensions (handles OCG PDFs fine)
+      reader = PDF::Reader.new(current_path)
+      Rails.logger.info("[AgreementPdfService] qpdf: source has #{reader.page_count} pages")
+
+      # Apply overlays page-by-page using qpdf
+      placements_by_page.sort.each do |page_index, page_placements|
+        next if page_placements.empty?
+        next if page_index >= reader.page_count
+
+        page = reader.pages[page_index]
+        page_box = page.attributes[:MediaBox] || [0, 0, 612, 792]
+        page_width = (page_box[2] - page_box[0]).to_f
+        page_height = (page_box[3] - page_box[1]).to_f
+
+        Rails.logger.info("[AgreementPdfService] qpdf: page #{page_index} = #{page_width}x#{page_height} pts, #{page_placements.size} placements")
+
+        overlay_data = create_page_overlay(page_placements, page_width, page_height, values_map, signatures_map)
+        next unless overlay_data
+
+        overlay_path = File.join(tmpdir, "overlay_#{page_index}.pdf")
+        File.binwrite(overlay_path, overlay_data)
+
+        output_path = File.join(tmpdir, "stamped_#{page_index}.pdf")
+        page_num = page_index + 1  # qpdf uses 1-based page numbers
+
+        stdout, stderr, status = Open3.capture3(
+          'qpdf', current_path,
+          '--overlay', overlay_path, "--from=1", "--to=#{page_num}",
+          '--', output_path
+        )
+
+        unless status.success?
+          Rails.logger.error("[AgreementPdfService] qpdf overlay failed for page #{page_index} (exit #{status.exitstatus}): #{stderr.strip}")
+          return nil
+        end
+
+        current_path = output_path
+      end
+
+      # Append audit certificate
+      begin
+        cert_data = generate_audit_certificate_pdf
+        if cert_data
+          cert_path = File.join(tmpdir, 'audit_cert.pdf')
+          File.binwrite(cert_path, cert_data)
+
+          final_path = File.join(tmpdir, 'sealed_final.pdf')
+          stdout, stderr, status = Open3.capture3(
+            'qpdf', current_path,
+            '--pages', current_path, cert_path, '--',
+            final_path
+          )
+
+          if status.success?
+            current_path = final_path
+            Rails.logger.info("[AgreementPdfService] qpdf: audit certificate appended")
+          else
+            Rails.logger.warn("[AgreementPdfService] qpdf: failed to append audit certificate (exit #{status.exitstatus}): #{stderr.strip}")
+          end
+        end
+      rescue => e
+        Rails.logger.error("[AgreementPdfService] qpdf: audit certificate generation failed (non-fatal): #{e.message}")
+      end
+
+      sealed_data = File.binread(current_path)
+      Rails.logger.info("[AgreementPdfService] qpdf sealed PDF: #{sealed_data.size} bytes")
+      upload_sealed_pdf(sealed_data)
+    end
+  rescue => e
+    Rails.logger.error("[AgreementPdfService] qpdf fallback failed: #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace.first(5).join("\n"))
+    nil
   end
 
   # ── Audit Certificate ─────────────────────────────────────────────────

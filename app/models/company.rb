@@ -56,6 +56,9 @@ class Company < ApplicationRecord
   has_many :project_templates, dependent: :destroy
   has_many :project_phases, dependent: :destroy
   has_many :project_tasks, dependent: :destroy
+  has_many :project_cost_items, dependent: :destroy
+  has_many :project_material_usages, dependent: :destroy
+  has_many :project_documents, dependent: :destroy
 
   # Contractors Module
   has_many :contractors, dependent: :destroy

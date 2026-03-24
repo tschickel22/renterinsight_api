@@ -626,7 +626,7 @@ class Api::V1::WebsitesController < ApplicationController
     font_family = loc_font.presence || company_font || 'Inter'
     logo = loc_logo.presence || company_logo
     
-    Rails.logger.info "[Website Sync] Final location branding - primary: #{primary_color}, secondary: #{secondary_color}, font: #{font_family}"
+    Rails.logger.info "[Website Sync] Final location branding - primary: #{primary_color}, secondary: #{secondary_color}, font: #{font_family}, logo: #{logo}"
     
     {
       theme: {
@@ -636,7 +636,7 @@ class Api::V1::WebsitesController < ApplicationController
       },
       brand: {
         company_name: location.company.name,
-        logo_url: logo,
+        logo_url: absolute_url(logo),
         phone: location.phone,
         email: location.email,
         address: location.address_line1,
@@ -665,7 +665,7 @@ class Api::V1::WebsitesController < ApplicationController
     font_family = company_branding['fontFamily'] || company_branding['font_family'] || 'Inter'
     logo = company_branding['logo'] || company_branding['logo_url'] || company_branding['portalLogo']
     
-    Rails.logger.info "[Website Sync] Final company branding - primary: #{primary_color}, secondary: #{secondary_color}, font: #{font_family}"
+    Rails.logger.info "[Website Sync] Final company branding - primary: #{primary_color}, secondary: #{secondary_color}, font: #{font_family}, logo: #{logo}"
     
     {
       theme: {
@@ -675,7 +675,7 @@ class Api::V1::WebsitesController < ApplicationController
       },
       brand: {
         company_name: company.name,
-        logo_url: logo,
+        logo_url: absolute_url(logo),
         phone: company_branding['phone'],
         email: company_branding['email']
       }.compact,

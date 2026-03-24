@@ -374,9 +374,19 @@ class CommunicationService
       return communicable.owner
     end
     
+    # For Agreements, use prepared_by as the assigned user
+    if communicable.respond_to?(:prepared_by) && communicable.prepared_by.present?
+      return communicable.prepared_by
+    end
+    
     # For Invitations, use invited_by as the assigned user
     if communicable.respond_to?(:invited_by) && communicable.invited_by.present?
       return communicable.invited_by
+    end
+    
+    # Final fallback: try to find any active user in the company
+    if communicable.respond_to?(:company) && communicable.company.present?
+      return communicable.company.users.where(is_active: true).first
     end
     
     nil

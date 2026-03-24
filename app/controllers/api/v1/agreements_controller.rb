@@ -6,7 +6,7 @@ module Api
         :show, :update, :destroy, :send_agreement, :void, :remind, :remind_signer,
         :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature,
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
-        :calculate, :vision_scan,
+        :calculate, :vision_scan, :upload_signed_document,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
         :validate_formula_field
       ]
@@ -136,8 +136,10 @@ module Api
             agreement.agreement_template = template
             agreement.content = template.content if agreement.content.blank?
             agreement.document_url = template.document_url if agreement.document_url.blank?
+            agreement.document_urls = template.document_urls if agreement.document_urls.blank?
             agreement.content_type = template.template_type if agreement.content_type.blank?
             agreement.field_placements = template.field_placements if agreement.field_placements.blank?
+            agreement.merge_field_placements = template.merge_field_placements if agreement.merge_field_placements.blank?
             agreement.merge_field_values = template.merge_fields if agreement.merge_field_values.blank?
           end
         end
@@ -229,6 +231,47 @@ module Api
           render json: agreement_json(@agreement.reload, detailed: true)
         else
           render json: { error: 'Agreement cannot be voided in its current status' }, status: :unprocessable_entity
+        end
+      end
+
+      # POST /api/v1/agreements/:id/upload_signed_document
+      def upload_signed_document
+        return unless authorize_action!('agreements', 'update')
+
+        file = params[:document]
+        unless file.present?
+          return render json: { error: 'Document file is required' }, status: :unprocessable_entity
+        end
+
+        if file.size > 25.megabytes
+          return render json: { error: 'File size exceeds 25MB limit' }, status: :unprocessable_entity
+        end
+
+        begin
+          s3_service = S3UploadService.new
+          folder = "agreements/#{@company.id}/#{@agreement.id}/signed"
+          result = s3_service.upload(file, folder: folder)
+
+          @agreement.update!(
+            sealed_document_url: result[:url],
+            status: Agreement::STATUS_COMPLETED
+          )
+
+          AgreementAuditLog.log!(
+            @agreement,
+            'signed_document_uploaded',
+            performed_by: current_user,
+            metadata: { filename: file.original_filename, uploaded_by: current_user.email }
+          )
+
+          render json: {
+            sealed_document_url: result[:url],
+            status: 'completed',
+            message: 'Signed document uploaded successfully'
+          }
+        rescue => e
+          Rails.logger.error "Signed document upload error: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+          render json: { error: 'Failed to upload signed document' }, status: :unprocessable_entity
         end
       end
 
@@ -404,11 +447,19 @@ module Api
       def download
         return unless authorize_action!('agreements', 'read')
 
-        effective_doc_url = @agreement.document_url.presence ||
-          (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
-
-        url = @agreement.status == Agreement::STATUS_COMPLETED && @agreement.sealed_document_url.present? ?
-          @agreement.sealed_document_url : effective_doc_url
+        if @agreement.status == Agreement::STATUS_COMPLETED
+          unless @agreement.sealed_document_url.present?
+            return render json: {
+              error: 'Document is being sealed',
+              message: 'The signed document is being prepared. Please try again in a few moments.',
+              retry_after: 3
+            }, status: :accepted
+          end
+          url = @agreement.sealed_document_url
+        else
+          url = @agreement.document_url.presence ||
+            (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
+        end
 
         unless url.present?
           return render json: { error: 'No document available' }, status: :not_found
@@ -1135,8 +1186,10 @@ module Api
         if detailed
           data.merge!(
             content: agreement.content,
-            document_url: agreement.document_url,
+            document_url: agreement.status == Agreement::STATUS_COMPLETED && agreement.sealed_document_url.present? ?
+              agreement.sealed_document_url : agreement.document_url,
             sealed_document_url: agreement.sealed_document_url,
+            original_document_url: agreement.document_url,
             document_urls: agreement.document_urls,
             custom_field_definitions: agreement.custom_field_definitions,
             template_id: agreement.agreement_template_id,
