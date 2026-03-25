@@ -101,7 +101,7 @@ puts "\n3. Creating users..."
 users = {}
 
 user_list = [
-  { key: :admin,   email: "admin@#{DEMO_EMAIL_DOMAIN}",   first: "Tom",     last: "Mitchell",  role: "platform_admin" },
+  { key: :admin,   email: "admin@#{DEMO_EMAIL_DOMAIN}",   first: "Tom",     last: "Mitchell",  role: "company_admin" },
   { key: :manager, email: "sarah@#{DEMO_EMAIL_DOMAIN}",   first: "Sarah",   last: "Collins",   role: "company_admin" },
   { key: :sales1,  email: "mike@#{DEMO_EMAIL_DOMAIN}",    first: "Mike",    last: "Henderson", role: "user" },
   { key: :sales2,  email: "jessica@#{DEMO_EMAIL_DOMAIN}", first: "Jessica", last: "Park",      role: "user" },
