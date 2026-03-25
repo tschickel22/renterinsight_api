@@ -37,12 +37,23 @@ if ENV['RESET'] == 'true'
   if existing
     puts "\nResetting existing demo company (ID: #{existing.id})..."
     %i[
-      projects project_templates
+      projects project_templates project_phases project_tasks
+      project_cost_items project_material_usages project_documents
       purchase_orders parts suppliers service_tickets
       invoices quotes deals contacts accounts
       leads vehicles units properties
-      nurture_sequences page_layouts custom_fields
-      tags bank_accounts locations
+      nurture_sequences nurture_enrollments page_layouts custom_fields
+      tasks sources territories
+      commission_payments commissions commission_rules commission_plans
+      tags bank_accounts
+      tenant_module_overrides api_keys webhook_endpoints
+      brochures listings agreements agreement_templates agreement_categories
+      warranty_claims contractor_assignments contractors
+      company_hidden_roles company_manufacturers
+      payments payment_methods loans land_parcels invitations templates
+      part_categories inventory_transactions stock_balances reorder_rules
+      commission_components
+      locations
     ].each do |assoc|
       if existing.respond_to?(assoc)
         count = existing.send(assoc).count
@@ -52,7 +63,11 @@ if ENV['RESET'] == 'true'
     end
     existing.users.destroy_all
     existing.roles.destroy_all if existing.respond_to?(:roles)
-    existing.destroy!
+    existing.tenant_subscription&.destroy if existing.respond_to?(:tenant_subscription)
+    existing.twilio_account&.destroy if existing.respond_to?(:twilio_account)
+    # Use delete instead of destroy! to avoid cascade through stale associations
+    # (Site, SiteMedium, WebsiteMedia, etc. - models that no longer exist)
+    existing.delete
     puts "  Company deleted.\n"
   end
 end
@@ -70,7 +85,7 @@ company = Company.find_or_create_by!(name: DEMO_COMPANY_NAME) do |c|
   c.is_demo = true
   c.external_payments_id = nil
   c.subscription_tier = "professional"
-  c.use_rbac_system = true
+  c.use_rbac_system = false
 end
 puts "  Company: #{company.name} (ID: #{company.id})"
 
