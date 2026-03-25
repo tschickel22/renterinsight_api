@@ -128,12 +128,15 @@ puts "\n4. Creating roles..."
 if company.respond_to?(:roles)
   roles = {}
   [
-    { name: "Sales Manager", description: "Full CRM + inventory access" },
-    { name: "Sales Rep",     description: "CRM access, quotes, leads" },
-    { name: "Service Tech",  description: "Service tickets and parts" },
+    { name: "Sales Manager", key: "sales_manager", tier: "company", description: "Full CRM + inventory access" },
+    { name: "Sales Rep",     key: "sales_rep",     tier: "location", description: "CRM access, quotes, leads" },
+    { name: "Service Tech",  key: "service_tech",  tier: "location", description: "Service tickets and parts" },
   ].each do |rd|
     role = company.roles.find_or_create_by!(name: rd[:name]) do |r|
+      r.key = rd[:key]
+      r.tier = rd[:tier]
       r.description = rd[:description]
+      r.active = true
     end
     roles[rd[:name]] = role
     puts "  Role: #{role.name}"
