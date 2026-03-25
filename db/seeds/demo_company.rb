@@ -184,6 +184,7 @@ account_data.each do |ad|
     a.location_id = locations["AUB"].id
     a.status = "active"
     a.is_deleted = false
+    a.custom_field_values = {}
   end
   accounts[ad[:name]] = acct
 end
@@ -226,31 +227,52 @@ contact_data.each do |cd|
     c.owner_id = [users[:sales1], users[:sales2], users[:manager]].sample.id
     c.location_id = [locations["AUB"], locations["FTW"]].sample.id
     c.is_deleted = false
+    c.opt_out_email = false
+    c.opt_out_sms = false
+    c.custom_field_values = {}
   end
   contacts["#{cd[:first]} #{cd[:last]}"] = contact
 end
 puts "  Created #{contact_data.length} contacts"
+
+# ── 7b. Sources (required for leads) ───────────────────────
+puts "\n7b. Creating sources..."
+sources = {}
+[
+  { name: "Website",  source_type: "online" },
+  { name: "Walk-In",  source_type: "offline" },
+  { name: "Referral", source_type: "offline" },
+  { name: "Facebook", source_type: "online" },
+  { name: "Zillow",   source_type: "online" },
+].each do |sd|
+  src = Source.find_or_create_by!(name: sd[:name], company_id: company.id) do |s|
+    s.source_type = sd[:source_type]
+    s.is_active = true
+  end
+  sources[sd[:name].downcase] = src
+end
+puts "  Created #{sources.length} sources"
 
 # ── 8. Leads ───────────────────────────────────────────────
 puts "\n8. Creating leads..."
 leads = {}
 
 lead_data = [
-  { first: "Steven",   last: "Baker",    email: "sbaker@gmail.com",      phone: "(260) 555-5001", status: "new",       location: "AUB" },
-  { first: "Michelle", last: "Rivera",   email: "mrivera@yahoo.com",     phone: "(260) 555-5002", status: "new",       location: "AUB" },
-  { first: "Gregory",  last: "Ward",     email: "gward@outlook.com",     phone: "(317) 555-5003", status: "new",       location: "FTW" },
-  { first: "Dorothy",  last: "Hughes",   email: "dhughes@gmail.com",     phone: "(574) 555-5004", status: "contacted", location: "AUB" },
-  { first: "Larry",    last: "Coleman",  email: "lcoleman@hotmail.com",  phone: "(260) 555-5005", status: "contacted", location: "FTW" },
-  { first: "Nancy",    last: "Reed",     email: "nreed@gmail.com",       phone: "(812) 555-5006", status: "contacted", location: "IND" },
-  { first: "Kenneth",  last: "Stewart",  email: "kstewart@icloud.com",   phone: "(260) 555-5007", status: "qualified", location: "AUB" },
-  { first: "Betty",    last: "Sanchez",  email: "bsanchez@gmail.com",    phone: "(317) 555-5008", status: "qualified", location: "FTW" },
-  { first: "Ronald",   last: "Morris",   email: "rmorris@yahoo.com",     phone: "(260) 555-5009", status: "qualified", location: "AUB" },
-  { first: "Sharon",   last: "Bell",     email: "sbell22@gmail.com",     phone: "(574) 555-5010", status: "proposal",  location: "FTW" },
-  { first: "Frank",    last: "Wood",     email: "fwood@outlook.com",     phone: "(260) 555-5011", status: "proposal",  location: "AUB" },
-  { first: "Helen",    last: "Rogers",   email: "hrogers@gmail.com",     phone: "(317) 555-5012", status: "proposal",  location: "IND" },
-  { first: "Arthur",   last: "Gray",     email: "agray@hotmail.com",     phone: "(260) 555-5013", status: "won",       location: "AUB" },
-  { first: "Diane",    last: "Watson",   email: "dwatson@gmail.com",     phone: "(260) 555-5014", status: "won",       location: "FTW" },
-  { first: "Carl",     last: "Brooks",   email: "cbrooks@yahoo.com",     phone: "(812) 555-5015", status: "lost",      location: "AUB" },
+  { first: "Steven",   last: "Baker",    email: "sbaker@gmail.com",      phone: "(260) 555-5001", status: "new",       location: "AUB", source: "website" },
+  { first: "Michelle", last: "Rivera",   email: "mrivera@yahoo.com",     phone: "(260) 555-5002", status: "new",       location: "AUB", source: "walk-in" },
+  { first: "Gregory",  last: "Ward",     email: "gward@outlook.com",     phone: "(317) 555-5003", status: "new",       location: "FTW", source: "referral" },
+  { first: "Dorothy",  last: "Hughes",   email: "dhughes@gmail.com",     phone: "(574) 555-5004", status: "contacted", location: "AUB", source: "facebook" },
+  { first: "Larry",    last: "Coleman",  email: "lcoleman@hotmail.com",  phone: "(260) 555-5005", status: "contacted", location: "FTW", source: "website" },
+  { first: "Nancy",    last: "Reed",     email: "nreed@gmail.com",       phone: "(812) 555-5006", status: "contacted", location: "IND", source: "zillow" },
+  { first: "Kenneth",  last: "Stewart",  email: "kstewart@icloud.com",   phone: "(260) 555-5007", status: "qualified", location: "AUB", source: "walk-in" },
+  { first: "Betty",    last: "Sanchez",  email: "bsanchez@gmail.com",    phone: "(317) 555-5008", status: "qualified", location: "FTW", source: "referral" },
+  { first: "Ronald",   last: "Morris",   email: "rmorris@yahoo.com",     phone: "(260) 555-5009", status: "qualified", location: "AUB", source: "website" },
+  { first: "Sharon",   last: "Bell",     email: "sbell22@gmail.com",     phone: "(574) 555-5010", status: "proposal",  location: "FTW", source: "walk-in" },
+  { first: "Frank",    last: "Wood",     email: "fwood@outlook.com",     phone: "(260) 555-5011", status: "proposal",  location: "AUB", source: "facebook" },
+  { first: "Helen",    last: "Rogers",   email: "hrogers@gmail.com",     phone: "(317) 555-5012", status: "proposal",  location: "IND", source: "zillow" },
+  { first: "Arthur",   last: "Gray",     email: "agray@hotmail.com",     phone: "(260) 555-5013", status: "won",       location: "AUB", source: "referral" },
+  { first: "Diane",    last: "Watson",   email: "dwatson@gmail.com",     phone: "(260) 555-5014", status: "won",       location: "FTW", source: "walk-in" },
+  { first: "Carl",     last: "Brooks",   email: "cbrooks@yahoo.com",     phone: "(812) 555-5015", status: "lost",      location: "AUB", source: "website" },
 ]
 
 lead_data.each do |ld|
@@ -261,6 +283,8 @@ lead_data.each do |ld|
     l.status = ld[:status]
     l.owner_id = users[:manager].id
     l.location_id = locations[ld[:location]].id
+    l.source_id = sources[ld[:source]]&.id
+    l.custom_field_values = {}
   end
   leads["#{ld[:first]} #{ld[:last]}"] = lead
 end
@@ -322,7 +346,10 @@ vehicle_data.each do |vd|
     v.square_feet = vd[:sqft]
     v.condition = vd[:year] >= 2025 ? "New" : "Used"
     v.home_type = "Manufactured"
+    v.listing_type = "sale"
     v.is_deleted = false
+    v.floor_plan_images = []
+    v.custom_field_values = {}
     if vd[:images].present?
       v.images = vd[:images].map { |url| { 'url' => url } }
       v.photo_url = vd[:images].first
@@ -370,6 +397,7 @@ deal_data.each do |dd|
     d.total_amount = dd[:amount]
     d.customer_name = dd[:contact]
     d.deal_number = "DL-#{rand(1000..9999)}"
+    d.custom_field_values = {}
   end
   deals[dd[:title]] = deal
 end
@@ -398,6 +426,8 @@ quote_data.each do |qd|
     q.sales_rep_id = users[:sales1].id
     q.location_id = locations["AUB"].id
     q.is_deleted = false
+    q.resend_count = 0
+    q.custom_field_values = {}
   end
 end
 puts "  Created #{quote_data.length} quotes"
@@ -428,6 +458,7 @@ invoice_data.each do |id_data|
     inv.is_deleted = false
     inv.due_date = id_data[:status] == 'overdue' ? 15.days.ago : 30.days.from_now
     inv.invoice_date = id_data[:status] == 'paid' ? 30.days.ago : 5.days.ago
+    inv.custom_field_values = {}
   end
 end
 puts "  Created #{invoice_data.length} invoices"
@@ -458,6 +489,9 @@ ticket_data.each_with_index do |td, idx|
     st.location_id = locations["AUB"].id
     st.ticket_number = "ST-2026-#{(idx + 1).to_s.rjust(3, '0')}"
     st.description = td[:title]
+    st.is_warranty_suspected = false
+    st.is_warranty_confirmed = false
+    st.portal_visible = false
   end
 end
 puts "  Created #{ticket_data.length} service tickets"
@@ -590,6 +624,7 @@ if company.respond_to?(:project_templates)
       p.actual_completion_date = 5.days.ago if pc[:status] == 'completed'
       p.client_access_token = SecureRandom.hex(16)
       p.is_deleted = false
+      p.custom_field_values = {}
     end
 
     tp_data.each do |tp|
@@ -658,6 +693,7 @@ puts "-" * 55
   "Parts"           => company.respond_to?(:parts)           ? company.parts.count : 0,
   "Suppliers"       => company.respond_to?(:suppliers)       ? company.suppliers.count : 0,
   "Tags"            => company.respond_to?(:tags)            ? company.tags.count : 0,
+  "Sources"         => Source.where(company_id: company.id).count,
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
 end
