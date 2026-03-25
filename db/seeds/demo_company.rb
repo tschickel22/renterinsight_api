@@ -153,10 +153,20 @@ end
 
 # ── 5. Tags ────────────────────────────────────────────────
 puts "\n5. Creating tags..."
-tag_names = ["Hot Lead", "VIP Customer", "First-Time Buyer", "Investor", "Referral",
-             "Trade-In", "Cash Buyer", "Financing Needed", "Rural Delivery", "Priority"]
-tag_names.each { |name| company.tags.find_or_create_by!(name: name) }
-puts "  Created #{tag_names.length} tags"
+tag_data = [
+  { name: "Hot Lead",         color: "#EF4444" },
+  { name: "VIP Customer",     color: "#F59E0B" },
+  { name: "First-Time Buyer", color: "#10B981" },
+  { name: "Investor",         color: "#3B82F6" },
+  { name: "Referral",         color: "#8B5CF6" },
+  { name: "Trade-In",         color: "#EC4899" },
+  { name: "Cash Buyer",       color: "#14B8A6" },
+  { name: "Financing Needed", color: "#F97316" },
+  { name: "Rural Delivery",   color: "#6366F1" },
+  { name: "Priority",         color: "#DC2626" },
+]
+tag_data.each { |td| company.tags.find_or_create_by!(name: td[:name]) { |t| t.color = td[:color] } }
+puts "  Created #{tag_data.length} tags"
 
 # ── 6. Accounts ────────────────────────────────────────────
 puts "\n6. Creating accounts..."
@@ -346,7 +356,7 @@ vehicle_data.each do |vd|
     v.square_feet = vd[:sqft]
     v.condition = vd[:year] >= 2025 ? "New" : "Used"
     v.home_type = "Manufactured"
-    v.listing_type = "sale"
+    v.listing_type = "manufactured_home"
     v.is_deleted = false
     v.floor_plan_images = []
     v.custom_field_values = {}
@@ -544,6 +554,8 @@ parts_data.each do |pd|
     p.list_price = pd[:price]
     p.is_deleted = false
     p.active = true
+    p.uom = "each"
+    p.inventory_method = "average_cost"
   end
 end
 puts "  Created #{parts_data.length} parts"
@@ -599,7 +611,7 @@ if company.respond_to?(:project_templates)
   puts "\n18. Creating projects..."
 
   [
-    { deal: "Smuts - Champion Aspire",  name: "Smuts - Champion Aspire Setup",   status: "in_progress", done: 8,  current: 9 },
+    { deal: "Smuts - Champion Aspire",  name: "Smuts - Champion Aspire Setup",   status: "active",    done: 8,  current: 9 },
     { deal: "Keller - Used Clayton",    name: "Keller - Used Clayton Setup",     status: "completed",   done: 17, current: nil },
   ].each do |pc|
     deal = deals[pc[:deal]]
