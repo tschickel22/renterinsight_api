@@ -22,7 +22,6 @@ class Account < ApplicationRecord
   has_many :leads, foreign_key: :converted_account_id, dependent: :nullify
   has_many :deals, dependent: :destroy
   has_many :contacts, dependent: :destroy
-  has_many :communication_logs, dependent: :destroy
   has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
   has_many :lead_activities, through: :leads
   has_many :tag_assignments, as: :entity, class_name: 'TagAssignment', dependent: :destroy
