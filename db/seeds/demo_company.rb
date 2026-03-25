@@ -381,16 +381,16 @@ puts "\n10. Creating deals..."
 deals = {}
 
 deal_data = [
-  { title: "Smuts - Champion Aspire",      stage: "won",           amount: 114235, contact: "Jeretta Smuts",     account: nil },
+  { title: "Smuts - Champion Aspire",      stage: "closed_won",    amount: 114235, contact: "Jeretta Smuts",     account: nil },
   { title: "Martin - Emerald Sky 4483",    stage: "negotiation",   amount: 124900, contact: "William Martin",    account: "Martin Family Properties" },
   { title: "O'Brien - Redman RM2856A",     stage: "proposal",      amount: 89500,  contact: "Kevin O'Brien",     account: nil },
   { title: "Lakeside - Dutch 2872A",       stage: "proposal",      amount: 105000, contact: "Dennis Hopper",     account: "Lakeside MH Community" },
   { title: "Gonzalez - Heritage 1676H",    stage: "qualification", amount: 62900,  contact: "Maria Gonzalez",    account: nil },
   { title: "Crawford - Redman RM3264A",    stage: "qualification", amount: 96700,  contact: "Daniel Crawford",   account: nil },
-  { title: "Fisher - Dutch 1676S",         stage: "discovery",     amount: 62000,  contact: "Tammy Fisher",      account: nil },
-  { title: "Hoosier Dev - Bulk Order",     stage: "discovery",     amount: 450000, contact: "Marcus Johnson",    account: "Hoosier Land Development" },
-  { title: "Keller - Used Clayton",        stage: "won",           amount: 38500,  contact: "Brian Keller",      account: nil },
-  { title: "Turner - Skyline Amber Cove",  stage: "lost",          amount: 42500,  contact: "Jason Turner",      account: nil },
+  { title: "Fisher - Dutch 1676S",         stage: "prospecting",   amount: 62000,  contact: "Tammy Fisher",      account: nil },
+  { title: "Hoosier Dev - Bulk Order",     stage: "needs_analysis", amount: 450000, contact: "Marcus Johnson",   account: "Hoosier Land Development" },
+  { title: "Keller - Used Clayton",        stage: "closed_won",    amount: 38500,  contact: "Brian Keller",      account: nil },
+  { title: "Turner - Skyline Amber Cove",  stage: "closed_lost",   amount: 42500,  contact: "Jason Turner",      account: nil },
 ]
 
 deal_data.each do |dd|
