@@ -588,11 +588,28 @@ parts_data.each do |pd|
 end
 puts "  Created #{parts_data.length} parts"
 
-# ── 16. RBAC Resources ────────────────────────────────────
+# ── 16. RBAC Resources & Refresh Company Admin Permissions ─
 puts "\n16. Seeding RBAC resources..."
 if defined?(Resource) && Resource.respond_to?(:seed_defaults)
   Resource.seed_defaults
-  puts "  Resources seeded"
+  puts "  Resources seeded (#{Resource.active.count} active)"
+  
+  # Refresh company_admin system role permissions for any NEW resources
+  # added after the initial rbac_system_seed.rb ran
+  ca_role = Role.system_roles.find_by(key: 'company_admin')
+  if ca_role
+    all_scope = Scope.find_by(key: 'all')
+    added = 0
+    Resource.active.each do |resource|
+      Action.all.each do |action|
+        rp = RolePermission.find_or_create_by!(
+          role: ca_role, resource: resource, action: action, scope: all_scope
+        ) { |p| p.granted = true }
+        added += 1 if rp.previously_new_record?
+      end
+    end
+    puts "  Company Admin role refreshed (#{added} new permissions added)"
+  end
 else
   puts "  Skipped"
 end
