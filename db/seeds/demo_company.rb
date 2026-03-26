@@ -37,10 +37,11 @@ if ENV['RESET'] == 'true'
   if existing
     puts "\nResetting existing demo company (ID: #{existing.id})..."
     %i[
+      deals quotes invoices
       projects project_templates project_phases project_tasks
       project_cost_items project_material_usages project_documents
       purchase_orders parts suppliers service_tickets
-      invoices quotes deals contacts accounts
+      contacts accounts
       leads vehicles units properties
       nurture_sequences nurture_enrollments page_layouts custom_fields
       tasks sources territories
