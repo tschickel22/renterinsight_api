@@ -89,6 +89,24 @@ company = Company.find_or_create_by!(name: DEMO_COMPANY_NAME) do |c|
 end
 puts "  Company: #{company.name} (ID: #{company.id})"
 
+# ── 1b. Subscription (Professional plan) ─────────────────
+puts "\n1b. Setting up subscription..."
+pro_plan = SubscriptionPlan.find_by(name: 'professional')
+if pro_plan
+  sub = TenantSubscription.find_or_initialize_by(company_id: company.id)
+  sub.assign_attributes(
+    subscription_plan_id: pro_plan.id,
+    status: 'active',
+    billing_cycle: 'annual',
+    current_period_start: Time.current,
+    current_period_end: 1.year.from_now
+  )
+  sub.save!
+  puts "  Subscription: #{pro_plan.display_name} (#{sub.status})"
+else
+  puts "  ⚠ No 'professional' plan found — run: bin/rails runner \"load 'db/seeds/subscription_plans.rb'\""
+end
+
 # ── 2. Locations ───────────────────────────────────────────
 puts "\n2. Creating locations..."
 locations = {}
@@ -118,9 +136,9 @@ users = {}
 user_list = [
   { key: :admin,   email: "admin@#{DEMO_EMAIL_DOMAIN}",   first: "Tom",     last: "Mitchell",  role: "company_admin" },
   { key: :manager, email: "sarah@#{DEMO_EMAIL_DOMAIN}",   first: "Sarah",   last: "Collins",   role: "company_admin" },
-  { key: :sales1,  email: "mike@#{DEMO_EMAIL_DOMAIN}",    first: "Mike",    last: "Henderson", role: "user" },
-  { key: :sales2,  email: "jessica@#{DEMO_EMAIL_DOMAIN}", first: "Jessica", last: "Park",      role: "user" },
-  { key: :tech,    email: "dave@#{DEMO_EMAIL_DOMAIN}",    first: "Dave",    last: "Torres",    role: "user" },
+  { key: :sales1,  email: "mike@#{DEMO_EMAIL_DOMAIN}",    first: "Mike",    last: "Henderson", role: "company_admin" },
+  { key: :sales2,  email: "jessica@#{DEMO_EMAIL_DOMAIN}", first: "Jessica", last: "Park",      role: "company_admin" },
+  { key: :tech,    email: "dave@#{DEMO_EMAIL_DOMAIN}",    first: "Dave",    last: "Torres",    role: "company_admin" },
 ]
 
 user_list.each do |ud|
@@ -139,30 +157,24 @@ user_list.each do |ud|
 end
 
 # ── 4. RBAC Roles ──────────────────────────────────────────
-puts "\n4. Creating roles..."
-if company.respond_to?(:roles)
-  roles = {}
-  [
-    { name: "Sales Manager", key: "sales_manager", tier: "company", description: "Full CRM + inventory access" },
-    { name: "Sales Rep",     key: "sales_rep",     tier: "location", description: "CRM access, quotes, leads" },
-    { name: "Service Tech",  key: "service_tech",  tier: "location", description: "Service tickets and parts" },
-  ].each do |rd|
-    role = company.roles.find_or_create_by!(name: rd[:name]) do |r|
-      r.key = rd[:key]
-      r.tier = rd[:tier]
-      r.description = rd[:description]
-      r.active = true
-    end
-    roles[rd[:name]] = role
-    puts "  Role: #{role.name}"
-  end
-
-  if defined?(UserRole)
-    { manager: "Sales Manager", sales1: "Sales Rep", sales2: "Sales Rep", tech: "Service Tech" }.each do |ukey, rname|
-      next unless roles[rname] && users[ukey]
-      UserRole.find_or_create_by!(user_id: users[ukey].id, role_id: roles[rname].id)
-    end
-    puts "  Roles assigned to users"
+puts "\n4. Assigning RBAC roles..."
+# Use system roles (seeded by rbac_system_seed.rb) which already have proper permissions.
+# assign_rbac_role creates UserRoleAssignment with company_id set correctly.
+# Without this, build_permissions returns [] at login → empty sidebar.
+{
+  admin:   'company_admin',
+  manager: 'company_admin',
+  sales1:  'sales_rep',
+  sales2:  'sales_rep',
+  tech:    'service_tech',
+}.each do |user_key, role_key|
+  user = users[user_key]
+  next unless user
+  assignment = user.assign_rbac_role(role_key, company_id: company.id)
+  if assignment
+    puts "  #{user.email} → #{role_key}"
+  else
+    puts "  ⚠ Failed to assign #{role_key} to #{user.email} (role not found - run rbac_system_seed first)"
   end
 end
 
