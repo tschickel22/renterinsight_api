@@ -34,7 +34,7 @@ module Public
           document_urls: @agreement.document_urls,
           content: @agreement.content,
           content_type: @agreement.content_type || (@agreement.document_urls.present? ? 'upload' : 'editor'),
-          field_placements: @agreement.merge_field_placements,
+          field_placements: combined_field_placements(@agreement),
           merge_field_values: build_combined_merge_values,
           message_to_signers: @agreement.message_to_signers,
           expires_at: @agreement.expires_at,
@@ -76,6 +76,15 @@ module Public
         return render json: { error: 'Signature is required' }, status: :unprocessable_entity
       end
 
+      # CRITICAL: Save field values BEFORE sign! because sign! may trigger
+      # complete! → SealAgreementJob which needs these values to stamp onto the PDF.
+      # In dev/test, SealAgreementJob.perform_now runs synchronously inside sign!.
+      if params[:field_values].present?
+        existing = @agreement.merge_field_values || {}
+        signer_values = params[:field_values].to_unsafe_h rescue params[:field_values].to_h
+        @agreement.update!(merge_field_values: existing.merge(signer_values))
+      end
+
       result = @signer.sign!(
         signature_url: signature_url,
         signature_method: signature_method,
@@ -87,13 +96,6 @@ module Public
         ip_address: request.remote_ip,
         user_agent: request.user_agent
       )
-
-      # Save field values filled by this signer (text inputs, checkboxes, etc.)
-      if result && params[:field_values].present?
-        existing = @agreement.merge_field_values || {}
-        signer_values = params[:field_values].to_unsafe_h rescue params[:field_values].to_h
-        @agreement.update(merge_field_values: existing.merge(signer_values))
-      end
 
       if result
         agreement = @agreement.reload
@@ -159,6 +161,18 @@ module Public
     end
 
     private
+
+    # Merge both placement columns — AcroForm fields (field_placements) and
+    # builder/custom fields (merge_field_placements) into a single array.
+    # CRITICAL: merge_field_placements (builder edits) takes priority over
+    # field_placements (template copy). The builder always saves the complete
+    # set to merge_field_placements, so when both exist with the same ID,
+    # the builder version wins.
+    def combined_field_placements(agreement)
+      fp = agreement.field_placements || []
+      mfp = agreement.merge_field_placements || []
+      (mfp + fp).uniq { |p| p = p.stringify_keys; p['id'] || "#{p['fieldKey']}_#{p['page'] || p['pageIndex']}_#{p['x']}_#{p['y']}" }
+    end
 
     def find_signer
       @signer = AgreementSigner.find_by!(access_token: params[:token])
@@ -267,11 +281,13 @@ module Public
       combined['date.today'] = Date.today.strftime('%m/%d/%Y')
       combined['date.current_year'] = Date.today.year.to_s
 
-      # 2. Merge stored values (fill in anything not resolved live)
+      # 2. Merge stored values — OVERRIDE live-resolved values because these
+      #    include signer-entered text inputs and preparer-set values which
+      #    should take precedence over auto-resolved entity data.
       if @agreement.merge_field_values.present?
         @agreement.merge_field_values.each do |key, value|
           next if value.nil? || value.to_s.strip.empty?
-          combined[key] = value.to_s unless combined[key].present?
+          combined[key] = value.to_s
         end
       end
 

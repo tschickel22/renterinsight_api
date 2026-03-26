@@ -27,7 +27,7 @@ class AgreementPdfService
       return nil
     end
 
-    placements = @agreement.merge_field_placements || []
+    placements = combined_field_placements
 
     # Download source PDF (always needed for audit certificate, even if no placements)
     source_pdf_data = download_pdf(source_url)
@@ -167,6 +167,15 @@ class AgreementPdfService
       (@agreement.document_urls.is_a?(Array) ? @agreement.document_urls.first : nil)
   end
 
+  # Merge both placement columns — AcroForm fields and builder/custom fields
+  # CRITICAL: merge_field_placements (builder edits) takes priority over
+  # field_placements (template copy). uniq keeps first occurrence.
+  def combined_field_placements
+    fp = @agreement.field_placements || []
+    mfp = @agreement.merge_field_placements || []
+    (mfp + fp).uniq { |p| p = p.stringify_keys; p['id'] || "#{p['fieldKey']}_#{p['page'] || p['pageIndex']}_#{p['x']}_#{p['y']}" }
+  end
+
   # Normalize placement keys (handle both camelCase and snake_case from JSONB)
   def normalize_placement(p)
     p = p.stringify_keys if p.is_a?(Hash)
@@ -181,7 +190,8 @@ class AgreementPdfService
       width: (p['width'] || 10).to_f,
       height: (p['height'] || 3).to_f,
       signer_index: (p['signerIndex'] || p['signer_index'] || 0).to_i,
-      is_signer_field: p['isSignerField'] || p['is_signer_field']
+      is_signer_field: p['isSignerField'] || p['is_signer_field'],
+      is_custom_field: p['isCustomField'] || p['is_custom_field']
     }
   end
 
@@ -251,24 +261,29 @@ class AgreementPdfService
     values['agreement.created_at'] = @agreement.created_at&.strftime('%m/%d/%Y').to_s
     values['agreement.completed_at'] = @agreement.completed_at&.strftime('%m/%d/%Y').to_s
 
-    # 2. Merge stored merge_field_values (fill gaps)
+    # 2. Merge stored merge_field_values — these OVERRIDE live-resolved values
+    #    because they include signer-entered text inputs and preparer-set values
+    #    which should take precedence over auto-resolved entity data.
     if @agreement.merge_field_values.is_a?(Hash)
       @agreement.merge_field_values.each do |k, v|
         next if v.nil? || v.to_s.strip.empty?
-        values[k.to_s] = v.to_s unless values[k.to_s].present?
+        values[k.to_s] = v.to_s
       end
     end
 
-    # 3. Custom field values with 'custom.' prefix
+    # 3. Custom field values — store under both raw key and 'custom.' prefix
+    #    so lookups work regardless of how fieldKey is stored in placements.
+    #    These also override (preparer explicitly set these values).
     if @agreement.custom_field_values.is_a?(Hash)
       @agreement.custom_field_values.each do |k, v|
         next if v.nil?
+        values[k.to_s] = v.to_s
         values["custom.#{k}"] = v.to_s
       end
     end
 
     values.reject! { |_, v| v.blank? }
-    Rails.logger.info("[AgreementPdfService] Values map: #{values.size} entries (#{values.keys.first(10).join(', ')}...)")
+    Rails.logger.info("[AgreementPdfService] Values map: #{values.size} entries, keys: #{values.keys.join(', ')}")
     values
   end
 
@@ -324,16 +339,30 @@ class AgreementPdfService
       field_key = p[:field_key].to_s
       signer_idx = p[:signer_index]
 
-      Rails.logger.debug("[AgreementPdfService] Stamping: type=#{field_type} key=#{field_key} signer=#{signer_idx} at (#{x_pt.round(1)}, #{y_pt.round(1)}) #{w_pt.round(1)}x#{h_pt.round(1)}")
+      Rails.logger.info("[AgreementPdfService] Stamping: type=#{field_type} key=#{field_key} id=#{p[:id]} signer=#{signer_idx} signerField=#{p[:is_signer_field]} custom=#{p[:is_custom_field]} at (#{x_pt.round(1)}, #{y_pt.round(1)}) #{w_pt.round(1)}x#{h_pt.round(1)}")
 
-      # Look up value from multiple sources
-      value = values_map[field_key] || values_map[p[:id].to_s] || ''
+      # Look up value from multiple sources — try key as-is, with custom. prefix, stripped of custom. prefix, and by id
+      value = values_map[field_key] ||
+              values_map["custom.#{field_key}"] ||
+              values_map[field_key.sub(/^custom\./, '')] ||
+              values_map[p[:id].to_s] || ''
+
+      Rails.logger.info("[AgreementPdfService] Value lookup: key=#{field_key} id=#{p[:id]} → #{value.present? ? "found (#{value.to_s.truncate(50)})" : 'EMPTY'}")
 
       applied = case field_type.downcase
       when 'signature'
-        stamp_signature(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+        # Custom (preparer) signature fields are stored as base64 in values_map, not in signatures_map
+        if p[:is_custom_field] && value.present? && value.to_s.start_with?('data:image/')
+          stamp_image(pdf, x_pt, y_pt, w_pt, h_pt, value)
+        else
+          stamp_signature(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+        end
       when 'initials'
-        stamp_initials(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+        if p[:is_custom_field] && value.present? && value.to_s.start_with?('data:image/')
+          stamp_image(pdf, x_pt, y_pt, w_pt, h_pt, value)
+        else
+          stamp_initials(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
+        end
       when 'date_signed'
         stamp_date_signed(pdf, x_pt, y_pt, w_pt, h_pt, signer_idx, signatures_map)
       when 'signer_name'
@@ -343,7 +372,7 @@ class AgreementPdfService
       when 'checkbox', 'custom_checkbox'
         stamp_checkbox(pdf, x_pt, y_pt, w_pt, h_pt, value)
       else
-        # All other types: text, currency, number, date, text_input, custom_text, etc.
+        # All other types: text, currency, number, date, text_input, custom_text, select, etc.
         stamp_text(pdf, x_pt, y_pt, w_pt, h_pt, value) if value.present?
       end
 
@@ -763,7 +792,7 @@ class AgreementPdfService
 
     integrity_data = [
       ['Document Fingerprint (SHA-256):', document_hash],
-      ['Total Pages:', (@agreement.merge_field_placements&.map { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }.max.to_i + 1).to_s],
+      ['Total Pages:', (combined_field_placements.map { |p| (p.stringify_keys['page'] || p.stringify_keys['pageIndex'] || 0).to_i }.max.to_i + 1).to_s],
       ['Signers Required:', signers.count.to_s],
       ['Signers Completed:', signers.signed.count.to_s],
     ]

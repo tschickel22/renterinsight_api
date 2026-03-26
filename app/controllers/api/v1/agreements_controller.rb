@@ -4,7 +4,7 @@ module Api
       before_action :set_company_scope
       before_action :set_agreement, only: [
         :show, :update, :destroy, :send_agreement, :void, :remind, :remind_signer,
-        :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature,
+        :duplicate, :save_as_template, :audit_log, :download, :certificate, :prepare_signature, :preparer_sign,
         :add_signer, :update_signer, :remove_signer, :add_attachment, :remove_attachment,
         :calculate, :vision_scan, :upload_signed_document,
         :list_custom_fields, :add_custom_field, :update_custom_field, :remove_custom_field,
@@ -205,6 +205,13 @@ module Api
       # POST /api/v1/agreements/:id/send_agreement
       def send_agreement
         return unless authorize_action!('agreements', 'update')
+
+        if @agreement.has_unsigned_preparer_fields?
+          return render json: {
+            error: 'Preparer signature/initials fields must be filled before sending. Go to the Fill Form step and sign.',
+            code: 'preparer_signature_required'
+          }, status: :unprocessable_entity
+        end
 
         unless @agreement.can_send?
           return render json: { error: 'Agreement cannot be sent. Ensure it is in draft status with at least one signer.' }, status: :unprocessable_entity
@@ -528,6 +535,95 @@ module Api
 
         render json: agreement_json(@agreement.reload, detailed: true)
       rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # PUT /api/v1/agreements/:id/preparer_sign
+      # Stamps preparer's signature/initials onto the agreement PDF at all preparer-assigned
+      # signature/initials field placements, then uploads the stamped PDF as document_url.
+      def preparer_sign
+        return unless authorize_action!('agreements', 'update')
+
+        unless @agreement.can_edit?
+          return render json: { error: 'Agreement must be in draft status' }, status: :unprocessable_entity
+        end
+
+        # Identify preparer signature/initials placements
+        placements = @agreement.merge_field_placements || []
+        preparer_placements = placements.select do |p|
+          p = p.stringify_keys
+          field_type = (p['fieldType'] || p['field_type']).to_s.downcase
+          is_signer = p['isSignerField'] || p['is_signer_field']
+          %w[signature initials].include?(field_type) && !is_signer
+        end
+
+        if preparer_placements.empty?
+          return render json: { error: 'No preparer signature/initials fields found' }, status: :unprocessable_entity
+        end
+
+        # Build signature data from params (or fall back to saved user signature)
+        sig_data = {
+          signature_url: params[:signature_data].presence || current_user.signature_url,
+          signature_method: params[:signature_method] || 'draw',
+          typed_signature: params[:typed_signature].presence || current_user.typed_signature,
+          signature_font: params[:signature_font].presence || current_user.signature_font,
+          initials_url: params[:initials_data].presence || current_user.initials_url,
+          typed_initials: params[:typed_initials].presence || current_user.typed_initials
+        }
+
+        has_signature = sig_data[:signature_url].present? || sig_data[:typed_signature].present?
+        has_initials = sig_data[:initials_url].present? || sig_data[:typed_initials].present?
+
+        needs_signature = preparer_placements.any? { |p| (p.stringify_keys['fieldType'] || p.stringify_keys['field_type']).to_s.downcase == 'signature' }
+        needs_initials = preparer_placements.any? { |p| (p.stringify_keys['fieldType'] || p.stringify_keys['field_type']).to_s.downcase == 'initials' }
+
+        if needs_signature && !has_signature
+          return render json: { error: 'Signature data is required' }, status: :unprocessable_entity
+        end
+        if needs_initials && !has_initials
+          return render json: { error: 'Initials data is required' }, status: :unprocessable_entity
+        end
+
+        # Stamp the preparer fields onto the PDF
+        service = PreparerSigningService.new(@agreement, current_user, sig_data)
+        result = service.stamp_preparer_fields(preparer_placements)
+
+        unless result[:success]
+          return render json: { error: result[:error] || 'Failed to stamp preparer signature' }, status: :unprocessable_entity
+        end
+
+        # Record preparer signing via existing prepare_signature flow
+        preparer = @agreement.agreement_signers.find_or_initialize_by(
+          email: current_user.email,
+          role: AgreementSigner::ROLE_PREPARER
+        )
+        preparer.name = current_user.name
+        preparer.save!
+        preparer.sign!(
+          signature_url: sig_data[:signature_url],
+          signature_method: sig_data[:signature_method],
+          typed_signature: sig_data[:typed_signature],
+          typed_initials: sig_data[:typed_initials],
+          signature_font: sig_data[:signature_font],
+          initials_url: sig_data[:initials_url],
+          ip_address: request.remote_ip,
+          user_agent: request.user_agent
+        )
+
+        # Optionally save signature for reuse
+        if params[:save_signature]
+          current_user.update(
+            signature_url: sig_data[:signature_url],
+            initials_url: sig_data[:initials_url],
+            typed_signature: sig_data[:typed_signature],
+            typed_initials: sig_data[:typed_initials],
+            signature_font: sig_data[:signature_font]
+          )
+        end
+
+        render json: agreement_json(@agreement.reload, detailed: true)
+      rescue => e
+        Rails.logger.error("[PreparerSign] Failed for agreement #{@agreement.id}: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
@@ -1050,6 +1146,7 @@ module Api
         permitted[:metadata] = raw[:metadata] if raw[:metadata].present?
         permitted[:document_urls] = raw[:document_urls] if raw[:document_urls].present?
         permitted[:custom_field_values] = raw[:custom_field_values] if raw[:custom_field_values].present?
+        permitted[:custom_field_definitions] = raw[:custom_field_definitions] if raw[:custom_field_definitions].present?
         permitted[:optional_equipment_snapshot] = raw[:optional_equipment_snapshot] if raw[:optional_equipment_snapshot].present?
 
         permitted
@@ -1156,6 +1253,7 @@ module Api
           category: agreement.category,
           content_type: agreement.content_type,
           signing_progress: agreement.signing_progress,
+          has_unsigned_preparer_fields: agreement.has_unsigned_preparer_fields?,
           expires_at: agreement.expires_at,
           sent_at: agreement.sent_at,
           completed_at: agreement.completed_at,

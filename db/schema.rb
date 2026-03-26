@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_21_100001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -4441,6 +4441,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_21_100001) do
     t.string "email_password"
     t.string "smtp_server"
     t.integer "smtp_port", default: 587
+    t.string "signature_url"
+    t.string "initials_url"
+    t.string "typed_signature"
+    t.string "typed_initials"
+    t.string "signature_font"
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
