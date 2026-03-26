@@ -85,7 +85,7 @@ company = Company.find_or_create_by!(name: DEMO_COMPANY_NAME) do |c|
   c.is_demo = true
   c.external_payments_id = nil
   c.subscription_tier = "professional"
-  c.use_rbac_system = false
+  c.use_rbac_system = true
 end
 puts "  Company: #{company.name} (ID: #{company.id})"
 
