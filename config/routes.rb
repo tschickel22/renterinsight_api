@@ -739,11 +739,13 @@ Rails.application.routes.draw do
           post :assign_location, path: 'assign-location'
           delete 'remove_location/:location_id', action: :remove_location, as: :remove_location
         end
-        
+
         collection do
           get :assignable  # Get users filtered by context (service, sales, finance, etc.)
           post :bulk_activate
           post :bulk_deactivate
+          get 'me/signature', action: :my_signature
+          put 'me/signature', action: :update_my_signature
         end
       end
       
@@ -1278,6 +1280,7 @@ Rails.application.routes.draw do
           get :download
           get :certificate
           post :prepare_signature
+          put :preparer_sign
           post :calculate
           post :vision_scan
           post :upload_signed_document

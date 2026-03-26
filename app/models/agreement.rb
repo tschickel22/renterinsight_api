@@ -75,7 +75,8 @@ class Agreement < ApplicationRecord
     return false unless status == STATUS_DRAFT
     return false if agreement_signers.where(role: [AgreementSigner::ROLE_SIGNER, AgreementSigner::ROLE_COUNTER_SIGNER]).empty?
 
-    update!(status: STATUS_SENT, sent_at: Time.current)
+    # Clear any stale sealed document from previous signing rounds
+    update!(status: STATUS_SENT, sent_at: Time.current, sealed_document_url: nil)
     AgreementAuditLog.log!(self, AgreementAuditLog::ACTION_SENT, performed_by: user)
     true
   end
@@ -144,7 +145,27 @@ class Agreement < ApplicationRecord
   end
 
   def can_send?
-    status == STATUS_DRAFT && agreement_signers.where(role: [AgreementSigner::ROLE_SIGNER, AgreementSigner::ROLE_COUNTER_SIGNER]).any?
+    status == STATUS_DRAFT &&
+      agreement_signers.where(role: [AgreementSigner::ROLE_SIGNER, AgreementSigner::ROLE_COUNTER_SIGNER]).any? &&
+      !has_unsigned_preparer_fields?
+  end
+
+  def has_unsigned_preparer_fields?
+    placements = (merge_field_placements || field_placements || []).map(&:stringify_keys)
+    preparer_sig_fields = placements.select do |p|
+      p['isCustomField'] == true &&
+        !p['isSignerField'] &&
+        %w[signature initials].include?((p['fieldType'] || p['field_type']).to_s.downcase)
+    end
+    return false if preparer_sig_fields.empty?
+
+    values = (custom_field_values || {}).stringify_keys
+    preparer_sig_fields.any? do |p|
+      key = p['fieldKey'] || p['field_key']
+      stripped_key = key&.sub(/^custom\./, '')
+      val = values[key] || values[stripped_key]
+      val.blank? || !val.to_s.start_with?('data:image/')
+    end
   end
 
   def all_signed?

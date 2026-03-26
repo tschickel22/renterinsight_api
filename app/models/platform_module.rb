@@ -84,7 +84,7 @@ class PlatformModule
       marketing.listings marketing.brochures
       finance.loans finance.agreements finance.invoices finance.documents finance.applications
       service.operations service.portal
-      management.reports management.tags management.tasks management.calendar
+      management.reports management.tags management.tasks management.calendar management.projects
       admin.settings admin.users admin.locations
     ],
     enterprise: %w[

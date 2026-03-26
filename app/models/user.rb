@@ -198,9 +198,10 @@ class User < ApplicationRecord
     query.exists?
   end
 
-  # Check if user is a company admin (RBAC)
+  # Check if user is a company admin (role column OR RBAC)
   def company_admin?
     return true if platform_admin?  # Platform admins have full access
+    return true if role == 'company_admin'  # Check role column directly (works with RBAC off)
     return false unless uses_rbac?
     roles.exists?(key: 'company_admin', tier: 'company')
   end
