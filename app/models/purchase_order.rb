@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class PurchaseOrder < ApplicationRecord
+  include ActivityTrackable
+
   # Associations
   belongs_to :company
   belongs_to :location, optional: true
@@ -82,7 +84,19 @@ class PurchaseOrder < ApplicationRecord
     return nil unless created_by
     "#{created_by.first_name} #{created_by.last_name}".strip
   end
-  
+
+  def activity_display_name
+    po_number || 'PO'
+  end
+
+  def activity_module_name
+    'inventory'
+  end
+
+  def activity_account_id
+    nil
+  end
+
   private
   
   def set_defaults

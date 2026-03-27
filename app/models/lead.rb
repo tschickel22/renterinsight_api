@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Lead < ApplicationRecord
+  include ActivityTrackable
   include Communicable
   include LocationAware
   include NotifiableLead
@@ -78,5 +79,18 @@ class Lead < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Lead] Failed to fire lifecycle webhook lead.converted: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:full_name).presence || "#{first_name} #{last_name}".strip.presence || "Lead ##{id}"
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    converted_account_id
   end
 end

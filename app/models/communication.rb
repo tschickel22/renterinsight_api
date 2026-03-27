@@ -38,9 +38,11 @@
 #
 
 class Communication < ApplicationRecord
+  include ActivityTrackable
+
   # SQLite compatibility - only serialize for non-PostgreSQL databases
   serialize :metadata, coder: JSON unless ActiveRecord::Base.connection.adapter_name == 'PostgreSQL'
-  
+
   # Polymorphic association - can belong to Lead, Account, Quote, etc.
   belongs_to :communicable, polymorphic: true, optional: true
   belongs_to :company, optional: true
@@ -197,8 +199,51 @@ class Communication < ApplicationRecord
     AttachmentService.attach_multiple_to_communication(self, file_list)
   end
   
+  # ActivityTrackable overrides
+  def activity_display_name
+    if channel == 'email'
+      subject.presence || 'Email'
+    elsif channel == 'sms'
+      'SMS Message'
+    else
+      channel&.titleize || 'Communication'
+    end
+  end
+
+  def activity_module_name
+    'communications'
+  end
+
+  def activity_account_id
+    communicable&.try(:account_id) || communicable&.try(:converted_account_id)
+  end
+
+  # Must be public - ActivityTrackable concern uses try(:company)
+  def company
+    super || communicable&.try(:company)
+  end
+
   private
-  
+
+  def log_create_activity
+    action = case channel
+             when 'email' then 'email_sent'
+             when 'sms' then 'sms_sent'
+             else 'created'
+             end
+
+    entity = communicable
+    description = case channel
+                  when 'email' then "Sent email to #{to_address}: #{subject || 'No subject'}"
+                  when 'sms' then "Sent SMS to #{to_address}"
+                  else "Communication #{channel} created"
+                  end
+
+    log_activity(action: action, description: description)
+  rescue => e
+    Rails.logger.error("[ActivityTrackable] Failed to log create for Communication: #{e.message}")
+  end
+
   def normalize_metadata
     return if metadata.blank?
     

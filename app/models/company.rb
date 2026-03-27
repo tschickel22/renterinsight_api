@@ -114,7 +114,8 @@ class Company < ApplicationRecord
   # QuickBooks Integration Associations
   has_many :quickbooks_field_mappings, dependent: :destroy
   has_many :quickbooks_sync_logs, dependent: :destroy
-  
+  has_many :activity_logs, dependent: :destroy
+
   # Enums
   enum :quickbooks_scope, { company: 'company', location: 'location' }, prefix: true, default: :company
   

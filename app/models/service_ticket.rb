@@ -27,6 +27,7 @@
 #
 
 class ServiceTicket < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
   include NotifiableServiceTicket
   include WebhookNotifiable
@@ -354,5 +355,18 @@ class ServiceTicket < ApplicationRecord
     if status.blank?
       self.status = nil
     end
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:ticket_number) || try(:title) || "Ticket ##{id}"
+  end
+
+  def activity_module_name
+    'service'
+  end
+
+  def activity_account_id
+    try(:account_id) || contact&.try(:account_id)
   end
 end

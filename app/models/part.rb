@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Part < ApplicationRecord
+  include ActivityTrackable
   include Customizable
   
   # Associations
@@ -250,5 +251,18 @@ class Part < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Part] Failed to fire parts.removed webhook: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:name) || try(:part_number) || "Part ##{id}"
+  end
+
+  def activity_module_name
+    'inventory'
+  end
+
+  def activity_account_id
+    nil
   end
 end

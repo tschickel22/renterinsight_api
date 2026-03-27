@@ -6,6 +6,7 @@
 # Integrates with external payment gateways (Zego, Stripe) and tracks processing fees.
 
 class Payment < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
   include WebhookNotifiable
   
@@ -298,5 +299,26 @@ class Payment < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Payment] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:description) || "Payment ##{id}"
+  end
+
+  def activity_module_name
+    'finance'
+  end
+
+  def activity_account_id
+    if try(:account_id)
+      account_id
+    elsif respond_to?(:payable) && payable.respond_to?(:account_id)
+      payable.try(:account_id)
+    elsif respond_to?(:payable) && payable.respond_to?(:contact)
+      payable.contact&.try(:account_id)
+    else
+      nil
+    end
   end
 end

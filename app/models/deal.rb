@@ -1,4 +1,5 @@
 class Deal < ApplicationRecord
+  include ActivityTrackable
   include Addressable
   include Buyable
   include LocationAware
@@ -370,5 +371,18 @@ class Deal < ApplicationRecord
     Rails.logger.info "[Deal] Synced pricing from vehicle #{vehicle_id}: selling_price=$#{selling_price}, unit_cost=$#{unit_cost}, value=$#{value}"
   rescue StandardError => e
     Rails.logger.error "[Deal] Failed to sync vehicle pricing: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:title) || try(:name) || "Deal ##{id}"
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    account_id
   end
 end

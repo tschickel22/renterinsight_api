@@ -175,6 +175,16 @@ Rails.application.routes.draw do
       
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
+
+      # ==================== ACTIVITY LOGS ====================
+      resources :activity_logs, only: [:index] do
+        collection do
+          get :my_activity
+          get 'account/:account_id', action: :account_feed, as: :account_feed
+          get 'entity/:trackable_type/:trackable_id', action: :entity_feed, as: :entity_feed
+          get :stats
+        end
+      end
       
       # ==================== USER SETTINGS ====================
       scope path: 'user_settings', controller: 'user_settings' do

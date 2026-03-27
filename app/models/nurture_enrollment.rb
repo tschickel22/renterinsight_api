@@ -1,4 +1,6 @@
 class NurtureEnrollment < ApplicationRecord
+  include ActivityTrackable
+
   belongs_to :company, optional: true
   
   # Polymorphic association - can belong to Lead or Account
@@ -39,8 +41,31 @@ class NurtureEnrollment < ApplicationRecord
     enrollable_id || lead_id
   end
   
+  # ActivityTrackable overrides
+  def activity_display_name
+    nurture_sequence&.name || 'Nurture Enrollment'
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    case enrollable_type
+    when 'Account' then enrollable_id
+    when 'Contact' then enrollable&.try(:account_id)
+    when 'Lead' then enrollable&.try(:converted_account_id)
+    else nil
+    end
+  end
+
+  # Must be public - ActivityTrackable concern uses try(:company)
+  def company
+    super || entity&.try(:company)
+  end
+
   private
-  
+
   def must_have_entity
     if lead_id.blank? && enrollable_id.blank?
       errors.add(:base, 'Must belong to either a lead or an enrollable entity')

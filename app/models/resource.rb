@@ -85,6 +85,7 @@ public
       { key: 'users', name: 'Users & Teams', category: 'admin', description: 'Manage users, roles, and team assignments', position: 2 },
       { key: 'locations', name: 'Locations', category: 'admin', description: 'Manage company locations and their settings', position: 3 },
       { key: 'branding', name: 'Branding & White Label', category: 'admin', description: 'Manage branding, logos, and appearance', position: 4 },
+      { key: 'activity_logs', name: 'Activity Log', category: 'admin', description: 'View platform activity and user actions', position: 5 },
       
       # Operations Resources (position 100-200)
       { key: 'inventory', name: 'Inventory', category: 'operations', description: 'Manage vehicle and property inventory', position: 100 },

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 class Account < ApplicationRecord
+  include ActivityTrackable
   include Communicable
   include LocationAware
   include NotifiableAccount
@@ -168,5 +169,18 @@ class Account < ApplicationRecord
   
   def update_last_activity_date
     self.last_activity_date = Time.current if saved_changes?
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    name
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    id
   end
 end

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class ContactActivity < ApplicationRecord
+  include ActivityTrackable
+
   belongs_to :contact
   belongs_to :account, optional: true
   belongs_to :user # creator
@@ -55,9 +57,30 @@ class ContactActivity < ApplicationRecord
   def overdue?
     due_date && due_date < Time.current && status != 'completed'
   end
-  
+
+  def activity_display_name
+    subject || 'Activity'
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    account_id || contact&.account_id
+  end
+
+  def activity_location_id
+    contact&.location_id
+  end
+
+  # Must be public - ActivityTrackable concern uses try(:company)
+  def company
+    contact&.company || account&.company
+  end
+
   private
-  
+
   def set_account_from_contact
     # Automatically set account_id from contact if not set
     self.account_id ||= contact.account_id if contact && contact.account_id.present?

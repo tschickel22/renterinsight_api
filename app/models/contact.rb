@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Contact < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
   include NotifiableContact
   include WebhookNotifiable
@@ -141,5 +142,18 @@ class Contact < ApplicationRecord
 
   def normalize_phone
     self.phone = phone.to_s.strip if phone.present?
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:full_name).presence || try(:display_name).presence || "#{first_name} #{last_name}".strip.presence || "Contact ##{id}"
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    account_id
   end
 end

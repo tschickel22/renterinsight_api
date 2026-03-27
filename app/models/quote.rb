@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Quote < ApplicationRecord
+  include ActivityTrackable
   include Addressable
   include Buyable
   include Communicable
@@ -422,5 +423,18 @@ class Quote < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Quote] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:quote_number) || "Quote ##{id}"
+  end
+
+  def activity_module_name
+    'finance'
+  end
+
+  def activity_account_id
+    try(:account_id) || deal&.try(:account_id) || contact&.try(:account_id)
   end
 end

@@ -18,6 +18,7 @@ class ApplicationController < ActionController::API
     Current.original_user = original_user
     Current.company_id = current_company_id
     Current.location_id = current_location_id
+    Current.ip_address = request.remote_ip
 
     if Rails.env.development? && Current.location_id.present?
       Rails.logger.info "📍 [Current] Location context set: #{Current.location_id}"

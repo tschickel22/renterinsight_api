@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_26_100001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -166,6 +166,31 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["lead_id", "created_at"], name: "index_activities_on_lead_id_and_created_at"
     t.index ["lead_id"], name: "index_activities_on_lead_id"
     t.index ["user_id"], name: "index_activities_on_user_id"
+  end
+
+  create_table "activity_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id"
+    t.string "trackable_type"
+    t.bigint "trackable_id"
+    t.bigint "account_id"
+    t.bigint "location_id"
+    t.string "action", null: false
+    t.string "module_name", null: false
+    t.string "entity_type_label"
+    t.string "description", null: false
+    t.jsonb "changes_made", default: {}
+    t.jsonb "metadata", default: {}
+    t.string "ip_address"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["action"], name: "index_activity_logs_on_action"
+    t.index ["company_id", "account_id", "created_at"], name: "idx_on_company_id_account_id_created_at_c0beedc755"
+    t.index ["company_id", "created_at"], name: "index_activity_logs_on_company_id_and_created_at"
+    t.index ["company_id", "location_id", "created_at"], name: "idx_on_company_id_location_id_created_at_2dcf7b4b92"
+    t.index ["company_id", "module_name", "created_at"], name: "idx_on_company_id_module_name_created_at_290527c75b"
+    t.index ["company_id", "user_id", "created_at"], name: "index_activity_logs_on_company_id_and_user_id_and_created_at"
+    t.index ["trackable_type", "trackable_id"], name: "index_activity_logs_on_trackable_type_and_trackable_id"
   end
 
   create_table "agreement_attachments", force: :cascade do |t|
@@ -4875,6 +4900,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
+  add_foreign_key "activity_logs", "companies"
   add_foreign_key "agreement_attachments", "agreements"
   add_foreign_key "agreement_audit_logs", "agreement_signers"
   add_foreign_key "agreement_audit_logs", "agreements"

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Vehicle < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
   include WebhookNotifiable
   
@@ -361,5 +362,18 @@ class Vehicle < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Vehicle] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    [try(:year), try(:make), try(:model)].compact.join(' ').presence || "Vehicle ##{id}"
+  end
+
+  def activity_module_name
+    'inventory'
+  end
+
+  def activity_account_id
+    nil
   end
 end

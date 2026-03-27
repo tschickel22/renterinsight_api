@@ -1,4 +1,5 @@
 class Invoice < ApplicationRecord
+  include ActivityTrackable
   include Addressable
   include Buyable
   include WebhookNotifiable
@@ -331,5 +332,18 @@ class Invoice < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Invoice] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:invoice_number) || "Invoice ##{id}"
+  end
+
+  def activity_module_name
+    'finance'
+  end
+
+  def activity_account_id
+    contact&.try(:account_id) || deal&.try(:account_id)
   end
 end
