@@ -116,10 +116,11 @@ class User < ApplicationRecord
   
   # Optimized RBAC permission check - avoids N+1 queries
   def has_permission?(resource, action, scope = 'all', company_id = nil)
-    # Platform admins and super admins have all permissions
+    # Platform admins, super admins, and company admins have all permissions
     return true if platform_admin?
     return true if super_admin?
-    
+    return true if company_admin?
+
     # Get the company
     check_company = company_id ? Company.find_by(id: company_id) : self.company
     
@@ -241,6 +242,7 @@ class User < ApplicationRecord
   def permissions_for_company(company_id)
     return ['*:*:*'] if platform_admin? # Platform admins have all permissions
     return ['*:*:*'] if super_admin? # All permissions
+    return ['*:*:*'] if company_admin? # Company admins have all permissions (matches has_permission? behavior)
     
     check_company = Company.find_by(id: company_id)
     return ['*:*:*'] unless check_company&.use_rbac_system # All permissions if RBAC disabled
