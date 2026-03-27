@@ -368,12 +368,12 @@ vehicle_data = [
   { year: 2017, make: "Fleetwood",     model: "Berkshire 3252B",        serial: "FLT-2017-B-554400",    beds: 4, baths: 2, sqft: 1664, price: 38000,  cost: 20000, status: "available",  location: "AUB", images: [], floor_plan: nil },
 ]
 
-vehicle_data.each do |vd|
+vehicle_data.each_with_index do |vd, idx|
   vehicle = company.vehicles.find_or_create_by!(serial_number: vd[:serial]) do |v|
     v.year = vd[:year]
     v.make = vd[:make]
     v.model = vd[:model]
-    v.stock_number = "STK-#{rand(10000..99999)}"
+    v.stock_number = "#{DEMO_PREFIX.upcase}-#{(idx + 1).to_s.rjust(3, '0')}"
     v.status = vd[:status]
     v.location_id = locations[vd[:location]].id
     v.sale_price = vd[:price]
@@ -421,7 +421,7 @@ deal_data = [
   { title: "Turner - Skyline Amber Cove",  stage: "closed_lost",   amount: 42500,  contact: "Jason Turner",      account: nil },
 ]
 
-deal_data.each do |dd|
+deal_data.each_with_index do |dd, idx|
   contact = contacts[dd[:contact]]
   account = dd[:account] ? accounts[dd[:account]] : nil
 
@@ -434,7 +434,7 @@ deal_data.each do |dd|
     d.value = dd[:amount]
     d.total_amount = dd[:amount]
     d.customer_name = dd[:contact]
-    d.deal_number = "DL-#{rand(1000..9999)}"
+    d.deal_number = "#{DEMO_PREFIX.upcase}-DL-#{(idx + 1).to_s.rjust(3, '0')}"
     d.custom_field_values = {}
   end
   deals[dd[:title]] = deal
