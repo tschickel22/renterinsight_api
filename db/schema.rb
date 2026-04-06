@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_26_100001) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_06_033424) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -514,6 +514,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_26_100001) do
     t.index ["requested_by_id"], name: "index_approval_workflows_on_requested_by_id"
     t.index ["status"], name: "index_approval_workflows_on_status"
     t.index ["workflow_type"], name: "index_approval_workflows_on_workflow_type"
+  end
+
+  create_table "assignment_work_logs", force: :cascade do |t|
+    t.bigint "contractor_assignment_id", null: false
+    t.bigint "contractor_id"
+    t.text "note"
+    t.string "log_type", default: "note"
+    t.jsonb "attachments", default: []
+    t.datetime "logged_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.string "author_type", default: "contractor"
+    t.string "author_name"
+    t.index ["contractor_assignment_id"], name: "index_assignment_work_logs_on_contractor_assignment_id"
+    t.index ["contractor_id"], name: "index_assignment_work_logs_on_contractor_id"
+    t.index ["user_id"], name: "index_assignment_work_logs_on_user_id"
   end
 
   create_table "bank_accounts", force: :cascade do |t|
@@ -1290,10 +1307,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_26_100001) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "submitted_for_review", default: false
+    t.datetime "submitted_for_review_at"
+    t.string "review_status"
+    t.datetime "reviewed_at"
+    t.bigint "reviewed_by_id"
+    t.text "review_notes"
+    t.text "completion_summary"
+    t.jsonb "completion_photos", default: []
+    t.text "revision_notes"
+    t.integer "revision_count", default: 0
     t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
     t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
     t.index ["company_id"], name: "index_contractor_assignments_on_company_id"
     t.index ["contractor_id"], name: "index_contractor_assignments_on_contractor_id"
+    t.index ["review_status"], name: "index_contractor_assignments_on_review_status"
+    t.index ["reviewed_by_id"], name: "index_contractor_assignments_on_reviewed_by_id"
     t.index ["status"], name: "index_contractor_assignments_on_status"
   end
 
@@ -1325,6 +1354,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_26_100001) do
     t.datetime "portal_token_expires_at"
     t.datetime "last_portal_login_at"
     t.boolean "is_vendor", default: false
+    t.string "password_digest"
+    t.boolean "password_login_enabled", default: false
     t.index ["company_id"], name: "index_contractors_on_company_id"
     t.index ["email"], name: "index_contractors_on_email"
     t.index ["is_vendor"], name: "index_contractors_on_is_vendor"
@@ -4923,6 +4954,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_26_100001) do
   add_foreign_key "approval_workflows", "deals"
   add_foreign_key "approval_workflows", "users", column: "approved_by_id"
   add_foreign_key "approval_workflows", "users", column: "requested_by_id"
+  add_foreign_key "assignment_work_logs", "contractor_assignments"
+  add_foreign_key "assignment_work_logs", "contractors"
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
   add_foreign_key "bins", "locations"

@@ -273,6 +273,7 @@ Rails.application.routes.draw do
           delete :unassign_phase_task_contractor  # DELETE body: { phase_id:, task_id:, contractor_id: }
           post :assign_phase_task_user            # POST body: { phase_id:, task_id:, user_id: }
           delete :unassign_phase_task_user        # DELETE body: { phase_id:, task_id: }
+          get :export_pdf
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
         resources :phases, only: [:update], controller: 'project_phases' do
@@ -281,6 +282,13 @@ Rails.application.routes.draw do
           resources :project_tasks, controller: 'project_tasks', only: [:index, :create] do
             collection do
               post :reorder
+            end
+          end
+          # Work logs on phase tasks (dealer ↔ contractor bidirectional)
+          resources :phase_tasks, controller: 'phase_task_work_logs', only: [] do
+            member do
+              get :work_logs, action: :index
+              post :work_logs, action: :create
             end
           end
         end
@@ -386,6 +394,15 @@ Rails.application.routes.draw do
         end
 
         resources :contractor_assignments, only: [:index, :create, :update, :destroy]
+      end
+
+      # Contractor Reviews (dealer-side approval workflow)
+      resources :contractor_reviews, path: 'contractor-reviews', only: [:index, :show] do
+        member do
+          post :approve
+          post :request_revision
+          post :reject
+        end
       end
 
       # ==================== WARRANTY SYSTEM ====================
@@ -2014,15 +2031,32 @@ Rails.application.routes.draw do
       # Authentication
       post 'sessions/magic_link', to: 'sessions#magic_link'
       post 'sessions/verify', to: 'sessions#verify'
+      post 'sessions/login', to: 'sessions#login'
 
       # Dashboard
       get 'dashboard', to: 'dashboard#index'
+
+      # Profile
+      get 'profile', to: 'profile#show'
+      patch 'profile', to: 'profile#update'
+      post 'profile/set_password', to: 'profile#set_password'
+      post 'profile/sync_credentials', to: 'profile#sync_credentials'
+
+      # Branding
+      get 'branding', to: 'branding#show'
+
+      # Projects
+      resources :projects, only: [:index, :show]
 
       # Tasks
       resources :tasks, only: [:index, :show] do
         member do
           patch :update_status
           patch :toggle_checklist_item
+          patch :add_note
+          post :submit_for_review
+          get :work_logs
+          post :work_logs, action: :create_work_log
         end
       end
 
@@ -2030,8 +2064,16 @@ Rails.application.routes.draw do
       resources :service_tickets, only: [:index, :show], path: 'service-tickets' do
         member do
           patch :update_status
+          patch :add_note
+          post :submit_for_review
+          get :work_logs
+          post :work_logs, action: :create_work_log
         end
       end
+
+      # Uploads
+      post 'uploads', to: 'uploads#create'
+      delete 'uploads', to: 'uploads#destroy'
     end
   end
 

@@ -385,6 +385,7 @@ class Api::V1::WebsitesController < ApplicationController
   # PUBLIC endpoint - no auth required. Used by /s/:slug preview in new tabs (Safari compatibility)
   def by_slug_public
     @website = Website.joins(:company)
+                      .includes(:company, :website_pages)
                       .where(slug: params[:slug], is_deleted: [false, nil])
                       .first!
 
@@ -400,6 +401,7 @@ class Api::V1::WebsitesController < ApplicationController
 
     # Include recent published blog posts for blogList blocks
     published_posts = @website.blog_posts
+                              .includes(:author, :blog_categories)
                               .where(is_deleted: [false, nil])
                               .where(status: :published)
                               .where('published_at <= ?', Time.current)
@@ -421,12 +423,13 @@ class Api::V1::WebsitesController < ApplicationController
                                               .order(:order, :name)
                                               .as_json(only: [:id, :name, :slug], methods: [:posts_count])
 
-    website_json['calculator_settings'] = build_calculator_settings(@website.company)
+    company = @website.company
+    website_json['calculator_settings'] = build_calculator_settings(company)
 
     website_json['inventory_embed_config'] = {
-      token: @website.company.public_inventory_token,
-      company_id: @website.company.id,
-      enabled: @website.company.public_inventory_enabled || false
+      token: company.public_inventory_token,
+      company_id: company.id,
+      enabled: company.public_inventory_enabled || false
     }
 
     render json: website_json

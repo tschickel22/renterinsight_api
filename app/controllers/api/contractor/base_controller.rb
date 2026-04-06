@@ -24,9 +24,19 @@ module Api
           )
 
           payload = decoded_token.first
-          contractor_id = payload['contractor_id']
 
-          @current_contractor = ::Contractor.find_by(id: contractor_id, is_deleted: [false, nil])
+          # Support both old (single ID) and new (multi ID) JWT format
+          if payload['contractor_ids'].present?
+            @contractor_ids = payload['contractor_ids']
+            @primary_contractor_id = payload['primary_contractor_id'] || @contractor_ids.first
+          elsif payload['contractor_id'].present?
+            @contractor_ids = [payload['contractor_id']]
+            @primary_contractor_id = payload['contractor_id']
+          else
+            return render json: { error: 'Invalid token' }, status: :unauthorized
+          end
+
+          @current_contractor = ::Contractor.find_by(id: @primary_contractor_id, is_deleted: [false, nil])
 
           unless @current_contractor
             return render json: { error: 'Invalid token' }, status: :unauthorized
@@ -35,6 +45,8 @@ module Api
           unless @current_contractor.status == 'active'
             return render json: { error: 'Account is inactive' }, status: :forbidden
           end
+
+          @all_contractors = ::Contractor.where(id: @contractor_ids, is_deleted: [false, nil], status: 'active')
 
         rescue JWT::ExpiredSignature
           render json: { error: 'Token has expired' }, status: :unauthorized
@@ -50,6 +62,28 @@ module Api
         @current_contractor
       end
 
+      def all_contractors
+        @all_contractors
+      end
+
+      def all_contractor_ids
+        @contractor_ids
+      end
+
+      def parse_photos(raw)
+        return [] unless raw.present?
+
+        arr = if raw.is_a?(String)
+          JSON.parse(raw) rescue []
+        elsif raw.is_a?(Array)
+          raw.map(&:to_s)
+        else
+          []
+        end
+
+        arr.select { |url| url.is_a?(String) && url.present? }
+      end
+
       def extract_token_from_header
         header = request.headers['Authorization']
         return nil unless header
@@ -57,8 +91,18 @@ module Api
       end
 
       def self.generate_contractor_token(contractor)
+        all_records = ::Contractor.where(
+          email: contractor.email.downcase.strip,
+          is_deleted: [false, nil],
+          status: 'active'
+        ).order(:created_at)
+
+        contractor_ids = all_records.pluck(:id)
+        primary_id = all_records.first&.id || contractor.id
+
         payload = {
-          contractor_id: contractor.id,
+          contractor_ids: contractor_ids,
+          primary_contractor_id: primary_id,
           email: contractor.email,
           exp: 7.days.from_now.to_i
         }

@@ -4,7 +4,7 @@ module Api
   module V1
     class ProjectsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task assign_phase_task_contractor unassign_phase_task_contractor assign_phase_task_user unassign_phase_task_user]
+      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task assign_phase_task_contractor unassign_phase_task_contractor assign_phase_task_user unassign_phase_task_user export_pdf]
 
       # GET /api/v1/projects
       def index
@@ -72,6 +72,7 @@ module Api
                      delivery_street delivery_city delivery_state delivery_zip
                      started_at estimated_completion_date actual_completion_date
                      owner_id deal_id vehicle_id location_id current_phase_id
+                     budget_amount actual_cost labor_cost materials_cost subcontractor_cost other_cost land_parcel_id
                      client_visible created_at updated_at],
             methods: [:current_phase_name, :progress_display, :home_display_name, :delivery_address_display]
           ),
@@ -96,12 +97,14 @@ module Api
                      delivery_street delivery_city delivery_state delivery_zip
                      started_at estimated_completion_date actual_completion_date
                      owner_id deal_id vehicle_id location_id current_phase_id project_template_id
+                     budget_amount actual_cost labor_cost materials_cost subcontractor_cost other_cost land_parcel_id
                      client_visible client_access_token custom_field_values created_at updated_at],
             methods: [:current_phase_name, :progress_display, :home_display_name, :delivery_address_display]
           ),
           phases: @project.project_phases.ordered.includes(project_phase_tasks: [:assigned_to, { contractor_assignments: :contractor }]).as_json(
             only: %i[id name description position status is_required
                      started_at completed_at estimated_start_date estimated_completion_date estimated_days
+                     estimated_budget actual_cost
                      visible_to_client notify_client_on_start notify_client_on_complete
                      notes client_notes icon color completed_by_id created_at updated_at],
             methods: [:status_display, :overdue?, :duration_days, :task_progress_percent, :tasks_summary,
@@ -111,6 +114,7 @@ module Api
                 only: %i[id name position status is_required completed_at completed_by_id
                          assigned_to_id visible_to_client client_actionable client_acknowledged_at client_acknowledged_by
                          estimated_days estimated_start_date estimated_completion_date],
+                methods: [:work_log_count],
                 include: {
                   assigned_to: {
                     only: %i[id first_name last_name email]
@@ -128,6 +132,24 @@ module Api
             }
           )
         }
+      end
+
+      # GET /api/v1/projects/:id/export_pdf
+      def export_pdf
+        return unless authorize_action!('deals', 'read')
+
+        sections = if params[:sections].present?
+          params[:sections].split(',').map(&:strip)
+        else
+          nil
+        end
+
+        pdf_content = ProjectPdfGenerator.new(@project, sections: sections, company: @company).generate
+
+        send_data pdf_content,
+          filename: "Project-#{@project.project_number || @project.id}.pdf",
+          type: 'application/pdf',
+          disposition: params[:inline] == 'true' ? 'inline' : 'attachment'
       end
 
       # POST /api/v1/projects
@@ -160,7 +182,9 @@ module Api
         if @project.update(project_params)
           render json: @project.as_json(
             only: %i[id name project_number description status progress_percent customer_name
-                     estimated_completion_date owner_id client_visible updated_at],
+                     estimated_completion_date owner_id client_visible
+                     budget_amount actual_cost labor_cost materials_cost subcontractor_cost other_cost land_parcel_id
+                     updated_at],
             methods: [:current_phase_name]
           )
         else
@@ -550,6 +574,7 @@ module Api
           :home_make, :home_model, :home_serial_number, :vehicle_id,
           :delivery_street, :delivery_city, :delivery_state, :delivery_zip,
           :estimated_completion_date, :client_visible,
+          :budget_amount, :land_parcel_id,
           custom_field_values: {}
           # NEVER permit: :company_id (Section 16)
         )
