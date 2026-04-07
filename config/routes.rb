@@ -144,6 +144,22 @@ Rails.application.routes.draw do
     
     # ==================== V1 API ====================
     namespace :v1 do
+      # ==================== AI REPORT QUERY ====================
+      scope 'report-ai', as: 'report_ai' do
+        post 'ask',               to: 'report_ai#ask'
+        post 'classify',          to: 'report_ai#classify'
+        post 'execute',           to: 'report_ai#execute'
+        post 'contextual',        to: 'report_ai#contextual'
+        get  'usage',             to: 'report_ai#usage'
+        get  'suggested',         to: 'report_ai#suggested'
+        get  'history',           to: 'report_ai#history'
+        get  'platform-insights', to: 'report_ai#platform_insights'
+        post 'trigger-digest',    to: 'report_ai#trigger_digest'
+        post 'refresh-digest',     to: 'report_ai#refresh_digest'
+        get  'digest-drilldown',   to: 'report_ai#digest_drilldown'
+        get  'failure-log',        to: 'report_ai#failure_log'
+      end
+
       # ==================== COMPANY SETTINGS (OPERATIONAL) ====================
       scope path: 'company_settings', controller: 'company_settings' do
         get 'operational', action: :show_operational
@@ -162,6 +178,8 @@ Rails.application.routes.draw do
         get 'form_states', action: :show_form_states
         patch 'form_states', action: :update_form_states
         get 'tax_rate_for_state', action: :tax_rate_for_state
+        get 'ai_settings', action: :ai_settings
+        patch 'ai_settings', action: :update_ai_settings
       end
       
       # ==================== GLOBAL SEARCH ====================

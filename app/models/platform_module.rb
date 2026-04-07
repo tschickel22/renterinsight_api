@@ -49,6 +49,7 @@ class PlatformModule
     'management.projects' => { name: 'Project Management', category: 'Management', icon: 'FolderKanban', description: 'Project tracking with phases, tasks, and client visibility' },
     'management.workflows' => { name: 'Workflow Automation', category: 'Management', icon: 'GitBranch', description: 'Business process automation' },
     'management.territories' => { name: 'Territory Management', category: 'Management', icon: 'MapPin', description: 'Sales territory assignment and tracking' },
+    'management_ai_reports' => { name: 'AI Report Queries', category: 'Management', icon: 'Sparkles', description: 'Natural language AI queries for reports' },
     
     # Administration
     'admin.settings' => { name: 'Company Settings', category: 'Administration', icon: 'Settings', description: 'Company configuration and branding' },

@@ -23,7 +23,7 @@ class Notification < ApplicationRecord
   # Validations
   validates :recipient_type, :recipient_id, :notification_type, :category, :title, :message, presence: true
   validates :priority, inclusion: { in: %w[urgent high normal low] }
-  validates :category, inclusion: { in: %w[service crm sales finance system broadcast communications] }
+  validates :category, inclusion: { in: %w[service crm sales finance system broadcast communications ai] }
   
   # Notification types with their default settings
   TYPES = {

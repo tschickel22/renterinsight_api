@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_07_034030) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_07_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -421,6 +421,36 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_07_034030) do
     t.index ["insight_type"], name: "index_ai_insights_on_insight_type"
     t.index ["lead_id", "is_read"], name: "index_ai_insights_on_lead_id_and_is_read"
     t.index ["lead_id"], name: "index_ai_insights_on_lead_id"
+  end
+
+  create_table "ai_query_logs", force: :cascade do |t|
+    t.bigint "company_id"
+    t.bigint "user_id"
+    t.bigint "location_id"
+    t.string "feature"
+    t.string "module_key"
+    t.text "question"
+    t.jsonb "generated_params", default: {}
+    t.string "execution_status", default: "success"
+    t.integer "result_count"
+    t.integer "input_tokens"
+    t.integer "output_tokens"
+    t.integer "cost_cents"
+    t.integer "response_time_ms"
+    t.text "error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "action_name"
+    t.string "failure_reason"
+    t.string "entity_name_searched"
+    t.string "entity_type_attempted"
+    t.text "user_question"
+    t.string "resolved_intent"
+    t.integer "disambiguate_count"
+    t.index ["action_name"], name: "index_ai_query_logs_on_action_name"
+    t.index ["company_id", "feature", "created_at"], name: "index_ai_query_logs_on_company_id_and_feature_and_created_at"
+    t.index ["company_id", "module_key"], name: "index_ai_query_logs_on_company_id_and_module_key"
+    t.index ["failure_reason"], name: "index_ai_query_logs_on_failure_reason"
   end
 
   create_table "api_keys", force: :cascade do |t|
@@ -2213,7 +2243,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_07_034030) do
     t.string "email"
     t.string "phone"
     t.text "notes"
-    t.integer "source_id", null: false
+    t.integer "source_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "status"

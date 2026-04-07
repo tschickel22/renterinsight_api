@@ -555,6 +555,34 @@ module Api
           default_sales_tax_rate: 0.0
         }
       end
+
+      # GET /api/v1/company_settings/ai_settings
+      def ai_settings
+        unless current_user&.role == 'platform_admin'
+          return render json: { error: 'Platform admin required' }, status: :forbidden
+        end
+        limit = begin
+          Setting.get('Company', @company.id, 'ai_report_queries_monthly_limit', nil)
+        rescue
+          nil
+        end
+        platform_default = begin
+          Setting.get('Platform', 0, 'ai_report_queries_monthly_limit', 100)
+        rescue
+          100
+        end
+        render json: { ai_report_queries_monthly_limit: limit&.to_i || platform_default.to_i }
+      end
+
+      # PATCH /api/v1/company_settings/ai_settings
+      def update_ai_settings
+        unless current_user&.role == 'platform_admin'
+          return render json: { error: 'Platform admin required' }, status: :forbidden
+        end
+        limit = params[:ai_report_queries_monthly_limit].to_i
+        Setting.set('Company', @company.id, 'ai_report_queries_monthly_limit', limit.to_s)
+        render json: { ai_report_queries_monthly_limit: limit, message: 'AI settings saved' }
+      end
     end
   end
 end
