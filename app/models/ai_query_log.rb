@@ -4,7 +4,7 @@ class AiQueryLog < ApplicationRecord
   belongs_to :location, optional: true
 
   FEATURES = %w[report_ai vision_scan].freeze
-  STATUSES = %w[success error rate_limited no_results].freeze
+  STATUSES = %w[success error rate_limited no_results classified no_match disambiguation].freeze
 
   validates :feature, inclusion: { in: FEATURES }
   validates :execution_status, inclusion: { in: STATUSES }
