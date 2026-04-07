@@ -4,7 +4,7 @@ module Api
   module V1
     class ProjectsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task assign_phase_task_contractor unassign_phase_task_contractor assign_phase_task_user unassign_phase_task_user export_pdf]
+      before_action :set_project, only: %i[show update destroy advance_phase undo_advance skip_phase set_phase_status toggle_task assign_phase_task_contractor unassign_phase_task_contractor assign_phase_task_user unassign_phase_task_user export_pdf flush_assignment_notifications pause_assignment_notifications resume_assignment_notifications skip_assignment_notification unskip_assignment_notification]
 
       # GET /api/v1/projects
       def index
@@ -120,7 +120,7 @@ module Api
                     only: %i[id first_name last_name email]
                   },
                   contractor_assignments: {
-                    only: %i[id status assigned_at],
+                    only: %i[id status assigned_at notified_at notification_paused_at notification_skipped_at review_status submitted_for_review_at review_notified_at],
                     include: {
                       contractor: {
                         only: %i[id name contact_name trade_type phone email]
@@ -150,6 +150,111 @@ module Api
           filename: "Project-#{@project.project_number || @project.id}.pdf",
           type: 'application/pdf',
           disposition: params[:inline] == 'true' ? 'inline' : 'attachment'
+      end
+
+      # POST /api/v1/projects/:id/flush_assignment_notifications
+      # Immediately flushes any pending batched contractor-assignment emails for this
+      # project AND any pending dealer-review emails. Dispatches INLINE (not via the
+      # debounced job) so the response only returns after emails are sent and
+      # notified_at / review_notified_at have been stamped.
+      def flush_assignment_notifications
+        return unless authorize_action!('deals', 'update')
+
+        # 1. Contractor assignment emails — find distinct contractors with pending rows.
+        # Flush respects pause AND skip: if the user paused/skipped, that intent holds.
+        contractor_ids = ContractorAssignment.joins(
+          "INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id"
+        ).joins(
+          "INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id"
+        ).where(
+          contractor_assignments: {
+            assignable_type: 'ProjectPhaseTask',
+            notified_at: nil,
+            notification_paused_at: nil,
+            notification_skipped_at: nil
+          },
+          project_phases: { project_id: @project.id }
+        ).distinct.pluck(:contractor_id)
+
+        contractor_sent = 0
+        contractor_ids.each do |cid|
+          contractor_sent += ProjectNotificationService.dispatch_pending_assignments_for_contractor(cid)
+        end
+
+        # 2. Dealer review emails for this project (if flush is clicked from the Reviews UI)
+        review_sent = ProjectNotificationService.dispatch_pending_reviews_for_project(@project.id)
+
+        render json: {
+          flushed: contractor_sent,
+          contractor_ids: contractor_ids,
+          reviews_flushed: review_sent
+        }
+      end
+
+      # POST /api/v1/projects/:id/pause_assignment_notifications
+      # Pauses the auto-send timer for all pending unsent assignments on this project.
+      def pause_assignment_notifications
+        return unless authorize_action!('deals', 'update')
+
+        count = project_pending_assignments_scope
+          .where(contractor_assignments: { notification_paused_at: nil })
+          .update_all(notification_paused_at: Time.current)
+
+        render json: { ok: true, paused: count }
+      end
+
+      # POST /api/v1/projects/:id/resume_assignment_notifications
+      # Clears pause on all paused (still-pending) assignments for this project
+      # and re-enqueues the debounced notifier job so the timer restarts.
+      def resume_assignment_notifications
+        return unless authorize_action!('deals', 'update')
+
+        resumed_scope = project_pending_assignments_scope
+          .where.not(contractor_assignments: { notification_paused_at: nil })
+
+        contractor_ids = resumed_scope.distinct.pluck(:contractor_id)
+        count = resumed_scope.update_all(notification_paused_at: nil)
+
+        # Re-enqueue the debounced job per contractor so the timer restarts.
+        delay = (ENV['CONTRACTOR_NOTIFICATION_DELAY_MINUTES'] || 10).to_i.minutes
+        contractor_ids.each do |cid|
+          ContractorAssignmentNotifierJob.set(wait: delay).perform_later(cid)
+        end
+
+        render json: { ok: true, resumed: count, contractor_ids: contractor_ids }
+      end
+
+      # POST /api/v1/projects/:id/skip_assignment_notification
+      # Body: { assignment_id: <int> }
+      # Marks a single pending assignment's notification as skipped (don't send this batch).
+      def skip_assignment_notification
+        return unless authorize_action!('deals', 'update')
+
+        assignment = find_project_assignment(params[:assignment_id])
+        return unless assignment
+
+        if assignment.notified_at.present?
+          return render json: { error: 'Cannot skip an already-sent notification' }, status: :unprocessable_entity
+        end
+
+        assignment.update!(notification_skipped_at: Time.current)
+        render json: { ok: true, assignment: assignment_notification_state(assignment) }
+      end
+
+      # POST /api/v1/projects/:id/unskip_assignment_notification
+      # Body: { assignment_id: <int> }
+      def unskip_assignment_notification
+        return unless authorize_action!('deals', 'update')
+
+        assignment = find_project_assignment(params[:assignment_id])
+        return unless assignment
+
+        if assignment.notified_at.present?
+          return render json: { error: 'Cannot modify an already-sent notification' }, status: :unprocessable_entity
+        end
+
+        assignment.update!(notification_skipped_at: nil)
+        render json: { ok: true, assignment: assignment_notification_state(assignment) }
       end
 
       # POST /api/v1/projects
@@ -561,6 +666,68 @@ module Api
 
       private
 
+      # Shared scope: pending, unsent contractor assignments on a ProjectPhaseTask
+      # in the current @project. Used by pause/resume endpoints.
+      def project_pending_assignments_scope
+        ContractorAssignment.joins(
+          "INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id"
+        ).joins(
+          "INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id"
+        ).where(
+          contractor_assignments: { assignable_type: 'ProjectPhaseTask', notified_at: nil },
+          project_phases: { project_id: @project.id }
+        )
+      end
+
+      # Loads an assignment by id scoped to the current project.
+      # Renders a 404 and returns nil if not found.
+      def find_project_assignment(assignment_id)
+        assignment = ContractorAssignment.joins(
+          "INNER JOIN project_phase_tasks ON project_phase_tasks.id = contractor_assignments.assignable_id"
+        ).joins(
+          "INNER JOIN project_phases ON project_phases.id = project_phase_tasks.project_phase_id"
+        ).where(
+          contractor_assignments: { assignable_type: 'ProjectPhaseTask' },
+          project_phases: { project_id: @project.id }
+        ).find_by(id: assignment_id)
+
+        unless assignment
+          render json: { error: 'Assignment not found for this project' }, status: :not_found
+          return nil
+        end
+
+        assignment
+      end
+
+      def assignment_notification_state(assignment)
+        {
+          id: assignment.id,
+          notified_at: assignment.notified_at,
+          notification_paused_at: assignment.notification_paused_at,
+          notification_skipped_at: assignment.notification_skipped_at
+        }
+      end
+
+      # Default project owner waterfall (overridable via params[:owner_id]):
+      # 1. Explicit owner_id in params
+      # 2. Deal's account.owner (sales rep that owns the account)
+      # 3. Deal's owner
+      # 4. current_user
+      def resolve_default_project_owner(deal = nil)
+        if params[:owner_id].present?
+          explicit = @company.users.find_by(id: params[:owner_id])
+          return explicit if explicit
+        end
+
+        if deal
+          account = deal.account rescue nil
+          return account.owner if account&.respond_to?(:owner) && account.owner.present?
+          return deal.owner if deal.respond_to?(:owner) && deal.owner.present?
+        end
+
+        current_user
+      end
+
       def set_project
         @project = @company.projects.not_deleted.find(params[:id])
       rescue ActiveRecord::RecordNotFound
@@ -587,11 +754,15 @@ module Api
         deal = @company.deals.find_by(id: params[:deal_id])
         return render(json: { error: 'Deal not found' }, status: :not_found) unless deal
 
+        # Default project owner waterfall: explicit param → account owner → deal owner → current_user.
+        # This lets a sales rep own the account/deal while a PM can be explicitly set as project owner.
+        default_owner = resolve_default_project_owner(deal)
+
         project = template.create_project!(
           company: @company,
           deal: deal,
           name: params[:name],
-          owner: current_user,
+          owner: default_owner,
           created_by: current_user
         )
 

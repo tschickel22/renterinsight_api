@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_06_033424) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_06_192050) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1317,10 +1317,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_06_033424) do
     t.jsonb "completion_photos", default: []
     t.text "revision_notes"
     t.integer "revision_count", default: 0
+    t.datetime "notified_at"
+    t.datetime "review_notified_at"
+    t.datetime "notification_paused_at"
+    t.datetime "notification_skipped_at"
     t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
     t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
     t.index ["company_id"], name: "index_contractor_assignments_on_company_id"
     t.index ["contractor_id"], name: "index_contractor_assignments_on_contractor_id"
+    t.index ["notification_paused_at"], name: "index_contractor_assignments_on_notification_paused_at"
+    t.index ["notification_skipped_at"], name: "index_contractor_assignments_on_notification_skipped_at"
+    t.index ["notified_at"], name: "index_contractor_assignments_on_notified_at"
+    t.index ["review_notified_at"], name: "index_contractor_assignments_on_review_notified_at"
     t.index ["review_status"], name: "index_contractor_assignments_on_review_status"
     t.index ["reviewed_by_id"], name: "index_contractor_assignments_on_reviewed_by_id"
     t.index ["status"], name: "index_contractor_assignments_on_status"

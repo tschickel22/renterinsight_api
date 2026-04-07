@@ -274,6 +274,11 @@ Rails.application.routes.draw do
           post :assign_phase_task_user            # POST body: { phase_id:, task_id:, user_id: }
           delete :unassign_phase_task_user        # DELETE body: { phase_id:, task_id: }
           get :export_pdf
+          post :flush_assignment_notifications
+          post :pause_assignment_notifications
+          post :resume_assignment_notifications
+          post :skip_assignment_notification
+          post :unskip_assignment_notification
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
         resources :phases, only: [:update], controller: 'project_phases' do

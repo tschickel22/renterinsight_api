@@ -11,11 +11,23 @@ class AssignmentWorkLog < ApplicationRecord
 
   scope :ordered, -> { order(logged_at: :desc, created_at: :desc) }
 
+  after_commit :notify_work_log_added, on: :create
+
   private
 
   def must_have_author
     if contractor_id.blank? && user_id.blank?
       errors.add(:base, 'Must have either a contractor or user as author')
     end
+  end
+
+  def notify_work_log_added
+    return unless contractor_assignment.present?
+    return unless author_type == 'contractor'
+    return if log_type == 'status_change' # skip auto status entries to reduce noise
+
+    ProjectNotificationService.notify_work_log_added(self, contractor_assignment)
+  rescue => e
+    Rails.logger.error("[AssignmentWorkLog] Notification error: #{e.message}")
   end
 end

@@ -71,7 +71,16 @@ class Notification < ApplicationRecord
 
     # SMS / Communications notifications
     sms_reply_received: { category: 'communications', priority: 'high', title: 'SMS Reply Received' },
-    sms_cap_alert: { category: 'system', priority: 'normal', title: 'SMS Usage Alert' }
+    sms_cap_alert: { category: 'system', priority: 'normal', title: 'SMS Usage Alert' },
+
+    # Project / Contractor notifications
+    contractor_review_submitted: { category: 'service', priority: 'high', title: 'Contractor Submitted for Review' },
+    contractor_review_approved: { category: 'service', priority: 'normal', title: 'Work Approved' },
+    contractor_review_revision: { category: 'service', priority: 'high', title: 'Revision Requested' },
+    contractor_review_rejected: { category: 'service', priority: 'normal', title: 'Work Rejected' },
+    contractor_task_assigned: { category: 'service', priority: 'high', title: 'New Task Assignment' },
+    project_phase_completed: { category: 'service', priority: 'normal', title: 'Project Phase Completed' },
+    contractor_work_log_added: { category: 'service', priority: 'low', title: 'Work Log Entry Added' }
   }.freeze
   
   # Mark notification as read
@@ -112,6 +121,8 @@ class Notification < ApplicationRecord
       "/tasks/#{notifiable_id}"
     when 'Communication'
       "/portal/messages"
+    when 'ContractorAssignment'
+      "/projects/reviews"
     when 'Note'
       # Try to get parent URL
       if notifiable.notable_type == 'Lead'
@@ -156,6 +167,8 @@ class Notification < ApplicationRecord
       'View Task'
     when 'Communication'
       'View Message'
+    when 'ContractorAssignment'
+      'Review Now'
     when 'Note'
       'View Note'
     else
