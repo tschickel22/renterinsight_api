@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_06_192050) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_07_034030) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -3723,6 +3723,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_06_192050) do
     t.index ["company_id"], name: "index_reorder_rules_on_company_id"
     t.index ["location_id"], name: "index_reorder_rules_on_location_id"
     t.index ["part_id"], name: "index_reorder_rules_on_part_id"
+  end
+
+  create_table "reports", force: :cascade do |t|
+    t.string "name"
+    t.text "description"
+    t.string "module_key"
+    t.jsonb "config"
+    t.string "status"
+    t.integer "company_id"
+    t.integer "user_id"
+    t.integer "location_id"
+    t.boolean "is_favorite"
+    t.boolean "is_deleted"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "visibility"
+    t.jsonb "shared_user_ids", default: []
+    t.index ["company_id", "module_key"], name: "index_reports_on_company_id_and_module_key"
+    t.index ["shared_user_ids"], name: "index_reports_on_shared_user_ids", using: :gin
   end
 
   create_table "resources", force: :cascade do |t|

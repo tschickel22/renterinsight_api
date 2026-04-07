@@ -6,6 +6,26 @@ class Lead < ApplicationRecord
   include LocationAware
   include NotifiableLead
   include WebhookNotifiable
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Leads",
+      category: "crm",
+      fields: [
+        { key: "id",         label: "ID",          type: "number",  filterable: true,  sortable: true },
+        { key: "first_name", label: "First Name",  type: "string",  filterable: true,  sortable: true },
+        { key: "last_name",  label: "Last Name",   type: "string",  filterable: true,  sortable: true },
+        { key: "email",      label: "Email",       type: "string",  filterable: true,  sortable: true },
+        { key: "phone",      label: "Phone",       type: "string",  filterable: true,  sortable: false },
+        { key: "status",     label: "Status",      type: "enum",    filterable: true,  sortable: true },
+        { key: "source_id",  label: "Source",      type: "number",  filterable: true,  sortable: true },
+        { key: "owner_id",   label: "Assigned To", type: "number",  filterable: true,  sortable: true },
+        { key: "created_at", label: "Created At",  type: "date",    filterable: true,  sortable: true },
+        { key: "updated_at", label: "Updated At",  type: "date",    filterable: true,  sortable: true }
+      ]
+    }
+  end
 
   # Transient flag — set to true to suppress assignment notifications (e.g. bulk edits)
   attr_accessor :skip_notifications

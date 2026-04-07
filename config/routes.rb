@@ -1085,6 +1085,20 @@ Rails.application.routes.draw do
         post 'nurture/:enrollment_id/unenroll', to: 'contact_nurture#unenroll'
       end
       
+      # ==================== REPORTS ====================
+      resources :reports do
+        collection do
+          post :run
+          get :modules
+          get :fields
+        end
+        member do
+          post :share
+          delete :unshare
+          get :export
+        end
+      end
+
       # ==================== ACCOUNTS ====================
       resources :accounts do
         member do

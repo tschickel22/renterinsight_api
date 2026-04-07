@@ -3,7 +3,35 @@
 class Part < ApplicationRecord
   include ActivityTrackable
   include Customizable
-  
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Parts",
+      category: "inventory",
+      fields: [
+        { key: "id",                  label: "ID",               type: "number",  filterable: true,  sortable: true  },
+        { key: "sku",                 label: "SKU",              type: "string",  filterable: true,  sortable: true  },
+        { key: "name",                label: "Name",             type: "string",  filterable: true,  sortable: true  },
+        { key: "description",         label: "Description",      type: "string",  filterable: false, sortable: false },
+        { key: "manufacturer_name",   label: "Manufacturer",     type: "string",  filterable: true,  sortable: true  },
+        { key: "manufacturer_part_no",label: "Mfr Part No",      type: "string",  filterable: true,  sortable: true  },
+        { key: "barcode",             label: "Barcode",          type: "string",  filterable: true,  sortable: false },
+        { key: "uom",                 label: "Unit of Measure",  type: "string",  filterable: true,  sortable: true  },
+        { key: "default_cost",        label: "Default Cost",     type: "number",  filterable: true,  sortable: true  },
+        { key: "average_cost",        label: "Average Cost",     type: "number",  filterable: true,  sortable: true  },
+        { key: "last_cost",           label: "Last Cost",        type: "number",  filterable: true,  sortable: true  },
+        { key: "list_price",          label: "List Price",       type: "number",  filterable: true,  sortable: true  },
+        { key: "sale_price",          label: "Sale Price",       type: "number",  filterable: true,  sortable: true  },
+        { key: "taxable",             label: "Taxable",          type: "boolean", filterable: true,  sortable: false },
+        { key: "active",              label: "Active",           type: "boolean", filterable: true,  sortable: false },
+        { key: "inventory_method",    label: "Inventory Method", type: "enum",    filterable: true,  sortable: false },
+        { key: "created_at",          label: "Created At",       type: "date",    filterable: true,  sortable: true  },
+        { key: "updated_at",          label: "Updated At",       type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
+
   # Associations
   belongs_to :company
   belongs_to :category, class_name: 'PartCategory', optional: true

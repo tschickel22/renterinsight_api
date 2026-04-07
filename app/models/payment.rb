@@ -8,6 +8,29 @@
 class Payment < ApplicationRecord
   include ActivityTrackable
   include LocationAware
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Payments",
+      category: "finance",
+      fields: [
+        { key: "id",             label: "ID",              type: "number",  filterable: true,  sortable: true  },
+        { key: "payment_number", label: "Payment Number",  type: "string",  filterable: true,  sortable: true  },
+        { key: "payment_type",   label: "Payment Type",   type: "enum",    filterable: true,  sortable: true  },
+        { key: "gateway_name",   label: "Gateway",        type: "enum",    filterable: true,  sortable: true  },
+        { key: "status",         label: "Status",         type: "enum",    filterable: true,  sortable: true  },
+        { key: "amount",         label: "Amount",         type: "number",  filterable: true,  sortable: true  },
+        { key: "fee_amount",     label: "Fee Amount",     type: "number",  filterable: true,  sortable: true  },
+        { key: "processing_fee", label: "Processing Fee", type: "number",  filterable: true,  sortable: true  },
+        { key: "total_charged",  label: "Total Charged",  type: "number",  filterable: true,  sortable: true  },
+        { key: "payer_type",     label: "Payer Type",     type: "string",  filterable: true,  sortable: false },
+        { key: "payment_date",   label: "Payment Date",   type: "date",    filterable: true,  sortable: true  },
+        { key: "processed_at",   label: "Processed At",   type: "date",    filterable: true,  sortable: true  },
+        { key: "created_at",     label: "Created At",     type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
   include WebhookNotifiable
   
   # Constants

@@ -5,7 +5,26 @@ class Contact < ApplicationRecord
   include LocationAware
   include NotifiableContact
   include WebhookNotifiable
-  
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Contacts",
+      category: "crm",
+      fields: [
+        { key: "id",         label: "ID",         type: "number", filterable: true, sortable: true },
+        { key: "first_name", label: "First Name", type: "string", filterable: true, sortable: true },
+        { key: "last_name",  label: "Last Name",  type: "string", filterable: true, sortable: true },
+        { key: "email",      label: "Email",      type: "string", filterable: true, sortable: true },
+        { key: "phone",      label: "Phone",      type: "string", filterable: true, sortable: false },
+        { key: "title",      label: "Title",      type: "string", filterable: true, sortable: true },
+        { key: "account_id", label: "Account",    type: "number", filterable: true, sortable: true },
+        { key: "created_at", label: "Created At", type: "date",   filterable: true, sortable: true },
+        { key: "updated_at", label: "Updated At", type: "date",   filterable: true, sortable: true }
+      ]
+    }
+  end
+
   # Associations
   belongs_to :account, optional: true
   belongs_to :company, optional: true

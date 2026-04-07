@@ -31,7 +31,32 @@ class ServiceTicket < ApplicationRecord
   include LocationAware
   include NotifiableServiceTicket
   include WebhookNotifiable
-  
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Service Tickets",
+      category: "operations",
+      fields: [
+        { key: "id",                    label: "ID",                    type: "number",  filterable: true,  sortable: true  },
+        { key: "ticket_number",         label: "Ticket Number",         type: "string",  filterable: true,  sortable: true  },
+        { key: "title",                 label: "Title",                 type: "string",  filterable: true,  sortable: true  },
+        { key: "status",                label: "Status",                type: "enum",    filterable: true,  sortable: true  },
+        { key: "priority",              label: "Priority",              type: "enum",    filterable: true,  sortable: true  },
+        { key: "assigned_to",           label: "Assigned To",           type: "string",  filterable: true,  sortable: true  },
+        { key: "contact_id",            label: "Contact",               type: "number",  filterable: true,  sortable: true  },
+        { key: "account_id",            label: "Account",               type: "number",  filterable: true,  sortable: true  },
+        { key: "scheduled_date",        label: "Scheduled Date",        type: "date",    filterable: true,  sortable: true  },
+        { key: "is_warranty_suspected", label: "Warranty Suspected",    type: "boolean", filterable: true,  sortable: false },
+        { key: "is_warranty_confirmed", label: "Warranty Confirmed",    type: "boolean", filterable: true,  sortable: false },
+        { key: "description",           label: "Description",           type: "string",  filterable: false, sortable: false },
+        { key: "notes",                 label: "Notes",                 type: "string",  filterable: false, sortable: false },
+        { key: "created_at",            label: "Created At",            type: "date",    filterable: true,  sortable: true  },
+        { key: "updated_at",            label: "Updated At",            type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
+
   # Associations
   belongs_to :company
   belongs_to :location, optional: true

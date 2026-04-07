@@ -4,6 +4,36 @@ class Vehicle < ApplicationRecord
   include ActivityTrackable
   include LocationAware
   include WebhookNotifiable
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Homes",
+      category: "inventory",
+      fields: [
+        { key: "id",           label: "ID",           type: "number", filterable: true,  sortable: true  },
+        { key: "inventory_id", label: "Inventory ID", type: "string", filterable: true,  sortable: true  },
+        { key: "listing_type", label: "Type",         type: "enum",   filterable: true,  sortable: true  },
+        { key: "status",       label: "Status",       type: "enum",   filterable: true,  sortable: true  },
+        { key: "condition",    label: "Condition",    type: "enum",   filterable: true,  sortable: true  },
+        { key: "year",         label: "Year",         type: "number", filterable: true,  sortable: true  },
+        { key: "make",         label: "Make",         type: "string", filterable: true,  sortable: true  },
+        { key: "model",        label: "Model",        type: "string", filterable: true,  sortable: true  },
+        { key: "trim",         label: "Trim",         type: "string", filterable: true,  sortable: false },
+        { key: "serial_number",label: "Serial Number",type: "string", filterable: true,  sortable: true  },
+        { key: "vin",          label: "VIN",          type: "string", filterable: true,  sortable: true  },
+        { key: "stock_number", label: "Stock Number", type: "string", filterable: true,  sortable: true  },
+        { key: "bedrooms",     label: "Bedrooms",     type: "number", filterable: true,  sortable: true  },
+        { key: "bathrooms",    label: "Bathrooms",    type: "number", filterable: true,  sortable: true  },
+        { key: "msrp",         label: "MSRP",         type: "number", filterable: true,  sortable: true  },
+        { key: "sale_price",   label: "Sale Price",   type: "number", filterable: true,  sortable: true  },
+        { key: "cost",         label: "Cost",         type: "number", filterable: true,  sortable: true  },
+        { key: "color",        label: "Color",        type: "string", filterable: true,  sortable: false },
+        { key: "created_at",   label: "Created At",   type: "date",   filterable: true,  sortable: true  },
+        { key: "updated_at",   label: "Updated At",   type: "date",   filterable: true,  sortable: true  }
+      ]
+    }
+  end
   
   # Virtual attribute for import: accepts URL string, converts to floor_plan_images array
   attr_accessor :floor_plan_url

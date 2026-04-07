@@ -3,6 +3,33 @@ class Invoice < ApplicationRecord
   include Addressable
   include Buyable
   include WebhookNotifiable
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Invoices",
+      category: "finance",
+      fields: [
+        { key: "id",              label: "ID",              type: "number",  filterable: true,  sortable: true  },
+        { key: "invoice_number",  label: "Invoice Number",  type: "string",  filterable: true,  sortable: true  },
+        { key: "status",          label: "Status",          type: "enum",    filterable: true,  sortable: true  },
+        { key: "billing_category",label: "Billing Category",type: "enum",    filterable: true,  sortable: true  },
+        { key: "subtotal",        label: "Subtotal",        type: "number",  filterable: true,  sortable: true  },
+        { key: "tax_amount",      label: "Tax",             type: "number",  filterable: true,  sortable: true  },
+        { key: "total",           label: "Total",           type: "number",  filterable: true,  sortable: true  },
+        { key: "amount_paid",     label: "Amount Paid",     type: "number",  filterable: true,  sortable: true  },
+        { key: "amount_due",      label: "Amount Due",      type: "number",  filterable: true,  sortable: true  },
+        { key: "contact_id",      label: "Contact",         type: "number",  filterable: true,  sortable: true  },
+        { key: "deal_id",         label: "Deal",            type: "number",  filterable: true,  sortable: true  },
+        { key: "invoice_date",    label: "Invoice Date",    type: "date",    filterable: true,  sortable: true  },
+        { key: "due_date",        label: "Due Date",        type: "date",    filterable: true,  sortable: true  },
+        { key: "sent_at",         label: "Sent At",         type: "date",    filterable: true,  sortable: true  },
+        { key: "paid_at",         label: "Paid At",         type: "date",    filterable: true,  sortable: true  },
+        { key: "notes",           label: "Notes",           type: "string",  filterable: false, sortable: false },
+        { key: "created_at",      label: "Created At",      type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
 
   belongs_to :company
   belongs_to :location, optional: true

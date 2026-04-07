@@ -39,6 +39,34 @@
 class WarrantyClaim < ApplicationRecord
   include LocationAware
   include NotifiableWarrantyClaim
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Warranty Claims",
+      category: "operations",
+      fields: [
+        { key: "id",                        label: "ID",               type: "number",  filterable: true,  sortable: true  },
+        { key: "claim_number",              label: "Claim Number",     type: "string",  filterable: true,  sortable: true  },
+        { key: "manufacturer_claim_number", label: "Mfr Claim Number", type: "string",  filterable: true,  sortable: true  },
+        { key: "status",                    label: "Status",           type: "enum",    filterable: true,  sortable: true  },
+        { key: "manufacturer_id",           label: "Manufacturer",     type: "number",  filterable: true,  sortable: true  },
+        { key: "service_ticket_id",         label: "Service Ticket",   type: "number",  filterable: true,  sortable: true  },
+        { key: "estimated_amount",          label: "Estimated Amount", type: "number",  filterable: true,  sortable: true  },
+        { key: "approved_amount",           label: "Approved Amount",  type: "number",  filterable: true,  sortable: true  },
+        { key: "client_copay_amount",       label: "Client Copay",     type: "number",  filterable: true,  sortable: true  },
+        { key: "submitted_by",              label: "Submitted By",     type: "string",  filterable: true,  sortable: false },
+        { key: "submitted_at",              label: "Submitted At",     type: "date",    filterable: true,  sortable: true  },
+        { key: "approved_at",               label: "Approved At",      type: "date",    filterable: true,  sortable: true  },
+        { key: "denied_at",                 label: "Denied At",        type: "date",    filterable: true,  sortable: true  },
+        { key: "closed_at",                 label: "Closed At",        type: "date",    filterable: true,  sortable: true  },
+        { key: "denial_reason",             label: "Denial Reason",    type: "string",  filterable: false, sortable: false },
+        { key: "notes_internal",            label: "Internal Notes",   type: "string",  filterable: false, sortable: false },
+        { key: "created_at",                label: "Created At",       type: "date",    filterable: true,  sortable: true  },
+        { key: "updated_at",                label: "Updated At",       type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
   
   STATUSES = %w[
     draft 

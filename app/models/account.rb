@@ -5,7 +5,26 @@ class Account < ApplicationRecord
   include LocationAware
   include NotifiableAccount
   include WebhookNotifiable
-  
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Accounts",
+      category: "crm",
+      fields: [
+        { key: "id",           label: "ID",          type: "number", filterable: true, sortable: true },
+        { key: "name",         label: "Name",        type: "string", filterable: true, sortable: true },
+        { key: "email",        label: "Email",       type: "string", filterable: true, sortable: true },
+        { key: "phone",        label: "Phone",       type: "string", filterable: true, sortable: false },
+        { key: "website",      label: "Website",     type: "string", filterable: true, sortable: false },
+        { key: "account_type", label: "Type",        type: "enum",   filterable: true, sortable: true },
+        { key: "status",       label: "Status",      type: "enum",   filterable: true, sortable: true },
+        { key: "created_at",   label: "Created At",  type: "date",   filterable: true, sortable: true },
+        { key: "updated_at",   label: "Updated At",  type: "date",   filterable: true, sortable: true }
+      ]
+    }
+  end
+
   # Account Types
   ACCOUNT_TYPES = %w[customer prospect vendor partner competitor converted_lead].freeze
   STATUSES = %w[active inactive pending archived].freeze

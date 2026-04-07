@@ -5,7 +5,37 @@ class Deal < ApplicationRecord
   include LocationAware
   include NotifiableDeal
   include WebhookNotifiable
-  
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Deals",
+      category: "crm",
+      fields: [
+        { key: "id",                  label: "ID",                  type: "number",  filterable: true,  sortable: true  },
+        { key: "deal_number",         label: "Deal Number",         type: "string",  filterable: true,  sortable: true  },
+        { key: "name",                label: "Title",               type: "string",  filterable: true,  sortable: true  },
+        { key: "stage",               label: "Stage",               type: "enum",    filterable: true,  sortable: true  },
+        { key: "value",               label: "Value",               type: "number",  filterable: true,  sortable: true  },
+        { key: "selling_price",       label: "Selling Price",       type: "number",  filterable: true,  sortable: true  },
+        { key: "unit_cost",           label: "Unit Cost",           type: "number",  filterable: true,  sortable: true  },
+        { key: "probability",         label: "Probability (%)",     type: "number",  filterable: true,  sortable: true  },
+        { key: "customer_name",       label: "Customer",            type: "string",  filterable: true,  sortable: true  },
+        { key: "owner_id",            label: "Assigned To",         type: "number",  filterable: true,  sortable: true  },
+        { key: "account_id",          label: "Account",             type: "number",  filterable: true,  sortable: true  },
+        { key: "contact_id",          label: "Contact",             type: "number",  filterable: true,  sortable: true  },
+        { key: "expected_close_date", label: "Expected Close Date", type: "date",    filterable: true,  sortable: true  },
+        { key: "actual_close_date",   label: "Actual Close Date",   type: "date",    filterable: true,  sortable: true  },
+        { key: "won_at",              label: "Won At",              type: "date",    filterable: true,  sortable: true  },
+        { key: "lost_at",             label: "Lost At",             type: "date",    filterable: true,  sortable: true  },
+        { key: "win_reason",          label: "Win Reason",          type: "string",  filterable: false, sortable: false },
+        { key: "loss_reason",         label: "Loss Reason",         type: "string",  filterable: false, sortable: false },
+        { key: "created_at",          label: "Created At",          type: "date",    filterable: true,  sortable: true  },
+        { key: "updated_at",          label: "Updated At",          type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
+
   belongs_to :company, optional: true
   belongs_to :location, optional: true
   belongs_to :account, optional: true
