@@ -11,7 +11,7 @@ class WorkflowRun < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
 
   scope :active, -> { where(status: %w[pending running waiting]) }
-  scope :due_for_resume, -> { where(status: 'waiting', wait_reason: 'delay').where('wait_until <= ?', Time.current) }
+  scope :due_for_resume, -> { where(status: 'waiting', wait_reason: %w[delay reply_pause approval]).where('wait_until <= ?', Time.current) }
 
   after_update_commit :fire_status_webhook
 
