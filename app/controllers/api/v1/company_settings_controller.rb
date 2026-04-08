@@ -580,8 +580,13 @@ module Api
           return render json: { error: 'Platform admin required' }, status: :forbidden
         end
         limit = params[:ai_report_queries_monthly_limit].to_i
-        Setting.set('Company', @company.id, 'ai_report_queries_monthly_limit', limit.to_s)
-        render json: { ai_report_queries_monthly_limit: limit, message: 'AI settings saved' }
+        begin
+          Setting.set('Company', @company.id, 'ai_report_queries_monthly_limit', limit.to_s)
+          render json: { ai_report_queries_monthly_limit: limit, message: 'AI settings saved' }
+        rescue => e
+          Rails.logger.error "[CompanySettings] Failed to save AI limit: #{e.message}"
+          render json: { error: "Failed to save: #{e.message}" }, status: :unprocessable_entity
+        end
       end
     end
   end
