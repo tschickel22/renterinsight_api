@@ -9,7 +9,7 @@ module ImportExport
       'accounts'        => { model: 'Account',       scope: :accounts,        match_fields: %w[name email],            label: 'Accounts',        supports_images: true  },
       'contacts'        => { model: 'Contact',       scope: :contacts,        match_fields: %w[email],                 label: 'Contacts',        supports_images: true  },
       'leads'           => { model: 'Lead',          scope: :leads,           match_fields: %w[email phone],           label: 'Leads',           supports_images: false },
-      'deals'           => { model: 'Deal',          scope: :deals,           match_fields: %w[title],                 label: 'Deals',           supports_images: false },
+      'deals'           => { model: 'Deal',          scope: :deals,           match_fields: %w[name],                  label: 'Deals',           supports_images: false },
       'vehicles'        => { model: 'Vehicle',       scope: :vehicles,        match_fields: %w[vin stock_number],      label: 'Homes',           supports_images: true  },
       'parts'           => { model: 'Part',          scope: :parts,           match_fields: %w[sku barcode],           label: 'Parts',           supports_images: true  },
       'service_tickets' => { model: 'ServiceTicket', scope: :service_tickets, match_fields: %w[ticket_number],         label: 'Service Tickets', supports_images: true  },
