@@ -94,9 +94,9 @@ module ImportExport
     private
 
     def download_source
-      # Local-path support for tests / dev. S3 download wired in Chunk C.
-      return @job.source_file_url if File.exist?(@job.source_file_url.to_s)
-      raise "Source file not accessible: #{@job.source_file_url}"
+      key = @job.source_file_url.to_s
+      return key if File.exist?(key)
+      ImportExport::S3Helper.download_to_tempfile(key)
     end
 
     def build_row_hash(row, headers, mapping)

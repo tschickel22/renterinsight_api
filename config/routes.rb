@@ -144,6 +144,24 @@ Rails.application.routes.draw do
     
     # ==================== V1 API ====================
     namespace :v1 do
+      # ==================== IMPORT / EXPORT ENGINE ====================
+      resources :import_jobs, only: %i[index show create destroy] do
+        member do
+          post :preview
+          post :start
+          post :rollback
+        end
+      end
+      resources :import_templates, only: %i[index show create update destroy]
+      resources :export_jobs, only: %i[index show create] do
+        member { get :download }
+      end
+      scope path: 'import_export', controller: 'import_export_metadata' do
+        get 'modules',                       action: :modules
+        get 'modules/:module_type/fields',    action: :fields
+        get 'modules/:module_type/sample_csv', action: :sample_csv
+      end
+
       # ==================== AI REPORT QUERY ====================
       scope 'report-ai', as: 'report_ai' do
         post 'ask',               to: 'report_ai#ask'

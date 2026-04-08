@@ -18,7 +18,8 @@ module ImportExport
 
     def match_and_attach!
       return { matched: 0, unmatched: [] } unless @job.image_zip_url.present?
-      return { matched: 0, unmatched: [] } unless File.exist?(@job.image_zip_url.to_s)
+      zip_path = File.exist?(@job.image_zip_url.to_s) ? @job.image_zip_url : ImportExport::S3Helper.download_to_tempfile(@job.image_zip_url)
+      return { matched: 0, unmatched: [] } unless zip_path && File.exist?(zip_path)
 
       cfg = ModuleRegistry.config_for(@job.module_type)
       return { matched: 0, unmatched: [] } unless cfg
@@ -29,7 +30,7 @@ module ImportExport
       unmatched = []
 
       Dir.mktmpdir do |tmpdir|
-        Zip::File.open(@job.image_zip_url) do |zip|
+        Zip::File.open(zip_path) do |zip|
           zip.each do |entry|
             next if entry.directory?
             ext = File.extname(entry.name).downcase
