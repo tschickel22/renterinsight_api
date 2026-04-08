@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_07_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_08_100200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1722,6 +1722,26 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_07_210000) do
     t.index ["contact_id"], name: "index_entity_buyers_on_contact_id"
   end
 
+  create_table "export_jobs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "module_type", null: false
+    t.string "status", default: "pending", null: false
+    t.string "format", default: "csv", null: false
+    t.jsonb "filters", default: {}, null: false
+    t.jsonb "selected_fields", default: [], null: false
+    t.integer "row_count", default: 0, null: false
+    t.string "file_url"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_export_jobs_on_company_id"
+    t.index ["module_type"], name: "index_export_jobs_on_module_type"
+    t.index ["status"], name: "index_export_jobs_on_status"
+    t.index ["user_id"], name: "index_export_jobs_on_user_id"
+  end
+
   create_table "factories", force: :cascade do |t|
     t.bigint "manufacturer_id", null: false
     t.string "name", null: false
@@ -1836,6 +1856,54 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_07_210000) do
     t.index ["manufacturer_id"], name: "index_floor_plans_on_manufacturer_id"
     t.index ["net_price"], name: "index_floor_plans_on_net_price"
     t.index ["series"], name: "index_floor_plans_on_series"
+  end
+
+  create_table "import_jobs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "module_type", null: false
+    t.string "status", default: "pending", null: false
+    t.string "source_filename"
+    t.string "source_file_url"
+    t.string "image_zip_url"
+    t.integer "total_rows", default: 0, null: false
+    t.integer "processed_rows", default: 0, null: false
+    t.integer "success_count", default: 0, null: false
+    t.integer "error_count", default: 0, null: false
+    t.integer "skipped_count", default: 0, null: false
+    t.jsonb "column_mapping", default: {}, null: false
+    t.string "duplicate_strategy", default: "skip"
+    t.jsonb "duplicate_match_fields", default: [], null: false
+    t.jsonb "options", default: {}, null: false
+    t.jsonb "error_log", default: [], null: false
+    t.jsonb "created_record_ids", default: [], null: false
+    t.jsonb "updated_record_snapshots", default: [], null: false
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module_type", "status"], name: "index_import_jobs_on_company_id_and_module_type_and_status"
+    t.index ["company_id"], name: "index_import_jobs_on_company_id"
+    t.index ["module_type"], name: "index_import_jobs_on_module_type"
+    t.index ["status"], name: "index_import_jobs_on_status"
+    t.index ["user_id"], name: "index_import_jobs_on_user_id"
+  end
+
+  create_table "import_templates", force: :cascade do |t|
+    t.bigint "company_id"
+    t.string "module_type", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.jsonb "column_mapping", default: {}, null: false
+    t.string "duplicate_strategy", default: "skip"
+    t.jsonb "duplicate_match_fields", default: [], null: false
+    t.jsonb "options", default: {}, null: false
+    t.boolean "is_platform_default", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module_type"], name: "index_import_templates_on_company_id_and_module_type"
+    t.index ["company_id"], name: "index_import_templates_on_company_id"
+    t.index ["module_type"], name: "index_import_templates_on_module_type"
   end
 
   create_table "intake_forms", force: :cascade do |t|
@@ -5107,6 +5175,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_07_210000) do
   add_foreign_key "deals", "users", column: "secondary_salesperson_id"
   add_foreign_key "entity_buyers", "companies"
   add_foreign_key "entity_buyers", "contacts"
+  add_foreign_key "export_jobs", "companies"
+  add_foreign_key "export_jobs", "users"
   add_foreign_key "factories", "manufacturers"
   add_foreign_key "field_option_overrides", "companies"
   add_foreign_key "floor_plan_option_applicabilities", "floor_plan_options"
@@ -5115,6 +5185,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_07_210000) do
   add_foreign_key "floor_plan_options", "option_categories"
   add_foreign_key "floor_plans", "factories"
   add_foreign_key "floor_plans", "manufacturers"
+  add_foreign_key "import_jobs", "companies"
+  add_foreign_key "import_jobs", "users"
+  add_foreign_key "import_templates", "companies"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_forms", "users", column: "notified_user_id"
