@@ -296,6 +296,25 @@ class Api::V1::SearchController < ApplicationController
       Rails.logger.error("Search contractors error: #{e.message}")
     end
 
+    # Workflow Rules
+    begin
+      rules = @company.workflow_rules
+                      .where("name ILIKE ?", "%#{query}%")
+                      .limit(5)
+      results += rules.map do |r|
+        {
+          id: r.id,
+          type: 'workflow_rule',
+          title: r.name,
+          subtitle: r.trigger&.dig('event_type'),
+          badge: r.status&.titleize,
+          score: calculate_score(query, r.name)
+        }
+      end
+    rescue => e
+      Rails.logger.error("Search workflow_rules error: #{e.message}")
+    end
+
     # Sort by relevance score (higher = better match)
     results.sort_by! { |r| -r[:score] }
     

@@ -6,6 +6,7 @@ class Contact < ApplicationRecord
   include NotifiableContact
   include WebhookNotifiable
   include Reportable
+  include WorkflowRunCancellable
 
   def self.reportable_config
     {
@@ -153,7 +154,23 @@ class Contact < ApplicationRecord
     }
   end
 
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
   private
+
+  def emit_workflow_created
+    WorkflowEngine.emit('contact.created', self, { id: id })
+  end
+
+  def emit_workflow_updated
+    WorkflowEngine.emit('contact.updated', self, { id: id, changes: saved_changes.keys })
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('contact.deleted', self, { id: id })
+  end
 
   def normalize_email
     self.email = email.to_s.strip.downcase if email.present?

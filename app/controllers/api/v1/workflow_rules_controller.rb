@@ -1,0 +1,148 @@
+module Api
+  module V1
+    class WorkflowRulesController < ApplicationController
+      include RbacAuthorization
+      before_action :set_company_scope
+      before_action :set_rule, only: [:show, :update, :destroy, :activate, :pause, :resume, :archive, :validate, :runs]
+      rbac_resource :workflow_automation,
+        read_actions: [:index, :show, :runs, :validate],
+        create_actions: [:create],
+        update_actions: [:update, :activate, :pause, :resume, :archive],
+        delete_actions: [:destroy]
+
+      def index
+        rules = @company.workflow_rules.where.not(status: 'archived')
+        rules = rules.where(entity_type: params[:entity_type]) if params[:entity_type].present?
+        rules = rules.where(status: params[:status]) if params[:status].present?
+        stats = {
+          total: @company.workflow_rules.where.not(status: 'archived').count,
+          draft: @company.workflow_rules.where(status: 'draft').count,
+          active: @company.workflow_rules.where(status: 'active').count,
+          paused: @company.workflow_rules.where(status: 'paused').count
+        }
+        if params[:search].present?
+          term = "%#{params[:search]}%"
+          rules = rules.where('name ILIKE ? OR description ILIKE ?', term, term)
+        end
+        rules = rules.order(updated_at: :desc)
+        filtered = rules.count
+        page = (params[:page] || 1).to_i
+        per_page = [(params[:per_page] || 50).to_i, 200].min
+        rules = rules.offset((page - 1) * per_page).limit(per_page)
+        render json: { items: rules.map { |r| rule_json(r) }, meta: { total: filtered, page: page, per_page: per_page, total_pages: (filtered.to_f / per_page).ceil, stats: stats } }
+      end
+
+      def show
+        render json: rule_json(@rule, full: true)
+      end
+
+      def create
+        rule = @company.workflow_rules.build(rule_params)
+        rule.status = 'draft'
+        rule.created_by_user_id = current_user&.id
+        if rule.save
+          render json: rule_json(rule, full: true), status: :created
+        else
+          render json: { errors: rule.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      def update
+        if @rule.update(rule_params)
+          render json: rule_json(@rule, full: true)
+        else
+          render json: { errors: @rule.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      def destroy
+        @rule.update(status: 'archived')
+        render json: { message: 'Archived' }
+      end
+
+      def activate
+        validation = WorkflowRuleValidator.new(@rule).validate
+        if validation.valid?
+          @rule.update!(status: 'active')
+          render json: rule_json(@rule, full: true)
+        else
+          render json: { errors: validation.errors }, status: :unprocessable_entity
+        end
+      end
+
+      def pause
+        @rule.update!(status: 'paused')
+        render json: rule_json(@rule)
+      end
+
+      def resume
+        @rule.update!(status: 'active')
+        render json: rule_json(@rule)
+      end
+
+      def archive
+        @rule.update!(status: 'archived')
+        render json: rule_json(@rule)
+      end
+
+      def validate
+        validation = WorkflowRuleValidator.new(@rule).validate
+        render json: { valid: validation.valid?, errors: validation.errors, warnings: validation.warnings }
+      end
+
+      def runs
+        runs = @rule.workflow_runs.order(started_at: :desc).limit(100)
+        render json: runs.map { |r| run_json(r) }
+      end
+
+      private
+
+      def set_rule
+        @rule = @company.workflow_rules.find(params[:id])
+      end
+
+      def rule_params
+        params.require(:workflow_rule).permit(:name, :description, :entity_type, :halt_on_reply, trigger: {}, conditions: [], steps: {}, parameters: {})
+      end
+
+      def rule_json(rule, full: false)
+        base = {
+          id: rule.id,
+          name: rule.name,
+          description: rule.description,
+          entity_type: rule.entity_type,
+          status: rule.status,
+          version: rule.version,
+          is_seeded: rule.is_seeded,
+          halt_on_reply: rule.halt_on_reply,
+          run_count: rule.workflow_runs.count,
+          last_run_at: rule.workflow_runs.maximum(:started_at),
+          created_at: rule.created_at,
+          updated_at: rule.updated_at
+        }
+        if full
+          base.merge!(
+            trigger: rule.trigger,
+            conditions: rule.conditions,
+            steps: rule.steps,
+            parameters: rule.parameters,
+            template_id: rule.workflow_template_id
+          )
+        end
+        base
+      end
+
+      def run_json(run)
+        {
+          id: run.id,
+          status: run.status,
+          entity_type: run.entity_type,
+          entity_id: run.entity_id,
+          current_step_id: run.current_step_id,
+          started_at: run.started_at,
+          completed_at: run.completed_at
+        }
+      end
+    end
+  end
+end

@@ -6,6 +6,7 @@ class Account < ApplicationRecord
   include NotifiableAccount
   include WebhookNotifiable
   include Reportable
+  include WorkflowRunCancellable
 
   def self.reportable_config
     {
@@ -201,5 +202,29 @@ class Account < ApplicationRecord
 
   def activity_account_id
     id
+  end
+
+  public
+
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
+  private
+
+  def emit_workflow_created
+    WorkflowEngine.emit('account.created', self, { id: id })
+  end
+
+  def emit_workflow_updated
+    WorkflowEngine.emit('account.updated', self, { id: id, changes: saved_changes.keys })
+    if saved_change_to_attribute?(:status)
+      from, to = saved_change_to_attribute(:status)
+      WorkflowEngine.emit('account.status_changed', self, { id: id, from: from, to: to })
+    end
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('account.deleted', self, { id: id })
   end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_08_100200) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_08_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1030,6 +1030,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_100200) do
     t.datetime "received_at"
     t.integer "company_id"
     t.integer "user_id"
+    t.bigint "workflow_run_id"
+    t.string "workflow_step_id"
     t.index ["channel"], name: "index_communications_on_channel"
     t.index ["communicable_type", "communicable_id"], name: "index_communications_on_communicable"
     t.index ["communication_thread_id"], name: "index_communications_on_communication_thread_id"
@@ -1044,6 +1046,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_100200) do
     t.index ["status"], name: "index_communications_on_status"
     t.index ["template_id"], name: "index_communications_on_template_id"
     t.index ["user_id"], name: "index_communications_on_user_id"
+    t.index ["workflow_run_id"], name: "index_communications_on_workflow_run_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -5047,6 +5050,155 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_100200) do
     t.index ["user_id"], name: "index_win_loss_reports_on_user_id"
   end
 
+  create_table "workflow_approvals", force: :cascade do |t|
+    t.bigint "workflow_run_id", null: false
+    t.string "step_id", null: false
+    t.bigint "company_id", null: false
+    t.string "status", default: "pending", null: false
+    t.bigint "approver_user_id"
+    t.datetime "approved_at"
+    t.text "rejection_reason"
+    t.datetime "expires_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approver_user_id"], name: "index_workflow_approvals_on_approver_user_id"
+    t.index ["company_id"], name: "index_workflow_approvals_on_company_id"
+    t.index ["expires_at"], name: "index_workflow_approvals_on_expires_at"
+    t.index ["workflow_run_id"], name: "index_workflow_approvals_on_workflow_run_id"
+  end
+
+  create_table "workflow_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "event_type", null: false
+    t.string "entity_type"
+    t.bigint "entity_id"
+    t.jsonb "payload", default: {}
+    t.datetime "dispatched_at"
+    t.jsonb "dispatch_error", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "dispatched_at"], name: "index_workflow_events_on_company_id_and_dispatched_at"
+    t.index ["company_id"], name: "index_workflow_events_on_company_id"
+    t.index ["dispatched_at"], name: "index_workflow_events_on_dispatched_at"
+    t.index ["event_type"], name: "index_workflow_events_on_event_type"
+  end
+
+  create_table "workflow_inbound_triggers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "token", null: false
+    t.string "name", null: false
+    t.bigint "workflow_rule_id", null: false
+    t.boolean "active", default: true
+    t.datetime "last_triggered_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_workflow_inbound_triggers_on_company_id"
+    t.index ["token"], name: "index_workflow_inbound_triggers_on_token", unique: true
+    t.index ["workflow_rule_id"], name: "index_workflow_inbound_triggers_on_workflow_rule_id"
+  end
+
+  create_table "workflow_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "entity_type", null: false
+    t.string "status", default: "draft", null: false
+    t.bigint "workflow_template_id"
+    t.jsonb "trigger", default: {}
+    t.jsonb "conditions", default: []
+    t.jsonb "steps", default: {}
+    t.jsonb "parameters", default: {}
+    t.integer "version", default: 1
+    t.bigint "created_by_user_id"
+    t.boolean "is_seeded", default: false
+    t.string "halt_on_reply", default: "false"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "entity_type"], name: "index_workflow_rules_on_company_id_and_status_and_entity_type"
+    t.index ["company_id"], name: "index_workflow_rules_on_company_id"
+    t.index ["created_by_user_id"], name: "index_workflow_rules_on_created_by_user_id"
+    t.index ["entity_type"], name: "index_workflow_rules_on_entity_type"
+    t.index ["workflow_template_id"], name: "index_workflow_rules_on_workflow_template_id"
+  end
+
+  create_table "workflow_run_steps", force: :cascade do |t|
+    t.bigint "workflow_run_id", null: false
+    t.string "step_id", null: false
+    t.string "step_type", null: false
+    t.string "status", null: false
+    t.jsonb "input", default: {}
+    t.jsonb "output", default: {}
+    t.jsonb "error", default: {}
+    t.integer "duration_ms"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["workflow_run_id"], name: "index_workflow_run_steps_on_workflow_run_id"
+  end
+
+  create_table "workflow_runs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "workflow_rule_id", null: false
+    t.string "entity_type", null: false
+    t.bigint "entity_id", null: false
+    t.string "status", default: "pending", null: false
+    t.string "current_step_id"
+    t.jsonb "variables", default: {}
+    t.datetime "wait_until"
+    t.string "wait_reason"
+    t.bigint "parent_run_id"
+    t.jsonb "rule_snapshot", default: {}
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.jsonb "error_details", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "wait_until"], name: "index_workflow_runs_on_company_id_and_status_and_wait_until"
+    t.index ["company_id"], name: "index_workflow_runs_on_company_id"
+    t.index ["entity_type", "entity_id"], name: "index_workflow_runs_on_entity_type_and_entity_id"
+    t.index ["parent_run_id"], name: "index_workflow_runs_on_parent_run_id"
+    t.index ["wait_until"], name: "index_workflow_runs_on_wait_until"
+    t.index ["workflow_rule_id"], name: "index_workflow_runs_on_workflow_rule_id"
+  end
+
+  create_table "workflow_subscriptions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "workflow_rule_id", null: false
+    t.string "event_type", null: false
+    t.string "entity_type_filter"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "event_type"], name: "index_workflow_subscriptions_on_company_id_and_event_type"
+    t.index ["company_id"], name: "index_workflow_subscriptions_on_company_id"
+    t.index ["event_type"], name: "index_workflow_subscriptions_on_event_type"
+    t.index ["workflow_rule_id"], name: "index_workflow_subscriptions_on_workflow_rule_id"
+  end
+
+  create_table "workflow_templates", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "category", null: false
+    t.string "entity_type", null: false
+    t.string "icon"
+    t.text "preview_description"
+    t.jsonb "required_integrations", default: []
+    t.jsonb "trigger", default: {}
+    t.jsonb "conditions", default: []
+    t.jsonb "steps", default: {}
+    t.jsonb "parameters", default: {}
+    t.jsonb "parameter_schema", default: []
+    t.boolean "is_active", default: true
+    t.integer "sort_order", default: 0
+    t.integer "version", default: 1
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_workflow_templates_on_category"
+    t.index ["is_active"], name: "index_workflow_templates_on_is_active"
+    t.index ["key"], name: "index_workflow_templates_on_key", unique: true
+  end
+
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "locations"
@@ -5431,4 +5583,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_100200) do
   add_foreign_key "websites", "locations"
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"
+  add_foreign_key "workflow_approvals", "companies"
+  add_foreign_key "workflow_approvals", "users", column: "approver_user_id"
+  add_foreign_key "workflow_approvals", "workflow_runs"
+  add_foreign_key "workflow_events", "companies"
+  add_foreign_key "workflow_inbound_triggers", "companies"
+  add_foreign_key "workflow_inbound_triggers", "workflow_rules"
+  add_foreign_key "workflow_rules", "companies"
+  add_foreign_key "workflow_rules", "users", column: "created_by_user_id"
+  add_foreign_key "workflow_run_steps", "workflow_runs"
+  add_foreign_key "workflow_runs", "companies"
+  add_foreign_key "workflow_runs", "workflow_rules"
+  add_foreign_key "workflow_runs", "workflow_runs", column: "parent_run_id"
+  add_foreign_key "workflow_subscriptions", "companies"
+  add_foreign_key "workflow_subscriptions", "workflow_rules"
 end

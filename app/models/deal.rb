@@ -6,6 +6,7 @@ class Deal < ApplicationRecord
   include NotifiableDeal
   include WebhookNotifiable
   include Reportable
+  include WorkflowRunCancellable
 
   def self.reportable_config
     {
@@ -414,5 +415,25 @@ class Deal < ApplicationRecord
 
   def activity_account_id
     account_id
+  end
+
+  public
+
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
+  private
+
+  def emit_workflow_created
+    WorkflowEngine.emit('deal.created', self, { id: id })
+  end
+
+  def emit_workflow_updated
+    WorkflowEngine.emit('deal.updated', self, { id: id, changes: saved_changes.keys })
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('deal.deleted', self, { id: id })
   end
 end
