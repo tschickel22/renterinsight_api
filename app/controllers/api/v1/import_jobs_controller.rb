@@ -98,7 +98,7 @@ module Api
 
       # POST /api/v1/import_jobs/:id/rollback
       def rollback
-        return unless authorize_action!('data_import_export', 'rollback')
+        return unless authorize_action!('data_import_export', 'delete')
 
         unless @job.can_rollback?
           return render json: { error: 'Job is not rollbackable (must be completed within 30 days with created records)' }, status: :unprocessable_entity

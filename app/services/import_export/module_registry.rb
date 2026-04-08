@@ -10,7 +10,8 @@ module ImportExport
       'contacts'        => { model: 'Contact',       scope: :contacts,        match_fields: %w[email],                 label: 'Contacts',        supports_images: true  },
       'leads'           => { model: 'Lead',          scope: :leads,           match_fields: %w[email phone],           label: 'Leads',           supports_images: false },
       'deals'           => { model: 'Deal',          scope: :deals,           match_fields: %w[name],                  label: 'Deals',           supports_images: false },
-      'vehicles'        => { model: 'Vehicle',       scope: :vehicles,        match_fields: %w[vin stock_number],      label: 'Homes',           supports_images: true  },
+      # NOTE: 'vehicles' (Homes) intentionally excluded — handled by the existing
+      # dedicated vehicle importer which already supports image uploads.
       'parts'           => { model: 'Part',          scope: :parts,           match_fields: %w[sku barcode],           label: 'Parts',           supports_images: true  },
       'service_tickets' => { model: 'ServiceTicket', scope: :service_tickets, match_fields: %w[ticket_number],         label: 'Service Tickets', supports_images: true  },
       'quotes'          => { model: 'Quote',         scope: :quotes,          match_fields: %w[quote_number],          label: 'Quotes',          supports_images: false },

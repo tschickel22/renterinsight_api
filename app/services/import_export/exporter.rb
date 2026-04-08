@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'csv'
+require 'caxlsx'
 
 module ImportExport
   # Generates CSV/XLSX/JSON files from a company-scoped query.
@@ -77,8 +78,17 @@ module ImportExport
     end
 
     def write_xlsx(records, fields, keys)
-      # Placeholder: write CSV with .xlsx extension. Real xlsx writer (caxlsx) wired in Chunk C if needed.
-      write_csv(records, fields, keys).sub(/\.csv\z/, '.xlsx')
+      selected = fields.select { |f| keys.include?(f[:key]) }
+      path = output_path('xlsx')
+      package = Axlsx::Package.new
+      package.workbook.add_worksheet(name: @job.module_type[0, 31]) do |sheet|
+        sheet.add_row(selected.map { |f| f[:label] || f[:key] })
+        records.find_each do |r|
+          sheet.add_row(selected.map { |f| value_for(r, f) })
+        end
+      end
+      package.serialize(path)
+      path
     end
 
     def write_json(records, fields, keys)
