@@ -48,8 +48,11 @@ class Communication < ApplicationRecord
   belongs_to :company, optional: true
   belongs_to :communication_thread, optional: true
   belongs_to :template, class_name: 'CommunicationTemplate', foreign_key: 'template_id', optional: true
-  
+  belongs_to :workflow_run, class_name: 'WorkflowRun', optional: true
+
   has_many :communication_events, dependent: :destroy
+
+  after_create :notify_workflow_of_inbound, if: :should_notify_workflow?
   
   # ActiveStorage attachments
   has_many_attached :attachments
@@ -282,6 +285,22 @@ class Communication < ApplicationRecord
   
   def update_thread_timestamp
     communication_thread&.touch(:last_message_at)
+  end
+
+  def should_notify_workflow?
+    direction == 'inbound' && communication_thread_id.present?
+  end
+
+  def notify_workflow_of_inbound
+    parent = Communication
+               .where(communication_thread_id: communication_thread_id, direction: 'outbound')
+               .where.not(workflow_run_id: nil)
+               .order(created_at: :desc)
+               .first
+    return unless parent&.workflow_run_id
+    WorkflowEngine.handle_inbound_reply(workflow_run_id: parent.workflow_run_id, inbound_communication: self)
+  rescue => e
+    Rails.logger.error "[Communication#notify_workflow_of_inbound] failed: #{e.message}"
   end
 
   public

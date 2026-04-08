@@ -32,6 +32,29 @@ class ServiceTicket < ApplicationRecord
   include NotifiableServiceTicket
   include WebhookNotifiable
   include Reportable
+  include WorkflowRunCancellable
+
+  # Workflow engine emit hooks
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
+  def emit_workflow_created
+    WorkflowEngine.emit('service_ticket.created', self, { id: id }) if defined?(WorkflowEngine)
+  end
+
+  def emit_workflow_updated
+    return unless defined?(WorkflowEngine)
+    WorkflowEngine.emit('service_ticket.updated', self, { id: id, changes: saved_changes.keys })
+    if self.class.column_names.include?('status') && saved_change_to_attribute?(:status)
+      from, to = saved_change_to_attribute(:status)
+      WorkflowEngine.emit('service_ticket.status_changed', self, { id: id, from: from, to: to })
+    end
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('service_ticket.deleted', self, { id: id }) if defined?(WorkflowEngine)
+  end
 
   def self.reportable_config
     {

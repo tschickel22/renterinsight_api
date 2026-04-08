@@ -142,7 +142,10 @@ public
       { key: 'dashboard_finance', name: 'Finance Dashboard', category: 'core', description: 'View financial dashboards and metrics', position: 905 },
 
       # Data Import / Export Engine
-      { key: 'data_import_export', name: 'Data Import & Export', category: 'operations', description: 'Import and export data across CRM, inventory, parts, and finance modules', position: 200 }
+      { key: 'data_import_export', name: 'Data Import & Export', category: 'operations', description: 'Import and export data across CRM, inventory, parts, and finance modules', position: 200 },
+
+      # Workflow Automation
+      { key: 'workflow_automation', name: 'Workflow Automation', category: 'operations', position: 180, description: 'Manage workflow rules, runs, and templates' }
     ]
     
     resources_data.each do |resource_data|

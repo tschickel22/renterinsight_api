@@ -20,6 +20,13 @@ Rails.application.routes.draw do
   post 'sign/:token/decline', to: 'public/agreement_signing#decline'
   get  'sign/:token/download', to: 'public/agreement_signing#download'
 
+  # Inbound workflow triggers (no auth — token-based)
+  namespace :api do
+    namespace :webhooks do
+      post 'inbound/:token', to: 'inbound_workflow_triggers#trigger'
+    end
+  end
+
   # ==================== WEBHOOKS (NO AUTH REQUIRED) ====================
   namespace :webhooks do
     # Email tracking pixel (no auth required)
@@ -292,6 +299,39 @@ Rails.application.routes.draw do
           get :stats
         end
       end
+
+      # ==================== WORKFLOW AUTOMATION ====================
+      resources :workflow_rules do
+        member do
+          post :activate
+          post :pause
+          post :resume
+          post :archive
+          post :validate
+          get  :runs
+        end
+      end
+      resources :workflow_runs, only: [:index, :show] do
+        member do
+          post :cancel
+          post :retry
+          get  :steps
+        end
+      end
+      resources :workflow_events, only: [:index]
+      resources :workflow_templates, only: [:index, :show] do
+        member do
+          post :activate
+        end
+      end
+      resources :workflow_approvals, only: [:index, :show] do
+        member do
+          post :approve
+          post :reject
+        end
+      end
+      resources :workflow_inbound_triggers
+      get 'workflow_metrics', to: 'workflow_metrics#index'
 
       # ==================== PROJECTS ====================
       resources :projects do

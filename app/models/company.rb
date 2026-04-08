@@ -4,6 +4,11 @@ class Company < ApplicationRecord
   include QuickbooksIntegration
   
   has_many :accounts, dependent: :destroy
+  has_many :workflow_rules, dependent: :destroy
+  has_many :workflow_runs, dependent: :destroy
+  has_many :workflow_events, dependent: :destroy
+  has_many :workflow_approvals, dependent: :destroy
+  has_many :workflow_inbound_triggers, dependent: :destroy
   has_many :reports, dependent: :destroy
   has_many :contacts, dependent: :destroy
   has_many :deals, dependent: :destroy

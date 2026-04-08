@@ -7,6 +7,7 @@ class Lead < ApplicationRecord
   include NotifiableLead
   include WebhookNotifiable
   include Reportable
+  include WorkflowRunCancellable
 
   def self.reportable_config
     {
@@ -60,6 +61,11 @@ class Lead < ApplicationRecord
   # Lifecycle webhook for lead conversion
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_is_converted?
 
+  # Workflow engine emit hooks
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
   # Scopes for filtering converted leads
   scope :active, -> { where(is_converted: [false, nil]) }
   scope :converted, -> { where(is_converted: true) }
@@ -86,6 +92,22 @@ class Lead < ApplicationRecord
   end
 
   private
+
+  def emit_workflow_created
+    WorkflowEngine.emit('lead.created', self, { id: id })
+  end
+
+  def emit_workflow_updated
+    WorkflowEngine.emit('lead.updated', self, { id: id, changes: saved_changes.keys })
+    if saved_change_to_attribute?(:status)
+      from, to = saved_change_to_attribute(:status)
+      WorkflowEngine.emit('lead.status_changed', self, { id: id, from: from, to: to })
+    end
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('lead.deleted', self, { id: id })
+  end
 
   # Fire lead.converted lifecycle webhook when is_converted changes to true
   # WebhookNotifiable handles generic lead.created/updated/deleted
