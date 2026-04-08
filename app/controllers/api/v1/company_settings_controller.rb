@@ -584,7 +584,7 @@ module Api
           Setting.set('Company', @company.id, 'ai_report_queries_monthly_limit', limit.to_s)
           render json: { ai_report_queries_monthly_limit: limit, message: 'AI settings saved' }
         rescue => e
-          Rails.logger.error "[CompanySettings] Failed to save AI limit: #{e.message}"
+          Rails.logger.error "[CompanySettings] Failed to save AI limit: #{e.class} - #{e.message}"
           render json: { error: "Failed to save: #{e.message}" }, status: :unprocessable_entity
         end
       end
