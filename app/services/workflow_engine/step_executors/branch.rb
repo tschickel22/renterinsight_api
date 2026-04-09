@@ -3,7 +3,7 @@ module WorkflowEngine
     class Branch < Base
       def call
         cfg = @step['config'] || {}
-        cond = cfg['condition']
+        cond = cfg['condition_structured'].presence || cfg['condition']
         ctx = {
           'entity' => @run.entity&.as_json || {},
           'variables' => @run.variables,
