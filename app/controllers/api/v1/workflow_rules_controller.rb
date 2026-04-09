@@ -102,7 +102,23 @@ module Api
       end
 
       def rule_params
-        params.require(:workflow_rule).permit(:name, :description, :entity_type, :halt_on_reply, trigger: {}, conditions: [], steps: {}, parameters: {})
+        permitted = params.require(:workflow_rule).permit(
+          :name, :description, :entity_type, :halt_on_reply,
+          trigger: {},
+          steps: {},
+          parameters: {}
+        )
+        raw_conditions = params.dig(:workflow_rule, :conditions)
+        unless raw_conditions.nil?
+          permitted[:conditions] = if raw_conditions.respond_to?(:permit!)
+            raw_conditions.permit!.to_h
+          elsif raw_conditions.is_a?(Array)
+            raw_conditions.map { |item| item.respond_to?(:permit!) ? item.permit!.to_h : item }
+          else
+            raw_conditions
+          end
+        end
+        permitted
       end
 
       def rule_json(rule, full: false)
