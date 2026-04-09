@@ -332,6 +332,7 @@ Rails.application.routes.draw do
       end
       resources :workflow_inbound_triggers
       get 'workflow_metrics', to: 'workflow_metrics#index'
+      get 'workflow_field_options', to: 'workflow_field_options#index'
 
       # ==================== PROJECTS ====================
       resources :projects do
