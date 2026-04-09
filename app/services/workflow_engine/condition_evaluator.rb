@@ -14,10 +14,12 @@ module WorkflowEngine
       when Array
         node.all? { |n| evaluate_node(n, context) }
       when Hash
-        if node['type'] == 'and'
-          Array(node['children']).all? { |c| evaluate_node(c, context) }
-        elsif node['type'] == 'or'
-          Array(node['children']).any? { |c| evaluate_node(c, context) }
+        type = node['type'] || node['logic']
+        children = node['children'] || node['conditions']
+        if type == 'and'
+          Array(children).all? { |c| evaluate_node(c, context) }
+        elsif type == 'or'
+          Array(children).any? { |c| evaluate_node(c, context) }
         else
           evaluate_leaf(node, context)
         end
