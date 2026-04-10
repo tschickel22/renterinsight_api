@@ -2,7 +2,9 @@ module Api
   module V1
     class WorkflowRulesController < ApplicationController
       include RbacAuthorization
+      include ModuleAccessRequired
       before_action :set_company_scope
+      require_module! 'management.workflows'
       before_action :set_rule, only: [:show, :update, :destroy, :activate, :pause, :resume, :archive, :validate, :runs, :preview]
       rbac_resource :workflow_automation,
         read_actions: [:index, :show, :runs, :validate, :preview, :preview_unsaved],

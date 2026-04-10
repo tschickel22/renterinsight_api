@@ -2,7 +2,9 @@ module Api
   module V1
     class WorkflowEventsController < ApplicationController
       include RbacAuthorization
+      include ModuleAccessRequired
       before_action :set_company_scope
+      require_module! 'management.workflows'
       rbac_resource :workflow_automation, read_actions: [:index]
 
       def index

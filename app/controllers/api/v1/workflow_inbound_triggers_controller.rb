@@ -2,7 +2,9 @@ module Api
   module V1
     class WorkflowInboundTriggersController < ApplicationController
       include RbacAuthorization
+      include ModuleAccessRequired
       before_action :set_company_scope
+      require_module! 'management.workflows'
       before_action :set_trigger, only: [:show, :update, :destroy]
 
       rbac_resource :workflow_automation,
