@@ -5,6 +5,8 @@ class TenantModuleOverride < ApplicationRecord
   belongs_to :company
   belongs_to :overridden_by, class_name: 'User', optional: true
   
+  after_commit :bust_tenant_basic_cache
+
   # Validations
   validates :module_key, presence: true
   validates :module_key, uniqueness: { scope: :company_id }
@@ -46,7 +48,13 @@ class TenantModuleOverride < ApplicationRecord
   end
   
   private
-  
+
+  def bust_tenant_basic_cache
+    Rails.cache.delete_matched("tenant_basic/#{company_id}/*")
+  rescue NotImplementedError
+    Company.where(id: company_id).update_all(updated_at: Time.current)
+  end
+
   def valid_module_key
     unless PlatformModule.valid_key?(module_key)
       errors.add(:module_key, "is not a recognized module: #{module_key}")

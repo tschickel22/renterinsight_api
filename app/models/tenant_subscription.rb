@@ -28,6 +28,7 @@ class TenantSubscription < ApplicationRecord
   # Callbacks
   before_validation :set_defaults, on: :create
   after_save :sync_company_fields
+  after_commit :bust_tenant_basic_cache
   
   # Status Constants
   STATUS_ACTIVE = 'active'
@@ -226,7 +227,13 @@ class TenantSubscription < ApplicationRecord
   end
   
   private
-  
+
+  def bust_tenant_basic_cache
+    Rails.cache.delete_matched("tenant_basic/#{company_id}/*")
+  rescue NotImplementedError
+    Company.where(id: company_id).update_all(updated_at: Time.current)
+  end
+
   def set_defaults
     self.billing_cycle ||= 'monthly'
     self.current_period_start ||= Time.current

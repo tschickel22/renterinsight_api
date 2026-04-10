@@ -18,7 +18,15 @@ module Api
     def tenant_basic
       Rails.logger.info "🏢 [SettingsController#tenant_basic] Loading basic tenant info for company: #{@company.name} (ID: #{@company.id})"
 
-      cache_key = "tenant_basic/#{@company.id}/#{@company.updated_at.to_i}"
+      sub_updated  = @company.tenant_subscription&.updated_at&.to_i || 0
+      override_updated = @company.tenant_module_overrides.maximum(:updated_at)&.to_i || 0
+      plan_updated = @company.tenant_subscription&.subscription_plan&.updated_at&.to_i || 0
+      plan_modules_updated = if @company.tenant_subscription&.subscription_plan
+        @company.tenant_subscription.subscription_plan.subscription_plan_modules.maximum(:updated_at)&.to_i || 0
+      else
+        0
+      end
+      cache_key = "tenant_basic/#{@company.id}/#{@company.updated_at.to_i}/#{sub_updated}/#{override_updated}/#{plan_updated}/#{plan_modules_updated}"
       result = Rails.cache.fetch(cache_key, expires_in: 5.minutes) do
         serialize_tenant_basic
       end
