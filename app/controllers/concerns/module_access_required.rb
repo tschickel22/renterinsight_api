@@ -14,7 +14,7 @@ module ModuleAccessRequired
   private
 
   def enforce_module_access!(module_key)
-    return true if current_user&.platform_admin? || current_user&.super_admin?
+    return true if current_user&.platform_admin? || current_user&.super_admin? || current_user&.tenant?
 
     company = @company || ::Company.find_by(id: current_company_id)
     unless company
