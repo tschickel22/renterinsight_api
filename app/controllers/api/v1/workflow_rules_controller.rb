@@ -3,9 +3,9 @@ module Api
     class WorkflowRulesController < ApplicationController
       include RbacAuthorization
       before_action :set_company_scope
-      before_action :set_rule, only: [:show, :update, :destroy, :activate, :pause, :resume, :archive, :validate, :runs]
+      before_action :set_rule, only: [:show, :update, :destroy, :activate, :pause, :resume, :archive, :validate, :runs, :preview]
       rbac_resource :workflow_automation,
-        read_actions: [:index, :show, :runs, :validate],
+        read_actions: [:index, :show, :runs, :validate, :preview, :preview_unsaved],
         create_actions: [:create],
         update_actions: [:update, :activate, :pause, :resume, :archive],
         delete_actions: [:destroy]
@@ -93,6 +93,19 @@ module Api
       def runs
         runs = @rule.workflow_runs.order(started_at: :desc).limit(100)
         render json: runs.map { |r| run_json(r) }
+      end
+
+      # POST /api/v1/workflow_rules/:id/preview
+      def preview
+        result = WorkflowPreviewService.preview(@rule, company: @company)
+        render json: result
+      end
+
+      # POST /api/v1/workflow_rules/preview (collection — unsaved rule)
+      def preview_unsaved
+        rule = @company.workflow_rules.new(rule_params)
+        result = WorkflowPreviewService.preview(rule, company: @company)
+        render json: result
       end
 
       private

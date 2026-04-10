@@ -302,12 +302,16 @@ Rails.application.routes.draw do
 
       # ==================== WORKFLOW AUTOMATION ====================
       resources :workflow_rules do
+        collection do
+          post :preview_unsaved, path: 'preview'
+        end
         member do
           post :activate
           post :pause
           post :resume
           post :archive
           post :validate
+          post :preview
           get  :runs
         end
       end
