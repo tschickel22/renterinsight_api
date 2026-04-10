@@ -40,6 +40,7 @@ class WorkflowPreviewService
     {
       matched_count:      matched_count,
       total_count:        total_count,
+      entity_type:        @rule.entity_type,
       sample_entities:    sample_entities,
       action_simulations: action_sims,
       warnings:           warnings
@@ -298,6 +299,7 @@ class WorkflowPreviewService
     {
       matched_count:      0,
       total_count:        0,
+      entity_type:        @rule&.entity_type,
       sample_entities:    [],
       action_simulations: [],
       warnings:           [message]
