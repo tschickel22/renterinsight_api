@@ -43,8 +43,8 @@ module WorkflowEngine
         req['content-type'] = 'application/json'
         req.body = body.to_json
 
-        res = http.request(req)
-        if res.code.to_i == 429 || res.code.to_i >= 400
+        res = with_retries { http.request(req) }
+        if res.code.to_i >= 400
           return { status: 'failed', output: {}, error: { message: "anthropic_http_#{res.code}" } }
         end
 
