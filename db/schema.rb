@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_08_140000) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1660,6 +1660,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_140000) do
     t.decimal "down_payment", precision: 15, scale: 2, default: "0.0"
     t.decimal "additional_payment", precision: 15, scale: 2, default: "0.0"
     t.decimal "unpaid_balance", precision: 15, scale: 2, default: "0.0"
+    t.datetime "last_activity_at"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -1688,6 +1689,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_140000) do
     t.index ["stage"], name: "index_deals_on_stage"
     t.index ["territory_id", "stage"], name: "index_deals_on_territory_id_and_stage"
     t.index ["territory_id"], name: "index_deals_on_territory_id"
+    t.index ["user_id", "last_activity_at"], name: "index_deals_on_user_id_and_last_activity_at"
     t.index ["user_id", "stage"], name: "index_deals_on_user_id_and_stage"
     t.index ["user_id"], name: "index_deals_on_user_id"
     t.index ["vehicle_id"], name: "index_deals_on_vehicle_id"
@@ -2336,10 +2338,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_140000) do
     t.string "state"
     t.string "zip"
     t.string "country"
+    t.datetime "last_activity_at"
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["location_id"], name: "index_leads_on_location_id"
+    t.index ["owner_id", "last_activity_at"], name: "index_leads_on_owner_id_and_last_activity_at"
     t.index ["owner_id"], name: "index_leads_on_owner_id"
     t.index ["source_id"], name: "index_leads_on_source_id"
     t.index ["vehicle_id"], name: "index_leads_on_vehicle_id"
@@ -4630,6 +4634,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_08_140000) do
     t.string "typed_signature"
     t.string "typed_initials"
     t.string "signature_font"
+    t.string "landing_page", default: "dashboard", null: false
+    t.jsonb "workqueue_preferences", default: {}, null: false
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"

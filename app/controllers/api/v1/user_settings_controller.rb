@@ -19,13 +19,18 @@ module Api
           city: extract_city,
           state: extract_state,
           zip: extract_zip,
-          user_type: @user_type
+          user_type: @user_type,
+          landing_page: @user.respond_to?(:landing_page) ? @user.landing_page : nil,
+          workqueue_preferences: @user.respond_to?(:workqueue_preferences) ? (@user.workqueue_preferences || {}) : {}
         }, status: :ok
       end
 
       # PATCH /api/v1/user_settings/profile
       def update_profile
-        profile_params = params.permit(:first_name, :last_name, :phone, :email, :address, :city, :state, :zip)
+        profile_params = params.permit(
+          :first_name, :last_name, :phone, :email, :address, :city, :state, :zip, :landing_page,
+          workqueue_preferences: {}
+        )
 
         begin
           if @user_type == 'client'
@@ -55,7 +60,14 @@ module Api
             updates[:last_name] = profile_params[:last_name] if profile_params[:last_name].present?
             updates[:phone] = profile_params[:phone] if profile_params[:phone].present?
             updates[:email] = profile_params[:email] if profile_params[:email].present?
-            
+            updates[:landing_page] = profile_params[:landing_page] if profile_params[:landing_page].present?
+
+            if params.key?(:workqueue_preferences) && @user.respond_to?(:workqueue_preferences)
+              raw = profile_params[:workqueue_preferences] || {}
+              sanitized = sanitize_workqueue_preferences(raw)
+              updates[:workqueue_preferences] = sanitized
+            end
+
             @user.update!(updates) if updates.any?
           end
 
@@ -288,6 +300,47 @@ module Api
       end
 
       private
+
+      # Coerces and constrains workqueue_preferences input so users can't
+      # store arbitrary data on their row.
+      def sanitize_workqueue_preferences(raw)
+        raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+        raw = raw.symbolize_keys
+
+        allowed_numeric_keys = %i[
+          new_leads_days
+          stale_leads_days
+          stale_deals_days
+          reminders_window_days
+          closing_week_days
+          tasks_week_days
+        ]
+
+        valid_queue_ids = %w[
+          activity_tasks_today activity_tasks_week activity_meetings_today
+          activity_calls_due activity_reminders_upcoming
+          leads_mine leads_new_24h leads_stale_48h
+          deals_mine deals_closing_month deals_closing_week deals_stale_30d
+          tickets_mine tickets_awaiting_parts tickets_ready_for_invoice
+          quotes_awaiting_response invoices_overdue
+        ]
+
+        result = {}
+
+        allowed_numeric_keys.each do |key|
+          next unless raw.key?(key)
+          value = raw[key].to_i
+          # Clamp to 1..365 days so a fat-fingered 999999 doesn't wreck queries.
+          result[key] = value.clamp(1, 365)
+        end
+
+        if raw.key?(:hidden_queues)
+          hidden = Array(raw[:hidden_queues]).map(&:to_s)
+          result[:hidden_queues] = hidden & valid_queue_ids
+        end
+
+        result
+      end
 
       def authenticate_any_user
         # Try to get token from Authorization header

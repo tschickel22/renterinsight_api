@@ -41,6 +41,7 @@ class LeadActivity < ApplicationRecord
   after_create :schedule_reminders, if: -> { ['reminder', 'call', 'task', 'meeting'].include?(activity_type) && reminder_time.present? }
   after_update :reschedule_reminders_if_changed, if: -> { ['reminder', 'call', 'task', 'meeting'].include?(activity_type) && reminder_time.present? && saved_change_to_reminder_time? }
   after_update :update_lead_last_activity
+  after_commit :touch_parent_last_activity, on: :create
   after_save :create_activity_log
   before_validation :ensure_reminder_method_array
   before_validation :set_meeting_reminder_time, if: -> { activity_type == 'meeting' && start_time.present? }
@@ -80,6 +81,14 @@ class LeadActivity < ApplicationRecord
   end
 
   private
+
+  def touch_parent_last_activity
+    return unless lead && lead.respond_to?(:last_activity_at)
+
+    lead.update_columns(last_activity_at: created_at || Time.current)
+  rescue => e
+    Rails.logger.warn "[LeadActivity] touch_parent_last_activity failed: #{e.message}"
+  end
 
   def ensure_reminder_method_array
     if reminder_method.is_a?(String)

@@ -454,6 +454,10 @@ Rails.application.routes.draw do
         get 'metrics/:card_type', action: :metrics
       end
       
+      # ==================== WORKQUEUE ====================
+      get 'workqueue/summary', to: 'workqueue#summary'
+      get 'workqueue/items',   to: 'workqueue#items'
+
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do

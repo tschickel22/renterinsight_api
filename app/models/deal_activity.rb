@@ -47,6 +47,7 @@ class DealActivity < ApplicationRecord
   
   before_validation :ensure_reminder_method_array
   before_validation :set_defaults
+  after_commit :touch_parent_last_activity, on: :create
   
   after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
   after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
@@ -85,6 +86,14 @@ class DealActivity < ApplicationRecord
   end
 
   private
+
+  def touch_parent_last_activity
+    return unless deal && deal.respond_to?(:last_activity_at)
+
+    deal.update_columns(last_activity_at: created_at || Time.current)
+  rescue => e
+    Rails.logger.warn "[DealActivity] touch_parent_last_activity failed: #{e.message}"
+  end
 
   def ensure_reminder_method_array
     if reminder_method.is_a?(String)
