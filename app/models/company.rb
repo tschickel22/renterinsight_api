@@ -77,6 +77,9 @@ class Company < ApplicationRecord
   has_many :manufacturer_ar_transactions, dependent: :destroy
   has_many :manufacturer_ar_payments, dependent: :destroy
   
+  # Champion IMS Feed Integration
+  has_many :champion_ims_retailers, dependent: :destroy
+  
   # Parts & Inventory Module Associations
   has_many :part_categories, dependent: :destroy
   has_many :parts, dependent: :destroy

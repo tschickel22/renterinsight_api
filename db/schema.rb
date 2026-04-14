@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_14_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -747,6 +747,30 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
     t.index ["mfa_enabled"], name: "index_buyer_portal_accesses_on_mfa_enabled"
     t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
+  end
+
+  create_table "champion_ims_retailers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "retailer_navision_id", null: false
+    t.string "retailer_name"
+    t.string "retailer_city"
+    t.string "retailer_state"
+    t.boolean "active", default: true, null: false
+    t.string "sync_frequency", default: "weekly", null: false
+    t.datetime "last_sync_at"
+    t.string "last_sync_status", default: "pending", null: false
+    t.text "last_sync_error"
+    t.jsonb "last_sync_stats", default: {}, null: false
+    t.datetime "next_scheduled_sync_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_champion_ims_retailers_on_active"
+    t.index ["company_id", "retailer_navision_id"], name: "idx_champion_ims_retailers_on_company_and_navision", unique: true
+    t.index ["company_id"], name: "index_champion_ims_retailers_on_company_id"
+    t.index ["last_sync_status"], name: "index_champion_ims_retailers_on_last_sync_status"
+    t.index ["location_id"], name: "index_champion_ims_retailers_on_location_id"
+    t.index ["next_scheduled_sync_at"], name: "index_champion_ims_retailers_on_next_scheduled_sync_at"
   end
 
   create_table "commission_audit_entries", force: :cascade do |t|
@@ -4833,7 +4857,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
     t.string "floor_joist_size", comment: "Floor joist dimensions (e.g. 2x6, 2x8, 2x10)"
     t.string "electrical_service", comment: "Electrical service rating (e.g. 100 AMP, 200 AMP)"
     t.decimal "modular_conversion_cost", precision: 10, scale: 2, comment: "Cost for modular conversion package"
+    t.string "source", default: "manual", null: false
+    t.bigint "floor_plan_id"
+    t.string "champion_model_id"
+    t.jsonb "champion_raw_payload", default: {}, null: false
+    t.jsonb "champion_images", default: [], null: false
+    t.datetime "champion_last_seen_at"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
+    t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
+    t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
     t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "(serial_number IS NOT NULL)"
@@ -4843,6 +4875,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
     t.index ["dealer_cost"], name: "index_vehicles_on_dealer_cost"
     t.index ["dwelling_type"], name: "index_vehicles_on_dwelling_type"
     t.index ["exterior_color"], name: "index_vehicles_on_exterior_color"
+    t.index ["floor_plan_id"], name: "index_vehicles_on_floor_plan_id"
     t.index ["home_type"], name: "index_vehicles_on_home_type"
     t.index ["is_deleted"], name: "index_vehicles_on_is_deleted"
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
@@ -4854,6 +4887,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
     t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
+    t.index ["source"], name: "index_vehicles_on_source"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["total_cost"], name: "index_vehicles_on_total_cost"
     t.index ["use_location_address"], name: "index_vehicles_on_use_location_address"
@@ -5248,6 +5282,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
   add_foreign_key "blog_posts_categories", "blog_categories"
   add_foreign_key "blog_posts_categories", "blog_posts"
   add_foreign_key "brochures", "companies"
+  add_foreign_key "champion_ims_retailers", "companies"
+  add_foreign_key "champion_ims_retailers", "locations"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
@@ -5574,6 +5610,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_13_130000) do
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
+  add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"
   add_foreign_key "warranty_claims", "companies", on_delete: :cascade
   add_foreign_key "warranty_claims", "locations", on_delete: :nullify

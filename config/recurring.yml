@@ -22,6 +22,9 @@ default: &default
   workflow_retention:
     class: WorkflowRetentionJob
     schedule: every sunday at 3am
+  champion_ims_weekly_sync:
+    class: ChampionImsWeeklySyncJob
+    schedule: every sunday at 2am
 
 production:
   <<: *default

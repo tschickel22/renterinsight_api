@@ -23,6 +23,83 @@ module ImportExport
       /\Ais_deleted\z/, /\Adeleted_at\z/, /\Aencrypted_/, /_digest\z/, /_token\z/
     ].freeze
 
+    # Per-module overrides for how `*_id` foreign-key columns resolve to a
+    # human-readable value at export time. Keyed by the DB column. `attr` is
+    # the method called on the associated record; if it returns nil we fall
+    # back through DISPLAY_ATTR_FALLBACKS. Anything not listed here is handled
+    # by auto-inference (see association_display_for).
+    ASSOCIATION_DISPLAYS = {
+      'accounts' => {
+        'location_id'       => { association: :location,       attr: :name },
+        'source_id'         => { association: :source,         attr: :name },
+        'owner_id'          => { association: :owner,          attr: :name },
+        'parent_account_id' => { association: :parent_account, attr: :name }
+      },
+      'contacts' => {
+        'account_id'  => { association: :account,  attr: :name },
+        'location_id' => { association: :location, attr: :name },
+        'owner_id'    => { association: :owner,    attr: :name }
+      },
+      'leads' => {
+        'location_id'          => { association: :location,          attr: :name },
+        'source_id'            => { association: :source,            attr: :name },
+        'owner_id'             => { association: :owner,             attr: :name },
+        'converted_account_id' => { association: :converted_account, attr: :name },
+        'vehicle_id'           => { association: :vehicle,           attr: :name }
+      },
+      'deals' => {
+        'location_id'              => { association: :location,              attr: :name },
+        'account_id'               => { association: :account,               attr: :name },
+        'contact_id'               => { association: :contact,               attr: :name },
+        'user_id'                  => { association: :user,                  attr: :name },
+        'owner_id'                 => { association: :owner,                 attr: :name },
+        'territory_id'             => { association: :territory,             attr: :name },
+        'source_id'                => { association: :source,                attr: :name },
+        'vehicle_id'               => { association: :vehicle,               attr: :name },
+        'commission_plan_id'       => { association: :commission_plan,       attr: :name },
+        'primary_salesperson_id'   => { association: :primary_salesperson,   attr: :name },
+        'sales_manager_id'         => { association: :sales_manager,         attr: :name },
+        'finance_manager_id'       => { association: :finance_manager,       attr: :name },
+        'desk_manager_id'          => { association: :desk_manager,          attr: :name },
+        'secondary_salesperson_id' => { association: :secondary_salesperson, attr: :name }
+      },
+      'parts' => {
+        'category_id'      => { association: :category,      attr: :name },
+        'created_by_id'    => { association: :created_by,    attr: :name },
+        'updated_by_id'    => { association: :updated_by,    attr: :name },
+        'factory_id'       => { association: :factory,       attr: :name },
+        'floor_plan_id'    => { association: :floor_plan,    attr: :name }
+      },
+      'service_tickets' => {
+        'location_id' => { association: :location, attr: :name },
+        'account_id'  => { association: :account,  attr: :name },
+        'contact_id'  => { association: :contact,  attr: :name },
+        'vehicle_id'  => { association: :vehicle,  attr: :name },
+        'deal_id'     => { association: :deal,     attr: :name }
+      },
+      'quotes' => {
+        'location_id'  => { association: :location,  attr: :name },
+        'account_id'   => { association: :account,   attr: :name },
+        'contact_id'   => { association: :contact,   attr: :name },
+        'vehicle_id'   => { association: :vehicle,   attr: :name },
+        'deal_id'      => { association: :deal,      attr: :name },
+        'sales_rep_id' => { association: :sales_rep, attr: :name }
+      },
+      'invoices' => {
+        'location_id'  => { association: :location,  attr: :name },
+        'contact_id'   => { association: :contact,   attr: :name },
+        'listing_id'   => { association: :listing,   attr: :name },
+        'deal_id'      => { association: :deal,      attr: :name },
+        'loan_id'      => { association: :loan,      attr: :name },
+        'quote_id'     => { association: :quote,     attr: :name },
+        'sales_rep_id' => { association: :sales_rep, attr: :name }
+      }
+    }.freeze
+
+    # Ordered list of attributes to try when resolving an association to a
+    # display value — first non-blank wins.
+    DISPLAY_ATTR_FALLBACKS = %i[name full_name display_name title label email].freeze
+
     class << self
       def available_modules
         MODULES.map { |key, cfg| { key: key, label: cfg[:label], model: cfg[:model] } }
@@ -81,6 +158,29 @@ module ImportExport
         when 'vehicles', 'parts', 'accounts', 'contacts', 'service_tickets'
           :images
         end
+      end
+
+      # Resolves a `*_id` column to the association + display attr(s) the
+      # Exporter should dereference. Returns nil if the column isn't a
+      # resolvable foreign key (e.g. polymorphic, or no matching reflection).
+      def association_display_for(module_type, field_key)
+        return nil if field_key.nil?
+        key = field_key.to_s
+        return nil unless key.end_with?('_id')
+
+        explicit = ASSOCIATION_DISPLAYS.dig(module_type.to_s, key)
+        if explicit
+          attrs = Array(explicit[:attr]).compact
+          return { association: explicit[:association], attrs: (attrs + DISPLAY_ATTR_FALLBACKS).uniq }
+        end
+
+        klass = model_class(module_type)
+        return nil unless klass
+        reflection = klass.reflect_on_all_associations(:belongs_to).find { |r| r.foreign_key.to_s == key }
+        return nil unless reflection
+        return nil if reflection.polymorphic?
+
+        { association: reflection.name, attrs: DISPLAY_ATTR_FALLBACKS }
       end
 
       private

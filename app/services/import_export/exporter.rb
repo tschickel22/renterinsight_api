@@ -53,10 +53,27 @@ module ImportExport
 
     def value_for(record, field)
       if field[:source] == 'custom'
-        (record.respond_to?(:custom_field_values) ? (record.custom_field_values || {}) : {})[field[:key]]
-      elsif record.respond_to?(field[:key])
-        record.public_send(field[:key])
+        return (record.respond_to?(:custom_field_values) ? (record.custom_field_values || {}) : {})[field[:key]]
       end
+
+      return nil unless record.respond_to?(field[:key])
+
+      raw = record.public_send(field[:key])
+      return raw if raw.nil?
+
+      display = ModuleRegistry.association_display_for(@job.module_type, field[:key])
+      return raw unless display
+
+      related = record.public_send(display[:association]) rescue nil
+      return raw unless related
+
+      display[:attrs].each do |attr|
+        next unless related.respond_to?(attr)
+        val = related.public_send(attr)
+        return val if val.present?
+      end
+
+      raw
     end
 
     def output_path(ext)

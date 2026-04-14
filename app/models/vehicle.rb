@@ -41,6 +41,7 @@ class Vehicle < ApplicationRecord
   # Associations
   belongs_to :company, optional: true
   belongs_to :location, optional: true
+  belongs_to :floor_plan, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
   has_many :listings, dependent: :destroy
@@ -58,6 +59,15 @@ class Vehicle < ApplicationRecord
   TYPES = %w[rv manufactured_home].freeze
   STATUSES = %w[available reserved sold pending service available_to_order].freeze
   CONDITIONS = %w[new used].freeze
+
+  # Champion IMS sync whitelist - ONLY these fields may be overwritten by
+  # Scrapers::ChampionImsSyncService. Everything else (pricing, status,
+  # VIN, serial, dealer images, custom fields) stays dealer-owned.
+  # See Prompt 1 architecture spec for full rationale.
+  CHAMPION_MANAGED_FIELDS = %w[
+    make model year bedrooms bathrooms square_feet home_type features
+    champion_images champion_raw_payload champion_last_seen_at
+  ].freeze
   
   # RV Classes for RVT.com syndication
   RV_CLASSES = [
@@ -131,6 +141,10 @@ class Vehicle < ApplicationRecord
   end
   scope :recent, -> { order(created_at: :desc) }
 
+  # Champion IMS sync scopes
+  scope :champion_sourced, -> { where(source: 'champion_ims') }
+  scope :needs_pricing_from_champion, -> { champion_sourced.where(sale_price: nil) }
+
   # Callbacks
   before_validation :normalize_fields
   before_validation :normalize_bedroom_bathroom_values  # FIX: Added to handle "4+" values
@@ -200,6 +214,11 @@ class Vehicle < ApplicationRecord
 
   def is_manufactured_home?
     listing_type == 'manufactured_home'
+  end
+
+  # True when this vehicle was imported from the Champion IMS feed.
+  def champion_sourced?
+    source == 'champion_ims'
   end
   
   # RV-specific helper methods

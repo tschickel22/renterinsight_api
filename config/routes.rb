@@ -592,6 +592,16 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== CHAMPION IMS FEED INTEGRATION ====================
+      namespace :champion_ims, path: 'champion_ims' do
+        resources :retailers do
+          member do
+            post :sync_now
+          end
+        end
+        resources :catalog, only: [:index]
+      end
+
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
         member do
