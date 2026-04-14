@@ -255,16 +255,16 @@ class WorkqueueService
   # ─── Service ticket queues ───────────────────────────────────────
 
   def tickets_mine
-    @company.service_tickets.where(deleted_at: nil, assigned_to: @user.id)
+    @company.service_tickets.where(is_deleted: [false, nil], assigned_to: @user.id)
                             .where.not(status: %w[completed cancelled])
   end
 
   def tickets_awaiting_parts
-    @company.service_tickets.where(deleted_at: nil, assigned_to: @user.id, status: 'waiting_parts')
+    @company.service_tickets.where(is_deleted: [false, nil], assigned_to: @user.id, status: 'waiting_parts')
   end
 
   def tickets_ready_for_invoice
-    @company.service_tickets.where(deleted_at: nil, assigned_to: @user.id, status: 'completed')
+    @company.service_tickets.where(is_deleted: [false, nil], assigned_to: @user.id, status: 'completed')
   end
 
   # ─── Quote queues ────────────────────────────────────────────────
