@@ -593,4 +593,5 @@ module Api
         @company = ::Company.find_by(id: company_id)
     end
   end
+  end
 end
