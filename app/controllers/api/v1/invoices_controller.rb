@@ -961,14 +961,31 @@ class Api::V1::InvoicesController < ApplicationController
         pdf.move_down 5
         
         schedule = invoice.draw_schedule
-        draw_data = schedule['draws'].sort_by { |d| d['position'] || 0 }.map do |draw|
-          ["#{draw['percentage']}%", draw['description'], h.number_to_currency(draw['amount'])]
+        sorted_draws = schedule['draws'].sort_by { |d| d['position'] || 0 }
+
+        draw_data = []
+        sorted_draws.each do |draw|
+          draw_data << ["#{draw['percentage']}%", draw['description'], h.number_to_currency(draw['amount'])]
+          (draw['sub_items'] || []).sort_by { |si| si['position'] || 0 }.each do |si|
+            amt = (si['amount'] || 0).to_f
+            next if amt <= 0 # blank sub-items are structural-only; don't print
+            # Inline amount with description so it reads as an annotation on the parent draw,
+            # not as its own line-item entry. Empty third column keeps the right-side total column clean.
+            draw_data << ['', "      \u2022 #{si['description']} \u2014 #{h.number_to_currency(amt)}", '']
+          end
         end
-        
+
         pdf.table(draw_data, cell_style: { borders: [], padding: [4, 6], size: 9 },
                   column_widths: [50, pdf.bounds.width - 160, 110]) do |t|
           t.columns(0).font_style = :bold
           t.columns(2).align = :right
+          # Style sub-item rows (those with empty first column) in lighter gray
+          draw_data.each_with_index do |row, i|
+            if row[0].to_s.empty? && row[1].to_s.include?('•')
+              t.row(i).text_color = '666666'
+              t.row(i).size = 8
+            end
+          end
         end
       end
       
@@ -1081,6 +1098,7 @@ class Api::V1::InvoicesController < ApplicationController
 
       # ── DRAW TABLE ──
       table_data = [['Draw #', 'Description', '%', 'Amount']]
+      sub_item_row_indices = []
 
       draws.each_with_index do |draw, i|
         table_data << [
@@ -1089,6 +1107,20 @@ class Api::V1::InvoicesController < ApplicationController
           "#{draw['percentage']}%",
           h.number_to_currency(draw['amount'])
         ]
+
+        (draw['sub_items'] || []).sort_by { |si| si['position'] || 0 }.each do |si|
+          amt = (si['amount'] || 0).to_f
+          next if amt <= 0 # blank sub-items are structural-only; don't print
+          # Inline amount with description so it reads as an annotation on the parent draw,
+          # not as a separate billable line. Right-side Amount column is left empty.
+          table_data << [
+            '',
+            "      \u2022 #{si['description']} \u2014 #{h.number_to_currency(amt)}",
+            '',
+            ''
+          ]
+          sub_item_row_indices << (table_data.length - 1)
+        end
       end
 
       # Total row
@@ -1110,6 +1142,13 @@ class Api::V1::InvoicesController < ApplicationController
         t.row(-1).border_top_color = accent
 
         t.columns(2..3).align = :right
+
+        # Style sub-item rows (lighter, smaller, no top border for tighter grouping)
+        sub_item_row_indices.each do |idx|
+          t.row(idx).text_color = '666666'
+          t.row(idx).size = 9
+          t.row(idx).background_color = 'FAFAFA'
+        end
       end
 
       pdf.number_pages 'Page <page> of <total>', at: [pdf.bounds.right - 150, 0], align: :right, size: 8, color: '999999'

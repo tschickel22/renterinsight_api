@@ -523,6 +523,8 @@ module Api
 
       # RBAC Authorization Methods for company_settings resource
       def authorize_settings_read!
+        return if skip_rbac?
+        unless current_user.has_permission?('company_settings', 'read', 'all', @company&.id)
           Rails.logger.warn "[RBAC] User #{current_user.id} denied READ access to company_settings for company #{@company&.id}"
           render json: { error: 'Permission denied: You do not have permission to view company settings' }, status: :forbidden
         end
@@ -556,16 +558,19 @@ module Api
       # RBAC Authorization Methods for finance resource
       def authorize_finance_manage!
         return if skip_rbac?
-        unless current_user.has_permission?('finance', 'manage', 'all', @company&.id)
-          Rails.logger.warn "[RBAC] User #{current_user.id} denied MANAGE access to finance for company #{@company&.id}"
+        # Use 'update' (real action) instead of 'manage' (which doesn't exist in the permission system)
+        unless current_user.has_permission?('finance', 'update', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to finance for company #{@company&.id}"
           render json: { error: 'Permission denied: You do not have permission to manage finance settings' }, status: :forbidden
         end
       end
 
       # Skip RBAC for platform admins or if company doesn't use RBAC
       def skip_rbac?
-        return true if current_user.platform_admin?
-        return true if current_user.super_admin?
+        return true if current_user.respond_to?(:platform_admin?) && current_user.platform_admin?
+        return true if current_user.respond_to?(:super_admin?) && current_user.super_admin?
+        return true if current_user.respond_to?(:effective_admin?) && current_user.effective_admin?
+        return true if %w[platform_admin super_admin company_admin admin].include?(current_user.user_type.to_s)
         return true unless @company&.use_rbac_system
         false
       end

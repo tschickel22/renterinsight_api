@@ -60,6 +60,29 @@ class Invoice < ApplicationRecord
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
   validates :invoice_date, presence: true
   validates :status, inclusion: { in: %w[draft finalized sent viewed partial paid overdue cancelled] }
+  validate :draw_schedule_sub_items_within_parent
+
+  # Sub-items on a draw are dollar amounts that draw down from the parent draw's calculated amount.
+  # Sum of sub_items for any single draw must NOT exceed that draw's amount.
+  # Section totals (parent draw amounts) remain fixed.
+  def draw_schedule_sub_items_within_parent
+    return if draw_schedule.blank?
+    draws = draw_schedule.is_a?(Hash) ? (draw_schedule['draws'] || draw_schedule[:draws]) : nil
+    return if draws.blank?
+
+    draws.each_with_index do |draw, idx|
+      sub_items = draw['sub_items'] || draw[:sub_items]
+      next if sub_items.blank?
+
+      parent_amount = draw['amount'].to_f
+      sub_total = sub_items.sum { |si| (si['amount'] || si[:amount]).to_f }
+
+      if sub_total > parent_amount + 0.001 # tiny float tolerance
+        label = draw['description'].presence || "Draw #{idx + 1}"
+        errors.add(:draw_schedule, "sub-items for '#{label}' total $#{format('%.2f', sub_total)} which exceeds the draw amount of $#{format('%.2f', parent_amount)}")
+      end
+    end
+  end
   
   scope :for_current_location, -> { 
     Current.location_filtered? ? where(location_id: Current.location_id) : all 
