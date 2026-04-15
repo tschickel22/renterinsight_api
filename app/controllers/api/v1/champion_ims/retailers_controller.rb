@@ -71,7 +71,7 @@ module Api
             return
           end
 
-          ChampionImsSyncJob.perform_later(@retailer.id)
+          ChampionImsSyncJob.perform_later(@retailer.id, trigger: 'manual')
           render json: {
             message: "Sync queued for #{@retailer.display_label}",
             retailer: retailer_json(@retailer)
@@ -93,6 +93,7 @@ module Api
             :retailer_city,
             :retailer_state,
             :location_id,
+            :apply_to_all_locations,
             :active,
             :sync_frequency
           )
@@ -106,6 +107,7 @@ module Api
             retailer_city:          retailer.retailer_city,
             retailer_state:         retailer.retailer_state,
             location_id:            retailer.location_id,
+            apply_to_all_locations: retailer.apply_to_all_locations,
             active:                 retailer.active,
             sync_frequency:         retailer.sync_frequency,
             last_sync_at:           retailer.last_sync_at,

@@ -18,6 +18,9 @@ class ChampionImsRetailer < ApplicationRecord
   # ------------------------------------------------------------------
   belongs_to :company
   belongs_to :location, optional: true
+  has_many :sync_runs,
+           class_name: 'ChampionImsSyncRun',
+           dependent:  :destroy
 
   # ------------------------------------------------------------------
   # Validations

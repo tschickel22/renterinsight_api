@@ -55,15 +55,29 @@ class Vehicle < ApplicationRecord
   # Inventory features (Option B - individual searchable/filterable records)
   has_many :inventory_features, dependent: :destroy
 
+  # Champion IMS catalog/clone lineage:
+  #   - `catalog_source` is the catalog Vehicle this row was cloned from
+  #     (only set on `source: 'champion_ims_clone'` rows)
+  #   - `clones` are working copies the dealer created when changing the
+  #     status of this catalog row (only populated on `source: 'champion_ims'` rows)
+  belongs_to :catalog_source, class_name: 'Vehicle', foreign_key: 'cloned_from_id', optional: true
+  has_many   :clones,         class_name: 'Vehicle', foreign_key: 'cloned_from_id', dependent: :nullify
+
   # Vehicle types
   TYPES = %w[rv manufactured_home].freeze
   STATUSES = %w[available reserved sold pending service available_to_order].freeze
   CONDITIONS = %w[new used].freeze
 
-  # Champion IMS sync whitelist - ONLY these fields may be overwritten by
-  # Scrapers::ChampionImsSyncService. Everything else (pricing, status,
-  # VIN, serial, dealer images, custom fields) stays dealer-owned.
-  # See Prompt 1 architecture spec for full rationale.
+  # Champion IMS source values:
+  #   - 'manual'              — default, dealer-created
+  #   - 'champion_ims'        — catalog row from IMS feed (immutable to dealers; sync writes only)
+  #   - 'champion_ims_clone'  — dealer-owned working copy of a catalog row, created via
+  #                              status-change interception. Sync NEVER touches these.
+  CHAMPION_SOURCES = %w[manual champion_ims champion_ims_clone].freeze
+
+  # Legacy whitelist — retained for backwards-compat in case anything else references it,
+  # but the cloning architecture means dealers never edit catalog rows directly.
+  # Sync now does a full upsert on catalog rows.
   CHAMPION_MANAGED_FIELDS = %w[
     make model year bedrooms bathrooms square_feet home_type features
     champion_images champion_raw_payload champion_last_seen_at
@@ -143,6 +157,9 @@ class Vehicle < ApplicationRecord
 
   # Champion IMS sync scopes
   scope :champion_sourced, -> { where(source: 'champion_ims') }
+  scope :champion_catalog,  -> { where(source: 'champion_ims') }                       # alias — catalog rows
+  scope :champion_clones,   -> { where(source: 'champion_ims_clone') }                  # dealer working copies
+  scope :champion_any,      -> { where(source: %w[champion_ims champion_ims_clone]) }   # both
   scope :needs_pricing_from_champion, -> { champion_sourced.where(sale_price: nil) }
 
   # Callbacks
@@ -216,9 +233,29 @@ class Vehicle < ApplicationRecord
     listing_type == 'manufactured_home'
   end
 
-  # True when this vehicle was imported from the Champion IMS feed.
+  # True when this vehicle was imported from the Champion IMS feed (catalog row).
   def champion_sourced?
     source == 'champion_ims'
+  end
+  alias_method :catalog?, :champion_sourced?
+
+  # True when this vehicle is a dealer-owned clone of a Champion catalog row.
+  def champion_clone?
+    source == 'champion_ims_clone'
+  end
+
+  # True when status change should trigger a clone instead of an in-place update.
+  # Catalog rows must stay at `available_to_order`; any other status means the
+  # dealer is taking action on a specific home and needs their own working copy.
+  def requires_clone_on_status_change?(new_status)
+    catalog? && new_status.to_s != 'available_to_order'
+  end
+
+  # True when this catalog row has any associated dealer activity that should
+  # prevent it from being tombstoned even if Champion drops it from the feed.
+  def has_dealer_activity?
+    return false unless catalog?
+    clones.any? || deals.any? || quotes.any? || listings.any? || inventory_packages.any?
   end
   
   # RV-specific helper methods
@@ -244,8 +281,14 @@ class Vehicle < ApplicationRecord
   private
 
   def normalize_fields
-    self.make = make&.titleize
-    self.model = model&.titleize
+    # Champion catalog rows come pre-formatted from the manufacturer's master
+    # data — titleizing them breaks part numbers (DAP1676H32222 → "Dap 1676 H 32222")
+    # and re-spaces model names ("Skyliner 6380P" → "Skyliner 6380 P"), causing
+    # an infinite update loop on every sync.
+    if source != 'champion_ims'
+      self.make = make&.titleize
+      self.model = model&.titleize
+    end
     self.status = normalize_status(status)
     self.listing_type = listing_type&.downcase
 

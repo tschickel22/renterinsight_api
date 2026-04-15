@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_14_000003) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -765,12 +765,54 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_14_000003) do
     t.datetime "next_scheduled_sync_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "apply_to_all_locations", default: false, null: false, comment: "When true, synced vehicles are company-wide (location_id=nil) regardless of retailer.location_id"
     t.index ["active"], name: "index_champion_ims_retailers_on_active"
     t.index ["company_id", "retailer_navision_id"], name: "idx_champion_ims_retailers_on_company_and_navision", unique: true
     t.index ["company_id"], name: "index_champion_ims_retailers_on_company_id"
     t.index ["last_sync_status"], name: "index_champion_ims_retailers_on_last_sync_status"
     t.index ["location_id"], name: "index_champion_ims_retailers_on_location_id"
     t.index ["next_scheduled_sync_at"], name: "index_champion_ims_retailers_on_next_scheduled_sync_at"
+  end
+
+  create_table "champion_ims_sync_events", force: :cascade do |t|
+    t.bigint "champion_ims_sync_run_id", null: false
+    t.bigint "vehicle_id"
+    t.string "champion_model_id"
+    t.string "event_type", null: false
+    t.string "display_name"
+    t.string "inventory_id"
+    t.jsonb "field_changes", default: {}, null: false
+    t.text "reason"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["champion_ims_sync_run_id"], name: "idx_cims_events_on_run"
+    t.index ["champion_model_id"], name: "index_champion_ims_sync_events_on_champion_model_id"
+    t.index ["event_type"], name: "index_champion_ims_sync_events_on_event_type"
+    t.index ["vehicle_id", "created_at"], name: "idx_cims_events_on_vehicle_and_created_at", order: { created_at: :desc }
+    t.index ["vehicle_id"], name: "idx_cims_events_on_vehicle"
+  end
+
+  create_table "champion_ims_sync_runs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "champion_ims_retailer_id", null: false
+    t.string "status", default: "running", null: false
+    t.datetime "started_at", null: false
+    t.datetime "finished_at"
+    t.integer "duration_ms"
+    t.integer "catalog_added", default: 0, null: false
+    t.integer "catalog_updated", default: 0, null: false
+    t.integer "catalog_unchanged", default: 0, null: false
+    t.integer "catalog_tombstoned", default: 0, null: false
+    t.integer "catalog_protected", default: 0, null: false
+    t.integer "vehicles_skipped", default: 0, null: false
+    t.integer "total", default: 0, null: false
+    t.string "trigger", default: "manual", null: false
+    t.text "error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["champion_ims_retailer_id", "started_at"], name: "idx_cims_runs_on_retailer_and_started_at", order: { started_at: :desc }
+    t.index ["champion_ims_retailer_id"], name: "idx_cims_runs_on_retailer"
+    t.index ["company_id"], name: "index_champion_ims_sync_runs_on_company_id"
   end
 
   create_table "commission_audit_entries", force: :cascade do |t|
@@ -4863,9 +4905,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_14_000003) do
     t.jsonb "champion_raw_payload", default: {}, null: false
     t.jsonb "champion_images", default: [], null: false
     t.datetime "champion_last_seen_at"
+    t.bigint "cloned_from_id", comment: "For Champion IMS clones: points to the catalog Vehicle this row was cloned from"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
+    t.index ["cloned_from_id"], name: "index_vehicles_on_cloned_from_id"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
     t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "(serial_number IS NOT NULL)"
@@ -5284,6 +5328,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_14_000003) do
   add_foreign_key "brochures", "companies"
   add_foreign_key "champion_ims_retailers", "companies"
   add_foreign_key "champion_ims_retailers", "locations"
+  add_foreign_key "champion_ims_sync_events", "champion_ims_sync_runs"
+  add_foreign_key "champion_ims_sync_events", "vehicles"
+  add_foreign_key "champion_ims_sync_runs", "champion_ims_retailers"
+  add_foreign_key "champion_ims_sync_runs", "companies"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
@@ -5612,6 +5660,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_14_000003) do
   add_foreign_key "vehicles", "companies"
   add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"
+  add_foreign_key "vehicles", "vehicles", column: "cloned_from_id"
   add_foreign_key "warranty_claims", "companies", on_delete: :cascade
   add_foreign_key "warranty_claims", "locations", on_delete: :nullify
   add_foreign_key "warranty_claims", "manufacturers", on_delete: :restrict

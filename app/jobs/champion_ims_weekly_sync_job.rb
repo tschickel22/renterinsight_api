@@ -15,7 +15,7 @@ class ChampionImsWeeklySyncJob < ApplicationJob
     Rails.logger.info "[ChampionImsWeeklySyncJob] Dispatching #{count} retailer sync(s)"
 
     retailers.find_each do |retailer|
-      ChampionImsSyncJob.perform_later(retailer.id)
+      ChampionImsSyncJob.perform_later(retailer.id, trigger: 'scheduled')
     rescue StandardError => e
       Rails.logger.error "[ChampionImsWeeklySyncJob] Failed to enqueue sync for retailer #{retailer.id}: #{e.message}"
     end

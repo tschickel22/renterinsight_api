@@ -8,7 +8,9 @@
 class ChampionImsSyncJob < ApplicationJob
   queue_as :default
 
-  def perform(retailer_id)
+  # @param retailer_id [Integer]
+  # @param trigger [String] 'manual' (UI button / console) or 'scheduled' (cron)
+  def perform(retailer_id, trigger: 'manual')
     retailer = ChampionImsRetailer.find_by(id: retailer_id)
 
     unless retailer
@@ -21,8 +23,8 @@ class ChampionImsSyncJob < ApplicationJob
       return
     end
 
-    Rails.logger.info "[ChampionImsSyncJob] Starting sync for #{retailer.display_label}"
-    Scrapers::ChampionImsSyncService.new(retailer).call
+    Rails.logger.info "[ChampionImsSyncJob] Starting sync for #{retailer.display_label} (trigger=#{trigger})"
+    Scrapers::ChampionImsSyncService.new(retailer, trigger: trigger).call
     Rails.logger.info "[ChampionImsSyncJob] Finished sync for #{retailer.display_label}"
   end
 end

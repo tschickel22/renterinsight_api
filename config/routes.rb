@@ -593,13 +593,16 @@ Rails.application.routes.draw do
       end
       
       # ==================== CHAMPION IMS FEED INTEGRATION ====================
+      # Note: catalog browsing was removed - sync writes directly to vehicles table
+      # with source='champion_ims', so synced homes appear in regular inventory list.
       namespace :champion_ims, path: 'champion_ims' do
         resources :retailers do
           member do
             post :sync_now
           end
+          # Read-only history of sync runs + per-home events
+          resources :sync_runs, only: %i[index show]
         end
-        resources :catalog, only: [:index]
       end
 
       # ==================== VEHICLES/INVENTORY ====================

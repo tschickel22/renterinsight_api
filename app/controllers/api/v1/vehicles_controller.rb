@@ -33,12 +33,14 @@ module Api
         end
         
         # Apply location filter - skip if 'all_locations' param sent
+        # Champion IMS catalog rows with location_id IS NULL (apply_to_all_locations=true)
+        # are visible under EVERY location's view, regardless of selector.
         if params[:all_locations].present? && params[:all_locations] == 'true'
           # Show all locations - no location filter applied
         elsif params[:location_id].present? && params[:location_id] != 'all'
-          vehicles = vehicles.where(location_id: params[:location_id])
+          vehicles = vehicles.where('location_id = ? OR (location_id IS NULL AND source = ?)', params[:location_id], 'champion_ims')
         elsif Current.location_filtered?
-          vehicles = vehicles.where(location_id: Current.location_id)
+          vehicles = vehicles.where('location_id = ? OR (location_id IS NULL AND source = ?)', Current.location_id, 'champion_ims')
         end
         
         # Apply non-search filters
@@ -47,6 +49,8 @@ module Api
         vehicles = vehicles.by_year(params[:year]) if params[:year].present?
         vehicles = vehicles.by_make(params[:make]) if params[:make].present?
         vehicles = vehicles.by_model(params[:model]) if params[:model].present?
+        # Source filter (e.g., 'champion_ims', 'manual') - used by Champion IMS Feeds tab
+        vehicles = vehicles.where(source: params[:source]) if params[:source].present?
         
         # Advanced MH filters
         vehicles = vehicles.where(bedrooms: params[:bedrooms]) if params[:bedrooms].present?
@@ -201,6 +205,49 @@ module Api
         if custom_field_values_param.present?
           existing = @vehicle.custom_field_values || {}
           params_to_update = params_to_update.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
+        end
+
+        # CHAMPION IMS CATALOG INTERCEPTION
+        # If this is a catalog row and the requested status is not 'available_to_order',
+        # clone the row instead of updating in place. The catalog row stays pristine
+        # for sync; the dealer works with the new clone.
+        requested_status = params_to_update[:status] || params_to_update['status']
+        if @vehicle.catalog? && requested_status.present? && @vehicle.requires_clone_on_status_change?(requested_status)
+          # Build attribute overrides from the params (everything except status, which the service applies)
+          override_attrs = params_to_update.to_h.except('status', :status)
+
+          service = VehicleCloneFromCatalogService.new(
+            @vehicle,
+            status:     requested_status,
+            attributes: override_attrs
+          )
+          clone = service.call
+
+          if clone
+            render json: {
+              vehicle:        vehicle_json(clone, detailed: true),
+              cloned:         true,
+              clone_id:       clone.id,
+              source_id:      @vehicle.id,
+              source_inventory_id: @vehicle.inventory_id,
+              message:        "Created new home from Champion catalog. Original stays available to order."
+            }, status: :created
+          else
+            render json: { errors: service.errors.full_messages }, status: :unprocessable_entity
+          end
+          return
+        end
+
+        # CHAMPION IMS CATALOG ROW EDIT GUARD
+        # Even for non-status edits, catalog rows are sync-owned. Block in-place edits
+        # so dealers don't accidentally mutate data that sync will overwrite next run.
+        if @vehicle.catalog?
+          render json: {
+            errors: [
+              "This is a Champion IMS catalog home. To customize for a customer, change its status to create a working copy."
+            ]
+          }, status: :forbidden
+          return
         end
 
         if @vehicle.update(params_to_update)
@@ -1511,8 +1558,14 @@ module Api
         end
         
         # Convert image URLs - handle both plain string URLs and Hash objects (S3 uploads)
-        full_image_urls = (vehicle.images || []).map do |url|
-          raw = url.is_a?(Hash) ? (url['url'] || url[:url]) : url
+        # Champion catalog/clone fallback: if `images` is empty but the row has
+        # `champion_images`, use those so previously-synced rows display photos
+        # without requiring a re-sync.
+        image_source = vehicle.images.presence ||
+                       (vehicle.respond_to?(:champion_images) ? vehicle.champion_images : nil) ||
+                       []
+        full_image_urls = image_source.map do |url|
+          raw = url.is_a?(Hash) ? (url['url'] || url[:url] || url['path'] || url[:path]) : url
           next nil if raw.blank?
           raw.start_with?('http') ? raw : "#{base_url}#{raw}"
         end.compact
