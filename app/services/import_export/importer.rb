@@ -26,11 +26,18 @@ module ImportExport
       fields = ModuleRegistry.fields_for(@job.module_type, company_id: @company.id)
       scope  = @company.public_send(cfg[:scope])
 
+      # Lookup field definitions for resolving human-readable values → _id columns
+      @lookup_defs = ModuleRegistry.lookup_fields_for(@job.module_type)
+      @lookup_by_key = @lookup_defs.index_by { |f| f[:key] }
+
       validator = RowValidator.new(fields)
       detector  = DuplicateDetector.new(scope, @job.duplicate_match_fields.presence || cfg[:match_fields])
 
       mapping       = @job.column_mapping || {}
       strategy      = @job.duplicate_strategy.presence || 'skip'
+      options       = @job.options || {}
+      auto_location = options['location_id'].presence
+      auto_owner    = options['owner_id'].presence
       created_ids   = []
       updated_snaps = []
       errors        = []
@@ -38,6 +45,11 @@ module ImportExport
       parsed[:rows].each_with_index do |row, idx|
         row_number = idx + 2 # +1 header, +1 1-based
         row_hash   = build_row_hash(row, parsed[:headers], mapping)
+
+        # Resolve lookup fields (e.g. "account_name" → account_id) before validation.
+        # Unresolvable lookups are warnings, not blocking errors — the deal is still
+        # created without that association.
+        lookup_warnings = resolve_lookups!(row_hash)
 
         result = validator.call(row_hash)
         unless result[:valid]
@@ -56,10 +68,17 @@ module ImportExport
             handle_duplicate(existing, data, strategy, scope, created_ids, updated_snaps, errors, row_number)
           else
             record = scope.new(data[:standard])
+            record.location_id = auto_location if auto_location && record.respond_to?(:location_id=) && record.location_id.blank?
+            record.owner_id = auto_owner if auto_owner && record.respond_to?(:owner_id=) && record.owner_id.blank?
             apply_custom_fields(record, data[:custom])
             record.save!
             created_ids << record.id
             @job.success_count += 1
+          end
+
+          # Record lookup warnings (non-blocking) so user can see skipped associations
+          if lookup_warnings.any?
+            errors << { row: row_number, warnings: lookup_warnings }
           end
         rescue ActiveRecord::RecordInvalid => e
           errors << { row: row_number, errors: e.record.errors.full_messages }
@@ -104,7 +123,14 @@ module ImportExport
       headers.each_with_index do |header, i|
         db_key = mapping[header] || mapping[header.to_s]
         next unless db_key
-        hash[db_key.to_s] = row[i]
+        val = row[i]
+        # When multiple CSV columns map to the same db field (e.g. "Phone"
+        # and "Secondary phone number" both → phone), keep the first
+        # non-blank value instead of letting a later blank column overwrite it.
+        if hash.key?(db_key.to_s)
+          next if val.nil? || (val.is_a?(String) && val.strip.empty?)
+        end
+        hash[db_key.to_s] = val
       end
       hash
     end
@@ -114,6 +140,96 @@ module ImportExport
       standard = transformed.reject { |k, _| custom_keys.include?(k) }
       custom   = transformed.select { |k, _| custom_keys.include?(k) }
       { standard: standard, custom: custom }
+    end
+
+    # Resolves virtual lookup fields in-place. For each lookup key present in
+    # the row_hash (e.g. "account_name" => "ABC Corp"), searches the company's
+    # records and replaces it with the real _id column (e.g. "account_id" => 42).
+    # Unresolvable lookups are silently skipped (the association is left blank)
+    # rather than failing the entire row, since these are optional associations.
+    # Returns an array of warning strings (informational only, never blocks import).
+    def resolve_lookups!(row_hash)
+      warnings = []
+
+      @lookup_by_key.each do |key, defn|
+        raw_value = row_hash.delete(key)
+        next if raw_value.nil? || (raw_value.is_a?(String) && raw_value.strip.empty?)
+
+        value = raw_value.to_s.strip
+        target = defn[:target_column]
+
+        # Skip if the target _id is already set (e.g. auto-assigned location_id)
+        next if row_hash[target].present?
+
+        record = find_lookup_record(defn, value)
+        if record
+          row_hash[target] = record.id
+        else
+          # Log warning but don't block the row — association is optional
+          Rails.logger.info "[ImportExport::Importer] Lookup miss: #{defn[:label]} '#{value}' not found, skipping association"
+          warnings << "#{defn[:label]}: could not find '#{value}' (skipped)"
+        end
+      end
+
+      warnings
+    end
+
+    # Searches company-scoped records for a lookup match.
+    # For name-based lookups with first_name/last_name fields, supports:
+    #   - "Benny" → matches first_name OR last_name
+    #   - "Benny Smith" → matches first_name='Benny' AND last_name='Smith'
+    #   - Also tries CONCAT(first_name, ' ', last_name) ILIKE for full name match
+    def find_lookup_record(defn, value)
+      scope_sym = defn[:scope]
+      base = @company.respond_to?(scope_sym) ? @company.public_send(scope_sym) : defn[:model].safe_constantize
+      return nil unless base
+
+      search_fields = defn[:search_fields]
+
+      # Special handling for first_name + last_name combo fields
+      if search_fields.include?('first_name') && search_fields.include?('last_name')
+        return find_by_name(base, value)
+      end
+
+      # Standard lookup: try exact match on each field, then ILIKE
+      search_fields.each do |field|
+        found = base.find_by(field => value)
+        return found if found
+      end
+
+      conditions = search_fields.map { |f| "#{f} ILIKE ?" }.join(' OR ')
+      placeholders = search_fields.map { value }
+      base.where(conditions, *placeholders).first
+    end
+
+    # Name-aware search: handles "Benny", "Benny Smith", "benny smith"
+    def find_by_name(base, value)
+      parts = value.strip.split(/\s+/, 2)
+
+      if parts.length >= 2
+        first_part, last_part = parts
+        # Try exact first+last
+        found = base.find_by(first_name: first_part, last_name: last_part)
+        return found if found
+
+        # Try case-insensitive first+last
+        found = base.where('first_name ILIKE ? AND last_name ILIKE ?', first_part, last_part).first
+        return found if found
+      end
+
+      # Try full name concat match (handles "Benny Smith" against first_name=Benny, last_name=Smith)
+      found = base.where("CONCAT(first_name, ' ', last_name) ILIKE ?", value.strip).first
+      return found if found
+
+      # Single name: try first_name or last_name individually
+      found = base.find_by(first_name: value.strip)
+      return found if found
+
+      found = base.find_by(last_name: value.strip)
+      return found if found
+
+      # Case-insensitive fallback
+      base.where('first_name ILIKE ? OR last_name ILIKE ?', value.strip, value.strip).first
     end
 
     def apply_custom_fields(record, custom)

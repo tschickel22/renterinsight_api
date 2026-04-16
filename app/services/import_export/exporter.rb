@@ -20,7 +20,25 @@ module ImportExport
 
       fields  = ModuleRegistry.fields_for(@job.module_type, company_id: @company.id)
       keys    = (@job.selected_fields.presence || fields.map { |f| f[:key] }).map(&:to_s)
-      records = apply_filters(@company.public_send(cfg[:scope]), @job.filters)
+      scope   = apply_filters(@company.public_send(cfg[:scope]), @job.filters)
+
+      # Eager-load associations that will be resolved to display names
+      includes_list = keys.filter_map do |k|
+        display = ModuleRegistry.association_display_for(@job.module_type, k)
+        display[:association] if display
+      end
+
+      if includes_list.any?
+        # Only include associations that actually exist on the model
+        model_class = ModuleRegistry.model_class(@job.module_type)
+        valid_associations = model_class.reflect_on_all_associations.map(&:name)
+        includes_list = includes_list.select { |a| valid_associations.include?(a) }
+        scope = scope.includes(*includes_list) if includes_list.any?
+      end
+
+      Rails.logger.info "[ImportExport::Exporter] module=#{@job.module_type} keys=#{keys.inspect} includes=#{includes_list.inspect}"
+
+      records = scope
 
       path = case @job.format
              when 'csv'  then write_csv(records, fields, keys)
@@ -53,27 +71,68 @@ module ImportExport
 
     def value_for(record, field)
       if field[:source] == 'custom'
-        return (record.respond_to?(:custom_field_values) ? (record.custom_field_values || {}) : {})[field[:key]]
+        raw = (record.respond_to?(:custom_field_values) ? (record.custom_field_values || {}) : {})[field[:key]]
+        return format_value(raw)
       end
 
       return nil unless record.respond_to?(field[:key])
 
       raw = record.public_send(field[:key])
-      return raw if raw.nil?
+      return nil if raw.nil?
 
+      # For _id columns, resolve to human-readable name
       display = ModuleRegistry.association_display_for(@job.module_type, field[:key])
-      return raw unless display
+      if display
+        begin
+          related = record.public_send(display[:association])
+        rescue StandardError
+          related = nil
+        end
 
-      related = record.public_send(display[:association]) rescue nil
-      return raw unless related
+        if related
+          # Try each display attribute in order
+          display[:attrs].each do |attr|
+            next unless related.respond_to?(attr)
+            val = related.public_send(attr)
+            return val if val.present?
+          end
 
-      display[:attrs].each do |attr|
-        next unless related.respond_to?(attr)
-        val = related.public_send(attr)
-        return val if val.present?
+          # Last resort for models with first_name/last_name
+          if related.respond_to?(:first_name) && related.respond_to?(:last_name)
+            full = [related.first_name, related.last_name].compact.join(' ')
+            return full if full.present?
+          end
+        end
+
+        # If association resolution was attempted but failed, return nil
+        # (don't leak raw integer IDs into exports)
+        return nil
       end
 
-      raw
+      format_value(raw)
+    end
+
+    # Convert JSONB arrays/hashes into human-readable cell values.
+    # Empty collections → nil (blank cell). Non-empty ones → readable text.
+    def format_value(val)
+      case val
+      when Array
+        return nil if val.empty?
+        # Complex structures (array of hashes) → JSON string for round-trip
+        if val.first.is_a?(Hash)
+          val.to_json
+        else
+          val.map { |v| format_value(v) }.compact.join(', ')
+        end
+      when Hash
+        val.empty? ? nil : val.to_json
+      when true
+        'Yes'
+      when false
+        'No'
+      else
+        val
+      end
     end
 
     def output_path(ext)

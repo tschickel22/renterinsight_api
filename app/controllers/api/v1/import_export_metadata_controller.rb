@@ -14,13 +14,15 @@ module Api
       end
 
       # GET /api/v1/import_export/modules/:module_type/fields
+      # Pass ?context=import to exclude FK _id columns (not useful in CSV imports)
       def fields
         return unless authorize_action!('data_import_export', 'read')
 
         cfg = ImportExport::ModuleRegistry.config_for(params[:module_type])
         return render json: { error: 'Unknown module' }, status: :not_found unless cfg
 
-        fields = ImportExport::ModuleRegistry.fields_for(params[:module_type], company_id: @company.id)
+        for_import = params[:context].to_s == 'import'
+        fields = ImportExport::ModuleRegistry.fields_for(params[:module_type], company_id: @company.id, for_import: for_import)
         render json: {
           module_type: params[:module_type],
           label: cfg[:label],
@@ -37,7 +39,7 @@ module Api
         cfg = ImportExport::ModuleRegistry.config_for(params[:module_type])
         return render json: { error: 'Unknown module' }, status: :not_found unless cfg
 
-        fields = ImportExport::ModuleRegistry.fields_for(params[:module_type], company_id: @company.id)
+        fields = ImportExport::ModuleRegistry.fields_for(params[:module_type], company_id: @company.id, for_import: true)
         csv_data = CSV.generate do |csv|
           csv << fields.map { |f| f[:required] ? "#{f[:label]} *" : f[:label] }
           csv << fields.map { |_| '' }

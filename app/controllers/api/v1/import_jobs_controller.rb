@@ -48,7 +48,7 @@ module Api
           image_zip_url: zip_key,
           duplicate_strategy: params[:duplicate_strategy].presence || 'skip',
           duplicate_match_fields: parse_array(params[:duplicate_match_fields]),
-          options: params[:options].is_a?(ActionController::Parameters) ? params[:options].to_unsafe_h : {}
+          options: build_import_options
         )
 
         render json: serialize(job), status: :created
@@ -64,7 +64,7 @@ module Api
 
         path   = ImportExport::S3Helper.download_to_tempfile(@job.source_file_url)
         parsed = ImportExport::CsvParser.new(path).parse
-        fields = ImportExport::ModuleRegistry.fields_for(@job.module_type, company_id: @company.id)
+        fields = ImportExport::ModuleRegistry.fields_for(@job.module_type, company_id: @company.id, for_import: true)
         mapper = ImportExport::FieldMapper.new(parsed[:headers], fields).call
 
         render json: {
@@ -131,6 +131,25 @@ module Api
         return [] if val.blank?
         return val if val.is_a?(Array)
         val.to_s.split(',').map(&:strip).reject(&:empty?)
+      end
+
+      def parse_options(val)
+        return {} if val.blank?
+        return val.to_unsafe_h if val.is_a?(ActionController::Parameters)
+        return val if val.is_a?(Hash)
+        JSON.parse(val.to_s)
+      rescue JSON::ParserError
+        {}
+      end
+
+      # Merge frontend-provided options with request context defaults.
+      # location_id falls back to the user's current location (X-Location-ID header).
+      # owner_id falls back to the importing user.
+      def build_import_options
+        opts = parse_options(params[:options])
+        opts['location_id'] ||= Current.location_id if Current.location_id.present?
+        opts['owner_id']    ||= current_user.id
+        opts
       end
 
       def serialize(job, include_errors: false)

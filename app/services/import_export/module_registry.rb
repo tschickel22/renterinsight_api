@@ -20,7 +20,13 @@ module ImportExport
 
     EXCLUDED_COLUMN_PATTERNS = [
       /\Aid\z/, /\Acompany_id\z/, /\Acreated_at\z/, /\Aupdated_at\z/,
-      /\Ais_deleted\z/, /\Adeleted_at\z/, /\Aencrypted_/, /_digest\z/, /_token\z/
+      /\Ais_deleted\z/, /\Adeleted_at\z/, /\Aencrypted_/, /_digest\z/, /_token\z/,
+      /\Acustom_field_values\z/
+    ].freeze
+
+    # Columns excluded additionally for import (users can't provide internal FK IDs)
+    IMPORT_EXCLUDED_PATTERNS = [
+      /_id\z/  # All foreign keys — location_id, owner_id, source_id, etc.
     ].freeze
 
     # Per-module overrides for how `*_id` foreign-key columns resolve to a
@@ -96,6 +102,50 @@ module ImportExport
       }
     }.freeze
 
+    # ---------------------------------------------------------------------------
+    # IMPORT LOOKUP FIELDS
+    # Virtual fields shown only during import. The user provides a human-readable
+    # value (e.g. account name, user email) and the Importer resolves it to the
+    # corresponding `_id` column by searching within the company scope.
+    #
+    # key:           Virtual column key used in mapping / row hash
+    # label:         Shown in the column-mapping UI
+    # target_column: The real DB column to set (e.g. account_id)
+    # model:         AR class to search
+    # scope:         Company association to search within (nil = use model directly)
+    # search_fields: Array of columns to ILIKE match against (first match wins)
+    # ---------------------------------------------------------------------------
+    LOOKUP_FIELDS = {
+      # --- Shared across many modules ---
+      'account_name'        => { label: 'Account (by name)',        target_column: 'account_id',    model: 'Account',  scope: :accounts,   search_fields: %w[name] },
+      'contact_email'       => { label: 'Contact (by email)',       target_column: 'contact_id',    model: 'Contact',  scope: :contacts,   search_fields: %w[email] },
+      'contact_name'        => { label: 'Contact (by name)',        target_column: 'contact_id',    model: 'Contact',  scope: :contacts,   search_fields: %w[first_name last_name] },
+      'owner_email'         => { label: 'Owner (by email)',         target_column: 'owner_id',      model: 'User',     scope: :users,      search_fields: %w[email] },
+      'owner_name'          => { label: 'Owner (by name)',          target_column: 'owner_id',      model: 'User',     scope: :users,      search_fields: %w[name email] },
+      'location_name'       => { label: 'Location (by name)',       target_column: 'location_id',   model: 'Location', scope: :locations,  search_fields: %w[name code] },
+      'source_name'         => { label: 'Source (by name)',         target_column: 'source_id',     model: 'Source',   scope: :sources,    search_fields: %w[name] },
+      'vehicle_stock'       => { label: 'Vehicle (by stock #)',     target_column: 'vehicle_id',    model: 'Vehicle',  scope: :vehicles,   search_fields: %w[stock_number] },
+      'vehicle_vin'         => { label: 'Vehicle (by VIN)',         target_column: 'vehicle_id',    model: 'Vehicle',  scope: :vehicles,   search_fields: %w[vin] },
+      'salesperson_email'   => { label: 'Salesperson (by email)',   target_column: 'primary_salesperson_id', model: 'User', scope: :users, search_fields: %w[email] },
+      'category_name'       => { label: 'Category (by name)',      target_column: 'category_id',   model: 'PartCategory', scope: :part_categories, search_fields: %w[name] },
+      'deal_name'           => { label: 'Deal (by name)',          target_column: 'deal_id',       model: 'Deal',   scope: :deals,    search_fields: %w[name deal_number] },
+      'sales_rep_email'     => { label: 'Sales Rep (by email)',    target_column: 'sales_rep_id',  model: 'User',   scope: :users,    search_fields: %w[email] },
+      'sales_rep_name'      => { label: 'Sales Rep (by name)',     target_column: 'sales_rep_id',  model: 'User',   scope: :users,    search_fields: %w[name email] },
+    }.freeze
+
+    # Which lookup fields are available per module (keyed by the `_id` columns
+    # that actually exist on the model).
+    MODULE_LOOKUPS = {
+      'accounts'        => %w[location_name source_name owner_email owner_name],
+      'contacts'        => %w[account_name location_name owner_email owner_name],
+      'leads'           => %w[location_name source_name owner_email owner_name vehicle_stock vehicle_vin],
+      'deals'           => %w[account_name contact_email contact_name owner_email owner_name location_name source_name vehicle_stock vehicle_vin salesperson_email],
+      'parts'           => %w[category_name],
+      'service_tickets' => %w[account_name contact_email contact_name location_name vehicle_stock vehicle_vin deal_name],
+      'quotes'          => %w[account_name contact_email contact_name location_name vehicle_stock vehicle_vin deal_name sales_rep_email sales_rep_name],
+      'invoices'        => %w[contact_email contact_name location_name deal_name sales_rep_email sales_rep_name],
+    }.freeze
+
     # Ordered list of attributes to try when resolving an association to a
     # display value — first non-blank wins.
     DISPLAY_ATTR_FALLBACKS = %i[name full_name display_name title label email].freeze
@@ -115,14 +165,15 @@ module ImportExport
         cfg[:model].safe_constantize
       end
 
-      # Dynamic field discovery — standard columns + custom fields.
-      def fields_for(module_type, company_id: nil)
+      # Dynamic field discovery — standard columns + custom fields + lookup fields.
+      # Pass for_import: true to exclude foreign key _id columns and add lookup fields.
+      def fields_for(module_type, company_id: nil, for_import: false)
         klass = model_class(module_type)
         return [] unless klass
 
         required = required_fields_for(module_type)
 
-        standard = klass.columns.reject { |c| excluded_column?(c.name) }.map do |col|
+        standard = klass.columns.reject { |c| excluded_column?(c.name, for_import: for_import) }.map do |col|
           {
             key: col.name,
             label: col.name.humanize,
@@ -133,7 +184,11 @@ module ImportExport
         end
 
         custom = custom_fields_for(module_type, company_id)
-        standard + custom
+
+        # Add virtual lookup fields for import (e.g. "Account (by name)" → account_id)
+        lookups = for_import ? lookup_fields_for(module_type) : []
+
+        standard + custom + lookups
       end
 
       def required_fields_for(module_type)
@@ -146,6 +201,26 @@ module ImportExport
              .uniq
       rescue StandardError
         []
+      end
+
+      # Returns lookup field definitions for a module (used during import).
+      def lookup_fields_for(module_type)
+        keys = MODULE_LOOKUPS[module_type.to_s] || []
+        keys.filter_map do |key|
+          cfg = LOOKUP_FIELDS[key]
+          next unless cfg
+          {
+            key: key,
+            label: cfg[:label],
+            type: 'string',
+            required: false,
+            source: 'lookup',
+            target_column: cfg[:target_column],
+            search_fields: cfg[:search_fields],
+            model: cfg[:model],
+            scope: cfg[:scope]
+          }
+        end
       end
 
       def supports_images?(module_type)
@@ -185,8 +260,10 @@ module ImportExport
 
       private
 
-      def excluded_column?(name)
-        EXCLUDED_COLUMN_PATTERNS.any? { |pat| name.match?(pat) }
+      def excluded_column?(name, for_import: false)
+        return true if EXCLUDED_COLUMN_PATTERNS.any? { |pat| name.match?(pat) }
+        return true if for_import && IMPORT_EXCLUDED_PATTERNS.any? { |pat| name.match?(pat) }
+        false
       end
 
       def column_type(col)

@@ -16,7 +16,22 @@ module ImportExport
       'stock_number'  => %w[stock stock_no],
       'ticket_number' => %w[ticket],
       'invoice_number'=> %w[invoice],
-      'quote_number'  => %w[quote]
+      'quote_number'  => %w[quote],
+      # Lookup field aliases
+      'account_name'      => %w[account accountname account_name company_account],
+      'contact_email'     => %w[contactemail contact_email],
+      'contact_name'      => %w[contactname contact_name contact],
+      'owner_email'       => %w[owneremail owner_email assigned_to_email],
+      'owner_name'        => %w[ownername owner assignedto assigned_to],
+      'location_name'     => %w[locationname location_name location dealership],
+      'source_name'       => %w[sourcename source_name leadsource lead_source source],
+      'vehicle_stock'     => %w[vehiclestock vehicle_stock_number stock_number stockno stock_no],
+      'vehicle_vin'       => %w[vehiclevin vehicle_vin],
+      'salesperson_email' => %w[salesperson_email salesperson sales_rep sales_rep_email],
+      'category_name'     => %w[categoryname category_name category],
+      'deal_name'         => %w[dealname deal_name deal deal_number],
+      'sales_rep_email'   => %w[salesrepemail sales_rep_email rep_email],
+      'sales_rep_name'    => %w[salesrepname sales_rep_name salesrep rep],
     }.freeze
 
     def initialize(headers, fields)
