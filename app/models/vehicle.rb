@@ -162,6 +162,25 @@ class Vehicle < ApplicationRecord
   scope :champion_any,      -> { where(source: %w[champion_ims champion_ims_clone]) }   # both
   scope :needs_pricing_from_champion, -> { champion_sourced.where(sale_price: nil) }
 
+  # Source filter scopes for the inventory list / brochure / feed `source_filter` param.
+  # `dealer_preferred`: hide a catalog row IF the dealer has any non-deleted clone of it
+  #   for this scope (the clone supersedes the original). Used by feeds and brochures so
+  #   customers see exactly one version of each home.
+  # `originals_only`:    catalog rows + manual entries; excludes clones (no dupes from edits)
+  # `dealer_only`:       clones + manual entries; excludes raw catalog rows
+  # `synced_only`:       just catalog rows (debugging / sync verification)
+  scope :originals_only, -> { where("source IS NULL OR source IN (?)", %w[manual champion_ims]) }
+  scope :dealer_only,    -> { where("source IS NULL OR source IN (?)", %w[manual champion_ims_clone]) }
+  scope :synced_only,    -> { where(source: 'champion_ims') }
+  scope :dealer_preferred, -> {
+    # Subquery: catalog row IDs that have at least one non-deleted clone in scope.
+    # We hide those catalog rows because the clone is the dealer-preferred version.
+    superseded_catalog_ids = where(source: 'champion_ims_clone', is_deleted: [false, nil])
+                              .where.not(cloned_from_id: nil)
+                              .select(:cloned_from_id)
+    where.not(id: superseded_catalog_ids)
+  }
+
   # Callbacks
   before_validation :normalize_fields
   before_validation :normalize_bedroom_bathroom_values  # FIX: Added to handle "4+" values
@@ -242,6 +261,13 @@ class Vehicle < ApplicationRecord
   # True when this vehicle is a dealer-owned clone of a Champion catalog row.
   def champion_clone?
     source == 'champion_ims_clone'
+  end
+  alias_method :clone?, :champion_clone?
+
+  # True if any version of this row should NOT be cloned again on edit.
+  # Clones-of-clones are not allowed: editing a clone updates it in place.
+  def cloneable?
+    catalog?
   end
 
   # True when status change should trigger a clone instead of an in-place update.

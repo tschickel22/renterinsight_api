@@ -32,6 +32,12 @@ class Public::InventoryController < ApplicationController
   # - bedrooms, bathrooms: Manufactured home filters
   # - make, model, year: Vehicle filters
   # - listing_type: 'rv' or 'manufactured_home'
+  # - source_filter: Listing Source scope. One of:
+  #     'dealer_preferred' (recommended for public catalog) — manufacturer originals
+  #        EXCEPT those the dealer has cloned/edited; plus the dealer's clones.
+  #        Prevents showing the same home twice.
+  #     'dealer_only'      — clones + manual entries only (hides untouched feed)
+  #     'all'              — no scope applied (default if param omitted)
   # - square_feet_min, square_feet_max: Square footage range
   # - search: Search across inventory_id, make, model, description
   # - sort_by: Field to sort by (default: created_at)
@@ -103,6 +109,11 @@ class Public::InventoryController < ApplicationController
     @vehicles = @vehicles.where(model: params[:model]) if params[:model].present?
     @vehicles = @vehicles.where(year: params[:year]) if params[:year].present?
     @vehicles = @vehicles.where(listing_type: params[:listing_type]) if params[:listing_type].present?
+
+    # Listing Source scope (Share & Embed / public catalog).
+    # Mirrors the same scope names used by api/v1/vehicles_controller#index.
+    # 'all' or blank → no-op (return everything that matched the other filters).
+    @vehicles = apply_source_filter(@vehicles, params[:source_filter])
     
     # Search across multiple fields
     if params[:search].present?
@@ -192,6 +203,8 @@ class Public::InventoryController < ApplicationController
   # - token (required): Public inventory token
   # - statuses (optional): Comma-separated statuses to scope filter options
   # - listing_type (optional): Comma-separated listing types to scope filter options
+  # - source_filter (optional): Same scope as #index — keeps filter options aligned
+  #     with what the catalog will actually display.
   def filters
     # Use passed statuses param if present, otherwise fall back to company defaults
     statuses = if params[:statuses].present?
@@ -209,6 +222,11 @@ class Public::InventoryController < ApplicationController
       listing_types = params[:listing_type].split(',').map(&:strip)
       vehicles = vehicles.where(listing_type: listing_types)
     end
+
+    # Keep filter options in sync with what the catalog index will return for
+    # the same source scope — otherwise users could see a make/year option that
+    # produces zero results once selected.
+    vehicles = apply_source_filter(vehicles, params[:source_filter])
     
     # Get unique values for filters
     makes = vehicles.where.not(make: [nil, '']).distinct.pluck(:make).compact.sort
@@ -278,6 +296,21 @@ class Public::InventoryController < ApplicationController
   end
   
   private
+
+  # Apply Listing Source scope. Mirrors api/v1/vehicles_controller#index.
+  # Unknown / blank / 'all' values are a no-op so the public catalog stays
+  # backwards-compatible with existing embeds that don't pass the param.
+  # The public catalog only exposes a subset of the model scopes since
+  # 'originals_only' and 'synced_only' don't make sense for end customers.
+  def apply_source_filter(scope, value)
+    case value.to_s
+    when 'dealer_preferred' then scope.dealer_preferred
+    when 'dealer_only'      then scope.dealer_only
+    when 'originals_only'   then scope.originals_only  # supported for symmetry
+    when 'synced_only'      then scope.synced_only     # supported for symmetry
+    else                          scope                # 'all' or blank → no-op
+    end
+  end
   
   # Authenticate using public_inventory_token
   # Token can be in params[:token] or X-Inventory-Token header

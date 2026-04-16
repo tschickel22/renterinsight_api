@@ -51,6 +51,20 @@ module Api
         vehicles = vehicles.by_model(params[:model]) if params[:model].present?
         # Source filter (e.g., 'champion_ims', 'manual') - used by Champion IMS Feeds tab
         vehicles = vehicles.where(source: params[:source]) if params[:source].present?
+
+        # source_filter: Listing Source filter for inventory list / brochure / feeds.
+        # Distinct from `source` (raw column equality) — this applies semantic scopes
+        # that combine multiple sources and (for `dealer_preferred`) supersede catalog
+        # rows with their dealer-edited clones.
+        # Values: 'all' (no-op), 'originals_only', 'dealer_only', 'synced_only',
+        #         'dealer_preferred' (default for feeds, brochures, public catalog).
+        case params[:source_filter].to_s
+        when 'originals_only'   then vehicles = vehicles.originals_only
+        when 'dealer_only'      then vehicles = vehicles.dealer_only
+        when 'synced_only'      then vehicles = vehicles.synced_only
+        when 'dealer_preferred' then vehicles = vehicles.dealer_preferred
+        # 'all' or blank → no-op (default for inventory list per dealer preference)
+        end
         
         # Advanced MH filters
         vehicles = vehicles.where(bedrooms: params[:bedrooms]) if params[:bedrooms].present?
@@ -207,18 +221,37 @@ module Api
           params_to_update = params_to_update.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
         end
 
-        # CHAMPION IMS CATALOG INTERCEPTION
-        # If this is a catalog row and the requested status is not 'available_to_order',
-        # clone the row instead of updating in place. The catalog row stays pristine
-        # for sync; the dealer works with the new clone.
-        requested_status = params_to_update[:status] || params_to_update['status']
-        if @vehicle.catalog? && requested_status.present? && @vehicle.requires_clone_on_status_change?(requested_status)
-          # Build attribute overrides from the params (everything except status, which the service applies)
+        # CHAMPION IMS CATALOG AUTO-CLONE
+        # Catalog rows are sync-owned and immutable to dealers. ANY edit (status
+        # change, field edit, inline tweak) triggers a clone so the dealer's work
+        # is preserved and the catalog row stays pristine for the next sync.
+        #
+        # Status edit: clone status = the new status (existing behavior).
+        # Field edit (no status): clone status defaults to 'available' so the
+        #   home immediately enters the dealer's normal inventory pipeline.
+        #
+        # NOTE: Only catalog rows clone. Clones themselves are edited in place
+        # (no clones-of-clones — `cloneable?` returns true only for catalog rows).
+        if @vehicle.cloneable?
+          requested_status = params_to_update[:status] || params_to_update['status']
+          # If the dealer explicitly tried to set status='available_to_order' on
+          # a catalog row, that's a no-op (it's already that). Treat as no change.
+          requested_status = nil if requested_status.to_s == 'available_to_order'
+
+          clone_status   = requested_status.presence || 'available'
           override_attrs = params_to_update.to_h.except('status', :status)
+
+          # Default the clone's location to the user's current location context
+          # if the dealer didn't explicitly set one. Catalog rows have
+          # location_id=NULL (apply_to_all_locations); the clone needs a real
+          # location or it won't appear in the dealer's filtered inventory list.
+          if !override_attrs.key?('location_id') && !override_attrs.key?(:location_id) && Current.location_id.present?
+            override_attrs['location_id'] = Current.location_id
+          end
 
           service = VehicleCloneFromCatalogService.new(
             @vehicle,
-            status:     requested_status,
+            status:     clone_status,
             attributes: override_attrs
           )
           clone = service.call
@@ -230,23 +263,11 @@ module Api
               clone_id:       clone.id,
               source_id:      @vehicle.id,
               source_inventory_id: @vehicle.inventory_id,
-              message:        "Created new home from Champion catalog. Original stays available to order."
+              message:        "Created a working copy from the Champion catalog. The original stays available to order for other customers."
             }, status: :created
           else
             render json: { errors: service.errors.full_messages }, status: :unprocessable_entity
           end
-          return
-        end
-
-        # CHAMPION IMS CATALOG ROW EDIT GUARD
-        # Even for non-status edits, catalog rows are sync-owned. Block in-place edits
-        # so dealers don't accidentally mutate data that sync will overwrite next run.
-        if @vehicle.catalog?
-          render json: {
-            errors: [
-              "This is a Champion IMS catalog home. To customize for a customer, change its status to create a working copy."
-            ]
-          }, status: :forbidden
           return
         end
 
@@ -1601,6 +1622,11 @@ module Api
           dateSold: vehicle.date_sold,
           createdAt: vehicle.created_at,
           updatedAt: vehicle.updated_at,
+          # Champion IMS lineage — used by FE to render Source badges and -C1 tooltips
+          source: vehicle.source,
+          clonedFromId: vehicle.cloned_from_id,
+          isCatalog: vehicle.respond_to?(:catalog?) ? vehicle.catalog? : false,
+          isClone:   vehicle.respond_to?(:champion_clone?) ? vehicle.champion_clone? : false,
           features: vehicle.features || [],
           images: full_image_urls,  # Use full URLs
           videos: vehicle.videos || [],

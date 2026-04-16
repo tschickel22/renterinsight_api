@@ -36,6 +36,8 @@ class VehicleCloneFromCatalogService
     source
     status
     champion_last_seen_at
+    serial_number
+    vin
   ].freeze
 
   attr_reader :catalog_vehicle, :requested_status, :attribute_overrides, :errors
@@ -95,6 +97,22 @@ class VehicleCloneFromCatalogService
     clone.status           = requested_status
     clone.is_deleted       = false
     clone.inventory_id     = generate_clone_inventory_id
+
+    # Generate placeholder serial_number / vin per-clone. Catalog rows use a
+    # synthetic value ("CHAMP-{champion_model_id}") which would collide on
+    # clone insert because Vehicle has a uniqueness validation per company
+    # for both columns. Suffix with the same -C{n} as inventory_id so the
+    # dealer can immediately tell which clone this is until they enter the
+    # real values upon receiving the home.
+    suffix = clone.inventory_id.to_s[/-C\d+\z/].to_s # "-C1" style
+    if catalog_vehicle.is_manufactured_home?
+      base_serial = catalog_vehicle.serial_number.to_s.sub(/-C\d+\z/, '')
+      clone.serial_number = "#{base_serial}#{suffix}"
+    end
+    if catalog_vehicle.is_rv? && catalog_vehicle.vin.present?
+      base_vin = catalog_vehicle.vin.to_s.sub(/-C\d+\z/, '')
+      clone.vin = "#{base_vin}#{suffix}"
+    end
 
     # Apply dealer-provided overrides AFTER copy + defaults
     attribute_overrides.each do |key, value|
