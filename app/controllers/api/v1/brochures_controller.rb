@@ -654,6 +654,24 @@ module Api
         Rails.logger.error e.backtrace.join("\n")
         nil
       end
+
+      # Normalize an image entry to a plain URL string.
+      # Vehicle.images and Vehicle.floor_plan_images are stored as JSONB arrays
+      # and can contain either plain URL strings OR hash objects like
+      #   { "url" => "https://...", "alt" => "..." }
+      # Champion IMS catalog rows (e.g. Scene7 CDN images) use the hash form;
+      # older dealer-uploaded entries are plain strings. We accept both.
+      # Returns nil for anything we can't resolve (blank strings, unexpected
+      # shapes), so callers can .compact after mapping.
+      def image_url_from(entry)
+        return nil if entry.blank?
+        url = if entry.is_a?(Hash)
+                entry['url'] || entry[:url]
+              else
+                entry
+              end
+        url.to_s.presence
+      end
       
       def brochure_json(brochure, detailed: false)
         base_url = request.base_url
@@ -695,12 +713,20 @@ module Api
           if first_vehicle
             # Use HTTPS for all environments (local dev uses SSL certificates)
             base_url_for_images = request.ssl? ? "https://#{request.host}:#{request.port}" : "http://#{request.host}:#{request.port}"
-            first_image = first_vehicle.images&.first
-            full_image_url = first_image&.start_with?('http') ? first_image : "#{base_url_for_images}#{first_image}"
-            
+            # Normalize first image — handle both plain string and hash shapes
+            first_image_url = image_url_from(first_vehicle.images&.first)
+            full_image_url =
+              if first_image_url.nil?
+                nil
+              elsif first_image_url.start_with?('http')
+                first_image_url
+              else
+                "#{base_url_for_images}#{first_image_url}"
+              end
+
             json[:vehicles] = [{
               id: first_vehicle.id.to_s,
-              images: [full_image_url]
+              images: [full_image_url].compact
             }]
           end
         end
@@ -712,8 +738,11 @@ module Api
         # Use HTTPS for all environments (local dev uses SSL certificates)
         base_url = request.ssl? ? "https://#{request.host}:#{request.port}" : "http://#{request.host}:#{request.port}"
         
-        full_image_urls = (vehicle.images || []).map do |url|
-          next url if url.blank?
+        # Normalize images — vehicle.images may contain plain URL strings OR
+        # hash entries like { "url" => "...", "alt" => "" } (Champion IMS).
+        full_image_urls = (vehicle.images || []).map do |entry|
+          url = image_url_from(entry)
+          next nil if url.blank?
           url.start_with?('http') ? url : "#{base_url}#{url}"
         end.compact
         
@@ -740,8 +769,9 @@ module Api
           description: vehicle.description,
           features: vehicle.features || [],
           images: full_image_urls,
-          floorPlanImages: (vehicle.floor_plan_images || []).map { |url|
-            next url if url.blank?
+          floorPlanImages: (vehicle.floor_plan_images || []).map { |entry|
+            url = image_url_from(entry)
+            next nil if url.blank?
             url.start_with?('http') ? url : "#{base_url}#{url}"
           }.compact,
           videoUrl: vehicle.video_url,

@@ -219,6 +219,18 @@ module Api
 
         if @agreement.send_to_signers!(current_user)
           SendAgreementJob.perform_later(@agreement.id) if defined?(SendAgreementJob)
+          begin
+            ActivityLogService.log(
+              company: @company,
+              trackable: @agreement,
+              action: 'agreement_sent',
+              module_name: 'finance',
+              description: "Sent agreement #{@agreement.title || @agreement.agreement_number} to signers",
+              metadata: {}
+            )
+          rescue => e
+            Rails.logger.error("[Agreements] Failed to log agreement sent: #{e.message}")
+          end
           render json: agreement_json(@agreement.reload, detailed: true)
         else
           render json: { error: 'Failed to send agreement' }, status: :unprocessable_entity
@@ -235,6 +247,17 @@ module Api
         end
 
         if @agreement.void!(current_user, reason)
+          begin
+            ActivityLogService.log(
+              company: @company,
+              trackable: @agreement,
+              action: 'status_changed',
+              module_name: 'finance',
+              description: "Voided agreement #{@agreement.title || @agreement.agreement_number}"
+            )
+          rescue => e
+            Rails.logger.error("[Agreements] Failed to log agreement void: #{e.message}")
+          end
           render json: agreement_json(@agreement.reload, detailed: true)
         else
           render json: { error: 'Agreement cannot be voided in its current status' }, status: :unprocessable_entity

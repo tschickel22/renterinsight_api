@@ -101,6 +101,7 @@ gem 'sendgrid-ruby'
 gem 'aws-sdk-sns', '~> 1.0'
 
 gem "roo", "~> 3.0"
+gem "caxlsx", "~> 4.1"
 
 # PDF merging for multi-document agreements
 gem 'combine_pdf', '~> 1.0'

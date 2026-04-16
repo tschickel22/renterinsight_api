@@ -1,8 +1,39 @@
 # frozen_string_literal: true
 
 class Vehicle < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
   include WebhookNotifiable
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Homes",
+      category: "inventory",
+      fields: [
+        { key: "id",           label: "ID",           type: "number", filterable: true,  sortable: true  },
+        { key: "inventory_id", label: "Inventory ID", type: "string", filterable: true,  sortable: true  },
+        { key: "listing_type", label: "Type",         type: "enum",   filterable: true,  sortable: true  },
+        { key: "status",       label: "Status",       type: "enum",   filterable: true,  sortable: true  },
+        { key: "condition",    label: "Condition",    type: "enum",   filterable: true,  sortable: true  },
+        { key: "year",         label: "Year",         type: "number", filterable: true,  sortable: true  },
+        { key: "make",         label: "Make",         type: "string", filterable: true,  sortable: true  },
+        { key: "model",        label: "Model",        type: "string", filterable: true,  sortable: true  },
+        { key: "trim",         label: "Trim",         type: "string", filterable: true,  sortable: false },
+        { key: "serial_number",label: "Serial Number",type: "string", filterable: true,  sortable: true  },
+        { key: "vin",          label: "VIN",          type: "string", filterable: true,  sortable: true  },
+        { key: "stock_number", label: "Stock Number", type: "string", filterable: true,  sortable: true  },
+        { key: "bedrooms",     label: "Bedrooms",     type: "number", filterable: true,  sortable: true  },
+        { key: "bathrooms",    label: "Bathrooms",    type: "number", filterable: true,  sortable: true  },
+        { key: "msrp",         label: "MSRP",         type: "number", filterable: true,  sortable: true  },
+        { key: "sale_price",   label: "Sale Price",   type: "number", filterable: true,  sortable: true  },
+        { key: "cost",         label: "Cost",         type: "number", filterable: true,  sortable: true  },
+        { key: "color",        label: "Color",        type: "string", filterable: true,  sortable: false },
+        { key: "created_at",   label: "Created At",   type: "date",   filterable: true,  sortable: true  },
+        { key: "updated_at",   label: "Updated At",   type: "date",   filterable: true,  sortable: true  }
+      ]
+    }
+  end
   
   # Virtual attribute for import: accepts URL string, converts to floor_plan_images array
   attr_accessor :floor_plan_url
@@ -10,6 +41,7 @@ class Vehicle < ApplicationRecord
   # Associations
   belongs_to :company, optional: true
   belongs_to :location, optional: true
+  belongs_to :floor_plan, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
   has_many :listings, dependent: :destroy
@@ -23,10 +55,33 @@ class Vehicle < ApplicationRecord
   # Inventory features (Option B - individual searchable/filterable records)
   has_many :inventory_features, dependent: :destroy
 
+  # Champion IMS catalog/clone lineage:
+  #   - `catalog_source` is the catalog Vehicle this row was cloned from
+  #     (only set on `source: 'champion_ims_clone'` rows)
+  #   - `clones` are working copies the dealer created when changing the
+  #     status of this catalog row (only populated on `source: 'champion_ims'` rows)
+  belongs_to :catalog_source, class_name: 'Vehicle', foreign_key: 'cloned_from_id', optional: true
+  has_many   :clones,         class_name: 'Vehicle', foreign_key: 'cloned_from_id', dependent: :nullify
+
   # Vehicle types
   TYPES = %w[rv manufactured_home].freeze
   STATUSES = %w[available reserved sold pending service available_to_order].freeze
   CONDITIONS = %w[new used].freeze
+
+  # Champion IMS source values:
+  #   - 'manual'              — default, dealer-created
+  #   - 'champion_ims'        — catalog row from IMS feed (immutable to dealers; sync writes only)
+  #   - 'champion_ims_clone'  — dealer-owned working copy of a catalog row, created via
+  #                              status-change interception. Sync NEVER touches these.
+  CHAMPION_SOURCES = %w[manual champion_ims champion_ims_clone].freeze
+
+  # Legacy whitelist — retained for backwards-compat in case anything else references it,
+  # but the cloning architecture means dealers never edit catalog rows directly.
+  # Sync now does a full upsert on catalog rows.
+  CHAMPION_MANAGED_FIELDS = %w[
+    make model year bedrooms bathrooms square_feet home_type features
+    champion_images champion_raw_payload champion_last_seen_at
+  ].freeze
   
   # RV Classes for RVT.com syndication
   RV_CLASSES = [
@@ -100,6 +155,32 @@ class Vehicle < ApplicationRecord
   end
   scope :recent, -> { order(created_at: :desc) }
 
+  # Champion IMS sync scopes
+  scope :champion_sourced, -> { where(source: 'champion_ims') }
+  scope :champion_catalog,  -> { where(source: 'champion_ims') }                       # alias — catalog rows
+  scope :champion_clones,   -> { where(source: 'champion_ims_clone') }                  # dealer working copies
+  scope :champion_any,      -> { where(source: %w[champion_ims champion_ims_clone]) }   # both
+  scope :needs_pricing_from_champion, -> { champion_sourced.where(sale_price: nil) }
+
+  # Source filter scopes for the inventory list / brochure / feed `source_filter` param.
+  # `dealer_preferred`: hide a catalog row IF the dealer has any non-deleted clone of it
+  #   for this scope (the clone supersedes the original). Used by feeds and brochures so
+  #   customers see exactly one version of each home.
+  # `originals_only`:    catalog rows + manual entries; excludes clones (no dupes from edits)
+  # `dealer_only`:       clones + manual entries; excludes raw catalog rows
+  # `synced_only`:       just catalog rows (debugging / sync verification)
+  scope :originals_only, -> { where("source IS NULL OR source IN (?)", %w[manual champion_ims]) }
+  scope :dealer_only,    -> { where("source IS NULL OR source IN (?)", %w[manual champion_ims_clone]) }
+  scope :synced_only,    -> { where(source: 'champion_ims') }
+  scope :dealer_preferred, -> {
+    # Subquery: catalog row IDs that have at least one non-deleted clone in scope.
+    # We hide those catalog rows because the clone is the dealer-preferred version.
+    superseded_catalog_ids = where(source: 'champion_ims_clone', is_deleted: [false, nil])
+                              .where.not(cloned_from_id: nil)
+                              .select(:cloned_from_id)
+    where.not(id: superseded_catalog_ids)
+  }
+
   # Callbacks
   before_validation :normalize_fields
   before_validation :normalize_bedroom_bathroom_values  # FIX: Added to handle "4+" values
@@ -170,6 +251,38 @@ class Vehicle < ApplicationRecord
   def is_manufactured_home?
     listing_type == 'manufactured_home'
   end
+
+  # True when this vehicle was imported from the Champion IMS feed (catalog row).
+  def champion_sourced?
+    source == 'champion_ims'
+  end
+  alias_method :catalog?, :champion_sourced?
+
+  # True when this vehicle is a dealer-owned clone of a Champion catalog row.
+  def champion_clone?
+    source == 'champion_ims_clone'
+  end
+  alias_method :clone?, :champion_clone?
+
+  # True if any version of this row should NOT be cloned again on edit.
+  # Clones-of-clones are not allowed: editing a clone updates it in place.
+  def cloneable?
+    catalog?
+  end
+
+  # True when status change should trigger a clone instead of an in-place update.
+  # Catalog rows must stay at `available_to_order`; any other status means the
+  # dealer is taking action on a specific home and needs their own working copy.
+  def requires_clone_on_status_change?(new_status)
+    catalog? && new_status.to_s != 'available_to_order'
+  end
+
+  # True when this catalog row has any associated dealer activity that should
+  # prevent it from being tombstoned even if Champion drops it from the feed.
+  def has_dealer_activity?
+    return false unless catalog?
+    clones.any? || deals.any? || quotes.any? || listings.any? || inventory_packages.any?
+  end
   
   # RV-specific helper methods
   def total_water_capacity
@@ -194,8 +307,14 @@ class Vehicle < ApplicationRecord
   private
 
   def normalize_fields
-    self.make = make&.titleize
-    self.model = model&.titleize
+    # Champion catalog rows come pre-formatted from the manufacturer's master
+    # data — titleizing them breaks part numbers (DAP1676H32222 → "Dap 1676 H 32222")
+    # and re-spaces model names ("Skyliner 6380P" → "Skyliner 6380 P"), causing
+    # an infinite update loop on every sync.
+    if source != 'champion_ims'
+      self.make = make&.titleize
+      self.model = model&.titleize
+    end
     self.status = normalize_status(status)
     self.listing_type = listing_type&.downcase
 
@@ -361,5 +480,18 @@ class Vehicle < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Vehicle] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    [try(:year), try(:make), try(:model)].compact.join(' ').presence || "Vehicle ##{id}"
+  end
+
+  def activity_module_name
+    'inventory'
+  end
+
+  def activity_account_id
+    nil
   end
 end

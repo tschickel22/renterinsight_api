@@ -85,6 +85,7 @@ public
       { key: 'users', name: 'Users & Teams', category: 'admin', description: 'Manage users, roles, and team assignments', position: 2 },
       { key: 'locations', name: 'Locations', category: 'admin', description: 'Manage company locations and their settings', position: 3 },
       { key: 'branding', name: 'Branding & White Label', category: 'admin', description: 'Manage branding, logos, and appearance', position: 4 },
+      { key: 'activity_logs', name: 'Activity Log', category: 'admin', description: 'View platform activity and user actions', position: 5 },
       
       # Operations Resources (position 100-200)
       { key: 'inventory', name: 'Inventory', category: 'operations', description: 'Manage vehicle and property inventory', position: 100 },
@@ -138,7 +139,13 @@ public
       { key: 'portal', name: 'Client Portal', category: 'core', description: 'Manage client portal access and content', position: 902 },
       { key: 'dashboard', name: 'Dashboard', category: 'core', description: 'View and customize dashboard', position: 903 },
       { key: 'dashboard_company_wide', name: 'Company-wide Dashboard', category: 'core', description: 'View company-wide metrics and analytics', position: 904 },
-      { key: 'dashboard_finance', name: 'Finance Dashboard', category: 'core', description: 'View financial dashboards and metrics', position: 905 }
+      { key: 'dashboard_finance', name: 'Finance Dashboard', category: 'core', description: 'View financial dashboards and metrics', position: 905 },
+
+      # Data Import / Export Engine
+      { key: 'data_import_export', name: 'Data Import & Export', category: 'operations', description: 'Import and export data across CRM, inventory, parts, and finance modules', position: 200 },
+
+      # Workflow Automation
+      { key: 'workflow_automation', name: 'Workflow Automation', category: 'operations', position: 180, description: 'Manage workflow rules, runs, and templates' }
     ]
     
     resources_data.each do |resource_data|

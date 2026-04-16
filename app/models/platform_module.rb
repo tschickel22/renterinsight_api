@@ -20,6 +20,7 @@ class PlatformModule
     'inventory.lot_map' => { name: 'Lot Map', category: 'Inventory & Operations', icon: 'MapPin', description: 'Visual lot mapping and assignment' },
     'inventory.pdi' => { name: 'PDI Checklist', category: 'Inventory & Operations', icon: 'ClipboardCheck', description: 'Pre-delivery inspection management' },
     'inventory.delivery' => { name: 'Delivery Tracker', category: 'Inventory & Operations', icon: 'Truck', description: 'Delivery scheduling and tracking' },
+    'inventory.champion_ims' => { name: 'Champion IMS Feed', category: 'Inventory & Operations', icon: 'Rss', description: 'Sync manufactured home catalog from Champion Homes IMS feeds' },
     
     # Marketing
     'marketing.listings' => { name: 'Property Listings', category: 'Marketing', icon: 'Globe', description: 'Public property listing management' },
@@ -49,6 +50,7 @@ class PlatformModule
     'management.projects' => { name: 'Project Management', category: 'Management', icon: 'FolderKanban', description: 'Project tracking with phases, tasks, and client visibility' },
     'management.workflows' => { name: 'Workflow Automation', category: 'Management', icon: 'GitBranch', description: 'Business process automation' },
     'management.territories' => { name: 'Territory Management', category: 'Management', icon: 'MapPin', description: 'Sales territory assignment and tracking' },
+    'management_ai_reports' => { name: 'AI Report Queries', category: 'Management', icon: 'Sparkles', description: 'Natural language AI queries for reports' },
     
     # Administration
     'admin.settings' => { name: 'Company Settings', category: 'Administration', icon: 'Settings', description: 'Company configuration and branding' },
@@ -89,7 +91,7 @@ class PlatformModule
     ],
     enterprise: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
-      inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
+      inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
       marketing.listings marketing.brochures marketing.website marketing.syndication
       finance.loans finance.agreements finance.invoices finance.documents finance.applications
       service.operations service.portal service.warranty

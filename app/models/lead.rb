@@ -1,10 +1,32 @@
 # frozen_string_literal: true
 
 class Lead < ApplicationRecord
+  include ActivityTrackable
   include Communicable
   include LocationAware
   include NotifiableLead
   include WebhookNotifiable
+  include Reportable
+  include WorkflowRunCancellable
+
+  def self.reportable_config
+    {
+      label: "Leads",
+      category: "crm",
+      fields: [
+        { key: "id",         label: "ID",          type: "number",  filterable: true,  sortable: true },
+        { key: "first_name", label: "First Name",  type: "string",  filterable: true,  sortable: true },
+        { key: "last_name",  label: "Last Name",   type: "string",  filterable: true,  sortable: true },
+        { key: "email",      label: "Email",       type: "string",  filterable: true,  sortable: true },
+        { key: "phone",      label: "Phone",       type: "string",  filterable: true,  sortable: false },
+        { key: "status",     label: "Status",      type: "enum",    filterable: true,  sortable: true },
+        { key: "source_id",  label: "Source",      type: "number",  filterable: true,  sortable: true },
+        { key: "owner_id",   label: "Assigned To", type: "number",  filterable: true,  sortable: true },
+        { key: "created_at", label: "Created At",  type: "date",    filterable: true,  sortable: true },
+        { key: "updated_at", label: "Updated At",  type: "date",    filterable: true,  sortable: true }
+      ]
+    }
+  end
 
   # Transient flag — set to true to suppress assignment notifications (e.g. bulk edits)
   attr_accessor :skip_notifications
@@ -39,6 +61,11 @@ class Lead < ApplicationRecord
   # Lifecycle webhook for lead conversion
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_is_converted?
 
+  # Workflow engine emit hooks
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
   # Scopes for filtering converted leads
   scope :active, -> { where(is_converted: [false, nil]) }
   scope :converted, -> { where(is_converted: true) }
@@ -66,6 +93,22 @@ class Lead < ApplicationRecord
 
   private
 
+  def emit_workflow_created
+    WorkflowEngine.emit('lead.created', self, { id: id })
+  end
+
+  def emit_workflow_updated
+    WorkflowEngine.emit('lead.updated', self, { id: id, changes: saved_changes.keys })
+    if saved_change_to_attribute?(:status)
+      from, to = saved_change_to_attribute(:status)
+      WorkflowEngine.emit('lead.status_changed', self, { id: id, from: from, to: to })
+    end
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('lead.deleted', self, { id: id })
+  end
+
   # Fire lead.converted lifecycle webhook when is_converted changes to true
   # WebhookNotifiable handles generic lead.created/updated/deleted
   def fire_lifecycle_webhooks
@@ -78,5 +121,18 @@ class Lead < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Lead] Failed to fire lifecycle webhook lead.converted: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:full_name).presence || "#{first_name} #{last_name}".strip.presence || "Lead ##{id}"
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    converted_account_id
   end
 end

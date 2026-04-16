@@ -1,7 +1,35 @@
 class Invoice < ApplicationRecord
+  include ActivityTrackable
   include Addressable
   include Buyable
   include WebhookNotifiable
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Invoices",
+      category: "finance",
+      fields: [
+        { key: "id",              label: "ID",              type: "number",  filterable: true,  sortable: true  },
+        { key: "invoice_number",  label: "Invoice Number",  type: "string",  filterable: true,  sortable: true  },
+        { key: "status",          label: "Status",          type: "enum",    filterable: true,  sortable: true  },
+        { key: "billing_category",label: "Billing Category",type: "enum",    filterable: true,  sortable: true  },
+        { key: "subtotal",        label: "Subtotal",        type: "number",  filterable: true,  sortable: true  },
+        { key: "tax_amount",      label: "Tax",             type: "number",  filterable: true,  sortable: true  },
+        { key: "total",           label: "Total",           type: "number",  filterable: true,  sortable: true  },
+        { key: "amount_paid",     label: "Amount Paid",     type: "number",  filterable: true,  sortable: true  },
+        { key: "amount_due",      label: "Amount Due",      type: "number",  filterable: true,  sortable: true  },
+        { key: "contact_id",      label: "Contact",         type: "number",  filterable: true,  sortable: true  },
+        { key: "deal_id",         label: "Deal",            type: "number",  filterable: true,  sortable: true  },
+        { key: "invoice_date",    label: "Invoice Date",    type: "date",    filterable: true,  sortable: true  },
+        { key: "due_date",        label: "Due Date",        type: "date",    filterable: true,  sortable: true  },
+        { key: "sent_at",         label: "Sent At",         type: "date",    filterable: true,  sortable: true  },
+        { key: "paid_at",         label: "Paid At",         type: "date",    filterable: true,  sortable: true  },
+        { key: "notes",           label: "Notes",           type: "string",  filterable: false, sortable: false },
+        { key: "created_at",      label: "Created At",      type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
 
   belongs_to :company
   belongs_to :location, optional: true
@@ -32,6 +60,29 @@ class Invoice < ApplicationRecord
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
   validates :invoice_date, presence: true
   validates :status, inclusion: { in: %w[draft finalized sent viewed partial paid overdue cancelled] }
+  validate :draw_schedule_sub_items_within_parent
+
+  # Sub-items on a draw are dollar amounts that draw down from the parent draw's calculated amount.
+  # Sum of sub_items for any single draw must NOT exceed that draw's amount.
+  # Section totals (parent draw amounts) remain fixed.
+  def draw_schedule_sub_items_within_parent
+    return if draw_schedule.blank?
+    draws = draw_schedule.is_a?(Hash) ? (draw_schedule['draws'] || draw_schedule[:draws]) : nil
+    return if draws.blank?
+
+    draws.each_with_index do |draw, idx|
+      sub_items = draw['sub_items'] || draw[:sub_items]
+      next if sub_items.blank?
+
+      parent_amount = draw['amount'].to_f
+      sub_total = sub_items.sum { |si| (si['amount'] || si[:amount]).to_f }
+
+      if sub_total > parent_amount + 0.001 # tiny float tolerance
+        label = draw['description'].presence || "Draw #{idx + 1}"
+        errors.add(:draw_schedule, "sub-items for '#{label}' total $#{format('%.2f', sub_total)} which exceeds the draw amount of $#{format('%.2f', parent_amount)}")
+      end
+    end
+  end
   
   scope :for_current_location, -> { 
     Current.location_filtered? ? where(location_id: Current.location_id) : all 
@@ -331,5 +382,18 @@ class Invoice < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Invoice] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:invoice_number) || "Invoice ##{id}"
+  end
+
+  def activity_module_name
+    'finance'
+  end
+
+  def activity_account_id
+    contact&.try(:account_id) || deal&.try(:account_id)
   end
 end

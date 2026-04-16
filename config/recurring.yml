@@ -9,7 +9,25 @@
 #     priority: 2
 #     schedule: at 5am every day
 
-production:
+default: &default
   clear_solid_queue_finished_jobs:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12
+  workflow_cron_dispatcher:
+    class: WorkflowCronDispatcherJob
+    schedule: every minute
+  workflow_resume_waiting:
+    class: ResumeWaitingWorkflowRunsJob
+    schedule: every minute
+  workflow_retention:
+    class: WorkflowRetentionJob
+    schedule: every sunday at 3am
+  champion_ims_weekly_sync:
+    class: ChampionImsWeeklySyncJob
+    schedule: every sunday at 2am
+
+production:
+  <<: *default
+
+staging:
+  <<: *default

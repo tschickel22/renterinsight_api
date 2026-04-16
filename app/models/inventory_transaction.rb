@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class InventoryTransaction < ApplicationRecord
+  include ActivityTrackable
+
   belongs_to :company
   belongs_to :part
   belongs_to :location
@@ -74,6 +76,18 @@ class InventoryTransaction < ApplicationRecord
     end
   end
   
+  def activity_display_name
+    [transaction_type&.titleize, part&.name].compact.join(' - ').presence || 'Transaction'
+  end
+
+  def activity_module_name
+    'inventory'
+  end
+
+  def activity_account_id
+    nil
+  end
+
   def as_json(options = {})
     super(options.merge(
       only: [:id, :transaction_type, :quantity, :unit_cost, :transaction_date, 

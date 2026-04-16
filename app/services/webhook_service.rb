@@ -19,6 +19,8 @@ class WebhookService
     parts.edited
     parts.removed
     parts.low_stock
+    workflow_rule.activated workflow_rule.paused
+    workflow_run.started workflow_run.completed workflow_run.failed
   ].freeze
 
   # Fire a webhook event for a company

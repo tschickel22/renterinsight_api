@@ -20,6 +20,13 @@ Rails.application.routes.draw do
   post 'sign/:token/decline', to: 'public/agreement_signing#decline'
   get  'sign/:token/download', to: 'public/agreement_signing#download'
 
+  # Inbound workflow triggers (no auth — token-based)
+  namespace :api do
+    namespace :webhooks do
+      post 'inbound/:token', to: 'inbound_workflow_triggers#trigger'
+    end
+  end
+
   # ==================== WEBHOOKS (NO AUTH REQUIRED) ====================
   namespace :webhooks do
     # Email tracking pixel (no auth required)
@@ -144,6 +151,40 @@ Rails.application.routes.draw do
     
     # ==================== V1 API ====================
     namespace :v1 do
+      # ==================== IMPORT / EXPORT ENGINE ====================
+      resources :import_jobs, only: %i[index show create destroy] do
+        member do
+          post :preview
+          post :start
+          post :rollback
+        end
+      end
+      resources :import_templates, only: %i[index show create update destroy]
+      resources :export_jobs, only: %i[index show create] do
+        member { get :download }
+      end
+      scope path: 'import_export', controller: 'import_export_metadata' do
+        get 'modules',                       action: :modules
+        get 'modules/:module_type/fields',    action: :fields
+        get 'modules/:module_type/sample_csv', action: :sample_csv
+      end
+
+      # ==================== AI REPORT QUERY ====================
+      scope 'report-ai', as: 'report_ai' do
+        post 'ask',               to: 'report_ai#ask'
+        post 'classify',          to: 'report_ai#classify'
+        post 'execute',           to: 'report_ai#execute'
+        post 'contextual',        to: 'report_ai#contextual'
+        get  'usage',             to: 'report_ai#usage'
+        get  'suggested',         to: 'report_ai#suggested'
+        get  'history',           to: 'report_ai#history'
+        get  'platform-insights', to: 'report_ai#platform_insights'
+        post 'trigger-digest',    to: 'report_ai#trigger_digest'
+        post 'refresh-digest',     to: 'report_ai#refresh_digest'
+        get  'digest-drilldown',   to: 'report_ai#digest_drilldown'
+        get  'failure-log',        to: 'report_ai#failure_log'
+      end
+
       # ==================== COMPANY SETTINGS (OPERATIONAL) ====================
       scope path: 'company_settings', controller: 'company_settings' do
         get 'operational', action: :show_operational
@@ -162,6 +203,8 @@ Rails.application.routes.draw do
         get 'form_states', action: :show_form_states
         patch 'form_states', action: :update_form_states
         get 'tax_rate_for_state', action: :tax_rate_for_state
+        get 'ai_settings', action: :ai_settings
+        patch 'ai_settings', action: :update_ai_settings
       end
       
       # ==================== GLOBAL SEARCH ====================
@@ -175,6 +218,16 @@ Rails.application.routes.draw do
       
       # ==================== NOTES ====================
       resources :notes, only: [:index, :create, :update, :destroy]
+
+      # ==================== ACTIVITY LOGS ====================
+      resources :activity_logs, only: [:index] do
+        collection do
+          get :my_activity
+          get 'account/:account_id', action: :account_feed, as: :account_feed
+          get 'entity/:trackable_type/:trackable_id', action: :entity_feed, as: :entity_feed
+          get :stats
+        end
+      end
       
       # ==================== USER SETTINGS ====================
       scope path: 'user_settings', controller: 'user_settings' do
@@ -247,6 +300,44 @@ Rails.application.routes.draw do
         end
       end
 
+      # ==================== WORKFLOW AUTOMATION ====================
+      resources :workflow_rules do
+        collection do
+          post :preview_unsaved, path: 'preview'
+        end
+        member do
+          post :activate
+          post :pause
+          post :resume
+          post :archive
+          post :validate
+          post :preview
+          get  :runs
+        end
+      end
+      resources :workflow_runs, only: [:index, :show] do
+        member do
+          post :cancel
+          post :retry
+          get  :steps
+        end
+      end
+      resources :workflow_events, only: [:index]
+      resources :workflow_templates, only: [:index, :show] do
+        member do
+          post :activate
+        end
+      end
+      resources :workflow_approvals, only: [:index, :show] do
+        member do
+          post :approve
+          post :reject
+        end
+      end
+      resources :workflow_inbound_triggers
+      get 'workflow_metrics', to: 'workflow_metrics#index'
+      get 'workflow_field_options', to: 'workflow_field_options#index'
+
       # ==================== PROJECTS ====================
       resources :projects do
         collection do
@@ -263,6 +354,12 @@ Rails.application.routes.draw do
           delete :unassign_phase_task_contractor  # DELETE body: { phase_id:, task_id:, contractor_id: }
           post :assign_phase_task_user            # POST body: { phase_id:, task_id:, user_id: }
           delete :unassign_phase_task_user        # DELETE body: { phase_id:, task_id: }
+          get :export_pdf
+          post :flush_assignment_notifications
+          post :pause_assignment_notifications
+          post :resume_assignment_notifications
+          post :skip_assignment_notification
+          post :unskip_assignment_notification
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
         resources :phases, only: [:update], controller: 'project_phases' do
@@ -271,6 +368,13 @@ Rails.application.routes.draw do
           resources :project_tasks, controller: 'project_tasks', only: [:index, :create] do
             collection do
               post :reorder
+            end
+          end
+          # Work logs on phase tasks (dealer ↔ contractor bidirectional)
+          resources :phase_tasks, controller: 'phase_task_work_logs', only: [] do
+            member do
+              get :work_logs, action: :index
+              post :work_logs, action: :create
             end
           end
         end
@@ -350,6 +454,10 @@ Rails.application.routes.draw do
         get 'metrics/:card_type', action: :metrics
       end
       
+      # ==================== WORKQUEUE ====================
+      get 'workqueue/summary', to: 'workqueue#summary'
+      get 'workqueue/items',   to: 'workqueue#items'
+
       # ==================== SERVICE TICKETS ====================
       resources :service_tickets, path: 'service-tickets' do
         member do
@@ -376,6 +484,15 @@ Rails.application.routes.draw do
         end
 
         resources :contractor_assignments, only: [:index, :create, :update, :destroy]
+      end
+
+      # Contractor Reviews (dealer-side approval workflow)
+      resources :contractor_reviews, path: 'contractor-reviews', only: [:index, :show] do
+        member do
+          post :approve
+          post :request_revision
+          post :reject
+        end
       end
 
       # ==================== WARRANTY SYSTEM ====================
@@ -475,6 +592,19 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== CHAMPION IMS FEED INTEGRATION ====================
+      # Note: catalog browsing was removed - sync writes directly to vehicles table
+      # with source='champion_ims', so synced homes appear in regular inventory list.
+      namespace :champion_ims, path: 'champion_ims' do
+        resources :retailers do
+          member do
+            post :sync_now
+          end
+          # Read-only history of sync runs + per-home events
+          resources :sync_runs, only: %i[index show]
+        end
+      end
+
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
         member do
@@ -1053,6 +1183,20 @@ Rails.application.routes.draw do
         post 'nurture/:enrollment_id/unenroll', to: 'contact_nurture#unenroll'
       end
       
+      # ==================== REPORTS ====================
+      resources :reports do
+        collection do
+          post :run
+          get :modules
+          get :fields
+        end
+        member do
+          post :share
+          delete :unshare
+          get :export
+        end
+      end
+
       # ==================== ACCOUNTS ====================
       resources :accounts do
         member do
@@ -2004,15 +2148,32 @@ Rails.application.routes.draw do
       # Authentication
       post 'sessions/magic_link', to: 'sessions#magic_link'
       post 'sessions/verify', to: 'sessions#verify'
+      post 'sessions/login', to: 'sessions#login'
 
       # Dashboard
       get 'dashboard', to: 'dashboard#index'
+
+      # Profile
+      get 'profile', to: 'profile#show'
+      patch 'profile', to: 'profile#update'
+      post 'profile/set_password', to: 'profile#set_password'
+      post 'profile/sync_credentials', to: 'profile#sync_credentials'
+
+      # Branding
+      get 'branding', to: 'branding#show'
+
+      # Projects
+      resources :projects, only: [:index, :show]
 
       # Tasks
       resources :tasks, only: [:index, :show] do
         member do
           patch :update_status
           patch :toggle_checklist_item
+          patch :add_note
+          post :submit_for_review
+          get :work_logs
+          post :work_logs, action: :create_work_log
         end
       end
 
@@ -2020,8 +2181,16 @@ Rails.application.routes.draw do
       resources :service_tickets, only: [:index, :show], path: 'service-tickets' do
         member do
           patch :update_status
+          patch :add_note
+          post :submit_for_review
+          get :work_logs
+          post :work_logs, action: :create_work_log
         end
       end
+
+      # Uploads
+      post 'uploads', to: 'uploads#create'
+      delete 'uploads', to: 'uploads#destroy'
     end
   end
 

@@ -31,4 +31,8 @@ class ProjectPhaseTask < ApplicationRecord
   def acknowledged?
     client_acknowledged_at.present?
   end
+
+  def work_log_count
+    AssignmentWorkLog.where(contractor_assignment_id: contractor_assignments.select(:id)).count
+  end
 end

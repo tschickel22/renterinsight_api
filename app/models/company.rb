@@ -4,6 +4,12 @@ class Company < ApplicationRecord
   include QuickbooksIntegration
   
   has_many :accounts, dependent: :destroy
+  has_many :workflow_rules, dependent: :destroy
+  has_many :workflow_runs, dependent: :destroy
+  has_many :workflow_events, dependent: :destroy
+  has_many :workflow_approvals, dependent: :destroy
+  has_many :workflow_inbound_triggers, dependent: :destroy
+  has_many :reports, dependent: :destroy
   has_many :contacts, dependent: :destroy
   has_many :deals, dependent: :destroy
   has_many :intake_forms, dependent: :destroy
@@ -71,6 +77,9 @@ class Company < ApplicationRecord
   has_many :manufacturer_ar_transactions, dependent: :destroy
   has_many :manufacturer_ar_payments, dependent: :destroy
   
+  # Champion IMS Feed Integration
+  has_many :champion_ims_retailers, dependent: :destroy
+  
   # Parts & Inventory Module Associations
   has_many :part_categories, dependent: :destroy
   has_many :parts, dependent: :destroy
@@ -114,7 +123,8 @@ class Company < ApplicationRecord
   # QuickBooks Integration Associations
   has_many :quickbooks_field_mappings, dependent: :destroy
   has_many :quickbooks_sync_logs, dependent: :destroy
-  
+  has_many :activity_logs, dependent: :destroy
+
   # Enums
   enum :quickbooks_scope, { company: 'company', location: 'location' }, prefix: true, default: :company
   

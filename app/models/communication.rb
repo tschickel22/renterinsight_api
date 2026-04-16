@@ -38,16 +38,21 @@
 #
 
 class Communication < ApplicationRecord
+  include ActivityTrackable
+
   # SQLite compatibility - only serialize for non-PostgreSQL databases
   serialize :metadata, coder: JSON unless ActiveRecord::Base.connection.adapter_name == 'PostgreSQL'
-  
+
   # Polymorphic association - can belong to Lead, Account, Quote, etc.
   belongs_to :communicable, polymorphic: true, optional: true
   belongs_to :company, optional: true
   belongs_to :communication_thread, optional: true
   belongs_to :template, class_name: 'CommunicationTemplate', foreign_key: 'template_id', optional: true
-  
+  belongs_to :workflow_run, class_name: 'WorkflowRun', optional: true
+
   has_many :communication_events, dependent: :destroy
+
+  after_create :notify_workflow_of_inbound, if: :should_notify_workflow?
   
   # ActiveStorage attachments
   has_many_attached :attachments
@@ -197,8 +202,51 @@ class Communication < ApplicationRecord
     AttachmentService.attach_multiple_to_communication(self, file_list)
   end
   
+  # ActivityTrackable overrides
+  def activity_display_name
+    if channel == 'email'
+      subject.presence || 'Email'
+    elsif channel == 'sms'
+      'SMS Message'
+    else
+      channel&.titleize || 'Communication'
+    end
+  end
+
+  def activity_module_name
+    'communications'
+  end
+
+  def activity_account_id
+    communicable&.try(:account_id) || communicable&.try(:converted_account_id)
+  end
+
+  # Must be public - ActivityTrackable concern uses try(:company)
+  def company
+    super || communicable&.try(:company)
+  end
+
   private
-  
+
+  def log_create_activity
+    action = case channel
+             when 'email' then 'email_sent'
+             when 'sms' then 'sms_sent'
+             else 'created'
+             end
+
+    entity = communicable
+    description = case channel
+                  when 'email' then "Sent email to #{to_address}: #{subject || 'No subject'}"
+                  when 'sms' then "Sent SMS to #{to_address}"
+                  else "Communication #{channel} created"
+                  end
+
+    log_activity(action: action, description: description)
+  rescue => e
+    Rails.logger.error("[ActivityTrackable] Failed to log create for Communication: #{e.message}")
+  end
+
   def normalize_metadata
     return if metadata.blank?
     
@@ -237,6 +285,22 @@ class Communication < ApplicationRecord
   
   def update_thread_timestamp
     communication_thread&.touch(:last_message_at)
+  end
+
+  def should_notify_workflow?
+    direction == 'inbound' && communication_thread_id.present?
+  end
+
+  def notify_workflow_of_inbound
+    parent = Communication
+               .where(communication_thread_id: communication_thread_id, direction: 'outbound')
+               .where.not(workflow_run_id: nil)
+               .order(created_at: :desc)
+               .first
+    return unless parent&.workflow_run_id
+    WorkflowEngine.handle_inbound_reply(workflow_run_id: parent.workflow_run_id, inbound_communication: self)
+  rescue => e
+    Rails.logger.error "[Communication#notify_workflow_of_inbound] failed: #{e.message}"
   end
 
   public

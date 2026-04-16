@@ -1,4 +1,6 @@
 class Agreement < ApplicationRecord
+  include ActivityTrackable
+
   belongs_to :company
   belongs_to :agreement_template, optional: true
   belongs_to :location, optional: true
@@ -271,6 +273,19 @@ class Agreement < ApplicationRecord
     return unless template&.custom_field_definitions.present?
 
     update_column(:custom_field_definitions, template.custom_field_definitions)
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    title || agreement_number || 'Agreement'
+  end
+
+  def activity_module_name
+    'finance'
+  end
+
+  def activity_account_id
+    account_id || deal&.try(:account_id) || contact&.try(:account_id)
   end
 
   private

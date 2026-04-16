@@ -6,7 +6,31 @@
 # Integrates with external payment gateways (Zego, Stripe) and tracks processing fees.
 
 class Payment < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
+  include Reportable
+
+  def self.reportable_config
+    {
+      label: "Payments",
+      category: "finance",
+      fields: [
+        { key: "id",             label: "ID",              type: "number",  filterable: true,  sortable: true  },
+        { key: "payment_number", label: "Payment Number",  type: "string",  filterable: true,  sortable: true  },
+        { key: "payment_type",   label: "Payment Type",   type: "enum",    filterable: true,  sortable: true  },
+        { key: "gateway_name",   label: "Gateway",        type: "enum",    filterable: true,  sortable: true  },
+        { key: "status",         label: "Status",         type: "enum",    filterable: true,  sortable: true  },
+        { key: "amount",         label: "Amount",         type: "number",  filterable: true,  sortable: true  },
+        { key: "fee_amount",     label: "Fee Amount",     type: "number",  filterable: true,  sortable: true  },
+        { key: "processing_fee", label: "Processing Fee", type: "number",  filterable: true,  sortable: true  },
+        { key: "total_charged",  label: "Total Charged",  type: "number",  filterable: true,  sortable: true  },
+        { key: "payer_type",     label: "Payer Type",     type: "string",  filterable: true,  sortable: false },
+        { key: "payment_date",   label: "Payment Date",   type: "date",    filterable: true,  sortable: true  },
+        { key: "processed_at",   label: "Processed At",   type: "date",    filterable: true,  sortable: true  },
+        { key: "created_at",     label: "Created At",     type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
   include WebhookNotifiable
   
   # Constants
@@ -298,5 +322,26 @@ class Payment < ApplicationRecord
     )
   rescue => e
     Rails.logger.error "[Payment] Failed to fire lifecycle webhook #{event}: #{e.message}"
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:description) || "Payment ##{id}"
+  end
+
+  def activity_module_name
+    'finance'
+  end
+
+  def activity_account_id
+    if try(:account_id)
+      account_id
+    elsif respond_to?(:payable) && payable.respond_to?(:account_id)
+      payable.try(:account_id)
+    elsif respond_to?(:payable) && payable.respond_to?(:contact)
+      payable.contact&.try(:account_id)
+    else
+      nil
+    end
   end
 end

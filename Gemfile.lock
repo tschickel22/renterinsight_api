@@ -112,6 +112,11 @@ GEM
     brakeman (7.1.0)
       racc
     builder (3.3.0)
+    caxlsx (4.4.2)
+      htmlentities (~> 4.3, >= 4.3.4)
+      marcel (~> 1.0)
+      nokogiri (~> 1.10, >= 1.10.4)
+      rubyzip (>= 2.4, < 4)
     combine_pdf (1.0.31)
       matrix
       ruby-rc4 (>= 0.1.5)
@@ -163,6 +168,7 @@ GEM
     groupdate (6.7.0)
       activesupport (>= 7.1)
     hashery (2.1.2)
+    htmlentities (4.4.2)
     httparty (0.23.2)
       csv
       mini_mime (>= 1.0.0)
@@ -485,6 +491,7 @@ DEPENDENCIES
   bcrypt (~> 3.1.7)
   bootsnap
   brakeman
+  caxlsx (~> 4.1)
   combine_pdf (~> 1.0)
   debug
   dotenv-rails

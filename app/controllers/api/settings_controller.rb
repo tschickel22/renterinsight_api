@@ -17,13 +17,24 @@ module Api
     # Returns minimal tenant info needed by all authenticated users (no company_settings permission required)
     def tenant_basic
       Rails.logger.info "🏢 [SettingsController#tenant_basic] Loading basic tenant info for company: #{@company.name} (ID: #{@company.id})"
-      
-      render json: {
-        tenant: serialize_tenant_basic
-      }
+
+      sub_updated  = @company.tenant_subscription&.updated_at&.to_i || 0
+      override_updated = @company.tenant_module_overrides.maximum(:updated_at)&.to_i || 0
+      plan_updated = @company.tenant_subscription&.subscription_plan&.updated_at&.to_i || 0
+      plan_modules_updated = if @company.tenant_subscription&.subscription_plan
+        @company.tenant_subscription.subscription_plan.subscription_plan_modules.maximum(:updated_at)&.to_i || 0
+      else
+        0
+      end
+      cache_key = "tenant_basic/#{@company.id}/#{@company.updated_at.to_i}/#{sub_updated}/#{override_updated}/#{plan_updated}/#{plan_modules_updated}"
+      result = Rails.cache.fetch(cache_key, expires_in: 5.minutes) do
+        serialize_tenant_basic
+      end
+
+      render json: { tenant: result }
     rescue => e
       Rails.logger.error "Tenant basic settings error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
-      render json: { 
+      render json: {
         error: 'Failed to load tenant settings',
         details: Rails.env.development? ? e.message : nil
       }, status: :internal_server_error

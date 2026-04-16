@@ -493,7 +493,13 @@ module Api
             condition: vehicle.condition,
             statusLabel: vehicle.status&.titleize,
             images: convert_image_urls_to_https(vehicle.images),
-            floorPlanImages: (vehicle.floor_plan_images || []).map { |url| url.start_with?('http') ? url : "#{base_url}#{url}" },
+            # Normalize floor plan images — handle both string and hash shapes
+            # (Champion IMS catalog/clones store as { "url" => "...", "alt" => "" })
+            floorPlanImages: (vehicle.floor_plan_images || []).map { |entry|
+              url = image_url_from(entry)
+              next nil if url.blank?
+              url.start_with?('http') ? url : "#{base_url}#{url}"
+            }.compact,
             virtualTourUrl: vehicle.virtual_tour_url,
             videoUrl: vehicle.video_url,
             features: vehicle.features || [],
@@ -538,23 +544,45 @@ module Api
         end
       end
 
+      # Normalize an image entry to a plain URL string.
+      # Vehicle.images / floor_plan_images are JSONB arrays that can contain:
+      #   - plain URL strings (dealer-uploaded)
+      #   - hash objects like { "url" => "https://...", "alt" => "..." }
+      #     (Champion IMS catalog rows & clones use this shape)
+      # Returns nil for anything we can't resolve so callers can .compact.
+      def image_url_from(entry)
+        return nil if entry.blank?
+        url = if entry.is_a?(Hash)
+                entry['url'] || entry[:url]
+              else
+                entry
+              end
+        url.to_s.presence
+      end
+
       # Helper to convert image URLs to HTTPS protocol
-      # Fixes mixed content issues when frontend is served over HTTPS
+      # Fixes mixed content issues when frontend is served over HTTPS.
+      # Handles both plain-string and hash-shape image entries (Champion IMS
+      # stores images as { "url" => "...", "alt" => "" }).
       def convert_image_urls_to_https(images)
         Rails.logger.info "[ListingsController] convert_image_urls_to_https called with: #{images.inspect}"
         return [] if images.blank?
-        
+
+        # Handle stringified JSON (legacy / edge case)
         images_array = images.is_a?(String) ? JSON.parse(images) : images
         return [] unless images_array.is_a?(Array)
-        
-        converted = images_array.map do |url|
-          next url if url.blank? || !url.is_a?(String)
-          # Convert http:// to https:// for external URLs
+
+        converted = images_array.map do |entry|
+          # Normalize hash → URL string first; silently skip unresolvable entries
+          url = image_url_from(entry)
+          next nil if url.blank?
+
+          # Convert http:// to https:// for external URLs (mixed-content fix)
           converted_url = url.start_with?('http://') ? url.sub('http://', 'https://') : url
-          Rails.logger.info "[ListingsController] Converted: #{url} -> #{converted_url}"
+          Rails.logger.info "[ListingsController] Converted: #{entry.inspect} -> #{converted_url}"
           converted_url
         end.compact
-        
+
         Rails.logger.info "[ListingsController] Final images array: #{converted.inspect}"
         converted
       rescue JSON::ParserError => e

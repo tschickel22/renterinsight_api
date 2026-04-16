@@ -33,12 +33,14 @@ module Api
         end
         
         # Apply location filter - skip if 'all_locations' param sent
+        # Champion IMS catalog rows with location_id IS NULL (apply_to_all_locations=true)
+        # are visible under EVERY location's view, regardless of selector.
         if params[:all_locations].present? && params[:all_locations] == 'true'
           # Show all locations - no location filter applied
         elsif params[:location_id].present? && params[:location_id] != 'all'
-          vehicles = vehicles.where(location_id: params[:location_id])
+          vehicles = vehicles.where('location_id = ? OR (location_id IS NULL AND source = ?)', params[:location_id], 'champion_ims')
         elsif Current.location_filtered?
-          vehicles = vehicles.where(location_id: Current.location_id)
+          vehicles = vehicles.where('location_id = ? OR (location_id IS NULL AND source = ?)', Current.location_id, 'champion_ims')
         end
         
         # Apply non-search filters
@@ -47,6 +49,22 @@ module Api
         vehicles = vehicles.by_year(params[:year]) if params[:year].present?
         vehicles = vehicles.by_make(params[:make]) if params[:make].present?
         vehicles = vehicles.by_model(params[:model]) if params[:model].present?
+        # Source filter (e.g., 'champion_ims', 'manual') - used by Champion IMS Feeds tab
+        vehicles = vehicles.where(source: params[:source]) if params[:source].present?
+
+        # source_filter: Listing Source filter for inventory list / brochure / feeds.
+        # Distinct from `source` (raw column equality) — this applies semantic scopes
+        # that combine multiple sources and (for `dealer_preferred`) supersede catalog
+        # rows with their dealer-edited clones.
+        # Values: 'all' (no-op), 'originals_only', 'dealer_only', 'synced_only',
+        #         'dealer_preferred' (default for feeds, brochures, public catalog).
+        case params[:source_filter].to_s
+        when 'originals_only'   then vehicles = vehicles.originals_only
+        when 'dealer_only'      then vehicles = vehicles.dealer_only
+        when 'synced_only'      then vehicles = vehicles.synced_only
+        when 'dealer_preferred' then vehicles = vehicles.dealer_preferred
+        # 'all' or blank → no-op (default for inventory list per dealer preference)
+        end
         
         # Advanced MH filters
         vehicles = vehicles.where(bedrooms: params[:bedrooms]) if params[:bedrooms].present?
@@ -201,6 +219,56 @@ module Api
         if custom_field_values_param.present?
           existing = @vehicle.custom_field_values || {}
           params_to_update = params_to_update.to_h.merge('custom_field_values' => existing.merge(custom_field_values_param.to_unsafe_h))
+        end
+
+        # CHAMPION IMS CATALOG AUTO-CLONE
+        # Catalog rows are sync-owned and immutable to dealers. ANY edit (status
+        # change, field edit, inline tweak) triggers a clone so the dealer's work
+        # is preserved and the catalog row stays pristine for the next sync.
+        #
+        # Status edit: clone status = the new status (existing behavior).
+        # Field edit (no status): clone status defaults to 'available' so the
+        #   home immediately enters the dealer's normal inventory pipeline.
+        #
+        # NOTE: Only catalog rows clone. Clones themselves are edited in place
+        # (no clones-of-clones — `cloneable?` returns true only for catalog rows).
+        if @vehicle.cloneable?
+          requested_status = params_to_update[:status] || params_to_update['status']
+          # If the dealer explicitly tried to set status='available_to_order' on
+          # a catalog row, that's a no-op (it's already that). Treat as no change.
+          requested_status = nil if requested_status.to_s == 'available_to_order'
+
+          clone_status   = requested_status.presence || 'available'
+          override_attrs = params_to_update.to_h.except('status', :status)
+
+          # Default the clone's location to the user's current location context
+          # if the dealer didn't explicitly set one. Catalog rows have
+          # location_id=NULL (apply_to_all_locations); the clone needs a real
+          # location or it won't appear in the dealer's filtered inventory list.
+          if !override_attrs.key?('location_id') && !override_attrs.key?(:location_id) && Current.location_id.present?
+            override_attrs['location_id'] = Current.location_id
+          end
+
+          service = VehicleCloneFromCatalogService.new(
+            @vehicle,
+            status:     clone_status,
+            attributes: override_attrs
+          )
+          clone = service.call
+
+          if clone
+            render json: {
+              vehicle:        vehicle_json(clone, detailed: true),
+              cloned:         true,
+              clone_id:       clone.id,
+              source_id:      @vehicle.id,
+              source_inventory_id: @vehicle.inventory_id,
+              message:        "Created a working copy from the Champion catalog. The original stays available to order for other customers."
+            }, status: :created
+          else
+            render json: { errors: service.errors.full_messages }, status: :unprocessable_entity
+          end
+          return
         end
 
         if @vehicle.update(params_to_update)
@@ -1511,8 +1579,14 @@ module Api
         end
         
         # Convert image URLs - handle both plain string URLs and Hash objects (S3 uploads)
-        full_image_urls = (vehicle.images || []).map do |url|
-          raw = url.is_a?(Hash) ? (url['url'] || url[:url]) : url
+        # Champion catalog/clone fallback: if `images` is empty but the row has
+        # `champion_images`, use those so previously-synced rows display photos
+        # without requiring a re-sync.
+        image_source = vehicle.images.presence ||
+                       (vehicle.respond_to?(:champion_images) ? vehicle.champion_images : nil) ||
+                       []
+        full_image_urls = image_source.map do |url|
+          raw = url.is_a?(Hash) ? (url['url'] || url[:url] || url['path'] || url[:path]) : url
           next nil if raw.blank?
           raw.start_with?('http') ? raw : "#{base_url}#{raw}"
         end.compact
@@ -1548,6 +1622,11 @@ module Api
           dateSold: vehicle.date_sold,
           createdAt: vehicle.created_at,
           updatedAt: vehicle.updated_at,
+          # Champion IMS lineage — used by FE to render Source badges and -C1 tooltips
+          source: vehicle.source,
+          clonedFromId: vehicle.cloned_from_id,
+          isCatalog: vehicle.respond_to?(:catalog?) ? vehicle.catalog? : false,
+          isClone:   vehicle.respond_to?(:champion_clone?) ? vehicle.champion_clone? : false,
           features: vehicle.features || [],
           images: full_image_urls,  # Use full URLs
           videos: vehicle.videos || [],

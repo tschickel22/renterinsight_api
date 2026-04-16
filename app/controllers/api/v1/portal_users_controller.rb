@@ -249,14 +249,32 @@ module Api
           messages << "SMS sent" if sms_sent
           message = messages.any? ? messages.join(" and ") : "Invitation created"
           message += " (with errors: #{errors.join(', ')})" if errors.any?
-          
-          render json: { 
+
+          # Status code reflects delivery reality:
+          # - 201 Created: at least one delivery method succeeded (or none was requested)
+          # - 207 Multi-Status: partial success (asked for both, only one worked)
+          # - 502 Bad Gateway: every requested delivery method failed (portal user
+          #   was saved but the user got nothing — surface the failure to the UI)
+          requested_email = delivery_method == 'email' || delivery_method == 'both'
+          requested_sms   = delivery_method == 'sms'   || delivery_method == 'both'
+          email_ok = !requested_email || email_sent
+          sms_ok   = !requested_sms   || sms_sent
+
+          status_code = if email_ok && sms_ok
+                          :created
+                        elsif email_sent || sms_sent
+                          :multi_status
+                        else
+                          :bad_gateway
+                        end
+
+          render json: {
             user: format_portal_user(@portal_user),
             message: message,
             email_sent: email_sent,
             sms_sent: sms_sent,
             errors: errors.any? ? errors : nil
-          }, status: :created
+          }, status: status_code
         else
           Rails.logger.error("Failed to save portal user: #{@portal_user.errors.full_messages.join(', ')}")
           render json: { errors: @portal_user.errors.full_messages }, status: :unprocessable_entity
@@ -479,7 +497,7 @@ module Api
           Rails.logger.info("Portal invitation sent to #{portal_user.email}")
         else
           Rails.logger.error("Failed to send portal invitation: #{result[:error]}")
-          raise Error, result[:error]
+          raise StandardError, result[:error]
         end
       end
 
@@ -535,7 +553,7 @@ module Api
           Rails.logger.info("Password reset sent to #{portal_user.email}")
         else
           Rails.logger.error("Failed to send password reset: #{result[:error]}")
-          raise Error, result[:error]
+          raise StandardError, result[:error]
         end
       end
 

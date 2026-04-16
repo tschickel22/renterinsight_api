@@ -27,10 +27,59 @@
 #
 
 class ServiceTicket < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
   include NotifiableServiceTicket
   include WebhookNotifiable
-  
+  include Reportable
+  include WorkflowRunCancellable
+
+  # Workflow engine emit hooks
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
+  def emit_workflow_created
+    WorkflowEngine.emit('service_ticket.created', self, { id: id }) if defined?(WorkflowEngine)
+  end
+
+  def emit_workflow_updated
+    return unless defined?(WorkflowEngine)
+    WorkflowEngine.emit('service_ticket.updated', self, { id: id, changes: saved_changes.keys })
+    if self.class.column_names.include?('status') && saved_change_to_attribute?(:status)
+      from, to = saved_change_to_attribute(:status)
+      WorkflowEngine.emit('service_ticket.status_changed', self, { id: id, from: from, to: to })
+    end
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('service_ticket.deleted', self, { id: id }) if defined?(WorkflowEngine)
+  end
+
+  def self.reportable_config
+    {
+      label: "Service Tickets",
+      category: "operations",
+      fields: [
+        { key: "id",                    label: "ID",                    type: "number",  filterable: true,  sortable: true  },
+        { key: "ticket_number",         label: "Ticket Number",         type: "string",  filterable: true,  sortable: true  },
+        { key: "title",                 label: "Title",                 type: "string",  filterable: true,  sortable: true  },
+        { key: "status",                label: "Status",                type: "enum",    filterable: true,  sortable: true  },
+        { key: "priority",              label: "Priority",              type: "enum",    filterable: true,  sortable: true  },
+        { key: "assigned_to",           label: "Assigned To",           type: "string",  filterable: true,  sortable: true  },
+        { key: "contact_id",            label: "Contact",               type: "number",  filterable: true,  sortable: true  },
+        { key: "account_id",            label: "Account",               type: "number",  filterable: true,  sortable: true  },
+        { key: "scheduled_date",        label: "Scheduled Date",        type: "date",    filterable: true,  sortable: true  },
+        { key: "is_warranty_suspected", label: "Warranty Suspected",    type: "boolean", filterable: true,  sortable: false },
+        { key: "is_warranty_confirmed", label: "Warranty Confirmed",    type: "boolean", filterable: true,  sortable: false },
+        { key: "description",           label: "Description",           type: "string",  filterable: false, sortable: false },
+        { key: "notes",                 label: "Notes",                 type: "string",  filterable: false, sortable: false },
+        { key: "created_at",            label: "Created At",            type: "date",    filterable: true,  sortable: true  },
+        { key: "updated_at",            label: "Updated At",            type: "date",    filterable: true,  sortable: true  }
+      ]
+    }
+  end
+
   # Associations
   belongs_to :company
   belongs_to :location, optional: true
@@ -354,5 +403,18 @@ class ServiceTicket < ApplicationRecord
     if status.blank?
       self.status = nil
     end
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:ticket_number) || try(:title) || "Ticket ##{id}"
+  end
+
+  def activity_module_name
+    'service'
+  end
+
+  def activity_account_id
+    try(:account_id) || contact&.try(:account_id)
   end
 end

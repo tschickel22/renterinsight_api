@@ -85,7 +85,16 @@ class Api::V1::DrawScheduleTemplatesController < ApplicationController
   end
 
   def template_params
-    params.require(:draw_schedule_template).permit(:name, :is_default, draws: [:percentage, :description, :position])
+    params.require(:draw_schedule_template).permit(
+      :name,
+      :is_default,
+      draws: [
+        :percentage,
+        :description,
+        :position,
+        { sub_items: [:description, :position] }
+      ]
+    )
   end
 
   def serialize_template(template)

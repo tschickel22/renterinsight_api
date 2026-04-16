@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class LeadActivity < ApplicationRecord
+  include ActivityTrackable
+
   belongs_to :lead
   belongs_to :user # creator
   belongs_to :assigned_to, class_name: 'User', optional: true
@@ -39,6 +41,7 @@ class LeadActivity < ApplicationRecord
   after_create :schedule_reminders, if: -> { ['reminder', 'call', 'task', 'meeting'].include?(activity_type) && reminder_time.present? }
   after_update :reschedule_reminders_if_changed, if: -> { ['reminder', 'call', 'task', 'meeting'].include?(activity_type) && reminder_time.present? && saved_change_to_reminder_time? }
   after_update :update_lead_last_activity
+  after_commit :touch_parent_last_activity, on: :create
   after_save :create_activity_log
   before_validation :ensure_reminder_method_array
   before_validation :set_meeting_reminder_time, if: -> { activity_type == 'meeting' && start_time.present? }
@@ -55,9 +58,38 @@ class LeadActivity < ApplicationRecord
   def overdue?
     due_date && due_date < Time.current && status != 'completed'
   end
-  
+
+  def activity_display_name
+    subject || 'Activity'
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    lead&.converted_account_id
+  end
+
+  def activity_location_id
+    lead&.location_id
+  end
+
+  # Must be public - ActivityTrackable concern uses try(:company)
+  def company
+    lead&.company
+  end
+
   private
-  
+
+  def touch_parent_last_activity
+    return unless lead && lead.respond_to?(:last_activity_at)
+
+    lead.update_columns(last_activity_at: created_at || Time.current)
+  rescue => e
+    Rails.logger.warn "[LeadActivity] touch_parent_last_activity failed: #{e.message}"
+  end
+
   def ensure_reminder_method_array
     if reminder_method.is_a?(String)
       self.reminder_method = JSON.parse(reminder_method) rescue []

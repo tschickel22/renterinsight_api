@@ -453,6 +453,72 @@ module Api
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
+      # GET /api/v1/company_settings/ai_settings
+      def ai_settings
+        unless current_user&.role == 'platform_admin'
+          return render json: { error: 'Platform admin required' }, status: :forbidden
+        end
+        limit = begin
+          Setting.get('Company', @company.id, 'ai_report_queries_monthly_limit', nil)
+        rescue
+          nil
+        end
+        platform_default = begin
+          Setting.get('Platform', 0, 'ai_report_queries_monthly_limit', 100)
+        rescue
+          100
+        end
+        render json: { ai_report_queries_monthly_limit: limit&.to_i || platform_default.to_i }
+      end
+
+      # PATCH /api/v1/company_settings/ai_settings
+      def update_ai_settings
+        unless current_user&.role == 'platform_admin'
+          return render json: { error: 'Platform admin required' }, status: :forbidden
+        end
+        limit = params[:ai_report_queries_monthly_limit].to_i
+        begin
+          Setting.set('Company', @company.id, 'ai_report_queries_monthly_limit', limit.to_s)
+          render json: { ai_report_queries_monthly_limit: limit, message: 'AI settings saved' }
+        rescue => e
+          Rails.logger.error "[CompanySettings] Failed to save AI limit: #{e.class} - #{e.message}"
+          render json: { error: "Failed to save: #{e.message}" }, status: :unprocessable_entity
+        end
+      end
+
+      # GET /api/v1/company_settings/ai_settings
+      def ai_settings
+        unless current_user&.role == 'platform_admin'
+          return render json: { error: 'Platform admin required' }, status: :forbidden
+        end
+        limit = begin
+          Setting.get('Company', @company.id, 'ai_report_queries_monthly_limit', nil)
+        rescue
+          nil
+        end
+        platform_default = begin
+          Setting.get('Platform', 0, 'ai_report_queries_monthly_limit', 100)
+        rescue
+          100
+        end
+        render json: { ai_report_queries_monthly_limit: limit&.to_i || platform_default.to_i }
+      end
+
+      # PATCH /api/v1/company_settings/ai_settings
+      def update_ai_settings
+        unless current_user&.role == 'platform_admin'
+          return render json: { error: 'Platform admin required' }, status: :forbidden
+        end
+        limit = params[:ai_report_queries_monthly_limit].to_i
+        begin
+          Setting.set('Company', @company.id, 'ai_report_queries_monthly_limit', limit.to_s)
+          render json: { ai_report_queries_monthly_limit: limit, message: 'AI settings saved' }
+        rescue => e
+          Rails.logger.error "[CompanySettings] Failed to save AI limit: #{e.class} - #{e.message}"
+          render json: { error: "Failed to save: #{e.message}" }, status: :unprocessable_entity
+        end
+      end
+
       private
 
       # RBAC Authorization Methods for company_settings resource
@@ -492,16 +558,19 @@ module Api
       # RBAC Authorization Methods for finance resource
       def authorize_finance_manage!
         return if skip_rbac?
-        unless current_user.has_permission?('finance', 'manage', 'all', @company&.id)
-          Rails.logger.warn "[RBAC] User #{current_user.id} denied MANAGE access to finance for company #{@company&.id}"
+        # Use 'update' (real action) instead of 'manage' (which doesn't exist in the permission system)
+        unless current_user.has_permission?('finance', 'update', 'all', @company&.id)
+          Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to finance for company #{@company&.id}"
           render json: { error: 'Permission denied: You do not have permission to manage finance settings' }, status: :forbidden
         end
       end
 
       # Skip RBAC for platform admins or if company doesn't use RBAC
       def skip_rbac?
-        return true if current_user.platform_admin?
-        return true if current_user.super_admin?
+        return true if current_user.respond_to?(:platform_admin?) && current_user.platform_admin?
+        return true if current_user.respond_to?(:super_admin?) && current_user.super_admin?
+        return true if current_user.respond_to?(:effective_admin?) && current_user.effective_admin?
+        return true if %w[platform_admin super_admin company_admin admin].include?(current_user.user_type.to_s)
         return true unless @company&.use_rbac_system
         false
       end
@@ -522,39 +591,7 @@ module Api
         end
 
         @company = ::Company.find_by(id: company_id)
-
-        if @company.nil?
-          Rails.logger.error "[CompanySettingsController] Company #{company_id} not found"
-          render json: { error: 'Company not found' }, status: :not_found
-          return
-        end
-
-        Rails.logger.info "[CompanySettingsController] Company scope set: #{@company.name} (ID: #{@company.id}) for user: #{current_user.email}"
-      end
-
-      # Default loan settings
-      def default_loan_settings
-        {
-          default_interest_rate: 6.99,
-          max_loan_term: 84,
-          min_down_payment_percent: 10,
-          default_payment_frequency: 'monthly',
-          # Affordability Calculator defaults
-          calculator_enabled: true,
-          calculator_include_lot_rent: false,
-          calculator_default_lot_rent: 500,
-          calculator_include_property_tax: false,
-          calculator_default_property_tax_rate: 1.0,
-          calculator_include_insurance: false,
-          calculator_default_insurance_annual: 1200,
-          calculator_include_setup_fee: false,
-          calculator_default_setup_fee: 0,
-          calculator_loan_term_options: [120, 180, 240, 300, 360],
-          calculator_disclaimer_text: 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.',
-          # Sales Tax
-          default_sales_tax_rate: 0.0
-        }
-      end
     end
+  end
   end
 end

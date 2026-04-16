@@ -230,42 +230,25 @@ class CommunicationSettingsService
   end
   
   # WATERFALL: Platform → Company → Location (Location has highest priority)
+  # Each scope is parsed independently — if one scope's JSON is corrupted we
+  # log it and skip that scope rather than blowing up the entire waterfall.
   def merged_settings
     return @merged_settings if defined?(@merged_settings)
-    
-    # Start with platform settings as the base
-    platform_setting = Setting.find_by(key: 'communications', scope_type: 'Platform', scope_id: 0)
-    platform_data = if platform_setting&.value.present?
-                      platform_setting.value.is_a?(Hash) ? platform_setting.value : JSON.parse(platform_setting.value)
-                    else
-                      {}
-                    end
-    
-    # Merge company settings (overrides platform)
+
+    merged = load_setting_safely('Platform', 0) || {}
+
     if company
-      company_setting = Setting.find_by(key: 'communications', scope_type: 'Company', scope_id: company.id)
-      company_data = if company_setting&.value.present?
-                       company_setting.value.is_a?(Hash) ? company_setting.value : JSON.parse(company_setting.value)
-                     else
-                       {}
-                     end
-      platform_data = deep_merge_settings(platform_data, company_data)
+      company_data = load_setting_safely('Company', company.id)
+      merged = deep_merge_settings(merged, company_data) if company_data
     end
-    
-    # Merge location settings (overrides company, highest priority)
+
     if location
-      location_setting = Setting.find_by(key: 'communications', scope_type: 'Location', scope_id: location.id)
-      location_data = if location_setting&.value.present?
-                        location_setting.value.is_a?(Hash) ? location_setting.value : JSON.parse(location_setting.value)
-                      else
-                        {}
-                      end
-      platform_data = deep_merge_settings(platform_data, location_data)
+      location_data = load_setting_safely('Location', location.id)
+      merged = deep_merge_settings(merged, location_data) if location_data
     end
-    
-    @merged_settings = platform_data
-    
-    # Debug logging
+
+    @merged_settings = merged
+
     scope_info = if user
                    "user_id=#{user.id}"
                  elsif location
@@ -275,16 +258,29 @@ class CommunicationSettingsService
                  else
                    "platform"
                  end
-    
+
     Rails.logger.debug("📧 Merged settings for #{scope_info}: email.fromEmail=#{@merged_settings.dig('email', 'fromEmail')}, sms.fromNumber=#{@merged_settings.dig('sms', 'fromNumber')}")
-    
+
     @merged_settings
+  end
+
+  # Loads and parses a single Setting row. Returns the parsed Hash, or nil if
+  # the row is missing, blank, or fails to parse. A parse failure is logged
+  # but does NOT raise — the waterfall continues with the other scopes so a
+  # single corrupted record can't poison every email-sending code path.
+  def load_setting_safely(scope_type, scope_id)
+    setting = Setting.find_by(key: 'communications', scope_type: scope_type, scope_id: scope_id)
+    return nil unless setting&.value.present?
+
+    return setting.value if setting.value.is_a?(Hash)
+
+    JSON.parse(setting.value)
   rescue JSON::ParserError => e
-    Rails.logger.error("Failed to parse communication settings: #{e.message}")
-    {}
+    Rails.logger.error("[CommunicationSettingsService] Skipping corrupted #{scope_type}/#{scope_id} communications setting (JSON parse error: #{e.message}). Repair the row to use this scope.")
+    nil
   rescue StandardError => e
-    Rails.logger.error("Failed to merge communication settings: #{e.message}")
-    platform_data || {}
+    Rails.logger.error("[CommunicationSettingsService] Skipping #{scope_type}/#{scope_id} communications setting due to error: #{e.class}: #{e.message}")
+    nil
   end
   
   # Deep merge helper: recursively merges hashes, with override taking precedence

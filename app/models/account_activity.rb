@@ -1,4 +1,6 @@
 class AccountActivity < ApplicationRecord
+  include ActivityTrackable
+
   belongs_to :account
   belongs_to :user, optional: true # creator
   belongs_to :assigned_to, class_name: 'User', optional: true
@@ -60,9 +62,30 @@ class AccountActivity < ApplicationRecord
   def overdue?
     due_date && due_date < Time.current && status != 'completed'
   end
-  
+
+  def activity_display_name
+    subject || 'Activity'
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    account_id
+  end
+
+  def activity_location_id
+    account&.location_id
+  end
+
+  # Must be public - ActivityTrackable concern uses try(:company)
+  def company
+    account&.company
+  end
+
   private
-  
+
   def ensure_reminder_method_array
     if reminder_method.is_a?(String)
       self.reminder_method = JSON.parse(reminder_method) rescue []

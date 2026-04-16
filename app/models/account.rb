@@ -1,10 +1,31 @@
 # frozen_string_literal: true
 class Account < ApplicationRecord
+  include ActivityTrackable
   include Communicable
   include LocationAware
   include NotifiableAccount
   include WebhookNotifiable
-  
+  include Reportable
+  include WorkflowRunCancellable
+
+  def self.reportable_config
+    {
+      label: "Accounts",
+      category: "crm",
+      fields: [
+        { key: "id",           label: "ID",          type: "number", filterable: true, sortable: true },
+        { key: "name",         label: "Name",        type: "string", filterable: true, sortable: true },
+        { key: "email",        label: "Email",       type: "string", filterable: true, sortable: true },
+        { key: "phone",        label: "Phone",       type: "string", filterable: true, sortable: false },
+        { key: "website",      label: "Website",     type: "string", filterable: true, sortable: false },
+        { key: "account_type", label: "Type",        type: "enum",   filterable: true, sortable: true },
+        { key: "status",       label: "Status",      type: "enum",   filterable: true, sortable: true },
+        { key: "created_at",   label: "Created At",  type: "date",   filterable: true, sortable: true },
+        { key: "updated_at",   label: "Updated At",  type: "date",   filterable: true, sortable: true }
+      ]
+    }
+  end
+
   # Account Types
   ACCOUNT_TYPES = %w[customer prospect vendor partner competitor converted_lead].freeze
   STATUSES = %w[active inactive pending archived].freeze
@@ -168,5 +189,42 @@ class Account < ApplicationRecord
   
   def update_last_activity_date
     self.last_activity_date = Time.current if saved_changes?
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    name
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    id
+  end
+
+  public
+
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
+  private
+
+  def emit_workflow_created
+    WorkflowEngine.emit('account.created', self, { id: id })
+  end
+
+  def emit_workflow_updated
+    WorkflowEngine.emit('account.updated', self, { id: id, changes: saved_changes.keys })
+    if saved_change_to_attribute?(:status)
+      from, to = saved_change_to_attribute(:status)
+      WorkflowEngine.emit('account.status_changed', self, { id: id, from: from, to: to })
+    end
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('account.deleted', self, { id: id })
   end
 end

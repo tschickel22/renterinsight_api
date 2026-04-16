@@ -1,5 +1,15 @@
 # frozen_string_literal: true
 
+# DEPRECATED: Use Scrapers::ChampionImsClient instead.
+#
+# This Selenium-based scraper targets the old championhomes.com listing
+# pages and is being phased out in favor of the Champion IMS JSON feed
+# (see app/services/scrapers/champion_ims_client.rb and champion_ims_sync_service.rb).
+#
+# The IMS feed is faster (no browser), more reliable (structured JSON),
+# and supports per-retailer filtering via Navision ID. Do not remove this
+# file yet - it may still be referenced by legacy scripts.
+
 require 'selenium-webdriver'
 
 module Scrapers

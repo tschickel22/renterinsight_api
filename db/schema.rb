@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -166,6 +166,31 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["lead_id", "created_at"], name: "index_activities_on_lead_id_and_created_at"
     t.index ["lead_id"], name: "index_activities_on_lead_id"
     t.index ["user_id"], name: "index_activities_on_user_id"
+  end
+
+  create_table "activity_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id"
+    t.string "trackable_type"
+    t.bigint "trackable_id"
+    t.bigint "account_id"
+    t.bigint "location_id"
+    t.string "action", null: false
+    t.string "module_name", null: false
+    t.string "entity_type_label"
+    t.string "description", null: false
+    t.jsonb "changes_made", default: {}
+    t.jsonb "metadata", default: {}
+    t.string "ip_address"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["action"], name: "index_activity_logs_on_action"
+    t.index ["company_id", "account_id", "created_at"], name: "idx_on_company_id_account_id_created_at_c0beedc755"
+    t.index ["company_id", "created_at"], name: "index_activity_logs_on_company_id_and_created_at"
+    t.index ["company_id", "location_id", "created_at"], name: "idx_on_company_id_location_id_created_at_2dcf7b4b92"
+    t.index ["company_id", "module_name", "created_at"], name: "idx_on_company_id_module_name_created_at_290527c75b"
+    t.index ["company_id", "user_id", "created_at"], name: "index_activity_logs_on_company_id_and_user_id_and_created_at"
+    t.index ["trackable_type", "trackable_id"], name: "index_activity_logs_on_trackable_type_and_trackable_id"
   end
 
   create_table "agreement_attachments", force: :cascade do |t|
@@ -398,6 +423,36 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["lead_id"], name: "index_ai_insights_on_lead_id"
   end
 
+  create_table "ai_query_logs", force: :cascade do |t|
+    t.bigint "company_id"
+    t.bigint "user_id"
+    t.bigint "location_id"
+    t.string "feature"
+    t.string "module_key"
+    t.text "question"
+    t.jsonb "generated_params", default: {}
+    t.string "execution_status", default: "success"
+    t.integer "result_count"
+    t.integer "input_tokens"
+    t.integer "output_tokens"
+    t.integer "cost_cents"
+    t.integer "response_time_ms"
+    t.text "error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "action_name"
+    t.string "failure_reason"
+    t.string "entity_name_searched"
+    t.string "entity_type_attempted"
+    t.text "user_question"
+    t.string "resolved_intent"
+    t.integer "disambiguate_count"
+    t.index ["action_name"], name: "index_ai_query_logs_on_action_name"
+    t.index ["company_id", "feature", "created_at"], name: "index_ai_query_logs_on_company_id_and_feature_and_created_at"
+    t.index ["company_id", "module_key"], name: "index_ai_query_logs_on_company_id_and_module_key"
+    t.index ["failure_reason"], name: "index_ai_query_logs_on_failure_reason"
+  end
+
   create_table "api_keys", force: :cascade do |t|
     t.bigint "company_id"
     t.string "name", null: false
@@ -489,6 +544,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["requested_by_id"], name: "index_approval_workflows_on_requested_by_id"
     t.index ["status"], name: "index_approval_workflows_on_status"
     t.index ["workflow_type"], name: "index_approval_workflows_on_workflow_type"
+  end
+
+  create_table "assignment_work_logs", force: :cascade do |t|
+    t.bigint "contractor_assignment_id", null: false
+    t.bigint "contractor_id"
+    t.text "note"
+    t.string "log_type", default: "note"
+    t.jsonb "attachments", default: []
+    t.datetime "logged_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.string "author_type", default: "contractor"
+    t.string "author_name"
+    t.index ["contractor_assignment_id"], name: "index_assignment_work_logs_on_contractor_assignment_id"
+    t.index ["contractor_id"], name: "index_assignment_work_logs_on_contractor_id"
+    t.index ["user_id"], name: "index_assignment_work_logs_on_user_id"
   end
 
   create_table "bank_accounts", force: :cascade do |t|
@@ -675,6 +747,72 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["mfa_enabled"], name: "index_buyer_portal_accesses_on_mfa_enabled"
     t.index ["reset_token"], name: "index_buyer_portal_accesses_on_reset_token"
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
+  end
+
+  create_table "champion_ims_retailers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "retailer_navision_id", null: false
+    t.string "retailer_name"
+    t.string "retailer_city"
+    t.string "retailer_state"
+    t.boolean "active", default: true, null: false
+    t.string "sync_frequency", default: "weekly", null: false
+    t.datetime "last_sync_at"
+    t.string "last_sync_status", default: "pending", null: false
+    t.text "last_sync_error"
+    t.jsonb "last_sync_stats", default: {}, null: false
+    t.datetime "next_scheduled_sync_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.boolean "apply_to_all_locations", default: false, null: false, comment: "When true, synced vehicles are company-wide (location_id=nil) regardless of retailer.location_id"
+    t.index ["active"], name: "index_champion_ims_retailers_on_active"
+    t.index ["company_id", "retailer_navision_id"], name: "idx_champion_ims_retailers_on_company_and_navision", unique: true
+    t.index ["company_id"], name: "index_champion_ims_retailers_on_company_id"
+    t.index ["last_sync_status"], name: "index_champion_ims_retailers_on_last_sync_status"
+    t.index ["location_id"], name: "index_champion_ims_retailers_on_location_id"
+    t.index ["next_scheduled_sync_at"], name: "index_champion_ims_retailers_on_next_scheduled_sync_at"
+  end
+
+  create_table "champion_ims_sync_events", force: :cascade do |t|
+    t.bigint "champion_ims_sync_run_id", null: false
+    t.bigint "vehicle_id"
+    t.string "champion_model_id"
+    t.string "event_type", null: false
+    t.string "display_name"
+    t.string "inventory_id"
+    t.jsonb "field_changes", default: {}, null: false
+    t.text "reason"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["champion_ims_sync_run_id"], name: "idx_cims_events_on_run"
+    t.index ["champion_model_id"], name: "index_champion_ims_sync_events_on_champion_model_id"
+    t.index ["event_type"], name: "index_champion_ims_sync_events_on_event_type"
+    t.index ["vehicle_id", "created_at"], name: "idx_cims_events_on_vehicle_and_created_at", order: { created_at: :desc }
+    t.index ["vehicle_id"], name: "idx_cims_events_on_vehicle"
+  end
+
+  create_table "champion_ims_sync_runs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "champion_ims_retailer_id", null: false
+    t.string "status", default: "running", null: false
+    t.datetime "started_at", null: false
+    t.datetime "finished_at"
+    t.integer "duration_ms"
+    t.integer "catalog_added", default: 0, null: false
+    t.integer "catalog_updated", default: 0, null: false
+    t.integer "catalog_unchanged", default: 0, null: false
+    t.integer "catalog_tombstoned", default: 0, null: false
+    t.integer "catalog_protected", default: 0, null: false
+    t.integer "vehicles_skipped", default: 0, null: false
+    t.integer "total", default: 0, null: false
+    t.string "trigger", default: "manual", null: false
+    t.text "error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["champion_ims_retailer_id", "started_at"], name: "idx_cims_runs_on_retailer_and_started_at", order: { started_at: :desc }
+    t.index ["champion_ims_retailer_id"], name: "idx_cims_runs_on_retailer"
+    t.index ["company_id"], name: "index_champion_ims_sync_runs_on_company_id"
   end
 
   create_table "commission_audit_entries", force: :cascade do |t|
@@ -958,6 +1096,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.datetime "received_at"
     t.integer "company_id"
     t.integer "user_id"
+    t.bigint "workflow_run_id"
+    t.string "workflow_step_id"
     t.index ["channel"], name: "index_communications_on_channel"
     t.index ["communicable_type", "communicable_id"], name: "index_communications_on_communicable"
     t.index ["communication_thread_id"], name: "index_communications_on_communication_thread_id"
@@ -972,6 +1112,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["status"], name: "index_communications_on_status"
     t.index ["template_id"], name: "index_communications_on_template_id"
     t.index ["user_id"], name: "index_communications_on_user_id"
+    t.index ["workflow_run_id"], name: "index_communications_on_workflow_run_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -1265,10 +1406,30 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "submitted_for_review", default: false
+    t.datetime "submitted_for_review_at"
+    t.string "review_status"
+    t.datetime "reviewed_at"
+    t.bigint "reviewed_by_id"
+    t.text "review_notes"
+    t.text "completion_summary"
+    t.jsonb "completion_photos", default: []
+    t.text "revision_notes"
+    t.integer "revision_count", default: 0
+    t.datetime "notified_at"
+    t.datetime "review_notified_at"
+    t.datetime "notification_paused_at"
+    t.datetime "notification_skipped_at"
     t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
     t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
     t.index ["company_id"], name: "index_contractor_assignments_on_company_id"
     t.index ["contractor_id"], name: "index_contractor_assignments_on_contractor_id"
+    t.index ["notification_paused_at"], name: "index_contractor_assignments_on_notification_paused_at"
+    t.index ["notification_skipped_at"], name: "index_contractor_assignments_on_notification_skipped_at"
+    t.index ["notified_at"], name: "index_contractor_assignments_on_notified_at"
+    t.index ["review_notified_at"], name: "index_contractor_assignments_on_review_notified_at"
+    t.index ["review_status"], name: "index_contractor_assignments_on_review_status"
+    t.index ["reviewed_by_id"], name: "index_contractor_assignments_on_reviewed_by_id"
     t.index ["status"], name: "index_contractor_assignments_on_status"
   end
 
@@ -1300,6 +1461,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.datetime "portal_token_expires_at"
     t.datetime "last_portal_login_at"
     t.boolean "is_vendor", default: false
+    t.string "password_digest"
+    t.boolean "password_login_enabled", default: false
     t.index ["company_id"], name: "index_contractors_on_company_id"
     t.index ["email"], name: "index_contractors_on_email"
     t.index ["is_vendor"], name: "index_contractors_on_is_vendor"
@@ -1563,6 +1726,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.decimal "down_payment", precision: 15, scale: 2, default: "0.0"
     t.decimal "additional_payment", precision: 15, scale: 2, default: "0.0"
     t.decimal "unpaid_balance", precision: 15, scale: 2, default: "0.0"
+    t.datetime "last_activity_at"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -1591,6 +1755,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["stage"], name: "index_deals_on_stage"
     t.index ["territory_id", "stage"], name: "index_deals_on_territory_id_and_stage"
     t.index ["territory_id"], name: "index_deals_on_territory_id"
+    t.index ["user_id", "last_activity_at"], name: "index_deals_on_user_id_and_last_activity_at"
     t.index ["user_id", "stage"], name: "index_deals_on_user_id_and_stage"
     t.index ["user_id"], name: "index_deals_on_user_id"
     t.index ["vehicle_id"], name: "index_deals_on_vehicle_id"
@@ -1626,6 +1791,26 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["company_id"], name: "index_entity_buyers_on_company_id"
     t.index ["contact_id", "buyable_type", "buyable_id"], name: "index_entity_buyers_on_contact_buyable", unique: true, where: "(is_deleted = false)"
     t.index ["contact_id"], name: "index_entity_buyers_on_contact_id"
+  end
+
+  create_table "export_jobs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "module_type", null: false
+    t.string "status", default: "pending", null: false
+    t.string "format", default: "csv", null: false
+    t.jsonb "filters", default: {}, null: false
+    t.jsonb "selected_fields", default: [], null: false
+    t.integer "row_count", default: 0, null: false
+    t.string "file_url"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_export_jobs_on_company_id"
+    t.index ["module_type"], name: "index_export_jobs_on_module_type"
+    t.index ["status"], name: "index_export_jobs_on_status"
+    t.index ["user_id"], name: "index_export_jobs_on_user_id"
   end
 
   create_table "factories", force: :cascade do |t|
@@ -1742,6 +1927,54 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["manufacturer_id"], name: "index_floor_plans_on_manufacturer_id"
     t.index ["net_price"], name: "index_floor_plans_on_net_price"
     t.index ["series"], name: "index_floor_plans_on_series"
+  end
+
+  create_table "import_jobs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "module_type", null: false
+    t.string "status", default: "pending", null: false
+    t.string "source_filename"
+    t.string "source_file_url"
+    t.string "image_zip_url"
+    t.integer "total_rows", default: 0, null: false
+    t.integer "processed_rows", default: 0, null: false
+    t.integer "success_count", default: 0, null: false
+    t.integer "error_count", default: 0, null: false
+    t.integer "skipped_count", default: 0, null: false
+    t.jsonb "column_mapping", default: {}, null: false
+    t.string "duplicate_strategy", default: "skip"
+    t.jsonb "duplicate_match_fields", default: [], null: false
+    t.jsonb "options", default: {}, null: false
+    t.jsonb "error_log", default: [], null: false
+    t.jsonb "created_record_ids", default: [], null: false
+    t.jsonb "updated_record_snapshots", default: [], null: false
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module_type", "status"], name: "index_import_jobs_on_company_id_and_module_type_and_status"
+    t.index ["company_id"], name: "index_import_jobs_on_company_id"
+    t.index ["module_type"], name: "index_import_jobs_on_module_type"
+    t.index ["status"], name: "index_import_jobs_on_status"
+    t.index ["user_id"], name: "index_import_jobs_on_user_id"
+  end
+
+  create_table "import_templates", force: :cascade do |t|
+    t.bigint "company_id"
+    t.string "module_type", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.jsonb "column_mapping", default: {}, null: false
+    t.string "duplicate_strategy", default: "skip"
+    t.jsonb "duplicate_match_fields", default: [], null: false
+    t.jsonb "options", default: {}, null: false
+    t.boolean "is_platform_default", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "module_type"], name: "index_import_templates_on_company_id_and_module_type"
+    t.index ["company_id"], name: "index_import_templates_on_company_id"
+    t.index ["module_type"], name: "index_import_templates_on_module_type"
   end
 
   create_table "intake_forms", force: :cascade do |t|
@@ -2149,7 +2382,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.string "email"
     t.string "phone"
     t.text "notes"
-    t.integer "source_id", null: false
+    t.integer "source_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "status"
@@ -2171,10 +2404,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.string "state"
     t.string "zip"
     t.string "country"
+    t.datetime "last_activity_at"
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["location_id"], name: "index_leads_on_location_id"
+    t.index ["owner_id", "last_activity_at"], name: "index_leads_on_owner_id_and_last_activity_at"
     t.index ["owner_id"], name: "index_leads_on_owner_id"
     t.index ["source_id"], name: "index_leads_on_source_id"
     t.index ["vehicle_id"], name: "index_leads_on_vehicle_id"
@@ -3661,6 +3896,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["part_id"], name: "index_reorder_rules_on_part_id"
   end
 
+  create_table "reports", force: :cascade do |t|
+    t.string "name"
+    t.text "description"
+    t.string "module_key"
+    t.jsonb "config"
+    t.string "status"
+    t.integer "company_id"
+    t.integer "user_id"
+    t.integer "location_id"
+    t.boolean "is_favorite"
+    t.boolean "is_deleted"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "visibility"
+    t.jsonb "shared_user_ids", default: []
+    t.index ["company_id", "module_key"], name: "index_reports_on_company_id_and_module_key"
+    t.index ["shared_user_ids"], name: "index_reports_on_shared_user_ids", using: :gin
+  end
+
   create_table "resources", force: :cascade do |t|
     t.string "key", limit: 100, null: false
     t.string "name", null: false
@@ -4446,6 +4700,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.string "typed_signature"
     t.string "typed_initials"
     t.string "signature_font"
+    t.string "landing_page", default: "dashboard", null: false
+    t.jsonb "workqueue_preferences", default: {}, null: false
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"
@@ -4643,7 +4899,17 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.string "floor_joist_size", comment: "Floor joist dimensions (e.g. 2x6, 2x8, 2x10)"
     t.string "electrical_service", comment: "Electrical service rating (e.g. 100 AMP, 200 AMP)"
     t.decimal "modular_conversion_cost", precision: 10, scale: 2, comment: "Cost for modular conversion package"
+    t.string "source", default: "manual", null: false
+    t.bigint "floor_plan_id"
+    t.string "champion_model_id"
+    t.jsonb "champion_raw_payload", default: {}, null: false
+    t.jsonb "champion_images", default: [], null: false
+    t.datetime "champion_last_seen_at"
+    t.bigint "cloned_from_id", comment: "For Champion IMS clones: points to the catalog Vehicle this row was cloned from"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
+    t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
+    t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
+    t.index ["cloned_from_id"], name: "index_vehicles_on_cloned_from_id"
     t.index ["company_id", "inventory_id"], name: "index_vehicles_on_company_id_and_inventory_id", unique: true
     t.index ["company_id", "location_id"], name: "index_vehicles_on_company_id_and_location_id"
     t.index ["company_id", "serial_number"], name: "index_vehicles_on_company_id_and_serial_number", unique: true, where: "(serial_number IS NOT NULL)"
@@ -4653,6 +4919,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["dealer_cost"], name: "index_vehicles_on_dealer_cost"
     t.index ["dwelling_type"], name: "index_vehicles_on_dwelling_type"
     t.index ["exterior_color"], name: "index_vehicles_on_exterior_color"
+    t.index ["floor_plan_id"], name: "index_vehicles_on_floor_plan_id"
     t.index ["home_type"], name: "index_vehicles_on_home_type"
     t.index ["is_deleted"], name: "index_vehicles_on_is_deleted"
     t.index ["listing_type"], name: "index_vehicles_on_listing_type"
@@ -4664,6 +4931,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
     t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
+    t.index ["source"], name: "index_vehicles_on_source"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["total_cost"], name: "index_vehicles_on_total_cost"
     t.index ["use_location_address"], name: "index_vehicles_on_use_location_address"
@@ -4866,6 +5134,155 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
     t.index ["user_id"], name: "index_win_loss_reports_on_user_id"
   end
 
+  create_table "workflow_approvals", force: :cascade do |t|
+    t.bigint "workflow_run_id", null: false
+    t.string "step_id", null: false
+    t.bigint "company_id", null: false
+    t.string "status", default: "pending", null: false
+    t.bigint "approver_user_id"
+    t.datetime "approved_at"
+    t.text "rejection_reason"
+    t.datetime "expires_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approver_user_id"], name: "index_workflow_approvals_on_approver_user_id"
+    t.index ["company_id"], name: "index_workflow_approvals_on_company_id"
+    t.index ["expires_at"], name: "index_workflow_approvals_on_expires_at"
+    t.index ["workflow_run_id"], name: "index_workflow_approvals_on_workflow_run_id"
+  end
+
+  create_table "workflow_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "event_type", null: false
+    t.string "entity_type"
+    t.bigint "entity_id"
+    t.jsonb "payload", default: {}
+    t.datetime "dispatched_at"
+    t.jsonb "dispatch_error", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "dispatched_at"], name: "index_workflow_events_on_company_id_and_dispatched_at"
+    t.index ["company_id"], name: "index_workflow_events_on_company_id"
+    t.index ["dispatched_at"], name: "index_workflow_events_on_dispatched_at"
+    t.index ["event_type"], name: "index_workflow_events_on_event_type"
+  end
+
+  create_table "workflow_inbound_triggers", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "token", null: false
+    t.string "name", null: false
+    t.bigint "workflow_rule_id", null: false
+    t.boolean "active", default: true
+    t.datetime "last_triggered_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_workflow_inbound_triggers_on_company_id"
+    t.index ["token"], name: "index_workflow_inbound_triggers_on_token", unique: true
+    t.index ["workflow_rule_id"], name: "index_workflow_inbound_triggers_on_workflow_rule_id"
+  end
+
+  create_table "workflow_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "entity_type", null: false
+    t.string "status", default: "draft", null: false
+    t.bigint "workflow_template_id"
+    t.jsonb "trigger", default: {}
+    t.jsonb "conditions", default: []
+    t.jsonb "steps", default: {}
+    t.jsonb "parameters", default: {}
+    t.integer "version", default: 1
+    t.bigint "created_by_user_id"
+    t.boolean "is_seeded", default: false
+    t.string "halt_on_reply", default: "false"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "entity_type"], name: "index_workflow_rules_on_company_id_and_status_and_entity_type"
+    t.index ["company_id"], name: "index_workflow_rules_on_company_id"
+    t.index ["created_by_user_id"], name: "index_workflow_rules_on_created_by_user_id"
+    t.index ["entity_type"], name: "index_workflow_rules_on_entity_type"
+    t.index ["workflow_template_id"], name: "index_workflow_rules_on_workflow_template_id"
+  end
+
+  create_table "workflow_run_steps", force: :cascade do |t|
+    t.bigint "workflow_run_id", null: false
+    t.string "step_id", null: false
+    t.string "step_type", null: false
+    t.string "status", null: false
+    t.jsonb "input", default: {}
+    t.jsonb "output", default: {}
+    t.jsonb "error", default: {}
+    t.integer "duration_ms"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["workflow_run_id"], name: "index_workflow_run_steps_on_workflow_run_id"
+  end
+
+  create_table "workflow_runs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "workflow_rule_id", null: false
+    t.string "entity_type", null: false
+    t.bigint "entity_id", null: false
+    t.string "status", default: "pending", null: false
+    t.string "current_step_id"
+    t.jsonb "variables", default: {}
+    t.datetime "wait_until"
+    t.string "wait_reason"
+    t.bigint "parent_run_id"
+    t.jsonb "rule_snapshot", default: {}
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.jsonb "error_details", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "wait_until"], name: "index_workflow_runs_on_company_id_and_status_and_wait_until"
+    t.index ["company_id"], name: "index_workflow_runs_on_company_id"
+    t.index ["entity_type", "entity_id"], name: "index_workflow_runs_on_entity_type_and_entity_id"
+    t.index ["parent_run_id"], name: "index_workflow_runs_on_parent_run_id"
+    t.index ["wait_until"], name: "index_workflow_runs_on_wait_until"
+    t.index ["workflow_rule_id"], name: "index_workflow_runs_on_workflow_rule_id"
+  end
+
+  create_table "workflow_subscriptions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "workflow_rule_id", null: false
+    t.string "event_type", null: false
+    t.string "entity_type_filter"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "event_type"], name: "index_workflow_subscriptions_on_company_id_and_event_type"
+    t.index ["company_id"], name: "index_workflow_subscriptions_on_company_id"
+    t.index ["event_type"], name: "index_workflow_subscriptions_on_event_type"
+    t.index ["workflow_rule_id"], name: "index_workflow_subscriptions_on_workflow_rule_id"
+  end
+
+  create_table "workflow_templates", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "category", null: false
+    t.string "entity_type", null: false
+    t.string "icon"
+    t.text "preview_description"
+    t.jsonb "required_integrations", default: []
+    t.jsonb "trigger", default: {}
+    t.jsonb "conditions", default: []
+    t.jsonb "steps", default: {}
+    t.jsonb "parameters", default: {}
+    t.jsonb "parameter_schema", default: []
+    t.boolean "is_active", default: true
+    t.integer "sort_order", default: 0
+    t.integer "version", default: 1
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_workflow_templates_on_category"
+    t.index ["is_active"], name: "index_workflow_templates_on_is_active"
+    t.index ["key"], name: "index_workflow_templates_on_key", unique: true
+  end
+
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "locations"
@@ -4875,6 +5292,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "leads"
   add_foreign_key "activities", "users"
+  add_foreign_key "activity_logs", "companies"
   add_foreign_key "agreement_attachments", "agreements"
   add_foreign_key "agreement_audit_logs", "agreement_signers"
   add_foreign_key "agreement_audit_logs", "agreements"
@@ -4897,6 +5315,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "approval_workflows", "deals"
   add_foreign_key "approval_workflows", "users", column: "approved_by_id"
   add_foreign_key "approval_workflows", "users", column: "requested_by_id"
+  add_foreign_key "assignment_work_logs", "contractor_assignments"
+  add_foreign_key "assignment_work_logs", "contractors"
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
   add_foreign_key "bins", "locations"
@@ -4906,6 +5326,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "blog_posts_categories", "blog_categories"
   add_foreign_key "blog_posts_categories", "blog_posts"
   add_foreign_key "brochures", "companies"
+  add_foreign_key "champion_ims_retailers", "companies"
+  add_foreign_key "champion_ims_retailers", "locations"
+  add_foreign_key "champion_ims_sync_events", "champion_ims_sync_runs"
+  add_foreign_key "champion_ims_sync_events", "vehicles"
+  add_foreign_key "champion_ims_sync_runs", "champion_ims_retailers"
+  add_foreign_key "champion_ims_sync_runs", "companies"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
@@ -4991,6 +5417,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "deals", "users", column: "secondary_salesperson_id"
   add_foreign_key "entity_buyers", "companies"
   add_foreign_key "entity_buyers", "contacts"
+  add_foreign_key "export_jobs", "companies"
+  add_foreign_key "export_jobs", "users"
   add_foreign_key "factories", "manufacturers"
   add_foreign_key "field_option_overrides", "companies"
   add_foreign_key "floor_plan_option_applicabilities", "floor_plan_options"
@@ -4999,6 +5427,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "floor_plan_options", "option_categories"
   add_foreign_key "floor_plans", "factories"
   add_foreign_key "floor_plans", "manufacturers"
+  add_foreign_key "import_jobs", "companies"
+  add_foreign_key "import_jobs", "users"
+  add_foreign_key "import_templates", "companies"
   add_foreign_key "intake_forms", "companies"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_forms", "users", column: "notified_user_id"
@@ -5227,7 +5658,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicles", "companies"
+  add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"
+  add_foreign_key "vehicles", "vehicles", column: "cloned_from_id"
   add_foreign_key "warranty_claims", "companies", on_delete: :cascade
   add_foreign_key "warranty_claims", "locations", on_delete: :nullify
   add_foreign_key "warranty_claims", "manufacturers", on_delete: :restrict
@@ -5242,4 +5675,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_25_100001) do
   add_foreign_key "websites", "locations"
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"
+  add_foreign_key "workflow_approvals", "companies"
+  add_foreign_key "workflow_approvals", "users", column: "approver_user_id"
+  add_foreign_key "workflow_approvals", "workflow_runs"
+  add_foreign_key "workflow_events", "companies"
+  add_foreign_key "workflow_inbound_triggers", "companies"
+  add_foreign_key "workflow_inbound_triggers", "workflow_rules"
+  add_foreign_key "workflow_rules", "companies"
+  add_foreign_key "workflow_rules", "users", column: "created_by_user_id"
+  add_foreign_key "workflow_run_steps", "workflow_runs"
+  add_foreign_key "workflow_runs", "companies"
+  add_foreign_key "workflow_runs", "workflow_rules"
+  add_foreign_key "workflow_runs", "workflow_runs", column: "parent_run_id"
+  add_foreign_key "workflow_subscriptions", "companies"
+  add_foreign_key "workflow_subscriptions", "workflow_rules"
 end

@@ -1,10 +1,31 @@
 # frozen_string_literal: true
 
 class Contact < ApplicationRecord
+  include ActivityTrackable
   include LocationAware
   include NotifiableContact
   include WebhookNotifiable
-  
+  include Reportable
+  include WorkflowRunCancellable
+
+  def self.reportable_config
+    {
+      label: "Contacts",
+      category: "crm",
+      fields: [
+        { key: "id",         label: "ID",         type: "number", filterable: true, sortable: true },
+        { key: "first_name", label: "First Name", type: "string", filterable: true, sortable: true },
+        { key: "last_name",  label: "Last Name",  type: "string", filterable: true, sortable: true },
+        { key: "email",      label: "Email",      type: "string", filterable: true, sortable: true },
+        { key: "phone",      label: "Phone",      type: "string", filterable: true, sortable: false },
+        { key: "title",      label: "Title",      type: "string", filterable: true, sortable: true },
+        { key: "account_id", label: "Account",    type: "number", filterable: true, sortable: true },
+        { key: "created_at", label: "Created At", type: "date",   filterable: true, sortable: true },
+        { key: "updated_at", label: "Updated At", type: "date",   filterable: true, sortable: true }
+      ]
+    }
+  end
+
   # Associations
   belongs_to :account, optional: true
   belongs_to :company, optional: true
@@ -133,7 +154,23 @@ class Contact < ApplicationRecord
     }
   end
 
+  after_commit :emit_workflow_created, on: :create
+  after_commit :emit_workflow_updated, on: :update
+  after_commit :emit_workflow_deleted, on: :destroy
+
   private
+
+  def emit_workflow_created
+    WorkflowEngine.emit('contact.created', self, { id: id })
+  end
+
+  def emit_workflow_updated
+    WorkflowEngine.emit('contact.updated', self, { id: id, changes: saved_changes.keys })
+  end
+
+  def emit_workflow_deleted
+    WorkflowEngine.emit('contact.deleted', self, { id: id })
+  end
 
   def normalize_email
     self.email = email.to_s.strip.downcase if email.present?
@@ -141,5 +178,18 @@ class Contact < ApplicationRecord
 
   def normalize_phone
     self.phone = phone.to_s.strip if phone.present?
+  end
+
+  # ActivityTrackable overrides
+  def activity_display_name
+    try(:full_name).presence || try(:display_name).presence || "#{first_name} #{last_name}".strip.presence || "Contact ##{id}"
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    account_id
   end
 end

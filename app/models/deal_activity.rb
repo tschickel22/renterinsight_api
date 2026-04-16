@@ -1,4 +1,6 @@
 class DealActivity < ApplicationRecord
+  include ActivityTrackable
+
   belongs_to :deal
   belongs_to :user, optional: true # creator
   belongs_to :assigned_to, class_name: 'User', optional: true
@@ -45,6 +47,7 @@ class DealActivity < ApplicationRecord
   
   before_validation :ensure_reminder_method_array
   before_validation :set_defaults
+  after_commit :touch_parent_last_activity, on: :create
   
   after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
   after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
@@ -60,9 +63,38 @@ class DealActivity < ApplicationRecord
   def overdue?
     due_date && due_date < Time.current && status != 'completed'
   end
-  
+
+  def activity_display_name
+    subject || 'Activity'
+  end
+
+  def activity_module_name
+    'crm'
+  end
+
+  def activity_account_id
+    deal&.account_id
+  end
+
+  def activity_location_id
+    deal&.location_id
+  end
+
+  # Must be public - ActivityTrackable concern uses try(:company)
+  def company
+    deal&.company
+  end
+
   private
-  
+
+  def touch_parent_last_activity
+    return unless deal && deal.respond_to?(:last_activity_at)
+
+    deal.update_columns(last_activity_at: created_at || Time.current)
+  rescue => e
+    Rails.logger.warn "[DealActivity] touch_parent_last_activity failed: #{e.message}"
+  end
+
   def ensure_reminder_method_array
     if reminder_method.is_a?(String)
       self.reminder_method = JSON.parse(reminder_method) rescue []
