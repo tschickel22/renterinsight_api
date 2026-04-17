@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_17_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -400,7 +400,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
     t.index ["location_id"], name: "index_agreements_on_location_id"
     t.index ["parent_agreement_id"], name: "index_agreements_on_parent_agreement_id"
     t.index ["prepared_by_id"], name: "index_agreements_on_prepared_by_id"
-    t.index ["status", "expires_at"], name: "idx_agreements_expiry_check", where: "((status)::text = ANY ((ARRAY['sent'::character varying, 'viewed'::character varying, 'partially_signed'::character varying])::text[]))"
+    t.index ["status", "expires_at"], name: "idx_agreements_expiry_check", where: "((status)::text = ANY (ARRAY[('sent'::character varying)::text, ('viewed'::character varying)::text, ('partially_signed'::character varying)::text]))"
     t.index ["voided_by_id"], name: "index_agreements_on_voided_by_id"
   end
 
@@ -2269,6 +2269,136 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
     t.index ["status"], name: "index_invoices_on_status"
   end
 
+  create_table "knowledge_articles", force: :cascade do |t|
+    t.bigint "knowledge_module_id"
+    t.bigint "knowledge_feature_id"
+    t.string "title", null: false
+    t.string "slug", null: false
+    t.text "content"
+    t.text "content_html"
+    t.text "excerpt"
+    t.string "article_type", default: "how_to", null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "is_published", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["article_type"], name: "index_knowledge_articles_on_article_type"
+    t.index ["is_published", "position"], name: "index_knowledge_articles_on_is_published_and_position"
+    t.index ["knowledge_feature_id"], name: "index_knowledge_articles_on_knowledge_feature_id"
+    t.index ["knowledge_module_id"], name: "index_knowledge_articles_on_knowledge_module_id"
+    t.index ["slug"], name: "index_knowledge_articles_on_slug", unique: true
+  end
+
+  create_table "knowledge_change_queue", force: :cascade do |t|
+    t.bigint "knowledge_snapshot_id", null: false
+    t.string "change_type", null: false
+    t.string "entity_type", null: false
+    t.string "entity_key", null: false
+    t.jsonb "old_value"
+    t.jsonb "new_value"
+    t.string "status", default: "pending", null: false
+    t.bigint "reviewed_by_id"
+    t.datetime "reviewed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["change_type"], name: "index_knowledge_change_queue_on_change_type"
+    t.index ["entity_key"], name: "index_knowledge_change_queue_on_entity_key"
+    t.index ["entity_type", "entity_key"], name: "index_knowledge_change_queue_on_entity_type_and_entity_key"
+    t.index ["entity_type"], name: "index_knowledge_change_queue_on_entity_type"
+    t.index ["knowledge_snapshot_id"], name: "index_knowledge_change_queue_on_knowledge_snapshot_id"
+    t.index ["reviewed_by_id"], name: "index_knowledge_change_queue_on_reviewed_by_id"
+    t.index ["status"], name: "index_knowledge_change_queue_on_status"
+  end
+
+  create_table "knowledge_entity_aliases", force: :cascade do |t|
+    t.string "canonical_key", null: false
+    t.string "alias_name", null: false
+    t.string "entity_type", default: "module", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["alias_name"], name: "index_knowledge_entity_aliases_on_alias_name"
+    t.index ["canonical_key"], name: "index_knowledge_entity_aliases_on_canonical_key"
+    t.index ["entity_type", "alias_name"], name: "idx_knowledge_aliases_on_type_and_alias", unique: true
+  end
+
+  create_table "knowledge_features", force: :cascade do |t|
+    t.bigint "knowledge_module_id", null: false
+    t.string "key", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "route"
+    t.string "ui_selector"
+    t.string "permission_key"
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["knowledge_module_id", "key"], name: "index_knowledge_features_on_knowledge_module_id_and_key", unique: true
+    t.index ["knowledge_module_id"], name: "index_knowledge_features_on_knowledge_module_id"
+    t.index ["permission_key"], name: "index_knowledge_features_on_permission_key"
+  end
+
+  create_table "knowledge_intent_patterns", force: :cascade do |t|
+    t.string "pattern", null: false
+    t.string "intent_type", null: false
+    t.string "entity_key"
+    t.integer "priority", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["entity_key"], name: "index_knowledge_intent_patterns_on_entity_key"
+    t.index ["intent_type"], name: "index_knowledge_intent_patterns_on_intent_type"
+    t.index ["priority"], name: "index_knowledge_intent_patterns_on_priority", order: :desc
+  end
+
+  create_table "knowledge_modules", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "icon"
+    t.string "route"
+    t.integer "position", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["is_active", "position"], name: "index_knowledge_modules_on_is_active_and_position"
+    t.index ["key"], name: "index_knowledge_modules_on_key", unique: true
+  end
+
+  create_table "knowledge_searches", force: :cascade do |t|
+    t.bigint "user_id"
+    t.string "query", null: false
+    t.string "intent_detected"
+    t.integer "result_count", default: 0, null: false
+    t.string "action_taken"
+    t.datetime "created_at", null: false
+    t.index ["created_at"], name: "index_knowledge_searches_on_created_at"
+    t.index ["intent_detected"], name: "index_knowledge_searches_on_intent_detected"
+    t.index ["user_id"], name: "index_knowledge_searches_on_user_id"
+  end
+
+  create_table "knowledge_snapshots", force: :cascade do |t|
+    t.datetime "snapshot_at", null: false
+    t.string "modules_hash", null: false
+    t.integer "features_count", default: 0, null: false
+    t.jsonb "changes_detected", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["modules_hash"], name: "index_knowledge_snapshots_on_modules_hash"
+    t.index ["snapshot_at"], name: "index_knowledge_snapshots_on_snapshot_at"
+  end
+
+  create_table "knowledge_ui_elements", force: :cascade do |t|
+    t.bigint "knowledge_feature_id", null: false
+    t.string "selector", null: false
+    t.string "label"
+    t.string "element_type", default: "button", null: false
+    t.text "tour_hint"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["element_type"], name: "index_knowledge_ui_elements_on_element_type"
+    t.index ["knowledge_feature_id", "selector"], name: "idx_knowledge_ui_elements_on_feature_and_selector", unique: true
+    t.index ["knowledge_feature_id"], name: "index_knowledge_ui_elements_on_knowledge_feature_id"
+  end
+
   create_table "land_parcels", force: :cascade do |t|
     t.integer "company_id", null: false
     t.string "parcel_number", null: false
@@ -2810,6 +2940,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
     t.index ["scraper_enabled"], name: "index_manufacturers_on_scraper_enabled"
   end
 
+  create_table "marketing_content", force: :cascade do |t|
+    t.bigint "knowledge_module_id"
+    t.bigint "knowledge_feature_id"
+    t.string "content_type", null: false
+    t.string "title", null: false
+    t.text "content"
+    t.string "status", default: "draft", null: false
+    t.datetime "published_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["content_type"], name: "index_marketing_content_on_content_type"
+    t.index ["knowledge_feature_id"], name: "index_marketing_content_on_knowledge_feature_id"
+    t.index ["knowledge_module_id"], name: "index_marketing_content_on_knowledge_module_id"
+    t.index ["published_at"], name: "index_marketing_content_on_published_at"
+    t.index ["status"], name: "index_marketing_content_on_status"
+  end
+
   create_table "mfa_tokens", force: :cascade do |t|
     t.string "token_digest", null: false
     t.string "user_type", null: false
@@ -2909,7 +3056,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
     t.bigint "company_id"
     t.index ["company_id"], name: "index_nurture_enrollments_on_company_id"
     t.index ["enrollable_type", "enrollable_id"], name: "index_nurture_enrollments_on_enrollable_type_and_enrollable_id"
-    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[]))"
+    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY (ARRAY[('running'::character varying)::text, ('paused'::character varying)::text]))"
     t.index ["lead_id", "nurture_sequence_id"], name: "index_nurture_enrollments_on_lead_id_and_nurture_sequence_id"
     t.index ["lead_id"], name: "index_nurture_enrollments_on_lead_id"
     t.index ["nurture_sequence_id"], name: "index_nurture_enrollments_on_nurture_sequence_id"
@@ -4552,6 +4699,41 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
     t.index ["user_id"], name: "index_territory_users_on_user_id"
   end
 
+  create_table "tour_steps", force: :cascade do |t|
+    t.bigint "tour_id", null: false
+    t.integer "position", null: false
+    t.string "selector"
+    t.string "title"
+    t.text "content"
+    t.string "placement", default: "bottom", null: false
+    t.string "highlight_type", default: "outline", null: false
+    t.boolean "click_required", default: false, null: false
+    t.boolean "input_required", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "route"
+    t.index ["tour_id", "position"], name: "index_tour_steps_on_tour_id_and_position", unique: true
+    t.index ["tour_id"], name: "index_tour_steps_on_tour_id"
+  end
+
+  create_table "tours", force: :cascade do |t|
+    t.bigint "knowledge_module_id"
+    t.string "key", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "trigger_type", default: "manual", null: false
+    t.boolean "is_active", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "trigger_route"
+    t.index ["is_active", "position"], name: "index_tours_on_is_active_and_position"
+    t.index ["key"], name: "index_tours_on_key"
+    t.index ["knowledge_module_id", "key"], name: "index_tours_on_knowledge_module_id_and_key", unique: true
+    t.index ["knowledge_module_id"], name: "index_tours_on_knowledge_module_id"
+    t.index ["trigger_route"], name: "index_tours_on_trigger_route"
+  end
+
   create_table "twilio_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "sub_account_sid"
@@ -4642,6 +4824,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
     t.index ["user_id", "role_id", "tier", "region_id", "location_id"], name: "index_user_role_assignments_unique", unique: true
     t.index ["user_id"], name: "index_user_role_assignments_on_user_id"
     t.check_constraint "tier::text = 'company'::text AND region_id IS NULL AND location_id IS NULL OR tier::text = 'region'::text AND region_id IS NOT NULL AND location_id IS NULL OR tier::text = 'location'::text AND location_id IS NOT NULL", name: "check_tier_assignment"
+  end
+
+  create_table "user_tour_completions", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "tour_id", null: false
+    t.datetime "completed_at"
+    t.jsonb "steps_completed", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["completed_at"], name: "index_user_tour_completions_on_completed_at"
+    t.index ["tour_id"], name: "index_user_tour_completions_on_tour_id"
+    t.index ["user_id", "tour_id"], name: "index_user_tour_completions_on_user_id_and_tour_id", unique: true
+    t.index ["user_id"], name: "index_user_tour_completions_on_user_id"
   end
 
   create_table "user_view_preferences", force: :cascade do |t|
@@ -5458,6 +5653,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
   add_foreign_key "invoices", "deals"
   add_foreign_key "invoices", "listings"
   add_foreign_key "invoices", "locations"
+  add_foreign_key "knowledge_articles", "knowledge_features"
+  add_foreign_key "knowledge_articles", "knowledge_modules"
+  add_foreign_key "knowledge_change_queue", "knowledge_snapshots"
+  add_foreign_key "knowledge_change_queue", "users", column: "reviewed_by_id"
+  add_foreign_key "knowledge_features", "knowledge_modules"
+  add_foreign_key "knowledge_searches", "users"
+  add_foreign_key "knowledge_ui_elements", "knowledge_features"
   add_foreign_key "land_parcels", "companies"
   add_foreign_key "lead_activities", "lead_activities", column: "related_activity_id"
   add_foreign_key "lead_activities", "leads"
@@ -5495,6 +5697,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
   add_foreign_key "manufacturer_ar_transactions", "warranty_claims", on_delete: :restrict
   add_foreign_key "manufacturer_claim_views", "companies"
   add_foreign_key "manufacturer_claim_views", "warranty_claims"
+  add_foreign_key "marketing_content", "knowledge_features"
+  add_foreign_key "marketing_content", "knowledge_modules"
   add_foreign_key "notes", "users"
   add_foreign_key "nurture_enrollments", "companies"
   add_foreign_key "nurture_enrollments", "leads"
@@ -5642,6 +5846,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
   add_foreign_key "territory_rules", "territories"
   add_foreign_key "territory_users", "territories"
   add_foreign_key "territory_users", "users"
+  add_foreign_key "tour_steps", "tours"
+  add_foreign_key "tours", "knowledge_modules"
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"
   add_foreign_key "user_email_connections", "users"
@@ -5652,6 +5858,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_15_000003) do
   add_foreign_key "user_role_assignments", "roles", on_delete: :cascade
   add_foreign_key "user_role_assignments", "users", column: "assigned_by_id", on_delete: :nullify
   add_foreign_key "user_role_assignments", "users", on_delete: :cascade
+  add_foreign_key "user_tour_completions", "tours"
+  add_foreign_key "user_tour_completions", "users"
   add_foreign_key "user_view_preferences", "companies"
   add_foreign_key "user_view_preferences", "custom_views", column: "active_view_id"
   add_foreign_key "user_view_preferences", "users"

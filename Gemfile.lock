@@ -216,6 +216,8 @@ GEM
     msgpack (1.8.0)
     multi_xml (0.8.0)
       bigdecimal (>= 3.1, < 5)
+    neighbor (0.6.0)
+      activerecord (>= 7.1)
     net-http (0.6.0)
       uri
     net-imap (0.5.10)
@@ -501,6 +503,7 @@ DEPENDENCIES
   jwt
   kamal
   liquid
+  neighbor (~> 0.5)
   pdf-reader (~> 2.12)
   pg (~> 1.5)
   prawn (~> 2.4)
