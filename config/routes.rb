@@ -1468,11 +1468,19 @@ Rails.application.routes.draw do
         get    'navigate',              action: :navigate
         get    'articles',              action: :articles
         get    'articles/:slug',        action: :article, constraints: { slug: %r{[^/]+} }
+        # IMPORTANT: generate must come before the :slug routes below so it
+        # doesn't get caught as a slug.
+        post   'articles/generate',     action: :generate_article
+        post   'articles',              action: :create_article
+        patch  'articles/:slug',        action: :update_article, constraints: { slug: %r{[^/]+} }
+        delete 'articles/:slug',        action: :delete_article, constraints: { slug: %r{[^/]+} }
         post   'record_search',         action: :record_search
+        get    'categories',            action: :categories
+        post   'categories',            action: :manage_category
       end
 
       # Interactive guided tours (list/start/complete/step tracking).
-      resources :tours, only: %i[index show] do
+      resources :tours, only: %i[index show create update destroy] do
         member do
           post :start
           post :complete

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_17_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2359,6 +2359,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_17_000002) do
     t.boolean "is_active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "category"
+    t.index ["category"], name: "index_knowledge_modules_on_category"
     t.index ["is_active", "position"], name: "index_knowledge_modules_on_is_active_and_position"
     t.index ["key"], name: "index_knowledge_modules_on_key", unique: true
   end
