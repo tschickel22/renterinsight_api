@@ -8,6 +8,7 @@ class User < ApplicationRecord
   has_many :activities, dependent: :nullify
   has_many :reminders, dependent: :destroy
   has_many :user_locations, dependent: :destroy
+  has_many :user_tour_completions, dependent: :destroy
   has_many :locations, through: :user_locations
   has_many :login_activities, dependent: :destroy
   has_many :assigned_tasks, class_name: 'Task', foreign_key: 'assigned_to_id', dependent: :nullify

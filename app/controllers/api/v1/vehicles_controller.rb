@@ -805,24 +805,30 @@ module Api
         vehicles = @company.vehicles.active
         
         # Apply strict location filter - only vehicles explicitly assigned to selected location
+        # But for available_to_order, also include Champion catalog items with location_id IS NULL
         if Current.location_filtered?
-          vehicles = vehicles.where(location_id: Current.location_id)
+          location_scoped = vehicles.where(location_id: Current.location_id)
+          catalog_items = vehicles.where(location_id: nil, status: 'available_to_order')
+        else
+          location_scoped = vehicles
+          catalog_items = vehicles.where(status: 'available_to_order')
         end
         
         render json: {
-          total: vehicles.count,
-          available: vehicles.available.count,
-          reserved: vehicles.reserved.count,
-          sold: vehicles.sold.count,
-          pending: vehicles.pending.count,
+          total: location_scoped.in_inventory.count + catalog_items.count,
+          available: location_scoped.available.count,
+          available_to_order: catalog_items.count,
+          reserved: location_scoped.reserved.count,
+          sold: location_scoped.sold.count,
+          pending: location_scoped.pending.count,
           by_type: {
-            rv: vehicles.rvs.count,
-            manufactured_home: vehicles.manufactured_homes.count
+            rv: location_scoped.rvs.count,
+            manufactured_home: location_scoped.manufactured_homes.count
           },
-          by_status: vehicles.group(:status).count,
+          by_status: location_scoped.group(:status).count,
           total_value: {
-            sale: vehicles.includes(:inventory_packages).sum { |v| v.total_home_price.to_f },
-            rent: vehicles.sum(:rent_price).to_f
+            sale: location_scoped.includes(:inventory_packages).sum { |v| v.total_home_price.to_f },
+            rent: location_scoped.sum(:rent_price).to_f
           }
         }
       end

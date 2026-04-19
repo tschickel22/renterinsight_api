@@ -1459,6 +1459,34 @@ Rails.application.routes.draw do
 
       # Agreement Merge Fields (definitions)
       get 'agreement_merge_fields', to: 'agreement_merge_fields#index'
+
+      # ==================== UNIFIED KNOWLEDGE BASE / SMART HELP ====================
+      # Smart search + navigate + articles (read-only for end users).
+      # Admin-side CRUD lives under api/admin/knowledge.
+      scope :knowledge, controller: :knowledge do
+        post   'search',                action: :search
+        get    'navigate',              action: :navigate
+        get    'articles',              action: :articles
+        get    'articles/:slug',        action: :article, constraints: { slug: %r{[^/]+} }
+        # IMPORTANT: generate must come before the :slug routes below so it
+        # doesn't get caught as a slug.
+        post   'articles/generate',     action: :generate_article
+        post   'articles',              action: :create_article
+        patch  'articles/:slug',        action: :update_article, constraints: { slug: %r{[^/]+} }
+        delete 'articles/:slug',        action: :delete_article, constraints: { slug: %r{[^/]+} }
+        post   'record_search',         action: :record_search
+        get    'categories',            action: :categories
+        post   'categories',            action: :manage_category
+      end
+
+      # Interactive guided tours (list/start/complete/step tracking).
+      resources :tours, only: %i[index show create update destroy] do
+        member do
+          post :start
+          post :complete
+          post :step_complete
+        end
+      end
     end
   end
 
@@ -1946,6 +1974,18 @@ Rails.application.routes.draw do
           post :activate
           post :deactivate
         end
+      end
+
+      # ==================== KNOWLEDGE BASE ADMIN (Platform Admin Only) ====================
+      # Resource-dispatched CRUD — ?resource=modules|features|articles|tours|...
+      scope :knowledge, controller: :knowledge do
+        get    'analytics',           action: :analytics
+        get    ':resource',           action: :index
+        post   ':resource',           action: :create
+        get    ':resource/:id',       action: :show,    constraints: { id: /\d+/ }
+        patch  ':resource/:id',       action: :update,  constraints: { id: /\d+/ }
+        put    ':resource/:id',       action: :update,  constraints: { id: /\d+/ }
+        delete ':resource/:id',       action: :destroy, constraints: { id: /\d+/ }
       end
     end
 

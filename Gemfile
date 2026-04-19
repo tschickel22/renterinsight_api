@@ -115,3 +115,6 @@ gem 'pdf-reader', '~> 2.12'
 
 # Web scraping for floor plan data
 gem 'selenium-webdriver'
+
+# pgvector wrapper for ActiveRecord (used by Knowledge::Article.embedding)
+gem 'neighbor', '~> 0.5'
