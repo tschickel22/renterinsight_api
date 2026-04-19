@@ -41,6 +41,9 @@ class Company < ApplicationRecord
   has_many :commission_payments, dependent: :destroy
   has_many :sources, dependent: :destroy
   has_many :tags, dependent: :destroy
+  has_many :facebook_integrations, dependent: :destroy
+  has_many :social_accounts, dependent: :destroy
+  has_many :social_posts, dependent: :destroy
   has_many :territories, dependent: :destroy
   has_many :nurture_sequences, dependent: :destroy
   has_many :nurture_enrollments, dependent: :destroy

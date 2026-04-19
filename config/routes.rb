@@ -55,6 +55,10 @@ Rails.application.routes.draw do
     
     # QuickBooks webhooks
     post 'quickbooks/notifications', to: 'quickbooks#notifications'
+
+    # Facebook Lead Ads webhooks
+    get  'facebook/leads', to: 'facebook_leads#verify'
+    post 'facebook/leads', to: 'facebook_leads#receive'
   end
 
   # ==================== PUBLIC INTAKE FORMS ====================
@@ -1303,8 +1307,48 @@ Rails.application.routes.draw do
           post 'sync/entity', to: 'quickbooks_settings#sync_entity'
           post 'sync/all', to: 'quickbooks_settings#sync_all_entities'
         end
+
+        # ==================== FACEBOOK INTEGRATION (OAuth) ====================
+        scope path: 'facebook' do
+          get    'authorize',    to: 'facebook#authorize'
+          get    'callback',     to: 'facebook#callback'
+          post   'connect_page', to: 'facebook#connect_page'
+          get    'status',       to: 'facebook#status'
+          delete 'disconnect',   to: 'facebook#disconnect'
+        end
       end
-      
+
+      # ==================== FACEBOOK INTEGRATIONS (CRUD) ====================
+      resources :facebook_integrations, path: 'facebook-integrations' do
+        member do
+          post :refresh_token
+          get  :lead_log
+        end
+      end
+
+      # ==================== SOCIAL ACCOUNTS ====================
+      resources :social_accounts, path: 'social-accounts' do
+        member do
+          post :refresh_token
+          post :disconnect
+        end
+        collection do
+          get :stats
+        end
+      end
+
+      # ==================== SOCIAL POSTS ====================
+      resources :social_posts, path: 'social-posts' do
+        member do
+          post :approve
+          post :publish
+        end
+        collection do
+          post :generate
+          get  :stats
+        end
+      end
+
       namespace :platform do
         resources :quickbooks_settings, only: [] do
           collection do
@@ -1695,6 +1739,11 @@ Rails.application.routes.draw do
           # Scoring
           get :score, to: 'lead_scores#show'
           post 'score/calculate', to: 'lead_scores#calculate'
+
+          # Health Score
+          get  :health_score,              to: 'lead_scores#health_score'
+          post :recalculate_health_score,  to: 'lead_scores#recalculate_health_score'
+          get  :score_history,             to: 'lead_scores#score_history'
 
           # Custom field migration integrity check
           get :conversion_integrity_check

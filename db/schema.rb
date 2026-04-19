@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_19_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -400,7 +400,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
     t.index ["location_id"], name: "index_agreements_on_location_id"
     t.index ["parent_agreement_id"], name: "index_agreements_on_parent_agreement_id"
     t.index ["prepared_by_id"], name: "index_agreements_on_prepared_by_id"
-    t.index ["status", "expires_at"], name: "idx_agreements_expiry_check", where: "((status)::text = ANY (ARRAY[('sent'::character varying)::text, ('viewed'::character varying)::text, ('partially_signed'::character varying)::text]))"
+    t.index ["status", "expires_at"], name: "idx_agreements_expiry_check", where: "((status)::text = ANY ((ARRAY['sent'::character varying, 'viewed'::character varying, 'partially_signed'::character varying])::text[]))"
     t.index ["voided_by_id"], name: "index_agreements_on_voided_by_id"
   end
 
@@ -1166,6 +1166,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
     t.string "country", default: "US"
     t.jsonb "allowed_form_states", default: [], null: false
     t.jsonb "state_tax_rates", default: {}, null: false
+    t.string "meta_catalog_token"
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
@@ -1811,6 +1812,31 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
     t.index ["module_type"], name: "index_export_jobs_on_module_type"
     t.index ["status"], name: "index_export_jobs_on_status"
     t.index ["user_id"], name: "index_export_jobs_on_user_id"
+  end
+
+  create_table "facebook_integrations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "page_id", null: false
+    t.string "page_name"
+    t.text "page_access_token"
+    t.text "user_access_token"
+    t.datetime "token_expires_at"
+    t.string "status", default: "active"
+    t.jsonb "subscribed_fields", default: ["leadgen"]
+    t.jsonb "field_mapping", default: {}
+    t.bigint "default_source_id"
+    t.bigint "default_owner_id"
+    t.bigint "default_workflow_id"
+    t.integer "lead_count", default: 0
+    t.datetime "last_lead_at"
+    t.jsonb "metadata", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_facebook_integrations_on_company_id"
+    t.index ["page_id"], name: "index_facebook_integrations_on_page_id"
+    t.index ["status"], name: "index_facebook_integrations_on_status"
   end
 
   create_table "factories", force: :cascade do |t|
@@ -2494,6 +2520,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
     t.string "reason"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "band"
+    t.jsonb "breakdown", default: {}
     t.index ["lead_id", "score"], name: "index_lead_scores_on_lead_id_and_score"
     t.index ["lead_id"], name: "index_lead_scores_on_lead_id"
   end
@@ -2537,13 +2565,29 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
     t.string "zip"
     t.string "country"
     t.datetime "last_activity_at"
+    t.string "utm_source"
+    t.string "utm_medium"
+    t.string "utm_campaign"
+    t.string "utm_content"
+    t.string "utm_term"
+    t.bigint "social_post_id"
+    t.string "social_intent"
+    t.jsonb "survey_answers"
+    t.integer "health_score", default: 0
+    t.datetime "health_score_updated_at"
+    t.datetime "last_activity_scored_at"
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
+    t.index ["health_score"], name: "index_leads_on_health_score"
     t.index ["location_id"], name: "index_leads_on_location_id"
     t.index ["owner_id", "last_activity_at"], name: "index_leads_on_owner_id_and_last_activity_at"
     t.index ["owner_id"], name: "index_leads_on_owner_id"
+    t.index ["social_post_id"], name: "index_leads_on_social_post_id"
     t.index ["source_id"], name: "index_leads_on_source_id"
+    t.index ["utm_campaign"], name: "index_leads_on_utm_campaign"
+    t.index ["utm_medium"], name: "index_leads_on_utm_medium"
+    t.index ["utm_source"], name: "index_leads_on_utm_source"
     t.index ["vehicle_id"], name: "index_leads_on_vehicle_id"
   end
 
@@ -3058,7 +3102,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
     t.bigint "company_id"
     t.index ["company_id"], name: "index_nurture_enrollments_on_company_id"
     t.index ["enrollable_type", "enrollable_id"], name: "index_nurture_enrollments_on_enrollable_type_and_enrollable_id"
-    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY (ARRAY[('running'::character varying)::text, ('paused'::character varying)::text]))"
+    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[]))"
     t.index ["lead_id", "nurture_sequence_id"], name: "index_nurture_enrollments_on_lead_id_and_nurture_sequence_id"
     t.index ["lead_id"], name: "index_nurture_enrollments_on_lead_id"
     t.index ["nurture_sequence_id"], name: "index_nurture_enrollments_on_nurture_sequence_id"
@@ -4226,6 +4270,72 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_18_000001) do
     t.index ["communication_id"], name: "index_sms_usage_logs_on_communication_id"
     t.index ["company_id", "billing_period"], name: "index_sms_usage_logs_on_company_id_and_billing_period"
     t.index ["company_id"], name: "index_sms_usage_logs_on_company_id"
+  end
+
+  create_table "social_accounts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "platform", null: false
+    t.string "account_type", null: false
+    t.string "external_id", null: false
+    t.string "name"
+    t.string "page_url"
+    t.text "access_token_encrypted"
+    t.string "token_type"
+    t.datetime "token_expires_at"
+    t.string "status", default: "active"
+    t.datetime "last_sync_at"
+    t.jsonb "metadata", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "platform"], name: "index_social_accounts_on_company_id_and_platform"
+    t.index ["external_id", "platform"], name: "index_social_accounts_on_external_id_and_platform"
+    t.index ["location_id", "platform"], name: "index_social_accounts_on_location_id_and_platform"
+  end
+
+  create_table "social_posts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "social_account_id"
+    t.bigint "created_by_user_id"
+    t.bigint "vehicle_id"
+    t.string "post_type"
+    t.string "intent_category"
+    t.string "platform"
+    t.string "status"
+    t.text "caption"
+    t.string "headline"
+    t.text "description"
+    t.jsonb "image_urls", default: []
+    t.string "cta_type"
+    t.string "tagged_url"
+    t.string "utm_campaign"
+    t.string "utm_content"
+    t.datetime "scheduled_at"
+    t.datetime "published_at"
+    t.string "external_post_id"
+    t.integer "lead_count", default: 0
+    t.integer "deal_count", default: 0
+    t.decimal "attributed_revenue", precision: 12, scale: 2, default: "0.0"
+    t.integer "reach"
+    t.integer "impressions"
+    t.integer "engagement_count"
+    t.integer "link_clicks"
+    t.datetime "metrics_synced_at"
+    t.boolean "nurture_approved", default: false
+    t.bigint "nurture_sequence_id"
+    t.string "ai_generation_version"
+    t.jsonb "generation_context", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "intent_category"], name: "index_social_posts_on_company_id_and_intent_category"
+    t.index ["company_id", "status"], name: "index_social_posts_on_company_id_and_status"
+    t.index ["created_by_user_id"], name: "index_social_posts_on_created_by_user_id"
+    t.index ["nurture_sequence_id"], name: "index_social_posts_on_nurture_sequence_id"
+    t.index ["published_at"], name: "index_social_posts_on_published_at"
+    t.index ["vehicle_id"], name: "index_social_posts_on_vehicle_id"
   end
 
   create_table "solid_cable_messages", force: :cascade do |t|
