@@ -145,7 +145,10 @@ public
       { key: 'data_import_export', name: 'Data Import & Export', category: 'operations', description: 'Import and export data across CRM, inventory, parts, and finance modules', position: 200 },
 
       # Workflow Automation
-      { key: 'workflow_automation', name: 'Workflow Automation', category: 'operations', position: 180, description: 'Manage workflow rules, runs, and templates' }
+      { key: 'workflow_automation', name: 'Workflow Automation', category: 'operations', position: 180, description: 'Manage workflow rules, runs, and templates' },
+
+      # Social Media Content Engine
+      { key: 'social_posts', name: 'Social Posts', category: 'operations', position: 180, description: 'Create, generate, schedule, and attribute social media posts' }
     ]
     
     resources_data.each do |resource_data|

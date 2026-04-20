@@ -1342,12 +1342,22 @@ Rails.application.routes.draw do
         member do
           post :approve
           post :publish
+          post :schedule
+          post :duplicate
         end
         collection do
           post :generate
           get  :stats
         end
       end
+
+      # ==================== META CATALOG FEED (public) ====================
+      get 'meta/catalog/:company_id/feed', to: 'meta_catalog#feed'
+
+      # ==================== SOCIAL ATTRIBUTION DASHBOARD ====================
+      get 'social/attribution',      to: 'social_attribution#index'
+      get 'social/rep_leaderboard',  to: 'social_attribution#rep_leaderboard'
+      get 'social/advisor',          to: 'social_attribution#advisor'
 
       namespace :platform do
         resources :quickbooks_settings, only: [] do
