@@ -4,7 +4,10 @@ module Api
   module Crm
     class DealProductsController < ApplicationController
       include RbacAuthorization
-      rbac_resource :deals, create_actions: [:create, :bulk_create]
+      rbac_resource :deals,
+        read_actions: [:index, :show],
+        create_actions: [:create, :bulk_create],
+        update_actions: [:update, :destroy]
 
       before_action :set_company_scope
       before_action :set_deal
