@@ -27,6 +27,7 @@ class PlatformModule
     'marketing.brochures' => { name: 'Brochure Generator', category: 'Marketing', icon: 'FileImage', description: 'Marketing brochure creation' },
     'marketing.website' => { name: 'Website Builder', category: 'Marketing', icon: 'Layout', description: 'Custom website creation and management' },
     'marketing.syndication' => { name: 'Listing Syndication', category: 'Marketing', icon: 'Share2', description: 'Syndicate listings to partner sites' },
+    'marketing.social_media' => { name: 'Social Media & Ads', category: 'Marketing', icon: 'Share2', description: 'Social posts, scheduler, attribution, and Facebook ad builder' },
     
     # Finance & Agreements
     'finance.loans' => { name: 'Finance Management', category: 'Finance & Agreements', icon: 'DollarSign', description: 'Loan and payment management' },
@@ -83,7 +84,7 @@ class PlatformModule
     professional: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
-      marketing.listings marketing.brochures
+      marketing.listings marketing.brochures marketing.social_media
       finance.loans finance.agreements finance.invoices finance.documents finance.applications
       service.operations service.portal
       management.reports management.tags management.tasks management.calendar management.projects
@@ -92,7 +93,7 @@ class PlatformModule
     enterprise: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
-      marketing.listings marketing.brochures marketing.website marketing.syndication
+      marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media
       finance.loans finance.agreements finance.invoices finance.documents finance.applications
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 

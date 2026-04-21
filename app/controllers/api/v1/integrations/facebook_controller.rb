@@ -4,7 +4,20 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   before_action :set_company_scope, except: [:callback]
   skip_before_action :authenticate, only: [:callback]
 
-  SCOPES = %w[leads_retrieval pages_read_engagement pages_manage_metadata pages_show_list].freeze
+  SCOPES = %w[
+    business_management
+    leads_retrieval
+    pages_read_engagement
+    pages_manage_metadata
+    pages_show_list
+    pages_manage_posts
+    ads_management
+    ads_read
+  ].freeze
+
+  # Facebook Login for Business configuration ID
+  # When set, uses config_id instead of scope (required for Business Login)
+  FACEBOOK_LOGIN_CONFIG_ID = ENV['FACEBOOK_LOGIN_CONFIG_ID'] || '997880389376695'
 
   # GET /api/v1/integrations/facebook/authorize
   def authorize
@@ -18,15 +31,29 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     )
 
     auth_url = URI("https://www.facebook.com/#{MetaGraphApi::API_VERSION}/dialog/oauth")
-    auth_url.query = URI.encode_www_form(
+
+    query_params = {
       client_id:     MetaGraphApi.app_id,
       redirect_uri:  callback_redirect_uri,
-      scope:         SCOPES.join(','),
       state:         state,
       response_type: 'code'
-    )
+    }
 
-    render json: { auth_url: auth_url.to_s }
+    # login_type param: 'business' uses Facebook Login for Business (config_id)
+    # 'classic' or default uses scope-based login
+    # Business Login is for dealer customers connecting their business portfolio
+    # Classic Login is for app owners or simple page connections
+    use_business_login = params[:login_type] == 'business' && FACEBOOK_LOGIN_CONFIG_ID.present?
+
+    if use_business_login
+      query_params[:config_id] = FACEBOOK_LOGIN_CONFIG_ID
+    else
+      query_params[:scope] = SCOPES.join(',')
+    end
+
+    auth_url.query = URI.encode_www_form(query_params)
+
+    render json: { authorize_url: auth_url.to_s }
   end
 
   # GET /api/v1/integrations/facebook/callback
@@ -46,7 +73,27 @@ class Api::V1::Integrations::FacebookController < ApplicationController
       user_access_token = long_lived_resp['access_token']
       expires_in        = long_lived_resp['expires_in']
 
-      pages = MetaGraphApi.list_user_pages(user_access_token)['data'] || []
+      pages_response = MetaGraphApi.list_user_pages(user_access_token)
+      Rails.logger.info "[FacebookOAuth] Raw pages response: #{pages_response.inspect[0..500]}"
+      pages = pages_response['data'] || []
+      Rails.logger.info "[FacebookOAuth] Pages returned from Graph API: #{pages.length} pages"
+      pages.each { |p| Rails.logger.info "[FacebookOAuth]   Page: #{p['id']} - #{p['name']}" }
+
+      # If /me/accounts returns empty, the user may have granted page access
+      # but isn't a direct admin (common with Business Portfolio-owned pages).
+      # Try fetching pages the user selected during OAuth via /me/accounts with
+      # the short-lived token as well.
+      if pages.empty?
+        Rails.logger.info "[FacebookOAuth] No pages from long-lived token, trying short-lived..."
+        short_pages = MetaGraphApi.list_user_pages(short_lived)['data'] || []
+        Rails.logger.info "[FacebookOAuth] Short-lived token pages: #{short_pages.length}"
+        pages = short_pages if short_pages.any?
+      end
+
+      # If still empty, return user_access_token so frontend can offer manual page ID entry
+      if pages.empty?
+        Rails.logger.info "[FacebookOAuth] Still no pages found. User may need to be a Page admin."
+      end
     rescue MetaGraphApi::Error => e
       Rails.logger.error "[FacebookOAuth] callback error: #{e.message}"
       return render json: { error: e.message }, status: :unprocessable_entity
@@ -74,6 +121,16 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     location_id        = params[:location_id]
 
     return render json: { error: 'page_id required' }, status: :bad_request if page_id.blank?
+    # If page_name wasn't provided, fetch it from Graph API
+    if page_name.blank? && page_access_token.present?
+      begin
+        page_data = MetaGraphApi.get("/#{page_id}", page_access_token, fields: 'name')
+        page_name = page_data['name'] if page_data.is_a?(Hash)
+      rescue MetaGraphApi::Error => e
+        Rails.logger.info "[FacebookOAuth] Could not fetch page name: #{e.message}"
+      end
+    end
+
     return render json: { error: 'page_access_token required' }, status: :bad_request if page_access_token.blank?
 
     begin
@@ -102,16 +159,30 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     )
     integration.save!
 
-    render json: serialize(integration), status: :ok
+    capture_instagram_business_account!(integration)
+
+    render json: { integration: serialize(integration).merge(metadata: integration.metadata) }, status: :ok
   end
 
   # GET /api/v1/integrations/facebook/status
   def status
     integrations = @company.facebook_integrations.active
 
+    first_integration = integrations.first
+
+    ig_meta = first_integration&.metadata.to_h.deep_stringify_keys
+    ig_connected = ig_meta&.dig('instagram_business_account_id').present?
+
     render json: {
       connected: integrations.exists?,
       count:     integrations.count,
+      integration_id: first_integration&.id,
+      page_id:   first_integration&.page_id,
+      page_name: first_integration&.page_name,
+      token_expires_at: first_integration&.token_expires_at,
+      token_expired: first_integration&.token_expires_at.present? && first_integration.token_expires_at < Time.current,
+      instagram_connected: ig_connected,
+      instagram_username: ig_connected ? ig_meta['instagram_username'] : nil,
       integrations: integrations.map { |i| serialize(i) }
     }
   end
@@ -120,7 +191,9 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   def disconnect
     return unless authorize_action!('integrations', 'delete')
 
-    integration = @company.facebook_integrations.find_by(id: params[:id])
+    integration = params[:id].present? ? 
+      @company.facebook_integrations.find_by(id: params[:id]) :
+      @company.facebook_integrations.where(is_deleted: [false, nil]).first
     return render json: { error: 'Integration not found' }, status: :not_found unless integration
 
     begin
@@ -134,6 +207,28 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   end
 
   private
+
+  # Stash the linked Instagram Business Account on the integration metadata so
+  # the publisher can later post to Instagram without an extra round-trip.
+  # Fails silently if the page has no IG linked or the token lacks scope.
+  def capture_instagram_business_account!(integration)
+    ig_data = MetaGraphApi.get(
+      "/#{integration.page_id}",
+      integration.page_access_token,
+      fields: 'instagram_business_account{id,name,username,profile_picture_url}'
+    )
+    ig_account = ig_data.is_a?(Hash) ? ig_data['instagram_business_account'] : nil
+    return unless ig_account.is_a?(Hash) && ig_account['id'].present?
+
+    merged = integration.metadata.to_h.deep_stringify_keys.merge(
+      'instagram_business_account_id' => ig_account['id'],
+      'instagram_username'             => ig_account['username'],
+      'instagram_profile_picture'      => ig_account['profile_picture_url']
+    )
+    integration.update!(metadata: merged)
+  rescue MetaGraphApi::Error => e
+    Rails.logger.info "[FacebookOAuth] no IG business account linked: #{e.message}"
+  end
 
   def callback_redirect_uri
     frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'

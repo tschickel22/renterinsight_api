@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_19_000006) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_21_194020) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -191,6 +191,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_19_000006) do
     t.index ["company_id", "module_name", "created_at"], name: "idx_on_company_id_module_name_created_at_290527c75b"
     t.index ["company_id", "user_id", "created_at"], name: "index_activity_logs_on_company_id_and_user_id_and_created_at"
     t.index ["trackable_type", "trackable_id"], name: "index_activity_logs_on_trackable_type_and_trackable_id"
+  end
+
+  create_table "ad_campaigns", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "external_campaign_id", null: false
+    t.string "name"
+    t.string "objective"
+    t.string "status"
+    t.decimal "daily_budget", precision: 12, scale: 2
+    t.decimal "lifetime_budget", precision: 12, scale: 2
+    t.decimal "spend", precision: 12, scale: 2, default: "0.0"
+    t.integer "impressions", default: 0
+    t.integer "clicks", default: 0
+    t.integer "reach", default: 0
+    t.integer "leads_count", default: 0
+    t.integer "deals_count", default: 0
+    t.decimal "revenue", precision: 12, scale: 2, default: "0.0"
+    t.decimal "cost_per_lead", precision: 10, scale: 2, default: "0.0"
+    t.decimal "cost_per_deal", precision: 10, scale: 2, default: "0.0"
+    t.decimal "roi_percentage", precision: 10, scale: 2, default: "0.0"
+    t.datetime "synced_at"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "external_campaign_id"], name: "index_ad_campaigns_on_company_id_and_external_campaign_id", unique: true
+    t.index ["company_id", "status"], name: "index_ad_campaigns_on_company_id_and_status"
   end
 
   create_table "agreement_attachments", force: :cascade do |t|
@@ -3100,6 +3126,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_19_000006) do
     t.string "enrollable_type"
     t.integer "enrollable_id"
     t.bigint "company_id"
+    t.jsonb "context", default: {}
     t.index ["company_id"], name: "index_nurture_enrollments_on_company_id"
     t.index ["enrollable_type", "enrollable_id"], name: "index_nurture_enrollments_on_enrollable_type_and_enrollable_id"
     t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[]))"
@@ -4294,6 +4321,60 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_19_000006) do
     t.index ["location_id", "platform"], name: "index_social_accounts_on_location_id_and_platform"
   end
 
+  create_table "social_comments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "social_post_id", null: false
+    t.string "external_comment_id", null: false
+    t.string "external_post_id"
+    t.string "platform"
+    t.string "author_name"
+    t.string "author_id"
+    t.string "author_profile_pic"
+    t.text "message"
+    t.string "parent_comment_id"
+    t.boolean "is_reply", default: false
+    t.string "status", default: "active"
+    t.boolean "is_from_page", default: false
+    t.bigint "replied_by_user_id"
+    t.datetime "commented_at"
+    t.datetime "read_at"
+    t.jsonb "metadata", default: {}
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "read_at"], name: "index_social_comments_on_company_id_and_read_at"
+    t.index ["company_id", "social_post_id"], name: "index_social_comments_on_company_id_and_social_post_id"
+    t.index ["company_id", "status"], name: "index_social_comments_on_company_id_and_status"
+    t.index ["external_comment_id"], name: "index_social_comments_on_external_comment_id", unique: true
+    t.index ["external_post_id"], name: "index_social_comments_on_external_post_id"
+  end
+
+  create_table "social_post_schedules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "name", default: "Default Schedule"
+    t.string "frequency", null: false
+    t.jsonb "preferred_times", default: ["10:00"]
+    t.jsonb "preferred_days", default: [1, 3, 5]
+    t.boolean "auto_approve", default: false
+    t.boolean "require_vehicle", default: true
+    t.jsonb "intent_rotation", default: ["new_arrival", "specific_unit", "education", "social_proof", "lifestyle"]
+    t.string "platform", default: "facebook"
+    t.string "post_type", default: "company_page"
+    t.string "tone", default: "friendly"
+    t.bigint "intake_form_id"
+    t.bigint "notify_user_id"
+    t.boolean "active", default: true
+    t.datetime "last_generated_at"
+    t.datetime "next_scheduled_at"
+    t.string "last_intent_used"
+    t.boolean "is_deleted", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.datetime "ends_at"
+    t.index ["company_id", "active"], name: "index_social_post_schedules_on_company_id_and_active"
+  end
+
   create_table "social_posts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -4330,6 +4411,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_19_000006) do
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "approved_at"
+    t.bigint "approved_by_id"
+    t.index ["approved_by_id"], name: "index_social_posts_on_approved_by_id"
     t.index ["company_id", "intent_category"], name: "index_social_posts_on_company_id_and_intent_category"
     t.index ["company_id", "status"], name: "index_social_posts_on_company_id_and_status"
     t.index ["created_by_user_id"], name: "index_social_posts_on_created_by_user_id"

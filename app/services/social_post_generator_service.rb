@@ -18,6 +18,7 @@ class SocialPostGeneratorService
   VALID_INTENTS = %w[
     specific_unit price_drop social_proof education financing
     lifestyle seasonal rep_personal new_arrival aged_inventory
+    ad_content
   ].freeze
 
   class << self
@@ -40,7 +41,7 @@ class SocialPostGeneratorService
       response = call_claude(api_key, system_prompt, prompt)
       parsed   = parse_model_output(response)
 
-      {
+      payload = {
         caption:     parsed['caption'],
         headline:    parsed['headline'],
         description: parsed['description'],
@@ -53,12 +54,63 @@ class SocialPostGeneratorService
           output_tokens: response.dig('usage', 'output_tokens').to_i
         }
       }
+
+      payload[:ad_settings] = build_ad_settings(company: company, vehicle: vehicle) if intent_category == 'ad_content'
+      payload
     end
 
     private
 
     def resolve_api_key
       Rails.application.credentials.dig(:anthropic, :api_key) || ENV['ANTHROPIC_API_KEY']
+    end
+
+    # ------------------------------------------------------------------
+    # Ad settings (for intent_category == 'ad_content')
+    # ------------------------------------------------------------------
+    def build_ad_settings(company:, vehicle:)
+      price = vehicle.try(:sale_price).to_f if vehicle
+      budget = recommended_budget(price)
+      dealership_city = company&.try(:city).to_s
+
+      {
+        recommended_audience: {
+          age_min:      25,
+          age_max:      65,
+          radius_miles: 50,
+          interests: [
+            'Manufactured homes',
+            'Home buying',
+            'Real estate',
+            'First-time homebuyer',
+            'Affordable housing'
+          ]
+        },
+        recommended_budget:    budget,
+        recommended_objective: 'lead_generation',
+        setup_instructions: [
+          'Go to Facebook Ads Manager (business.facebook.com)',
+          'Click Create → Choose objective: Lead Generation',
+          "Set your daily budget to $#{budget[:daily_min]}-$#{budget[:daily_max]}",
+          "Target: Age 25-65, within 50 miles of #{dealership_city.presence || 'your dealership'}",
+          'Add interests: Manufactured homes, Home buying, First-time homebuyer',
+          'Upload the images from this post',
+          'Paste the Primary Text, Headline, and Description from below',
+          'Select your Lead Form (or create one that matches your intake form)',
+          'Review and publish'
+        ]
+      }
+    end
+
+    # Ladder: smaller unit price → smaller budget. Market size proxy could be
+    # layered in later when we track dealership metros.
+    def recommended_budget(price)
+      case price.to_f
+      when 0...60_000     then { daily_min: 10, daily_max: 25 }
+      when 60_000...100_000 then { daily_min: 15, daily_max: 40 }
+      when 100_000...150_000 then { daily_min: 25, daily_max: 60 }
+      else                      { daily_min: 35, daily_max: 100 }
+      end
     end
 
     # ------------------------------------------------------------------
@@ -168,6 +220,15 @@ class SocialPostGeneratorService
       when 'aged_inventory'
         dwell = ctx.dig(:vehicle, :days_in_stock)
         "Write a post that refreshes interest in a home that's been on the lot for #{dwell || '60+'} days. Re-frame it as an opportunity (well-kept, ready-to-move, price negotiation possible). CTA = message_us."
+      when 'ad_content'
+        <<~AD.strip
+          Generate Facebook/Instagram ad content for this unit. Produce three ad fields:
+          1. PRIMARY TEXT  — the main ad copy, 125 characters max for best performance. Put this in `caption`.
+          2. HEADLINE      — 40 characters max, shown below the image. Put this in `headline`.
+          3. DESCRIPTION   — 30 characters max, shown below the headline. Put this in `description`.
+          CTA should be `lead_generation` or `shop_now`. Hashtags optional (≤3).
+          Stay punchy; do not exceed the character limits.
+        AD
       else
         "Write a general social post for this dealership."
       end

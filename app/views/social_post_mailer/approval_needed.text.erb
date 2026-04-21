@@ -1,0 +1,18 @@
+Social Post Ready for Review
+
+Hi <%= @recipient.first_name.presence || @recipient.email %>,
+
+A new auto-generated post for <%= @company.name %> is waiting for your approval.
+
+Platform: <%= @post.platform.to_s.titleize %>
+Intent: <%= @post.intent_category.to_s.titleize %>
+<% if @post.headline.present? %>Headline: <%= @post.headline %>
+<% end %><% if @vehicle.present? %>Unit: <%= [@vehicle.year, @vehicle.make, @vehicle.model].compact.join(' ') %><% if @vehicle.try(:sale_price).present? %> — $<%= number_with_delimiter(@vehicle.sale_price.to_i) %><% end %>
+<% end %>
+Caption preview:
+<%= truncate(@post.caption.to_s, length: 500) %>
+
+Actions:
+  Approve & Publish: <%= @approve_url %>
+  Edit Post: <%= @edit_url %>
+  Skip This Post: <%= @skip_url %>

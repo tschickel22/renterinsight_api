@@ -8,9 +8,11 @@ class SocialPost < ApplicationRecord
   belongs_to :social_account, optional: true
   belongs_to :vehicle, optional: true
   belongs_to :created_by_user, class_name: 'User', optional: true
+  belongs_to :approved_by, class_name: 'User', foreign_key: :approved_by_id, optional: true
   belongs_to :nurture_sequence, optional: true
 
   has_many :leads, foreign_key: :social_post_id, dependent: :nullify
+  has_many :social_comments, dependent: :destroy
 
   scope :active,    -> { where(is_deleted: [false, nil]) }
   scope :published, -> { where(status: 'published') }

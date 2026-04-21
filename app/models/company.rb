@@ -44,6 +44,9 @@ class Company < ApplicationRecord
   has_many :facebook_integrations, dependent: :destroy
   has_many :social_accounts, dependent: :destroy
   has_many :social_posts, dependent: :destroy
+  has_many :social_post_schedules, dependent: :destroy
+  has_many :ad_campaigns, dependent: :destroy
+  has_many :social_comments, dependent: :destroy
   has_many :territories, dependent: :destroy
   has_many :nurture_sequences, dependent: :destroy
   has_many :nurture_enrollments, dependent: :destroy

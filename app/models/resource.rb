@@ -148,7 +148,8 @@ public
       { key: 'workflow_automation', name: 'Workflow Automation', category: 'operations', position: 180, description: 'Manage workflow rules, runs, and templates' },
 
       # Social Media Content Engine
-      { key: 'social_posts', name: 'Social Posts', category: 'operations', position: 180, description: 'Create, generate, schedule, and attribute social media posts' }
+      { key: 'social_posts', name: 'Social Media', category: 'operations', position: 135, description: 'Create, manage, and publish social media posts' },
+      { key: 'facebook_ads', name: 'Facebook Ads', category: 'operations', position: 136, description: 'Create, manage, pause, and delete Facebook ad campaigns' }
     ]
     
     resources_data.each do |resource_data|

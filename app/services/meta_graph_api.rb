@@ -52,6 +52,167 @@ class MetaGraphApi
       get('/me/accounts', user_access_token, fields: 'id,name,access_token,category,tasks')
     end
 
+    # Publish a post to a Facebook Page. Photo-posts take precedence (higher
+    # engagement); if a photo_url is provided we use /photos, otherwise /feed.
+    def publish_page_post(page_id, access_token, message:, link: nil, photo_url: nil)
+      if photo_url.present?
+        post("/#{page_id}/photos", access_token,
+             caption: message,
+             url:     photo_url)
+      elsif link.present?
+        post("/#{page_id}/feed", access_token,
+             message: message,
+             link:    link)
+      else
+        post("/#{page_id}/feed", access_token, message: message)
+      end
+    end
+
+    # Publish to an Instagram Business Account. Two-step: create media
+    # container, then publish. Instagram always requires an image.
+    def publish_instagram_post(ig_user_id, access_token, caption:, image_url:)
+      container = post("/#{ig_user_id}/media", access_token,
+                       caption:   caption,
+                       image_url: image_url)
+      container_id = container['id']
+      return nil if container_id.blank?
+
+      post("/#{ig_user_id}/media_publish", access_token, creation_id: container_id)
+    end
+
+    def get_post_insights(post_id, access_token)
+      get("/#{post_id}/insights", access_token,
+          metric: 'post_impressions,post_reach,post_clicks,post_engaged_users')
+    end
+
+    def get_post_basic_metrics(post_id, access_token)
+      get("/#{post_id}", access_token,
+          fields: 'id,message,created_time,likes.summary(true),comments.summary(true),shares')
+    end
+
+    # ------------------------------------------------------------------
+    # Comments
+    # ------------------------------------------------------------------
+    def get_post_comments(post_id, access_token, limit: 50)
+      get("/#{post_id}/comments", access_token,
+          fields: 'id,message,from{id,name,picture},created_time,parent{id},comment_count',
+          limit:  limit,
+          order:  'reverse_chronological')
+    end
+
+    def reply_to_comment(comment_id, access_token, message:)
+      post("/#{comment_id}/comments", access_token, message: message)
+    end
+
+    def delete_comment(comment_id, access_token)
+      delete("/#{comment_id}", access_token)
+    end
+
+    def hide_comment(comment_id, access_token)
+      post("/#{comment_id}", access_token, is_hidden: true)
+    end
+
+    def unhide_comment(comment_id, access_token)
+      post("/#{comment_id}", access_token, is_hidden: false)
+    end
+
+    # ------------------------------------------------------------------
+    # Ads / Marketing API
+    # ------------------------------------------------------------------
+    def get_ad_campaigns(ad_account_id, access_token)
+      get("/act_#{ad_account_id}/campaigns", access_token,
+          fields: 'id,name,objective,status,daily_budget,lifetime_budget,insights{spend,impressions,clicks,reach}',
+          limit:  100)
+    end
+
+    def get_campaign_insights(campaign_id, access_token, date_preset: 'last_30d')
+      get("/#{campaign_id}/insights", access_token,
+          fields:      'spend,impressions,clicks,reach,actions,cost_per_action_type',
+          date_preset: date_preset)
+    end
+
+    def create_campaign(ad_account_id, access_token, name:, objective:, status: 'PAUSED', daily_budget_cents: nil, special_ad_categories: [])
+      params = {
+        name:                  name,
+        objective:             objective,
+        status:                status,
+        special_ad_categories: Array(special_ad_categories).to_json
+      }
+      params[:daily_budget] = daily_budget_cents if daily_budget_cents
+      post("/act_#{ad_account_id}/campaigns", access_token, **params)
+    end
+
+    def create_ad_set(ad_account_id, access_token, campaign_id:, name:, daily_budget_cents:, targeting:,
+                      billing_event: 'IMPRESSIONS', optimization_goal: 'LEAD_GENERATION', start_time: nil)
+      post("/act_#{ad_account_id}/adsets", access_token,
+           campaign_id:       campaign_id,
+           name:              name,
+           daily_budget:      daily_budget_cents,
+           billing_event:     billing_event,
+           optimization_goal: optimization_goal,
+           targeting:         targeting.to_json,
+           start_time:        start_time || Time.current.iso8601,
+           status:            'PAUSED')
+    end
+
+    def create_ad(ad_account_id, access_token, ad_set_id:, name:, creative_id:)
+      post("/act_#{ad_account_id}/ads", access_token,
+           adset_id:    ad_set_id,
+           name:        name,
+           creative_id: creative_id,
+           status:      'PAUSED')
+    end
+
+    def create_ad_creative(ad_account_id, access_token, page_id:, message:, link:, image_url: nil,
+                           headline: nil, description: nil, call_to_action_type: 'LEARN_MORE',
+                           lead_form_id: nil)
+      cta = { type: call_to_action_type }
+      # When we attach a native FB Lead Form, Meta requires the form id to live
+      # inside call_to_action.value.lead_gen_form_id.
+      if lead_form_id.present?
+        cta[:value] = { lead_gen_form_id: lead_form_id }
+      end
+
+      link_data = {
+        message:        message,
+        link:           link,
+        name:           headline,
+        description:    description,
+        call_to_action: cta
+      }.compact
+      link_data[:picture] = image_url if image_url.present?
+
+      object_story_spec = { page_id: page_id, link_data: link_data }
+
+      post("/act_#{ad_account_id}/adcreatives", access_token,
+           name:              "RI_Creative_#{Time.current.to_i}",
+           object_story_spec: object_story_spec.to_json)
+    end
+
+    def update_campaign_status(campaign_id, access_token, status:)
+      post("/#{campaign_id}", access_token, status: status)
+    end
+
+    def delete_campaign(campaign_id, access_token)
+      post("/#{campaign_id}", access_token, status: 'DELETED')
+    end
+
+    def get_ad_account_info(ad_account_id, access_token)
+      get("/act_#{ad_account_id}", access_token,
+          fields: 'id,name,account_status,currency,timezone_name,amount_spent')
+    end
+
+    def get_user_ad_accounts(user_access_token)
+      get('/me/adaccounts', user_access_token,
+          fields: 'id,name,account_status,currency')
+    end
+
+    def get_lead_forms(page_id, access_token)
+      get("/#{page_id}/leadgen_forms", access_token,
+          fields: 'id,name,status,created_time,leads_count',
+          limit:  50)
+    end
+
     # Exchange OAuth code for a user access token.
     def exchange_code_for_token(code, redirect_uri)
       get('/oauth/access_token', nil,

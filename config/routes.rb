@@ -1344,20 +1344,77 @@ Rails.application.routes.draw do
           post :publish
           post :schedule
           post :duplicate
+          get  :skip
+          get  :email_approve
+          get  :email_decline
         end
         collection do
           post :generate
           get  :stats
+          get  :seasonal_suggestions
+        end
+      end
+
+      # ==================== SOCIAL POST SCHEDULES ====================
+      resources :social_post_schedules, path: 'social-post-schedules' do
+        member do
+          post :activate
+          post :pause
+          post :test_approval_email
+        end
+        collection do
+          get :preview
         end
       end
 
       # ==================== META CATALOG FEED (public) ====================
-      get 'meta/catalog/:company_id/feed', to: 'meta_catalog#feed'
+      get   'meta/catalog/:company_id/feed', to: 'meta_catalog#feed'
+      get   'meta/catalog/info',             to: 'meta_catalog#info'
+      post  'meta/catalog/regenerate_token', to: 'meta_catalog#regenerate_token'
+      patch 'meta/catalog/settings',         to: 'meta_catalog#update_settings'
 
       # ==================== SOCIAL ATTRIBUTION DASHBOARD ====================
       get 'social/attribution',      to: 'social_attribution#index'
       get 'social/rep_leaderboard',  to: 'social_attribution#rep_leaderboard'
       get 'social/advisor',          to: 'social_attribution#advisor'
+
+      # ==================== AD CAMPAIGNS ====================
+      resources :ad_campaigns, path: 'ad-campaigns' do
+        member do
+          post :pause
+          post :resume
+        end
+        collection do
+          post :launch
+          get  :roi_summary
+          get  'lead-forms',     action: :lead_forms
+          get  'catalog-status', action: :catalog_status
+        end
+      end
+
+      # ==================== SOCIAL MEDIA UPLOADS ====================
+      post 'social-media/upload', to: 'social_media_uploads#create'
+
+      # ==================== BRAND HEALTH ====================
+      get 'brand-health', to: 'brand_health#show'
+
+      # ==================== SOCIAL COMMENTS ====================
+      resources :social_comments, path: 'social-comments' do
+        member do
+          post :reply
+          post :hide
+        end
+        collection do
+          post :mark_all_read
+        end
+      end
+
+      # ==================== SOCIAL MEDIA SETTINGS ====================
+      scope path: 'social-media-settings', controller: 'social_media_settings' do
+        get    '', action: :show
+        patch  '', action: :update
+        put    '', action: :update
+      end
 
       namespace :platform do
         resources :quickbooks_settings, only: [] do

@@ -4,10 +4,71 @@
 # Auth is via a company-scoped token (Authorization: Bearer <token>, or ?token=).
 class Api::V1::MetaCatalogController < ApplicationController
   skip_before_action :authenticate, only: [:feed]
+  before_action :set_company_scope, only: [:info, :regenerate_token, :update_settings]
 
   MAX_EXTRA_IMAGES = 9
   DEFAULT_MEDIUM   = 'catalog_ad'
   DEFAULT_CAMPAIGN = 'rotating_inventory'
+
+  SETTING_KEY        = 'meta_catalog_settings'
+  ALLOWED_STATUSES   = %w[available available_to_order reserved sold pending in_transit delivered].freeze
+  DEFAULT_STATUSES   = %w[available].freeze
+
+  # GET /api/v1/meta/catalog/info
+  def info
+    return unless authorize_action!('integrations', 'read')
+
+    token = @company.meta_catalog_token
+    statuses = catalog_statuses
+    vehicle_count = @company.vehicles.where(is_deleted: false, status: statuses).count
+
+    render json: {
+      catalog: {
+        token:         token,
+        active_count:  vehicle_count,
+        feed_url:      token.present? ? catalog_feed_url : nil,
+        last_sync_at:  nil,
+        statuses:      statuses,
+        allowed_statuses: ALLOWED_STATUSES
+      }
+    }
+  end
+
+  # PATCH /api/v1/meta/catalog/settings
+  def update_settings
+    return unless authorize_action!('integrations', 'update')
+
+    requested = Array(params[:statuses]).map(&:to_s).select { |s| ALLOWED_STATUSES.include?(s) }.uniq
+    requested = DEFAULT_STATUSES.dup if requested.empty?
+
+    settings = load_settings
+    settings['statuses'] = requested
+    Setting.set('Company', @company.id, SETTING_KEY, settings)
+
+    vehicle_count = @company.vehicles.where(is_deleted: false, status: requested).count
+
+    render json: {
+      catalog: {
+        statuses:     requested,
+        active_count: vehicle_count
+      }
+    }
+  end
+
+  # POST /api/v1/meta/catalog/regenerate_token
+  def regenerate_token
+    return unless authorize_action!('integrations', 'update')
+
+    new_token = SecureRandom.urlsafe_base64(32)
+    @company.update!(meta_catalog_token: new_token)
+
+    render json: {
+      catalog: {
+        token: new_token,
+        feed_url: catalog_feed_url
+      }
+    }
+  end
 
   # GET /api/v1/meta/catalog/:company_id/feed
   def feed
@@ -21,9 +82,9 @@ class Api::V1::MetaCatalogController < ApplicationController
     end
 
     base_url = intake_form_url(company)
+    statuses = statuses_for(company)
     vehicles = company.vehicles
-                      .where(is_deleted: false, status: 'available')
-                      .where.not(sale_price: nil)
+                      .where(is_deleted: false, status: statuses)
                       .order(id: :asc)
 
     items = vehicles.map { |v| serialize(v, company: company, base_url: base_url) }
@@ -32,6 +93,30 @@ class Api::V1::MetaCatalogController < ApplicationController
   end
 
   private
+
+  def catalog_statuses
+    statuses_for(@company)
+  end
+
+  def statuses_for(company)
+    raw = Setting.get('Company', company.id, SETTING_KEY)
+    hash = case raw
+           when Hash   then raw.deep_stringify_keys
+           when String then (JSON.parse(raw).deep_stringify_keys rescue {})
+           else              {}
+           end
+    list = Array(hash['statuses']).map(&:to_s).select { |s| ALLOWED_STATUSES.include?(s) }
+    list.presence || DEFAULT_STATUSES
+  end
+
+  def load_settings
+    raw = Setting.get('Company', @company.id, SETTING_KEY)
+    case raw
+    when Hash   then raw.deep_stringify_keys
+    when String then (JSON.parse(raw).deep_stringify_keys rescue {})
+    else              {}
+    end
+  end
 
   def bearer_token
     header = request.headers['Authorization'].to_s
@@ -44,8 +129,13 @@ class Api::V1::MetaCatalogController < ApplicationController
     ActiveSupport::SecurityUtils.secure_compare(a.to_s, b.to_s)
   end
 
+  def catalog_feed_url
+    base = ENV['API_BASE_URL'] || request.base_url
+    "#{base}/api/v1/meta/catalog/#{@company.id}/feed?token=#{@company.meta_catalog_token}"
+  end
+
   def intake_form_url(company)
-    form = company.intake_forms.respond_to?(:where) ? company.intake_forms.where(active: true).order(:id).first : nil
+    form = company.intake_forms.respond_to?(:where) ? company.intake_forms.where(is_active: true).order(:id).first : nil
     form ||= company.intake_forms.order(:id).first rescue nil
     form&.public_url
   end

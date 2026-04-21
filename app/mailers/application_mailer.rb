@@ -3,36 +3,65 @@ class ApplicationMailer < ActionMailer::Base
 
   private
 
+  # Resolves the From: address for a mailer using a User → Location → Company → Platform waterfall.
+  # Set @sender_user, @location, and/or @company in the mailer action to scope the lookup.
+  # Returns nil if no level has a from_address configured so ActionMailer raises instead of
+  # silently sending from a bogus noreply inbox.
   def default_from_address
-    # Try to get from email from settings hierarchy: Location -> Company -> Platform
     from_email = nil
-    from_name = nil
+    from_name  = nil
 
-    # Try location settings first
-    if @location.present?
-      location_comms = Setting.get('communications', 'Location', @location.id)
-      from_email = location_comms.dig('email', 'from_address') if location_comms.present?
-      from_name = location_comms.dig('email', 'from_name') if location_comms.present?
+    # 1. User-level override (if any mailer has set @sender_user)
+    if @sender_user.respond_to?(:id) && @sender_user.id.present?
+      settings = Setting.get('User', @sender_user.id, 'communications')
+      from_email, from_name = dig_email(settings)
     end
 
-    # Fall back to company settings
-    if from_email.blank? && @company.present?
-      company_comms = Setting.get('communications', 'Company', @company.id)
-      from_email = company_comms.dig('email', 'from_address') if company_comms.present?
-      from_name = company_comms.dig('email', 'from_name') if company_comms.present?
+    # 2. Location
+    if from_email.blank? && @location.respond_to?(:id) && @location.id.present?
+      settings = Setting.get('Location', @location.id, 'communications')
+      from_email, from_name = dig_email(settings)
     end
 
-    # Fall back to platform settings
+    # 3. Company
+    if from_email.blank? && @company.respond_to?(:id) && @company.id.present?
+      settings = Setting.get('Company', @company.id, 'communications')
+      from_email, from_name = dig_email(settings)
+    end
+
+    # 4. Platform
     if from_email.blank?
-      platform_comms = Setting.get('communications', 'Platform', 0)
-      from_email = platform_comms.dig('email', 'from_address') if platform_comms.present?
-      from_name = platform_comms.dig('email', 'from_name') if platform_comms.present?
+      settings = Setting.get('Platform', 0, 'communications')
+      from_email, from_name = dig_email(settings)
     end
 
-    # Final fallback
-    from_email ||= Rails.application.credentials.dig(:mailer_from) || 'noreply@renterinsight.com'
-    from_name ||= 'RenterInsight'
+    if from_email.blank?
+      Rails.logger.warn "[ApplicationMailer] No from_address configured at User/Location/Company/Platform level — letting ActionMailer fall through to config.action_mailer defaults."
+      return nil
+    end
 
+    from_name = from_name.presence || 'RenterInsight'
     "#{from_name} <#{from_email}>"
+  end
+
+  # Extract [from_address, from_name] from a communications settings hash,
+  # tolerating string-keyed, symbol-keyed, or JSON-string values.
+  def dig_email(settings)
+    return [nil, nil] if settings.blank?
+    hash = case settings
+           when Hash   then settings.deep_stringify_keys
+           when String then (JSON.parse(settings).deep_stringify_keys rescue {})
+           else              {}
+           end
+    email_cfg = hash['email'].is_a?(Hash) ? hash['email'] : {}
+    # Accept every historical variant: snake_case, camelCase, and the canonical
+    # fromEmail / fromName used by the platform settings UI.
+    from_address = email_cfg['from_address'].presence ||
+                   email_cfg['fromAddress'].presence  ||
+                   email_cfg['fromEmail'].presence    ||
+                   email_cfg['from_email'].presence
+    from_name    = email_cfg['from_name'].presence    ||
+                   email_cfg['fromName'].presence
+    [from_address, from_name]
   end
 end
