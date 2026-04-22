@@ -645,13 +645,22 @@ class Api::V1::InvoicesController < ApplicationController
     # Resolve branding settings (location → company fallback)
     branding = {}
     if source_pref == 'location' && location.present?
-      loc_branding = Setting.get('Location', location.id, 'branding') rescue {} || {}
-      branding = loc_branding if loc_branding.present? && loc_branding.any?
+      loc_branding = begin
+        Setting.get('Location', location.id, 'branding')
+      rescue
+        nil
+      end
+      branding = loc_branding if loc_branding.is_a?(Hash) && loc_branding.any?
     end
     
     # Fallback to company branding
     if branding.blank?
-      branding = Setting.get('Company', company.id, 'branding') rescue {} || {}
+      branding = begin
+        Setting.get('Company', company.id, 'branding')
+      rescue
+        nil
+      end
+      branding = {} unless branding.is_a?(Hash)
     end
     
     # Resolve logo URL - convert relative paths to absolute
