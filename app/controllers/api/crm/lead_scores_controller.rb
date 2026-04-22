@@ -2,7 +2,9 @@ module Api
   module Crm
     class LeadScoresController < ApplicationController
       include RbacAuthorization
-      rbac_resource :crm, read_actions: [:show], update_actions: [:calculate]
+      rbac_resource :crm,
+                    read_actions:   [:show, :health_score, :score_history],
+                    update_actions: [:calculate, :recalculate_health_score]
 
       before_action :set_company_scope
       before_action :set_lead
@@ -67,6 +69,46 @@ module Api
         score.save!
 
         render json: render_json(score, factors:)
+      end
+
+      # GET /api/crm/leads/:lead_id/health_score
+      def health_score
+        latest = LeadScore.where(lead_id: @lead.id).order(created_at: :desc).first
+
+        render json: {
+          lead_id:    @lead.id,
+          score:      @lead.health_score,
+          band:       latest&.band,
+          breakdown:  latest&.breakdown || {},
+          updated_at: @lead.health_score_updated_at
+        }
+      end
+
+      # POST /api/crm/leads/:lead_id/recalculate_health_score
+      def recalculate_health_score
+        result = LeadHealthScoreService.new(@lead).save!
+        render json: {
+          lead_id:    @lead.id,
+          score:      result[:score],
+          band:       result[:band],
+          breakdown:  result[:breakdown],
+          updated_at: Time.current
+        }
+      end
+
+      # GET /api/crm/leads/:lead_id/score_history
+      def score_history
+        history = LeadScore.where(lead_id: @lead.id).order(created_at: :desc).limit(50)
+        render json: history.map { |s|
+          {
+            id:         s.id,
+            score:      s.score,
+            band:       s.band,
+            reason:     s.reason,
+            breakdown:  s.breakdown,
+            created_at: s.created_at
+          }
+        }
       end
 
       private

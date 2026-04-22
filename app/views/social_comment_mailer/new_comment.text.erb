@@ -1,0 +1,13 @@
+<%= @comment.author_name.presence || 'Someone' %> commented on your post:
+
+  "<%= @comment.message.to_s %>"
+
+<% if @post.present? %>
+Post: <%= @post.headline.presence || truncate(@post.caption.to_s, length: 100) %>
+<% end %>
+
+Reply in RenterInsight: <%= @reply_url %>
+<% if @facebook_url.present? %>View on <%= @post&.platform.to_s == 'instagram' ? 'Instagram' : 'Facebook' %>: <%= @facebook_url %>
+<% end %>
+
+You're receiving this because <%= @company&.name || 'your company' %> has you listed as a recipient for social comment notifications.

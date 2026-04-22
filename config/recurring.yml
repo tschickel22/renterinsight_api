@@ -25,6 +25,27 @@ default: &default
   champion_ims_weekly_sync:
     class: ChampionImsWeeklySyncJob
     schedule: every sunday at 2am
+  generate_scheduled_social_posts:
+    class: GenerateScheduledSocialPostsJob
+    schedule: every hour
+  sync_social_post_metrics:
+    class: SyncSocialPostMetricsJob
+    schedule: every day at 3am
+  vehicle_days_on_lot_check:
+    class: VehicleDaysOnLotCheckJob
+    schedule: every day at 4am
+  publish_due_social_posts:
+    class: PublishDueSocialPostsJob
+    queue: default
+    schedule: every 5 minutes
+  sync_ad_spend:
+    class: SyncAdSpendJob
+    queue: default
+    schedule: every day at 3am
+  sync_social_comments:
+    class: SyncSocialCommentsJob
+    queue: default
+    schedule: every 15 minutes
 
 production:
   <<: *default

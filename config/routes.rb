@@ -55,6 +55,10 @@ Rails.application.routes.draw do
     
     # QuickBooks webhooks
     post 'quickbooks/notifications', to: 'quickbooks#notifications'
+
+    # Facebook Lead Ads webhooks
+    get  'facebook/leads', to: 'facebook_leads#verify'
+    post 'facebook/leads', to: 'facebook_leads#receive'
   end
 
   # ==================== PUBLIC INTAKE FORMS ====================
@@ -151,6 +155,9 @@ Rails.application.routes.draw do
     
     # ==================== V1 API ====================
     namespace :v1 do
+      # Lightweight auth/token health check
+      get 'health/ping', to: 'health#ping'
+
       # ==================== IMPORT / EXPORT ENGINE ====================
       resources :import_jobs, only: %i[index show create destroy] do
         member do
@@ -1303,8 +1310,115 @@ Rails.application.routes.draw do
           post 'sync/entity', to: 'quickbooks_settings#sync_entity'
           post 'sync/all', to: 'quickbooks_settings#sync_all_entities'
         end
+
+        # ==================== FACEBOOK INTEGRATION (OAuth) ====================
+        scope path: 'facebook' do
+          get    'authorize',    to: 'facebook#authorize'
+          get    'callback',     to: 'facebook#callback'
+          post   'connect_page', to: 'facebook#connect_page'
+          get    'status',       to: 'facebook#status'
+          delete 'disconnect',   to: 'facebook#disconnect'
+        end
       end
-      
+
+      # ==================== FACEBOOK INTEGRATIONS (CRUD) ====================
+      resources :facebook_integrations, path: 'facebook-integrations' do
+        member do
+          post :refresh_token
+          get  :lead_log
+        end
+      end
+
+      # ==================== SOCIAL ACCOUNTS ====================
+      resources :social_accounts, path: 'social-accounts' do
+        member do
+          post :refresh_token
+          post :disconnect
+        end
+        collection do
+          get :stats
+        end
+      end
+
+      # ==================== SOCIAL POSTS ====================
+      resources :social_posts, path: 'social-posts' do
+        member do
+          post :approve
+          post :publish
+          post :schedule
+          post :duplicate
+          get  :skip
+          get  :email_approve
+          get  :email_decline
+        end
+        collection do
+          post :generate
+          get  :stats
+          get  :seasonal_suggestions
+        end
+      end
+
+      # ==================== SOCIAL POST SCHEDULES ====================
+      resources :social_post_schedules, path: 'social-post-schedules' do
+        member do
+          post :activate
+          post :pause
+          post :test_approval_email
+        end
+        collection do
+          get :preview
+        end
+      end
+
+      # ==================== META CATALOG FEED (public) ====================
+      get   'meta/catalog/:company_id/feed', to: 'meta_catalog#feed'
+      get   'meta/catalog/info',             to: 'meta_catalog#info'
+      post  'meta/catalog/regenerate_token', to: 'meta_catalog#regenerate_token'
+      patch 'meta/catalog/settings',         to: 'meta_catalog#update_settings'
+
+      # ==================== SOCIAL ATTRIBUTION DASHBOARD ====================
+      get 'social/attribution',      to: 'social_attribution#index'
+      get 'social/rep_leaderboard',  to: 'social_attribution#rep_leaderboard'
+      get 'social/advisor',          to: 'social_attribution#advisor'
+
+      # ==================== AD CAMPAIGNS ====================
+      resources :ad_campaigns, path: 'ad-campaigns' do
+        member do
+          post :pause
+          post :resume
+        end
+        collection do
+          post :launch
+          get  :roi_summary
+          get  'lead-forms',     action: :lead_forms
+          get  'catalog-status', action: :catalog_status
+        end
+      end
+
+      # ==================== SOCIAL MEDIA UPLOADS ====================
+      post 'social-media/upload', to: 'social_media_uploads#create'
+
+      # ==================== BRAND HEALTH ====================
+      get 'brand-health', to: 'brand_health#show'
+
+      # ==================== SOCIAL COMMENTS ====================
+      resources :social_comments, path: 'social-comments' do
+        member do
+          post :reply
+          post :hide
+        end
+        collection do
+          post :mark_all_read
+        end
+      end
+
+      # ==================== SOCIAL MEDIA SETTINGS ====================
+      scope path: 'social-media-settings', controller: 'social_media_settings' do
+        get    '', action: :show
+        patch  '', action: :update
+        put    '', action: :update
+      end
+
       namespace :platform do
         resources :quickbooks_settings, only: [] do
           collection do
@@ -1696,6 +1810,11 @@ Rails.application.routes.draw do
           get :score, to: 'lead_scores#show'
           post 'score/calculate', to: 'lead_scores#calculate'
 
+          # Health Score
+          get  :health_score,              to: 'lead_scores#health_score'
+          post :recalculate_health_score,  to: 'lead_scores#recalculate_health_score'
+          get  :score_history,             to: 'lead_scores#score_history'
+
           # Custom field migration integrity check
           get :conversion_integrity_check
         end
@@ -1980,6 +2099,7 @@ Rails.application.routes.draw do
       # Resource-dispatched CRUD — ?resource=modules|features|articles|tours|...
       scope :knowledge, controller: :knowledge do
         get    'analytics',           action: :analytics
+        get    'analytics/:kind',     action: :analytics_kind, constraints: { kind: /searches|tours|articles/ }
         get    ':resource',           action: :index
         post   ':resource',           action: :create
         get    ':resource/:id',       action: :show,    constraints: { id: /\d+/ }

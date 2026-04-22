@@ -75,12 +75,23 @@ module Api
       # POST /api/platform/settings/test_email
       def test_email
         email_settings = params[:email] || params[:settings] || {}
-        
+
         return render_missing_settings('email') if email_settings.blank?
-        
+
         # Convert ActionController::Parameters to hash for service
         settings_hash = email_settings.is_a?(ActionController::Parameters) ? email_settings.to_unsafe_h : email_settings
-        
+
+        # If the FE only sent a recipient string, fall back to the stored config entirely.
+        if settings_hash.is_a?(String) || !settings_hash.is_a?(Hash)
+          stored = fetch_communications_settings || {}
+          settings_hash = (stored['email'] || stored[:email] || {}).deep_stringify_keys
+          return render_missing_settings('email') if settings_hash.blank?
+        end
+
+        # Replace any masked/encrypted values in the submitted form with the real
+        # decrypted secrets from the DB so the tester sees working credentials.
+        settings_hash = unmask_secrets_for_testing('email', settings_hash)
+
         # Test the email configuration
         result = TestCommunicationService.new(settings_hash, :email).test
         
@@ -109,12 +120,20 @@ module Api
       # POST /api/platform/settings/test_sms
       def test_sms
         sms_settings = params[:sms] || params[:settings] || {}
-        
+
         return render_missing_settings('sms') if sms_settings.blank?
-        
+
         # Convert ActionController::Parameters to hash for service
         settings_hash = sms_settings.is_a?(ActionController::Parameters) ? sms_settings.to_unsafe_h : sms_settings
-        
+
+        if settings_hash.is_a?(String) || !settings_hash.is_a?(Hash)
+          stored = fetch_communications_settings || {}
+          settings_hash = (stored['sms'] || stored[:sms] || {}).deep_stringify_keys
+          return render_missing_settings('sms') if settings_hash.blank?
+        end
+
+        settings_hash = unmask_secrets_for_testing('sms', settings_hash)
+
         # Test the SMS configuration
         result = TestCommunicationService.new(settings_hash, :sms).test
         
@@ -189,6 +208,11 @@ module Api
       end
 
       MASKED_PLACEHOLDER = '••••••••'
+      # Any field sent back as a run of common mask characters counts as "unchanged".
+      # Historically only the exact 8-bullet string was caught, but the FE renders
+      # a dot per character of the stored encrypted value (~110 chars), so re-saves
+      # were silently re-encrypting a long bullet string and corrupting the secret.
+      MASK_ONLY_REGEX = /\A[\u2022\*\u25CF\u00B7\u2219 ]+\z/.freeze
 
       SENSITIVE_KEYS = {
         'email' => %w[smtpPassword gmailClientSecret gmailRefreshToken sendgridApiKey awsSecretAccessKey],
@@ -201,8 +225,9 @@ module Api
         Setting.set('Platform', 0, 'communications', encrypted_settings)
       end
 
-      # When the frontend sends back the masked placeholder, preserve the existing
-      # encrypted value from the DB so we don't overwrite secrets with "••••••••"
+      # When the frontend sends back the masked placeholder (any length of bullets/stars)
+      # OR an already-encrypted value, preserve the existing stored value so we never
+      # overwrite a real secret with a masked display string.
       def restore_masked_secrets(settings)
         existing = fetch_communications_settings
         return settings unless existing.is_a?(Hash)
@@ -212,8 +237,13 @@ module Api
           next unless restored[section].is_a?(Hash)
 
           keys.each do |key|
-            value = restored[section][key]
-            if value == MASKED_PLACEHOLDER || (value.present? && value.to_s.start_with?('encrypted:'))
+            value = restored[section][key].to_s
+            next if value.blank?
+
+            masked    = value == MASKED_PLACEHOLDER || MASK_ONLY_REGEX.match?(value)
+            encrypted = value.start_with?('encrypted:')
+
+            if masked || encrypted
               existing_value = existing.dig(section, key) || existing.dig(section.to_sym, key.to_sym)
               restored[section][key] = existing_value if existing_value.present?
             end
@@ -221,6 +251,44 @@ module Api
         end
 
         restored
+      end
+
+      # Public-ish helper so the test_email / test_sms actions can swap masks in the
+      # incoming form payload for the real decrypted value before calling the tester.
+      def unmask_secrets_for_testing(section_name, section_hash)
+        return section_hash unless section_hash.is_a?(Hash)
+
+        existing = fetch_communications_settings || {}
+        stored_section = existing[section_name] || existing[section_name.to_sym] || {}
+        stored_section = stored_section.deep_stringify_keys if stored_section.is_a?(Hash)
+
+        merged = section_hash.deep_stringify_keys
+        Array(SENSITIVE_KEYS[section_name.to_s]).each do |key|
+          value = merged[key].to_s
+          next if value.blank?
+
+          masked    = value == MASKED_PLACEHOLDER || MASK_ONLY_REGEX.match?(value)
+          encrypted = value.start_with?('encrypted:')
+          next unless masked || encrypted
+
+          stored = stored_section[key]
+          next if stored.blank?
+
+          decrypted = decrypt_if_needed(stored)
+          merged[key] = decrypted if decrypted.present?
+        end
+        merged
+      end
+
+      def decrypt_if_needed(value)
+        return value unless value.is_a?(String) && value.start_with?('encrypted:')
+        ciphertext = value.sub('encrypted:', '')
+        key_base = ENV['SETTINGS_ENCRYPTION_KEY'] || Rails.application.secret_key_base
+        key = ActiveSupport::KeyGenerator.new(key_base).generate_key('', 32)
+        ActiveSupport::MessageEncryptor.new(key).decrypt_and_verify(ciphertext)
+      rescue => e
+        Rails.logger.error "[PlatformSettings] decrypt_if_needed failed: #{e.message}"
+        nil
       end
 
       def save_notifications_settings(settings)

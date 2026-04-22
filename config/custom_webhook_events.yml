@@ -137,3 +137,17 @@ events:
   - value: agreement.reminder_sent
     label: Agreement Reminder Sent
     category: Agreement Events
+
+  # ── Social Media Events ──
+  - value: social_post.created
+    label: Social Post Created
+    category: Social Media Events
+  - value: social_post.updated
+    label: Social Post Updated
+    category: Social Media Events
+  - value: social_post.deleted
+    label: Social Post Deleted
+    category: Social Media Events
+  - value: social_post.published
+    label: Social Post Published
+    category: Social Media Events
