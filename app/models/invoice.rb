@@ -65,8 +65,16 @@ class Invoice < ApplicationRecord
   # Sub-items on a draw are dollar amounts that draw down from the parent draw's calculated amount.
   # Sum of sub_items for any single draw must NOT exceed that draw's amount.
   # Section totals (parent draw amounts) remain fixed.
+  #
+  # EXCEPTION: When addon_mode == 'additional', sub-items are ADDED ON TOP of the
+  # home-price draw amount (e.g., Heartland Homes model). No overage check needed.
   def draw_schedule_sub_items_within_parent
     return if draw_schedule.blank?
+
+    # In 'additional' mode, sub-items are extra charges on top of draws — skip validation
+    mode = draw_schedule['addon_mode'] || draw_schedule[:addon_mode]
+    return if mode == 'additional'
+
     draws = draw_schedule.is_a?(Hash) ? (draw_schedule['draws'] || draw_schedule[:draws]) : nil
     return if draws.blank?
 

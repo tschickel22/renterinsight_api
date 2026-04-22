@@ -38,6 +38,16 @@ module Api
 
       # POST /api/v1/package_templates
       def create
+        existing = @company.package_templates.active.where('LOWER(name) = LOWER(?)', template_params[:name]).first
+        if existing
+          if existing.default_price == template_params[:default_price]&.to_f
+            return render json: template_json(existing), status: :ok
+          else
+            existing.update(template_params.except(:name))
+            return render json: template_json(existing), status: :ok
+          end
+        end
+
         template = @company.package_templates.build(template_params)
         template.position = @company.package_templates.maximum(:position).to_i + 1
 

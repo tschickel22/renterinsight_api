@@ -88,6 +88,8 @@ class Api::V1::DrawScheduleTemplatesController < ApplicationController
     params.require(:draw_schedule_template).permit(
       :name,
       :is_default,
+      :addon_mode,
+      :tax_timing,
       draws: [
         :percentage,
         :description,
@@ -102,6 +104,8 @@ class Api::V1::DrawScheduleTemplatesController < ApplicationController
       id: template.id,
       name: template.name,
       is_default: template.is_default,
+      addon_mode: template.effective_addon_mode,
+      tax_timing: template.tax_timing || 'per_draw',
       draws: template.draws,
       created_at: template.created_at,
       updated_at: template.updated_at

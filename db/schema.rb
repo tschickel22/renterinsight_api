@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_21_194020) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1798,6 +1798,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_21_194020) do
     t.boolean "is_deleted", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "addon_mode", default: "included", null: false
+    t.string "tax_timing", default: "per_draw", null: false
     t.index ["company_id", "is_default"], name: "idx_draw_templates_company_default"
     t.index ["company_id"], name: "index_draw_schedule_templates_on_company_id"
   end

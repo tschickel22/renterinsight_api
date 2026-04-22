@@ -367,7 +367,14 @@ module Api
 
         render json: {
           loan_settings: settings,
-          defaults: default_loan_settings,
+          defaults: {
+            default_interest_rate: 8.0,
+            default_loan_term: 360,
+            default_down_payment_pct: 10.0,
+            default_sales_tax_rate: 0.0,
+            late_fee_amount: 25.0,
+            late_fee_grace_days: 15
+          },
           payments_enabled: @company.external_payments_id.present?
         }
       end

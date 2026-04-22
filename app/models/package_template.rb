@@ -4,6 +4,7 @@ class PackageTemplate < ApplicationRecord
   belongs_to :company
 
   validates :name, presence: true
+  validates :name, uniqueness: { scope: :company_id, case_sensitive: false, conditions: -> { where(is_active: true) } }, on: :create
   validates :default_price, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
 
   scope :active, -> { where(is_active: true) }

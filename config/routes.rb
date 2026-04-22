@@ -155,6 +155,9 @@ Rails.application.routes.draw do
     
     # ==================== V1 API ====================
     namespace :v1 do
+      # Lightweight auth/token health check
+      get 'health/ping', to: 'health#ping'
+
       # ==================== IMPORT / EXPORT ENGINE ====================
       resources :import_jobs, only: %i[index show create destroy] do
         member do
@@ -2096,6 +2099,7 @@ Rails.application.routes.draw do
       # Resource-dispatched CRUD — ?resource=modules|features|articles|tours|...
       scope :knowledge, controller: :knowledge do
         get    'analytics',           action: :analytics
+        get    'analytics/:kind',     action: :analytics_kind, constraints: { kind: /searches|tours|articles/ }
         get    ':resource',           action: :index
         post   ':resource',           action: :create
         get    ':resource/:id',       action: :show,    constraints: { id: /\d+/ }
