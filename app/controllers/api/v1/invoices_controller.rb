@@ -973,28 +973,165 @@ class Api::V1::InvoicesController < ApplicationController
         
         schedule = invoice.draw_schedule
         sorted_draws = schedule['draws'].sort_by { |d| d['position'] || 0 }
+        inline_addon_mode = schedule['addon_mode'] || 'included'
+        inline_tax_timing = schedule['tax_timing'] || 'per_draw'
+        inline_tax_rate = invoice.tax_rate.to_f
 
-        draw_data = []
-        sorted_draws.each do |draw|
-          draw_data << ["#{draw['percentage']}%", draw['description'], h.number_to_currency(draw['amount'])]
-          (draw['sub_items'] || []).sort_by { |si| si['position'] || 0 }.each do |si|
-            amt = (si['amount'] || 0).to_f
-            next if amt <= 0 # blank sub-items are structural-only; don't print
-            # Inline amount with description so it reads as an annotation on the parent draw,
-            # not as its own line-item entry. Empty third column keeps the right-side total column clean.
-            draw_data << ['', "      \u2022 #{si['description']} \u2014 #{h.number_to_currency(amt)}", '']
+        if inline_addon_mode == 'additional'
+          # ── ADDITIONAL MODE: Rich layout matching standalone draw schedule PDF ──
+          inv_items = invoice.invoice_items.order(:position, :id)
+          home_items_check = inv_items.select { |it| it.category == 'home' }
+          home_is_taxable = home_items_check.any? { |it| it.taxable? }
+
+          inline_draw_calcs = sorted_draws.each_with_index.map do |draw, i|
+            subs = (draw['sub_items'] || []).select { |si| si['from_line_item'] }
+            items_total = subs.sum { |si| si['amount'].to_f }
+            taxable_total = subs.sum do |si|
+              matching = inv_items.find { |it| it.description == si['description'] && it.category != 'home' }
+              (matching&.taxable? ? si['amount'].to_f : 0)
+            end
+            home_tax_portion = home_is_taxable ? draw['amount'].to_f : 0
+            draw_tax = inline_tax_rate > 0 ? ((taxable_total + home_tax_portion) * inline_tax_rate / 100.0) : 0
+            subtotal = draw['amount'].to_f + items_total
+            { draw: draw, subs: subs, items_total: items_total, draw_tax: draw_tax, subtotal: subtotal }
           end
-        end
 
-        pdf.table(draw_data, cell_style: { borders: [], padding: [4, 6], size: 9 },
-                  column_widths: [50, pdf.bounds.width - 160, 110]) do |t|
-          t.columns(0).font_style = :bold
-          t.columns(2).align = :right
-          # Style sub-item rows (those with empty first column) in lighter gray
-          draw_data.each_with_index do |row, i|
-            if row[0].to_s.empty? && row[1].to_s.include?('•')
-              t.row(i).text_color = '666666'
-              t.row(i).size = 8
+          inline_total_tax_all = inline_draw_calcs.sum { |dc| dc[:draw_tax] }
+          inline_is_final_tax = inline_tax_timing == 'final_draw'
+
+          all_sub_descs = sorted_draws.flat_map { |d| (d['sub_items'] || []).map { |si| si['description'] } }
+          inline_unassigned = inv_items.select { |it| it.category != 'home' && !all_sub_descs.include?(it.description) }
+
+          inline_grand_draw = 0
+          inline_grand_tax = 0
+
+          inline_draw_calcs.each_with_index do |dc, idx|
+            is_last = idx == inline_draw_calcs.length - 1
+            this_tax = inline_is_final_tax ? (is_last ? inline_total_tax_all : 0) : dc[:draw_tax]
+            draw_grand = dc[:subtotal] + this_tax
+            inline_grand_draw += dc[:subtotal]
+            inline_grand_tax += this_tax
+
+            pdf.text_box dc[:draw]['description'], at: [0, pdf.cursor], width: pdf.bounds.width - 120, size: 10, style: :bold
+            pdf.text_box h.number_to_currency(draw_grand), at: [pdf.bounds.width - 120, pdf.cursor], width: 120, size: 10, style: :bold, align: :right
+            pdf.move_down 14
+
+            pdf.indent(15) do
+              pdf.text_box "#{dc[:draw]['percentage']}% of Home Price", at: [0, pdf.cursor], width: pdf.bounds.width - 135, size: 8, color: '666666'
+              pdf.text_box h.number_to_currency(dc[:draw]['amount']), at: [pdf.bounds.width - 135, pdf.cursor], width: 120, size: 8, align: :right
+              pdf.move_down 12
+            end
+
+            dc[:subs].each do |si|
+              matching_item = inv_items.find { |it| it.description == si['description'] && it.category != 'home' }
+              label = si['description']
+              label += '  +tax' if matching_item&.taxable?
+              pdf.indent(25) do
+                pdf.text_box "\u2022 #{label}", at: [0, pdf.cursor], width: pdf.bounds.width - 145, size: 8, color: '444444'
+                pdf.text_box h.number_to_currency(si['amount']), at: [pdf.bounds.width - 145, pdf.cursor], width: 120, size: 8, align: :right
+                pdf.move_down 12
+              end
+            end
+
+            if this_tax > 0
+              tax_label = inline_is_final_tax && is_last ? "Taxes (all draws) (#{inline_tax_rate}%)" : "Taxes (#{inline_tax_rate}%)"
+              pdf.indent(25) do
+                pdf.text_box tax_label, at: [0, pdf.cursor], width: pdf.bounds.width - 145, size: 8, color: accent
+                pdf.text_box h.number_to_currency(this_tax), at: [pdf.bounds.width - 145, pdf.cursor], width: 120, size: 8, align: :right, color: accent
+                pdf.move_down 12
+              end
+            end
+
+            if dc[:subs].any? || this_tax > 0
+              pdf.indent(15) do
+                pdf.stroke_color 'CCCCCC'
+                pdf.dash(2)
+                pdf.stroke_horizontal_line 0, pdf.bounds.width - 15
+                pdf.undash
+                pdf.stroke_color '000000'
+                pdf.move_down 3
+                pdf.text_box 'Total this draw', at: [0, pdf.cursor], width: pdf.bounds.width - 135, size: 8, style: :bold
+                pdf.text_box h.number_to_currency(draw_grand), at: [pdf.bounds.width - 135, pdf.cursor], width: 120, size: 8, style: :bold, align: :right
+                pdf.move_down 14
+              end
+            end
+          end
+
+          if inline_unassigned.any?
+            pdf.move_down 4
+            pdf.stroke_color 'CCCCCC'
+            pdf.dash(2)
+            pdf.stroke_horizontal_rule
+            pdf.undash
+            pdf.stroke_color '000000'
+            pdf.move_down 4
+            pdf.text 'UNASSIGNED LINE ITEMS', size: 7, color: '999999', style: :bold
+            pdf.move_down 3
+            inline_unassigned.each do |item|
+              pdf.indent(10) do
+                pdf.text_box "\u2022 #{item.description}", at: [0, pdf.cursor], width: pdf.bounds.width - 130, size: 8, color: '999999'
+                pdf.text_box h.number_to_currency(item.amount), at: [pdf.bounds.width - 130, pdf.cursor], width: 120, size: 8, align: :right, color: '999999'
+                pdf.move_down 11
+              end
+            end
+          end
+
+          home_total = sorted_draws.sum { |d| d['amount'].to_f }
+          line_items_in_draws = inline_draw_calcs.sum { |dc| dc[:items_total] }
+
+          pdf.move_down 4
+          pdf.stroke_color '333333'
+          pdf.line_width = 1
+          pdf.stroke_horizontal_rule
+          pdf.line_width = 0.5
+          pdf.stroke_color '000000'
+          pdf.move_down 6
+
+          pdf.text_box 'Home Price Draws', at: [0, pdf.cursor], width: pdf.bounds.width - 120, size: 8, color: '666666'
+          pdf.text_box h.number_to_currency(home_total), at: [pdf.bounds.width - 120, pdf.cursor], width: 120, size: 8, align: :right
+          pdf.move_down 12
+
+          if line_items_in_draws > 0
+            pdf.text_box 'Line Items in Draws', at: [0, pdf.cursor], width: pdf.bounds.width - 120, size: 8, color: '666666'
+            pdf.text_box h.number_to_currency(line_items_in_draws), at: [pdf.bounds.width - 120, pdf.cursor], width: 120, size: 8, align: :right
+            pdf.move_down 12
+          end
+
+          if inline_grand_tax > 0
+            pdf.text_box 'Total Taxes', at: [0, pdf.cursor], width: pdf.bounds.width - 120, size: 8, color: accent
+            pdf.text_box h.number_to_currency(inline_grand_tax), at: [pdf.bounds.width - 120, pdf.cursor], width: 120, size: 8, align: :right, color: accent
+            pdf.move_down 12
+          end
+
+          pdf.stroke_color 'CCCCCC'
+          pdf.stroke_horizontal_rule
+          pdf.stroke_color '000000'
+          pdf.move_down 4
+          pdf.text_box 'Grand Total', at: [0, pdf.cursor], width: pdf.bounds.width - 120, size: 10, style: :bold
+          pdf.text_box h.number_to_currency(inline_grand_draw + inline_grand_tax), at: [pdf.bounds.width - 120, pdf.cursor], width: 120, size: 10, style: :bold, align: :right
+          pdf.move_down 14
+
+        else
+          # ── INCLUDED MODE: Original compact table ──
+          draw_data = []
+          sorted_draws.each do |draw|
+            draw_data << ["#{draw['percentage']}%", draw['description'], h.number_to_currency(draw['amount'])]
+            (draw['sub_items'] || []).sort_by { |si| si['position'] || 0 }.each do |si|
+              amt = (si['amount'] || 0).to_f
+              next if amt <= 0
+              draw_data << ['', "      \u2022 #{si['description']} \u2014 #{h.number_to_currency(amt)}", '']
+            end
+          end
+
+          pdf.table(draw_data, cell_style: { borders: [], padding: [4, 6], size: 9 },
+                    column_widths: [50, pdf.bounds.width - 160, 110]) do |t|
+            t.columns(0).font_style = :bold
+            t.columns(2).align = :right
+            draw_data.each_with_index do |row, i|
+              if row[0].to_s.empty? && row[1].to_s.include?('•')
+                t.row(i).text_color = '666666'
+                t.row(i).size = 8
+              end
             end
           end
         end
