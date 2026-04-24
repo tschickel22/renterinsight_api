@@ -28,11 +28,11 @@ module Api
                     scope.map { |f| feature_payload(f) }
                   when 'articles'
                     scope = klass.includes(:knowledge_module, :knowledge_feature).order(updated_at: :desc)
-                    scope = scope.where(status: params[:status]) if params[:status].present?
+                    scope = scope.where(is_published: params[:status] == 'published') if params[:status].present?
                     scope = scope.joins(:knowledge_module).where(knowledge_modules: { key: params[:module] }) if params[:module].present?
                     scope.limit(200).map { |a| article_payload(a) }
                   when 'tours'
-                    klass.includes(:steps, :knowledge_module).order(:position, :name).map { |t| tour_payload(t, include_steps: true) }
+                    klass.includes(:steps).order(:position, :name).map { |t| tour_payload(t, include_steps: true) }
                   when 'tour_steps'
                     scope = klass.order(:position)
                     scope = scope.where(tour_id: params[:tour_id]) if params[:tour_id].present?
@@ -106,9 +106,9 @@ module Api
             failed_searches: recent.where(result_count: 0).count,
             tour_completions: tour_completions,
             total_modules: Knowledge::Module.active.count,
-            total_features: Knowledge::Feature.where(is_active: true).count,
+            total_features: Knowledge::Feature.count,
             total_articles: Knowledge::Article.count,
-            total_tours: Tour.where(is_active: true).count
+            total_tours: Tour.count
           },
           top_queries: top_queries.map { |q, c| { query: q, count: c } },
           recent_searches: recent_searches
@@ -140,10 +140,6 @@ module Api
         klass
       end
 
-      def require_platform_admin!
-        render(json: { error: 'Platform admin access required' }, status: :forbidden) unless current_user&.role == 'platform_admin'
-      end
-
       def test_intent_pattern
         query = params[:query].to_s.strip
         return render(json: { error: 'query required' }, status: :bad_request) if query.empty?
@@ -167,9 +163,9 @@ module Api
       def permitted_params_for(resource)
         case resource
         when 'modules'         then params.permit(:key, :name, :icon, :route, :description, :position, :is_active)
-        when 'features'        then params.permit(:knowledge_module_id, :key, :name, :route, :ui_selector, :permission_key, :position, :is_active)
-        when 'articles'        then params.permit(:knowledge_module_id, :knowledge_feature_id, :slug, :title, :excerpt, :content, :content_html, :article_type, :status, :position)
-        when 'tours'           then params.permit(:knowledge_module_id, :knowledge_feature_id, :name, :description, :trigger_type, :start_url, :position, :is_active)
+        when 'features'        then params.permit(:knowledge_module_id, :key, :name, :route, :ui_selector, :permission_key, :position)
+        when 'articles'        then params.permit(:knowledge_module_id, :knowledge_feature_id, :slug, :title, :excerpt, :content, :content_html, :article_type, :is_published, :position)
+        when 'tours'           then params.permit(:name, :description, :trigger_type, :start_url, :position, :is_active)
         when 'tour_steps'      then params.permit(:tour_id, :selector, :title, :content, :placement, :highlight_type, :click_required, :input_required, :position)
         when 'intent_patterns' then params.permit(:pattern, :intent_type, :entity_key, :priority, :is_active)
         when 'entity_aliases'  then params.permit(:alias_name, :canonical_key)
@@ -177,9 +173,18 @@ module Api
         end
       end
 
+      # ─── Safe attribute reader ──────────────────────────────
+      # Returns nil instead of raising if column doesn't exist
+      def safe_read(record, attr)
+        record.respond_to?(attr) ? record.send(attr) : nil
+      end
+
+      # ─── Payloads ──────────────────────────────────────────
+
       def module_payload(mod, include_features: false)
-        p = { id: mod.id, key: mod.key, name: mod.name, icon: mod.icon, route: mod.route,
-              description: mod.description, position: mod.position, is_active: mod.is_active,
+        p = { id: mod.id, key: mod.key, name: mod.name, icon: safe_read(mod, :icon), route: safe_read(mod, :route),
+              description: safe_read(mod, :description), position: mod.position,
+              is_active: safe_read(mod, :is_active) || true,
               features_count: mod.features.count }
         p[:features] = mod.features.order(:position, :name).map { |f| feature_payload(f) } if include_features
         p
@@ -187,38 +192,53 @@ module Api
 
       def feature_payload(f)
         { id: f.id, key: f.key, name: f.name, route: f.route, ui_selector: f.ui_selector,
-          permission_key: f.permission_key, position: f.position, is_active: f.is_active,
-          knowledge_module_id: f.knowledge_module_id, module_key: f.knowledge_module&.key, module_name: f.knowledge_module&.name }
+          permission_key: f.permission_key, position: f.position, is_active: true,
+          knowledge_module_id: f.knowledge_module_id,
+          module_key: f.knowledge_module&.key, module_name: f.knowledge_module&.name }
       end
 
       def article_payload(a, include_content: false)
-        p = { id: a.id, slug: a.slug, title: a.title, excerpt: a.excerpt, article_type: a.article_type,
-              status: a.status, knowledge_module_id: a.knowledge_module_id, knowledge_feature_id: a.knowledge_feature_id,
+        p = { id: a.id, slug: a.slug, title: a.title, excerpt: safe_read(a, :excerpt),
+              article_type: safe_read(a, :article_type),
+              status: a.is_published ? 'published' : 'draft',
+              is_published: a.is_published,
+              knowledge_module_id: a.knowledge_module_id,
+              knowledge_feature_id: safe_read(a, :knowledge_feature_id),
               module_key: a.knowledge_module&.key, module_name: a.knowledge_module&.name,
-              feature_key: a.knowledge_feature&.key, position: a.position,
+              feature_key: a.knowledge_feature&.key,
+              position: safe_read(a, :position),
+              views_count: safe_read(a, :views_count) || 0,
               updated_at: a.updated_at, created_at: a.created_at }
-        p.merge!(content: a.content, content_html: a.content_html) if include_content
+        p.merge!(content: a.content, content_html: safe_read(a, :content_html)) if include_content
         p
       end
 
       def tour_payload(t, include_steps: false)
-        p = { id: t.id, name: t.name, description: t.description, trigger_type: t.trigger_type,
-              start_url: t.start_url, position: t.position, is_active: t.is_active,
-              knowledge_module_id: t.knowledge_module_id, knowledge_feature_id: t.knowledge_feature_id,
-              module_key: t.knowledge_module&.key, feature_key: t.knowledge_feature&.key, steps_count: t.steps.count }
+        p = { id: t.id, name: t.name, description: safe_read(t, :description),
+              trigger_type: safe_read(t, :trigger_type),
+              start_url: safe_read(t, :start_url),
+              position: safe_read(t, :position) || 0,
+              is_active: safe_read(t, :is_active) || true,
+              module_key: safe_read(t, :knowledge_module)&.key,
+              steps_count: t.steps.count,
+              completion_count: 0 }
         p[:steps] = t.steps.order(:position).map { |s| step_payload(s) } if include_steps
         p
       end
 
       def step_payload(s)
-        { id: s.id, tour_id: s.tour_id, selector: s.selector, title: s.title, content: s.content,
-          placement: s.placement, highlight_type: s.highlight_type, click_required: s.click_required,
-          input_required: s.input_required, position: s.position }
+        { id: s.id, tour_id: s.tour_id, selector: s.selector, title: s.title,
+          content: safe_read(s, :content),
+          placement: safe_read(s, :placement) || 'bottom',
+          highlight_type: safe_read(s, :highlight_type),
+          click_required: safe_read(s, :click_required) || false,
+          input_required: safe_read(s, :input_required) || false,
+          position: s.position }
       end
 
       def pattern_payload(p)
         { id: p.id, pattern: p.pattern, intent_type: p.intent_type, entity_key: p.entity_key,
-          priority: p.priority, is_active: (p.respond_to?(:is_active) ? p.is_active : true) }
+          priority: p.priority, is_active: safe_read(p, :is_active) || true }
       end
 
       def alias_payload(a)
