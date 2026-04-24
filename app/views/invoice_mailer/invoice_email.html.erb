@@ -8,7 +8,7 @@
     .wrapper { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
     .card { background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .header { padding: 30px 30px 20px; border-bottom: 2px solid #2563EB; }
-    .logo { max-width: 180px; height: auto; margin-bottom: 10px; }
+    .logo { width: 120px; max-width: 120px; height: auto; display: block; margin-bottom: 10px; }
     .company-name { font-size: 18px; font-weight: bold; color: #333; }
     .body { padding: 30px; }
     .greeting { font-size: 16px; margin-bottom: 20px; }
@@ -30,7 +30,11 @@
       <!-- Header -->
       <div class="header">
         <% if @company.try(:logo_url).present? || @company.try(:logo).present? %>
-          <img src="<%= @company.try(:logo_url) || @company.try(:logo) %>" alt="<%= @company.name %>" class="logo"><br>
+          <img src="<%= @company.try(:logo_url) || @company.try(:logo) %>"
+               alt="<%= @company.name %>"
+               class="logo"
+               width="120"
+               style="width: 120px; max-width: 120px; height: auto; display: block; margin-bottom: 10px;">
         <% else %>
           <div class="company-name"><%= @company.name %></div>
         <% end %>
@@ -71,10 +75,21 @@
             <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right; border-bottom: 1px solid #f1f5f9;"><%= @invoice.due_date.strftime('%B %d, %Y') %></td>
           </tr>
           <% end %>
+          <% has_partial_payment = @invoice.amount_paid.to_d > 0 && @invoice.amount_due.to_d < @invoice.total.to_d %>
           <tr>
-            <td style="padding: 8px 0; font-size: 14px; color: #64748b;">Total</td>
-            <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right;"><%= number_to_currency(@invoice.total) %></td>
+            <td style="padding: 8px 0; font-size: 14px; color: #64748b;<%= ' border-bottom: 1px solid #f1f5f9;' if has_partial_payment %>">Total</td>
+            <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right;<%= ' border-bottom: 1px solid #f1f5f9;' if has_partial_payment %>"><%= number_to_currency(@invoice.total) %></td>
           </tr>
+          <% if has_partial_payment %>
+          <tr>
+            <td style="padding: 8px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #f1f5f9;">Amount Paid</td>
+            <td style="padding: 8px 0; font-size: 14px; font-weight: 600; text-align: right; color: #059669; border-bottom: 1px solid #f1f5f9;">-<%= number_to_currency(@invoice.amount_paid) %></td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; font-size: 14px; color: #64748b;">Balance Due</td>
+            <td style="padding: 8px 0; font-size: 14px; font-weight: 700; text-align: right; color: #1e293b;"><%= number_to_currency(@invoice.amount_due) %></td>
+          </tr>
+          <% end %>
         </table>
 
         <!-- CTA Button -->

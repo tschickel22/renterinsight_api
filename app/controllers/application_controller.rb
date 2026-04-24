@@ -102,15 +102,14 @@ class ApplicationController < ActionController::API
       return @impersonated_user.company_id
     end
 
-    # For platform_admin/tenant/super_admin users, allow override via X-Company-ID header (platform admin switching)
-    if current_user&.role.in?(['platform_admin', 'tenant', 'super_admin', 'admin'])
-      # Try both X-Company-ID and X-Company-Context for backward compatibility
+    # Only platform admins and super admins can override company scope via header.
+    # Previously this also allowed 'admin' and 'tenant' roles, which was a tenant-isolation hole —
+    # a company-tier admin could set X-Company-ID to another tenant and read their data.
+    if current_user&.platform_admin? || current_user&.super_admin?
       context_company_id = request.headers['X-Company-ID']&.to_i || request.headers['X-Company-Context']&.to_i
 
       if context_company_id.present? && context_company_id > 0
         Rails.logger.info "[ApplicationController] Platform admin #{current_user.email} switching to company #{context_company_id}"
-        # Verify the platform admin has access to this company
-        # For now, platform admins can access any company
         return context_company_id
       end
     end
