@@ -8,7 +8,8 @@ Invoice Number: <%= @invoice.invoice_number %>
 Invoice Date:   <%= @invoice.invoice_date.strftime('%B %d, %Y') %>
 <% if @invoice.due_date %>Due Date:       <%= @invoice.due_date.strftime('%B %d, %Y') %><% end %>
 Total:          <%= number_to_currency(@invoice.total) %>
-Amount Due:     <%= number_to_currency(@invoice.amount_due) %>
+<% if @invoice.amount_paid.to_d > 0 && @invoice.amount_due.to_d < @invoice.total.to_d %>Amount Paid:    -<%= number_to_currency(@invoice.amount_paid) %>
+Balance Due:    <%= number_to_currency(@invoice.amount_due) %><% else %>Amount Due:     <%= number_to_currency(@invoice.amount_due) %><% end %>
 
 <%= @payments_enabled ? 'VIEW & PAY ONLINE' : 'VIEW INVOICE' %>
 =================

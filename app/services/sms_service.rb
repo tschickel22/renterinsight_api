@@ -244,14 +244,14 @@ class SmsService
   def invoice_template(invoice)
     company_name = invoice.company.name
     invoice_number = invoice.invoice_number
-    amount = format_currency(invoice.total)
+    amount = format_currency(invoice.amount_due)
     due_date = invoice.due_date&.strftime('%m/%d/%Y')
     payment_link = invoice.payment_url
-    
-    message = "#{company_name}: Invoice #{invoice_number} for #{amount}"
+
+    message = "#{company_name}: Invoice #{invoice_number} balance #{amount}"
     message += " is due #{due_date}." if due_date
     message += " Pay online: #{payment_link}"
-    
+
     message
   end
   
