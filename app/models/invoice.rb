@@ -60,6 +60,7 @@ class Invoice < ApplicationRecord
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
   validates :invoice_date, presence: true
   validates :status, inclusion: { in: %w[draft finalized sent viewed partial paid overdue cancelled] }
+  validates :location_id, presence: { message: 'must be assigned — every invoice must have a location' }
   validate :draw_schedule_sub_items_within_parent
 
   # Sub-items on a draw are dollar amounts that draw down from the parent draw's calculated amount.

@@ -79,10 +79,16 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     customer_id = qb_invoice.dig('CustomerRef', 'value')
     contact = find_or_create_contact_from_qb(customer_id)
     
+    # Resolve location: prefer the handler's scoped location; otherwise fall back
+    # to the company's first active location. Invoice validation now requires
+    # location_id, so company-scoped syncs must still produce a valid row.
+    resolved_location_id = location&.id ||
+      company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
+
     # Create invoice with basic info first (without financial totals to avoid callback issues)
     invoice_data = {
       company_id: company.id,
-      location_id: location&.id,
+      location_id: resolved_location_id,
       contact_id: contact&.id,
       quickbooks_id: qb_invoice['Id'],
       invoice_number: qb_invoice['DocNumber'],

@@ -88,7 +88,22 @@ class Api::V1::InvoicesController < ApplicationController
       location_ids = permission_service.accessible_location_ids
       invoice.location_id = location_ids.first if location_ids.any?
     end
-    
+
+    # Final backstop — every invoice must have a location. If nothing resolved from
+    # params, Current context, or RBAC, fall back to the company's first active location.
+    # This enforces the 'every invoice has a location' business rule for platform admins
+    # and any caller that forgets to pass location_id.
+    if invoice.location_id.nil?
+      fallback_location = @company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first
+      if fallback_location
+        invoice.location_id = fallback_location.id
+        Rails.logger.warn "⚠️  [Invoices#create] No location provided for new invoice; falling back to #{fallback_location.name} (id=#{fallback_location.id})"
+      else
+        Rails.logger.error "🚫 [Invoices#create] Cannot create invoice — company #{@company.id} has no active locations"
+        return render json: { errors: { location_id: ['No active location available for this company'] } }, status: :unprocessable_entity
+      end
+    end
+
     if invoice.save
       Rails.logger.info "✅ [Invoices#create] Invoice saved with #{invoice.invoice_items.count} items"
       invoice.invoice_items.each_with_index do |item, idx|
@@ -361,7 +376,7 @@ class Api::V1::InvoicesController < ApplicationController
     invoice = @company.invoices.build(
       quote_id: quote.id,
       contact_id: quote.contact_id,
-      location_id: quote.location_id || Current.location_id,
+      location_id: quote.location_id || Current.location_id || @company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id,
       sales_rep_id: params[:sales_rep_id] || current_user.id, # Default to current user
       invoice_date: Date.current,
       due_date: Date.current + 30.days, # Default 30 days
