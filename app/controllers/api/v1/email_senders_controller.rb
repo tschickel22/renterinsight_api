@@ -17,10 +17,18 @@ class Api::V1::EmailSendersController < ApplicationController
   def user_senders
     return [] unless defined?(UserEmailConnection)
 
+    # Include connections for users in the current company, PLUS
+    # the current_user's own connections regardless of company scoping.
+    # This matters for platform admins (company_id=1) operating in a
+    # tenant company context (e.g. Denver RV company_id=19) — without
+    # this, their personal Gmail/Outlook would be invisible in the picker.
+    user_ids_in_company = User.where(company_id: @company.id).pluck(:id)
+    user_ids_in_company |= [current_user.id] if current_user
+
     connections = UserEmailConnection
-                    .joins(:user)
-                    .where(users: { company_id: @company.id })
+                    .where(user_id: user_ids_in_company)
                     .where(is_active: true)
+                    .includes(:user)
 
     connections.map do |conn|
       display = conn.display_name.presence ||

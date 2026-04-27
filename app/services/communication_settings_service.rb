@@ -323,6 +323,23 @@ class CommunicationSettingsService
     expires_at_str = config['oauthExpiresAt'] || config[:oauthExpiresAt]
     access_token   = config['oauthAccessToken'] || config[:oauthAccessToken]
 
+    # PREFERRED PATH: when we have a UserEmailConnection, delegate to the
+    # model's refresh_oauth_token! method which correctly reads ENV vars
+    # (GOOGLE_OAUTH_CLIENT_ID etc.) with fallback to credentials. This is
+    # the canonical refresh logic; do not duplicate it here.
+    if user_connection.present?
+      if user_connection.oauth_token_expired? && user_connection.oauth_refresh_token_encrypted.present?
+        refreshed_token = user_connection.refresh_oauth_token!
+        return refreshed_token if refreshed_token.present?
+        # Refresh failed — fall through and return whatever access_token we have
+        Rails.logger.warn "[CommunicationSettingsService] user_connection.refresh_oauth_token! returned nil for connection #{user_connection.id}"
+      end
+      # Token still valid (or refresh failed) — return current access token
+      return user_connection.oauth_token_encrypted.presence || access_token
+    end
+
+    # FALLBACK PATH: Setting-scoped (Platform/Company/Location) OAuth config —
+    # used when OAuth lives on a Setting row instead of a UserEmailConnection.
     if expires_at_str.present?
       expires_at = Time.parse(expires_at_str.to_s) rescue nil
       if expires_at && expires_at <= 5.minutes.from_now
@@ -351,8 +368,14 @@ class CommunicationSettingsService
                 else return nil
                 end
 
-    client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
-    client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+    # Read from ENV first (production / dotenv-local), fall back to credentials.
+    # Without the ENV fallback this method silently fails on any host that
+    # doesn't have credentials.yml.enc loaded for OAuth.
+    provider_env = provider.to_s == 'microsoft' ? 'MICROSOFT' : 'GOOGLE'
+    client_id     = ENV["#{provider_env}_OAUTH_CLIENT_ID"].presence ||
+                    Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+    client_secret = ENV["#{provider_env}_OAUTH_CLIENT_SECRET"].presence ||
+                    Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
 
     uri = URI(token_url)
     req = Net::HTTP::Post.new(uri)

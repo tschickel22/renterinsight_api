@@ -209,7 +209,18 @@ class Api::V1::CampaignsController < ApplicationController
     enrollment.save!
 
     result = Campaigns::CampaignSender.new(enrollment: enrollment).deliver_current_step
-    render json: { success: !!result, recipient: test_address, channel: @campaign.channel }
+    if result
+      render json: { success: true, recipient: test_address, channel: @campaign.channel }
+    else
+      last_send = enrollment.campaign_sends.order(created_at: :desc).first
+      err = last_send&.metadata.is_a?(Hash) ? last_send.metadata['error'] : nil
+      render json: {
+        success: false,
+        recipient: test_address,
+        channel: @campaign.channel,
+        error: err.presence || 'Send failed (check email connection)'
+      }
+    end
   rescue => e
     Rails.logger.error "[CampaignsController#test_send] #{e.class}: #{e.message}"
     render json: { error: e.message }, status: :unprocessable_entity

@@ -153,3 +153,6 @@ upload_box_pdfs_to_s3.rb
 manifest.json
 progress.json
 seed_stderr.log
+
+# Local env backups (created during Render→Mac migration)
+.env.backup-*
