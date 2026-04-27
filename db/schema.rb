@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_27_174137) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_27_185422) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5061,7 +5061,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_174137) do
   create_table "tag_assignments", force: :cascade do |t|
     t.integer "tag_id", null: false
     t.string "entity_type", null: false
-    t.string "entity_id", null: false
+    t.bigint "entity_id", null: false
     t.string "assigned_by"
     t.datetime "assigned_at", null: false
     t.datetime "created_at", null: false

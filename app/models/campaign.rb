@@ -37,13 +37,21 @@ class Campaign < ApplicationRecord
   def email_channel? = channel == 'email'
   def sms_channel?   = channel == 'sms'
 
+  def mixed_channel?
+    step_channels = campaign_steps.pluck(:channel).compact.uniq
+    step_channels.length > 1
+  end
+
   def can_start?
     return false unless status == 'draft'
     return false if campaign_steps.active.empty?
     return false if campaign_audience.nil?
-    if email_channel?
+
+    step_channels = campaign_steps.active.pluck(:channel).compact.uniq
+    if step_channels.include?('email') || (step_channels.empty? && email_channel?)
       return false if resolve_email_connection.nil?
-    elsif sms_channel?
+    end
+    if step_channels.include?('sms') || (step_channels.empty? && sms_channel?)
       return false if resolve_sms_sender.nil?
     end
     true

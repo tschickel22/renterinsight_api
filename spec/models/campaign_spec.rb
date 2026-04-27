@@ -210,6 +210,53 @@ RSpec.describe Campaign, type: :model do
     end
   end
 
+  # ============================================================
+  # Phase E — mixed-channel drips
+  # ============================================================
+  describe "#mixed_channel?" do
+    let(:campaign) { Campaign.create!(base_attrs) }
+
+    it "returns false when all steps share the campaign channel" do
+      campaign.campaign_steps.create!(position: 0, body_blocks: [{ "type" => "text", "html" => "hi" }])
+      campaign.campaign_steps.create!(position: 1, body_blocks: [{ "type" => "text", "html" => "again" }])
+      expect(campaign.mixed_channel?).to be(false)
+    end
+
+    it "returns true when steps mix email and sms channels" do
+      campaign.campaign_steps.create!(position: 0, channel: "email", body_blocks: [{ "type" => "text", "html" => "hi" }])
+      campaign.campaign_steps.create!(position: 1, channel: "sms", sms_body: "Hi {{first_name}}")
+      expect(campaign.mixed_channel?).to be(true)
+    end
+  end
+
+  describe "#can_start? for mixed-channel campaigns" do
+    let(:campaign) { Campaign.create!(base_attrs) }
+
+    before do
+      campaign.campaign_steps.create!(position: 0, channel: "email", body_blocks: [{ "type" => "text", "html" => "hi" }])
+      campaign.campaign_steps.create!(position: 1, channel: "sms", sms_body: "Hi {{first_name}}")
+      campaign.create_campaign_audience!(source_type: "Lead")
+    end
+
+    it "is false when no email connection is resolvable" do
+      allow(campaign).to receive(:resolve_email_connection).and_return(nil)
+      allow(campaign).to receive(:resolve_sms_sender).and_return(double("twilio"))
+      expect(campaign.can_start?).to be(false)
+    end
+
+    it "is false when no SMS sender is resolvable" do
+      allow(campaign).to receive(:resolve_email_connection).and_return(double("conn"))
+      allow(campaign).to receive(:resolve_sms_sender).and_return(nil)
+      expect(campaign.can_start?).to be(false)
+    end
+
+    it "is true when both email connection and SMS sender are resolvable" do
+      allow(campaign).to receive(:resolve_email_connection).and_return(double("conn"))
+      allow(campaign).to receive(:resolve_sms_sender).and_return(double("twilio"))
+      expect(campaign.can_start?).to be(true)
+    end
+  end
+
   describe "#can_start? for SMS campaigns" do
     let(:campaign) { Campaign.create!(base_attrs.merge(channel: "sms")) }
 

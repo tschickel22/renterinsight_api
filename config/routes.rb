@@ -1621,6 +1621,7 @@ Rails.application.routes.draw do
           post :test_send
           get :preview
           get :stats
+          get :analytics_timeseries
         end
         resource :audience, controller: 'campaign_audiences', only: [] do
           post :preview

@@ -235,6 +235,34 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
     end
   end
 
+  # ============================================================
+  # Phase E — analytics_timeseries
+  # ============================================================
+  describe "GET /api/v1/campaigns/:id/analytics_timeseries" do
+    let(:campaign) do
+      Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: "TS",
+                       campaign_type: "blast", from_identity_type: "User",
+                       from_identity_id: user.id, throttle_per_day: 100)
+    end
+
+    it "returns 200 with buckets and totals" do
+      get "/api/v1/campaigns/#{campaign.id}/analytics_timeseries", headers: auth_headers
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body["campaign_id"]).to eq(campaign.id)
+      expect(body["buckets"]).to be_an(Array)
+      expect(body["totals"]).to be_a(Hash)
+      expect(body["totals"]).to include("sent", "opened", "clicked", "replied", "bounced", "delivered")
+    end
+
+    it "defaults to 30 days when no param provided" do
+      get "/api/v1/campaigns/#{campaign.id}/analytics_timeseries", headers: auth_headers
+      body = JSON.parse(response.body)
+      expect(body["days"]).to eq(30)
+      expect(body["buckets"].size).to eq(30)
+    end
+  end
+
   describe "GET /api/v1/campaigns/merge_fields" do
     it "returns 200 with fields and grouped keys (defaults to Lead)" do
       get "/api/v1/campaigns/merge_fields", headers: auth_headers
