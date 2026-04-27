@@ -2,6 +2,7 @@
 
 class TwilioAccount < ApplicationRecord
   belongs_to :company
+  belongs_to :location, optional: true
 
   encrypts :auth_token
 
@@ -13,6 +14,17 @@ class TwilioAccount < ApplicationRecord
 
   scope :active, -> { where(status: 'active') }
   scope :provisioning, -> { where(status: 'provisioning') }
+
+  # Resolve the active TwilioAccount for a given company (optionally location-specific).
+  # Prefers an active number assigned to the location; falls back to a company-wide
+  # number (location_id IS NULL); else nil. NEVER returns master/platform.
+  def self.resolve_for(company_id:, location_id: nil)
+    if location_id.present?
+      loc = where(company_id: company_id, location_id: location_id, status: 'active').first
+      return loc if loc
+    end
+    where(company_id: company_id, location_id: nil, status: 'active').first
+  end
 
   def active? = status == 'active'
   def suspended? = status == 'suspended'

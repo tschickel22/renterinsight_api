@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_27_035141) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -776,6 +776,215 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.index ["status"], name: "index_buyer_portal_accesses_on_status"
   end
 
+  create_table "campaign_ai_generations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "campaign_id"
+    t.text "prompt", null: false
+    t.jsonb "context_snapshot", default: {}, null: false
+    t.bigint "template_id_used"
+    t.jsonb "generated_plan", default: {}, null: false
+    t.string "status", default: "generated", null: false
+    t.bigint "parent_generation_id"
+    t.string "model_version"
+    t.integer "input_tokens"
+    t.integer "output_tokens"
+    t.bigint "ai_query_log_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_id"], name: "index_campaign_ai_generations_on_campaign_id"
+    t.index ["company_id", "created_at"], name: "index_campaign_ai_generations_on_company_id_and_created_at"
+    t.index ["user_id"], name: "index_campaign_ai_generations_on_user_id"
+  end
+
+  create_table "campaign_audiences", force: :cascade do |t|
+    t.bigint "campaign_id", null: false
+    t.string "source_type", null: false
+    t.jsonb "filter_tree", default: {}, null: false
+    t.jsonb "exclude_filter_tree", default: {}, null: false
+    t.integer "estimated_count", default: 0, null: false
+    t.datetime "estimated_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.index ["campaign_id"], name: "index_campaign_audiences_on_campaign_id", unique: true
+  end
+
+  create_table "campaign_enrollments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "campaign_id", null: false
+    t.string "recipient_type", null: false
+    t.bigint "recipient_id", null: false
+    t.string "email_address_snapshot"
+    t.string "status", default: "pending", null: false
+    t.integer "current_step_index", default: 0, null: false
+    t.datetime "next_send_at"
+    t.datetime "last_sent_at"
+    t.datetime "goal_met_at"
+    t.string "goal_met_reason"
+    t.datetime "unsubscribed_at"
+    t.datetime "bounced_at"
+    t.datetime "complained_at"
+    t.string "failure_reason"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "sms_phone_snapshot"
+    t.index ["campaign_id", "recipient_type", "recipient_id"], name: "idx_campaign_enrollments_unique", unique: true
+    t.index ["campaign_id", "status", "next_send_at"], name: "idx_campaign_enrollments_due"
+    t.index ["company_id"], name: "index_campaign_enrollments_on_company_id"
+    t.index ["recipient_type", "recipient_id"], name: "index_campaign_enrollments_on_recipient_type_and_recipient_id"
+  end
+
+  create_table "campaign_events", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "campaign_id", null: false
+    t.bigint "campaign_enrollment_id"
+    t.bigint "campaign_send_id"
+    t.string "event_type", null: false
+    t.datetime "occurred_at", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_id", "event_type", "occurred_at"], name: "idx_on_campaign_id_event_type_occurred_at_fb61660f49"
+    t.index ["company_id"], name: "index_campaign_events_on_company_id"
+  end
+
+  create_table "campaign_link_tokens", force: :cascade do |t|
+    t.bigint "campaign_id", null: false
+    t.bigint "campaign_send_id", null: false
+    t.string "token", null: false
+    t.text "target_url", null: false
+    t.integer "click_count", default: 0, null: false
+    t.datetime "first_clicked_at"
+    t.datetime "last_clicked_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_send_id"], name: "index_campaign_link_tokens_on_campaign_send_id"
+    t.index ["token"], name: "index_campaign_link_tokens_on_token", unique: true
+  end
+
+  create_table "campaign_sends", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "campaign_id", null: false
+    t.bigint "campaign_step_id", null: false
+    t.bigint "campaign_enrollment_id", null: false
+    t.bigint "communication_id"
+    t.datetime "sent_at"
+    t.datetime "delivered_at"
+    t.datetime "opened_at"
+    t.integer "open_count", default: 0, null: false
+    t.datetime "clicked_at"
+    t.integer "click_count", default: 0, null: false
+    t.datetime "replied_at"
+    t.datetime "bounced_at"
+    t.string "bounce_type"
+    t.datetime "unsubscribed_at"
+    t.datetime "goal_met_at"
+    t.jsonb "inventory_vehicle_ids", default: [], null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_enrollment_id"], name: "index_campaign_sends_on_campaign_enrollment_id"
+    t.index ["campaign_id", "sent_at"], name: "index_campaign_sends_on_campaign_id_and_sent_at"
+    t.index ["communication_id"], name: "index_campaign_sends_on_communication_id"
+    t.index ["company_id"], name: "index_campaign_sends_on_company_id"
+  end
+
+  create_table "campaign_steps", force: :cascade do |t|
+    t.bigint "campaign_id", null: false
+    t.integer "position", default: 0, null: false
+    t.integer "wait_days", default: 0, null: false
+    t.integer "wait_hours", default: 0, null: false
+    t.string "subject"
+    t.string "preheader"
+    t.jsonb "body_blocks", default: [], null: false
+    t.jsonb "inventory_block_config"
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "channel", default: "email", null: false
+    t.text "sms_body"
+    t.string "media_url"
+    t.index ["campaign_id", "position"], name: "index_campaign_steps_on_campaign_id_and_position"
+  end
+
+  create_table "campaign_suppressions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "email_address"
+    t.string "reason", null: false
+    t.bigint "source_campaign_id"
+    t.datetime "suppressed_at", null: false
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "phone_number"
+    t.index ["company_id", "email_address"], name: "idx_campaign_suppressions_email_unique", unique: true, where: "(email_address IS NOT NULL)"
+    t.index ["company_id", "phone_number"], name: "idx_campaign_suppressions_phone_unique", unique: true, where: "(phone_number IS NOT NULL)"
+  end
+
+  create_table "campaign_templates", force: :cascade do |t|
+    t.bigint "company_id"
+    t.string "slug", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "category", null: false
+    t.string "vertical", null: false
+    t.jsonb "audience_hint", default: {}, null: false
+    t.jsonb "steps_template", default: [], null: false
+    t.jsonb "goal_config_template", default: {}, null: false
+    t.jsonb "send_window_template", default: {}, null: false
+    t.boolean "is_seeded", default: false, null: false
+    t.boolean "is_active", default: true, null: false
+    t.bigint "created_by_user_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "channel", default: "email", null: false
+    t.index ["category"], name: "index_campaign_templates_on_category"
+    t.index ["company_id", "slug"], name: "index_campaign_templates_on_company_id_and_slug", unique: true
+    t.index ["vertical"], name: "index_campaign_templates_on_vertical"
+  end
+
+  create_table "campaigns", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "created_by_user_id", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "status", default: "draft", null: false
+    t.string "campaign_type", null: false
+    t.string "audience_mode", default: "static", null: false
+    t.datetime "audience_snapshot_at"
+    t.string "from_identity_type", null: false
+    t.bigint "from_identity_id", null: false
+    t.string "from_display_name"
+    t.string "reply_to_address"
+    t.string "subject_default"
+    t.jsonb "goal_config", default: {}, null: false
+    t.jsonb "reply_handling", default: {}, null: false
+    t.jsonb "send_window", default: {}, null: false
+    t.integer "throttle_per_day", default: 500, null: false
+    t.string "utm_source"
+    t.string "utm_medium"
+    t.string "utm_campaign"
+    t.datetime "scheduled_at"
+    t.string "recurrence_cron"
+    t.jsonb "trigger_config", default: {}, null: false
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.jsonb "stats_cache", default: {}, null: false
+    t.boolean "is_deleted", default: false, null: false
+    t.bigint "seeded_from_template_id"
+    t.bigint "generated_from_ai_generation_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "channel", default: "email", null: false
+    t.index ["campaign_type", "status"], name: "index_campaigns_on_campaign_type_and_status"
+    t.index ["company_id", "channel"], name: "index_campaigns_on_company_id_and_channel"
+    t.index ["company_id", "status"], name: "index_campaigns_on_company_id_and_status"
+    t.index ["from_identity_type"], name: "index_campaigns_on_from_identity_type"
+  end
+
   create_table "champion_ims_retailers", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -1125,6 +1334,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.integer "user_id"
     t.bigint "workflow_run_id"
     t.string "workflow_step_id"
+    t.bigint "campaign_send_id"
+    t.index ["campaign_send_id"], name: "index_communications_on_campaign_send_id"
     t.index ["channel"], name: "index_communications_on_channel"
     t.index ["communicable_type", "communicable_id"], name: "index_communications_on_communicable"
     t.index ["communication_thread_id"], name: "index_communications_on_communication_thread_id"
@@ -1241,6 +1452,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.index ["hostname"], name: "index_company_domains_on_hostname", unique: true
     t.index ["verification_status"], name: "index_company_domains_on_verification_status"
     t.index ["website_id"], name: "index_company_domains_on_website_id"
+  end
+
+  create_table "company_email_connections", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "provider", null: false
+    t.string "email_address", null: false
+    t.string "display_name"
+    t.string "smtp_host"
+    t.integer "smtp_port", default: 587
+    t.string "smtp_username"
+    t.text "smtp_password_encrypted"
+    t.string "smtp_authentication", default: "plain"
+    t.boolean "smtp_enable_tls", default: true
+    t.boolean "smtp_enable_starttls", default: true
+    t.text "oauth_token_encrypted"
+    t.text "oauth_refresh_token_encrypted"
+    t.datetime "oauth_expires_at"
+    t.string "oauth_provider"
+    t.boolean "is_active", default: true
+    t.datetime "verified_at"
+    t.datetime "last_used_at"
+    t.datetime "last_error_at"
+    t.text "last_error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_company_email_connections_on_company_id", unique: true
   end
 
   create_table "company_floor_plan_option_overrides", force: :cascade do |t|
@@ -1410,11 +1647,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.string "delivery_state"
     t.string "delivery_zip"
     t.string "delivery_country"
+    t.boolean "email_invalid", default: false, null: false
+    t.boolean "opt_in_sms", default: false, null: false
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
     t.index ["is_deleted"], name: "index_contacts_on_is_deleted"
     t.index ["location_id"], name: "index_contacts_on_location_id"
+    t.index ["opt_in_sms"], name: "index_contacts_on_opt_in_sms"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
@@ -2607,11 +2847,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.integer "health_score", default: 0
     t.datetime "health_score_updated_at"
     t.datetime "last_activity_scored_at"
+    t.boolean "email_invalid", default: false, null: false
+    t.boolean "opt_in_sms", default: false, null: false
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["health_score"], name: "index_leads_on_health_score"
     t.index ["location_id"], name: "index_leads_on_location_id"
+    t.index ["opt_in_sms"], name: "index_leads_on_opt_in_sms"
     t.index ["owner_id", "last_activity_at"], name: "index_leads_on_owner_id_and_last_activity_at"
     t.index ["owner_id"], name: "index_leads_on_owner_id"
     t.index ["social_post_id"], name: "index_leads_on_social_post_id"
@@ -2790,6 +3033,37 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.index ["location_id"], name: "index_location_activities_on_location_id"
     t.index ["occurred_at"], name: "index_location_activities_on_occurred_at"
     t.index ["user_id"], name: "index_location_activities_on_user_id"
+  end
+
+  create_table "location_email_connections", force: :cascade do |t|
+    t.bigint "location_id", null: false
+    t.bigint "company_id", null: false
+    t.string "provider", null: false
+    t.string "email_address", null: false
+    t.string "display_name"
+    t.string "smtp_host"
+    t.integer "smtp_port", default: 587
+    t.string "smtp_username"
+    t.text "smtp_password_encrypted"
+    t.string "smtp_authentication", default: "plain"
+    t.boolean "smtp_enable_tls", default: true
+    t.boolean "smtp_enable_starttls", default: true
+    t.text "oauth_token_encrypted"
+    t.text "oauth_refresh_token_encrypted"
+    t.datetime "oauth_expires_at"
+    t.string "oauth_provider"
+    t.boolean "is_default", default: false
+    t.boolean "is_active", default: true
+    t.datetime "verified_at"
+    t.string "verification_token"
+    t.datetime "verification_sent_at"
+    t.datetime "last_used_at"
+    t.datetime "last_error_at"
+    t.text "last_error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_location_email_connections_on_company_id"
+    t.index ["location_id"], name: "index_location_email_connections_on_location_id", unique: true
   end
 
   create_table "location_manufacturers", force: :cascade do |t|
@@ -4641,6 +4915,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "max_ai_credits", default: 50, null: false
     t.index ["category"], name: "index_subscription_plans_on_category"
     t.index ["is_active", "position"], name: "index_subscription_plans_on_is_active_and_position"
     t.index ["is_active"], name: "index_subscription_plans_on_is_active"
@@ -4851,6 +5126,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.jsonb "billing_history", default: []
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "ai_credits_override"
     t.index ["company_id", "status"], name: "idx_tenant_sub_company_status"
     t.index ["company_id"], name: "index_tenant_subscriptions_on_company_id"
     t.index ["current_period_end"], name: "index_tenant_subscriptions_on_current_period_end"
@@ -4946,6 +5222,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "location_id"
+    t.index ["company_id", "location_id"], name: "index_twilio_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_twilio_accounts_on_company_id"
     t.index ["phone_number"], name: "index_twilio_accounts_on_phone_number", unique: true
     t.index ["status"], name: "index_twilio_accounts_on_status"
@@ -5722,6 +6000,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
   add_foreign_key "blog_posts_categories", "blog_categories"
   add_foreign_key "blog_posts_categories", "blog_posts"
   add_foreign_key "brochures", "companies"
+  add_foreign_key "campaign_audiences", "campaigns"
+  add_foreign_key "campaign_enrollments", "campaigns"
+  add_foreign_key "campaign_events", "campaigns"
+  add_foreign_key "campaign_sends", "campaign_enrollments"
+  add_foreign_key "campaign_sends", "campaign_steps"
+  add_foreign_key "campaign_sends", "campaigns"
+  add_foreign_key "campaign_steps", "campaigns"
   add_foreign_key "champion_ims_retailers", "companies"
   add_foreign_key "champion_ims_retailers", "locations"
   add_foreign_key "champion_ims_sync_events", "champion_ims_sync_runs"

@@ -1601,8 +1601,64 @@ Rails.application.routes.draw do
           post :step_complete
         end
       end
+
+      # ==================== EMAIL CAMPAIGNS ====================
+      resources :campaigns do
+        collection do
+          post :ai_generate
+          post 'ai_generate/:generation_id/accept', action: :ai_accept, as: :ai_accept
+          post 'ai_generate/:generation_id/refine', action: :ai_refine, as: :ai_refine
+          get :templates, to: 'campaign_templates#index'
+        end
+        member do
+          post :duplicate
+          post :start
+          post :pause
+          post :resume
+          post :archive
+          post :test_send
+          get :preview
+          get :stats
+        end
+        resource :audience, controller: 'campaign_audiences', only: [] do
+          post :preview
+          post :recompute
+          post :acknowledge_sms_compliance
+        end
+        resources :enrollments, controller: 'campaign_enrollments', only: [:index, :show] do
+          member { post :unenroll }
+        end
+        resources :events, controller: 'campaign_events', only: [:index]
+        resources :sends, controller: 'campaign_sends', only: [:index, :show]
+      end
+
+      resources :campaign_templates, only: [:index, :show] do
+        member { post :instantiate }
+      end
+
+      resources :campaign_suppressions, only: [:index, :create, :destroy]
+
+      resources :location_email_connections, path: 'location-email-connections' do
+        member do
+          post :test
+          post :set_default
+          post :send_verification
+        end
+      end
+
+      resource :company_email_connection, path: 'company-email-connection', only: [:show, :create, :update, :destroy] do
+        member do
+          post :test
+          post :send_verification
+        end
+      end
     end
   end
+
+  # ==================== EMAIL CAMPAIGN TRACKING (PUBLIC) ====================
+  get  '/t/:token',  to: 'campaign_tracking#click', as: :campaign_click
+  get  '/u/:token',  to: 'campaign_tracking#unsubscribe_show', as: :campaign_unsubscribe_show
+  post '/u/:token',  to: 'campaign_tracking#unsubscribe_confirm', as: :campaign_unsubscribe_confirm
 
   # One-time setup endpoint for Render free tier
   namespace :api do

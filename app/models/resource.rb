@@ -107,7 +107,10 @@ public
       { key: 'commission_plans', name: 'Commission Plans', category: 'operations', description: 'Configure commission plans and structures', position: 121 },
       { key: 'commission_components', name: 'Commission Components', category: 'operations', description: 'Manage commission calculation components', position: 122 },
       { key: 'commission_payments', name: 'Commission Payments', category: 'operations', description: 'Process commission payments', position: 123 },
-      
+
+      # Email Campaigns (position 125)
+      { key: 'campaigns', name: 'Email Campaigns', category: 'operations', description: 'Build and send marketing email campaigns', position: 125 },
+
       # Parts & Inventory Module (position 150-159 - grouped together)
       { key: 'parts', name: 'Parts', category: 'operations', description: 'Manage parts catalog, stock levels, and inventory transactions', position: 150 },
       { key: 'bins', name: 'Warehouse Bins', category: 'operations', description: 'Manage storage bin locations and organization', position: 151 },

@@ -18,7 +18,16 @@ module InboundEmail
       
       case token[:prefix]
       when 'reply'
-        process_reply_tracking(token[:token])
+        if token[:token].to_s.start_with?('campaign-')
+          result = Campaigns::ReplyHandler.process(token: token[:token], parsed_email: parsed_email)
+          if result.handled
+            { success: true, source: 'campaign_reply_handler', enrollment_id: result.enrollment_id, send_id: result.send_id, is_ooo: result.is_ooo }
+          else
+            { success: false, error: 'Campaign send not found for reply token' }
+          end
+        else
+          process_reply_tracking(token[:token])
+        end
       when 'crm'
         process_bcc_capture(token[:token])
       else
