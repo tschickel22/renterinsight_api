@@ -38,10 +38,11 @@ module Campaigns
       throttle = Messaging::ThrottleChecker.new(campaign: @campaign).check
       return reschedule_to(1.hour.from_now) if throttle == :throttled
 
-      if @campaign.email_channel?
-        return mark_failed('no_valid_email_connection') if @campaign.resolve_email_connection.nil?
+      step_channel = step.effective_channel
+      if step_channel == 'email'
+        return mark_failed('no_valid_email_connection') if @campaign.resolve_email_connection_for_step.nil?
       else
-        return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender.nil?
+        return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender_for_step.nil?
       end
 
       send_record = CampaignSend.create!(
@@ -49,7 +50,7 @@ module Campaigns
         campaign_step_id: step.id, campaign_enrollment_id: @enrollment.id
       )
 
-      result = @campaign.email_channel? ? deliver_email(step, send_record) : deliver_sms(step, send_record)
+      result = step_channel == 'email' ? deliver_email(step, send_record) : deliver_sms(step, send_record)
 
       if result[:success]
         send_record.update!(sent_at: Time.current, communication_id: result[:communication_id])
@@ -82,7 +83,12 @@ module Campaigns
     end
 
     def contact_value
-      @campaign.email_channel? ? @enrollment.email_address_snapshot : @enrollment.sms_phone_snapshot
+      step = current_step
+      if step&.effective_channel == 'sms'
+        @enrollment.sms_phone_snapshot
+      else
+        @enrollment.email_address_snapshot
+      end
     end
 
     def suppressed?
@@ -90,7 +96,7 @@ module Campaigns
     end
 
     def deliver_email(step, send_record)
-      conn = @campaign.resolve_email_connection
+      conn = @campaign.resolve_email_connection_for_step
       rendered = Messaging::EmailRenderer.new(
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: send_record, company: @company, base_url: @base_url
@@ -143,7 +149,7 @@ module Campaigns
     end
 
     def deliver_sms(step, send_record)
-      twilio_acct = @campaign.resolve_sms_sender
+      twilio_acct = @campaign.resolve_sms_sender_for_step
       return { success: false, error: 'no_valid_sms_sender' } unless twilio_acct
 
       rendered = Messaging::SmsRenderer.new(
@@ -199,7 +205,8 @@ module Campaigns
 
     def handle_failure(result, send_record)
       err = result[:error].to_s
-      if @campaign.email_channel?
+      step_channel = send_record.campaign_step&.effective_channel || @campaign.channel
+      if step_channel == 'email'
         if HARD_BOUNCE_PATTERNS.any? { |p| err.match?(p) }
           handle_hard_email_bounce(send_record, err)
         elsif SOFT_BOUNCE_PATTERNS.any? { |p| err.match?(p) }

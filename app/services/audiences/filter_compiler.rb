@@ -166,11 +166,10 @@ module Audiences
 
       table = scope.model.table_name
       entity_type = scope.model.name
-      # tag_assignments.entity_id is varchar — explicit cast required for join.
       tag_join_sql = <<~SQL.squish
         INNER JOIN tag_assignments
           ON tag_assignments.entity_type = '#{entity_type}'
-         AND tag_assignments.entity_id::bigint = #{table}.id
+         AND tag_assignments.entity_id = #{table}.id
         INNER JOIN tags
           ON tags.id = tag_assignments.tag_id
       SQL

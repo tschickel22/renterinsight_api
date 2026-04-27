@@ -37,14 +37,22 @@ class Campaign < ApplicationRecord
   def email_channel? = channel == 'email'
   def sms_channel?   = channel == 'sms'
 
+  def mixed_channel?
+    step_channels = campaign_steps.pluck(:channel).compact.uniq
+    step_channels.length > 1
+  end
+
   def can_start?
     return false unless status == 'draft'
     return false if campaign_steps.active.empty?
     return false if campaign_audience.nil?
-    if email_channel?
-      return false if resolve_email_connection.nil?
-    elsif sms_channel?
-      return false if resolve_sms_sender.nil?
+
+    step_channels = campaign_steps.active.pluck(:channel).compact.uniq
+    if step_channels.include?('email') || (step_channels.empty? && email_channel?)
+      return false if resolve_email_connection_for_step.nil?
+    end
+    if step_channels.include?('sms') || (step_channels.empty? && sms_channel?)
+      return false if resolve_sms_sender_for_step.nil?
     end
     true
   end
@@ -73,6 +81,34 @@ class Campaign < ApplicationRecord
       return loc_match if loc_match
     end
 
+    TwilioAccount.where(company_id: company_id, location_id: nil, status: 'active').first
+  end
+
+  # Step-level email resolver — bypasses campaign-channel guard for mixed-channel
+  # drips. Used by CampaignSender#deliver_email when sending an individual step
+  # whose channel may differ from the campaign's primary channel.
+  # Queries the same company-scoped OAuth connection tables as resolve_email_connection.
+  # NEVER falls back to platform-level senders.
+  def resolve_email_connection_for_step
+    case from_identity_type
+    when 'User'
+      UserEmailConnection.where(user_id: from_identity_id, is_active: true).first
+    when 'Location'
+      LocationEmailConnection.where(location_id: from_identity_id, is_active: true).first
+    when 'Company'
+      CompanyEmailConnection.where(company_id: from_identity_id, is_active: true).first
+    end
+  end
+
+  # Step-level SMS resolver — bypasses campaign-channel guard for mixed-channel
+  # drips. Used by CampaignSender#deliver_sms when sending an individual step.
+  # Always queries company-scoped TwilioAccount (SMS identity is always Company-level,
+  # enforced by enforce_sms_identity_constraints). NEVER falls back to master account.
+  def resolve_sms_sender_for_step
+    if location_id.present?
+      loc_match = TwilioAccount.where(company_id: company_id, location_id: location_id, status: 'active').first
+      return loc_match if loc_match
+    end
     TwilioAccount.where(company_id: company_id, location_id: nil, status: 'active').first
   end
 

@@ -62,6 +62,28 @@ RSpec.describe CampaignStep, type: :model do
       step = sms_campaign.campaign_steps.create!(position: 0, sms_body: "Hi {{first_name}}")
       expect(step.channel).to eq("sms")
     end
+
+    # Phase E — mixed-channel drips
+    it "defaults to the campaign's channel when the step's channel is blank" do
+      step = campaign.campaign_steps.create!(position: 0, body_blocks: [{ "type" => "text", "html" => "hi" }])
+      expect(step.channel).to eq(campaign.channel)
+    end
+
+    it "does NOT overwrite an explicitly-set per-step channel that differs from the campaign" do
+      # campaign.channel == 'email' (the default). Set step.channel = 'sms' explicitly.
+      step = campaign.campaign_steps.create!(position: 0, channel: "sms", sms_body: "Hi {{first_name}}")
+      step.reload
+      expect(step.channel).to eq("sms")
+      expect(campaign.channel).to eq("email")
+    end
+
+    it "allows an SMS step inside an email campaign and persists the override" do
+      step = campaign.campaign_steps.create!(position: 1, channel: "sms", sms_body: "Hi {{first_name}}")
+      # Re-save to ensure the before_validation callback doesn't clobber it on subsequent saves.
+      step.update!(sms_body: "Hi {{first_name}}, take a look")
+      step.reload
+      expect(step.channel).to eq("sms")
+    end
   end
 
   describe "SMS body validations" do

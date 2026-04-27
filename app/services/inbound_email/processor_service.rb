@@ -19,11 +19,19 @@ module InboundEmail
       case token[:prefix]
       when 'reply'
         if token[:token].to_s.start_with?('campaign-')
-          result = Campaigns::ReplyHandler.process(token: token[:token], parsed_email: parsed_email)
-          if result.handled
-            { success: true, source: 'campaign_reply_handler', enrollment_id: result.enrollment_id, send_id: result.send_id, is_ooo: result.is_ooo }
+          # First, attempt classification as bounce or auto-reply.
+          bounce_result = Campaigns::BounceHandler.process(token: token[:token], parsed_email: parsed_email)
+
+          if bounce_result.handled
+            { success: true, source: 'campaign_bounce_handler', classification: bounce_result.classification, enrollment_id: bounce_result.enrollment_id, send_id: bounce_result.send_id }
           else
-            { success: false, error: 'Campaign send not found for reply token' }
+            # Not a bounce/OOO — pass through to ReplyHandler.
+            reply_result = Campaigns::ReplyHandler.process(token: token[:token], parsed_email: parsed_email)
+            if reply_result.handled
+              { success: true, source: 'campaign_reply_handler', enrollment_id: reply_result.enrollment_id, send_id: reply_result.send_id, is_ooo: reply_result.is_ooo }
+            else
+              { success: false, error: 'Campaign send not found for reply token' }
+            end
           end
         else
           process_reply_tracking(token[:token])

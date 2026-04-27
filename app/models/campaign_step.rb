@@ -2,6 +2,11 @@ class CampaignStep < ApplicationRecord
   CHANNELS = %w[email sms].freeze
   SMS_MAX_LENGTH = 1600  # Twilio long-message hard limit
 
+  # Override the DB default of 'email' so the inherit_channel_from_campaign
+  # callback can distinguish "no explicit channel (inherit from campaign)" from
+  # "explicit per-step override". Required for mixed-channel drips (Phase E).
+  attribute :channel, :string, default: nil
+
   belongs_to :campaign
 
   validates :position, presence: true, numericality: { greater_than_or_equal_to: 0 }
@@ -31,9 +36,9 @@ class CampaignStep < ApplicationRecord
   private
 
   def inherit_channel_from_campaign
-    # Steps always match the parent campaign's channel. The DB default of
-    # 'email' kicks in for new records, so we overwrite here at validation time.
-    self.channel = campaign.channel if campaign
+    # Default to the campaign's channel only when the step has no explicit channel.
+    # This permits mixed-channel drips (e.g., email step 1, SMS step 2).
+    self.channel = campaign&.channel if channel.blank? && campaign
   end
 
   def sms_body_present_when_sms
