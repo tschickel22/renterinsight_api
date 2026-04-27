@@ -146,6 +146,54 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
     end
   end
 
+  describe "SMS channel (Phase A.5)" do
+    let(:sms_create_payload) do
+      {
+        campaign: {
+          name: "SMS Blast",
+          campaign_type: "blast",
+          channel: "sms",
+          # User passes User as identity, but the model forces Company
+          from_identity_type: "User",
+          from_identity_id: user.id
+        }
+      }
+    end
+
+    it "creates an SMS campaign with auto-coerced identity to Company" do
+      post "/api/v1/campaigns", params: sms_create_payload.to_json, headers: auth_headers
+      expect(response).to have_http_status(:created)
+      body = JSON.parse(response.body)
+      expect(body["channel"]).to eq("sms")
+      expect(body["from_identity_type"]).to eq("Company")
+      expect(body["from_identity_id"]).to eq(company.id)
+    end
+
+    it "start endpoint returns SMS-specific reason when no TwilioAccount" do
+      post "/api/v1/campaigns", params: sms_create_payload.to_json, headers: auth_headers
+      campaign = Campaign.find(JSON.parse(response.body)["id"])
+      campaign.campaign_steps.create!(position: 0, is_active: true, sms_body: "Hi {{first_name}}")
+      campaign.create_campaign_audience!(source_type: "Lead")
+
+      post "/api/v1/campaigns/#{campaign.id}/start", headers: auth_headers
+      expect(response).to have_http_status(:unprocessable_entity)
+      body = JSON.parse(response.body)
+      expect(body["reasons"]).to include(a_string_matching(/active SMS number/i))
+    end
+
+    it "start endpoint succeeds for SMS campaign with TwilioAccount + steps + audience" do
+      TwilioAccount.create!(company_id: company.id, phone_number: "+15551112222", phone_number_sid: "PN1", status: "active")
+      post "/api/v1/campaigns", params: sms_create_payload.to_json, headers: auth_headers
+      campaign = Campaign.find(JSON.parse(response.body)["id"])
+      campaign.campaign_steps.create!(position: 0, is_active: true, sms_body: "Hi {{first_name}}")
+      campaign.create_campaign_audience!(source_type: "Lead")
+
+      post "/api/v1/campaigns/#{campaign.id}/start", headers: auth_headers
+      expect(response).to have_http_status(:ok)
+      expect(campaign.reload.status).to eq("running")
+    end
+  end
+
   describe "phase B 501 endpoints" do
     let(:campaign) do
       Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: "L",

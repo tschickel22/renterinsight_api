@@ -126,7 +126,12 @@ class Api::V1::CampaignsController < ApplicationController
       reasons << 'Campaign must be in draft status' unless @campaign.status == 'draft'
       reasons << 'Campaign needs at least one active step' if @campaign.campaign_steps.where(is_active: true).empty?
       reasons << 'Campaign needs an audience' if @campaign.campaign_audience.nil?
-      reasons << 'Selected sender has no valid email connection' if @campaign.resolve_email_connection.nil?
+      if @campaign.email_channel? && @campaign.resolve_email_connection.nil?
+        reasons << 'Selected sender has no valid email connection. Connect an email account first.'
+      end
+      if @campaign.sms_channel? && @campaign.resolve_sms_sender.nil?
+        reasons << 'No active SMS number for this company. Provision one in Settings > Communications > SMS.'
+      end
       return render(json: { error: 'Cannot start campaign', reasons: reasons }, status: :unprocessable_entity)
     end
 
@@ -195,7 +200,7 @@ class Api::V1::CampaignsController < ApplicationController
 
   def campaign_params
     params.require(:campaign).permit(
-      :name, :description, :campaign_type, :audience_mode,
+      :name, :description, :campaign_type, :audience_mode, :channel,
       :from_identity_type, :from_identity_id, :from_display_name, :reply_to_address,
       :subject_default, :throttle_per_day,
       :utm_source, :utm_medium, :utm_campaign,
@@ -216,6 +221,7 @@ class Api::V1::CampaignsController < ApplicationController
       description: c.description,
       status: c.status,
       campaign_type: c.campaign_type,
+      channel: c.channel,
       audience_mode: c.audience_mode,
       from_identity_type: c.from_identity_type,
       from_identity_id: c.from_identity_id,
@@ -251,11 +257,14 @@ class Api::V1::CampaignsController < ApplicationController
     {
       id: s.id,
       position: s.position,
+      channel: s.channel,
       wait_days: s.wait_days,
       wait_hours: s.wait_hours,
       subject: s.subject,
       preheader: s.preheader,
       body_blocks: s.body_blocks,
+      sms_body: s.sms_body,
+      media_url: s.media_url,
       inventory_block_config: s.inventory_block_config,
       is_active: s.is_active
     }

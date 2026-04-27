@@ -33,6 +33,7 @@ class Api::V1::CampaignTemplatesController < ApplicationController
         name: params[:name].presence || "#{t.name} - #{Time.current.strftime('%b %-d')}",
         description: t.description,
         status: 'draft',
+        channel: t.channel || 'email',
         campaign_type: t.steps_template.is_a?(Array) && t.steps_template.length > 1 ? 'drip' : 'blast',
         audience_mode: 'static',
         from_identity_type: from_identity_type,
@@ -41,7 +42,7 @@ class Api::V1::CampaignTemplatesController < ApplicationController
         goal_config: t.goal_config_template || {},
         send_window: t.send_window_template || {},
         utm_source: 'campaign',
-        utm_medium: 'email',
+        utm_medium: t.channel == 'sms' ? 'sms' : 'email',
         utm_campaign: t.slug,
         seeded_from_template_id: t.id,
         created_by_user_id: current_user.id,
@@ -51,11 +52,14 @@ class Api::V1::CampaignTemplatesController < ApplicationController
       Array(t.steps_template).each_with_index do |step_blob, idx|
         campaign.campaign_steps.create!(
           position: idx,
+          channel: step_blob['channel'] || t.channel || 'email',
           wait_days: step_blob['wait_days'] || 0,
           wait_hours: step_blob['wait_hours'] || 0,
           subject: step_blob['subject'],
           preheader: step_blob['preheader'],
           body_blocks: step_blob['body_blocks'] || [],
+          sms_body: step_blob['sms_body'],
+          media_url: step_blob['media_url'],
           inventory_block_config: step_blob['inventory_block_config']
         )
       end

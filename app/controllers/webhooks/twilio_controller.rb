@@ -63,6 +63,33 @@ module Webhooks
 
       Rails.logger.info "[TwilioWebhook] Inbound SMS from #{from_number} to #{to_number}: #{body&.truncate(100)}"
 
+      # Campaign STOP/HELP/START handler (Phase A.5). Runs before the legacy
+      # opt-out logic below — only handles inbound messages whose number ever
+      # appeared as a campaign recipient. Returns handled=false otherwise.
+      campaign_result = Campaigns::SmsInboundHandler.process(
+        from_phone: from_number,
+        body: body,
+        to_phone: to_number
+      )
+
+      if campaign_result.handled
+        twilio_acct = TwilioAccount.find_by(
+          phone_number: Campaigns::SmsInboundHandler.normalize_phone(to_number),
+          status: 'active'
+        )
+        if twilio_acct
+          # ONE permitted use of send_via_master in campaign code paths:
+          # legally-required compliance auto-reply on inbound STOP/HELP/START.
+          # Outbound campaign sends still must NEVER use master.
+          TwilioSmsService.send_via_master(
+            to: from_number,
+            body: campaign_result.reply_body,
+            from_number: twilio_acct.phone_number
+          )
+        end
+        head :ok and return
+      end
+
       # Handle STOP/START keyword opt-out/opt-in (A2P compliance)
       stripped_body = body.to_s.strip.upcase
       stop_keywords  = %w[STOP STOPALL UNSUBSCRIBE CANCEL END QUIT].freeze

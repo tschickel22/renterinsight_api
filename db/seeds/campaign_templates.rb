@@ -367,4 +367,83 @@ CampaignTemplate.find_or_create_by(slug: "rv-show-followup", company_id: nil) do
   ]
 end
 
-puts "✅ Seeded #{CampaignTemplate.where(is_seeded: true).count} platform campaign templates"
+# ============================================================
+# === SMS TEMPLATES (Phase A.5) ===
+# ============================================================
+
+CampaignTemplate.find_or_create_by(slug: 'sms-quick-confirm-mh-buyer') do |t|
+  t.name = 'SMS — Quick Confirm (MH Buyer)'
+  t.description = 'Single SMS to quickly confirm interest in a specific home. Use after a tour, showing, or qualified lead match.'
+  t.category = 'mh_buyer_journey'
+  t.vertical = 'manufactured_home'
+  t.channel = 'sms'
+  t.is_seeded = true
+  t.is_active = true
+  t.audience_hint = {
+    'source_type' => 'Lead',
+    'filter_tree' => { 'type' => 'and', 'children' => [
+      { 'field' => 'opt_in_sms', 'operator' => 'equals', 'value' => true }
+    ]}
+  }
+  t.steps_template = [
+    {
+      'wait_days' => 0, 'wait_hours' => 0,
+      'channel' => 'sms',
+      'sms_body' => "Hi {{first_name}}, this is {{rep_name}} from {{company.name}}. Following up on the home you looked at — still interested? Reply YES and I'll send the next steps."
+    }
+  ]
+  t.goal_config_template = { 'primary_goal' => 'replied', 'remove_on_goal_met' => true }
+  t.send_window_template = { 'business_hours_only' => true, 'tcpa_quiet_hours' => true }
+end
+
+CampaignTemplate.find_or_create_by(slug: 'sms-appointment-reminder') do |t|
+  t.name = 'SMS — Appointment Reminder'
+  t.description = '24h-before reminder for scheduled tours, deliveries, or appointments. Designed for triggered campaigns tied to calendar events.'
+  t.category = 'event_followup'
+  t.vertical = 'universal'
+  t.channel = 'sms'
+  t.is_seeded = true
+  t.is_active = true
+  t.audience_hint = {
+    'source_type' => 'Contact',
+    'filter_tree' => { 'type' => 'and', 'children' => [
+      { 'field' => 'opt_in_sms', 'operator' => 'equals', 'value' => true }
+    ]}
+  }
+  t.steps_template = [
+    {
+      'wait_days' => 0, 'wait_hours' => 0,
+      'channel' => 'sms',
+      'sms_body' => "Reminder: Your appointment with {{company.name}} is tomorrow. See you soon! Reply with any questions."
+    }
+  ]
+  t.goal_config_template = { 'primary_goal' => 'replied', 'remove_on_goal_met' => false }
+  t.send_window_template = { 'business_hours_only' => true, 'tcpa_quiet_hours' => true }
+end
+
+CampaignTemplate.find_or_create_by(slug: 'sms-new-lead-followup-rv') do |t|
+  t.name = 'SMS — New Lead Quick Follow-up (RV)'
+  t.description = 'Sent within minutes of an RV lead capture. Speed-to-lead — first to respond wins. Designed for triggered campaigns.'
+  t.category = 'rv_buyer_journey'
+  t.vertical = 'rv'
+  t.channel = 'sms'
+  t.is_seeded = true
+  t.is_active = true
+  t.audience_hint = {
+    'source_type' => 'Lead',
+    'filter_tree' => { 'type' => 'and', 'children' => [
+      { 'field' => 'opt_in_sms', 'operator' => 'equals', 'value' => true }
+    ]}
+  }
+  t.steps_template = [
+    {
+      'wait_days' => 0, 'wait_hours' => 0,
+      'channel' => 'sms',
+      'sms_body' => "Hey {{first_name}}, thanks for your interest in {{company.name}}! When's a good time to chat about what you're looking for in an RV?"
+    }
+  ]
+  t.goal_config_template = { 'primary_goal' => 'replied', 'remove_on_goal_met' => true }
+  t.send_window_template = { 'business_hours_only' => true, 'tcpa_quiet_hours' => true }
+end
+
+puts "✅ Seeded #{CampaignTemplate.where(is_seeded: true).count} platform templates total (#{CampaignTemplate.where(is_seeded: true, channel: 'sms').count} SMS, #{CampaignTemplate.where(is_seeded: true, channel: 'email').count} email)"

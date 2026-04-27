@@ -9,7 +9,7 @@ class SmsUsageLog < ApplicationRecord
   validates :billing_period, presence: true,
             format: { with: /\A\d{4}-\d{2}\z/, message: 'must be in YYYY-MM format' }
   validates :direction, presence: true, inclusion: { in: %w[inbound outbound] }
-  validates :source, presence: true, inclusion: { in: %w[manual sequence inbound] }
+  validates :source, presence: true, inclusion: { in: %w[manual sequence inbound campaign] }
 
   scope :for_period, ->(period) { where(billing_period: period) }
   scope :current_period, -> { for_period(Time.current.strftime('%Y-%m')) }

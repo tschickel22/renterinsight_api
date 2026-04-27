@@ -7,11 +7,17 @@ class CampaignEnrollment < ApplicationRecord
   has_many :campaign_events
 
   validates :status, inclusion: { in: STATUSES }
-  validates :email_address_snapshot, presence: true
   validates :recipient_id, uniqueness: { scope: [:campaign_id, :recipient_type] }
+  validate :contact_snapshot_present
 
   scope :active, -> { where(status: %w[pending active]) }
   scope :due_for_send, -> { active.where('next_send_at <= ?', Time.current) }
+
+  def contact_snapshot_present
+    if email_address_snapshot.blank? && sms_phone_snapshot.blank?
+      errors.add(:base, 'Either email_address_snapshot or sms_phone_snapshot must be present')
+    end
+  end
 
   def advance_to_next_step
     next_index = current_step_index + 1

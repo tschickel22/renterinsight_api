@@ -48,4 +48,80 @@ RSpec.describe CampaignStep, type: :model do
       expect(step.body_blocks).to eq([])
     end
   end
+
+  # ============================================================
+  # Phase A.5 — SMS channel
+  # ============================================================
+  describe "channel inheritance" do
+    it "inherits channel from the parent campaign on save" do
+      sms_campaign = Campaign.create!(
+        company_id: company.id, created_by_user_id: user.id, name: "SMS",
+        campaign_type: "blast", channel: "sms",
+        from_identity_type: "User", from_identity_id: user.id, throttle_per_day: 100
+      )
+      step = sms_campaign.campaign_steps.create!(position: 0, sms_body: "Hi {{first_name}}")
+      expect(step.channel).to eq("sms")
+    end
+  end
+
+  describe "SMS body validations" do
+    let(:sms_campaign) do
+      Campaign.create!(
+        company_id: company.id, created_by_user_id: user.id, name: "SMS",
+        campaign_type: "blast", channel: "sms",
+        from_identity_type: "User", from_identity_id: user.id, throttle_per_day: 100
+      )
+    end
+
+    it "requires sms_body when channel is sms" do
+      step = sms_campaign.campaign_steps.build(position: 0, sms_body: nil)
+      expect(step).not_to be_valid
+      expect(step.errors[:sms_body]).to include(/must be present/i)
+    end
+
+    it "rejects sms_body longer than SMS_MAX_LENGTH" do
+      step = sms_campaign.campaign_steps.build(position: 0, sms_body: "a" * (CampaignStep::SMS_MAX_LENGTH + 5))
+      expect(step).not_to be_valid
+      expect(step.errors[:sms_body]).to include(/must be #{CampaignStep::SMS_MAX_LENGTH}/)
+    end
+
+    it "rejects inventory_block_config when channel is sms" do
+      step = sms_campaign.campaign_steps.build(
+        position: 0, sms_body: "Hi", inventory_block_config: { "mode" => "segment_based" }
+      )
+      expect(step).not_to be_valid
+      expect(step.errors[:inventory_block_config]).to be_present
+    end
+  end
+
+  describe "ensure_sms_stop_footer" do
+    let(:sms_campaign) do
+      Campaign.create!(
+        company_id: company.id, created_by_user_id: user.id, name: "SMS",
+        campaign_type: "blast", channel: "sms",
+        from_identity_type: "User", from_identity_id: user.id, throttle_per_day: 100
+      )
+    end
+
+    it "auto-appends 'Reply STOP to unsubscribe' when missing" do
+      step = sms_campaign.campaign_steps.create!(position: 0, sms_body: "Hi there")
+      step.reload
+      expect(step.sms_body).to include("Reply STOP to unsubscribe")
+    end
+
+    it "does NOT duplicate the footer when STOP language already present" do
+      step = sms_campaign.campaign_steps.create!(position: 0, sms_body: "Hi there. Reply STOP to opt out.")
+      step.reload
+      stop_count = step.sms_body.scan(/Reply STOP/i).length
+      expect(stop_count).to eq(1)
+    end
+
+    it "rejects bodies that pack the SMS too tight to fit the footer" do
+      tight_body = "a" * (CampaignStep::SMS_MAX_LENGTH - 5)
+      step = sms_campaign.campaign_steps.build(position: 0, sms_body: tight_body)
+      step.valid?
+      step.save # triggers ensure_sms_stop_footer
+      expect(step.errors[:sms_body]).to include(/leaves no room/i)
+    end
+  end
 end

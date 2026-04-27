@@ -1,5 +1,5 @@
 class CampaignEvent < ApplicationRecord
-  EVENT_TYPES = %w[enrolled unenrolled step_scheduled step_skipped goal_met paused resumed failed].freeze
+  EVENT_TYPES = %w[enrolled unenrolled step_scheduled step_skipped goal_met paused resumed failed compliance_acknowledgment sms_stop sms_help sms_start].freeze
 
   belongs_to :campaign
   belongs_to :campaign_enrollment, optional: true

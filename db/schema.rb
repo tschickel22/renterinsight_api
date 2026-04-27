@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_27_035141) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -806,6 +806,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.datetime "estimated_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "metadata", default: {}, null: false
     t.index ["campaign_id"], name: "index_campaign_audiences_on_campaign_id", unique: true
   end
 
@@ -814,7 +815,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.bigint "campaign_id", null: false
     t.string "recipient_type", null: false
     t.bigint "recipient_id", null: false
-    t.string "email_address_snapshot", null: false
+    t.string "email_address_snapshot"
     t.string "status", default: "pending", null: false
     t.integer "current_step_index", default: 0, null: false
     t.datetime "next_send_at"
@@ -828,6 +829,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.jsonb "metadata", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "sms_phone_snapshot"
     t.index ["campaign_id", "recipient_type", "recipient_id"], name: "idx_campaign_enrollments_unique", unique: true
     t.index ["campaign_id", "status", "next_send_at"], name: "idx_campaign_enrollments_due"
     t.index ["company_id"], name: "index_campaign_enrollments_on_company_id"
@@ -901,19 +903,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.boolean "is_active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "channel", default: "email", null: false
+    t.text "sms_body"
+    t.string "media_url"
     t.index ["campaign_id", "position"], name: "index_campaign_steps_on_campaign_id_and_position"
   end
 
   create_table "campaign_suppressions", force: :cascade do |t|
     t.bigint "company_id", null: false
-    t.string "email_address", null: false
+    t.string "email_address"
     t.string "reason", null: false
     t.bigint "source_campaign_id"
     t.datetime "suppressed_at", null: false
     t.text "notes"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["company_id", "email_address"], name: "index_campaign_suppressions_on_company_id_and_email_address", unique: true
+    t.string "phone_number"
+    t.index ["company_id", "email_address"], name: "idx_campaign_suppressions_email_unique", unique: true, where: "(email_address IS NOT NULL)"
+    t.index ["company_id", "phone_number"], name: "idx_campaign_suppressions_phone_unique", unique: true, where: "(phone_number IS NOT NULL)"
   end
 
   create_table "campaign_templates", force: :cascade do |t|
@@ -932,6 +939,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.bigint "created_by_user_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "channel", default: "email", null: false
     t.index ["category"], name: "index_campaign_templates_on_category"
     t.index ["company_id", "slug"], name: "index_campaign_templates_on_company_id_and_slug", unique: true
     t.index ["vertical"], name: "index_campaign_templates_on_vertical"
@@ -970,7 +978,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.bigint "generated_from_ai_generation_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "channel", default: "email", null: false
     t.index ["campaign_type", "status"], name: "index_campaigns_on_campaign_type_and_status"
+    t.index ["company_id", "channel"], name: "index_campaigns_on_company_id_and_channel"
     t.index ["company_id", "status"], name: "index_campaigns_on_company_id_and_status"
     t.index ["from_identity_type"], name: "index_campaigns_on_from_identity_type"
   end
@@ -1638,11 +1648,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.string "delivery_zip"
     t.string "delivery_country"
     t.boolean "email_invalid", default: false, null: false
+    t.boolean "opt_in_sms", default: false, null: false
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
     t.index ["is_deleted"], name: "index_contacts_on_is_deleted"
     t.index ["location_id"], name: "index_contacts_on_location_id"
+    t.index ["opt_in_sms"], name: "index_contacts_on_opt_in_sms"
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
@@ -2836,11 +2848,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.datetime "health_score_updated_at"
     t.datetime "last_activity_scored_at"
     t.boolean "email_invalid", default: false, null: false
+    t.boolean "opt_in_sms", default: false, null: false
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["health_score"], name: "index_leads_on_health_score"
     t.index ["location_id"], name: "index_leads_on_location_id"
+    t.index ["opt_in_sms"], name: "index_leads_on_opt_in_sms"
     t.index ["owner_id", "last_activity_at"], name: "index_leads_on_owner_id_and_last_activity_at"
     t.index ["owner_id"], name: "index_leads_on_owner_id"
     t.index ["social_post_id"], name: "index_leads_on_social_post_id"
@@ -5208,6 +5222,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_025818) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "location_id"
+    t.index ["company_id", "location_id"], name: "index_twilio_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_twilio_accounts_on_company_id"
     t.index ["phone_number"], name: "index_twilio_accounts_on_phone_number", unique: true
     t.index ["status"], name: "index_twilio_accounts_on_status"

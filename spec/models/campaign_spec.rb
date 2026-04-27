@@ -128,4 +128,110 @@ RSpec.describe Campaign, type: :model do
       expect(campaign.can_start?).to be(true)
     end
   end
+
+  # ============================================================
+  # Phase A.5 — SMS channel
+  # ============================================================
+  describe "channel" do
+    it "validates inclusion in CHANNELS" do
+      c = Campaign.new(base_attrs.merge(channel: "fax"))
+      expect(c).not_to be_valid
+      expect(c.errors[:channel]).to be_present
+    end
+
+    it "defaults to email for new campaigns when not specified" do
+      c = Campaign.create!(base_attrs)
+      expect(c.channel).to eq("email")
+      expect(c.email_channel?).to be(true)
+      expect(c.sms_channel?).to be(false)
+    end
+
+    it "supports sms channel" do
+      c = Campaign.create!(base_attrs.merge(channel: "sms"))
+      expect(c.sms_channel?).to be(true)
+    end
+  end
+
+  describe "enforce_sms_identity_constraints callback" do
+    it "forces from_identity_type='Company' and from_identity_id=company_id when channel=sms" do
+      c = Campaign.create!(base_attrs.merge(channel: "sms", from_identity_type: "User", from_identity_id: user.id))
+      expect(c.from_identity_type).to eq("Company")
+      expect(c.from_identity_id).to eq(company.id)
+    end
+
+    it "leaves identity untouched when channel=email" do
+      c = Campaign.create!(base_attrs)
+      expect(c.from_identity_type).to eq("User")
+      expect(c.from_identity_id).to eq(user.id)
+    end
+  end
+
+  describe "#resolve_sms_sender" do
+    it "returns nil when channel is email" do
+      c = Campaign.create!(base_attrs)
+      TwilioAccount.create!(company_id: company.id, phone_number: "+15551112222", phone_number_sid: "PN1", status: "active")
+      expect(c.resolve_sms_sender).to be_nil
+    end
+
+    it "returns nil when no active TwilioAccount exists for the company" do
+      c = Campaign.create!(base_attrs.merge(channel: "sms"))
+      expect(c.resolve_sms_sender).to be_nil
+    end
+
+    it "returns the company-wide TwilioAccount when present (no location)" do
+      acct = TwilioAccount.create!(company_id: company.id, phone_number: "+15551112222", phone_number_sid: "PN1", status: "active")
+      c = Campaign.create!(base_attrs.merge(channel: "sms"))
+      expect(c.resolve_sms_sender).to eq(acct)
+    end
+
+    it "prefers the location-scoped TwilioAccount when campaign has location_id" do
+      location = company.locations.create!(name: "Loc A")
+      company_acct  = TwilioAccount.create!(company_id: company.id, phone_number: "+15551112222", phone_number_sid: "PN1", status: "active")
+      location_acct = TwilioAccount.create!(company_id: company.id, location_id: location.id, phone_number: "+15553334444", phone_number_sid: "PN2", status: "active")
+      c = Campaign.create!(base_attrs.merge(channel: "sms", location_id: location.id))
+      expect(c.resolve_sms_sender).to eq(location_acct)
+      # Without location_id, falls back to company-wide
+      c2 = Campaign.create!(base_attrs.merge(channel: "sms", name: "S2"))
+      expect(c2.resolve_sms_sender).to eq(company_acct)
+    end
+
+    it "NEVER returns a TwilioAccount belonging to a different company" do
+      other_company = Company.create!(name: "Other-#{SecureRandom.hex(4)}")
+      TwilioAccount.create!(company_id: other_company.id, phone_number: "+15559998888", phone_number_sid: "PN9", status: "active")
+      c = Campaign.create!(base_attrs.merge(channel: "sms"))
+      expect(c.resolve_sms_sender).to be_nil
+    end
+
+    it "NEVER falls back to a master/platform number when company has none" do
+      # Even with the platform's TWILIO_PHONE_NUMBER env set, resolve_sms_sender
+      # only looks at the TwilioAccount table — never master.
+      c = Campaign.create!(base_attrs.merge(channel: "sms"))
+      expect(c.resolve_sms_sender).to be_nil
+    end
+  end
+
+  describe "#can_start? for SMS campaigns" do
+    let(:campaign) { Campaign.create!(base_attrs.merge(channel: "sms")) }
+
+    it "is false when there is no active TwilioAccount" do
+      campaign.campaign_steps.create!(position: 0, is_active: true, sms_body: "hi {{first_name}}")
+      campaign.create_campaign_audience!(source_type: "Lead")
+      expect(campaign.can_start?).to be(false)
+    end
+
+    it "is true when TwilioAccount + steps + audience all present" do
+      TwilioAccount.create!(company_id: company.id, phone_number: "+15551112222", phone_number_sid: "PN1", status: "active")
+      campaign.campaign_steps.create!(position: 0, is_active: true, sms_body: "hi {{first_name}}")
+      campaign.create_campaign_audience!(source_type: "Lead")
+      expect(campaign.can_start?).to be(true)
+    end
+
+    it "does NOT require an email connection for SMS campaigns" do
+      TwilioAccount.create!(company_id: company.id, phone_number: "+15551112222", phone_number_sid: "PN1", status: "active")
+      campaign.campaign_steps.create!(position: 0, is_active: true, sms_body: "hi {{first_name}}")
+      campaign.create_campaign_audience!(source_type: "Lead")
+      expect(UserEmailConnection.where(user_id: user.id).count).to eq(0)
+      expect(campaign.can_start?).to be(true)
+    end
+  end
 end

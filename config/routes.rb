@@ -1623,6 +1623,7 @@ Rails.application.routes.draw do
         resource :audience, controller: 'campaign_audiences', only: [] do
           post :preview
           post :recompute
+          post :acknowledge_sms_compliance
         end
         resources :enrollments, controller: 'campaign_enrollments', only: [:index, :show] do
           member { post :unenroll }
