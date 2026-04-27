@@ -194,13 +194,7 @@ module Campaigns
 
     def formatted_from_for(conn)
       return nil unless conn
-      if conn.respond_to?(:formatted_from_address)
-        conn.formatted_from_address
-      else
-        addr = conn.try(:from_email_address) || conn.try(:email_address) || conn.try(:email)
-        name = conn.try(:from_display_name) || conn.try(:display_name)
-        name.present? ? %("#{name}" <#{addr}>) : addr
-      end
+      conn.try(:email_address) || conn.try(:from_email_address) || conn.try(:email)
     end
 
     def handle_failure(result, send_record)
