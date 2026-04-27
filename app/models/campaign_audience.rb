@@ -2,6 +2,7 @@ class CampaignAudience < ApplicationRecord
   SOURCE_TYPES = %w[Lead Contact Account].freeze
 
   belongs_to :campaign
+  belongs_to :saved_audience, class_name: 'Audience', optional: true
 
   validates :source_type, inclusion: { in: SOURCE_TYPES }
 

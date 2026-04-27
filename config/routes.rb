@@ -1640,6 +1640,21 @@ Rails.application.routes.draw do
 
       resources :campaign_suppressions, only: [:index, :create, :destroy]
 
+      resources :audiences do
+        member do
+          post :preview
+          post :refresh
+          post :archive
+          post :unarchive
+        end
+        collection do
+          post :preview_dry_run
+          post :ai_generate
+          post :ai_refine
+          post :ai_accept
+        end
+      end
+
       resources :email_senders, only: [:index]
 
       resources :location_email_connections, path: 'location-email-connections' do

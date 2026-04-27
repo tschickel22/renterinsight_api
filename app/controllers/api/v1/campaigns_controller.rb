@@ -60,6 +60,7 @@ class Api::V1::CampaignsController < ApplicationController
     @campaign.created_by_user_id = current_user.id
 
     if @campaign.save
+      apply_saved_audience(@campaign) if params[:saved_audience_id].present?
       render json: campaign_json(@campaign, full: true), status: :created
     else
       render json: { errors: @campaign.errors.full_messages }, status: :unprocessable_entity
@@ -342,6 +343,18 @@ class Api::V1::CampaignsController < ApplicationController
     @campaign = @company.campaigns.active.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Campaign not found' }, status: :not_found
+  end
+
+  def apply_saved_audience(campaign)
+    audience = @company.audiences.active.find_by(id: params[:saved_audience_id])
+    return unless audience
+
+    campaign.create_campaign_audience!(
+      source_type: audience.source_type,
+      filter_tree: audience.filter_tree,
+      exclude_filter_tree: audience.exclude_filter_tree,
+      saved_audience_id: audience.id
+    )
   end
 
   def campaign_params
