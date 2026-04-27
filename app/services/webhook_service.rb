@@ -22,6 +22,9 @@ class WebhookService
     workflow_rule.activated workflow_rule.paused
     workflow_run.started workflow_run.completed workflow_run.failed
     social_post.created social_post.updated social_post.deleted social_post.published
+    campaign.started campaign.paused campaign.resumed campaign.completed campaign.archived
+    campaign.enrollment_created campaign.enrollment_completed campaign.goal_met
+    campaign.unsubscribed campaign.bounced campaign.complained
   ].freeze
 
   # Fire a webhook event for a company

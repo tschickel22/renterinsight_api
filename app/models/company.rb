@@ -47,6 +47,14 @@ class Company < ApplicationRecord
   has_many :social_post_schedules, dependent: :destroy
   has_many :ad_campaigns, dependent: :destroy
   has_many :social_comments, dependent: :destroy
+
+  # Email Campaigns
+  has_many :campaigns, dependent: :destroy
+  has_many :campaign_suppressions, dependent: :destroy
+  has_many :campaign_templates, dependent: :destroy
+  has_many :campaign_ai_generations, dependent: :destroy
+  has_many :location_email_connections, dependent: :destroy
+  has_one  :company_email_connection, dependent: :destroy
   has_many :territories, dependent: :destroy
   has_many :nurture_sequences, dependent: :destroy
   has_many :nurture_enrollments, dependent: :destroy

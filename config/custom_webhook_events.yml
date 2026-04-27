@@ -151,3 +151,38 @@ events:
   - value: social_post.published
     label: Social Post Published
     category: Social Media Events
+
+  # ── Email Campaign Events ──
+  - value: campaign.started
+    label: Campaign Started
+    category: Email Campaign Events
+  - value: campaign.paused
+    label: Campaign Paused
+    category: Email Campaign Events
+  - value: campaign.resumed
+    label: Campaign Resumed
+    category: Email Campaign Events
+  - value: campaign.completed
+    label: Campaign Completed
+    category: Email Campaign Events
+  - value: campaign.archived
+    label: Campaign Archived
+    category: Email Campaign Events
+  - value: campaign.enrollment_created
+    label: Campaign Enrollment Created
+    category: Email Campaign Events
+  - value: campaign.enrollment_completed
+    label: Campaign Enrollment Completed
+    category: Email Campaign Events
+  - value: campaign.goal_met
+    label: Campaign Goal Met
+    category: Email Campaign Events
+  - value: campaign.unsubscribed
+    label: Campaign Unsubscribed
+    category: Email Campaign Events
+  - value: campaign.bounced
+    label: Campaign Bounced
+    category: Email Campaign Events
+  - value: campaign.complained
+    label: Campaign Complained
+    category: Email Campaign Events
