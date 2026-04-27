@@ -77,6 +77,21 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
       campaign = Campaign.find(body["id"])
       expect(campaign.company_id).to eq(company.id)
     end
+
+    it "snapshots a saved audience onto the campaign when saved_audience_id is provided" do
+      saved = Audience.create!(
+        company: company, name: "Hot Leads", source_type: "Lead",
+        filter_tree: { 'type' => 'and', 'children' => [{ 'field' => 'status', 'operator' => 'equals', 'value' => 'qualified' }] }
+      )
+      payload = create_payload.merge(saved_audience_id: saved.id)
+      post "/api/v1/campaigns", params: payload.to_json, headers: auth_headers
+      expect(response).to have_http_status(:created)
+      body = JSON.parse(response.body)
+      campaign = Campaign.find(body["id"])
+      expect(campaign.campaign_audience).not_to be_nil
+      expect(campaign.campaign_audience.saved_audience_id).to eq(saved.id)
+      expect(campaign.campaign_audience.filter_tree).to eq(saved.filter_tree)
+    end
   end
 
   describe "GET /api/v1/campaigns/:id" do

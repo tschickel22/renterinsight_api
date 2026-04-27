@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_27_035141) do
+ActiveRecord::Schema[8.0].define(version: 2026_04_27_174137) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -590,6 +590,54 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_035141) do
     t.index ["user_id"], name: "index_assignment_work_logs_on_user_id"
   end
 
+  create_table "audience_ai_generations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id"
+    t.text "prompt", null: false
+    t.jsonb "context_snapshot", default: {}
+    t.jsonb "generated_filter_tree", default: {}, null: false
+    t.string "status", default: "generated", null: false
+    t.bigint "parent_generation_id"
+    t.string "model_version"
+    t.integer "input_tokens"
+    t.integer "output_tokens"
+    t.bigint "ai_query_log_id"
+    t.string "source_type", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "audience_id"
+    t.index ["ai_query_log_id"], name: "idx_audience_ai_gen_log"
+    t.index ["audience_id"], name: "idx_audience_ai_gen_audience"
+    t.index ["company_id"], name: "index_audience_ai_generations_on_company_id"
+    t.index ["parent_generation_id"], name: "idx_audience_ai_gen_parent"
+    t.index ["user_id"], name: "index_audience_ai_generations_on_user_id"
+  end
+
+  create_table "audiences", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "created_by_user_id"
+    t.string "name", null: false
+    t.text "description"
+    t.string "source_type", null: false
+    t.jsonb "filter_tree", default: {}, null: false
+    t.jsonb "exclude_filter_tree", default: {}
+    t.integer "estimated_count"
+    t.datetime "estimated_at"
+    t.bigint "generated_from_ai_generation_id"
+    t.boolean "is_archived", default: false, null: false
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_archived"], name: "index_audiences_on_company_id_and_is_archived"
+    t.index ["company_id", "name"], name: "index_audiences_on_company_id_and_name"
+    t.index ["company_id", "source_type"], name: "index_audiences_on_company_id_and_source_type"
+    t.index ["company_id"], name: "index_audiences_on_company_id"
+    t.index ["created_by_user_id"], name: "index_audiences_on_created_by_user_id"
+    t.index ["generated_from_ai_generation_id"], name: "idx_audiences_on_ai_gen"
+    t.index ["location_id"], name: "index_audiences_on_location_id"
+  end
+
   create_table "bank_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id", null: false
@@ -807,7 +855,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_035141) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "metadata", default: {}, null: false
+    t.bigint "saved_audience_id"
     t.index ["campaign_id"], name: "index_campaign_audiences_on_campaign_id", unique: true
+    t.index ["saved_audience_id"], name: "idx_campaign_audiences_saved_audience"
   end
 
   create_table "campaign_enrollments", force: :cascade do |t|
@@ -5991,6 +6041,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_035141) do
   add_foreign_key "approval_workflows", "users", column: "requested_by_id"
   add_foreign_key "assignment_work_logs", "contractor_assignments"
   add_foreign_key "assignment_work_logs", "contractors"
+  add_foreign_key "audience_ai_generations", "ai_query_logs"
+  add_foreign_key "audience_ai_generations", "audience_ai_generations", column: "parent_generation_id"
+  add_foreign_key "audience_ai_generations", "audiences"
+  add_foreign_key "audience_ai_generations", "companies"
+  add_foreign_key "audience_ai_generations", "users"
+  add_foreign_key "audiences", "audience_ai_generations", column: "generated_from_ai_generation_id"
+  add_foreign_key "audiences", "companies"
+  add_foreign_key "audiences", "locations"
+  add_foreign_key "audiences", "users", column: "created_by_user_id"
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
   add_foreign_key "bins", "locations"
@@ -6000,6 +6059,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_035141) do
   add_foreign_key "blog_posts_categories", "blog_categories"
   add_foreign_key "blog_posts_categories", "blog_posts"
   add_foreign_key "brochures", "companies"
+  add_foreign_key "campaign_audiences", "audiences", column: "saved_audience_id"
   add_foreign_key "campaign_audiences", "campaigns"
   add_foreign_key "campaign_enrollments", "campaigns"
   add_foreign_key "campaign_events", "campaigns"

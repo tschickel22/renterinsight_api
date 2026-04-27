@@ -53,6 +53,8 @@ class Company < ApplicationRecord
   has_many :campaign_suppressions, dependent: :destroy
   has_many :campaign_templates, dependent: :destroy
   has_many :campaign_ai_generations, dependent: :destroy
+  has_many :audiences, dependent: :destroy
+  has_many :audience_ai_generations, dependent: :destroy
   has_many :location_email_connections, dependent: :destroy
   has_one  :company_email_connection, dependent: :destroy
   has_many :territories, dependent: :destroy
