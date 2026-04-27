@@ -59,6 +59,13 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       }
     )
 
+    if defined?(WebhookService)
+      WebhookService.fire(
+        company_id: @company.id, event: 'campaign.compliance_acknowledged',
+        payload: { campaign_id: @campaign.id, user_id: current_user.id, acknowledged_at: meta['compliance_override_at'] }
+      )
+    end
+
     render json: { success: true, acknowledged_at: meta['compliance_override_at'] }
   end
 

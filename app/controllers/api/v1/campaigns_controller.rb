@@ -1,6 +1,6 @@
 class Api::V1::CampaignsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats ai_accept ai_refine]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -137,6 +137,12 @@ class Api::V1::CampaignsController < ApplicationController
 
     new_status = (@campaign.scheduled_at.present? && @campaign.scheduled_at > Time.current) ? 'scheduled' : 'running'
     @campaign.update!(status: new_status, started_at: Time.current)
+
+    if new_status == 'running' && defined?(WebhookService)
+      WebhookService.fire(company_id: @company.id, event: 'campaign.started', payload: { campaign_id: @campaign.id })
+      CampaignAudienceEnrollerJob.perform_later(@campaign.id) if defined?(CampaignAudienceEnrollerJob)
+    end
+
     render json: campaign_json(@campaign, full: true)
   end
 
@@ -144,6 +150,9 @@ class Api::V1::CampaignsController < ApplicationController
     return unless authorize_action!('campaigns', 'update')
     return render(json: { error: "Cannot pause #{@campaign.status} campaign" }, status: :unprocessable_entity) unless %w[running scheduled].include?(@campaign.status)
     @campaign.update!(status: 'paused')
+    if defined?(WebhookService)
+      WebhookService.fire(company_id: @company.id, event: 'campaign.paused', payload: { campaign_id: @campaign.id })
+    end
     render json: campaign_json(@campaign, full: true)
   end
 
@@ -151,23 +160,96 @@ class Api::V1::CampaignsController < ApplicationController
     return unless authorize_action!('campaigns', 'update')
     return render(json: { error: "Cannot resume #{@campaign.status} campaign" }, status: :unprocessable_entity) unless @campaign.status == 'paused'
     @campaign.update!(status: 'running')
+    if defined?(WebhookService)
+      WebhookService.fire(company_id: @company.id, event: 'campaign.resumed', payload: { campaign_id: @campaign.id })
+    end
     render json: campaign_json(@campaign, full: true)
   end
 
   def archive
     return unless authorize_action!('campaigns', 'update')
     @campaign.update!(status: 'archived')
+    if defined?(WebhookService)
+      WebhookService.fire(company_id: @company.id, event: 'campaign.archived', payload: { campaign_id: @campaign.id })
+    end
     render json: campaign_json(@campaign, full: true)
   end
 
   def test_send
     return unless authorize_action!('campaigns', 'update')
-    render json: { error: 'Test send will be available in Phase B', phase: 'A' }, status: :not_implemented
+
+    step = @campaign.campaign_steps.active.ordered.first
+    return render(json: { error: 'Campaign has no active steps' }, status: :unprocessable_entity) unless step
+
+    if @campaign.email_channel?
+      return render(json: { error: 'No valid email connection for this campaign' }, status: :unprocessable_entity) if @campaign.resolve_email_connection.nil?
+      test_address = current_user.email
+      return render(json: { error: 'Your user has no email on file for test send' }, status: :unprocessable_entity) if test_address.blank?
+    else
+      return render(json: { error: 'No active SMS number for this company' }, status: :unprocessable_entity) if @campaign.resolve_sms_sender.nil?
+      test_address = current_user.try(:phone)
+      return render(json: { error: 'Your user has no phone number on file for SMS test' }, status: :unprocessable_entity) if test_address.blank?
+    end
+
+    enrollment = CampaignEnrollment.find_or_initialize_by(
+      campaign_id: @campaign.id, recipient_type: 'User', recipient_id: current_user.id
+    )
+    enrollment.assign_attributes(
+      company_id: @company.id, status: 'pending', current_step_index: 0,
+      email_address_snapshot: @campaign.email_channel? ? test_address : nil,
+      sms_phone_snapshot: @campaign.sms_channel? ? test_address : nil,
+      metadata: { 'test_send' => 'true', 'sent_by_user_id' => current_user.id }
+    )
+    enrollment.save!
+
+    result = Campaigns::CampaignSender.new(enrollment: enrollment).deliver_current_step
+    render json: { success: !!result, recipient: test_address, channel: @campaign.channel }
+  rescue => e
+    Rails.logger.error "[CampaignsController#test_send] #{e.class}: #{e.message}"
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def preview
     return unless authorize_action!('campaigns', 'read')
-    render json: { error: 'Preview rendering will be available in Phase B', phase: 'A' }, status: :not_implemented
+    step = @campaign.campaign_steps.active.ordered.first
+    return render(json: { error: 'Campaign has no active steps' }, status: :unprocessable_entity) unless step
+
+    recipient_type = params[:recipient_type] || 'Lead'
+    recipient_id = params[:recipient_id]
+    recipient = if recipient_id.present?
+                  klass = recipient_type.safe_constantize
+                  klass&.find_by(id: recipient_id)
+                else
+                  OpenStruct.new(
+                    first_name: 'Sample', last_name: 'Recipient',
+                    email: 'sample@example.com', phone: '+15555550100',
+                    custom_field_values: {}
+                  )
+                end
+
+    fake_send = CampaignSend.new(
+      company_id: @company.id, campaign_id: @campaign.id,
+      campaign_step_id: step.id, campaign_enrollment_id: 0
+    )
+
+    base_url = ENV['CAMPAIGN_BASE_URL'].presence || 'https://app.renterinsight.com'
+
+    if @campaign.email_channel?
+      rendered = Messaging::EmailRenderer.new(
+        step: step, recipient: recipient, campaign: @campaign,
+        campaign_send: fake_send, company: @company, base_url: base_url
+      ).render
+      render json: { channel: 'email', subject: rendered[:subject], html_body: rendered[:html_body], error: rendered[:error] }
+    else
+      rendered = Messaging::SmsRenderer.new(
+        step: step, recipient: recipient, campaign: @campaign,
+        campaign_send: fake_send, company: @company, base_url: base_url
+      ).render
+      render json: { channel: 'sms', body: rendered[:body], media_url: rendered[:media_url] }
+    end
+  rescue => e
+    Rails.logger.error "[CampaignsController#preview] #{e.class}: #{e.message}"
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def stats
@@ -177,17 +259,59 @@ class Api::V1::CampaignsController < ApplicationController
 
   def ai_generate
     return unless authorize_action!('campaigns', 'create')
-    render json: { error: 'AI generation will be available in Phase B', phase: 'A' }, status: :not_implemented
+
+    prompt = params[:prompt].to_s.strip
+    return render(json: { error: 'prompt is required' }, status: :unprocessable_entity) if prompt.blank?
+    channel = params[:channel].presence || 'email'
+
+    generation = Campaigns::AiBuilder.new(company: @company, user: current_user).generate(
+      prompt: prompt, channel: channel, context_overrides: params[:context_overrides].try(:to_unsafe_h) || {}
+    )
+    render json: {
+      generation_id: generation.id, plan: generation.generated_plan,
+      model_version: generation.model_version,
+      input_tokens: generation.input_tokens, output_tokens: generation.output_tokens
+    }
+  rescue Campaigns::AiBuilder::CreditLimitError => e
+    render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
+  rescue Campaigns::AiBuilder::GenerationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def ai_accept
     return unless authorize_action!('campaigns', 'create')
-    render json: { error: 'AI acceptance will be available in Phase B', phase: 'A' }, status: :not_implemented
+
+    generation = CampaignAiGeneration.find_by(id: params[:generation_id], company_id: @company.id)
+    return render(json: { error: 'Generation not found' }, status: :not_found) unless generation
+
+    plan_channel = generation.generated_plan['channel'] || 'email'
+    sender = {
+      from_identity_type: params[:from_identity_type] || (plan_channel == 'sms' ? 'Company' : 'User'),
+      from_identity_id: params[:from_identity_id] || (plan_channel == 'sms' ? @company.id : current_user.id),
+      from_display_name: params[:from_display_name],
+      location_id: params[:location_id]
+    }
+
+    campaign = Campaigns::AiBuilder.new(company: @company, user: current_user).accept(generation: generation, sender_params: sender)
+    render json: { campaign_id: campaign.id, name: campaign.name, status: campaign.status }, status: :created
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
   end
 
   def ai_refine
     return unless authorize_action!('campaigns', 'create')
-    render json: { error: 'AI refinement will be available in Phase B', phase: 'A' }, status: :not_implemented
+
+    generation = CampaignAiGeneration.find_by(id: params[:generation_id], company_id: @company.id)
+    return render(json: { error: 'Generation not found' }, status: :not_found) unless generation
+    feedback = params[:feedback].to_s.strip
+    return render(json: { error: 'feedback is required' }, status: :unprocessable_entity) if feedback.blank?
+
+    new_gen = Campaigns::AiBuilder.new(company: @company, user: current_user).refine(generation: generation, feedback: feedback)
+    render json: { generation_id: new_gen.id, plan: new_gen.generated_plan, parent_id: generation.id }
+  rescue Campaigns::AiBuilder::CreditLimitError => e
+    render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
+  rescue Campaigns::AiBuilder::GenerationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   private

@@ -1606,6 +1606,8 @@ Rails.application.routes.draw do
       resources :campaigns do
         collection do
           post :ai_generate
+          post 'ai_generate/:generation_id/accept', action: :ai_accept, as: :ai_accept
+          post 'ai_generate/:generation_id/refine', action: :ai_refine, as: :ai_refine
           get :templates, to: 'campaign_templates#index'
         end
         member do
@@ -1617,8 +1619,6 @@ Rails.application.routes.draw do
           post :test_send
           get :preview
           get :stats
-          post 'ai_generate/:generation_id/accept', action: :ai_accept, as: :ai_accept
-          post 'ai_generate/:generation_id/refine', action: :ai_refine, as: :ai_refine
         end
         resource :audience, controller: 'campaign_audiences', only: [] do
           post :preview

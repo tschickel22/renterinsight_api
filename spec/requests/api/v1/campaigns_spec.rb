@@ -194,26 +194,29 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
     end
   end
 
-  describe "phase B 501 endpoints" do
+  describe "phase B endpoints" do
     let(:campaign) do
       Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: "L",
                        campaign_type: "blast", from_identity_type: "User",
                        from_identity_id: user.id, throttle_per_day: 100)
     end
 
-    it "test_send returns 501 in Phase A" do
+    it "test_send rejects when no active steps configured" do
       post "/api/v1/campaigns/#{campaign.id}/test_send", headers: auth_headers
-      expect(response).to have_http_status(:not_implemented)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to match(/no active steps/i)
     end
 
-    it "preview returns 501 in Phase A" do
+    it "preview rejects when no active steps configured" do
       get "/api/v1/campaigns/#{campaign.id}/preview", headers: auth_headers
-      expect(response).to have_http_status(:not_implemented)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to match(/no active steps/i)
     end
 
-    it "ai_generate returns 501 in Phase A" do
+    it "ai_generate requires a prompt" do
       post "/api/v1/campaigns/ai_generate", headers: auth_headers
-      expect(response).to have_http_status(:not_implemented)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to match(/prompt is required/i)
     end
   end
 end

@@ -68,6 +68,12 @@ module Campaigns
             event_type: 'sms_stop', occurred_at: Time.current,
             payload: { phone: phone, source: 'inbound_sms' }
           )
+          if defined?(WebhookService)
+            WebhookService.fire(
+              company_id: company_id, event: 'campaign.unsubscribed',
+              payload: { campaign_id: e.campaign_id, enrollment_id: e.id, phone: phone, reason: 'sms_stop' }
+            )
+          end
         end
       end
 

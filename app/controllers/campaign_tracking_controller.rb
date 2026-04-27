@@ -102,6 +102,13 @@ class CampaignTrackingController < ActionController::API
       end
     end
 
+    if defined?(WebhookService)
+      WebhookService.fire(
+        company_id: company_id, event: 'campaign.unsubscribed',
+        payload: { campaign_id: cs.campaign_id, enrollment_id: enrollment.id, send_id: cs.id, email: email }
+      )
+    end
+
     render json: { success: true, message: 'You have been unsubscribed.' }
   rescue => e
     Rails.logger.error "[CampaignTracking#unsubscribe_confirm] #{e.message}"

@@ -25,6 +25,7 @@ class WebhookService
     campaign.started campaign.paused campaign.resumed campaign.completed campaign.archived
     campaign.enrollment_created campaign.enrollment_completed campaign.goal_met
     campaign.unsubscribed campaign.bounced campaign.complained
+    campaign.compliance_acknowledged
   ].freeze
 
   # Fire a webhook event for a company

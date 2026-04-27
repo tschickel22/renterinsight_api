@@ -186,3 +186,6 @@ events:
   - value: campaign.complained
     label: Campaign Complained
     category: Email Campaign Events
+  - value: campaign.compliance_acknowledged
+    label: Campaign SMS Compliance Acknowledged
+    category: Email Campaign Events
