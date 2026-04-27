@@ -314,6 +314,28 @@ class Api::V1::CampaignsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  def merge_fields
+    return unless authorize_action!('campaigns', 'read')
+    source_type = params[:source_type].presence || 'Lead'
+    channel = params[:channel].presence
+
+    fields = Messaging::MergeFieldRegistry.for_source_type(source_type, channel: channel)
+    grouped = Messaging::MergeFieldRegistry.grouped_for_source_type(source_type, channel: channel)
+
+    render json: { source_type: source_type, channel: channel, fields: fields, grouped: grouped }
+  end
+
+  def audience_field_schema
+    return unless authorize_action!('campaigns', 'read')
+    source_type = params[:source_type].presence || 'Lead'
+
+    render json: {
+      source_type: source_type,
+      fields: Audiences::FieldSchema.for_source_type(source_type),
+      operator_labels: Audiences::FieldSchema.operators_with_labels
+    }
+  end
+
   private
 
   def set_campaign

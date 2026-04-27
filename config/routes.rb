@@ -1609,6 +1609,8 @@ Rails.application.routes.draw do
           post 'ai_generate/:generation_id/accept', action: :ai_accept, as: :ai_accept
           post 'ai_generate/:generation_id/refine', action: :ai_refine, as: :ai_refine
           get :templates, to: 'campaign_templates#index'
+          get :merge_fields
+          get :audience_field_schema
         end
         member do
           post :duplicate
@@ -1637,6 +1639,8 @@ Rails.application.routes.draw do
       end
 
       resources :campaign_suppressions, only: [:index, :create, :destroy]
+
+      resources :email_senders, only: [:index]
 
       resources :location_email_connections, path: 'location-email-connections' do
         member do

@@ -5,6 +5,7 @@ class Api::V1::CampaignTemplatesController < ApplicationController
     return unless authorize_action!('campaigns', 'read')
 
     templates = CampaignTemplate.active.for_company_or_seeded(@company.id)
+    templates = templates.where.not(vertical: 'b2b') unless current_user.platform_admin?
     templates = templates.where(category: params[:category]) if params[:category].present?
     templates = templates.where(vertical: params[:vertical]) if params[:vertical].present?
 
@@ -14,6 +15,9 @@ class Api::V1::CampaignTemplatesController < ApplicationController
   def show
     return unless authorize_action!('campaigns', 'read')
     t = CampaignTemplate.for_company_or_seeded(@company.id).find(params[:id])
+    if t.vertical == 'b2b' && !current_user.platform_admin?
+      return render(json: { error: 'Template not found' }, status: :not_found)
+    end
     render json: template_json(t, full: true)
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Template not found' }, status: :not_found
@@ -22,6 +26,10 @@ class Api::V1::CampaignTemplatesController < ApplicationController
   def instantiate
     return unless authorize_action!('campaigns', 'create')
     t = CampaignTemplate.for_company_or_seeded(@company.id).find(params[:id])
+
+    if t.vertical == 'b2b' && !current_user.platform_admin?
+      return render(json: { error: 'Template not found' }, status: :not_found)
+    end
 
     from_identity_type = params[:from_identity_type]
     from_identity_id = params[:from_identity_id]

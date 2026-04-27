@@ -219,4 +219,54 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
       expect(JSON.parse(response.body)['error']).to match(/prompt is required/i)
     end
   end
+
+  describe "GET /api/v1/campaigns/merge_fields" do
+    it "returns 200 with fields and grouped keys (defaults to Lead)" do
+      get "/api/v1/campaigns/merge_fields", headers: auth_headers
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body["source_type"]).to eq("Lead")
+      expect(body["fields"]).to be_an(Array)
+      expect(body["grouped"]).to be_a(Hash)
+      keys = body["fields"].map { |f| f["key"] }
+      expect(keys).to include("first_name", "rep_name", "company.name")
+    end
+
+    it "filters by source_type=Account" do
+      get "/api/v1/campaigns/merge_fields?source_type=Account", headers: auth_headers
+      body = JSON.parse(response.body)
+      keys = body["fields"].map { |f| f["key"] }
+      expect(keys).to include("account_name")
+      expect(keys).not_to include("first_name")
+    end
+
+    it "filters by channel=sms (excludes email-only fields)" do
+      get "/api/v1/campaigns/merge_fields?channel=sms", headers: auth_headers
+      body = JSON.parse(response.body)
+      keys = body["fields"].map { |f| f["key"] }
+      expect(keys).not_to include("unsubscribe_url", "rep_email")
+      expect(keys).to include("phone")
+    end
+  end
+
+  describe "GET /api/v1/campaigns/audience_field_schema" do
+    it "returns 200 with fields and operator_labels (defaults to Lead)" do
+      get "/api/v1/campaigns/audience_field_schema", headers: auth_headers
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body["source_type"]).to eq("Lead")
+      expect(body["fields"]).to be_an(Array)
+      expect(body["operator_labels"]).to be_a(Hash)
+      tags_field = body["fields"].find { |f| f["key"] == "tags" }
+      expect(tags_field["type"]).to eq("tags")
+    end
+
+    it "returns Account fields when source_type=Account" do
+      get "/api/v1/campaigns/audience_field_schema?source_type=Account", headers: auth_headers
+      body = JSON.parse(response.body)
+      keys = body["fields"].map { |f| f["key"] }
+      expect(keys).to include("name", "account_type")
+      expect(keys).not_to include("first_name")
+    end
+  end
 end

@@ -48,4 +48,59 @@ RSpec.describe "Api::V1::CampaignTemplates", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
     end
   end
+
+  describe "B2B template gating for non-platform-admin users" do
+    let(:dealer_company) { Company.create!(name: "Dealer-#{SecureRandom.hex(4)}", use_rbac_system: false) }
+    let(:dealer_user) do
+      User.create!(email: "dealer-#{SecureRandom.hex(4)}@example.com", first_name: "D", last_name: "U",
+                   password: "Pass1234!", company_id: dealer_company.id, role: "staff")
+    end
+    let(:dealer_token) { JsonWebToken.encode(user_id: dealer_user.id, company_id: dealer_company.id) }
+    let(:dealer_headers) { { "Authorization" => "Bearer #{dealer_token}", "Content-Type" => "application/json" } }
+
+    let!(:b2b_tpl) do
+      CampaignTemplate.create!(slug: "b2b-#{SecureRandom.hex(4)}", name: "B2B Outbound",
+        category: "b2b_saas_sales", vertical: "b2b", is_seeded: true,
+        steps_template: [{ "wait_days" => 0, "subject" => "Hi", "body_blocks" => [{ "type" => "text", "html" => "hi" }] }],
+        audience_hint: { "source_type" => "Lead" })
+    end
+    let!(:dealer_tpl) do
+      CampaignTemplate.create!(slug: "dlr-#{SecureRandom.hex(4)}", name: "Dealer Drip",
+        category: "rv_buyer_journey", vertical: "rv", is_seeded: true,
+        steps_template: [{ "wait_days" => 0, "subject" => "Hello", "body_blocks" => [{ "type" => "text", "html" => "hi" }] }],
+        audience_hint: { "source_type" => "Lead" })
+    end
+
+    it "non-platform-admin index excludes b2b vertical" do
+      get "/api/v1/campaign_templates", headers: dealer_headers
+      expect(response).to have_http_status(:ok)
+      slugs = JSON.parse(response.body)["items"].map { |t| t["slug"] }
+      expect(slugs).not_to include(b2b_tpl.slug)
+      expect(slugs).to include(dealer_tpl.slug)
+    end
+
+    it "platform admin index includes b2b vertical" do
+      get "/api/v1/campaign_templates", headers: auth_headers
+      slugs = JSON.parse(response.body)["items"].map { |t| t["slug"] }
+      expect(slugs).to include(b2b_tpl.slug)
+    end
+
+    it "non-platform-admin show on b2b returns 404" do
+      get "/api/v1/campaign_templates/#{b2b_tpl.id}", headers: dealer_headers
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "platform admin show on b2b returns the template" do
+      get "/api/v1/campaign_templates/#{b2b_tpl.id}", headers: auth_headers
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)["slug"]).to eq(b2b_tpl.slug)
+    end
+
+    it "non-platform-admin instantiate on b2b returns 404" do
+      post "/api/v1/campaign_templates/#{b2b_tpl.id}/instantiate",
+           params: { from_identity_type: "User", from_identity_id: dealer_user.id }.to_json,
+           headers: dealer_headers
+      expect(response).to have_http_status(:not_found)
+    end
+  end
 end
