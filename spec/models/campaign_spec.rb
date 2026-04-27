@@ -239,20 +239,20 @@ RSpec.describe Campaign, type: :model do
     end
 
     it "is false when no email connection is resolvable" do
-      allow(campaign).to receive(:resolve_email_connection).and_return(nil)
-      allow(campaign).to receive(:resolve_sms_sender).and_return(double("twilio"))
+      allow(campaign).to receive(:resolve_email_connection_for_step).and_return(nil)
+      allow(campaign).to receive(:resolve_sms_sender_for_step).and_return(double("twilio"))
       expect(campaign.can_start?).to be(false)
     end
 
     it "is false when no SMS sender is resolvable" do
-      allow(campaign).to receive(:resolve_email_connection).and_return(double("conn"))
-      allow(campaign).to receive(:resolve_sms_sender).and_return(nil)
+      allow(campaign).to receive(:resolve_email_connection_for_step).and_return(double("conn"))
+      allow(campaign).to receive(:resolve_sms_sender_for_step).and_return(nil)
       expect(campaign.can_start?).to be(false)
     end
 
     it "is true when both email connection and SMS sender are resolvable" do
-      allow(campaign).to receive(:resolve_email_connection).and_return(double("conn"))
-      allow(campaign).to receive(:resolve_sms_sender).and_return(double("twilio"))
+      allow(campaign).to receive(:resolve_email_connection_for_step).and_return(double("conn"))
+      allow(campaign).to receive(:resolve_sms_sender_for_step).and_return(double("twilio"))
       expect(campaign.can_start?).to be(true)
     end
   end
@@ -279,6 +279,67 @@ RSpec.describe Campaign, type: :model do
       campaign.create_campaign_audience!(source_type: "Lead")
       expect(UserEmailConnection.where(user_id: user.id).count).to eq(0)
       expect(campaign.can_start?).to be(true)
+    end
+  end
+
+  # ============================================================
+  # Phase E patch — step-level resolvers (mixed-channel drips)
+  # ============================================================
+  describe "#resolve_email_connection_for_step" do
+    it "returns the active UserEmailConnection even when campaign.channel is sms" do
+      conn = UserEmailConnection.create!(
+        user_id: user.id,
+        company_id: company.id,
+        provider: "oauth_gmail",
+        email_address: "rep@example.com",
+        is_active: true,
+        oauth_token_encrypted: "tok",
+        oauth_refresh_token_encrypted: "ref"
+      )
+
+      # Build an SMS campaign, then bypass the SMS-identity callback so we can
+      # verify the step-level resolver still finds the User-bound connection.
+      campaign = Campaign.new(base_attrs.merge(channel: "sms"))
+      campaign.save(validate: false)
+      campaign.update_columns(from_identity_type: "User", from_identity_id: user.id)
+
+      expect(campaign.resolve_email_connection_for_step).to eq(conn)
+    end
+
+    it "returns nil when no active connection exists for the identity" do
+      campaign = Campaign.create!(base_attrs)
+      expect(campaign.resolve_email_connection_for_step).to be_nil
+    end
+  end
+
+  describe "#resolve_sms_sender_for_step" do
+    it "returns the active company-level TwilioAccount even when campaign.channel is email" do
+      twilio = TwilioAccount.create!(
+        company_id: company.id, phone_number: "+15551112222",
+        phone_number_sid: "PN1", status: "active"
+      )
+      campaign = Campaign.create!(base_attrs)  # channel defaults to 'email'
+      expect(campaign.resolve_sms_sender_for_step).to eq(twilio)
+    end
+
+    it "prefers location-specific TwilioAccount when campaign has location_id" do
+      location = company.locations.create!(name: "Loc A")
+      TwilioAccount.create!(
+        company_id: company.id, phone_number: "+15551112222",
+        phone_number_sid: "PN1", status: "active"
+      )
+      loc_acct = TwilioAccount.create!(
+        company_id: company.id, location_id: location.id,
+        phone_number: "+15553334444", phone_number_sid: "PN2", status: "active"
+      )
+
+      campaign = Campaign.create!(base_attrs.merge(location_id: location.id))
+      expect(campaign.resolve_sms_sender_for_step).to eq(loc_acct)
+    end
+
+    it "returns nil when no active TwilioAccount exists" do
+      campaign = Campaign.create!(base_attrs)
+      expect(campaign.resolve_sms_sender_for_step).to be_nil
     end
   end
 end

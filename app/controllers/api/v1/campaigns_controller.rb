@@ -132,10 +132,10 @@ class Api::V1::CampaignsController < ApplicationController
       needs_email = step_channels.include?('email') || (step_channels.empty? && @campaign.email_channel?)
       needs_sms = step_channels.include?('sms') || (step_channels.empty? && @campaign.sms_channel?)
 
-      if needs_email && @campaign.resolve_email_connection.nil?
+      if needs_email && @campaign.resolve_email_connection_for_step.nil?
         reasons << 'Selected sender has no valid email connection. Connect an email account first.'
       end
-      if needs_sms && @campaign.resolve_sms_sender.nil?
+      if needs_sms && @campaign.resolve_sms_sender_for_step.nil?
         reasons << 'No active SMS number for this company. Provision one in Settings > Communications > SMS.'
       end
       return render(json: { error: 'Cannot start campaign', reasons: reasons }, status: :unprocessable_entity)

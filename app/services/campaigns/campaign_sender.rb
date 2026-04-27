@@ -40,9 +40,9 @@ module Campaigns
 
       step_channel = step.effective_channel
       if step_channel == 'email'
-        return mark_failed('no_valid_email_connection') if @campaign.resolve_email_connection.nil?
+        return mark_failed('no_valid_email_connection') if @campaign.resolve_email_connection_for_step.nil?
       else
-        return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender.nil?
+        return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender_for_step.nil?
       end
 
       send_record = CampaignSend.create!(
@@ -96,7 +96,7 @@ module Campaigns
     end
 
     def deliver_email(step, send_record)
-      conn = @campaign.resolve_email_connection
+      conn = @campaign.resolve_email_connection_for_step
       rendered = Messaging::EmailRenderer.new(
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: send_record, company: @company, base_url: @base_url
@@ -149,7 +149,7 @@ module Campaigns
     end
 
     def deliver_sms(step, send_record)
-      twilio_acct = @campaign.resolve_sms_sender
+      twilio_acct = @campaign.resolve_sms_sender_for_step
       return { success: false, error: 'no_valid_sms_sender' } unless twilio_acct
 
       rendered = Messaging::SmsRenderer.new(
