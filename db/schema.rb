@@ -13,6 +13,7 @@
 ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+  enable_extension "vector"
 
   create_table "account_activities", force: :cascade do |t|
     t.integer "account_id", null: false
@@ -426,7 +427,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.index ["location_id"], name: "index_agreements_on_location_id"
     t.index ["parent_agreement_id"], name: "index_agreements_on_parent_agreement_id"
     t.index ["prepared_by_id"], name: "index_agreements_on_prepared_by_id"
-    t.index ["status", "expires_at"], name: "idx_agreements_expiry_check", where: "((status)::text = ANY ((ARRAY['sent'::character varying, 'viewed'::character varying, 'partially_signed'::character varying])::text[]))"
+    t.index ["status", "expires_at"], name: "idx_agreements_expiry_check", where: "((status)::text = ANY (ARRAY[('sent'::character varying)::text, ('viewed'::character varying)::text, ('partially_signed'::character varying)::text]))"
     t.index ["voided_by_id"], name: "index_agreements_on_voided_by_id"
   end
 
@@ -2334,9 +2335,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.string "article_type", default: "how_to", null: false
     t.integer "position", default: 0, null: false
     t.boolean "is_published", default: false, null: false
+    t.vector "embedding", limit: 1536
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["article_type"], name: "index_knowledge_articles_on_article_type"
+    t.index ["embedding"], name: "idx_knowledge_articles_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
     t.index ["is_published", "position"], name: "index_knowledge_articles_on_is_published_and_position"
     t.index ["knowledge_feature_id"], name: "index_knowledge_articles_on_knowledge_feature_id"
     t.index ["knowledge_module_id"], name: "index_knowledge_articles_on_knowledge_module_id"
@@ -3131,7 +3134,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_22_000002) do
     t.jsonb "context", default: {}
     t.index ["company_id"], name: "index_nurture_enrollments_on_company_id"
     t.index ["enrollable_type", "enrollable_id"], name: "index_nurture_enrollments_on_enrollable_type_and_enrollable_id"
-    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY ((ARRAY['running'::character varying, 'paused'::character varying])::text[]))"
+    t.index ["lead_id", "nurture_sequence_id"], name: "idx_unique_active_enrollment", unique: true, where: "((status)::text = ANY (ARRAY[('running'::character varying)::text, ('paused'::character varying)::text]))"
     t.index ["lead_id", "nurture_sequence_id"], name: "index_nurture_enrollments_on_lead_id_and_nurture_sequence_id"
     t.index ["lead_id"], name: "index_nurture_enrollments_on_lead_id"
     t.index ["nurture_sequence_id"], name: "index_nurture_enrollments_on_nurture_sequence_id"
