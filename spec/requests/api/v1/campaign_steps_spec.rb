@@ -180,4 +180,66 @@ RSpec.describe "Api::V1::CampaignSteps", type: :request do
       expect(response).to have_http_status(:not_found)
     end
   end
+
+  # ==================== AUTHORIZATION ====================
+
+  describe "authorization (without campaigns.update permission)" do
+    let(:unprivileged_user) do
+      User.create!(
+        email: "np-#{SecureRandom.hex(4)}@example.com",
+        first_name: "N", last_name: "P",
+        password: "Pass1234!", company_id: company.id,
+        role: "user"
+      )
+    end
+    let(:unprivileged_token) { JsonWebToken.encode(user_id: unprivileged_user.id, company_id: company.id) }
+    let(:unprivileged_headers) do
+      { "Authorization" => "Bearer #{unprivileged_token}", "Content-Type" => "application/json" }
+    end
+
+    before do
+      allow_any_instance_of(Api::V1::CampaignStepsController)
+        .to receive(:authorize_action!) do |controller, resource, action|
+          if resource == 'campaigns' && action == 'update'
+            controller.send(:render, json: { error: 'Forbidden' }, status: :forbidden)
+            false
+          else
+            true
+          end
+        end
+    end
+
+    it "returns 403 on POST create" do
+      payload = {
+        campaign_step: {
+          channel: "email", wait_days: 0, subject: "Hi",
+          body_blocks: [{ "type" => "text", "html" => "<p>x</p>" }],
+          is_active: true
+        }
+      }
+      post "/api/v1/campaigns/#{campaign.id}/steps",
+           params: payload.to_json, headers: unprivileged_headers
+
+      expect(response).to have_http_status(:forbidden)
+      expect(campaign.campaign_steps.count).to eq(0)
+    end
+
+    it "returns 403 on PATCH update" do
+      patch "/api/v1/campaigns/#{campaign.id}/steps/#{step.id}",
+            params: { campaign_step: { subject: "Hacked" } }.to_json,
+            headers: unprivileged_headers
+
+      expect(response).to have_http_status(:forbidden)
+      expect(step.reload.subject).to eq("Welcome")
+    end
+
+    it "returns 403 on DELETE destroy" do
+      step_to_delete = step
+      delete "/api/v1/campaigns/#{campaign.id}/steps/#{step_to_delete.id}",
+             headers: unprivileged_headers
+
+      expect(response).to have_http_status(:forbidden)
+      expect(CampaignStep.where(id: step_to_delete.id)).to exist
+    end
+  end
 end

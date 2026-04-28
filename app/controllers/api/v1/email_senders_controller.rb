@@ -41,7 +41,9 @@ class Api::V1::EmailSendersController < ApplicationController
         display_name: display,
         provider: conn.provider,
         is_default: conn.user_id == current_user.id,
-        is_current_user: conn.user_id == current_user.id
+        is_current_user: conn.user_id == current_user.id,
+        connection_id: conn.id,
+        status: connection_status(conn)
       }
     end
   end
@@ -66,7 +68,9 @@ class Api::V1::EmailSendersController < ApplicationController
         email_address: conn.email_address,
         display_name: conn.display_name.presence || conn.location&.name,
         provider: conn.provider,
-        is_default: false
+        is_default: false,
+        connection_id: conn.id,
+        status: connection_status(conn)
       }
     end
   end
@@ -84,9 +88,18 @@ class Api::V1::EmailSendersController < ApplicationController
         email_address: conn.email_address,
         display_name: conn.display_name.presence || @company.name,
         provider: conn.provider,
-        is_default: false
+        is_default: false,
+        connection_id: conn.id,
+        status: connection_status(conn)
       }
     end
+  end
+
+  def connection_status(conn)
+    token_present = conn.oauth_token_encrypted.present?
+    expiry = conn.oauth_expires_at
+    healthy = token_present && (expiry.nil? || expiry > Time.current)
+    healthy ? 'healthy' : 'needs_reconnect'
   end
 
   def sms_senders
