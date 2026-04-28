@@ -22,7 +22,7 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
     company.contacts.where(id: ids)
   end
   
-  def transform_to_quickbooks(contact, config)
+  def transform_to_quickbooks(contact, config, unique_suffix: nil)
     # Get company name from account if available
     company_name = if contact.respond_to?(:account) && contact.account.present?
       contact.account.name
@@ -32,9 +32,12 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
       nil
     end
 
+    # Build unique DisplayName - QB requires unique across Customers, Vendors, and Employees
+    display_name = build_unique_display_name(contact, unique_suffix)
+
     # Base customer data
     data = {
-      DisplayName: contact.display_name || "#{contact.first_name} #{contact.last_name}",
+      DisplayName: display_name,
       GivenName: contact.first_name,
       FamilyName: contact.last_name,
       CompanyName: company_name,
@@ -67,6 +70,10 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
   
   def find_by_quickbooks_id(qb_id)
     company.contacts.find_by(quickbooks_id: qb_id)
+  end
+
+  def get_records_by_quickbooks_ids(qb_ids)
+    company.contacts.where(quickbooks_id: qb_ids)
   end
   
   def create_from_quickbooks(qb_customer, config)
@@ -113,6 +120,26 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
   
   private
   
+  # Build a unique DisplayName for QB
+  # QB requires unique DisplayName across Customers, Vendors, and Employees
+  # Strategy: base name → with email → with contact ID
+  def build_unique_display_name(contact, suffix = nil)
+    base_name = contact.display_name || "#{contact.first_name} #{contact.last_name}"
+    
+    case suffix
+    when :email
+      if contact.email.present?
+        "#{base_name} - #{contact.email}"
+      else
+        "#{base_name} (#{contact.id})"
+      end
+    when :id
+      "#{base_name} (#{contact.id})"
+    else
+      base_name
+    end
+  end
+
   def format_phone(phone)
     return nil if phone.blank?
     
