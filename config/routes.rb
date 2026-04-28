@@ -1634,6 +1634,11 @@ Rails.application.routes.draw do
         resources :events, controller: 'campaign_events', only: [:index]
         resources :sends, controller: 'campaign_sends', only: [:index, :show]
         resources :steps, controller: 'campaign_steps', only: [:create, :update, :destroy]
+        resources :campaign_uploads, only: [:create], path: 'uploads' do
+          collection do
+            delete :destroy
+          end
+        end
       end
 
       resources :campaign_templates, only: [:index, :show] do

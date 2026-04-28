@@ -370,6 +370,21 @@ class Api::V1::CampaignsController < ApplicationController
 
   private
 
+  def resolve_from_identity_name(c)
+    case c.from_identity_type
+    when 'User'
+      u = User.find_by(id: c.from_identity_id)
+      u ? [u.first_name, u.last_name].compact.join(' ').presence : nil
+    when 'Location'
+      Location.find_by(id: c.from_identity_id)&.name
+    when 'Company'
+      Company.find_by(id: c.from_identity_id)&.name
+    end
+  rescue => e
+    Rails.logger.warn "[campaigns] resolve_from_identity_name: #{e.message}"
+    nil
+  end
+
   def set_campaign
     @campaign = @company.campaigns.active.find(params[:id])
   rescue ActiveRecord::RecordNotFound
@@ -416,6 +431,7 @@ class Api::V1::CampaignsController < ApplicationController
       from_identity_type: c.from_identity_type,
       from_identity_id: c.from_identity_id,
       from_display_name: c.from_display_name,
+      from_identity_name: resolve_from_identity_name(c),
       reply_to_address: c.reply_to_address,
       subject_default: c.subject_default,
       throttle_per_day: c.throttle_per_day,
