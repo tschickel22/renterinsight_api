@@ -93,13 +93,14 @@ module WorkflowEngine
     end
 
     RELATED_ENTITY_ASSOCIATIONS = {
-      'Lead'          => { 'vehicle' => :vehicle, 'account' => :converted_account },
-      'Deal'          => { 'account' => :account, 'contact' => :contact, 'vehicle' => :vehicle },
+      'Lead'          => { 'home' => :vehicle, 'account' => :converted_account },
+      'Deal'          => { 'account' => :account, 'contact' => :contact, 'home' => :vehicle },
       'Contact'       => { 'account' => :account },
-      'ServiceTicket' => { 'contact' => :contact, 'account' => :account, 'vehicle' => :vehicle, 'deal' => :deal },
-      'Listing'       => { 'vehicle' => :vehicle },
+      'ServiceTicket' => { 'contact' => :contact, 'account' => :account, 'home' => :vehicle, 'deal' => :deal },
+      'Listing'       => { 'home' => :vehicle },
       'Account'       => {},
-      'Vehicle'       => {}
+      'Vehicle'       => {},
+      'Home'          => {}
     }.freeze
 
     def build_initial_variables(entity, event)

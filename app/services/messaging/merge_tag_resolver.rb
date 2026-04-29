@@ -2,7 +2,7 @@ module Messaging
   module MergeTagResolver
     TAG_PATTERN = /\{\{\s*([a-z0-9_.]+)\s*\}\}/i
 
-    CROSS_ENTITY_NAMESPACES = %w[deal contact account vehicle service_ticket].freeze
+    CROSS_ENTITY_NAMESPACES = %w[lead deal contact account home service_ticket].freeze
 
     def self.resolve(text, context)
       return '' if text.nil?
@@ -47,10 +47,11 @@ module Messaging
       started_at = Time.current
       deal, contact, account, vehicle, ticket = resolve_cross_entities(recipient, company)
 
+      apply_lead_fields(context, recipient)
       apply_deal_fields(context, deal)
       apply_contact_fields(context, contact)
       apply_account_fields(context, account)
-      apply_vehicle_fields(context, vehicle)
+      apply_home_fields(context, vehicle)
       apply_service_ticket_fields(context, ticket)
 
       Rails.logger.debug do
@@ -180,6 +181,19 @@ module Messaging
       [deal, contact, nil, vehicle, ticket]
     end
 
+    def self.apply_lead_fields(context, recipient)
+      return unless recipient.is_a?(Lead)
+      owner = recipient.try(:owner)
+      source = recipient.try(:source)
+      context['lead.status']      = recipient.try(:status).to_s
+      context['lead.source']      = source&.try(:name).to_s.presence || recipient.try(:source_text).to_s
+      context['lead.owner_name']  = rep_full_name(owner).to_s
+      context['lead.owner_email'] = owner&.try(:email).to_s
+      context['lead.owner_phone'] = owner&.try(:phone).to_s
+      context['lead.created_at']  = recipient.created_at&.strftime('%Y-%m-%d').to_s
+      context['lead.notes']       = recipient.try(:notes).to_s
+    end
+
     def self.apply_deal_fields(context, deal)
       vehicle = deal&.vehicle
       vehicle_desc = vehicle ? [vehicle.year, vehicle.make, vehicle.model].compact.reject(&:blank?).join(' ') : ''
@@ -217,16 +231,16 @@ module Messaging
       context['account.account_type'] = account&.try(:account_type).to_s
     end
 
-    def self.apply_vehicle_fields(context, vehicle)
+    def self.apply_home_fields(context, vehicle)
       desc = vehicle ? [vehicle.year, vehicle.make, vehicle.model].compact.reject(&:blank?).join(' ') : ''
-      context['vehicle.year']          = vehicle&.year.to_s
-      context['vehicle.make']          = vehicle&.make.to_s
-      context['vehicle.model']         = vehicle&.model.to_s
-      context['vehicle.description']   = desc
-      context['vehicle.serial_number'] = vehicle&.try(:serial_number).to_s
-      context['vehicle.stock_number']  = vehicle&.try(:stock_number).to_s
-      context['vehicle.sale_price']    = format_decimal(vehicle&.try(:sale_price))
-      context['vehicle.status']        = vehicle&.try(:status).to_s
+      context['home.year']          = vehicle&.year.to_s
+      context['home.make']          = vehicle&.make.to_s
+      context['home.model']         = vehicle&.model.to_s
+      context['home.description']   = desc
+      context['home.serial_number'] = vehicle&.try(:serial_number).to_s
+      context['home.stock_number']  = vehicle&.try(:stock_number).to_s
+      context['home.sale_price']    = format_decimal(vehicle&.try(:sale_price))
+      context['home.status']        = vehicle&.try(:status).to_s
     end
 
     def self.apply_service_ticket_fields(context, ticket)

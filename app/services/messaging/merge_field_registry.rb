@@ -38,7 +38,7 @@ module Messaging
       { key: 'deal.owner_name', label: 'Deal owner name', group: 'Deal', sample: 'Tom Schickel', available_for: %w[Lead Contact Account], channels: %w[email sms] },
       { key: 'deal.owner_email', label: 'Deal owner email', group: 'Deal', sample: 'tom@dealership.com', available_for: %w[Lead Contact Account], channels: %w[email sms] },
       { key: 'deal.customer_name', label: 'Deal customer name', group: 'Deal', sample: 'Sarah Johnson', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'deal.vehicle_description', label: 'Deal vehicle description', group: 'Deal', sample: '2024 Forest River Cherokee', available_for: %w[Lead Contact Account], channels: %w[email sms] }
+      { key: 'deal.vehicle_description', label: 'Deal home description', group: 'Deal', sample: '2024 Champion Homes Emerald Sky', available_for: %w[Lead Contact Account], channels: %w[email sms] }
     ].freeze
 
     CONTACT_FIELDS = [
@@ -60,15 +60,25 @@ module Messaging
       { key: 'account.account_type', label: 'Account type', group: 'Account', sample: 'customer', available_for: %w[Lead Contact], channels: %w[email sms] }
     ].freeze
 
-    VEHICLE_FIELDS = [
-      { key: 'vehicle.year', label: 'Vehicle year', group: 'Vehicle', sample: '2024', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'vehicle.make', label: 'Vehicle make', group: 'Vehicle', sample: 'Forest River', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'vehicle.model', label: 'Vehicle model', group: 'Vehicle', sample: 'Cherokee', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'vehicle.description', label: 'Vehicle description', group: 'Vehicle', sample: '2024 Forest River Cherokee', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'vehicle.serial_number', label: 'Vehicle serial number', group: 'Vehicle', sample: 'SN12345', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'vehicle.stock_number', label: 'Vehicle stock number', group: 'Vehicle', sample: 'STK-001', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'vehicle.sale_price', label: 'Vehicle sale price', group: 'Vehicle', sample: '42500', available_for: %w[Lead Contact Account], channels: %w[email sms] },
-      { key: 'vehicle.status', label: 'Vehicle status', group: 'Vehicle', sample: 'available', available_for: %w[Lead Contact Account], channels: %w[email sms] }
+    LEAD_FIELDS = [
+      { key: 'lead.status', label: 'Lead status', group: 'Lead', sample: 'qualified', available_for: %w[Lead], channels: %w[email sms] },
+      { key: 'lead.source', label: 'Lead source', group: 'Lead', sample: 'Website', available_for: %w[Lead], channels: %w[email sms] },
+      { key: 'lead.owner_name', label: 'Lead owner name', group: 'Lead', sample: 'Tom Schickel', available_for: %w[Lead], channels: %w[email sms] },
+      { key: 'lead.owner_email', label: 'Lead owner email', group: 'Lead', sample: 'tom@dealership.com', available_for: %w[Lead], channels: %w[email sms] },
+      { key: 'lead.owner_phone', label: 'Lead owner phone', group: 'Lead', sample: '(303) 555-0100', available_for: %w[Lead], channels: %w[email sms] },
+      { key: 'lead.created_at', label: 'Lead created date', group: 'Lead', sample: '2026-01-15', available_for: %w[Lead], channels: %w[email sms] },
+      { key: 'lead.notes', label: 'Lead notes', group: 'Lead', sample: 'Interested in 3-bed home', available_for: %w[Lead], channels: %w[email sms] }
+    ].freeze
+
+    HOME_FIELDS = [
+      { key: 'home.year', label: 'Home year', group: 'Home', sample: '2024', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'home.make', label: 'Home manufacturer', group: 'Home', sample: 'Champion Homes', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'home.model', label: 'Home model', group: 'Home', sample: 'Emerald Sky', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'home.description', label: 'Home description', group: 'Home', sample: '2024 Champion Homes Emerald Sky', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'home.serial_number', label: 'Home serial number', group: 'Home', sample: 'SN12345', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'home.stock_number', label: 'Home stock number', group: 'Home', sample: 'STK-001', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'home.sale_price', label: 'Home sale price', group: 'Home', sample: '42500', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'home.status', label: 'Home status', group: 'Home', sample: 'available', available_for: %w[Lead Contact Account], channels: %w[email sms] }
     ].freeze
 
     SERVICE_TICKET_FIELDS = [
@@ -80,7 +90,7 @@ module Messaging
 
     def self.for_source_type(source_type, channel: nil)
       all = UNIVERSAL_FIELDS + REP_FIELDS + COMPANY_FIELDS + SYSTEM_FIELDS +
-            DEAL_FIELDS + CONTACT_FIELDS + ACCOUNT_FIELDS + VEHICLE_FIELDS + SERVICE_TICKET_FIELDS
+            LEAD_FIELDS + DEAL_FIELDS + CONTACT_FIELDS + ACCOUNT_FIELDS + HOME_FIELDS + SERVICE_TICKET_FIELDS
       filtered = all.select { |f| f[:available_for].include?(source_type) }
       filtered = filtered.select { |f| f[:channels].include?(channel) } if channel
       filtered

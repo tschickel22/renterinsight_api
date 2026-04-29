@@ -17,7 +17,7 @@
 #   string, textarea, number, boolean, select, date, datetime, user
 
 module WorkflowFieldMetadata
-  SUPPORTED_TYPES = %w[Lead Deal Contact Account ServiceTicket Vehicle Listing].freeze
+  SUPPORTED_TYPES = %w[Lead Deal Contact Account ServiceTicket Home Listing].freeze
 
   # ---------- Common merge tags available for all entities ----------
   GLOBAL_MERGE_TAGS = [
@@ -160,10 +160,10 @@ module WorkflowFieldMetadata
     { key: "entity.assigned_to_name",   label: "Assigned To Name",   entity_type: "ServiceTicket" }
   ].freeze
 
-  # ---------- Vehicle ----------
-  FIELDS_VEHICLE = [
+  # ---------- Home (manufactured home / inventory) ----------
+  FIELDS_HOME = [
     { key: "year",          label: "Year",          type: "number",   updatable: false, filterable: true },
-    { key: "make",          label: "Make",          type: "string",   updatable: false, filterable: true },
+    { key: "make",          label: "Manufacturer",  type: "string",   updatable: false, filterable: true },
     { key: "model",         label: "Model",         type: "string",   updatable: false, filterable: true },
     { key: "serial_number", label: "Serial Number", type: "string",   updatable: false, filterable: true },
     { key: "stock_number",  label: "Stock Number",  type: "string",   updatable: false, filterable: true },
@@ -176,17 +176,17 @@ module WorkflowFieldMetadata
     { key: "updated_at",    label: "Updated At",    type: "datetime", updatable: false, filterable: true }
   ].freeze
 
-  MERGE_TAGS_VEHICLE = [
-    { key: "vehicle.year",          label: "Year",          entity_type: "Vehicle" },
-    { key: "vehicle.make",          label: "Make",          entity_type: "Vehicle" },
-    { key: "vehicle.model",         label: "Model",         entity_type: "Vehicle" },
-    { key: "vehicle.serial_number", label: "Serial Number", entity_type: "Vehicle" },
-    { key: "vehicle.stock_number",  label: "Stock Number",  entity_type: "Vehicle" },
-    { key: "vehicle.sale_price",    label: "Sale Price",    entity_type: "Vehicle" },
-    { key: "vehicle.rent_price",    label: "Rent Price",    entity_type: "Vehicle" },
-    { key: "vehicle.status",        label: "Status",        entity_type: "Vehicle" },
-    { key: "vehicle.location",      label: "Location",      entity_type: "Vehicle" },
-    { key: "vehicle.description",   label: "Description",   entity_type: "Vehicle" }
+  MERGE_TAGS_HOME = [
+    { key: "home.year",          label: "Year",          entity_type: "Home" },
+    { key: "home.make",          label: "Manufacturer",  entity_type: "Home" },
+    { key: "home.model",         label: "Model",         entity_type: "Home" },
+    { key: "home.serial_number", label: "Serial Number", entity_type: "Home" },
+    { key: "home.stock_number",  label: "Stock Number",  entity_type: "Home" },
+    { key: "home.sale_price",    label: "Sale Price",    entity_type: "Home" },
+    { key: "home.rent_price",    label: "Rent Price",    entity_type: "Home" },
+    { key: "home.status",        label: "Status",        entity_type: "Home" },
+    { key: "home.location",      label: "Location",      entity_type: "Home" },
+    { key: "home.description",   label: "Description",   entity_type: "Home" }
   ].freeze
 
   # ---------- Listing ----------
@@ -217,7 +217,7 @@ module WorkflowFieldMetadata
     when "Contact"       then [FIELDS_CONTACT, MERGE_TAGS_CONTACT]
     when "Account"       then [FIELDS_ACCOUNT, MERGE_TAGS_ACCOUNT]
     when "ServiceTicket" then [FIELDS_SERVICE_TICKET, MERGE_TAGS_SERVICE_TICKET]
-    when "Vehicle"       then [FIELDS_VEHICLE, MERGE_TAGS_VEHICLE]
+    when "Home"          then [FIELDS_HOME, MERGE_TAGS_HOME]
     when "Listing"       then [FIELDS_LISTING, MERGE_TAGS_LISTING]
     else
       raise ArgumentError, "Unknown entity_type: #{entity_type}"
