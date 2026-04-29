@@ -13,11 +13,18 @@ end
 
 new_lead_alert = {
   name: 'New Lead Alert',
-  description: 'Notify the lead owner whenever a new lead is created.',
+  description: 'Notify the lead owner when a new lead is captured from Facebook.',
   entity_type: 'Lead',
   status: 'active',
   trigger: { 'event_type' => 'lead.created', 'entity_type_filter' => 'Lead' },
-  conditions: [],
+  conditions: [
+    {
+      'type' => 'and',
+      'conditions' => [
+        { 'field' => 'source', 'operator' => 'equals', 'value' => 'Facebook' }
+      ]
+    }
+  ],
   steps: {
     'nodes' => [
       {
@@ -25,8 +32,17 @@ new_lead_alert = {
         'type' => 'send_email',
         'config' => {
           'to' => '{{entity.owner_email}}',
-          'subject' => 'New Lead: {{entity.first_name}} {{entity.last_name}}',
-          'body' => "A new lead has been added.\n\nName: {{entity.first_name}} {{entity.last_name}}\nEmail: {{entity.email}}\nPhone: {{entity.phone}}\nSource: {{entity.source}}\n\nLog in to follow up."
+          'subject' => 'New Facebook Lead: {{entity.first_name}} {{entity.last_name}}',
+          'body' => "You have a new lead from Facebook that needs follow-up.\n\n" \
+            "Name: {{entity.first_name}} {{entity.last_name}}\n" \
+            "Email: {{entity.email}}\n" \
+            "Phone: {{entity.phone}}\n" \
+            "Source: {{entity.source}}\n\n" \
+            "Facebook leads have a short shelf life — try to make contact within the first 5 minutes for the best chance of converting.\n\n" \
+            "Quick actions:\n" \
+            "- Call them now at {{entity.phone}}\n" \
+            "- Reply to their email at {{entity.email}}\n\n" \
+            "Log in to view the full lead details and assign follow-up tasks."
         }
       }
     ],
@@ -56,8 +72,18 @@ deal_closed_notification = {
         'type' => 'send_email',
         'config' => {
           'to' => '{{entity.owner_email}}',
-          'subject' => 'Deal Closed: {{entity.name}}',
-          'body' => "Great news! A deal has been closed.\n\nDeal: {{entity.name}}\nAmount: {{entity.amount}}\nClosed by: {{entity.owner_name}}\nAccount: {{entity.account_name}}\n\nCongratulations!"
+          'subject' => 'Deal Closed — {{entity.name}}',
+          'body' => "A deal has officially been marked as closed-won. Here are the details:\n\n" \
+            "Deal: {{entity.name}}\n" \
+            "Sale Amount: {{entity.amount}}\n" \
+            "Closed By: {{entity.owner_name}}\n" \
+            "Customer: {{entity.account_name}}\n\n" \
+            "Next steps to keep things moving:\n" \
+            "- Confirm all signed agreements are uploaded to the deal record\n" \
+            "- Verify financing details and deposit status\n" \
+            "- Coordinate delivery timeline with the operations team\n" \
+            "- Schedule a welcome call with the customer\n\n" \
+            "Congratulations to {{entity.owner_name}} and the entire team!"
         }
       }
     ],
@@ -80,8 +106,20 @@ service_ticket_acknowledgment = {
         'type' => 'send_email',
         'config' => {
           'to' => '{{entity.contact_email}}',
-          'subject' => 'We received your service request - Ticket #{{entity.id}}',
-          'body' => "Hi {{entity.contact_first_name}},\n\nThank you for reaching out. We received your service request and our team is reviewing it.\n\nTicket: \#{{entity.id}}\nSubject: {{entity.subject}}\n\nWe will follow up shortly. If urgent, please call our office.\n\nThank you,\nThe Management Team"
+          'subject' => 'Your service request has been received — Ticket #{{entity.id}}',
+          'body' => "Hi {{entity.contact_first_name}},\n\n" \
+            "Thank you for submitting your service request. We want you to know it has been received and logged in our system.\n\n" \
+            "Ticket Number: #{{entity.id}}\n" \
+            "Subject: {{entity.subject}}\n" \
+            "Status: Open — Awaiting Assignment\n\n" \
+            "What happens next:\n" \
+            "- A team member will review your request and reach out to schedule a time that works for you\n" \
+            "- For routine requests, we typically respond within 1 business day\n" \
+            "- You can reply to this email at any time to add details or photos\n\n" \
+            "If this is an emergency (water leak, gas smell, electrical hazard, or no heat), please call our office immediately rather than waiting for an email response.\n\n" \
+            "We appreciate your patience and will be in touch soon.\n\n" \
+            "Best regards,\n" \
+            "The Service Team"
         }
       }
     ],
@@ -111,8 +149,17 @@ facebook_lead_welcome = {
         'type' => 'send_email',
         'config' => {
           'to' => '{{entity.email}}',
-          'subject' => 'Welcome, {{entity.first_name}}!',
-          'body' => "Hi {{entity.first_name}},\n\nThanks for your interest! We saw you reached out through Facebook and we're excited to help.\n\nA team member will be in touch soon. In the meantime, feel free to reply with any questions.\n\nCheers,\nThe Team"
+          'subject' => 'Thanks for reaching out, {{entity.first_name}} — here is what to expect',
+          'body' => "Hi {{entity.first_name}},\n\n" \
+            "Thank you for your interest in our community! We received your inquiry through Facebook and wanted to personally welcome you.\n\n" \
+            "Here is a little about what we offer:\n" \
+            "- New and pre-owned manufactured homes in a variety of floor plans\n" \
+            "- Affordable financing options and move-in specials\n" \
+            "- A friendly, well-maintained community with great amenities\n\n" \
+            "A member of our sales team will be reaching out shortly to learn more about what you are looking for. In the meantime, feel free to reply to this email with any questions — we are happy to help.\n\n" \
+            "We look forward to connecting with you!\n\n" \
+            "Warm regards,\n" \
+            "The Sales Team"
         }
       },
       { 'id' => 'n2', 'type' => 'wait', 'config' => { 'duration' => 2, 'unit' => 'days' } },
@@ -121,8 +168,16 @@ facebook_lead_welcome = {
         'type' => 'send_email',
         'config' => {
           'to' => '{{entity.email}}',
-          'subject' => 'Following up, {{entity.first_name}}',
-          'body' => "Hi {{entity.first_name}},\n\nJust checking in to see if you had any questions we can help answer. Reply to this email anytime — we read every message.\n\nTalk soon,\nThe Team"
+          'subject' => '{{entity.first_name}}, still looking for the right home?',
+          'body' => "Hi {{entity.first_name}},\n\n" \
+            "We wanted to follow up on your recent inquiry. Finding the right home is a big decision, and we are here to make the process as easy as possible.\n\n" \
+            "Here are a few ways we can help:\n" \
+            "- Schedule a tour of our available homes at a time that works for you\n" \
+            "- Walk you through financing options and what to expect\n" \
+            "- Answer any questions about floor plans, pricing, or community details\n\n" \
+            "If you would like to set up a visit, just reply to this email or give us a call. We would love to show you around.\n\n" \
+            "Best,\n" \
+            "The Sales Team"
         }
       },
       { 'id' => 'n4', 'type' => 'wait', 'config' => { 'duration' => 3, 'unit' => 'days' } },
@@ -162,8 +217,18 @@ reengage_stale_leads = {
         'type' => 'send_email',
         'config' => {
           'to' => '{{entity.email}}',
-          'subject' => 'Still interested, {{entity.first_name}}?',
-          'body' => "Hi {{entity.first_name}},\n\nIt's been a while since we last connected. Are you still in the market? Reply with a quick yes or no and we'll take it from there.\n\nThanks,\nThe Team"
+          'subject' => '{{entity.first_name}}, we have new homes available',
+          'body' => "Hi {{entity.first_name}},\n\n" \
+            "It has been a little while since we last connected, and we wanted to reach out with a quick update.\n\n" \
+            "We have had some new homes come available recently, including some great move-in-ready options. Pricing and availability change frequently, so if you are still exploring your options, now is a great time to take another look.\n\n" \
+            "We would love to reconnect and see how we can help. Feel free to:\n" \
+            "- Reply to this email with any questions\n" \
+            "- Call us to schedule a tour\n" \
+            "- Visit our website to browse current availability\n\n" \
+            "No pressure at all — we just wanted to make sure you did not miss out on something that might be a perfect fit.\n\n" \
+            "Hope to hear from you!\n\n" \
+            "Best regards,\n" \
+            "The Sales Team"
         }
       },
       { 'id' => 'n2', 'type' => 'add_tag', 'config' => { 'tag_names' => ['stale-notified'] } },
