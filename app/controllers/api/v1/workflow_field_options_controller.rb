@@ -10,6 +10,8 @@ module Api
       def index
         entity_type = params[:entity_type].to_s
 
+        return render(json: WorkflowFieldMetadata.all) if entity_type == 'all'
+
         unless WorkflowFieldMetadata::SUPPORTED_TYPES.include?(entity_type)
           return render(
             json: {

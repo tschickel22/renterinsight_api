@@ -92,12 +92,74 @@ module WorkflowEngine
       (rule.steps['nodes'] || []).first&.dig('id')
     end
 
+    RELATED_ENTITY_ASSOCIATIONS = {
+      'Lead'          => { 'vehicle' => :vehicle, 'account' => :converted_account },
+      'Deal'          => { 'account' => :account, 'contact' => :contact, 'vehicle' => :vehicle },
+      'Contact'       => { 'account' => :account },
+      'ServiceTicket' => { 'contact' => :contact, 'account' => :account, 'vehicle' => :vehicle, 'deal' => :deal },
+      'Listing'       => { 'vehicle' => :vehicle },
+      'Account'       => {},
+      'Vehicle'       => {}
+    }.freeze
+
     def build_initial_variables(entity, event)
-      {
-        'entity' => entity.as_json,
+      vars = {
+        'entity' => entity_as_hash_with_denormalized(entity),
         'trigger' => event&.payload || {},
         'started_at' => Time.current.iso8601
       }
+      vars.merge!(related_entity_snapshots(entity))
+      vars
+    end
+
+    def entity_as_hash_with_denormalized(entity)
+      hash = (entity.respond_to?(:as_json) ? entity.as_json : {}) || {}
+
+      if entity.respond_to?(:first_name)
+        hash['full_name'] ||= full_name_for(entity)
+      end
+
+      if entity.respond_to?(:owner) && (owner = entity.try(:owner))
+        hash['owner_email'] ||= owner.try(:email)
+        hash['owner_phone'] ||= owner.try(:phone)
+        hash['owner_name']  ||= full_name_for(owner) || owner.try(:email)
+      end
+
+      account = entity.try(:account) || entity.try(:converted_account)
+      hash['account_name'] ||= account.try(:name) if account
+
+      if (contact = entity.try(:contact))
+        hash['contact_email']      ||= contact.try(:email)
+        hash['contact_first_name'] ||= contact.try(:first_name)
+        hash['contact_last_name']  ||= contact.try(:last_name)
+      end
+
+      if (assignee = entity.try(:assigned_to_user) || entity.try(:assigned_to))
+        hash['assigned_to_name'] ||= full_name_for(assignee) || assignee.try(:email)
+      end
+
+      if entity.is_a?(Listing) && (vehicle = entity.try(:vehicle))
+        hash['url']     ||= vehicle.try(:listing_url)
+        hash['address'] ||= vehicle.try(:address1)
+      end
+
+      hash
+    end
+
+    def related_entity_snapshots(entity)
+      mappings = RELATED_ENTITY_ASSOCIATIONS[entity.class.name] || {}
+      mappings.each_with_object({}) do |(key, assoc), acc|
+        record = entity.try(assoc)
+        next unless record
+        acc[key] = entity_as_hash_with_denormalized(record)
+      end
+    end
+
+    def full_name_for(record)
+      return nil unless record
+      first = record.try(:first_name)
+      last  = record.try(:last_name)
+      [first, last].compact.reject(&:blank?).join(' ').presence
     end
   end
 end
