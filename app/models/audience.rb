@@ -6,7 +6,7 @@ class Audience < ApplicationRecord
   belongs_to :created_by_user, class_name: 'User', optional: true
   belongs_to :generated_from_ai_generation, class_name: 'AudienceAiGeneration', optional: true
 
-  has_many :audience_ai_generations
+  has_many :audience_ai_generations, dependent: :nullify
   has_many :campaign_audiences, foreign_key: :saved_audience_id, dependent: :nullify
 
   validates :name, presence: true, length: { maximum: 200 }

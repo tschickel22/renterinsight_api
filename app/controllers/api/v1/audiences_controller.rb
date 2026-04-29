@@ -76,8 +76,13 @@ class Api::V1::AudiencesController < ApplicationController
       return render(json: { error: 'Cannot delete audience used by one or more campaigns. Archive instead.' }, status: :unprocessable_entity)
     end
 
-    @audience.destroy
-    head :no_content
+    if @audience.destroy
+      head :no_content
+    else
+      render json: { error: 'Cannot delete audience: ' + @audience.errors.full_messages.join(', ') }, status: :unprocessable_entity
+    end
+  rescue ActiveRecord::InvalidForeignKey
+    render json: { error: 'Cannot delete audience: it is still referenced by other records. Try archiving instead.' }, status: :unprocessable_entity
   end
 
   def archive
