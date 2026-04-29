@@ -2,6 +2,50 @@ class Api::V1::CampaignAudiencesController < ApplicationController
   before_action :set_company_scope
   before_action :set_campaign
 
+  def create
+    return unless authorize_action!('campaigns', 'update')
+    return render(json: { error: 'Campaign is locked. Pause it to edit.' }, status: :unprocessable_entity) unless editable?
+
+    if @campaign.campaign_audience.present?
+      return render(json: { error: 'Audience already exists. Use update instead.' }, status: :unprocessable_entity)
+    end
+
+    attrs = audience_params
+    audience = @campaign.build_campaign_audience(
+      source_type: attrs[:source_type],
+      saved_audience_id: attrs[:saved_audience_id],
+      filter_tree: attrs[:filter_tree] || {},
+      exclude_filter_tree: attrs[:exclude_filter_tree] || {}
+    )
+
+    if audience.save
+      recompute_estimate(audience)
+      render json: audience_json(audience), status: :created
+    else
+      render json: { errors: audience.errors.full_messages }, status: :unprocessable_entity
+    end
+  end
+
+  def update
+    return unless authorize_action!('campaigns', 'update')
+    return render(json: { error: 'Campaign is locked. Pause it to edit.' }, status: :unprocessable_entity) unless editable?
+
+    audience = @campaign.campaign_audience
+    return render(json: { error: 'No audience set' }, status: :unprocessable_entity) unless audience
+
+    attrs = audience_params
+    update_attrs = {}
+    update_attrs[:filter_tree] = attrs[:filter_tree] if attrs.key?(:filter_tree)
+    update_attrs[:exclude_filter_tree] = attrs[:exclude_filter_tree] if attrs.key?(:exclude_filter_tree)
+
+    if audience.update(update_attrs)
+      recompute_estimate(audience)
+      render json: audience_json(audience)
+    else
+      render json: { errors: audience.errors.full_messages }, status: :unprocessable_entity
+    end
+  end
+
   def preview
     return unless authorize_action!('campaigns', 'read')
 
@@ -89,6 +133,41 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     @campaign = @company.campaigns.active.find(params[:campaign_id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Campaign not found' }, status: :not_found
+  end
+
+  def editable?
+    %w[draft scheduled].include?(@campaign.status)
+  end
+
+  def audience_params
+    params.require(:campaign_audience).permit(
+      :source_type, :location_id, :saved_audience_id,
+      filter_tree: {}, exclude_filter_tree: {}
+    )
+  end
+
+  def recompute_estimate(audience)
+    count = Audiences::FilterCompiler.new(
+      company: @company,
+      source_type: audience.source_type,
+      filter_tree: audience.filter_tree,
+      exclude_filter_tree: audience.exclude_filter_tree
+    ).count
+    audience.update!(estimated_count: count, estimated_at: Time.current)
+  end
+
+  def audience_json(audience)
+    {
+      id: audience.id,
+      campaign_id: audience.campaign_id,
+      source_type: audience.source_type,
+      saved_audience_id: audience.saved_audience_id,
+      filter_tree: audience.filter_tree,
+      exclude_filter_tree: audience.exclude_filter_tree,
+      estimated_count: audience.estimated_count,
+      estimated_at: audience.estimated_at,
+      metadata: audience.metadata
+    }
   end
 
   def record_display_name(r)

@@ -1623,7 +1623,7 @@ Rails.application.routes.draw do
           get :stats
           get :analytics_timeseries
         end
-        resource :audience, controller: 'campaign_audiences', only: [] do
+        resource :audience, controller: 'campaign_audiences', only: [:create, :update] do
           post :preview
           post :recompute
           post :acknowledge_sms_compliance
