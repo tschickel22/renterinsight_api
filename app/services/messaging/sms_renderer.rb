@@ -15,6 +15,7 @@ module Messaging
         recipient: @recipient, company: @company, rep: @campaign.try(:created_by),
         campaign_send: @send, urls: urls
       )
+      MergeTagResolver.enrich_context(context, recipient: @recipient, company: @company)
       body = MergeTagResolver.resolve(@step.sms_body, context)
       body = LinkTokenizer.new(campaign_send: @send, base_url: @base_url).tokenize_text(body) if @send && @send.persisted?
       { body: body, media_url: @step.try(:media_url) }

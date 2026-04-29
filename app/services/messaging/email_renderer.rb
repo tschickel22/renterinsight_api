@@ -15,6 +15,7 @@ module Messaging
         recipient: @recipient, company: @company, rep: @campaign.try(:created_by),
         campaign_send: @send, urls: urls
       )
+      MergeTagResolver.enrich_context(context, recipient: @recipient, company: @company)
 
       inventory_units = nil
       blocks = Array(@step.body_blocks)
