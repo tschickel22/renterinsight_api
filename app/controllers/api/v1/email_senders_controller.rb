@@ -96,10 +96,12 @@ class Api::V1::EmailSendersController < ApplicationController
   end
 
   def connection_status(conn)
-    token_present = conn.oauth_token_encrypted.present?
+    return 'needs_reconnect' if conn.oauth_token_encrypted.blank?
+
     expiry = conn.oauth_expires_at
-    healthy = token_present && (expiry.nil? || expiry > Time.current)
-    healthy ? 'healthy' : 'needs_reconnect'
+    return 'healthy' if expiry.nil? || expiry > Time.current
+
+    conn.oauth_refresh_token_encrypted.present? ? 'healthy' : 'needs_reconnect'
   end
 
   def sms_senders
