@@ -109,7 +109,7 @@ service_ticket_acknowledgment = {
           'subject' => 'Your service request has been received — Ticket #{{entity.id}}',
           'body' => "Hi {{entity.contact_first_name}},\n\n" \
             "Thank you for submitting your service request. We want you to know it has been received and logged in our system.\n\n" \
-            "Ticket Number: #{{entity.id}}\n" \
+            "Ticket Number: \#{{entity.id}}\n" \
             "Subject: {{entity.subject}}\n" \
             "Status: Open — Awaiting Assignment\n\n" \
             "What happens next:\n" \
