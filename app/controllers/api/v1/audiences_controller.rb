@@ -1,6 +1,8 @@
+require 'csv'
+
 class Api::V1::AudiencesController < ApplicationController
   before_action :set_company_scope
-  before_action :set_audience, only: %i[show update destroy preview refresh archive unarchive]
+  before_action :set_audience, only: %i[show update destroy preview refresh archive unarchive members export]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -136,6 +138,57 @@ class Api::V1::AudiencesController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  def members
+    return unless authorize_action!('campaigns', 'read')
+
+    scope = Audiences::FilterCompiler.new(
+      company: @company, source_type: @audience.source_type,
+      filter_tree: @audience.filter_tree, exclude_filter_tree: @audience.exclude_filter_tree
+    ).scope
+
+    scope = apply_member_search(scope, params[:search]) if params[:search].present?
+
+    total = scope.count
+    page = (params[:page] || 1).to_i
+    per_page = [(params[:per_page] || 50).to_i, 200].min
+    records = scope.offset((page - 1) * per_page).limit(per_page)
+
+    render json: {
+      items: records.map { |r| member_row(r) },
+      meta: {
+        total: total, page: page, per_page: per_page,
+        total_pages: (total.to_f / per_page).ceil
+      }
+    }
+  rescue Audiences::FilterCompiler::CompilationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  def export
+    return unless authorize_action!('campaigns', 'read')
+
+    scope = Audiences::FilterCompiler.new(
+      company: @company, source_type: @audience.source_type,
+      filter_tree: @audience.filter_tree, exclude_filter_tree: @audience.exclude_filter_tree
+    ).scope
+
+    scope = apply_member_search(scope, params[:search]) if params[:search].present?
+
+    headers = member_csv_headers
+    csv_string = CSV.generate do |csv|
+      csv << headers
+      scope.find_each do |r|
+        row = member_row(r)
+        csv << headers.map { |h| row[h.to_sym] }
+      end
+    end
+
+    filename = "audience-#{@audience.name.parameterize}-#{Date.current.iso8601}.csv"
+    send_data csv_string, filename: filename, type: 'text/csv', disposition: 'attachment'
+  rescue Audiences::FilterCompiler::CompilationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   def ai_generate
     return unless authorize_action!('campaigns', 'create')
 
@@ -252,7 +305,47 @@ class Api::V1::AudiencesController < ApplicationController
     base.merge(
       filter_tree: a.filter_tree, exclude_filter_tree: a.exclude_filter_tree,
       generated_from_ai_generation_id: a.generated_from_ai_generation_id,
-      campaigns_using_count: a.campaign_audiences.count
+      campaigns_using_count: a.campaign_audiences.count,
+      campaigns_using: a.campaign_audiences.includes(:campaign).map { |ca|
+        { id: ca.campaign.id, name: ca.campaign.name, status: ca.campaign.status }
+      }
     )
+  end
+
+  def apply_member_search(scope, search)
+    term = "%#{search}%"
+    case @audience.source_type
+    when 'Lead', 'Contact'
+      scope.where('first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?', term, term, term)
+    when 'Account'
+      scope.where('name ILIKE ? OR website ILIKE ?', term, term)
+    else
+      scope
+    end
+  end
+
+  def member_csv_headers
+    case @audience.source_type
+    when 'Lead'    then %w[id first_name last_name email phone status created_at]
+    when 'Contact' then %w[id first_name last_name email phone account_id created_at]
+    when 'Account' then %w[id name account_type website created_at]
+    else []
+    end
+  end
+
+  def member_row(r)
+    case @audience.source_type
+    when 'Lead'
+      { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
+        phone: r.phone, status: r.status, created_at: r.created_at }
+    when 'Contact'
+      { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
+        phone: r.phone, account_id: r.account_id, created_at: r.created_at }
+    when 'Account'
+      { id: r.id, name: r.name, account_type: r.account_type, website: r.website,
+        created_at: r.created_at }
+    else
+      { id: r.id }
+    end
   end
 end
