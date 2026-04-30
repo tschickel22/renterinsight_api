@@ -28,14 +28,25 @@ class Api::V1::EmailSendersController < ApplicationController
                     .includes(:user)
 
     connections.map do |conn|
-      display = conn.display_name.presence ||
-                [conn.user&.first_name, conn.user&.last_name].compact.join(' ').presence ||
-                conn.email_address
+      first_name = conn.user&.first_name
+      last_name  = conn.user&.last_name
+      user_name  = [first_name, last_name].compact.map(&:to_s).map(&:strip).reject(&:empty?).join(' ').presence
+
+      # Treat the connection's display_name as a customization only when it
+      # differs from the email_address. The OAuth flow historically stamped
+      # display_name = email, which made the picker show emails instead of
+      # names; ignore that case so user_name wins.
+      custom_display = conn.display_name.presence
+      custom_display = nil if custom_display && custom_display.casecmp(conn.email_address.to_s).zero?
+
       {
         from_identity_type: 'User',
         from_identity_id: conn.user_id,
         email_address: conn.email_address,
-        display_name: display,
+        first_name: first_name,
+        last_name: last_name,
+        user_name: user_name,
+        display_name: user_name || custom_display || conn.email_address,
         provider: conn.provider,
         is_default: conn.user_id == current_user.id,
         is_current_user: conn.user_id == current_user.id,

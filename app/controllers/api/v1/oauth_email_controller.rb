@@ -270,11 +270,15 @@ class Api::V1::OauthEmailController < ApplicationController
     connection = scope.find_by(provider: provider_value) ||
                  scope.find_by(email_address: email)
 
+    # NB: display_name is intentionally not set here. It used to default to the
+    # user's email, which (a) clobbered any UI-set display_name on every re-auth
+    # and (b) made the email_senders picker show emails instead of names.
+    # The picker now derives the label from User#first_name/last_name and
+    # treats display_name as an optional override only.
     attrs = {
       email_address:              email,
       provider:                   provider_value,
       oauth_provider:             provider,
-      display_name:               email,
       is_active:                  true,
       verified_at:                Time.current,
       oauth_token_encrypted:      access_token,
