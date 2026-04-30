@@ -246,6 +246,21 @@ class QuickbooksSyncService
         
         synced += 1
         
+      rescue QuickbooksValidationError => e
+        # Handle "Duplicate Name Exists Error" with unique name retry
+        if e.message.include?('Duplicate Name Exists') && handler.respond_to?(:transform_to_quickbooks)
+          retry_result = retry_with_unique_name(handler, record, config)
+          if retry_result[:success]
+            synced += 1
+            next
+          else
+            errors << { record_id: record.id, error: retry_result[:error] }
+            Rails.logger.error "Failed to sync #{entity_type} ##{record.id} (after retry): #{retry_result[:error]}"
+          end
+        else
+          errors << { record_id: record.id, error: e.message }
+          Rails.logger.error "Failed to sync #{entity_type} ##{record.id}: #{e.message}"
+        end
       rescue => e
         errors << { record_id: record.id, error: e.message }
         Rails.logger.error "Failed to sync #{entity_type} ##{record.id}: #{e.message}"
@@ -480,6 +495,39 @@ class QuickbooksSyncService
   def create_conflict_record(record, qb_entity)
     # TODO: Create QuickbooksConflict model to store conflicts for manual review
     Rails.logger.info "Conflict detected for #{record.class.name} ##{record.id}"
+  end
+
+  # Retry sync with progressively more unique DisplayName
+  # Attempt 1: append email (e.g., "John Smith - john@example.com")
+  # Attempt 2: append record ID (e.g., "John Smith (42)")
+  def retry_with_unique_name(handler, record, config)
+    suffixes = [:email, :id]
+
+    suffixes.each do |suffix|
+      begin
+        Rails.logger.info "[QB Sync] Retrying #{record.class.name} ##{record.id} with unique_suffix: #{suffix}"
+        qb_data = handler.transform_to_quickbooks(record, config, unique_suffix: suffix)
+
+        if record.quickbooks_id.present?
+          @api.update_entity(handler.qb_entity_type, record.quickbooks_id, qb_data)
+        else
+          response = @api.create_entity(handler.qb_entity_type, qb_data)
+          qb_id = response.dig(handler.qb_entity_type, 'Id')
+          handler.save_quickbooks_id(record, qb_id)
+        end
+
+        record.update_column(:quickbooks_synced_at, Time.current) if record.respond_to?(:quickbooks_synced_at=)
+        Rails.logger.info "[QB Sync] Retry succeeded for #{record.class.name} ##{record.id} with suffix: #{suffix}"
+        return { success: true }
+      rescue QuickbooksValidationError => e
+        next if e.message.include?('Duplicate Name Exists')
+        return { success: false, error: e.message }
+      rescue => e
+        return { success: false, error: e.message }
+      end
+    end
+
+    { success: false, error: 'Duplicate Name Exists Error - all retry suffixes exhausted' }
   end
   
   def create_sync_log(entity_type, sync_direction)

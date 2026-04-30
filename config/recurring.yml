@@ -46,6 +46,18 @@ default: &default
     class: SyncSocialCommentsJob
     queue: default
     schedule: every 15 minutes
+  campaign_scheduler:
+    class: CampaignSchedulerJob
+    queue: default
+    schedule: every 5 minutes
+  campaign_goal_checker:
+    class: CampaignGoalCheckJob
+    queue: default
+    schedule: every 10 minutes
+  campaign_stats_rollup:
+    class: CampaignStatsRollupJob
+    queue: default
+    schedule: every 15 minutes
 
 production:
   <<: *default

@@ -31,7 +31,11 @@ module InboundEmail
       # Extract body (prefer text, fallback to HTML)
       body_text = mail.text_part&.decoded || mail.body.decoded
       body_html = mail.html_part&.decoded
-      
+
+      # Capture full raw headers for bounce / OOO classification.
+      raw_headers = mail.header.to_s rescue ''
+      content_type = mail.content_type.to_s rescue ''
+
       {
         from: mail.from.first,
         to: mail.to.first,
@@ -40,7 +44,9 @@ module InboundEmail
         body_html: body_html,
         timestamp: mail.date || Time.current,
         token: token,
-        message_id: mail.message_id
+        message_id: mail.message_id,
+        headers: raw_headers,
+        content_type: content_type
       }
     rescue => e
       Rails.logger.error "[ParserService] Error parsing email: #{e.message}"

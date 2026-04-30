@@ -202,7 +202,7 @@ class ApplicationController < ActionController::API
     return @current_user_locations if defined?(@current_user_locations)
     
     # Company admins have access to all locations
-    if current_user.admin?
+    if current_user.effective_admin?
       @current_user_locations = current_company.locations.where(is_deleted: false, active: true)
     else
       # Regular users only access their assigned locations
@@ -218,7 +218,7 @@ class ApplicationController < ActionController::API
     return false unless current_user && location
     
     # Company admins can access all locations
-    return true if current_user.admin?
+    return true if current_user.effective_admin?
     
     # Check if user has an active assignment to this location
     current_user_locations.exists?(id: location.id)
@@ -228,7 +228,7 @@ class ApplicationController < ActionController::API
     return false unless current_user && location
     
     # Company admins have admin rights everywhere
-    return true if current_user.admin?
+    return true if current_user.effective_admin?
     
     # Check if user is a location admin for this specific location
     UserLocation.exists?(
@@ -243,7 +243,7 @@ class ApplicationController < ActionController::API
     return false unless current_user && location
     
     # Company admins can manage all locations
-    return true if current_user.admin?
+    return true if current_user.effective_admin?
     
     # Location admins and managers can manage operations
     user_location = UserLocation.find_by(
@@ -269,7 +269,7 @@ class ApplicationController < ActionController::API
     
     if header_location_id.present? && header_location_id > 0
       # Verify user has access to this location
-      if current_user&.platform_admin? || current_user&.super_admin? || current_user&.admin?
+      if current_user&.platform_admin? || current_user&.super_admin? || current_user&.effective_admin?
         # Admins can access any location in their company
         location = Location.find_by(id: header_location_id, company_id: current_company_id)
         if location
@@ -480,7 +480,7 @@ class ApplicationController < ActionController::API
       permission_service.accessible_region_ids
     else
       # Legacy: company admins get all regions
-      current_user.admin? ? current_company.regions.pluck(:id) : []
+      current_user.effective_admin? ? current_company.regions.pluck(:id) : []
     end
   end
   

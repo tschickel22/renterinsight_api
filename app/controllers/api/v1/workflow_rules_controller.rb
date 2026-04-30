@@ -68,7 +68,11 @@ module Api
           @rule.update!(status: 'active')
           render json: rule_json(@rule, full: true)
         else
-          render json: { errors: validation.errors }, status: :unprocessable_entity
+          render json: {
+            error: 'Workflow cannot be activated',
+            validation_errors: validation.structured_errors,
+            errors: validation.errors
+          }, status: :unprocessable_entity
         end
       end
 
@@ -89,7 +93,12 @@ module Api
 
       def validate
         validation = WorkflowRuleValidator.new(@rule).validate
-        render json: { valid: validation.valid?, errors: validation.errors, warnings: validation.warnings }
+        render json: {
+          valid: validation.valid?,
+          errors: validation.errors,
+          validation_errors: validation.structured_errors,
+          warnings: validation.warnings
+        }
       end
 
       def runs

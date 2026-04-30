@@ -27,12 +27,17 @@ class Api::V1::OauthEmailController < ApplicationController
     key       = Rails.application.secret_key_base[0..31]
     encryptor = ActiveSupport::MessageEncryptor.new(key)
 
+    # Capture the *active session* company at authorize time. current_user.company_id
+    # is the user's home company, which differs from the active company when a
+    # platform admin is proxied into a tenant (X-Company-Id header / JWT override).
+    # The connection must be persisted under the session's company, not the user's.
     state_data = {
       provider:   provider,
       scope_type: scope_type,
       scope_id:   scope_id,
       return_url: return_url,
       user_id:    current_user.id,
+      company_id: @company&.id,
       nonce:      SecureRandom.hex(8)
     }
     state = Base64.urlsafe_encode64(encryptor.encrypt_and_sign(state_data.to_json))
@@ -201,6 +206,7 @@ class Api::V1::OauthEmailController < ApplicationController
       if scope_type == 'user_email_connection' && email.present?
         upsert_user_email_connection(
           user_id:       state_data['user_id'],
+          company_id:    state_data['company_id'],
           email:         email,
           provider:      provider,
           access_token:  tokens['access_token'],
@@ -244,21 +250,35 @@ class Api::V1::OauthEmailController < ApplicationController
 
   private
 
-  def upsert_user_email_connection(user_id:, email:, provider:, access_token:, refresh_token:, expires_at:)
+  def upsert_user_email_connection(user_id:, company_id:, email:, provider:, access_token:, refresh_token:, expires_at:)
     user = User.find_by(id: user_id)
     return unless user
 
+    # Resolve the company under which to persist this connection: prefer the active
+    # session company captured in the OAuth state, fall back to the user's home
+    # company only if state didn't carry one (older auth links). NEVER silently
+    # rebind across companies.
+    target_company_id = company_id.presence || user.company_id
+    return unless target_company_id
+
     provider_value = provider == 'microsoft' ? 'oauth_outlook' : 'oauth_gmail'
 
-    # Find existing OAuth connection for this user (by provider type) or by email
-    connection = user.user_email_connections.find_by(provider: provider_value) ||
-                 user.user_email_connections.find_by(email_address: email)
+    # Scope the upsert lookup to (user, company, provider). Without the company
+    # scope, connecting OAuth while proxied into company 5 would update the
+    # user's existing company-1 connection — moving credentials across tenants.
+    scope = user.user_email_connections.where(company_id: target_company_id)
+    connection = scope.find_by(provider: provider_value) ||
+                 scope.find_by(email_address: email)
 
+    # NB: display_name is intentionally not set here. It used to default to the
+    # user's email, which (a) clobbered any UI-set display_name on every re-auth
+    # and (b) made the email_senders picker show emails instead of names.
+    # The picker now derives the label from User#first_name/last_name and
+    # treats display_name as an optional override only.
     attrs = {
       email_address:              email,
       provider:                   provider_value,
       oauth_provider:             provider,
-      display_name:               email,
       is_active:                  true,
       verified_at:                Time.current,
       oauth_token_encrypted:      access_token,
@@ -268,11 +288,15 @@ class Api::V1::OauthEmailController < ApplicationController
 
     if connection
       connection.update!(attrs)
-      Rails.logger.info "[OAuthEmail] Updated UserEmailConnection #{connection.id} for user #{user_id}"
+      Rails.logger.info "[OAuthEmail] Updated UserEmailConnection #{connection.id} for user #{user_id} in company #{target_company_id}"
     else
-      is_first = user.user_email_connections.count.zero?
-      connection = user.user_email_connections.create!(attrs.merge(is_default: is_first))
-      Rails.logger.info "[OAuthEmail] Created UserEmailConnection #{connection.id} for user #{user_id}"
+      is_first = scope.count.zero?
+      # Pass company_id explicitly so the model's set_company_from_user callback
+      # (which uses ||=) won't fall back to user.company_id.
+      connection = user.user_email_connections.create!(
+        attrs.merge(company_id: target_company_id, is_default: is_first)
+      )
+      Rails.logger.info "[OAuthEmail] Created UserEmailConnection #{connection.id} for user #{user_id} in company #{target_company_id}"
     end
   rescue => e
     Rails.logger.error "[OAuthEmail] Failed to upsert UserEmailConnection: #{e.message}\n#{e.backtrace&.first(3)&.join('\n')}"

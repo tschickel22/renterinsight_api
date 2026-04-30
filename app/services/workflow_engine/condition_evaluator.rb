@@ -65,12 +65,35 @@ module WorkflowEngine
         (9..16).cover?(t.hour) && (1..5).cover?(t.wday)
       when 'matches_regex'
         Regexp.new(value.to_s).match?(field_value.to_s)
+      when 'tags_include'
+        evaluate_tags_include(field_value, value)
+      when 'tags_exclude'
+        !evaluate_tags_include(field_value, value)
+      when 'tags_any_of'
+        Array(value).any? { |v| evaluate_tags_include(field_value, v) }
       else
         false
       end
     rescue => e
       Rails.logger.error "[ConditionEvaluator] leaf error: #{e.message}"
       false
+    end
+
+    def evaluate_tags_include(field_value, value)
+      return false if field_value.nil?
+      tags = Array(field_value)
+      tags.any? do |t|
+        case t
+        when String then t == value.to_s
+        when Integer then t == value.to_i
+        when Hash
+          t['name'] == value.to_s || t['id'] == value.to_i ||
+            t[:name] == value.to_s || t[:id] == value.to_i
+        else
+          (t.respond_to?(:name) && t.name == value.to_s) ||
+            (t.respond_to?(:id) && t.id == value.to_i)
+        end
+      end
     end
 
     def resolve_field(path, context)
