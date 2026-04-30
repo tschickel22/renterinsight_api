@@ -59,12 +59,42 @@ class Api::V1::CampaignsController < ApplicationController
     @campaign = @company.campaigns.build(campaign_params)
     @campaign.created_by_user_id = current_user.id
 
-    if @campaign.save
-      apply_saved_audience(@campaign) if params[:saved_audience_id].present?
-      render json: campaign_json(@campaign, full: true), status: :created
-    else
-      render json: { errors: @campaign.errors.full_messages }, status: :unprocessable_entity
+    ActiveRecord::Base.transaction do
+      @campaign.save!
+
+      if params[:campaign][:steps].present?
+        params[:campaign][:steps].each do |step_param|
+          sp = step_param.respond_to?(:to_unsafe_h) ? step_param.to_unsafe_h : step_param.to_h
+          @campaign.campaign_steps.create!(
+            position: sp['position'],
+            wait_days: sp['wait_days'],
+            wait_hours: sp['wait_hours'],
+            channel: sp['channel'],
+            subject: sp['subject'],
+            preheader: sp['preheader'],
+            body_blocks: sp['body_blocks'],
+            sms_body: sp['sms_body'],
+            media_url: sp['media_url'],
+            is_active: true
+          )
+        end
+      end
+
+      audience_param = params[:campaign][:audience]
+      if audience_param.present? && audience_param[:source_type].present?
+        ap = audience_param.respond_to?(:to_unsafe_h) ? audience_param.to_unsafe_h : audience_param.to_h
+        @campaign.create_campaign_audience!(
+          source_type: ap['source_type'],
+          filter_tree: ap['filter_tree']
+        )
+      elsif saved_audience_id_param.present?
+        apply_saved_audience(@campaign)
+      end
     end
+
+    render json: campaign_json(@campaign, full: true), status: :created
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
   end
 
   def update
@@ -392,7 +422,7 @@ class Api::V1::CampaignsController < ApplicationController
   end
 
   def apply_saved_audience(campaign)
-    audience = @company.audiences.active.find_by(id: params[:saved_audience_id])
+    audience = @company.audiences.active.find_by(id: saved_audience_id_param)
     return unless audience
 
     campaign.create_campaign_audience!(
@@ -401,6 +431,10 @@ class Api::V1::CampaignsController < ApplicationController
       exclude_filter_tree: audience.exclude_filter_tree,
       saved_audience_id: audience.id
     )
+  end
+
+  def saved_audience_id_param
+    params[:saved_audience_id].presence || params.dig(:campaign, :saved_audience_id)
   end
 
   def campaign_params

@@ -56,6 +56,7 @@ class Api::V1::CampaignEnrollmentsController < ApplicationController
       id: e.id,
       recipient_type: e.recipient_type,
       recipient_id: e.recipient_id,
+      recipient_name: recipient_name_for(e.recipient_type, e.recipient_id),
       email_address_snapshot: e.email_address_snapshot,
       status: e.status,
       current_step_index: e.current_step_index,
@@ -73,5 +74,24 @@ class Api::V1::CampaignEnrollmentsController < ApplicationController
       sends: e.campaign_sends.order(:created_at).map { |s| { id: s.id, sent_at: s.sent_at, opened_at: s.opened_at, clicked_at: s.clicked_at, replied_at: s.replied_at } },
       events: e.campaign_events.order(:occurred_at).map { |ev| { event_type: ev.event_type, occurred_at: ev.occurred_at, payload: ev.payload } }
     )
+  end
+
+  def recipient_name_for(recipient_type, recipient_id)
+    fallback = "#{recipient_type} ##{recipient_id}"
+    klass = case recipient_type
+            when 'Lead'    then Lead
+            when 'Contact' then Contact
+            when 'User'    then User
+            end
+    return fallback unless klass
+
+    record = klass.find_by(id: recipient_id)
+    return fallback unless record
+
+    name = [record.first_name, record.last_name].compact.map(&:to_s).map(&:strip).reject(&:empty?).join(' ')
+    name.presence || fallback
+  rescue => e
+    Rails.logger.warn "[CampaignEnrollmentsController] recipient_name_for(#{recipient_type}, #{recipient_id}): #{e.message}"
+    "#{recipient_type} ##{recipient_id}"
   end
 end

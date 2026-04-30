@@ -58,15 +58,16 @@ class Campaign < ApplicationRecord
   end
 
   # Email connection resolution — NEVER falls back to platform.
+  # All lookups MUST be scoped to self.company_id to prevent cross-tenant leaks.
   def resolve_email_connection
     return nil if sms_channel?
     case from_identity_type
     when 'User'
-      UserEmailConnection.where(user_id: from_identity_id, is_active: true).first
+      UserEmailConnection.where(company_id: company_id, user_id: from_identity_id, is_active: true).first
     when 'Location'
-      LocationEmailConnection.where(location_id: from_identity_id, is_active: true).first
+      LocationEmailConnection.where(company_id: company_id, location_id: from_identity_id, is_active: true).first
     when 'Company'
-      CompanyEmailConnection.where(company_id: from_identity_id, is_active: true).first
+      CompanyEmailConnection.where(company_id: company_id, is_active: true).first
     end
   end
 
@@ -92,11 +93,11 @@ class Campaign < ApplicationRecord
   def resolve_email_connection_for_step
     case from_identity_type
     when 'User'
-      UserEmailConnection.where(user_id: from_identity_id, is_active: true).first
+      UserEmailConnection.where(company_id: company_id, user_id: from_identity_id, is_active: true).first
     when 'Location'
-      LocationEmailConnection.where(location_id: from_identity_id, is_active: true).first
+      LocationEmailConnection.where(company_id: company_id, location_id: from_identity_id, is_active: true).first
     when 'Company'
-      CompanyEmailConnection.where(company_id: from_identity_id, is_active: true).first
+      CompanyEmailConnection.where(company_id: company_id, is_active: true).first
     end
   end
 
