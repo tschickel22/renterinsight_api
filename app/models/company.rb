@@ -73,6 +73,9 @@ class Company < ApplicationRecord
   has_many :invoice_terms_templates, dependent: :destroy
   has_many :invoice_notes_templates, dependent: :destroy
   
+  # Notifications
+  has_many :notifications, dependent: :destroy
+
   # Tasks Module
   has_many :tasks, dependent: :destroy
 
