@@ -58,6 +58,9 @@ class Company < ApplicationRecord
   has_many :location_email_connections, dependent: :destroy
   has_one  :company_email_connection, dependent: :destroy
   has_many :territories, dependent: :destroy
+
+  # Champion Integrations
+  has_many :champion_lead_feed_configs, dependent: :destroy
   has_many :nurture_sequences, dependent: :destroy
   has_many :nurture_enrollments, dependent: :destroy
   

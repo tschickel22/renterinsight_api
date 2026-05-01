@@ -612,6 +612,25 @@ Rails.application.routes.draw do
         end
       end
 
+      # ==================== CHAMPION LEADS API INTEGRATION ====================
+      # Polls Champion's Retailer API for leads, supports accept/decline workflow.
+      # Config CRUD + accept/decline/refresh actions on individual leads.
+      namespace :champion_leads, path: 'champion-leads' do
+        resources :configs do
+          member do
+            post :test_connection
+            post :sync_now
+          end
+        end
+
+        # Accept/decline/refresh actions on individual CRM leads
+        scope 'actions/:id', controller: 'actions' do
+          post :accept
+          post :decline
+          post :refresh
+        end
+      end
+
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
         member do

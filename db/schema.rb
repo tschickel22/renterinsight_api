@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_04_27_185422) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_01_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1052,6 +1052,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_185422) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.boolean "apply_to_all_locations", default: false, null: false, comment: "When true, synced vehicles are company-wide (location_id=nil) regardless of retailer.location_id"
+    t.text "custom_retailer_sentence"
     t.index ["active"], name: "index_champion_ims_retailers_on_active"
     t.index ["company_id", "retailer_navision_id"], name: "idx_champion_ims_retailers_on_company_and_navision", unique: true
     t.index ["company_id"], name: "index_champion_ims_retailers_on_company_id"
@@ -1099,6 +1100,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_185422) do
     t.index ["champion_ims_retailer_id", "started_at"], name: "idx_cims_runs_on_retailer_and_started_at", order: { started_at: :desc }
     t.index ["champion_ims_retailer_id"], name: "idx_cims_runs_on_retailer"
     t.index ["company_id"], name: "index_champion_ims_sync_runs_on_company_id"
+  end
+
+  create_table "champion_lead_feed_configs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "api_token_ciphertext", null: false
+    t.string "environment", default: "production", null: false
+    t.string "champion_account_number"
+    t.string "retailer_name"
+    t.boolean "active", default: true, null: false
+    t.datetime "last_synced_at"
+    t.datetime "last_sync_error_at"
+    t.text "last_sync_error"
+    t.integer "total_leads_synced", default: 0, null: false
+    t.integer "sync_interval_minutes", default: 15, null: false
+    t.jsonb "last_sync_stats", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_champion_lead_feed_configs_on_active"
+    t.index ["company_id", "location_id"], name: "idx_champion_lead_configs_company_location", unique: true
+    t.index ["company_id"], name: "index_champion_lead_feed_configs_on_company_id"
+    t.index ["location_id"], name: "index_champion_lead_feed_configs_on_location_id"
   end
 
   create_table "commission_audit_entries", force: :cascade do |t|
@@ -2899,6 +2922,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_185422) do
     t.datetime "last_activity_scored_at"
     t.boolean "email_invalid", default: false, null: false
     t.boolean "opt_in_sms", default: false, null: false
+    t.string "champion_salesforce_id"
+    t.string "champion_status"
+    t.jsonb "champion_lead_data", default: {}
+    t.bigint "champion_config_id"
+    t.datetime "champion_accepted_at"
+    t.datetime "champion_declined_at"
+    t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
+    t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"
+    t.index ["company_id", "champion_salesforce_id"], name: "idx_leads_company_champion_sf_id", unique: true
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
@@ -6073,6 +6105,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_04_27_185422) do
   add_foreign_key "champion_ims_sync_events", "vehicles"
   add_foreign_key "champion_ims_sync_runs", "champion_ims_retailers"
   add_foreign_key "champion_ims_sync_runs", "companies"
+  add_foreign_key "champion_lead_feed_configs", "companies"
+  add_foreign_key "champion_lead_feed_configs", "locations"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade

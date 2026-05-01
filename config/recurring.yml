@@ -25,6 +25,10 @@ default: &default
   champion_ims_weekly_sync:
     class: ChampionImsWeeklySyncJob
     schedule: every sunday at 2am
+  champion_lead_sync:
+    class: ChampionLeadSyncJob
+    queue: default
+    schedule: every 15 minutes
   generate_scheduled_social_posts:
     class: GenerateScheduledSocialPostsJob
     schedule: every hour
