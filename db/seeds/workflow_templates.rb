@@ -349,6 +349,9 @@ templates << {
 }
 
 # Champion Lead Intake - Round Robin Assignment
+# NOTE: No create_activity step because Champion leads have no phone/email
+# until the lead is accepted via Champion's API. The rep must accept first,
+# then contact info is revealed and a follow-up activity can be created.
 templates << {
   key: 'champion_lead_intake_round_robin',
   name: 'Champion Lead Intake - Round Robin',
@@ -356,7 +359,7 @@ templates << {
   entity_type: 'Lead',
   icon: 'Users',
   description: 'Automatically assign Champion leads via round robin and notify the assigned rep.',
-  preview_description: 'When a new lead arrives from Champion\'s Retailer API, assigns it to the next sales rep via round robin, then creates a call activity to review and accept/decline the lead.',
+  preview_description: 'When a new lead arrives from Champion\'s Retailer API, assigns it to the next sales rep via round robin, then sends a notification email with lead details and a link to accept or decline.',
   required_integrations: ['champion_leads'],
   trigger: { 'event_type' => 'lead.created', 'entity_type_filter' => 'Lead' },
   conditions: [
@@ -365,28 +368,21 @@ templates << {
   steps: {
     'nodes' => [
       { 'id' => 'n1', 'type' => 'assign_owner', 'config' => { 'strategy' => 'round_robin' } },
-      { 'id' => 'n2', 'type' => 'create_activity', 'config' => {
-        'activity_type' => 'call',
-        'subject' => 'Review Champion Lead: {{entity.first_name}} {{entity.last_name}}',
-        'due_in_hours' => 4,
-        'priority' => 'high',
-        'assigned_to' => 'owner'
-      } },
-      { 'id' => 'n3', 'type' => 'send_email', 'config' => {
+      { 'id' => 'n2', 'type' => 'send_email', 'config' => {
         'to' => '{{entity.owner_email}}',
         'subject' => '{{params.notify_subject}}',
         'body' => '{{params.notify_body}}'
       } }
     ],
-    'edges' => linear_edges(%w[n1 n2 n3])
+    'edges' => linear_edges(%w[n1 n2])
   },
-  version: 1,
+  version: 2,
   parameters: {
-    'notify_subject' => 'New Champion Lead Assigned: {{entity.first_name}} {{entity.last_name}}',
-    'notify_body' => 'Hi,\n\nA new lead from Champion Homes has been assigned to you.\n\nName: {{entity.first_name}} {{entity.last_name}}\nStatus: {{entity.status}}\n\nPlease review and accept or decline the lead in your CRM.\n\nThank you'
+    'notify_subject' => 'New Champion Lead: {{entity.first_name}} {{entity.last_name}} — Accept or Decline',
+    'notify_body' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;"><div style="background: #f97316; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;"><h2 style="margin: 0; font-size: 20px;">New Champion Lead Assigned to You</h2></div><div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;"><p style="margin: 0 0 16px; font-size: 15px; color: #374151;">A new lead from <strong>Champion Homes</strong> has been assigned to you and requires your attention.</p><table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;"><tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; width: 140px; color: #374151;">Name</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.first_name}} {{entity.last_name}}</td></tr><tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Source</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">Champion Homes — Retailer API</td></tr><tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Status</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_status}}</td></tr></table><div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 16px; margin-bottom: 20px;"><p style="margin: 0; font-size: 14px; color: #9a3412;"><strong>⚠️ Action Required:</strong> You must <strong>Accept</strong> or <strong>Decline</strong> this lead. Contact information (email and phone) will only be revealed after you accept the lead.</p></div><div style="text-align: center; margin: 24px 0;"><a href="{{frontend_url}}/crm/prospecting" style="display: inline-block; background: #f97316; color: white; padding: 12px 32px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px;">Review Lead in CRM →</a></div><p style="margin: 0; font-size: 13px; color: #6b7280; text-align: center;">Log in to your CRM and search for "{{entity.first_name}} {{entity.last_name}}" to view the full Champion lead panel.</p></div></div>'
   },
   parameter_schema: [
-    { 'key' => 'notify_subject', 'label' => 'Notification Email Subject', 'type' => 'string', 'required' => true, 'default' => 'New Champion Lead Assigned: {{entity.first_name}} {{entity.last_name}}' },
+    { 'key' => 'notify_subject', 'label' => 'Notification Email Subject', 'type' => 'string', 'required' => true, 'default' => 'New Champion Lead: {{entity.first_name}} {{entity.last_name}} — Accept or Decline' },
     { 'key' => 'notify_body', 'label' => 'Notification Email Body', 'type' => 'textarea', 'required' => true, 'default' => 'A new Champion lead has been assigned to you. Please review and accept or decline.' }
   ],
   sort_order: 15
