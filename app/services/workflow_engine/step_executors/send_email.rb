@@ -11,11 +11,17 @@ module WorkflowEngine
 
         comm = nil
         begin
+          # Use the entity's owner as the sending user so their email
+          # connection (Gmail OAuth, etc.) is used instead of falling
+          # back to platform-level AWS SES credentials.
+          sending_user = @run.entity.try(:owner)
+
           result = CommunicationService.send_email(
             communicable: @run.entity,
             to: to,
             subject: subject,
             body: body,
+            user: sending_user,
             metadata: { workflow_run_id: @run.id, step_id: @step['id'] }
           )
           comm = result if result.is_a?(Communication)
