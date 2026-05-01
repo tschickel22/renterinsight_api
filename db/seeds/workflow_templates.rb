@@ -360,7 +360,7 @@ templates << {
   required_integrations: ['champion_leads'],
   trigger: { 'event_type' => 'lead.created', 'entity_type_filter' => 'Lead' },
   conditions: [
-    { 'field' => 'source', 'operator' => 'equals', 'value' => 'Champion Leads' }
+    { 'field' => 'source.name', 'operator' => 'equals', 'value' => 'Champion Leads' }
   ],
   steps: {
     'nodes' => [
