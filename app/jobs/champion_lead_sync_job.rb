@@ -113,12 +113,11 @@ class ChampionLeadSyncJob < ApplicationJob
       champion_accepted_at:    accepted&.dig('acceptedDateTime'),
       notes:                   build_notes(data),
       location_id:             config.location_id,
+      owner_id:                resolve_default_owner(config),
       purchase_timeframe:      additional['timing'],
       interests_requirements:  build_interests(additional)
     )
 
-    # Suppress assignment notifications on bulk import
-    lead.skip_notifications = true
     lead.save!
   end
 
@@ -209,6 +208,25 @@ class ChampionLeadSyncJob < ApplicationJob
         s.source_type = 'api' if s.respond_to?(:source_type=)
       end
       source.id
+    end
+  end
+
+  # Resolve the default owner for new champion leads.
+  # Priority: config.default_lead_owner_id → first company admin → nil
+  def resolve_default_owner(config)
+    @owner_cache ||= {}
+    @owner_cache[config.id] ||= begin
+      if config.default_lead_owner_id.present?
+        config.default_lead_owner_id
+      else
+        # Fall back to first active admin
+        admin = config.company.users
+                      .where(is_active: true)
+                      .where(role: %w[company_admin admin])
+                      .order(:created_at)
+                      .first
+        admin&.id
+      end
     end
   end
 

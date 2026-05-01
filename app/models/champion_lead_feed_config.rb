@@ -16,6 +16,7 @@ class ChampionLeadFeedConfig < ApplicationRecord
   # ------------------------------------------------------------------
   belongs_to :company
   belongs_to :location, optional: true # nil = company-wide token
+  belongs_to :default_lead_owner, class_name: 'User', optional: true
 
   # ------------------------------------------------------------------
   # Encryption

@@ -348,6 +348,50 @@ templates << {
   sort_order: 100
 }
 
+# Champion Lead Intake - Round Robin Assignment
+templates << {
+  key: 'champion_lead_intake_round_robin',
+  name: 'Champion Lead Intake - Round Robin',
+  category: 'Lead Follow-up',
+  entity_type: 'Lead',
+  icon: 'Users',
+  description: 'Automatically assign Champion leads via round robin and notify the assigned rep.',
+  preview_description: 'When a new lead arrives from Champion\'s Retailer API, assigns it to the next sales rep via round robin, then creates a call activity to review and accept/decline the lead.',
+  required_integrations: ['champion_leads'],
+  trigger: { 'event_type' => 'lead.created', 'entity_type_filter' => 'Lead' },
+  conditions: [
+    { 'field' => 'source', 'operator' => 'equals', 'value' => 'Champion Leads' }
+  ],
+  steps: {
+    'nodes' => [
+      { 'id' => 'n1', 'type' => 'assign_owner', 'config' => { 'strategy' => 'round_robin' } },
+      { 'id' => 'n2', 'type' => 'create_activity', 'config' => {
+        'activity_type' => 'call',
+        'subject' => 'Review Champion Lead: {{entity.first_name}} {{entity.last_name}}',
+        'due_in_hours' => 4,
+        'priority' => 'high',
+        'assigned_to' => 'owner'
+      } },
+      { 'id' => 'n3', 'type' => 'send_email', 'config' => {
+        'to' => '{{entity.owner_email}}',
+        'subject' => '{{params.notify_subject}}',
+        'body' => '{{params.notify_body}}'
+      } }
+    ],
+    'edges' => linear_edges(%w[n1 n2 n3])
+  },
+  version: 1,
+  parameters: {
+    'notify_subject' => 'New Champion Lead Assigned: {{entity.first_name}} {{entity.last_name}}',
+    'notify_body' => 'Hi,\n\nA new lead from Champion Homes has been assigned to you.\n\nName: {{entity.first_name}} {{entity.last_name}}\nStatus: {{entity.status}}\n\nPlease review and accept or decline the lead in your CRM.\n\nThank you'
+  },
+  parameter_schema: [
+    { 'key' => 'notify_subject', 'label' => 'Notification Email Subject', 'type' => 'string', 'required' => true, 'default' => 'New Champion Lead Assigned: {{entity.first_name}} {{entity.last_name}}' },
+    { 'key' => 'notify_body', 'label' => 'Notification Email Body', 'type' => 'textarea', 'required' => true, 'default' => 'A new Champion lead has been assigned to you. Please review and accept or decline.' }
+  ],
+  sort_order: 15
+}
+
 templates.each do |attrs|
   key = attrs.delete(:key)
   upsert_template(key, attrs.merge(is_active: true))

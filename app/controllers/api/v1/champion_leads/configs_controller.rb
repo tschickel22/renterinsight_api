@@ -95,7 +95,8 @@ class Api::V1::ChampionLeads::ConfigsController < ApplicationController
   def config_params
     params.require(:config).permit(
       :api_token, :environment, :champion_account_number,
-      :retailer_name, :active, :location_id, :sync_interval_minutes
+      :retailer_name, :active, :location_id, :sync_interval_minutes,
+      :default_lead_owner_id
     )
   end
 
@@ -116,6 +117,8 @@ class Api::V1::ChampionLeads::ConfigsController < ApplicationController
       totalLeadsSynced: config.total_leads_synced,
       lastSyncStats: config.last_sync_stats,
       hasToken: config.api_token.present?,
+      defaultLeadOwnerId: config.default_lead_owner_id,
+      defaultLeadOwnerName: config.default_lead_owner ? "#{config.default_lead_owner.first_name} #{config.default_lead_owner.last_name}".strip : nil,
       createdAt: config.created_at,
       updatedAt: config.updated_at
     }

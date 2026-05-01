@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_01_000003) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1118,9 +1118,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000003) do
     t.jsonb "last_sync_stats", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "default_lead_owner_id"
     t.index ["active"], name: "index_champion_lead_feed_configs_on_active"
     t.index ["company_id", "location_id"], name: "idx_champion_lead_configs_company_location", unique: true
     t.index ["company_id"], name: "index_champion_lead_feed_configs_on_company_id"
+    t.index ["default_lead_owner_id"], name: "index_champion_lead_feed_configs_on_default_lead_owner_id"
     t.index ["location_id"], name: "index_champion_lead_feed_configs_on_location_id"
   end
 
@@ -6107,6 +6109,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000003) do
   add_foreign_key "champion_ims_sync_runs", "companies"
   add_foreign_key "champion_lead_feed_configs", "companies"
   add_foreign_key "champion_lead_feed_configs", "locations"
+  add_foreign_key "champion_lead_feed_configs", "users", column: "default_lead_owner_id"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
