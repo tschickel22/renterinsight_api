@@ -11,10 +11,6 @@ class Api::V1::ChampionLeads::ActionsController < ApplicationController
   before_action :set_lead
 
   # POST /api/v1/champion-leads/actions/:id/accept
-  #
-  # Accepts the lead on Champion's side, which reveals the prospect's
-  # contact information (email, phone). The next sync will pull those in,
-  # but we also trigger an immediate re-sync for faster turnaround.
   def accept
     return unless authorize_action!('leads', 'update')
 
@@ -45,9 +41,6 @@ class Api::V1::ChampionLeads::ActionsController < ApplicationController
   end
 
   # POST /api/v1/champion-leads/actions/:id/decline
-  #
-  # Declines the lead on Champion's side with an optional reason.
-  # The lead moves to "lost" status in the CRM.
   def decline
     return unless authorize_action!('leads', 'update')
 
@@ -77,10 +70,6 @@ class Api::V1::ChampionLeads::ActionsController < ApplicationController
   end
 
   # POST /api/v1/champion-leads/actions/:id/refresh
-  #
-  # Pulls the latest data for this specific lead from Champion and
-  # updates the local record. Useful for checking if contact info
-  # has been populated after accepting.
   def refresh
     return unless authorize_action!('leads', 'read')
 
@@ -122,21 +111,34 @@ class Api::V1::ChampionLeads::ActionsController < ApplicationController
     render json: { error: 'Lead not found' }, status: :not_found
   end
 
-  # Find the right config for this lead — try location-specific first, then company-wide
+  # Find the right config for this lead.
+  # Priority: location-specific → company-wide → by config ID stored on lead
   def find_config
-    if @lead.location_id
+    config = nil
+
+    # 1. Try location-specific config
+    if @lead.location_id.present?
       config = ChampionLeadFeedConfig.active.find_by(
         company_id: @company.id,
         location_id: @lead.location_id
       )
     end
-    config || ChampionLeadFeedConfig.active.find_by(
+
+    # 2. Try company-wide config (location_id is nil)
+    config ||= ChampionLeadFeedConfig.active.find_by(
       company_id: @company.id,
       location_id: nil
-    ) || ChampionLeadFeedConfig.active.find_by(
-      company_id: @company.id,
-      champion_config_id: @lead.champion_config_id
     )
+
+    # 3. Try by the config ID stored on the lead itself
+    if config.nil? && @lead.champion_config_id.present?
+      config = ChampionLeadFeedConfig.active.find_by(
+        company_id: @company.id,
+        id: @lead.champion_config_id
+      )
+    end
+
+    config
   end
 
   # Don't demote leads that are further in the pipeline
