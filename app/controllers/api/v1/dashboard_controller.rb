@@ -243,6 +243,48 @@ class Api::V1::DashboardController < ApplicationController
       # Recently completed tickets
       return unless authorize_action!('service', 'read')
       service.recent_completions
+    # ========== GM Overview ==========
+    when 'lead_conversion_funnel'
+      return unless authorize_action!('leads', 'read')
+      service.lead_conversion_funnel
+    when 'lead_velocity'
+      return unless authorize_action!('leads', 'read')
+      service.lead_velocity
+    when 'account_growth'
+      return unless authorize_action!('leads', 'read')
+      service.account_growth
+    when 'sales_velocity'
+      return unless authorize_action!('deals', 'read')
+      service.sales_velocity
+    when 'project_velocity'
+      return unless authorize_action!('leads', 'read')
+      service.project_velocity
+    when 'business_health_summary'
+      return unless authorize_action!('leads', 'read')
+      service.business_health_summary
+    # ========== Sales Manager ==========
+    when 'rep_leaderboard'
+      return unless authorize_action!('deals', 'read')
+      service.rep_leaderboard
+    when 'pipeline_coverage'
+      return unless authorize_action!('deals', 'read')
+      service.pipeline_coverage
+    when 'stale_deals_alert'
+      return unless authorize_action!('deals', 'read')
+      service.stale_deals_alert
+    when 'engagement_heatmap'
+      return unless authorize_action!('deals', 'read')
+      service.engagement_heatmap
+    # ========== Marketing ==========
+    when 'campaign_performance'
+      return unless authorize_action!('campaigns', 'read')
+      service.campaign_performance
+    when 'lead_source_breakdown'
+      return unless authorize_action!('campaigns', 'read')
+      service.lead_source_breakdown
+    when 'communication_stats'
+      return unless authorize_action!('campaigns', 'read')
+      service.communication_stats
     else
       # Unknown card type
       { error: "Unknown card type: #{card_type}" }
@@ -365,6 +407,37 @@ class Api::V1::DashboardController < ApplicationController
         id: 'service_tech',
         name: 'My Service',
         description: 'Assigned tickets and routes'
+      }
+    end
+
+    # GM Overview - admins / company owners
+    if current_user.admin? || current_user.company_admin? || current_user.effective_admin? || (current_user.respond_to?(:platform_admin?) && current_user.platform_admin?)
+      presets << {
+        id: 'gm_overview',
+        name: 'GM Overview',
+        description: 'Business health at a glance'
+      }
+    end
+
+    # Sales Manager - admins or users with both deals + leads read
+    if current_user.admin? || current_user.company_admin? || current_user.effective_admin? ||
+       (current_user.respond_to?(:platform_admin?) && current_user.platform_admin?) ||
+       (current_user.has_permission?('deals', 'read') && current_user.has_permission?('leads', 'read'))
+      presets << {
+        id: 'sales_manager',
+        name: 'Sales Manager',
+        description: 'Team performance and pipeline health'
+      }
+    end
+
+    # Marketing - admins or users with campaigns read
+    if current_user.admin? || current_user.company_admin? || current_user.effective_admin? ||
+       (current_user.respond_to?(:platform_admin?) && current_user.platform_admin?) ||
+       current_user.has_permission?('campaigns', 'read')
+      presets << {
+        id: 'marketing',
+        name: 'Marketing',
+        description: 'Campaign performance and lead generation'
       }
     end
 

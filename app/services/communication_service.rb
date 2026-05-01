@@ -225,13 +225,19 @@ class CommunicationService
     if channel == 'email' && direction == 'outbound' && @communication.reply_to.blank?
       # Get the user who is sending (if available from options or context)
       sending_user = options[:user] || options[:sent_by]
-      
+
       generated_reply_to = ReplyToAddressService.generate_for(@communication, user: sending_user)
       @communication.update_column(:reply_to, generated_reply_to)
-      
+
       Rails.logger.info "[CommunicationService] Auto-generated reply_to: #{generated_reply_to} for communication #{@communication.id}"
     end
-    
+
+    # Inject open-tracking pixel for outbound emails. Must happen BEFORE the
+    # provider reads communication.body so the recipient receives the pixeled
+    # version. PixelInjector itself guards against double-injection (campaign
+    # emails inject their own pixel earlier in the pipeline).
+    inject_tracking_pixel!(@communication)
+
     # Log metadata after saving
     Rails.logger.info "[CommunicationService] Communication #{@communication.id} created with metadata: #{@communication.metadata.inspect}"
     
@@ -365,6 +371,20 @@ class CommunicationService
   end
   
   private
+
+  def inject_tracking_pixel!(communication)
+    return unless communication&.email? && communication.outbound? && communication.id.present?
+    return if communication.body.blank?
+
+    base_url = ENV['APP_BASE_URL'].presence || ENV['CAMPAIGN_BASE_URL'].presence || 'https://app.renterinsight.com'
+    pixeled  = Messaging::PixelInjector.inject(communication.body, communication_id: communication.id, base_url: base_url)
+
+    return if pixeled == communication.body # already injected or no-op
+
+    communication.update_column(:body, pixeled)
+  rescue StandardError => e
+    Rails.logger.error "[CommunicationService] Pixel injection failed for communication #{communication&.id}: #{e.message}"
+  end
 
   def extract_assigned_user(communicable)
     return nil unless communicable.present?

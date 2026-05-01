@@ -14,6 +14,7 @@ class Api::V1::SearchController < ApplicationController
     begin
       leads = @company.leads
                      .where(is_converted: [false, nil])
+                     .where.not(status: %w[lost unqualified dead])
                      .where("first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ?", 
                             "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
                      .limit(5)

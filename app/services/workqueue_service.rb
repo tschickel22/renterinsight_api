@@ -4,6 +4,10 @@ require 'digest'
 
 class WorkqueueService
   QUEUES = {
+    'engagement_opened_today'     => :engagement_opened_today,
+    'engagement_opened_week'      => :engagement_opened_week,
+    'engagement_clicked_today'    => :engagement_clicked_today,
+    'engagement_hot_reopeners'    => :engagement_hot_reopeners,
     'activity_tasks_today'        => :activity_tasks_today,
     'activity_tasks_week'         => :activity_tasks_week,
     'activity_meetings_today'     => :activity_meetings_today,
@@ -24,6 +28,8 @@ class WorkqueueService
   }.freeze
 
   GROUPS = [
+    { id: 'engagement', label: 'Hot Engagement',
+      queue_ids: %w[engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week] },
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
@@ -86,7 +92,9 @@ class WorkqueueService
     scope = apply_sort(scope)
     total = scope.count
     total_pages = (total.to_f / @per_page).ceil
-    records = scope.offset((@page - 1) * @per_page).limit(@per_page)
+    records = scope.offset((@page - 1) * @per_page).limit(@per_page).to_a
+
+    preload_lead_engagement(records.select { |r| r.is_a?(Lead) })
 
     {
       items: records.map { |r| normalize(r) },
@@ -122,6 +130,10 @@ class WorkqueueService
   # Dynamic labels that reflect the current threshold values.
   def queue_label(queue_id)
     case queue_id
+    when 'engagement_opened_today'     then 'Opened Email Today'
+    when 'engagement_opened_week'      then 'Opened Email This Week'
+    when 'engagement_clicked_today'    then 'Clicked Link Today'
+    when 'engagement_hot_reopeners'    then 'Hot Reopeners (3+)'
     when 'activity_tasks_today'        then 'Tasks — Today & Overdue'
     when 'activity_tasks_week'         then "Tasks — Next #{prefs[:tasks_week_days]}d"
     when 'activity_meetings_today'     then 'Meetings — Today'
@@ -187,12 +199,14 @@ class WorkqueueService
     WorkqueueActivity.where(company_id: @company.id, assigned_to_id: @user.id, activity_type: 'meeting')
                      .where.not(status: %w[completed cancelled])
                      .where('due_date >= ? AND due_date <= ?', Date.current.beginning_of_day, Date.current.end_of_day)
+                     .where(valid_parent_condition)
   end
 
   def activity_calls_due
     WorkqueueActivity.where(company_id: @company.id, assigned_to_id: @user.id, activity_type: 'call')
                      .where.not(status: %w[completed cancelled])
                      .where('due_date <= ?', Date.current.end_of_day)
+                     .where(valid_parent_condition)
   end
 
   def activity_reminders_upcoming
@@ -201,6 +215,25 @@ class WorkqueueService
                      .where.not(status: %w[completed cancelled])
                      .where('reminder_time IS NOT NULL AND reminder_time >= ? AND reminder_time <= ?',
                             Time.current, window_end)
+                     .where(valid_parent_condition)
+  end
+
+  # Exclude activities whose parent Lead/Contact/Deal no longer exists or is effectively deleted.
+  # We use a raw SQL condition that checks:
+  #   - Lead parents: lead must exist, not converted, not lost/unqualified
+  #   - Non-Lead parents: parent must exist (basic check)
+  def valid_parent_condition
+    <<~SQL.squish
+      (
+        (parent_type != 'Lead') OR
+        (parent_type = 'Lead' AND EXISTS (
+          SELECT 1 FROM leads
+          WHERE leads.id = workqueue_activities.parent_id
+            AND (leads.is_converted IS NULL OR leads.is_converted = false)
+            AND leads.status NOT IN ('converted', 'lost', 'unqualified', 'dead')
+        ))
+      )
+    SQL
   end
 
   # ─── Lead queues ─────────────────────────────────────────────────
@@ -222,6 +255,76 @@ class WorkqueueService
                   .where.not(status: %w[converted lost unqualified])
                   .where('(leads.last_activity_at IS NULL AND leads.created_at < :t) OR leads.last_activity_at < :t',
                          t: cutoff)
+  end
+
+  # ─── Engagement queues ───────────────────────────────────────────
+
+  def engagement_opened_today
+    recency = engagement_lead_recency(event: 'opened', since: 24.hours.ago)
+    engagement_scope_for(recency)
+  end
+
+  def engagement_opened_week
+    recent  = engagement_lead_recency(event: 'opened', since: 24.hours.ago)
+    weekly  = engagement_lead_recency(event: 'opened', since: 7.days.ago, before: 24.hours.ago)
+    weekly.reject! { |lead_id, _| recent.key?(lead_id) }
+    engagement_scope_for(weekly)
+  end
+
+  def engagement_clicked_today
+    recency = engagement_lead_recency(event: 'clicked', since: 24.hours.ago)
+    engagement_scope_for(recency)
+  end
+
+  def engagement_hot_reopeners
+    cutoff = 48.hours.ago
+    pairs = CampaignSend
+              .joins(:campaign_enrollment)
+              .where(company_id: @company.id)
+              .where(campaign_enrollments: { recipient_type: 'Lead' })
+              .where('campaign_sends.open_count >= ?', 3)
+              .where('campaign_sends.opened_at >= ?', cutoff)
+              .pluck('campaign_enrollments.recipient_id, campaign_sends.opened_at')
+
+    recency = pairs.group_by(&:first).transform_values { |arr| arr.map(&:last).compact.max }
+    engagement_scope_for(recency)
+  end
+
+  # Returns { lead_id => most_recent_event_timestamp } across both
+  # CampaignSends (opened_at/clicked_at) and CommunicationEvents.
+  def engagement_lead_recency(event:, since:, before: nil)
+    campaign_field = event == 'opened' ? :opened_at : :clicked_at
+
+    campaign_q = CampaignSend
+                   .joins(:campaign_enrollment)
+                   .where(company_id: @company.id)
+                   .where(campaign_enrollments: { recipient_type: 'Lead' })
+                   .where("campaign_sends.#{campaign_field} >= ?", since)
+    campaign_q = campaign_q.where("campaign_sends.#{campaign_field} < ?", before) if before
+    campaign_pairs = campaign_q.pluck("campaign_enrollments.recipient_id, campaign_sends.#{campaign_field}")
+
+    comm_q = CommunicationEvent
+               .joins(:communication)
+               .where(event_type: event)
+               .where(communications: { communicable_type: 'Lead', company_id: @company.id })
+               .where('communication_events.occurred_at >= ?', since)
+    comm_q = comm_q.where('communication_events.occurred_at < ?', before) if before
+    comm_pairs = comm_q.pluck('communications.communicable_id, communication_events.occurred_at')
+
+    (campaign_pairs + comm_pairs)
+      .group_by(&:first)
+      .transform_values { |arr| arr.map(&:last).compact.max }
+  end
+
+  def engagement_scope_for(recency_by_lead)
+    return @company.leads.none if recency_by_lead.empty?
+
+    ordered_ids = recency_by_lead.sort_by { |_, ts| -(ts ? ts.to_f : 0) }.map { |id, _| id.to_i }
+    ids_csv = ordered_ids.join(',')
+
+    @company.leads.where(owner_id: @user.id, id: ordered_ids)
+                  .where.not(status: %w[converted lost unqualified])
+                  .order(Arel.sql("array_position(ARRAY[#{ids_csv}]::bigint[], leads.id)"))
   end
 
   # ─── Deal queues ─────────────────────────────────────────────────
@@ -368,20 +471,105 @@ class WorkqueueService
   end
 
   def normalize_lead(r)
+    eng = lead_engagement_for(r.id)
     {
-      uid:              "lead-#{r.id}",
-      entity_type:      'lead',
-      entity_id:        r.id,
-      title:            [r.first_name, r.last_name].compact.join(' ').presence || 'Unnamed Lead',
-      subtitle:         r.email,
-      status:           r.status,
-      priority:         nil,
-      badge:            r.try(:source)&.try(:name),
-      amount:           nil,
-      due_at:           nil,
-      last_activity_at: r.try(:last_activity_at),
-      link:             "/crm/leads/#{r.id}",
+      uid:                "lead-#{r.id}",
+      entity_type:        'lead',
+      entity_id:          r.id,
+      title:              [r.first_name, r.last_name].compact.join(' ').presence || 'Unnamed Lead',
+      subtitle:           r.email,
+      status:             r.status,
+      priority:           nil,
+      badge:              r.try(:source)&.try(:name),
+      amount:             nil,
+      due_at:             nil,
+      last_activity_at:   r.try(:last_activity_at),
+      link:               "/crm/leads/#{r.id}",
+      engagement_opens:   eng[:opens],
+      engagement_clicks:  eng[:clicks],
+      last_engagement_at: eng[:last_at],
+      engagement_source:  eng[:source],
     }
+  end
+
+  EMPTY_ENGAGEMENT = { opens: 0, clicks: 0, last_at: nil, source: nil }.freeze
+
+  def lead_engagement_for(lead_id)
+    (@lead_engagement ||= {})[lead_id] || EMPTY_ENGAGEMENT
+  end
+
+  def preload_lead_engagement(leads)
+    @lead_engagement ||= {}
+    return if leads.empty?
+
+    cutoff   = 7.days.ago
+    lead_ids = leads.map(&:id)
+
+    campaign_rows = CampaignSend
+                      .joins(:campaign_enrollment, :campaign)
+                      .where(company_id: @company.id)
+                      .where(campaign_enrollments: { recipient_type: 'Lead', recipient_id: lead_ids })
+                      .where('campaign_sends.opened_at >= :c OR campaign_sends.clicked_at >= :c', c: cutoff)
+                      .pluck(
+                        'campaign_enrollments.recipient_id',
+                        'campaigns.name',
+                        'campaign_sends.open_count',
+                        'campaign_sends.click_count',
+                        'campaign_sends.opened_at',
+                        'campaign_sends.clicked_at'
+                      )
+
+    comm_rows = CommunicationEvent
+                  .joins(:communication)
+                  .where(event_type: %w[opened clicked])
+                  .where(communications: { communicable_type: 'Lead', communicable_id: lead_ids, company_id: @company.id })
+                  .where('communication_events.occurred_at >= ?', cutoff)
+                  .pluck(
+                    'communications.communicable_id',
+                    'communication_events.event_type',
+                    'communication_events.occurred_at'
+                  )
+
+    campaign_by_lead = campaign_rows.group_by(&:first)
+    comm_by_lead     = comm_rows.group_by(&:first)
+
+    lead_ids.each do |id|
+      cs = campaign_by_lead[id] || []
+      es = comm_by_lead[id]     || []
+
+      opens      = 0
+      clicks     = 0
+      timestamps = []
+
+      cs.each do |_, _name, oc, cc, oat, cat|
+        if oat && oat >= cutoff
+          opens += oc.to_i
+          timestamps << oat
+        end
+        if cat && cat >= cutoff
+          clicks += cc.to_i
+          timestamps << cat
+        end
+      end
+
+      es.each do |_, type, ts|
+        type == 'opened' ? opens += 1 : clicks += 1
+        timestamps << ts
+      end
+
+      source = if cs.any?
+                 cs.first[1]
+               elsif es.any?
+                 'direct'
+               end
+
+      @lead_engagement[id] = {
+        opens:   opens,
+        clicks:  clicks,
+        last_at: timestamps.compact.max,
+        source:  source,
+      }
+    end
   end
 
   def normalize_deal(r)
@@ -414,7 +602,7 @@ class WorkqueueService
       amount:           nil,
       due_at:           nil,
       last_activity_at: r.updated_at,
-      link:             "/service/tickets/#{r.id}",
+      link:             "/service/#{r.id}",
     }
   end
 
