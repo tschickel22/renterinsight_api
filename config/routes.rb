@@ -56,6 +56,9 @@ Rails.application.routes.draw do
     # QuickBooks webhooks
     post 'quickbooks/notifications', to: 'quickbooks#notifications'
 
+    # Stripe Financial Connections webhooks (signature-verified, no auth)
+    post 'stripe', to: '/api/v1/stripe_webhooks#receive'
+
     # Facebook Lead Ads webhooks
     get  'facebook/leads', to: 'facebook_leads#verify'
     post 'facebook/leads', to: 'facebook_leads#receive'
@@ -640,6 +643,7 @@ Rails.application.routes.draw do
           get :tags
           post :tags, to: 'vehicles#add_tags'
           delete 'tags/:tag_name', to: 'vehicles#remove_tag'
+          post :post_to_accounting
         end
         
         collection do
@@ -1102,6 +1106,7 @@ Rails.application.routes.draw do
           post :send_to_supplier, path: 'send'
           post :cancel
           get :receiving_history, path: 'receiving-history'
+          post :post_to_accounting
         end
         collection do
           get :stats
@@ -1759,7 +1764,7 @@ Rails.application.routes.draw do
       end
 
       # ==================== BANKING & RECONCILIATION ====================
-      resources :bank_accounts, only: [] do
+      resources :bank_accounts, only: [:index, :create, :update] do
         resources :transactions, controller: 'bank_transactions', only: [:index, :show] do
           member do
             post :categorize
@@ -1813,6 +1818,15 @@ Rails.application.routes.draw do
         end
         member do
           post :void
+        end
+      end
+
+      resources :accounting_imports, only: [:index, :show] do
+        collection do
+          post :preview
+          post :run_import
+          post :parse_iif
+          post :parse_csv
         end
       end
 

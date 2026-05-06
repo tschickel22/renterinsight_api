@@ -89,13 +89,19 @@ class Api::V1::BankRulesController < ApplicationController
 
     txn = BankTransaction.where(company_id: @company.id).find(params[:transaction_id])
 
+    unless txn.category_account_id.present?
+      return render json: { error: 'Categorize this transaction first before creating a rule from it.' }, status: :unprocessable_entity
+    end
+
+    is_deposit = txn.try(:deposit?) || txn.amount.to_f >= 0
+
     rule = @company.bank_rules.build(
       name: "Auto: #{txn.description&.truncate(40)}",
       bank_account_id: txn.bank_account_id,
       match_type: 'contains',
       match_field: 'description',
       match_value: extract_rule_pattern(txn.description),
-      transaction_direction: txn.deposit? ? 'deposit' : 'withdrawal',
+      transaction_direction: is_deposit ? 'deposit' : 'withdrawal',
       assign_account_id: txn.category_account_id,
       assign_contact_id: txn.contact_id,
       assign_memo: txn.memo,

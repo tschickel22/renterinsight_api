@@ -11,7 +11,7 @@ module Api
         delete_actions: [:destroy, :bulk_delete]
 
       before_action :set_company
-      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone, :tags, :add_tags, :remove_tag, :share]
+      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting]
 
       def index
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
@@ -1077,6 +1077,20 @@ module Api
         # Reload tags association to get updated list
         @vehicle.reload
         render json: vehicle_json(@vehicle, detailed: true)
+      end
+
+      # POST /api/v1/vehicles/:id/post_to_accounting
+      def post_to_accounting
+        return unless authorize_action!('inventory', 'update')
+
+        result = Accounting::VehicleInventoryPostingService.new(@vehicle).post!
+        if result
+          render json: { message: 'Posted to accounting', journal_entry_id: result.id }
+        else
+          render json: { message: 'Already posted or auto-post disabled' }, status: :unprocessable_entity
+        end
+      rescue => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       private

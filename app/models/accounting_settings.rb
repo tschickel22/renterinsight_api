@@ -9,6 +9,8 @@ class AccountingSettings < ApplicationRecord
   belongs_to :default_cogs_account, class_name: 'ChartOfAccount', optional: true
   belongs_to :default_sales_tax_payable_account, class_name: 'ChartOfAccount', optional: true
   belongs_to :default_bank_account, class_name: 'BankAccount', optional: true
+  belongs_to :default_parts_inventory_account, class_name: 'ChartOfAccount', optional: true
+  belongs_to :default_vehicle_inventory_account, class_name: 'ChartOfAccount', optional: true
 
   validates :company_id, uniqueness: true
   validates :fiscal_year_start_month, inclusion: { in: 1..12 }

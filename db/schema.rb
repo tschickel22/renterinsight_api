@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_05_600001) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -77,6 +77,29 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_600001) do
     t.index ["linkable_type", "linkable_id", "link_purpose"], name: "idx_account_links_polymorphic_purpose"
   end
 
+  create_table "accounting_imports", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.string "source_type", null: false
+    t.string "status", default: "pending"
+    t.date "cutover_date"
+    t.jsonb "import_config", default: {}
+    t.jsonb "results", default: {}
+    t.jsonb "errors_log", default: []
+    t.integer "total_imported", default: 0
+    t.integer "total_skipped", default: 0
+    t.integer "total_errors", default: 0
+    t.text "notes"
+    t.datetime "started_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "source_type"], name: "index_accounting_imports_on_company_id_and_source_type"
+    t.index ["company_id"], name: "index_accounting_imports_on_company_id"
+    t.index ["status"], name: "index_accounting_imports_on_status"
+    t.index ["user_id"], name: "index_accounting_imports_on_user_id"
+  end
+
   create_table "accounting_settings", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.integer "fiscal_year_start_month", default: 1
@@ -94,13 +117,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_600001) do
     t.integer "check_number_sequence", default: 1
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "default_parts_inventory_account_id"
+    t.bigint "default_vehicle_inventory_account_id"
+    t.boolean "auto_post_purchase_orders", default: true
+    t.boolean "auto_post_parts_usage", default: true
     t.index ["company_id"], name: "index_accounting_settings_on_company_id", unique: true
     t.index ["default_ap_account_id"], name: "index_accounting_settings_on_default_ap_account_id"
     t.index ["default_ar_account_id"], name: "index_accounting_settings_on_default_ar_account_id"
     t.index ["default_bank_account_id"], name: "index_accounting_settings_on_default_bank_account_id"
     t.index ["default_cogs_account_id"], name: "index_accounting_settings_on_default_cogs_account_id"
+    t.index ["default_parts_inventory_account_id"], name: "idx_on_default_parts_inventory_account_id_67295920a0"
     t.index ["default_sales_revenue_account_id"], name: "index_accounting_settings_on_default_sales_revenue_account_id"
     t.index ["default_sales_tax_payable_account_id"], name: "idx_on_default_sales_tax_payable_account_id_6cda82c2b5"
+    t.index ["default_vehicle_inventory_account_id"], name: "idx_on_default_vehicle_inventory_account_id_cb785f0d78"
     t.index ["retained_earnings_account_id"], name: "index_accounting_settings_on_retained_earnings_account_id"
   end
 
@@ -683,12 +712,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_600001) do
 
   create_table "bank_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
-    t.bigint "location_id", null: false
+    t.bigint "location_id"
     t.string "account_purpose", null: false
     t.string "account_type", null: false
     t.string "bank_name"
-    t.string "routing_number", null: false
-    t.string "account_number", null: false
+    t.string "routing_number"
+    t.string "account_number"
     t.string "account_holder_name"
     t.string "external_id"
     t.boolean "is_active", default: true, null: false
@@ -724,6 +753,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_600001) do
     t.string "check_company_zip"
     t.string "check_signor_name"
     t.string "check_bank_name"
+    t.string "stripe_last_cursor"
+    t.text "stripe_error_message"
     t.index ["chart_of_account_id"], name: "index_bank_accounts_on_chart_of_account_id"
     t.index ["company_id", "location_id"], name: "index_bank_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_bank_accounts_on_company_id"
@@ -6436,12 +6467,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_600001) do
 
   add_foreign_key "account_links", "chart_of_accounts"
   add_foreign_key "account_links", "companies"
+  add_foreign_key "accounting_imports", "companies"
+  add_foreign_key "accounting_imports", "users"
   add_foreign_key "accounting_settings", "bank_accounts", column: "default_bank_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_ap_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_ar_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_cogs_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_parts_inventory_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_sales_revenue_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_sales_tax_payable_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_vehicle_inventory_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "retained_earnings_account_id"
   add_foreign_key "accounting_settings", "companies"
   add_foreign_key "accounts", "accounts", column: "parent_account_id"

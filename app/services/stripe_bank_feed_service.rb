@@ -53,8 +53,8 @@ class StripeBankFeedService
         bank_account.stripe_fc_account_id,
         { features: ['transactions'] }
       )
-    rescue Stripe::StripeError => e
-      Rails.logger.warn("[StripeBankFeed] Refresh failed: #{e.message}")
+    rescue => e
+      Rails.logger.warn("[StripeBankFeed] Refresh failed (non-fatal): #{e.message}")
     end
 
     since = bank_account.stripe_fc_last_synced_at || 90.days.ago
@@ -73,7 +73,7 @@ class StripeBankFeedService
 
       begin
         txn_list = Stripe::FinancialConnections::Transaction.list(params)
-      rescue Stripe::StripeError => e
+      rescue => e
         Rails.logger.error("[StripeBankFeed] Transaction list failed: #{e.message}")
         handle_stripe_error(bank_account, e)
         return { error: e.message, imported: imported, skipped: skipped }
@@ -88,7 +88,7 @@ class StripeBankFeedService
         bank_account.bank_transactions.create!(
           company: @company,
           transaction_date: Time.at(txn.transacted_at).to_date,
-          post_date: txn.posted_at ? Time.at(txn.posted_at).to_date : nil,
+          post_date: txn.status_transitions&.posted_at ? Time.at(txn.status_transitions.posted_at).to_date : nil,
           description: txn.description,
           amount: txn.amount / 100.0,
           reference_number: txn.id,
@@ -136,13 +136,13 @@ class StripeBankFeedService
   private
 
   def configure_stripe!
-    stripe_key = Setting.find_by(setting_type: 'platform', key: 'stripe_secret_key')&.value
-    stripe_key ||= PlatformSetting.find_by(key: 'stripe_secret_key')&.value
+    stripe_key = ENV['STRIPE_SECRET_KEY']
+    stripe_key ||= Rails.application.credentials.dig(:stripe, :secret_key) rescue nil
 
     if stripe_key.present?
       Stripe.api_key = stripe_key
     else
-      Rails.logger.error("[StripeBankFeed] No Stripe secret key configured!")
+      Rails.logger.error("[StripeBankFeed] No Stripe secret key configured! Set STRIPE_SECRET_KEY env var.")
       raise "Stripe secret key not configured"
     end
   end
@@ -150,15 +150,11 @@ class StripeBankFeedService
   def ensure_stripe_customer(bank_account)
     return bank_account.stripe_customer_id if bank_account.stripe_customer_id.present?
 
-    company_stripe_id = Setting.find_by(
-      setting_type: 'company',
-      settable_id: @company.id,
-      key: 'stripe_customer_id'
-    )&.value
-
-    if company_stripe_id.present?
-      bank_account.update_column(:stripe_customer_id, company_stripe_id)
-      return company_stripe_id
+    # Check if company already has a Stripe customer via AccountingSettings
+    settings = AccountingSettings.for_company(@company) rescue nil
+    if settings&.respond_to?(:stripe_customer_id) && settings.stripe_customer_id.present?
+      bank_account.update_column(:stripe_customer_id, settings.stripe_customer_id)
+      return settings.stripe_customer_id
     end
 
     customer = Stripe::Customer.create({
@@ -172,12 +168,10 @@ class StripeBankFeedService
 
     bank_account.update_column(:stripe_customer_id, customer.id)
 
-    Setting.find_or_create_by(
-      setting_type: 'company',
-      settable_id: @company.id,
-      settable_type: 'Company',
-      key: 'stripe_customer_id'
-    ).update!(value: customer.id)
+    # Save to AccountingSettings for reuse
+    if settings
+      settings.update(stripe_customer_id: customer.id) rescue nil
+    end
 
     customer.id
   end

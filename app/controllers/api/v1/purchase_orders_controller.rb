@@ -2,7 +2,7 @@
 
 class Api::V1::PurchaseOrdersController < ApplicationController
   before_action :set_company_scope
-  before_action :set_purchase_order, only: [:show, :update, :destroy, :send_to_supplier, :cancel, :receiving_history]
+  before_action :set_purchase_order, only: [:show, :update, :destroy, :send_to_supplier, :cancel, :receiving_history, :post_to_accounting]
 
   def index
     return unless authorize_action!('inventory', 'read')
@@ -241,6 +241,20 @@ class Api::V1::PurchaseOrdersController < ApplicationController
         created_by: { only: [:id, :first_name, :last_name] }
       }
     )
+  end
+
+  # POST /api/v1/purchase_orders/:id/post_to_accounting
+  def post_to_accounting
+    return unless authorize_action!('purchase_orders', 'update')
+
+    result = Accounting::PurchaseOrderPostingService.new(@purchase_order).post!
+    if result
+      render json: { message: 'Posted to accounting', journal_entry_id: result.id }
+    else
+      render json: { message: 'Already posted or auto-post disabled' }, status: :unprocessable_entity
+    end
+  rescue => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   private
