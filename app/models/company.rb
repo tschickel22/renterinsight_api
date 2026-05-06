@@ -85,6 +85,10 @@ class Company < ApplicationRecord
   has_many :bank_transactions, dependent: :destroy
   has_many :bank_rules, dependent: :destroy
   has_many :bank_reconciliations, dependent: :destroy
+  has_many :recurring_bills, dependent: :destroy
+  has_many :printed_checks, dependent: :destroy
+  has_one  :quickbooks_connection, dependent: :destroy
+  has_many :quickbooks_entity_mappings, dependent: :destroy
   
   # Notifications
   has_many :notifications, dependent: :destroy

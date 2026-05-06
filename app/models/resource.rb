@@ -160,7 +160,7 @@ public
       { key: 'journal_entries', name: 'Journal Entries', category: 'operations', description: 'Create and manage journal entries', position: 132 },
       { key: 'bank_accounts_accounting', name: 'Bank Accounts (Accounting)', category: 'operations', description: 'Bank feed and reconciliation', position: 133 },
       { key: 'bank_reconciliation', name: 'Bank Reconciliation', category: 'operations', description: 'Bank statement reconciliation', position: 134 },
-      { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 135 }
+      { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 137 }
     ]
     
     resources_data.each do |resource_data|

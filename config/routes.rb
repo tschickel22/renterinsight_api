@@ -1738,6 +1738,19 @@ Rails.application.routes.draw do
       get 'accounting/reports/ar_aging', to: 'accounting_reports#ar_aging'
       get 'accounting/reports/ap_aging', to: 'accounting_reports#ap_aging'
       get 'accounting/reports/source_entries', to: 'accounting_reports#source_entries'
+      get 'accounting/reports/deal_profitability', to: 'accounting_reports#deal_profitability'
+      get 'accounting/reports/floor_plan', to: 'accounting_reports#floor_plan'
+      get 'accounting/reports/departmental_pnl', to: 'accounting_reports#departmental_pnl'
+      get 'accounting/reports/sales_tax_summary', to: 'accounting_reports#sales_tax_summary'
+      get 'accounting/reports/cash_flow_statement', to: 'accounting_reports#cash_flow_statement'
+      get 'accounting/dashboard', to: 'accounting_reports#dashboard'
+
+      resources :deals, only: [] do
+        resource :accounting, controller: 'deal_accounting', only: [:show] do
+          post :calculate
+          post :post_closing
+        end
+      end
 
       resources :recurring_journal_entries do
         member do
@@ -1786,6 +1799,33 @@ Rails.application.routes.draw do
           post :complete
           post :add_adjustment
         end
+      end
+
+      resources :recurring_bills do
+        member do
+          post :generate_now
+        end
+      end
+
+      resources :printed_checks, only: [:index, :create] do
+        collection do
+          post :print_batch
+        end
+        member do
+          post :void
+        end
+      end
+
+      scope :quickbooks, controller: :quickbooks do
+        get    :authorize
+        get    :callback
+        post   :exchange_token
+        get    :status
+        delete :disconnect
+        post   :sync
+        get    :qb_accounts
+        get    :sync_logs
+        patch  :update_settings
       end
     end
   end

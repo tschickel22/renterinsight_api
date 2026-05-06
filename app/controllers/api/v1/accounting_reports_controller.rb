@@ -95,6 +95,73 @@ class Api::V1::AccountingReportsController < ApplicationController
     render json: report
   end
 
+  # GET /api/v1/accounting/reports/departmental_pnl
+  def departmental_pnl
+    return unless authorize_action!('financial_reports', 'read')
+
+    start_date = params[:start_date] ? Date.parse(params[:start_date]) : Date.current.beginning_of_month
+    end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
+
+    service = Reports::DepartmentalPnlReportService.new(@company)
+    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id])
+  end
+
+  # GET /api/v1/accounting/reports/sales_tax_summary
+  def sales_tax_summary
+    return unless authorize_action!('financial_reports', 'read')
+
+    start_date = params[:start_date] ? Date.parse(params[:start_date]) : Date.current.beginning_of_month
+    end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
+
+    service = Reports::SalesTaxSummaryReportService.new(@company)
+    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id])
+  end
+
+  # GET /api/v1/accounting/reports/cash_flow_statement
+  def cash_flow_statement
+    return unless authorize_action!('financial_reports', 'read')
+
+    start_date = params[:start_date] ? Date.parse(params[:start_date]) : Date.current.beginning_of_year
+    end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
+
+    service = Reports::CashFlowStatementReportService.new(@company)
+    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id])
+  end
+
+  # GET /api/v1/accounting/dashboard
+  def dashboard
+    return unless authorize_action!('accounting', 'read')
+
+    service = Accounting::DashboardService.new(@company)
+    render json: service.widgets
+  end
+
+  # GET /api/v1/accounting/reports/floor_plan
+  def floor_plan
+    return unless authorize_action!('financial_reports', 'read')
+
+    service = Accounting::FloorPlanService.new(@company)
+    render json: service.report(location_id: params[:location_id])
+  end
+
+  # GET /api/v1/accounting/reports/deal_profitability
+  def deal_profitability
+    return unless authorize_action!('financial_reports', 'read')
+
+    start_date = params[:start_date] ? Date.parse(params[:start_date]) : Date.current.beginning_of_year
+    end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
+
+    service = Reports::DealProfitabilityReportService.new(@company)
+    report = service.generate(
+      start_date: start_date,
+      end_date: end_date,
+      location_id: params[:location_id],
+      salesperson_id: params[:salesperson_id]
+    )
+
+    render json: report
+  end
+
   # GET /api/v1/accounting/reports/source_entries
   def source_entries
     return unless authorize_action!('journal_entries', 'read')

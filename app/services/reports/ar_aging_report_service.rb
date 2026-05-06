@@ -8,7 +8,7 @@ module Reports
 
     def generate(as_of_date: Date.current, location_id: nil)
       invoices = @company.invoices
-        .where(status: ['sent', 'partially_paid', 'overdue', 'pending', 'approved'])
+        .where(status: ['sent', 'partial', 'overdue', 'finalized', 'viewed', 'pending'])
         .where('amount_due > 0')
 
       invoices = invoices.where(location_id: location_id) if location_id && invoices.column_names.include?('location_id')

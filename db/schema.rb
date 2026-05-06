@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_05_600001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2261,6 +2261,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
     t.decimal "additional_payment", precision: 15, scale: 2, default: "0.0"
     t.decimal "unpaid_balance", precision: 15, scale: 2, default: "0.0"
     t.datetime "last_activity_at"
+    t.decimal "home_cost", precision: 15, scale: 2
+    t.decimal "reconditioning_cost", precision: 15, scale: 2
+    t.decimal "floor_plan_interest", precision: 15, scale: 2
+    t.decimal "delivery_setup_cost", precision: 15, scale: 2
+    t.decimal "front_gross", precision: 15, scale: 2
+    t.decimal "back_gross", precision: 15, scale: 2
+    t.decimal "total_gross", precision: 15, scale: 2
+    t.decimal "commission_amount", precision: 15, scale: 2
+    t.decimal "net_deal_profit", precision: 15, scale: 2
+    t.boolean "gl_posted", default: false
+    t.datetime "gl_posted_at"
+    t.bigint "gl_journal_entry_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -2278,6 +2290,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
     t.index ["desk_manager_id"], name: "index_deals_on_desk_manager_id"
     t.index ["expected_close_date"], name: "index_deals_on_expected_close_date"
     t.index ["finance_manager_id"], name: "index_deals_on_finance_manager_id"
+    t.index ["gl_journal_entry_id"], name: "index_deals_on_gl_journal_entry_id"
+    t.index ["gl_posted"], name: "index_deals_on_gl_posted"
     t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["owner_id"], name: "index_deals_on_owner_id"
@@ -4092,6 +4106,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
     t.index ["uploaded_at"], name: "index_portal_documents_on_uploaded_at"
   end
 
+  create_table "printed_checks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "bank_account_id", null: false
+    t.bigint "journal_entry_id"
+    t.string "status", default: "queued"
+    t.string "paid_to", null: false
+    t.decimal "amount", precision: 15, scale: 2, null: false
+    t.string "check_number"
+    t.string "memo"
+    t.string "description"
+    t.date "printed_on"
+    t.bigint "contact_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bank_account_id", "check_number"], name: "index_printed_checks_on_bank_account_id_and_check_number", unique: true, where: "(check_number IS NOT NULL)"
+    t.index ["bank_account_id"], name: "index_printed_checks_on_bank_account_id"
+    t.index ["company_id", "status"], name: "index_printed_checks_on_company_id_and_status"
+    t.index ["company_id"], name: "index_printed_checks_on_company_id"
+    t.index ["contact_id"], name: "index_printed_checks_on_contact_id"
+    t.index ["journal_entry_id"], name: "index_printed_checks_on_journal_entry_id"
+  end
+
   create_table "project_cost_items", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "project_id", null: false
@@ -4535,6 +4571,45 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
   end
 
+  create_table "quickbooks_connections", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "realm_id"
+    t.string "company_name"
+    t.text "access_token"
+    t.text "refresh_token"
+    t.datetime "token_expires_at"
+    t.datetime "refresh_token_expires_at"
+    t.string "status", default: "disconnected"
+    t.text "error_message"
+    t.boolean "sync_enabled", default: false
+    t.boolean "auto_sync_enabled", default: false
+    t.string "auto_sync_interval", default: "daily"
+    t.date "sync_start_date"
+    t.boolean "initial_sync_complete", default: false
+    t.string "sync_mode", default: "create_only"
+    t.datetime "last_sync_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "idx_qbo_connections_company_unique", unique: true
+    t.index ["company_id"], name: "index_quickbooks_connections_on_company_id"
+  end
+
+  create_table "quickbooks_entity_mappings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "entity_type", null: false
+    t.bigint "ri_entity_id", null: false
+    t.string "qb_entity_type", null: false
+    t.string "qb_entity_id", null: false
+    t.string "sync_status", default: "synced"
+    t.text "error_message"
+    t.datetime "last_synced_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "entity_type", "ri_entity_id"], name: "idx_qb_entity_mappings_unique", unique: true
+    t.index ["company_id", "qb_entity_type", "qb_entity_id"], name: "idx_qb_entity_mappings_qb"
+    t.index ["company_id"], name: "index_quickbooks_entity_mappings_on_company_id"
+  end
+
   create_table "quickbooks_field_mappings", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -4702,6 +4777,38 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
     t.index ["status"], name: "index_quotes_on_status"
     t.index ["valid_until"], name: "index_quotes_on_valid_until"
     t.index ["vehicle_id"], name: "index_quotes_on_vehicle_id"
+  end
+
+  create_table "recurring_bills", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.bigint "supplier_id"
+    t.bigint "contact_id"
+    t.decimal "amount", precision: 15, scale: 2, null: false
+    t.string "frequency", null: false
+    t.date "next_due_date", null: false
+    t.date "end_date"
+    t.bigint "expense_account_id", null: false
+    t.bigint "payment_account_id"
+    t.string "posting_type", default: "ap"
+    t.boolean "auto_post", default: false
+    t.boolean "is_active", default: true
+    t.string "memo"
+    t.string "invoice_number_pattern"
+    t.bigint "location_id"
+    t.string "department"
+    t.datetime "last_generated_at"
+    t.integer "generated_count", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_active"], name: "index_recurring_bills_on_company_id_and_is_active"
+    t.index ["company_id"], name: "index_recurring_bills_on_company_id"
+    t.index ["contact_id"], name: "index_recurring_bills_on_contact_id"
+    t.index ["expense_account_id"], name: "index_recurring_bills_on_expense_account_id"
+    t.index ["location_id"], name: "index_recurring_bills_on_location_id"
+    t.index ["next_due_date"], name: "index_recurring_bills_on_next_due_date"
+    t.index ["payment_account_id"], name: "index_recurring_bills_on_payment_account_id"
+    t.index ["supplier_id"], name: "index_recurring_bills_on_supplier_id"
   end
 
   create_table "recurring_journal_entries", force: :cascade do |t|
@@ -5944,6 +6051,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
     t.jsonb "champion_images", default: [], null: false
     t.datetime "champion_last_seen_at"
     t.bigint "cloned_from_id", comment: "For Champion IMS clones: points to the catalog Vehicle this row was cloned from"
+    t.decimal "floor_plan_amount", precision: 15, scale: 2
+    t.date "floor_plan_start_date"
+    t.decimal "floor_plan_accrued_interest", precision: 15, scale: 2, default: "0.0"
+    t.integer "days_on_floor_plan", default: 0
+    t.date "floor_plan_curtailed_at"
+    t.string "floor_plan_lender"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
@@ -6632,6 +6745,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "printed_checks", "bank_accounts"
+  add_foreign_key "printed_checks", "companies"
+  add_foreign_key "printed_checks", "contacts"
+  add_foreign_key "printed_checks", "journal_entries"
   add_foreign_key "project_cost_items", "companies"
   add_foreign_key "project_cost_items", "contractors", on_delete: :nullify
   add_foreign_key "project_cost_items", "inventory_transactions", on_delete: :nullify
@@ -6686,6 +6803,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
   add_foreign_key "purchase_orders", "suppliers"
   add_foreign_key "purchase_orders", "users", column: "approved_by_id"
   add_foreign_key "purchase_orders", "users", column: "created_by_id"
+  add_foreign_key "quickbooks_connections", "companies"
+  add_foreign_key "quickbooks_entity_mappings", "companies"
   add_foreign_key "quickbooks_field_mappings", "companies"
   add_foreign_key "quickbooks_field_mappings", "locations"
   add_foreign_key "quickbooks_sync_logs", "companies"
@@ -6701,6 +6820,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
   add_foreign_key "quotes", "locations"
+  add_foreign_key "recurring_bills", "chart_of_accounts", column: "expense_account_id"
+  add_foreign_key "recurring_bills", "chart_of_accounts", column: "payment_account_id"
+  add_foreign_key "recurring_bills", "companies"
+  add_foreign_key "recurring_bills", "contacts"
+  add_foreign_key "recurring_bills", "locations"
+  add_foreign_key "recurring_bills", "suppliers"
   add_foreign_key "recurring_journal_entries", "companies"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
