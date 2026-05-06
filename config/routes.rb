@@ -1733,6 +1733,17 @@ Rails.application.routes.draw do
 
       get 'accounting/reports/trial_balance', to: 'accounting_reports#trial_balance'
       get 'accounting/reports/general_ledger', to: 'accounting_reports#general_ledger'
+      get 'accounting/reports/profit_and_loss', to: 'accounting_reports#profit_and_loss'
+      get 'accounting/reports/balance_sheet', to: 'accounting_reports#balance_sheet'
+      get 'accounting/reports/ar_aging', to: 'accounting_reports#ar_aging'
+      get 'accounting/reports/ap_aging', to: 'accounting_reports#ap_aging'
+      get 'accounting/reports/source_entries', to: 'accounting_reports#source_entries'
+
+      resources :recurring_journal_entries do
+        member do
+          post :generate_now
+        end
+      end
     end
   end
 
