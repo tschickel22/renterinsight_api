@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_05_100006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -59,6 +59,49 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
     t.index ["related_activity_id"], name: "index_account_activities_on_related_activity_id"
     t.index ["status"], name: "index_account_activities_on_status"
     t.index ["user_id"], name: "index_account_activities_on_user_id"
+  end
+
+  create_table "account_links", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "linkable_type", null: false
+    t.bigint "linkable_id", null: false
+    t.string "link_purpose", null: false
+    t.bigint "chart_of_account_id", null: false
+    t.integer "priority", default: 0
+    t.boolean "is_active", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["chart_of_account_id"], name: "index_account_links_on_chart_of_account_id"
+    t.index ["company_id", "link_purpose"], name: "index_account_links_on_company_id_and_link_purpose"
+    t.index ["company_id"], name: "index_account_links_on_company_id"
+    t.index ["linkable_type", "linkable_id", "link_purpose"], name: "idx_account_links_polymorphic_purpose"
+  end
+
+  create_table "accounting_settings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.integer "fiscal_year_start_month", default: 1
+    t.bigint "retained_earnings_account_id"
+    t.bigint "default_ar_account_id"
+    t.bigint "default_ap_account_id"
+    t.bigint "default_sales_revenue_account_id"
+    t.bigint "default_cogs_account_id"
+    t.bigint "default_sales_tax_payable_account_id"
+    t.bigint "default_bank_account_id"
+    t.boolean "auto_post_invoices", default: false
+    t.boolean "auto_post_payments", default: false
+    t.boolean "auto_post_purchases", default: false
+    t.boolean "lock_period_on_close", default: true
+    t.integer "check_number_sequence", default: 1
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_accounting_settings_on_company_id", unique: true
+    t.index ["default_ap_account_id"], name: "index_accounting_settings_on_default_ap_account_id"
+    t.index ["default_ar_account_id"], name: "index_accounting_settings_on_default_ar_account_id"
+    t.index ["default_bank_account_id"], name: "index_accounting_settings_on_default_bank_account_id"
+    t.index ["default_cogs_account_id"], name: "index_accounting_settings_on_default_cogs_account_id"
+    t.index ["default_sales_revenue_account_id"], name: "index_accounting_settings_on_default_sales_revenue_account_id"
+    t.index ["default_sales_tax_payable_account_id"], name: "idx_on_default_sales_tax_payable_account_id_6cda82c2b5"
+    t.index ["retained_earnings_account_id"], name: "index_accounting_settings_on_retained_earnings_account_id"
   end
 
   create_table "accounts", force: :cascade do |t|
@@ -1124,6 +1167,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
     t.index ["company_id"], name: "index_champion_lead_feed_configs_on_company_id"
     t.index ["default_lead_owner_id"], name: "index_champion_lead_feed_configs_on_default_lead_owner_id"
     t.index ["location_id"], name: "index_champion_lead_feed_configs_on_location_id"
+  end
+
+  create_table "chart_of_accounts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "account_number", null: false
+    t.string "name", null: false
+    t.string "description"
+    t.string "account_type", null: false
+    t.string "sub_type"
+    t.string "normal_balance", null: false
+    t.bigint "parent_id"
+    t.boolean "is_header", default: false
+    t.boolean "is_active", default: true
+    t.boolean "is_system", default: false
+    t.string "qbo_account_id"
+    t.integer "position", default: 0
+    t.bigint "bank_account_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bank_account_id"], name: "index_chart_of_accounts_on_bank_account_id"
+    t.index ["company_id", "account_number"], name: "index_chart_of_accounts_on_company_id_and_account_number", unique: true
+    t.index ["company_id", "account_type"], name: "index_chart_of_accounts_on_company_id_and_account_type"
+    t.index ["company_id", "parent_id"], name: "index_chart_of_accounts_on_company_id_and_parent_id"
+    t.index ["company_id"], name: "index_chart_of_accounts_on_company_id"
+    t.index ["is_active"], name: "index_chart_of_accounts_on_is_active"
+    t.index ["parent_id"], name: "index_chart_of_accounts_on_parent_id"
   end
 
   create_table "commission_audit_entries", force: :cascade do |t|
@@ -2214,6 +2283,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
     t.index ["company_id"], name: "index_field_option_overrides_on_company_id"
   end
 
+  create_table "fiscal_periods", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.integer "fiscal_year", null: false
+    t.integer "period_number", null: false
+    t.date "start_date", null: false
+    t.date "end_date", null: false
+    t.string "status", default: "open"
+    t.datetime "closed_at"
+    t.bigint "closed_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["closed_by_id"], name: "index_fiscal_periods_on_closed_by_id"
+    t.index ["company_id", "fiscal_year", "period_number"], name: "idx_fiscal_periods_company_year_period", unique: true
+    t.index ["company_id", "status"], name: "index_fiscal_periods_on_company_id_and_status"
+    t.index ["company_id"], name: "index_fiscal_periods_on_company_id"
+  end
+
   create_table "floor_plan_option_applicabilities", force: :cascade do |t|
     t.bigint "floor_plan_id", null: false
     t.bigint "floor_plan_option_id", null: false
@@ -2637,6 +2723,60 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
     t.index ["sales_rep_id"], name: "index_invoices_on_sales_rep_id"
     t.index ["source_type", "source_id"], name: "index_invoices_on_source_type_and_source_id"
     t.index ["status"], name: "index_invoices_on_status"
+  end
+
+  create_table "journal_entries", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "entry_number"
+    t.date "entry_date", null: false
+    t.text "memo"
+    t.string "source_type", default: "manual"
+    t.string "source_entity_type"
+    t.bigint "source_entity_id"
+    t.boolean "is_adjusting", default: false
+    t.boolean "is_closing", default: false
+    t.boolean "is_void", default: false
+    t.datetime "voided_at"
+    t.bigint "voided_by_id"
+    t.bigint "posted_by_id"
+    t.bigint "reversed_by_id"
+    t.integer "fiscal_year"
+    t.integer "fiscal_period"
+    t.boolean "locked", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "entry_date"], name: "index_journal_entries_on_company_id_and_entry_date"
+    t.index ["company_id", "entry_number"], name: "index_journal_entries_on_company_id_and_entry_number", unique: true
+    t.index ["company_id"], name: "index_journal_entries_on_company_id"
+    t.index ["fiscal_year", "fiscal_period"], name: "index_journal_entries_on_fiscal_year_and_fiscal_period"
+    t.index ["is_void"], name: "index_journal_entries_on_is_void"
+    t.index ["posted_by_id"], name: "index_journal_entries_on_posted_by_id"
+    t.index ["reversed_by_id"], name: "index_journal_entries_on_reversed_by_id"
+    t.index ["source_entity_type", "source_entity_id"], name: "idx_on_source_entity_type_source_entity_id_a5b7b62861"
+    t.index ["voided_by_id"], name: "index_journal_entries_on_voided_by_id"
+  end
+
+  create_table "journal_entry_lines", force: :cascade do |t|
+    t.bigint "journal_entry_id", null: false
+    t.bigint "chart_of_account_id", null: false
+    t.decimal "debit_amount", precision: 15, scale: 2, default: "0.0"
+    t.decimal "credit_amount", precision: 15, scale: 2, default: "0.0"
+    t.text "memo"
+    t.bigint "location_id"
+    t.string "department"
+    t.bigint "contact_id"
+    t.bigint "deal_id"
+    t.bigint "vehicle_id"
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["chart_of_account_id"], name: "index_journal_entry_lines_on_chart_of_account_id"
+    t.index ["contact_id"], name: "index_journal_entry_lines_on_contact_id"
+    t.index ["deal_id"], name: "index_journal_entry_lines_on_deal_id"
+    t.index ["department"], name: "index_journal_entry_lines_on_department"
+    t.index ["journal_entry_id"], name: "index_journal_entry_lines_on_journal_entry_id"
+    t.index ["location_id"], name: "index_journal_entry_lines_on_location_id"
+    t.index ["vehicle_id"], name: "index_journal_entry_lines_on_vehicle_id"
   end
 
   create_table "knowledge_articles", force: :cascade do |t|
@@ -4442,6 +4582,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
     t.index ["vehicle_id"], name: "index_quotes_on_vehicle_id"
   end
 
+  create_table "recurring_journal_entries", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "frequency", null: false
+    t.date "next_run_date"
+    t.date "end_date"
+    t.jsonb "template_lines", default: []
+    t.boolean "auto_post", default: false
+    t.boolean "is_active", default: true
+    t.datetime "last_run_at"
+    t.text "memo"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_active"], name: "index_recurring_journal_entries_on_company_id_and_is_active"
+    t.index ["company_id"], name: "index_recurring_journal_entries_on_company_id"
+    t.index ["next_run_date"], name: "index_recurring_journal_entries_on_next_run_date"
+  end
+
   create_table "reminders", force: :cascade do |t|
     t.integer "lead_id", null: false
     t.integer "user_id", null: false
@@ -6041,6 +6199,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
     t.index ["key"], name: "index_workflow_templates_on_key", unique: true
   end
 
+  add_foreign_key "account_links", "chart_of_accounts"
+  add_foreign_key "account_links", "companies"
+  add_foreign_key "accounting_settings", "bank_accounts", column: "default_bank_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_ap_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_ar_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_cogs_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_sales_revenue_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_sales_tax_payable_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "retained_earnings_account_id"
+  add_foreign_key "accounting_settings", "companies"
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"
   add_foreign_key "accounts", "locations"
@@ -6110,6 +6278,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
   add_foreign_key "champion_lead_feed_configs", "companies"
   add_foreign_key "champion_lead_feed_configs", "locations"
   add_foreign_key "champion_lead_feed_configs", "users", column: "default_lead_owner_id"
+  add_foreign_key "chart_of_accounts", "bank_accounts"
+  add_foreign_key "chart_of_accounts", "chart_of_accounts", column: "parent_id"
+  add_foreign_key "chart_of_accounts", "companies"
   add_foreign_key "commission_audit_entries", "commissions"
   add_foreign_key "commission_audit_entries", "users"
   add_foreign_key "commission_components", "commission_plans", on_delete: :cascade
@@ -6199,6 +6370,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
   add_foreign_key "export_jobs", "users"
   add_foreign_key "factories", "manufacturers"
   add_foreign_key "field_option_overrides", "companies"
+  add_foreign_key "fiscal_periods", "companies"
+  add_foreign_key "fiscal_periods", "users", column: "closed_by_id"
   add_foreign_key "floor_plan_option_applicabilities", "floor_plan_options"
   add_foreign_key "floor_plan_option_applicabilities", "floor_plans"
   add_foreign_key "floor_plan_options", "factories"
@@ -6236,6 +6409,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
   add_foreign_key "invoices", "deals"
   add_foreign_key "invoices", "listings"
   add_foreign_key "invoices", "locations"
+  add_foreign_key "journal_entries", "companies"
+  add_foreign_key "journal_entries", "journal_entries", column: "reversed_by_id"
+  add_foreign_key "journal_entries", "users", column: "posted_by_id"
+  add_foreign_key "journal_entries", "users", column: "voided_by_id"
+  add_foreign_key "journal_entry_lines", "chart_of_accounts"
+  add_foreign_key "journal_entry_lines", "contacts"
+  add_foreign_key "journal_entry_lines", "deals"
+  add_foreign_key "journal_entry_lines", "journal_entries"
+  add_foreign_key "journal_entry_lines", "locations"
+  add_foreign_key "journal_entry_lines", "vehicles"
   add_foreign_key "knowledge_articles", "knowledge_features"
   add_foreign_key "knowledge_articles", "knowledge_modules"
   add_foreign_key "knowledge_change_queue", "knowledge_snapshots"
@@ -6380,6 +6563,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_01_000004) do
   add_foreign_key "quotes", "accounts"
   add_foreign_key "quotes", "contacts"
   add_foreign_key "quotes", "locations"
+  add_foreign_key "recurring_journal_entries", "companies"
   add_foreign_key "reminders", "leads"
   add_foreign_key "reminders", "users"
   add_foreign_key "reorder_rules", "companies"

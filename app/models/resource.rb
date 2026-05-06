@@ -152,7 +152,15 @@ public
 
       # Social Media Content Engine
       { key: 'social_posts', name: 'Social Media', category: 'operations', position: 135, description: 'Create, manage, and publish social media posts' },
-      { key: 'facebook_ads', name: 'Facebook Ads', category: 'operations', position: 136, description: 'Create, manage, pause, and delete Facebook ad campaigns' }
+      { key: 'facebook_ads', name: 'Facebook Ads', category: 'operations', position: 136, description: 'Create, manage, pause, and delete Facebook ad campaigns' },
+
+      # Accounting Module (position 130-139)
+      { key: 'accounting', name: 'Accounting', category: 'operations', description: 'Accounting module access', position: 130 },
+      { key: 'chart_of_accounts', name: 'Chart of Accounts', category: 'operations', description: 'Manage chart of accounts', position: 131 },
+      { key: 'journal_entries', name: 'Journal Entries', category: 'operations', description: 'Create and manage journal entries', position: 132 },
+      { key: 'bank_accounts_accounting', name: 'Bank Accounts (Accounting)', category: 'operations', description: 'Bank feed and reconciliation', position: 133 },
+      { key: 'bank_reconciliation', name: 'Bank Reconciliation', category: 'operations', description: 'Bank statement reconciliation', position: 134 },
+      { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 135 }
     ]
     
     resources_data.each do |resource_data|

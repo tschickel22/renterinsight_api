@@ -1,0 +1,150 @@
+# frozen_string_literal: true
+
+class Api::V1::JournalEntriesController < ApplicationController
+  before_action :set_company_scope
+  before_action :set_journal_entry, only: [:show, :update, :void]
+
+  def index
+    return unless authorize_action!('journal_entries', 'read')
+
+    entries = @company.journal_entries.includes(:journal_entry_lines, :posted_by)
+
+    stats = {
+      total: entries.count,
+      posted: entries.posted.count,
+      voided: entries.voided.count
+    }
+
+    entries = entries.where(source_type: params[:source_type]) if params[:source_type].present?
+    entries = entries.where(is_void: params[:is_void]) if params[:is_void].present?
+    if params[:start_date].present? && params[:end_date].present?
+      entries = entries.for_date_range(params[:start_date], params[:end_date])
+    end
+
+    if params[:search].present?
+      search_term = "%#{params[:search]}%"
+      entries = entries.where(
+        "entry_number ILIKE ? OR memo ILIKE ?",
+        search_term, search_term
+      )
+    end
+
+    sort_by = params[:sort_by] || 'entry_date'
+    sort_order = params[:sort_order]&.downcase == 'asc' ? :asc : :desc
+    entries = entries.order(sort_by => sort_order)
+
+    filtered_count = entries.count
+
+    page = (params[:page] || 1).to_i
+    per_page = [(params[:per_page] || 50).to_i, 200].min
+    entries = entries.offset((page - 1) * per_page).limit(per_page)
+
+    render json: {
+      items: entries.as_json(
+        include: {
+          journal_entry_lines: {
+            include: { chart_of_account: { only: [:id, :account_number, :name] } }
+          },
+          posted_by: { only: [:id, :email, :first_name, :last_name] }
+        }
+      ),
+      meta: {
+        total: filtered_count,
+        page: page,
+        per_page: per_page,
+        total_pages: (filtered_count.to_f / per_page).ceil,
+        stats: stats
+      }
+    }
+  end
+
+  def show
+    return unless authorize_action!('journal_entries', 'read')
+
+    render json: @journal_entry.as_json(
+      include: {
+        journal_entry_lines: {
+          include: {
+            chart_of_account: { only: [:id, :account_number, :name, :account_type] },
+            location: { only: [:id, :name] },
+            contact: { only: [:id, :first_name, :last_name, :company_name] },
+            deal: { only: [:id, :title] },
+            vehicle: { only: [:id, :year, :make, :model, :stock_number] }
+          }
+        },
+        posted_by: { only: [:id, :email, :first_name, :last_name] },
+        voided_by: { only: [:id, :email, :first_name, :last_name] },
+        reversed_by: { only: [:id, :entry_number] }
+      }
+    )
+  end
+
+  def create
+    return unless authorize_action!('journal_entries', 'create')
+
+    entry = @company.journal_entries.build(journal_entry_params)
+    entry.posted_by = current_user
+    entry.source_type = 'manual'
+
+    if entry.save
+      render json: entry.as_json(
+        include: { journal_entry_lines: { include: { chart_of_account: { only: [:id, :account_number, :name] } } } }
+      ), status: :created
+    else
+      render json: { errors: entry.errors }, status: :unprocessable_entity
+    end
+  end
+
+  def update
+    return unless authorize_action!('journal_entries', 'update')
+
+    if @journal_entry.locked?
+      return render json: { error: 'Cannot edit a locked journal entry' }, status: :unprocessable_entity
+    end
+
+    if @journal_entry.is_void?
+      return render json: { error: 'Cannot edit a voided journal entry' }, status: :unprocessable_entity
+    end
+
+    if @journal_entry.update(journal_entry_params)
+      render json: @journal_entry.as_json(
+        include: { journal_entry_lines: { include: { chart_of_account: { only: [:id, :account_number, :name] } } } }
+      )
+    else
+      render json: { errors: @journal_entry.errors }, status: :unprocessable_entity
+    end
+  end
+
+  # POST /api/v1/journal_entries/:id/void
+  def void
+    return unless authorize_action!('journal_entries', 'update')
+
+    if @journal_entry.is_void?
+      return render json: { error: 'Entry is already voided' }, status: :unprocessable_entity
+    end
+
+    @journal_entry.void!(current_user)
+    render json: { message: 'Journal entry voided', journal_entry: @journal_entry }
+  rescue => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  private
+
+  def set_journal_entry
+    @journal_entry = @company.journal_entries.find(params[:id])
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'Journal entry not found' }, status: :not_found
+  end
+
+  def journal_entry_params
+    params.require(:journal_entry).permit(
+      :entry_date, :memo, :is_adjusting,
+      journal_entry_lines_attributes: [
+        :id, :chart_of_account_id, :debit_amount, :credit_amount,
+        :memo, :location_id, :department, :contact_id, :deal_id,
+        :vehicle_id, :position, :_destroy
+      ]
+    )
+  end
+end

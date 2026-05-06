@@ -1699,6 +1699,40 @@ Rails.application.routes.draw do
           post :send_verification
         end
       end
+
+      # ==================== ACCOUNTING MODULE ====================
+      resources :chart_of_accounts do
+        collection do
+          post :import
+        end
+      end
+
+      resources :journal_entries do
+        member do
+          post :void
+        end
+      end
+
+      resource :accounting_settings, only: [:show, :update]
+
+      resources :fiscal_periods, only: [:index] do
+        collection do
+          post :generate
+        end
+        member do
+          post :close
+          post :reopen
+        end
+      end
+
+      resources :account_links do
+        collection do
+          post :resolve
+        end
+      end
+
+      get 'accounting/reports/trial_balance', to: 'accounting_reports#trial_balance'
+      get 'accounting/reports/general_ledger', to: 'accounting_reports#general_ledger'
     end
   end
 

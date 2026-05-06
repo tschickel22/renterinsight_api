@@ -72,6 +72,14 @@ class Company < ApplicationRecord
   has_many :draw_schedule_templates, dependent: :destroy
   has_many :invoice_terms_templates, dependent: :destroy
   has_many :invoice_notes_templates, dependent: :destroy
+
+  # Accounting Module Associations
+  has_many :chart_of_accounts, dependent: :destroy
+  has_many :journal_entries, dependent: :destroy
+  has_many :fiscal_periods, dependent: :destroy
+  has_many :account_links, dependent: :destroy
+  has_many :recurring_journal_entries, dependent: :destroy
+  has_one  :accounting_settings, dependent: :destroy
   
   # Notifications
   has_many :notifications, dependent: :destroy
