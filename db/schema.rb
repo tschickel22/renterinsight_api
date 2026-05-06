@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_05_100006) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_05_200004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -703,12 +703,134 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_100006) do
     t.string "display_last_four", limit: 4
     t.text "admin_notes"
     t.datetime "locked_at"
+    t.bigint "chart_of_account_id"
+    t.string "stripe_customer_id"
+    t.string "stripe_fc_account_id"
+    t.string "stripe_fc_status"
+    t.datetime "stripe_fc_last_synced_at"
+    t.decimal "current_balance", precision: 15, scale: 2
+    t.string "institution_name"
+    t.string "account_mask"
+    t.string "currency", default: "USD"
+    t.decimal "opening_balance", precision: 15, scale: 2
+    t.date "opened_on"
+    t.boolean "check_printing_enabled", default: false
+    t.integer "check_number", default: 0
+    t.string "check_format"
+    t.string "check_company_name"
+    t.string "check_company_street"
+    t.string "check_company_city"
+    t.string "check_company_state"
+    t.string "check_company_zip"
+    t.string "check_signor_name"
+    t.string "check_bank_name"
+    t.index ["chart_of_account_id"], name: "index_bank_accounts_on_chart_of_account_id"
     t.index ["company_id", "location_id"], name: "index_bank_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_bank_accounts_on_company_id"
     t.index ["external_id"], name: "index_bank_accounts_on_external_id"
     t.index ["is_deleted"], name: "index_bank_accounts_on_is_deleted"
     t.index ["location_id", "account_purpose"], name: "index_bank_accounts_on_location_id_and_account_purpose"
     t.index ["location_id"], name: "index_bank_accounts_on_location_id"
+    t.index ["stripe_fc_account_id"], name: "index_bank_accounts_on_stripe_fc_account_id", unique: true, where: "(stripe_fc_account_id IS NOT NULL)"
+    t.index ["stripe_fc_status"], name: "index_bank_accounts_on_stripe_fc_status"
+  end
+
+  create_table "bank_reconciliation_items", force: :cascade do |t|
+    t.bigint "bank_reconciliation_id", null: false
+    t.bigint "journal_entry_line_id", null: false
+    t.boolean "cleared", default: false
+    t.date "cleared_date"
+    t.decimal "amount", precision: 15, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bank_reconciliation_id", "cleared"], name: "idx_recon_items_cleared"
+    t.index ["bank_reconciliation_id"], name: "index_bank_reconciliation_items_on_bank_reconciliation_id"
+    t.index ["journal_entry_line_id"], name: "index_bank_reconciliation_items_on_journal_entry_line_id"
+  end
+
+  create_table "bank_reconciliations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "bank_account_id", null: false
+    t.date "statement_date", null: false
+    t.decimal "statement_ending_balance", precision: 15, scale: 2, null: false
+    t.decimal "beginning_balance", precision: 15, scale: 2, null: false
+    t.decimal "cleared_deposits", precision: 15, scale: 2, default: "0.0"
+    t.decimal "cleared_payments", precision: 15, scale: 2, default: "0.0"
+    t.decimal "calculated_balance", precision: 15, scale: 2, default: "0.0"
+    t.decimal "difference", precision: 15, scale: 2, default: "0.0"
+    t.string "status", default: "in_progress"
+    t.datetime "completed_at"
+    t.bigint "completed_by_id"
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bank_account_id", "statement_date"], name: "idx_on_bank_account_id_statement_date_e24fec856a"
+    t.index ["bank_account_id"], name: "index_bank_reconciliations_on_bank_account_id"
+    t.index ["company_id", "status"], name: "index_bank_reconciliations_on_company_id_and_status"
+    t.index ["company_id"], name: "index_bank_reconciliations_on_company_id"
+    t.index ["completed_by_id"], name: "index_bank_reconciliations_on_completed_by_id"
+  end
+
+  create_table "bank_rules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.bigint "bank_account_id"
+    t.string "match_type", null: false
+    t.string "match_field", default: "description"
+    t.string "match_value", null: false
+    t.decimal "min_amount", precision: 15, scale: 2
+    t.decimal "max_amount", precision: 15, scale: 2
+    t.string "transaction_direction", default: "any"
+    t.bigint "assign_account_id", null: false
+    t.bigint "assign_contact_id"
+    t.string "assign_memo"
+    t.boolean "auto_confirm", default: false
+    t.integer "priority", default: 100
+    t.integer "match_count", default: 0
+    t.boolean "is_active", default: true
+    t.datetime "last_matched_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assign_account_id"], name: "index_bank_rules_on_assign_account_id"
+    t.index ["assign_contact_id"], name: "index_bank_rules_on_assign_contact_id"
+    t.index ["bank_account_id"], name: "index_bank_rules_on_bank_account_id"
+    t.index ["company_id", "is_active"], name: "index_bank_rules_on_company_id_and_is_active"
+    t.index ["company_id", "priority"], name: "index_bank_rules_on_company_id_and_priority"
+    t.index ["company_id"], name: "index_bank_rules_on_company_id"
+  end
+
+  create_table "bank_transactions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "bank_account_id", null: false
+    t.date "transaction_date", null: false
+    t.date "post_date"
+    t.text "description"
+    t.decimal "amount", precision: 15, scale: 2, null: false
+    t.string "reference_number"
+    t.string "transaction_type"
+    t.string "fitid"
+    t.string "stripe_txn_id"
+    t.string "status", default: "unmatched"
+    t.bigint "matched_journal_entry_id"
+    t.datetime "matched_at"
+    t.string "matched_by"
+    t.bigint "category_account_id"
+    t.bigint "rule_id"
+    t.text "excluded_reason"
+    t.text "memo"
+    t.bigint "contact_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bank_account_id", "fitid"], name: "idx_bank_txn_fitid_unique", unique: true, where: "(fitid IS NOT NULL)"
+    t.index ["bank_account_id", "status"], name: "index_bank_transactions_on_bank_account_id_and_status"
+    t.index ["bank_account_id"], name: "index_bank_transactions_on_bank_account_id"
+    t.index ["category_account_id"], name: "index_bank_transactions_on_category_account_id"
+    t.index ["company_id"], name: "index_bank_transactions_on_company_id"
+    t.index ["contact_id"], name: "index_bank_transactions_on_contact_id"
+    t.index ["matched_journal_entry_id"], name: "index_bank_transactions_on_matched_journal_entry_id"
+    t.index ["rule_id"], name: "index_bank_transactions_on_rule_id"
+    t.index ["stripe_txn_id"], name: "index_bank_transactions_on_stripe_txn_id", unique: true, where: "(stripe_txn_id IS NOT NULL)"
+    t.index ["transaction_date"], name: "index_bank_transactions_on_transaction_date"
   end
 
   create_table "bins", force: :cascade do |t|
@@ -6252,8 +6374,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_05_100006) do
   add_foreign_key "audiences", "companies"
   add_foreign_key "audiences", "locations"
   add_foreign_key "audiences", "users", column: "created_by_user_id"
+  add_foreign_key "bank_accounts", "chart_of_accounts"
   add_foreign_key "bank_accounts", "companies"
   add_foreign_key "bank_accounts", "locations"
+  add_foreign_key "bank_reconciliation_items", "bank_reconciliations"
+  add_foreign_key "bank_reconciliation_items", "journal_entry_lines"
+  add_foreign_key "bank_reconciliations", "bank_accounts"
+  add_foreign_key "bank_reconciliations", "companies"
+  add_foreign_key "bank_reconciliations", "users", column: "completed_by_id"
+  add_foreign_key "bank_rules", "bank_accounts"
+  add_foreign_key "bank_rules", "chart_of_accounts", column: "assign_account_id"
+  add_foreign_key "bank_rules", "companies"
+  add_foreign_key "bank_rules", "contacts", column: "assign_contact_id"
+  add_foreign_key "bank_transactions", "bank_accounts"
+  add_foreign_key "bank_transactions", "bank_rules", column: "rule_id"
+  add_foreign_key "bank_transactions", "chart_of_accounts", column: "category_account_id"
+  add_foreign_key "bank_transactions", "companies"
+  add_foreign_key "bank_transactions", "contacts"
+  add_foreign_key "bank_transactions", "journal_entries", column: "matched_journal_entry_id"
   add_foreign_key "bins", "locations"
   add_foreign_key "blog_categories", "websites"
   add_foreign_key "blog_posts", "users", column: "author_id"

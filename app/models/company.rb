@@ -80,6 +80,11 @@ class Company < ApplicationRecord
   has_many :account_links, dependent: :destroy
   has_many :recurring_journal_entries, dependent: :destroy
   has_one  :accounting_settings, dependent: :destroy
+
+  # Banking & Reconciliation Associations
+  has_many :bank_transactions, dependent: :destroy
+  has_many :bank_rules, dependent: :destroy
+  has_many :bank_reconciliations, dependent: :destroy
   
   # Notifications
   has_many :notifications, dependent: :destroy

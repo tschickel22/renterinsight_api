@@ -1744,6 +1744,49 @@ Rails.application.routes.draw do
           post :generate_now
         end
       end
+
+      # ==================== BANKING & RECONCILIATION ====================
+      resources :bank_accounts, only: [] do
+        resources :transactions, controller: 'bank_transactions', only: [:index, :show] do
+          member do
+            post :categorize
+            post :match
+            post :exclude
+            post :unmatch
+            get  :suggestions
+          end
+          collection do
+            post :auto_match
+            post :import_csv
+            post :bulk_action
+          end
+        end
+      end
+
+      scope 'bank_accounts/:bank_account_id/feed', controller: 'bank_account_feeds' do
+        post :create_session
+        post :complete_connection
+        post :sync
+        post :disconnect
+        get  :status
+      end
+
+      resources :bank_rules do
+        collection do
+          post :test
+          post :create_from_transaction
+        end
+      end
+
+      resources :bank_reconciliations do
+        member do
+          post :toggle_item
+          post :clear_all
+          post :unclear_all
+          post :complete
+          post :add_adjustment
+        end
+      end
     end
   end
 

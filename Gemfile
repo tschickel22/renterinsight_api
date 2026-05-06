@@ -88,6 +88,9 @@ gem 'rotp', '~> 6.3'
 # XML parsing for payment gateway integration (Zego)
 gem 'xml-simple', '~> 1.1'
 
+# Stripe Financial Connections for bank feed (Phase 3 accounting)
+gem 'stripe'
+
 # HTTP requests for QuickBooks API integration
 gem 'httparty'
 

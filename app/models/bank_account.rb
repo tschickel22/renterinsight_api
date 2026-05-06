@@ -4,6 +4,11 @@ class BankAccount < ApplicationRecord
   # Associations
   belongs_to :company
   belongs_to :location
+  belongs_to :chart_of_account, optional: true
+
+  has_many :bank_transactions, dependent: :destroy
+  has_many :bank_reconciliations, dependent: :destroy
+  has_many :bank_rules, dependent: :destroy
   
   # Constants
   ACCOUNT_PURPOSE_OPERATING = 'operating'
@@ -46,8 +51,29 @@ class BankAccount < ApplicationRecord
   scope :deposit, -> { where(account_purpose: ACCOUNT_PURPOSE_DEPOSIT) }
   scope :for_location, ->(location_id) { where(location_id: location_id) }
   scope :synced_to_zego, -> { where.not(external_id: nil) }
-  
+  scope :with_active_feed, -> { where(stripe_fc_status: 'active') }
+
   # Instance Methods
+
+  def feed_connected?
+    stripe_fc_status == 'active'
+  end
+
+  def needs_reauth?
+    stripe_fc_status.in?(['disconnected', 'requires_reauth'])
+  end
+
+  def unconfirmed_transaction_count
+    bank_transactions.unmatched.count
+  end
+
+  def last_reconciliation
+    bank_reconciliations.completed.order(statement_date: :desc).first
+  end
+
+  def last_reconciled_balance
+    last_reconciliation&.statement_ending_balance
+  end
   
   # Display name for UI
   def display_name
