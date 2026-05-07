@@ -15,7 +15,18 @@ class AccountingSettings < ApplicationRecord
   validates :company_id, uniqueness: true
   validates :fiscal_year_start_month, inclusion: { in: 1..12 }
 
+  # New companies should have auto-posting enabled by default
+  after_initialize :set_auto_post_defaults, if: :new_record?
+
   def self.for_company(company)
     find_or_create_by!(company: company)
+  end
+
+  private
+
+  def set_auto_post_defaults
+    self.auto_post_invoices = true if auto_post_invoices.nil?
+    self.auto_post_payments = true if auto_post_payments.nil?
+    self.auto_post_purchases = true if auto_post_purchases.nil?
   end
 end
