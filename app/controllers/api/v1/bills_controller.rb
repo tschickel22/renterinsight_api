@@ -308,6 +308,41 @@ class Api::V1::BillsController < ApplicationController
     render json: results
   end
 
+  # POST /api/v1/bills/scan_receipt
+  def scan_receipt
+    return unless authorize_action!('bills', 'create')
+
+    file = params[:file]
+    unless file.present?
+      return render json: { error: 'No file provided. Upload a receipt or bill image.' }, status: :bad_request
+    end
+
+    begin
+      service = Accounting::BillScanService.new(@company, current_user)
+      result = service.scan(file)
+
+      if result[:vendor_name].present?
+        vendor = @company.vendors.where('name ILIKE ?', "%#{result[:vendor_name]}%").first
+        result[:matched_vendor_id] = vendor&.id
+        result[:matched_vendor_name] = vendor&.name
+      end
+
+      if result[:line_items].present?
+        result[:line_items].each do |item|
+          hint = item[:category_hint]
+          next if hint.blank?
+          account = find_expense_account_for_hint(hint)
+          item[:suggested_account_id] = account&.id
+          item[:suggested_account_name] = account ? "#{account.account_number} — #{account.name}" : nil
+        end
+      end
+
+      render json: { scan: result }
+    rescue Accounting::BillScanService::ScanError => e
+      render json: { error: e.message }, status: :unprocessable_entity
+    end
+  end
+
   # DELETE /api/v1/bills/:id/attachments/:s3_key
   def delete_attachment
     return unless authorize_action!('bills', 'update')
@@ -353,6 +388,37 @@ class Api::V1::BillsController < ApplicationController
       :amount, :payment_date, :payment_method,
       :check_number, :bank_account_id, :chart_of_account_id, :memo
     )
+  end
+
+  # Match a category hint string from bill scanning to a COA expense account
+  def find_expense_account_for_hint(hint)
+    return nil if hint.blank?
+
+    mappings = {
+      'office_supplies' => %w[office supplies],
+      'utilities' => %w[utilities electric gas water],
+      'repairs' => %w[repairs maintenance],
+      'travel' => %w[travel mileage],
+      'meals' => %w[meals entertainment dining],
+      'insurance' => %w[insurance],
+      'rent' => %w[rent lease occupancy],
+      'professional_services' => %w[professional legal accounting consulting],
+      'advertising' => %w[advertising marketing promotion],
+      'vehicle_expense' => %w[vehicle auto fuel gas],
+      'equipment' => %w[equipment tools]
+    }
+
+    keywords = mappings[hint] || [hint.to_s.gsub('_', ' ')]
+
+    keywords.each do |keyword|
+      account = @company.chart_of_accounts
+        .where(account_type: 'expense', is_active: true, is_header: false)
+        .where('name ILIKE ?', "%#{keyword}%")
+        .first
+      return account if account
+    end
+
+    nil
   end
 
   def serialize_bill(bill)

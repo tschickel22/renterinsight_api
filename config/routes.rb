@@ -1824,6 +1824,7 @@ Rails.application.routes.draw do
       resources :bills do
         collection do
           post :bulk_action
+          post :scan_receipt
         end
         member do
           post   :void
