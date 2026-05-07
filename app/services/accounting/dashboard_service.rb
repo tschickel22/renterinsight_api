@@ -2,8 +2,9 @@
 
 module Accounting
   class DashboardService
-    def initialize(company)
+    def initialize(company, location_id: nil)
       @company = company
+      @location_id = location_id
     end
 
     def widgets
@@ -22,15 +23,15 @@ module Accounting
       balance_service = AccountBalanceService.new(@company)
       cash_accounts = @company.chart_of_accounts.where(sub_type: 'bank', is_active: true)
       accounts = cash_accounts.map do |account|
-        { name: account.name, balance: balance_service.balance_as_of(account, Date.current) }
+        { name: account.name, balance: balance_service.balance_as_of(account, Date.current, location_id: @location_id) }
       end
       { accounts: accounts, total: accounts.sum { |a| a[:balance] } }
     end
 
     def ar_ap_summary
-      ar_report = Reports::ArAgingReportService.new(@company).generate
+      ar_report = Reports::ArAgingReportService.new(@company).generate(location_id: @location_id)
       ap_report = begin
-        Reports::ApAgingReportService.new(@company).generate
+        Reports::ApAgingReportService.new(@company).generate(location_id: @location_id)
       rescue StandardError
         { grand_total: 0 }
       end
@@ -46,7 +47,7 @@ module Accounting
       (0..5).map do |months_ago|
         start_d = (Date.current - months_ago.months).beginning_of_month
         end_d = start_d.end_of_month
-        pnl = pnl_service.generate(start_date: start_d, end_date: end_d)
+        pnl = pnl_service.generate(start_date: start_d, end_date: end_d, location_id: @location_id)
         {
           month: start_d.strftime('%b %Y'),
           revenue: pnl[:total_revenue],
@@ -57,7 +58,19 @@ module Accounting
     end
 
     def recent_entries
-      @company.journal_entries.posted.order(entry_date: :desc, created_at: :desc).limit(10).map do |je|
+      entries = @company.journal_entries.posted.order(entry_date: :desc, created_at: :desc)
+
+      if @location_id
+        entry_ids = JournalEntryLine
+          .joins(:journal_entry)
+          .where(journal_entries: { company_id: @company.id })
+          .where(location_id: @location_id)
+          .select(:journal_entry_id)
+          .distinct
+        entries = entries.where(id: entry_ids)
+      end
+
+      entries.limit(10).map do |je|
         {
           id: je.id,
           entry_number: je.entry_number,

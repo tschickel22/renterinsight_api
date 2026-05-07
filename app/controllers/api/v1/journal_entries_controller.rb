@@ -1,13 +1,19 @@
 # frozen_string_literal: true
 
 class Api::V1::JournalEntriesController < ApplicationController
+  include AccountingLocationScoping
+
   before_action :set_company_scope
-  before_action :set_journal_entry, only: [:show, :update, :void]
+  before_action :set_journal_entry, only: [:show, :update, :void, :destroy]
 
   def index
     return unless authorize_action!('journal_entries', 'read')
 
     entries = @company.journal_entries.includes(:journal_entry_lines, :posted_by)
+
+    # Filter by accounting location bar (separate from the global location selector)
+    je_ids = je_ids_for_accounting_location
+    entries = entries.where(id: je_ids) if je_ids
 
     stats = {
       total: entries.count,
@@ -125,6 +131,33 @@ class Api::V1::JournalEntriesController < ApplicationController
 
     @journal_entry.void!(current_user)
     render json: { message: 'Journal entry voided', journal_entry: @journal_entry }
+  rescue => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # DELETE /api/v1/journal_entries/:id
+  def destroy
+    return unless authorize_action!('journal_entries', 'delete')
+
+    # If voided, also delete the reversing entry
+    if @journal_entry.is_void? && @journal_entry.reversed_by_id.present?
+      reversing_id = @journal_entry.reversed_by_id
+      # Clear FK reference BEFORE deleting the reversing entry
+      @journal_entry.update_columns(reversed_by_id: nil)
+      reversing = @company.journal_entries.find_by(id: reversing_id)
+      reversing&.destroy!
+    end
+
+    # If this IS a reversing entry (locked), clear the original's reference first
+    if @journal_entry.locked?
+      original = @company.journal_entries.find_by(reversed_by_id: @journal_entry.id)
+      if original
+        original.update_columns(is_void: false, voided_at: nil, voided_by_id: nil, reversed_by_id: nil)
+      end
+    end
+
+    @journal_entry.destroy!
+    head :no_content
   rescue => e
     render json: { error: e.message }, status: :unprocessable_entity
   end

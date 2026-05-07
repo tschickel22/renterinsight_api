@@ -3,6 +3,8 @@
 class RecurringBill < ApplicationRecord
   belongs_to :company
   belongs_to :supplier, optional: true
+  # Parallel association to the unified vendors table. New callers should use :vendor.
+  belongs_to :vendor, optional: true
   belongs_to :contact, optional: true
   belongs_to :expense_account, class_name: 'ChartOfAccount'
   belongs_to :payment_account, class_name: 'ChartOfAccount', optional: true

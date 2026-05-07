@@ -8,6 +8,7 @@ module Reports
 
     def generate(as_of_date: Date.current, location_id: nil)
       pos = @company.purchase_orders
+        .includes(:supplier)
         .where(status: ['submitted', 'approved', 'partially_received', 'received'])
 
       pos = pos.where(is_deleted: false) if pos.column_names.include?('is_deleted')
@@ -22,12 +23,14 @@ module Reports
         next if balance <= 0
 
         row = {
-          po_id: po.id,
-          po_number: po.try(:po_number),
-          supplier_name: po.try(:supplier)&.name || 'Unknown',
-          supplier_id: po.try(:supplier_id),
-          po_date: po.created_at.to_date,
-          due_date: due_date,
+          id: po.id,
+          reference_number: po.try(:po_number) || "##{po.id}",
+          party: {
+            id: po.try(:supplier_id),
+            name: po.try(:supplier)&.name || 'Unknown'
+          },
+          document_date: po.created_at.to_date.to_s,
+          due_date: due_date.to_s,
           total: po.try(:total_amount),
           balance_due: balance,
           days_past_due: [days_past, 0].max

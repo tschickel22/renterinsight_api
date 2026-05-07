@@ -8,6 +8,7 @@ module Reports
 
     def generate(as_of_date: Date.current, location_id: nil)
       invoices = @company.invoices
+        .includes(:contact)
         .where(status: ['sent', 'partial', 'overdue', 'finalized', 'viewed', 'pending'])
         .where('amount_due > 0')
 
@@ -23,12 +24,14 @@ module Reports
         next if balance <= 0
 
         row = {
-          invoice_id: invoice.id,
-          invoice_number: invoice.try(:invoice_number),
-          contact_name: resolve_invoice_contact(invoice),
-          contact_id: invoice.try(:contact_id) || invoice.try(:customer_id),
-          invoice_date: invoice.try(:invoice_date),
-          due_date: due_date,
+          id: invoice.id,
+          reference_number: invoice.try(:invoice_number) || "##{invoice.id}",
+          party: {
+            id: invoice.try(:contact_id) || invoice.try(:customer_id),
+            name: resolve_invoice_contact(invoice)
+          },
+          document_date: (invoice.try(:invoice_date) || invoice.created_at.to_date).to_s,
+          due_date: due_date.to_s,
           total: invoice.try(:total) || invoice.try(:subtotal),
           balance_due: balance,
           days_past_due: [days_past, 0].max

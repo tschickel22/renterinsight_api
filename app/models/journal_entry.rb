@@ -44,7 +44,7 @@ class JournalEntry < ApplicationRecord
   end
 
   def no_edits_if_locked
-    if locked && changed?
+    if locked && changed? && !new_record? && !is_void_changed?
       errors.add(:base, "Cannot edit a locked journal entry (period is closed)")
     end
   end
@@ -84,7 +84,8 @@ class JournalEntry < ApplicationRecord
         memo: "VOID: #{memo}",
         source_type: 'auto',
         source_entity: source_entity,
-        posted_by: user
+        posted_by: user,
+        locked: true  # Reversing entries can't be edited or voided
       )
 
       journal_entry_lines.each do |line|

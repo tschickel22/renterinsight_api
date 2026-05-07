@@ -92,6 +92,8 @@ class BankTransaction < ApplicationRecord
     return unless bank_gl_account
 
     posting_service = Accounting::ManualPostingService.new(company)
+    je_location_id = bank_account.try(:location_id) ||
+                     (Current.location_id if Current.respond_to?(:location_id))
 
     je = if deposit?
            posting_service.post_simple!(
@@ -101,6 +103,7 @@ class BankTransaction < ApplicationRecord
              memo: memo.presence || description,
              entry_date: transaction_date,
              source_entity: self,
+             location_id: je_location_id,
              contact_id: contact_id
            )
          else
@@ -111,6 +114,7 @@ class BankTransaction < ApplicationRecord
              memo: memo.presence || description,
              entry_date: transaction_date,
              source_entity: self,
+             location_id: je_location_id,
              contact_id: contact_id
            )
          end

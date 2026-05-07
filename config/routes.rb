@@ -486,6 +486,9 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== VENDORS (unified contractors + suppliers) ====================
+      resources :vendors
+
       # ==================== CONTRACTORS ====================
       resources :contractors do
         collection do
@@ -1749,6 +1752,7 @@ Rails.application.routes.draw do
       get 'accounting/reports/sales_tax_summary', to: 'accounting_reports#sales_tax_summary'
       get 'accounting/reports/cash_flow_statement', to: 'accounting_reports#cash_flow_statement'
       get 'accounting/dashboard', to: 'accounting_reports#dashboard'
+      get 'accounting/locations', to: 'accounting_reports#accounting_locations'
 
       resources :deals, only: [] do
         resource :accounting, controller: 'deal_accounting', only: [:show] do
@@ -1811,6 +1815,17 @@ Rails.application.routes.draw do
           post :generate_now
         end
       end
+
+      resources :bills do
+        member do
+          post   :void
+          post   :record_payment
+          post   :upload_attachment
+          delete :delete_attachment
+        end
+      end
+
+      resources :record_transactions, only: [:create], path: 'record-transactions'
 
       resources :printed_checks, only: [:index, :create] do
         collection do

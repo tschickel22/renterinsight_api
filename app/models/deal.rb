@@ -119,6 +119,13 @@ class Deal < ApplicationRecord
   # Auto-generate commission payment when deal is marked closed_won
   after_save :generate_commission_payment, if: :just_closed_won?
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
+  after_commit :auto_post_closing_to_accounting, on: [:create, :update], if: -> { saved_change_to_stage? && stage == 'closed_won' && !gl_posted? }
+
+  def auto_post_closing_to_accounting
+    Accounting::DealAccountingService.new(self).post_closing_entries!(user: try(:owner) || try(:user))
+  rescue => e
+    Rails.logger.error("[AutoPost] Deal #{id} closing entries failed: #{e.message}")
+  end
   
   def normalize_stage
     self.stage = stage&.downcase

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_07_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -647,7 +647,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
 
   create_table "assignment_work_logs", force: :cascade do |t|
     t.bigint "contractor_assignment_id", null: false
-    t.bigint "contractor_id"
+    t.bigint "vendor_id"
     t.text "note"
     t.string "log_type", default: "note"
     t.jsonb "attachments", default: []
@@ -658,8 +658,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.string "author_type", default: "contractor"
     t.string "author_name"
     t.index ["contractor_assignment_id"], name: "index_assignment_work_logs_on_contractor_assignment_id"
-    t.index ["contractor_id"], name: "index_assignment_work_logs_on_contractor_id"
     t.index ["user_id"], name: "index_assignment_work_logs_on_user_id"
+    t.index ["vendor_id"], name: "index_assignment_work_logs_on_vendor_id"
   end
 
   create_table "audience_ai_generations", force: :cascade do |t|
@@ -862,6 +862,83 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["rule_id"], name: "index_bank_transactions_on_rule_id"
     t.index ["stripe_txn_id"], name: "index_bank_transactions_on_stripe_txn_id", unique: true, where: "(stripe_txn_id IS NOT NULL)"
     t.index ["transaction_date"], name: "index_bank_transactions_on_transaction_date"
+  end
+
+  create_table "bill_line_items", force: :cascade do |t|
+    t.bigint "bill_id", null: false
+    t.bigint "chart_of_account_id", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.string "description"
+    t.bigint "location_id"
+    t.string "department"
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bill_id"], name: "index_bill_line_items_on_bill_id"
+    t.index ["chart_of_account_id"], name: "index_bill_line_items_on_chart_of_account_id"
+    t.index ["location_id"], name: "index_bill_line_items_on_location_id"
+  end
+
+  create_table "bill_payments", force: :cascade do |t|
+    t.bigint "bill_id", null: false
+    t.bigint "company_id", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.date "payment_date", null: false
+    t.string "payment_method"
+    t.string "check_number"
+    t.bigint "bank_account_id"
+    t.bigint "chart_of_account_id"
+    t.bigint "journal_entry_id"
+    t.text "memo"
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bank_account_id"], name: "index_bill_payments_on_bank_account_id"
+    t.index ["bill_id"], name: "index_bill_payments_on_bill_id"
+    t.index ["chart_of_account_id"], name: "index_bill_payments_on_chart_of_account_id"
+    t.index ["company_id"], name: "index_bill_payments_on_company_id"
+    t.index ["created_by_id"], name: "index_bill_payments_on_created_by_id"
+    t.index ["journal_entry_id"], name: "index_bill_payments_on_journal_entry_id"
+  end
+
+  create_table "bills", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "vendor_id"
+    t.bigint "contact_id"
+    t.bigint "location_id"
+    t.string "bill_number"
+    t.string "vendor_name"
+    t.date "bill_date", null: false
+    t.date "due_date"
+    t.string "status", default: "draft", null: false
+    t.decimal "subtotal", precision: 12, scale: 2, default: "0.0"
+    t.decimal "tax_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "total_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "amount_paid", precision: 12, scale: 2, default: "0.0"
+    t.decimal "balance_due", precision: 12, scale: 2, default: "0.0"
+    t.string "payment_terms"
+    t.text "memo"
+    t.text "notes"
+    t.string "reference_number"
+    t.jsonb "attachments", default: []
+    t.bigint "ap_account_id"
+    t.bigint "journal_entry_id"
+    t.bigint "payment_journal_entry_id"
+    t.bigint "created_by_id"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["ap_account_id"], name: "index_bills_on_ap_account_id"
+    t.index ["company_id", "bill_number"], name: "index_bills_on_company_id_and_bill_number", unique: true, where: "(bill_number IS NOT NULL)"
+    t.index ["company_id", "due_date"], name: "index_bills_on_company_id_and_due_date"
+    t.index ["company_id", "status"], name: "index_bills_on_company_id_and_status"
+    t.index ["company_id"], name: "index_bills_on_company_id"
+    t.index ["contact_id"], name: "index_bills_on_contact_id"
+    t.index ["created_by_id"], name: "index_bills_on_created_by_id"
+    t.index ["journal_entry_id"], name: "index_bills_on_journal_entry_id"
+    t.index ["location_id"], name: "index_bills_on_location_id"
+    t.index ["payment_journal_entry_id"], name: "index_bills_on_payment_journal_entry_id"
+    t.index ["vendor_id"], name: "index_bills_on_vendor_id"
   end
 
   create_table "bins", force: :cascade do |t|
@@ -1959,7 +2036,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
   end
 
   create_table "contractor_assignments", force: :cascade do |t|
-    t.bigint "contractor_id", null: false
+    t.bigint "vendor_id", null: false
     t.string "assignable_type", null: false
     t.bigint "assignable_id", null: false
     t.bigint "company_id", null: false
@@ -1988,7 +2065,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
     t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
     t.index ["company_id"], name: "index_contractor_assignments_on_company_id"
-    t.index ["contractor_id"], name: "index_contractor_assignments_on_contractor_id"
     t.index ["notification_paused_at"], name: "index_contractor_assignments_on_notification_paused_at"
     t.index ["notification_skipped_at"], name: "index_contractor_assignments_on_notification_skipped_at"
     t.index ["notified_at"], name: "index_contractor_assignments_on_notified_at"
@@ -1996,44 +2072,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["review_status"], name: "index_contractor_assignments_on_review_status"
     t.index ["reviewed_by_id"], name: "index_contractor_assignments_on_reviewed_by_id"
     t.index ["status"], name: "index_contractor_assignments_on_status"
-  end
-
-  create_table "contractors", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.string "name", null: false
-    t.string "contact_name"
-    t.string "email"
-    t.string "phone"
-    t.string "trade_type", default: "general"
-    t.string "license_number"
-    t.string "license_state"
-    t.date "license_expiry"
-    t.string "insurance_provider"
-    t.string "insurance_policy_number"
-    t.date "insurance_expiry"
-    t.boolean "bonded", default: false
-    t.decimal "bond_amount", precision: 10, scale: 2
-    t.date "bond_expiry"
-    t.decimal "hourly_rate", precision: 10, scale: 2
-    t.text "notes"
-    t.string "status", default: "active"
-    t.decimal "rating", precision: 3, scale: 2
-    t.boolean "is_deleted", default: false
-    t.jsonb "custom_field_values", default: {}
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.string "portal_access_token"
-    t.datetime "portal_token_expires_at"
-    t.datetime "last_portal_login_at"
-    t.boolean "is_vendor", default: false
-    t.string "password_digest"
-    t.boolean "password_login_enabled", default: false
-    t.index ["company_id"], name: "index_contractors_on_company_id"
-    t.index ["email"], name: "index_contractors_on_email"
-    t.index ["is_vendor"], name: "index_contractors_on_is_vendor"
-    t.index ["portal_access_token"], name: "index_contractors_on_portal_access_token", unique: true
-    t.index ["status"], name: "index_contractors_on_status"
-    t.index ["trade_type"], name: "index_contractors_on_trade_type"
+    t.index ["vendor_id"], name: "index_contractor_assignments_on_vendor_id"
   end
 
   create_table "custom_field_migrations", force: :cascade do |t|
@@ -3512,9 +3551,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.integer "fiscal_year_start_month", comment: "Month when fiscal year starts (1=January, 2=February, etc.). Used for quarterly commission calculations. If NULL, falls back to company.fiscal_year_start_month. If both NULL, defaults to 1 (January) for calendar year."
     t.boolean "is_default", default: false, null: false
     t.jsonb "allowed_form_states", default: [], null: false
+    t.boolean "is_corporate", default: false, null: false
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
+    t.index ["company_id", "is_corporate"], name: "index_locations_one_corporate_per_company", unique: true, where: "(is_corporate = true)"
     t.index ["company_id", "is_default"], name: "index_locations_on_company_id_and_is_default"
     t.index ["company_id", "is_deleted"], name: "index_locations_on_company_id_and_is_deleted"
     t.index ["company_id"], name: "index_locations_on_company_id"
@@ -4185,10 +4226,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "contractor_id"
+    t.bigint "vendor_id"
     t.index ["approved_by_id"], name: "index_project_cost_items_on_approved_by_id"
     t.index ["company_id"], name: "index_project_cost_items_on_company_id"
-    t.index ["contractor_id"], name: "index_project_cost_items_on_contractor_id"
     t.index ["cost_type"], name: "index_project_cost_items_on_cost_type"
     t.index ["date"], name: "index_project_cost_items_on_date"
     t.index ["inventory_transaction_id"], name: "index_project_cost_items_on_inventory_transaction_id"
@@ -4197,6 +4237,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["project_phase_id"], name: "index_project_cost_items_on_project_phase_id"
     t.index ["project_task_id"], name: "index_project_cost_items_on_project_task_id"
     t.index ["status"], name: "index_project_cost_items_on_status"
+    t.index ["vendor_id"], name: "index_project_cost_items_on_vendor_id"
   end
 
   create_table "project_documents", force: :cascade do |t|
@@ -4586,6 +4627,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.datetime "received_date"
+    t.bigint "vendor_id"
     t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
     t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
     t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
@@ -4600,6 +4642,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["received_date"], name: "index_purchase_orders_on_received_date"
     t.index ["status"], name: "index_purchase_orders_on_status"
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
+    t.index ["vendor_id"], name: "index_purchase_orders_on_vendor_id"
   end
 
   create_table "quickbooks_connections", force: :cascade do |t|
@@ -4832,6 +4875,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.integer "generated_count", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "vendor_id"
     t.index ["company_id", "is_active"], name: "index_recurring_bills_on_company_id_and_is_active"
     t.index ["company_id"], name: "index_recurring_bills_on_company_id"
     t.index ["contact_id"], name: "index_recurring_bills_on_contact_id"
@@ -4840,6 +4884,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["next_due_date"], name: "index_recurring_bills_on_next_due_date"
     t.index ["payment_account_id"], name: "index_recurring_bills_on_payment_account_id"
     t.index ["supplier_id"], name: "index_recurring_bills_on_supplier_id"
+    t.index ["vendor_id"], name: "index_recurring_bills_on_vendor_id"
   end
 
   create_table "recurring_journal_entries", force: :cascade do |t|
@@ -5471,6 +5516,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "account_number"
+    t.bigint "vendor_id"
     t.index ["company_id", "active"], name: "index_suppliers_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_suppliers_on_company_id_and_code", unique: true, where: "((code IS NOT NULL) AND (is_deleted = false))"
     t.index ["company_id", "name"], name: "index_suppliers_on_company_id_and_name", where: "(is_deleted = false)"
@@ -5478,6 +5524,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["created_by_id"], name: "index_suppliers_on_created_by_id"
     t.index ["qb_vendor_id"], name: "index_suppliers_on_qb_vendor_id"
     t.index ["updated_by_id"], name: "index_suppliers_on_updated_by_id"
+    t.index ["vendor_id"], name: "index_suppliers_on_vendor_id"
   end
 
   create_table "syndication_partners", force: :cascade do |t|
@@ -6120,6 +6167,67 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
     t.index ["year", "make", "model"], name: "index_vehicles_on_year_and_make_and_model"
   end
 
+  create_table "vendors", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "contact_name"
+    t.string "email"
+    t.string "phone"
+    t.string "trade_type", default: "general"
+    t.string "license_number"
+    t.string "license_state"
+    t.date "license_expiry"
+    t.string "insurance_provider"
+    t.string "insurance_policy_number"
+    t.date "insurance_expiry"
+    t.boolean "bonded", default: false
+    t.decimal "bond_amount", precision: 10, scale: 2
+    t.date "bond_expiry"
+    t.decimal "hourly_rate", precision: 10, scale: 2
+    t.text "notes"
+    t.string "status", default: "active"
+    t.decimal "rating", precision: 3, scale: 2
+    t.boolean "is_deleted", default: false
+    t.jsonb "custom_field_values", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "portal_access_token"
+    t.datetime "portal_token_expires_at"
+    t.datetime "last_portal_login_at"
+    t.boolean "is_vendor", default: false
+    t.string "password_digest"
+    t.boolean "password_login_enabled", default: false
+    t.string "vendor_type", default: "contractor", null: false
+    t.string "code"
+    t.string "website"
+    t.string "address_line1"
+    t.string "address_line2"
+    t.string "city"
+    t.string "state"
+    t.string "zip_code"
+    t.string "country", default: "US"
+    t.string "tax_id"
+    t.string "payment_terms"
+    t.integer "default_lead_time_days"
+    t.string "qb_vendor_id"
+    t.boolean "active", default: true
+    t.datetime "deleted_at"
+    t.bigint "created_by_id"
+    t.bigint "updated_by_id"
+    t.string "account_number"
+    t.boolean "is_1099_eligible", default: false
+    t.bigint "default_expense_account_id"
+    t.index ["company_id"], name: "index_vendors_on_company_id"
+    t.index ["default_expense_account_id"], name: "index_vendors_on_default_expense_account_id"
+    t.index ["email"], name: "index_vendors_on_email"
+    t.index ["is_vendor"], name: "index_vendors_on_is_vendor"
+    t.index ["portal_access_token"], name: "index_vendors_on_portal_access_token", unique: true
+    t.index ["qb_vendor_id"], name: "index_vendors_on_qb_vendor_id"
+    t.index ["status"], name: "index_vendors_on_status"
+    t.index ["trade_type"], name: "index_vendors_on_trade_type"
+    t.index ["vendor_type"], name: "index_vendors_on_vendor_type"
+  end
+
   create_table "warranty_claims", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -6512,7 +6620,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
   add_foreign_key "approval_workflows", "users", column: "approved_by_id"
   add_foreign_key "approval_workflows", "users", column: "requested_by_id"
   add_foreign_key "assignment_work_logs", "contractor_assignments"
-  add_foreign_key "assignment_work_logs", "contractors"
+  add_foreign_key "assignment_work_logs", "vendors", on_delete: :nullify
   add_foreign_key "audience_ai_generations", "ai_query_logs"
   add_foreign_key "audience_ai_generations", "audience_ai_generations", column: "parent_generation_id"
   add_foreign_key "audience_ai_generations", "audiences"
@@ -6540,6 +6648,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
   add_foreign_key "bank_transactions", "companies"
   add_foreign_key "bank_transactions", "contacts"
   add_foreign_key "bank_transactions", "journal_entries", column: "matched_journal_entry_id"
+  add_foreign_key "bill_line_items", "bills"
+  add_foreign_key "bill_line_items", "chart_of_accounts"
+  add_foreign_key "bill_line_items", "locations"
+  add_foreign_key "bill_payments", "bank_accounts"
+  add_foreign_key "bill_payments", "bills"
+  add_foreign_key "bill_payments", "chart_of_accounts"
+  add_foreign_key "bill_payments", "companies"
+  add_foreign_key "bill_payments", "journal_entries"
+  add_foreign_key "bill_payments", "users", column: "created_by_id"
+  add_foreign_key "bills", "chart_of_accounts", column: "ap_account_id"
+  add_foreign_key "bills", "companies"
+  add_foreign_key "bills", "contacts"
+  add_foreign_key "bills", "journal_entries"
+  add_foreign_key "bills", "journal_entries", column: "payment_journal_entry_id"
+  add_foreign_key "bills", "locations"
+  add_foreign_key "bills", "users", column: "created_by_id"
+  add_foreign_key "bills", "vendors", on_delete: :nullify
   add_foreign_key "bins", "locations"
   add_foreign_key "blog_categories", "websites"
   add_foreign_key "blog_posts", "users", column: "author_id"
@@ -6614,9 +6739,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
   add_foreign_key "contact_activities", "users", column: "assigned_to_id"
   add_foreign_key "contacts", "locations"
   add_foreign_key "contractor_assignments", "companies"
-  add_foreign_key "contractor_assignments", "contractors"
   add_foreign_key "contractor_assignments", "users", column: "assigned_by_id"
-  add_foreign_key "contractors", "companies"
+  add_foreign_key "contractor_assignments", "vendors", on_delete: :nullify
   add_foreign_key "custom_field_migrations", "companies"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "source_custom_field_id"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "target_custom_field_id"
@@ -6785,13 +6909,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
   add_foreign_key "printed_checks", "contacts"
   add_foreign_key "printed_checks", "journal_entries"
   add_foreign_key "project_cost_items", "companies"
-  add_foreign_key "project_cost_items", "contractors", on_delete: :nullify
   add_foreign_key "project_cost_items", "inventory_transactions", on_delete: :nullify
   add_foreign_key "project_cost_items", "parts", on_delete: :nullify
   add_foreign_key "project_cost_items", "project_phases"
   add_foreign_key "project_cost_items", "project_tasks"
   add_foreign_key "project_cost_items", "projects"
   add_foreign_key "project_cost_items", "users", column: "approved_by_id", on_delete: :nullify
+  add_foreign_key "project_cost_items", "vendors", on_delete: :nullify
   add_foreign_key "project_documents", "companies"
   add_foreign_key "project_documents", "projects"
   add_foreign_key "project_documents", "users", column: "uploaded_by_id", on_delete: :nullify
@@ -6934,6 +7058,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_06_300000) do
   add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"
   add_foreign_key "vehicles", "vehicles", column: "cloned_from_id"
+  add_foreign_key "vendors", "companies"
   add_foreign_key "warranty_claims", "companies", on_delete: :cascade
   add_foreign_key "warranty_claims", "locations", on_delete: :nullify
   add_foreign_key "warranty_claims", "manufacturers", on_delete: :restrict

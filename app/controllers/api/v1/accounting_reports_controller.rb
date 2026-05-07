@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Api::V1::AccountingReportsController < ApplicationController
+  include AccountingLocationScoping
+
   before_action :set_company_scope
 
   # GET /api/v1/accounting/reports/trial_balance
@@ -8,7 +10,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     return unless authorize_action!('financial_reports', 'read')
 
     as_of = params[:as_of_date] ? Date.parse(params[:as_of_date]) : Date.current
-    location_id = params[:location_id]
+    location_id = params[:location_id].presence || accounting_location_id
     department = params[:department]
 
     service = Reports::TrialBalanceReportService.new(@company)
@@ -51,7 +53,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     report = service.generate(
       start_date: start_date,
       end_date: end_date,
-      location_id: params[:location_id],
+      location_id: params[:location_id].presence || accounting_location_id,
       department: params[:department],
       compare_prior: params[:compare_prior] == 'true'
     )
@@ -66,7 +68,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     as_of = params[:as_of_date] ? Date.parse(params[:as_of_date]) : Date.current
 
     service = Reports::BalanceSheetReportService.new(@company)
-    report = service.generate(as_of_date: as_of, location_id: params[:location_id])
+    report = service.generate(as_of_date: as_of, location_id: params[:location_id].presence || accounting_location_id)
 
     render json: report
   end
@@ -78,7 +80,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     as_of = params[:as_of_date] ? Date.parse(params[:as_of_date]) : Date.current
 
     service = Reports::ArAgingReportService.new(@company)
-    report = service.generate(as_of_date: as_of, location_id: params[:location_id])
+    report = service.generate(as_of_date: as_of, location_id: params[:location_id].presence || accounting_location_id)
 
     render json: report
   end
@@ -90,7 +92,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     as_of = params[:as_of_date] ? Date.parse(params[:as_of_date]) : Date.current
 
     service = Reports::ApAgingReportService.new(@company)
-    report = service.generate(as_of_date: as_of, location_id: params[:location_id])
+    report = service.generate(as_of_date: as_of, location_id: params[:location_id].presence || accounting_location_id)
 
     render json: report
   end
@@ -103,7 +105,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
 
     service = Reports::DepartmentalPnlReportService.new(@company)
-    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id])
+    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id].presence || accounting_location_id)
   end
 
   # GET /api/v1/accounting/reports/sales_tax_summary
@@ -114,7 +116,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
 
     service = Reports::SalesTaxSummaryReportService.new(@company)
-    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id])
+    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id].presence || accounting_location_id)
   end
 
   # GET /api/v1/accounting/reports/cash_flow_statement
@@ -125,14 +127,14 @@ class Api::V1::AccountingReportsController < ApplicationController
     end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
 
     service = Reports::CashFlowStatementReportService.new(@company)
-    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id])
+    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id].presence || accounting_location_id)
   end
 
   # GET /api/v1/accounting/dashboard
   def dashboard
     return unless authorize_action!('accounting', 'read')
 
-    service = Accounting::DashboardService.new(@company)
+    service = Accounting::DashboardService.new(@company, location_id: accounting_location_id)
     render json: service.widgets
   end
 
@@ -141,7 +143,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     return unless authorize_action!('financial_reports', 'read')
 
     service = Accounting::FloorPlanService.new(@company)
-    render json: service.report(location_id: params[:location_id])
+    render json: service.report(location_id: params[:location_id].presence || accounting_location_id)
   end
 
   # GET /api/v1/accounting/reports/deal_profitability
@@ -155,11 +157,31 @@ class Api::V1::AccountingReportsController < ApplicationController
     report = service.generate(
       start_date: start_date,
       end_date: end_date,
-      location_id: params[:location_id],
+      location_id: params[:location_id].presence || accounting_location_id,
       salesperson_id: params[:salesperson_id]
     )
 
     render json: report
+  end
+
+  # GET /api/v1/accounting/locations
+  # Returns the list of locations available to the accounting location bar,
+  # with the Corporate location surfaced first.
+  def accounting_locations
+    return unless authorize_action!('accounting', 'read')
+
+    locations = @company.locations
+                        .where(active: true, is_deleted: false)
+                        .order(is_corporate: :desc, name: :asc)
+
+    render json: locations.map { |loc|
+      {
+        id: loc.id,
+        name: loc.name,
+        code: loc.code,
+        is_corporate: loc.is_corporate
+      }
+    }
   end
 
   # GET /api/v1/accounting/reports/source_entries

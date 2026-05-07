@@ -7,6 +7,10 @@ class PurchaseOrder < ApplicationRecord
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :supplier
+  # Parallel association to the unified vendors table. supplier_id and
+  # vendor_id hold identical values after the unify-vendors migration; new
+  # callers should use :vendor.
+  belongs_to :vendor, optional: true
   belongs_to :created_by, class_name: 'User', optional: true
   belongs_to :approved_by, class_name: 'User', optional: true
   

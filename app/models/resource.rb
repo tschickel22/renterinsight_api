@@ -124,6 +124,9 @@ public
       # Contractors (position 163)
       { key: 'contractors', name: 'Contractors', category: 'operations', description: 'Manage contractors, assignments, and portal access', position: 163 },
 
+      # Vendors (unified contractors + suppliers)
+      { key: 'vendors', name: 'Vendors', category: 'operations', description: 'Manage vendors (contractors, suppliers, service providers)', position: 164 },
+
       # Warranty Resources (position 160-165)
       { key: 'warranty_claims', name: 'Warranty Claims', category: 'operations', description: 'Manage warranty claims and submissions to manufacturers', position: 160 },
       { key: 'manufacturer_ar', name: 'Manufacturer AR', category: 'operations', description: 'Track and manage manufacturer accounts receivable', position: 161 },
@@ -160,6 +163,7 @@ public
       { key: 'journal_entries', name: 'Journal Entries', category: 'operations', description: 'Create and manage journal entries', position: 132 },
       { key: 'bank_accounts_accounting', name: 'Bank Accounts (Accounting)', category: 'operations', description: 'Bank feed and reconciliation', position: 133 },
       { key: 'bank_reconciliation', name: 'Bank Reconciliation', category: 'operations', description: 'Bank statement reconciliation', position: 134 },
+      { key: 'bills', name: 'Bills & Expenses', category: 'operations', description: 'Manage vendor bills, expenses, and payments', position: 135 },
       { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 137 }
     ]
     

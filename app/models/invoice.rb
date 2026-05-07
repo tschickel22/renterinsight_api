@@ -56,6 +56,18 @@ class Invoice < ApplicationRecord
   after_save :update_status_based_on_payments
   after_update :mark_inventory_as_used_on_payment, if: -> { saved_change_to_status? && status == 'paid' }
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
+  after_commit :auto_post_to_accounting, on: [:create, :update], if: :should_auto_post_to_accounting?
+
+  def should_auto_post_to_accounting?
+    return false unless previous_changes.key?('status') || saved_change_to_status?
+    %w[finalized sent viewed partial paid overdue].include?(status)
+  end
+
+  def auto_post_to_accounting
+    Accounting::InvoicePostingService.new(self).post!
+  rescue => e
+    Rails.logger.error("[AutoPost] Invoice #{id} failed: #{e.message}")
+  end
   
   validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
   validates :invoice_date, presence: true

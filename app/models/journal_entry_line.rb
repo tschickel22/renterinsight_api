@@ -14,6 +14,8 @@ class JournalEntryLine < ApplicationRecord
   validates :department, inclusion: { in: DEPARTMENTS }, allow_blank: true
   validate :has_amount
 
+  before_validation :set_default_location
+
   def has_amount
     if (debit_amount.blank? || debit_amount.zero?) && (credit_amount.blank? || credit_amount.zero?)
       errors.add(:base, "Line must have either a debit or credit amount")
@@ -29,5 +31,16 @@ class JournalEntryLine < ApplicationRecord
 
   def bank_amount
     net_amount
+  end
+
+  private
+
+  # Falls back to the request's current location when a caller didn't supply one
+  # (e.g. manual JE form, recurring JE without a template location). Source-entity
+  # services already set location_id explicitly and won't be overridden.
+  def set_default_location
+    return if location_id.present?
+    return unless Current.respond_to?(:location_id) && Current.location_id.present?
+    self.location_id = Current.location_id
   end
 end

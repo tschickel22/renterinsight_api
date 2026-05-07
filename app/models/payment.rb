@@ -84,6 +84,20 @@ class Payment < ApplicationRecord
   after_commit :update_loan_after_completion, if: -> { saved_change_to_status? && status == 'completed' && !try(:skip_loan_processing?) }
   after_commit :update_invoice_after_completion, if: -> { saved_change_to_status? && status == 'completed' && payable_type == 'Invoice' }
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
+  after_commit :auto_post_to_accounting, if: -> { saved_change_to_status? && status == 'completed' }
+  after_commit :auto_post_refund_to_accounting, if: -> { saved_change_to_status? && status == 'refunded' }
+
+  def auto_post_to_accounting
+    Accounting::PaymentPostingService.new(self).post!
+  rescue => e
+    Rails.logger.error("[AutoPost] Payment #{id} failed: #{e.message}")
+  end
+
+  def auto_post_refund_to_accounting
+    Accounting::PaymentPostingService.new(self).post_refund!
+  rescue => e
+    Rails.logger.error("[AutoPost] Payment refund #{id} failed: #{e.message}")
+  end
   
   # Instance methods
   def display_name

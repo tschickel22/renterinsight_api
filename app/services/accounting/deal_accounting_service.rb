@@ -28,6 +28,7 @@ module Accounting
 
       ActiveRecord::Base.transaction do
         lines = []
+        deal_location_id = @deal.try(:location_id)
 
         selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
         home_cost = @deal.home_cost || BigDecimal('0')
@@ -38,10 +39,12 @@ module Accounting
 
           if revenue_account && ar_account
             lines << { chart_of_account_id: ar_account.id, debit_amount: selling_price, credit_amount: 0,
-                       memo: "Deal revenue — #{deal_description}", department: deal_department, deal_id: @deal.id,
+                       memo: "Deal revenue — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id), contact_id: @deal.try(:contact_id) || @deal.try(:lead_id) }
             lines << { chart_of_account_id: revenue_account.id, debit_amount: 0, credit_amount: selling_price,
-                       memo: "Deal revenue — #{deal_description}", department: deal_department, deal_id: @deal.id,
+                       memo: "Deal revenue — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id) }
           end
         end
@@ -53,10 +56,12 @@ module Accounting
 
           if cogs_account && inventory_account
             lines << { chart_of_account_id: cogs_account.id, debit_amount: home_cost, credit_amount: 0,
-                       memo: "COGS — #{deal_description}", department: deal_department, deal_id: @deal.id,
+                       memo: "COGS — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id) }
             lines << { chart_of_account_id: inventory_account.id, debit_amount: 0, credit_amount: home_cost,
-                       memo: "Inventory relief — #{deal_description}", department: deal_department, deal_id: @deal.id,
+                       memo: "Inventory relief — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id) }
           end
         end
@@ -67,9 +72,11 @@ module Accounting
           recon_wip = @company.chart_of_accounts.find_by(account_number: '1240')
           if recon_cogs && recon_wip
             lines << { chart_of_account_id: recon_cogs.id, debit_amount: recon_cost, credit_amount: 0,
-                       memo: "Reconditioning — #{deal_description}", department: deal_department, deal_id: @deal.id }
+                       memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id }
             lines << { chart_of_account_id: recon_wip.id, debit_amount: 0, credit_amount: recon_cost,
-                       memo: "Reconditioning — #{deal_description}", department: deal_department, deal_id: @deal.id }
+                       memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id }
           end
         end
 
@@ -79,9 +86,11 @@ module Accounting
           bank_account = @company.chart_of_accounts.where(sub_type: 'bank', is_active: true).order(:account_number).first
           if fp_liability && bank_account
             lines << { chart_of_account_id: fp_liability.id, debit_amount: fp_amount, credit_amount: 0,
-                       memo: "Floor plan payoff — #{deal_description}", deal_id: @deal.id, vehicle_id: @deal.try(:vehicle_id) }
+                       memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
+                       deal_id: @deal.id, vehicle_id: @deal.try(:vehicle_id) }
             lines << { chart_of_account_id: bank_account.id, debit_amount: 0, credit_amount: fp_amount,
-                       memo: "Floor plan payoff — #{deal_description}", deal_id: @deal.id }
+                       memo: "Floor plan payoff — #{deal_description}", location_id: deal_location_id,
+                       deal_id: @deal.id }
           end
         end
 
@@ -96,10 +105,10 @@ module Accounting
           if fi_revenue_account && ar_account
             lines << { chart_of_account_id: ar_account.id, debit_amount: product_revenue, credit_amount: 0,
                        memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
-                       department: 'fi', deal_id: @deal.id }
+                       location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
             lines << { chart_of_account_id: fi_revenue_account.id, debit_amount: 0, credit_amount: product_revenue,
                        memo: "F&I: #{product.try(:name) || product.try(:product_name) || product.try(:product_type)} — #{deal_description}",
-                       department: 'fi', deal_id: @deal.id }
+                       location_id: deal_location_id, department: 'fi', deal_id: @deal.id }
           end
         end
 
@@ -109,9 +118,11 @@ module Accounting
           accrued_comp = @company.chart_of_accounts.find_by(account_number: '2020')
           if commission_exp && accrued_comp
             lines << { chart_of_account_id: commission_exp.id, debit_amount: commission, credit_amount: 0,
-                       memo: "Commission — #{deal_description}", department: deal_department, deal_id: @deal.id }
+                       memo: "Commission — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id }
             lines << { chart_of_account_id: accrued_comp.id, debit_amount: 0, credit_amount: commission,
-                       memo: "Commission — #{deal_description}", department: deal_department, deal_id: @deal.id }
+                       memo: "Commission — #{deal_description}", location_id: deal_location_id,
+                       department: deal_department, deal_id: @deal.id }
           end
         end
 

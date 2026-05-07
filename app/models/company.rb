@@ -87,6 +87,8 @@ class Company < ApplicationRecord
   has_many :bank_reconciliations, dependent: :destroy
   has_many :recurring_bills, dependent: :destroy
   has_many :printed_checks, dependent: :destroy
+  has_many :bills, dependent: :destroy
+  has_many :bill_payments, dependent: :destroy
   has_one  :quickbooks_connection, dependent: :destroy
   has_many :quickbooks_entity_mappings, dependent: :destroy
   has_many :accounting_imports, dependent: :destroy
@@ -106,8 +108,9 @@ class Company < ApplicationRecord
   has_many :project_material_usages, dependent: :destroy
   has_many :project_documents, dependent: :destroy
 
-  # Contractors Module
-  has_many :contractors, dependent: :destroy
+  # Vendors (unified contractors + suppliers)
+  has_many :vendors, dependent: :destroy
+  has_many :contractors  # alias subclass of Vendor scoped to vendor_type='contractor'
   has_many :contractor_assignments, dependent: :destroy
 
   # Warranty & Service Module Associations
@@ -123,7 +126,7 @@ class Company < ApplicationRecord
   # Parts & Inventory Module Associations
   has_many :part_categories, dependent: :destroy
   has_many :parts, dependent: :destroy
-  has_many :suppliers, dependent: :destroy
+  has_many :suppliers  # alias subclass of Vendor scoped to vendor_type='supplier'
   has_many :purchase_orders, dependent: :destroy
   has_many :inventory_transactions, dependent: :destroy
   has_many :stock_balances, dependent: :destroy
@@ -183,6 +186,7 @@ class Company < ApplicationRecord
   
   # Callbacks
   after_create :create_default_location
+  after_create :ensure_corporate_location
   after_create :seed_default_project_templates
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
@@ -590,6 +594,12 @@ class Company < ApplicationRecord
   rescue => e
     Rails.logger.error "❌ [Company#seed_default_project_templates] Failed to seed templates for Company #{id}: #{e.message}"
     nil
+  end
+
+  def ensure_corporate_location
+    Location.ensure_corporate_for(self)
+  rescue => e
+    Rails.logger.warn "[Company] Failed to create corporate location for company #{id}: #{e.message}"
   end
 
   def create_default_location
