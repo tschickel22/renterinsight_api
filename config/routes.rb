@@ -1769,6 +1769,9 @@ Rails.application.routes.draw do
 
       # ==================== BANKING & RECONCILIATION ====================
       resources :bank_accounts, only: [:index, :create, :update] do
+        collection do
+          get :check_enabled
+        end
         resources :transactions, controller: 'bank_transactions', only: [:index, :show] do
           member do
             post :categorize
@@ -1830,6 +1833,8 @@ Rails.application.routes.draw do
       resources :printed_checks, only: [:index, :create] do
         collection do
           post :print_batch
+          post :reprint
+          get  :check_settings
         end
         member do
           post :void

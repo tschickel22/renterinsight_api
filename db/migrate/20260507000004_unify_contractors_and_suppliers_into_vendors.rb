@@ -32,15 +32,17 @@ class UnifyContractorsAndSuppliersIntoVendors < ActiveRecord::Migration[8.0]
   # can drop it once nothing reads from it.
   def up
     # ------------------------------------------------------------------
-    # 1. Rename contractors -> vendors
+    # 1. Rename contractors -> vendors (idempotent: skip if already done)
     # ------------------------------------------------------------------
-    rename_table :contractors, :vendors
+    if table_exists?(:contractors) && !table_exists?(:vendors)
+      rename_table :contractors, :vendors
+    end
 
     # ------------------------------------------------------------------
     # 2. Add vendor_type discriminator
     # ------------------------------------------------------------------
-    add_column :vendors, :vendor_type, :string, default: 'contractor', null: false
-    add_index :vendors, :vendor_type
+    add_column :vendors, :vendor_type, :string, default: 'contractor', null: false unless column_exists?(:vendors, :vendor_type)
+    add_index :vendors, :vendor_type unless index_exists?(:vendors, :vendor_type)
 
     # ------------------------------------------------------------------
     # 3. Add columns from the suppliers schema that contractors lacked
@@ -66,7 +68,7 @@ class UnifyContractorsAndSuppliersIntoVendors < ActiveRecord::Migration[8.0]
     # Net-new accounting columns
     add_column :vendors, :is_1099_eligible, :boolean, default: false  unless column_exists?(:vendors, :is_1099_eligible)
     add_column :vendors, :default_expense_account_id, :bigint         unless column_exists?(:vendors, :default_expense_account_id)
-    add_index :vendors, :default_expense_account_id
+    add_index :vendors, :default_expense_account_id unless index_exists?(:vendors, :default_expense_account_id)
     add_index :vendors, :qb_vendor_id  unless index_exists?(:vendors, :qb_vendor_id)
 
     # Backfill `active` from contractor `status` (per ops decision: status is
@@ -156,7 +158,10 @@ class UnifyContractorsAndSuppliersIntoVendors < ActiveRecord::Migration[8.0]
     #    Supplier < Vendor alias resolves these FKs correctly.
     # ------------------------------------------------------------------
 
-    # purchase_orders: remap supplier_id, also add parallel vendor_id
+    # purchase_orders: drop old FK to suppliers, remap supplier_id, add parallel vendor_id
+    if foreign_key_exists?(:purchase_orders, column: :supplier_id)
+      remove_foreign_key :purchase_orders, column: :supplier_id
+    end
     execute <<~SQL
       UPDATE purchase_orders po
       SET supplier_id = s.vendor_id
@@ -167,8 +172,11 @@ class UnifyContractorsAndSuppliersIntoVendors < ActiveRecord::Migration[8.0]
     execute "UPDATE purchase_orders SET vendor_id = supplier_id"
     add_index :purchase_orders, :vendor_id unless index_exists?(:purchase_orders, :vendor_id)
 
-    # recurring_bills: remap supplier_id, also add parallel vendor_id
+    # recurring_bills: drop old FK to suppliers, remap supplier_id, add parallel vendor_id
     if table_exists?(:recurring_bills)
+      if foreign_key_exists?(:recurring_bills, column: :supplier_id)
+        remove_foreign_key :recurring_bills, column: :supplier_id
+      end
       execute <<~SQL
         UPDATE recurring_bills rb
         SET supplier_id = s.vendor_id
@@ -180,7 +188,10 @@ class UnifyContractorsAndSuppliersIntoVendors < ActiveRecord::Migration[8.0]
       add_index :recurring_bills, :vendor_id unless index_exists?(:recurring_bills, :vendor_id)
     end
 
-    # supplier_parts: remap only, no parallel column (per ops decision)
+    # supplier_parts: drop old FK to suppliers, remap only, no parallel column
+    if foreign_key_exists?(:supplier_parts, column: :supplier_id)
+      remove_foreign_key :supplier_parts, column: :supplier_id
+    end
     execute <<~SQL
       UPDATE supplier_parts sp
       SET supplier_id = s.vendor_id

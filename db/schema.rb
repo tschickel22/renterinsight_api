@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_07_000004) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_07_100002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -755,6 +755,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_000004) do
     t.string "check_bank_name"
     t.string "stripe_last_cursor"
     t.text "stripe_error_message"
+    t.string "check_company_phone"
+    t.string "check_bank_city"
+    t.string "check_bank_state"
+    t.string "check_aba_fractional_number"
+    t.string "check_signature_heading"
     t.index ["chart_of_account_id"], name: "index_bank_accounts_on_chart_of_account_id"
     t.index ["company_id", "location_id"], name: "index_bank_accounts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_bank_accounts_on_company_id"
@@ -893,7 +898,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_000004) do
     t.bigint "created_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "voided", default: false, null: false
+    t.datetime "voided_at"
     t.index ["bank_account_id"], name: "index_bill_payments_on_bank_account_id"
+    t.index ["bill_id", "voided"], name: "index_bill_payments_on_bill_id_and_voided"
     t.index ["bill_id"], name: "index_bill_payments_on_bill_id"
     t.index ["chart_of_account_id"], name: "index_bill_payments_on_chart_of_account_id"
     t.index ["company_id"], name: "index_bill_payments_on_company_id"
@@ -4192,12 +4200,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_000004) do
     t.bigint "contact_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "vendor_id"
+    t.bigint "bill_id"
+    t.bigint "bill_payment_id"
     t.index ["bank_account_id", "check_number"], name: "index_printed_checks_on_bank_account_id_and_check_number", unique: true, where: "(check_number IS NOT NULL)"
     t.index ["bank_account_id"], name: "index_printed_checks_on_bank_account_id"
+    t.index ["bill_id"], name: "index_printed_checks_on_bill_id"
+    t.index ["bill_payment_id"], name: "index_printed_checks_on_bill_payment_id"
     t.index ["company_id", "status"], name: "index_printed_checks_on_company_id_and_status"
     t.index ["company_id"], name: "index_printed_checks_on_company_id"
     t.index ["contact_id"], name: "index_printed_checks_on_contact_id"
     t.index ["journal_entry_id"], name: "index_printed_checks_on_journal_entry_id"
+    t.index ["vendor_id"], name: "index_printed_checks_on_vendor_id"
   end
 
   create_table "project_cost_items", force: :cascade do |t|
@@ -6905,9 +6919,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_000004) do
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
   add_foreign_key "printed_checks", "bank_accounts"
+  add_foreign_key "printed_checks", "bill_payments"
+  add_foreign_key "printed_checks", "bills"
   add_foreign_key "printed_checks", "companies"
   add_foreign_key "printed_checks", "contacts"
   add_foreign_key "printed_checks", "journal_entries"
+  add_foreign_key "printed_checks", "vendors"
   add_foreign_key "project_cost_items", "companies"
   add_foreign_key "project_cost_items", "inventory_transactions", on_delete: :nullify
   add_foreign_key "project_cost_items", "parts", on_delete: :nullify

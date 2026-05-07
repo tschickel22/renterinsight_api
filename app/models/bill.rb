@@ -52,21 +52,23 @@ class Bill < ApplicationRecord
           memo: "Payment for Bill #{bill_number} — #{vendor_display_name}",
           source_type: 'auto',
           source_entity: self,
-          posted_by: payment.created_by
-        )
-        je.journal_entry_lines.create!(
-          chart_of_account: ap,
-          debit_amount: payment.amount,
-          credit_amount: 0,
-          memo: "Bill payment — #{vendor_display_name}",
-          location_id: location_id
-        )
-        je.journal_entry_lines.create!(
-          chart_of_account: bank_gl_account,
-          debit_amount: 0,
-          credit_amount: payment.amount,
-          memo: "Bill payment — #{bill_number}",
-          location_id: location_id
+          posted_by: payment.created_by,
+          journal_entry_lines_attributes: [
+            {
+              chart_of_account_id: ap.id,
+              debit_amount: payment.amount,
+              credit_amount: 0,
+              memo: "Bill payment — #{vendor_display_name}",
+              location_id: location_id
+            },
+            {
+              chart_of_account_id: bank_gl_account.id,
+              debit_amount: 0,
+              credit_amount: payment.amount,
+              memo: "Bill payment — #{bill_number}",
+              location_id: location_id
+            }
+          ]
         )
         payment.update!(journal_entry: je)
       end
@@ -96,7 +98,7 @@ class Bill < ApplicationRecord
   def refresh_payment_status!
     return if status == 'void'
 
-    paid = bill_payments.sum(:amount)
+    paid = bill_payments.where(voided: [false, nil]).sum(:amount)
     new_status =
       if paid <= 0
         bill_line_items.any? ? 'pending' : 'draft'
@@ -113,6 +115,8 @@ class Bill < ApplicationRecord
       updated_at: Time.current
     )
   end
+
+  alias_method :recalculate_balance!, :refresh_payment_status!
 
   private
 
@@ -146,32 +150,37 @@ class Bill < ApplicationRecord
     return if bill_line_items.empty?
     return if total_amount.to_d <= 0
 
-    je = company.journal_entries.create!(
-      entry_date: bill_date,
-      memo: "Bill #{bill_number} — #{vendor_display_name}",
-      source_type: 'auto',
-      source_entity: self,
-      posted_by: created_by
-    )
+    lines_attrs = []
 
-    je.journal_entry_lines.create!(
-      chart_of_account: ap,
+    # Credit AP for the full amount
+    lines_attrs << {
+      chart_of_account_id: ap.id,
       debit_amount: 0,
       credit_amount: total_amount,
       memo: "AP — #{vendor_display_name}",
       location_id: location_id
-    )
+    }
 
+    # Debit each expense line item
     bill_line_items.each do |line|
-      je.journal_entry_lines.create!(
+      lines_attrs << {
         chart_of_account_id: line.chart_of_account_id,
         debit_amount: line.amount,
         credit_amount: 0,
         memo: line.description.presence || "Bill #{bill_number}",
         location_id: line.location_id || location_id,
         department: line.department
-      )
+      }
     end
+
+    je = company.journal_entries.create!(
+      entry_date: bill_date,
+      memo: "Bill #{bill_number} — #{vendor_display_name}",
+      source_type: 'auto',
+      source_entity: self,
+      posted_by: created_by,
+      journal_entry_lines_attributes: lines_attrs
+    )
 
     update_column(:journal_entry_id, je.id)
   rescue => e

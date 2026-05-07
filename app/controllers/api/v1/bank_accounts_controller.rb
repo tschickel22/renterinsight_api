@@ -161,6 +161,20 @@ class Api::V1::BankAccountsController < ApplicationController
     render json: { message: "Bank account deleted" }
   end
 
+  # GET /api/v1/bank_accounts/check_enabled
+  # Returns only bank accounts where check_printing_enabled = true.
+  # Used by the check writing UI to populate the bank account dropdown.
+  def check_enabled
+    return unless authorize_action!('bank_accounts_accounting', 'read')
+
+    accounts = company_scoped_bank_accounts
+                 .where(check_printing_enabled: true)
+                 .includes(:location, :chart_of_account)
+                 .order(:bank_name)
+
+    render json: { bank_accounts: accounts.map { |ba| bank_account_json(ba) } }
+  end
+
   private
 
   def set_location
@@ -200,7 +214,23 @@ class Api::V1::BankAccountsController < ApplicationController
       :admin_notes,
       :location_id,
       :chart_of_account_id,
-      :is_active
+      :is_active,
+      # Check printing fields
+      :check_printing_enabled,
+      :check_number,
+      :check_format,
+      :check_company_name,
+      :check_company_street,
+      :check_company_city,
+      :check_company_state,
+      :check_company_zip,
+      :check_company_phone,
+      :check_signor_name,
+      :check_bank_name,
+      :check_bank_city,
+      :check_bank_state,
+      :check_aba_fractional_number,
+      :check_signature_heading
     )
   end
 
@@ -267,7 +297,23 @@ class Api::V1::BankAccountsController < ApplicationController
       institution_name: ba.try(:institution_name),
       transaction_count: ba.bank_transactions.count,
       is_active: ba.is_active,
-      created_at: ba.created_at
+      created_at: ba.created_at,
+      # Check printing fields
+      check_printing_enabled: ba.check_printing_enabled,
+      check_number: ba.check_number,
+      check_format: ba.check_format,
+      check_company_name: ba.check_company_name,
+      check_company_street: ba.check_company_street,
+      check_company_city: ba.check_company_city,
+      check_company_state: ba.check_company_state,
+      check_company_zip: ba.check_company_zip,
+      check_company_phone: ba.check_company_phone,
+      check_signor_name: ba.check_signor_name,
+      check_bank_name: ba.check_bank_name,
+      check_bank_city: ba.check_bank_city,
+      check_bank_state: ba.check_bank_state,
+      check_aba_fractional_number: ba.check_aba_fractional_number,
+      check_signature_heading: ba.check_signature_heading,
     }
   end
 

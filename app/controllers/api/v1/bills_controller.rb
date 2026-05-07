@@ -165,10 +165,39 @@ class Api::V1::BillsController < ApplicationController
   def record_payment
     return unless authorize_action!('bills', 'update')
 
-    payment = @bill.record_payment!(payment_params.merge(created_by: current_user))
+    attrs = payment_params
+    method = attrs[:payment_method].to_s
+
+    if method == BillPayment::PAYMENT_METHOD_PRINT_CHECK
+      if attrs[:bank_account_id].blank?
+        return render json: { error: 'bank_account_id is required for print_check payments' },
+                      status: :unprocessable_entity
+      end
+      bank_account = BankAccount.find_by(id: attrs[:bank_account_id])
+      unless bank_account&.check_printing_enabled
+        return render json: { error: 'Bank account does not have check printing enabled' },
+                      status: :unprocessable_entity
+      end
+      # check_number is assigned at print time — strip any value the client sent.
+      attrs = attrs.except(:check_number)
+    elsif method == BillPayment::PAYMENT_METHOD_CHECK
+      if attrs[:check_number].blank?
+        return render json: { error: 'check_number is required for check payments' },
+                      status: :unprocessable_entity
+      end
+      if attrs[:bank_account_id].blank?
+        return render json: { error: 'bank_account_id is required for check payments' },
+                      status: :unprocessable_entity
+      end
+    end
+
+    payment = @bill.record_payment!(attrs.merge(created_by: current_user))
+    queued_check = payment.printed_checks.first if method == BillPayment::PAYMENT_METHOD_PRINT_CHECK
+
     render json: {
-      message: 'Payment recorded',
+      message: queued_check ? 'Payment recorded — check queued for printing' : 'Payment recorded',
       payment: payment.as_json(include: { journal_entry: { only: [:id, :entry_number] } }),
+      printed_check_id: queued_check&.id,
       bill: serialize_bill(@bill.reload)
     }
   rescue => e

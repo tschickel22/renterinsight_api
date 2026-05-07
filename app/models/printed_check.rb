@@ -5,6 +5,9 @@ class PrintedCheck < ApplicationRecord
   belongs_to :bank_account
   belongs_to :journal_entry, optional: true
   belongs_to :contact, optional: true
+  belongs_to :vendor, optional: true
+  belongs_to :bill, optional: true
+  belongs_to :bill_payment, optional: true
 
   STATUS_QUEUED = 'queued'
   STATUS_PRINTED = 'printed'
@@ -40,8 +43,20 @@ class PrintedCheck < ApplicationRecord
   end
 
   def void!
-    update!(status: STATUS_VOIDED)
-    journal_entry&.void!(Current.user) if journal_entry && !journal_entry.is_void?
+    voider = Current.user
+
+    transaction do
+      update!(status: STATUS_VOIDED)
+      journal_entry&.void!(voider) if journal_entry && !journal_entry.is_void?
+
+      # Cascade-void the linked bill payment (if this check was queued from a bill).
+      if bill_payment.present? && !bill_payment.voided?
+        bill_payment.update!(voided: true, voided_at: Time.current)
+        bp_je = bill_payment.journal_entry
+        bp_je.void!(voider) if bp_je && !bp_je.is_void?
+        bill_payment.bill&.recalculate_balance!
+      end
+    end
   end
 
   private
