@@ -42,13 +42,24 @@ class Api::V1::RecordTransactionsController < ApplicationController
     location_id = params[:location_id].presence || Current.location_id
     party_name = type == 'expense' ? params[:vendor_name] : params[:customer_name]
     memo_prefix = type == 'expense' ? 'Expense' : 'Income'
-    memo = params[:memo].presence || "#{memo_prefix}: #{party_name || category_account.name}"
+
+    # Build memo: always include party name for list display
+    user_memo = params[:memo].presence
+    if party_name.present? && user_memo.present?
+      memo = "#{party_name} — #{user_memo}"
+    elsif party_name.present?
+      memo = "#{memo_prefix}: #{party_name}"
+    elsif user_memo.present?
+      memo = user_memo
+    else
+      memo = "#{memo_prefix}: #{category_account.name}"
+    end
     ref = params[:reference_number].presence
 
     je = @company.journal_entries.build(
       entry_date: params[:date].presence || Date.current,
       memo: ref ? "#{memo} (Ref #{ref})" : memo,
-      source_type: 'manual',
+      source_type: 'quick_entry',
       posted_by: current_user
     )
 

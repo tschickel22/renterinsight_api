@@ -49,7 +49,7 @@ class Api::V1::JournalEntriesController < ApplicationController
       items: entries.as_json(
         include: {
           journal_entry_lines: {
-            include: { chart_of_account: { only: [:id, :account_number, :name] } }
+            include: { chart_of_account: { only: [:id, :account_number, :name, :account_type] } }
           },
           posted_by: { only: [:id, :email, :first_name, :last_name] }
         }
@@ -160,6 +160,52 @@ class Api::V1::JournalEntriesController < ApplicationController
     head :no_content
   rescue => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/journal_entries/:id/upload_attachment
+  def upload_attachment
+    return unless authorize_action!('accounting', 'update')
+
+    je = @company.journal_entries.find(params[:id])
+    file = params[:file]
+    return render json: { error: 'No file provided' }, status: :bad_request unless file
+
+    s3 = S3UploadService.new
+    result = s3.upload(file, folder: "journal_entries/#{@company.id}/#{je.id}")
+
+    attachment = {
+      'url' => result[:url],
+      's3_key' => result[:key],
+      'filename' => file.original_filename,
+      'size' => result[:size],
+      'content_type' => result[:content_type],
+      'uploaded_at' => Time.current.iso8601,
+      'uploaded_by_id' => current_user&.id
+    }
+
+    je.update!(attachments: (je.attachments || []) + [attachment])
+    render json: attachment
+  rescue => e
+    render json: { error: "Upload failed: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # DELETE /api/v1/journal_entries/:id/delete_attachment
+  def delete_attachment
+    return unless authorize_action!('accounting', 'update')
+
+    je = @company.journal_entries.find(params[:id])
+    s3_key = params[:s3_key]
+    return render json: { error: 'No s3_key provided' }, status: :bad_request unless s3_key.present?
+
+    begin
+      s3 = S3UploadService.new
+      s3.delete(s3_key)
+    rescue => e
+      Rails.logger.warn("[JE] S3 delete failed for #{s3_key}: #{e.message}")
+    end
+
+    je.update!(attachments: (je.attachments || []).reject { |a| a['s3_key'] == s3_key })
+    render json: { message: 'Attachment deleted' }
   end
 
   private

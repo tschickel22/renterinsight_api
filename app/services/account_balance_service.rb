@@ -20,10 +20,19 @@ class AccountBalanceService
     total_debits = lines.sum(:debit_amount)
     total_credits = lines.sum(:credit_amount)
 
-    if account.normal_balance == 'debit'
+    net = if account.normal_balance == 'debit'
       total_debits - total_credits
     else
       total_credits - total_debits
+    end
+
+    # Include opening balance from COA (set during initial setup/migration)
+    opening = account.opening_balance || 0
+    opening_date = account.opening_balance_date
+    if opening != 0 && (opening_date.nil? || opening_date <= as_of_date)
+      net + opening
+    else
+      net
     end
   end
 
@@ -50,6 +59,22 @@ class AccountBalanceService
         total_debits: row.total_debits,
         total_credits: row.total_credits
       }
+    end
+
+    # Merge opening balances from COA records
+    opening_balances = @company.chart_of_accounts
+      .where('opening_balance IS NOT NULL AND opening_balance != 0')
+      .where('opening_balance_date IS NULL OR opening_balance_date <= ?', as_of_date)
+      .pluck(:id, :opening_balance, :normal_balance)
+
+    opening_balances.each do |acct_id, opening, normal_bal|
+      balances[acct_id] ||= { total_debits: BigDecimal('0'), total_credits: BigDecimal('0') }
+      # Add opening balance as a debit or credit depending on normal balance
+      if normal_bal == 'debit'
+        balances[acct_id][:total_debits] += opening
+      else
+        balances[acct_id][:total_credits] += opening
+      end
     end
 
     balances

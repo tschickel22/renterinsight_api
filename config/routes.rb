@@ -1718,6 +1718,8 @@ Rails.application.routes.draw do
       resources :journal_entries do
         member do
           post :void
+          post :upload_attachment
+          delete :delete_attachment
         end
       end
 

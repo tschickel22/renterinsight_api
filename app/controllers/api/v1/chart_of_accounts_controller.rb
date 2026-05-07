@@ -34,7 +34,17 @@ class Api::V1::ChartOfAccountsController < ApplicationController
       end
 
       accounts = accounts.where(account_type: params[:account_type]) if params[:account_type].present?
-      accounts = accounts.where(is_active: params[:is_active]) if params[:is_active].present?
+
+      # Default to active accounts only unless explicitly requested otherwise.
+      # Pass is_active=all to include both active and inactive.
+      if params.key?(:is_active)
+        unless params[:is_active].to_s == 'all'
+          is_active = ActiveModel::Type::Boolean.new.cast(params[:is_active])
+          accounts = accounts.where(is_active: is_active)
+        end
+      else
+        accounts = accounts.where(is_active: true)
+      end
 
       filtered_count = accounts.count
 
@@ -46,8 +56,12 @@ class Api::V1::ChartOfAccountsController < ApplicationController
       bank_bals = bank_account_balances
 
       items = accounts.map do |acct|
+        opening = acct.opening_balance || BigDecimal('0')
+        net = balances[acct.id] || BigDecimal('0')
         acct.as_json.merge(
-          'balance' => balances[acct.id] || BigDecimal('0'),
+          'balance' => net + opening,
+          'opening_balance' => opening,
+          'opening_balance_date' => acct.opening_balance_date,
           'bank_balance' => bank_bals[acct.id]
         )
       end
@@ -146,7 +160,8 @@ class Api::V1::ChartOfAccountsController < ApplicationController
       :account_number, :name, :description,
       :account_type, :sub_type, :normal_balance,
       :parent_id, :is_header, :is_active,
-      :position, :bank_account_id
+      :position, :bank_account_id,
+      :opening_balance, :opening_balance_date
     )
   end
 

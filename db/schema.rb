@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_07_200002) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_07_220001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1469,6 +1469,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_200002) do
     t.bigint "bank_account_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "opening_balance", precision: 12, scale: 2, default: "0.0"
+    t.date "opening_balance_date"
     t.index ["bank_account_id"], name: "index_chart_of_accounts_on_bank_account_id"
     t.index ["company_id", "account_number"], name: "index_chart_of_accounts_on_company_id_and_account_number", unique: true
     t.index ["company_id", "account_type"], name: "index_chart_of_accounts_on_company_id_and_account_type"
@@ -3004,6 +3006,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_200002) do
     t.boolean "locked", default: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "attachments", default: []
     t.index ["company_id", "entry_date"], name: "index_journal_entries_on_company_id_and_entry_date"
     t.index ["company_id", "entry_number"], name: "index_journal_entries_on_company_id_and_entry_number", unique: true
     t.index ["company_id"], name: "index_journal_entries_on_company_id"
