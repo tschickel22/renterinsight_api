@@ -287,8 +287,6 @@ class Quickbooks::Client
   end
 end
 
-class QuickbooksAuthError < StandardError; end
-
 class QuickbooksApiError < StandardError
   attr_reader :status_code, :response_body
   def initialize(msg, status_code = nil, response_body = nil)
@@ -297,3 +295,8 @@ class QuickbooksApiError < StandardError
     @response_body = response_body
   end
 end
+
+class QuickbooksAuthError < QuickbooksApiError; end
+class QuickbooksValidationError < QuickbooksApiError; end
+class QuickbooksRateLimitError < QuickbooksApiError; end
+class QuickbooksServerError < QuickbooksApiError; end
