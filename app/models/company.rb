@@ -89,6 +89,7 @@ class Company < ApplicationRecord
   has_many :printed_checks, dependent: :destroy
   has_many :bills, dependent: :destroy
   has_many :bill_payments, dependent: :destroy
+  has_many :cash_receipts, dependent: :destroy
   has_one  :quickbooks_connection, dependent: :destroy
   has_many :quickbooks_entity_mappings, dependent: :destroy
   has_many :accounting_imports, dependent: :destroy

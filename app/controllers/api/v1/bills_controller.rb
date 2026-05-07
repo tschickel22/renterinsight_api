@@ -232,6 +232,82 @@ class Api::V1::BillsController < ApplicationController
     render json: { error: "Upload failed: #{e.message}" }, status: :unprocessable_entity
   end
 
+  # POST /api/v1/bills/bulk_action
+  def bulk_action
+    return unless authorize_action!('bills', 'update')
+
+    bill_ids = params[:bill_ids] || []
+    action = params[:action_type]
+
+    return render json: { error: 'No bills selected' }, status: :bad_request if bill_ids.empty?
+    return render json: { error: 'Invalid action' }, status: :bad_request unless %w[delete void post queue_for_printing].include?(action)
+
+    bills = @company.bills.active.where(id: bill_ids)
+    results = { success: 0, failed: 0, errors: [] }
+
+    # Queue for printing requires a bank account
+    bank_account = nil
+    if action == 'queue_for_printing'
+      bank_account = @company.bank_accounts.find_by(id: params[:bank_account_id])
+      unless bank_account&.check_printing_enabled
+        return render json: { error: 'Select a bank account with check printing enabled' }, status: :unprocessable_entity
+      end
+    end
+
+    bills.each do |bill|
+      begin
+        case action
+        when 'delete'
+          if bill.status == 'paid' || bill.bill_payments.any?
+            results[:errors] << "#{bill.bill_number}: Cannot delete a bill with payments"
+            results[:failed] += 1
+          else
+            je = bill.journal_entry
+            bill.update!(is_deleted: true, journal_entry_id: nil)
+            je&.destroy
+            results[:success] += 1
+          end
+        when 'void'
+          bill.void!
+          results[:success] += 1
+        when 'post'
+          if bill.status == 'draft'
+            bill.update!(status: 'pending')
+            bill.send(:auto_post_bill_je) if bill.journal_entry_id.nil?
+            results[:success] += 1
+          else
+            results[:errors] << "#{bill.bill_number}: Only draft bills can be posted"
+            results[:failed] += 1
+          end
+        when 'queue_for_printing'
+          # Post draft bills first
+          if bill.status == 'draft'
+            bill.update!(status: 'pending')
+            bill.send(:auto_post_bill_je) if bill.journal_entry_id.nil?
+          end
+          if bill.balance_due.to_d <= 0
+            results[:errors] << "#{bill.bill_number}: No balance due"
+            results[:failed] += 1
+          else
+            payment = bill.record_payment!(
+              amount: bill.balance_due,
+              payment_date: Date.current,
+              payment_method: 'print_check',
+              bank_account_id: bank_account.id,
+              created_by: current_user
+            )
+            results[:success] += 1
+          end
+        end
+      rescue => e
+        results[:errors] << "#{bill.bill_number}: #{e.message}"
+        results[:failed] += 1
+      end
+    end
+
+    render json: results
+  end
+
   # DELETE /api/v1/bills/:id/attachments/:s3_key
   def delete_attachment
     return unless authorize_action!('bills', 'update')

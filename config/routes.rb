@@ -1820,6 +1820,9 @@ Rails.application.routes.draw do
       end
 
       resources :bills do
+        collection do
+          post :bulk_action
+        end
         member do
           post   :void
           post   :record_payment
@@ -1827,6 +1830,19 @@ Rails.application.routes.draw do
           delete :delete_attachment
         end
       end
+
+      resources :cash_receipts, only: [:index, :show, :create, :destroy] do
+      collection do
+      get :open_invoices
+      end
+      member do
+      post :void
+      end
+      end
+
+    # Year-End Close
+      get 'accounting/year_end_close/preview', to: 'accounting_year_end_close#preview'
+      post 'accounting/year_end_close/execute', to: 'accounting_year_end_close#execute'
 
       resources :record_transactions, only: [:create], path: 'record-transactions'
 

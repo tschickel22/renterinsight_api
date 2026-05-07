@@ -184,6 +184,30 @@ class Api::V1::SearchController < ApplicationController
       Rails.logger.error("Search invoices error: #{e.message}")
     end
     
+    # Finance - Cash Receipts
+    begin
+      cash_receipts = @company.cash_receipts
+        .not_deleted
+        .left_joins(:account)
+        .where("cash_receipts.receipt_number ILIKE ? OR cash_receipts.customer_name ILIKE ? OR accounts.name ILIKE ?",
+               "%#{query}%", "%#{query}%", "%#{query}%")
+        .limit(5)
+
+      results += cash_receipts.map do |cr|
+        {
+          id: cr.id,
+          type: 'cash_receipt',
+          title: cr.receipt_number,
+          subtitle: cr.display_customer,
+          badge: cr.status&.titleize,
+          amount: cr.amount,
+          score: calculate_score(query, cr.receipt_number, cr.display_customer)
+        }
+      end
+    rescue => e
+      Rails.logger.error("Search cash_receipts error: #{e.message}")
+    end
+
     # Inventory - Parts
     begin
       parts = @company.parts

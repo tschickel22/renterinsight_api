@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_07_100002) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_07_200002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1314,6 +1314,51 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_100002) do
     t.index ["company_id", "channel"], name: "index_campaigns_on_company_id_and_channel"
     t.index ["company_id", "status"], name: "index_campaigns_on_company_id_and_status"
     t.index ["from_identity_type"], name: "index_campaigns_on_from_identity_type"
+  end
+
+  create_table "cash_receipt_applications", force: :cascade do |t|
+    t.bigint "cash_receipt_id", null: false
+    t.bigint "invoice_id", null: false
+    t.decimal "amount_applied", precision: 12, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["cash_receipt_id", "invoice_id"], name: "idx_cra_unique_receipt_invoice", unique: true
+    t.index ["cash_receipt_id"], name: "index_cash_receipt_applications_on_cash_receipt_id"
+    t.index ["invoice_id"], name: "index_cash_receipt_applications_on_invoice_id"
+  end
+
+  create_table "cash_receipts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "account_id"
+    t.bigint "contact_id"
+    t.bigint "bank_account_id"
+    t.bigint "journal_entry_id"
+    t.bigint "location_id"
+    t.bigint "created_by_id"
+    t.string "receipt_number"
+    t.date "receipt_date", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.decimal "amount_applied", precision: 12, scale: 2, default: "0.0"
+    t.decimal "amount_unapplied", precision: 12, scale: 2, default: "0.0"
+    t.string "payment_method"
+    t.string "reference_number"
+    t.text "memo"
+    t.string "customer_name"
+    t.string "status", default: "posted"
+    t.datetime "voided_at"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_cash_receipts_on_account_id"
+    t.index ["bank_account_id"], name: "index_cash_receipts_on_bank_account_id"
+    t.index ["company_id", "receipt_number"], name: "index_cash_receipts_on_company_id_and_receipt_number", unique: true, where: "(receipt_number IS NOT NULL)"
+    t.index ["company_id", "status"], name: "index_cash_receipts_on_company_id_and_status"
+    t.index ["company_id"], name: "index_cash_receipts_on_company_id"
+    t.index ["contact_id"], name: "index_cash_receipts_on_contact_id"
+    t.index ["created_by_id"], name: "index_cash_receipts_on_created_by_id"
+    t.index ["journal_entry_id"], name: "index_cash_receipts_on_journal_entry_id"
+    t.index ["location_id"], name: "index_cash_receipts_on_location_id"
+    t.index ["receipt_date"], name: "index_cash_receipts_on_receipt_date"
   end
 
   create_table "champion_ims_retailers", force: :cascade do |t|
@@ -6694,6 +6739,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_100002) do
   add_foreign_key "campaign_sends", "campaign_steps"
   add_foreign_key "campaign_sends", "campaigns"
   add_foreign_key "campaign_steps", "campaigns"
+  add_foreign_key "cash_receipt_applications", "cash_receipts", on_delete: :cascade
+  add_foreign_key "cash_receipt_applications", "invoices"
+  add_foreign_key "cash_receipts", "accounts"
+  add_foreign_key "cash_receipts", "bank_accounts"
+  add_foreign_key "cash_receipts", "companies"
+  add_foreign_key "cash_receipts", "contacts"
+  add_foreign_key "cash_receipts", "journal_entries"
+  add_foreign_key "cash_receipts", "locations"
+  add_foreign_key "cash_receipts", "users", column: "created_by_id"
   add_foreign_key "champion_ims_retailers", "companies"
   add_foreign_key "champion_ims_retailers", "locations"
   add_foreign_key "champion_ims_sync_events", "champion_ims_sync_runs"
