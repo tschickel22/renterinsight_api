@@ -8,10 +8,12 @@ module Reports
 
     def generate(start_date:, end_date:, location_id: nil, basis: 'accrual')
       tax_accounts = @company.chart_of_accounts
-        .where(account_type: 'liability')
-        .where(account_number: ['2210', '2220', '2230'])
-        .or(@company.chart_of_accounts.where(account_type: 'liability').where("name ILIKE '%sales tax%'"))
-        .where(is_active: true)
+        .where(account_type: 'liability', is_active: true)
+        .where(
+          "account_number IN (?) OR name ILIKE ?",
+          ['2210', '2220', '2230'],
+          '%sales tax%'
+        )
 
       balance_service = AccountBalanceService.new(@company)
       period_data = balance_service.period_balances(

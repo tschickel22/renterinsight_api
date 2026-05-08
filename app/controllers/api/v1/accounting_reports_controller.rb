@@ -122,11 +122,12 @@ class Api::V1::AccountingReportsController < ApplicationController
     end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
 
     service = Reports::SalesTaxSummaryReportService.new(@company)
+    # Sales tax is always accrual-based — tax is owed at time of sale, not payment
     render json: service.generate(
       start_date: start_date,
       end_date: end_date,
       location_id: params[:location_id].presence || accounting_location_id,
-      basis: report_basis
+      basis: 'accrual'
     )
   end
 

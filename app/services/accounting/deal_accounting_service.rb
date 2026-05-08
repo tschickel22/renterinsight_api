@@ -149,33 +149,67 @@ module Accounting
 
     def profitability_summary
       selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
+      vehicle = @deal.try(:vehicle)
+      owner = @deal.try(:owner) || @deal.try(:user)
+
+      # Calculate front gross on-the-fly if not stored
+      front_gross = @deal.try(:front_gross)
+      if front_gross.nil? || front_gross.zero?
+        front_gross = selling_price - total_front_costs
+      end
+
+      back_gross = @deal.try(:back_gross)
+      if back_gross.nil? || back_gross.zero?
+        products = @deal.try(:deal_products) || []
+        back_gross = products.sum { |p| p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0') }
+      end
+
+      total_gross = @deal.try(:total_gross)
+      if total_gross.nil? || total_gross.zero?
+        total_gross = front_gross + back_gross
+      end
+
+      commission = @deal.try(:commission_amount) || BigDecimal('0')
+      net_profit = @deal.try(:net_deal_profit)
+      if net_profit.nil? || net_profit.zero?
+        net_profit = total_gross - commission
+      end
 
       {
         deal_id: @deal.id,
         deal_title: @deal.try(:title) || @deal.try(:name),
+        deal_number: @deal.try(:deal_number),
+        vehicle: vehicle ? {
+          id: vehicle.id,
+          year: vehicle.try(:year),
+          make: vehicle.try(:make),
+          model: vehicle.try(:model),
+          vin: vehicle.try(:vin),
+          stock_number: vehicle.try(:stock_number)
+        } : nil,
+        salesperson: owner ? {
+          id: owner.id,
+          name: [owner.try(:first_name), owner.try(:last_name)].compact.join(' ').presence || owner.try(:email)
+        } : nil,
         selling_price: selling_price,
-        front_end: {
+        front_gross: front_gross,
+        back_gross: back_gross,
+        total_gross: total_gross,
+        commission: commission,
+        net_profit: net_profit,
+        front_detail: {
           home_cost: @deal.home_cost || 0,
-          reconditioning: @deal.reconditioning_cost || 0,
+          recon: @deal.reconditioning_cost || 0,
           floor_plan_interest: @deal.floor_plan_interest || 0,
-          delivery_setup: @deal.delivery_setup_cost || 0,
-          pack: @deal.pack_amount || 0,
-          total_costs: total_front_costs,
-          gross: @deal.front_gross || 0,
-          margin: selling_price.zero? ? 0 : ((@deal.front_gross || 0) / selling_price * 100).round(2)
+          delivery: @deal.delivery_setup_cost || 0,
+          pack: @deal.pack_amount || 0
         },
-        back_end: {
-          products: (@deal.try(:deal_products) || []).map { |p|
-            {
-              name: p.try(:name) || p.try(:product_name) || p.try(:product_type),
-              amount: p.try(:price) || p.try(:amount) || p.try(:total) || 0
-            }
-          },
-          gross: @deal.back_gross || 0
+        back_detail: (@deal.try(:deal_products) || []).map { |p|
+          {
+            name: p.try(:name) || p.try(:product_name) || p.try(:product_type),
+            amount: p.try(:price) || p.try(:amount) || p.try(:total) || 0
+          }
         },
-        total_gross: @deal.total_gross || 0,
-        commission: @deal.commission_amount || 0,
-        net_profit: @deal.net_deal_profit || 0,
         gl_posted: @deal.gl_posted?
       }
     end

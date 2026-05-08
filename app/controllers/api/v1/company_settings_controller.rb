@@ -311,7 +311,16 @@ module Api
           params[:state_tax_rates].to_unsafe_h.each do |state_code, rate|
             code = state_code.to_s.strip.upcase
             next unless code.match?(/\A[A-Z]{2}\z/)
-            tax_rates[code] = rate.to_f
+            # Support both flat (legacy: 2.9) and nested ({ state: 2.9, county: 0.25, city: 3.75 })
+            if rate.is_a?(Hash)
+              tax_rates[code] = {
+                'state' => rate['state'].to_f,
+                'county' => rate['county'].to_f,
+                'city' => rate['city'].to_f
+              }
+            else
+              tax_rates[code] = rate.to_f
+            end
           end
           # Only keep rates for selected states
           tax_rates = tax_rates.select { |k, _| cleaned.include?(k) }
@@ -352,13 +361,24 @@ module Api
         default_rate = loan_settings['default_sales_tax_rate'] || loan_settings[:default_sales_tax_rate] || 0.0
 
         # Look up state-specific rate, fall back to default
-        rate = state_tax_rates[state_code] || default_rate
-
-        render json: {
-          state: state_code,
-          tax_rate: rate.to_f,
-          source: state_tax_rates.key?(state_code) ? 'state' : 'default'
-        }
+        rate_data = state_tax_rates[state_code]
+        if rate_data.is_a?(Hash)
+          render json: {
+            state: state_code,
+            state_rate: rate_data['state'].to_f,
+            county_rate: rate_data['county'].to_f,
+            city_rate: rate_data['city'].to_f,
+            combined_rate: rate_data['state'].to_f + rate_data['county'].to_f + rate_data['city'].to_f,
+            source: 'state'
+          }
+        else
+          rate = rate_data || default_rate
+          render json: {
+            state: state_code,
+            tax_rate: rate.to_f,
+            source: state_tax_rates.key?(state_code) ? 'state' : 'default'
+          }
+        end
       end
 
       # GET /api/v1/company_settings/loan

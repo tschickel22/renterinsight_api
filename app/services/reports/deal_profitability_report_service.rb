@@ -29,8 +29,8 @@ module Reports
       end
 
       total_revenue = deal_rows.sum { |d| d[:selling_price] }
-      total_front = deal_rows.sum { |d| d[:front_end][:gross] }
-      total_back = deal_rows.sum { |d| d[:back_end][:gross] }
+      total_front = deal_rows.sum { |d| d[:front_gross] || 0 }
+      total_back = deal_rows.sum { |d| d[:back_gross] || 0 }
       total_gross = deal_rows.sum { |d| d[:total_gross] }
       total_commission = deal_rows.sum { |d| d[:commission] }
       total_net = deal_rows.sum { |d| d[:net_profit] }
