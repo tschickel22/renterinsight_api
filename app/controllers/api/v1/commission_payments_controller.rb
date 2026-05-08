@@ -336,13 +336,19 @@ module Api
             base_payments.none
         end
         
+        # users.name can be NULL for some accounts; fall back to first+last, then email,
+        # so the frontend always has a non-empty userName to render.
+        user_name_sql = "COALESCE(NULLIF(TRIM(users.name), ''), " \
+                        "NULLIF(TRIM(CONCAT_WS(' ', users.first_name, users.last_name)), ''), " \
+                        "users.email)"
+
         # Payroll Export Data - Group by user and pay period
         payroll_data = base_payments
           .joins(:payee_user)
-          .group('users.id', 'users.name', 'users.email')
+          .group('users.id', 'users.name', 'users.first_name', 'users.last_name', 'users.email')
           .select(
             'users.id as user_id',
-            'users.name as user_name',
+            "#{user_name_sql} as user_name",
             'users.email as user_email',
             'COUNT(commission_payments.id) as payment_count',
             'COALESCE(SUM(commission_payments.amount_paid), 0) as total_paid',
@@ -359,14 +365,14 @@ module Api
               netPay: record.total_paid.round(2) # In real scenario, deductions would be calculated here
             }
           end
-        
+
         # Tax Reporting (1099) - Annual totals
         tax_data = base_payments
           .joins(:payee_user)
-          .group('users.id', 'users.name', 'users.email')
+          .group('users.id', 'users.name', 'users.first_name', 'users.last_name', 'users.email')
           .select(
             'users.id as user_id',
-            'users.name as user_name',
+            "#{user_name_sql} as user_name",
             'users.email as user_email',
             'COUNT(commission_payments.id) as payment_count',
             'COALESCE(SUM(commission_payments.amount_paid), 0) as total_paid'

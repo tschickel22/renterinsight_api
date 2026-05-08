@@ -119,9 +119,15 @@ class Deal < ApplicationRecord
   # Auto-generate commission payment when deal is marked closed_won
   after_save :generate_commission_payment, if: :just_closed_won?
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
+  # Deals queue for accountant approval by default. Auto-posting only fires when the
+  # company opts in via AccountingSettings.auto_post_deals; otherwise the deal sits in
+  # the Deal Approvals queue until reviewed.
   after_commit :auto_post_closing_to_accounting, on: [:create, :update], if: -> { saved_change_to_stage? && stage == 'closed_won' && !gl_posted? }
 
   def auto_post_closing_to_accounting
+    settings = AccountingSettings.for_company(company)
+    return unless settings.try(:auto_post_deals)
+
     Accounting::DealAccountingService.new(self).post_closing_entries!(user: try(:owner) || try(:user))
   rescue => e
     Rails.logger.error("[AutoPost] Deal #{id} closing entries failed: #{e.message}")

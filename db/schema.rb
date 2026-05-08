@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_08_020001) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_08_050002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -125,7 +125,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_08_020001) do
     t.boolean "floor_plan_tracking_enabled", default: false, null: false
     t.decimal "default_floor_plan_rate", precision: 8, scale: 5
     t.string "default_floor_plan_lender"
+    t.boolean "sales_tax_enabled", default: false, null: false
+    t.decimal "default_state_tax_rate", precision: 8, scale: 5
+    t.decimal "default_county_tax_rate", precision: 8, scale: 5
+    t.decimal "default_city_tax_rate", precision: 8, scale: 5
+    t.bigint "state_tax_account_id"
+    t.bigint "county_tax_account_id"
+    t.bigint "city_tax_account_id"
+    t.jsonb "tax_rates_by_state", default: {}, null: false
+    t.boolean "auto_post_deals", default: false, null: false
+    t.index ["city_tax_account_id"], name: "index_accounting_settings_on_city_tax_account_id"
     t.index ["company_id"], name: "index_accounting_settings_on_company_id", unique: true
+    t.index ["county_tax_account_id"], name: "index_accounting_settings_on_county_tax_account_id"
     t.index ["default_ap_account_id"], name: "index_accounting_settings_on_default_ap_account_id"
     t.index ["default_ar_account_id"], name: "index_accounting_settings_on_default_ar_account_id"
     t.index ["default_bank_account_id"], name: "index_accounting_settings_on_default_bank_account_id"
@@ -135,6 +146,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_08_020001) do
     t.index ["default_sales_tax_payable_account_id"], name: "idx_on_default_sales_tax_payable_account_id_6cda82c2b5"
     t.index ["default_vehicle_inventory_account_id"], name: "idx_on_default_vehicle_inventory_account_id_cb785f0d78"
     t.index ["retained_earnings_account_id"], name: "index_accounting_settings_on_retained_earnings_account_id"
+    t.index ["state_tax_account_id"], name: "index_accounting_settings_on_state_tax_account_id"
   end
 
   create_table "accounts", force: :cascade do |t|
@@ -2402,6 +2414,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_08_020001) do
     t.boolean "gl_posted", default: false
     t.datetime "gl_posted_at"
     t.bigint "gl_journal_entry_id"
+    t.decimal "state_tax_rate", precision: 8, scale: 5
+    t.decimal "county_tax_rate", precision: 8, scale: 5
+    t.decimal "city_tax_rate", precision: 8, scale: 5
+    t.decimal "total_tax_amount", precision: 15, scale: 2
+    t.boolean "tax_posted", default: false, null: false
+    t.jsonb "tax_journal_entry_ids", default: [], null: false
+    t.boolean "commission_posted", default: false, null: false
+    t.datetime "commission_posted_at"
+    t.bigint "commission_journal_entry_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -6644,6 +6665,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_08_020001) do
   add_foreign_key "accounting_imports", "companies"
   add_foreign_key "accounting_imports", "users"
   add_foreign_key "accounting_settings", "bank_accounts", column: "default_bank_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "city_tax_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "county_tax_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_ap_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_ar_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_cogs_account_id"
@@ -6652,6 +6675,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_08_020001) do
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_sales_tax_payable_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "default_vehicle_inventory_account_id"
   add_foreign_key "accounting_settings", "chart_of_accounts", column: "retained_earnings_account_id"
+  add_foreign_key "accounting_settings", "chart_of_accounts", column: "state_tax_account_id"
   add_foreign_key "accounting_settings", "companies"
   add_foreign_key "accounts", "accounts", column: "parent_account_id"
   add_foreign_key "accounts", "companies"

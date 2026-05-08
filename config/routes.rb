@@ -1723,7 +1723,21 @@ Rails.application.routes.draw do
         end
       end
 
-      resource :accounting_settings, only: [:show, :update]
+      resource :accounting_settings, only: [:show, :update] do
+        get :tax_rates_for_state
+      end
+
+      resources :deal_approvals, only: [:show, :update] do
+        collection do
+          get :pending
+          get :stats
+          post :bulk_approve_commissions
+        end
+        member do
+          post :approve
+          post :approve_commission
+        end
+      end
 
       resources :fiscal_periods, only: [:index] do
         collection do

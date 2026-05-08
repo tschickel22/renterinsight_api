@@ -137,7 +137,8 @@ module Accounting
 
           if je
             @deal.update!(gl_posted: true, gl_posted_at: Time.current, gl_journal_entry_id: je.id)
-            { success: true, journal_entry: je, lines_count: lines.count }
+            tax_result = post_sales_tax_entries!(user: user)
+            { success: true, journal_entry: je, lines_count: lines.count, tax: tax_result }
           else
             raise ActiveRecord::Rollback, "Failed to create journal entry"
           end
@@ -147,33 +148,90 @@ module Accounting
       end
     end
 
+    def post_sales_tax_entries!(user: nil)
+      settings = AccountingSettings.for_company(@company)
+      return { success: true, skipped: 'sales_tax_disabled', entries: [], total_tax: BigDecimal('0') } unless settings.sales_tax_enabled
+
+      state_code = deal_state_code
+      return { success: true, skipped: 'no_state_code', entries: [], total_tax: BigDecimal('0') } if state_code.blank?
+
+      ar_account = settings.default_ar_account
+      return { success: true, skipped: 'missing_ar_account', entries: [], total_tax: BigDecimal('0') } unless ar_account
+
+      selling_price = BigDecimal((@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || 0).to_s)
+      return { success: true, skipped: 'no_selling_price', entries: [], total_tax: BigDecimal('0') } if selling_price <= 0
+
+      rates = settings.combined_tax_rate(state_code)
+      accounts = settings.tax_accounts
+      posting_service = ManualPostingService.new(@company)
+
+      entries = []
+      je_ids = []
+      total_tax = BigDecimal('0')
+      location_id = @deal.try(:location_id)
+
+      [:state, :county, :city].each do |slot|
+        rate = rates[slot] || BigDecimal('0')
+        account = accounts[slot]
+        next if rate.nil? || rate <= 0
+        next if account.nil?
+
+        amount = (selling_price * rate / 100).round(2)
+        next if amount <= 0
+
+        je = posting_service.post_simple!(
+          debit_account: ar_account,
+          credit_account: account,
+          amount: amount,
+          memo: "Sales tax (#{slot.to_s.capitalize}) — #{deal_description}",
+          entry_date: deal_close_date,
+          source_entity: @deal,
+          location_id: location_id,
+          department: deal_department,
+          contact_id: @deal.try(:contact_id) || @deal.try(:lead_id),
+          deal_id: @deal.id,
+          vehicle_id: @deal.try(:vehicle_id),
+          posted_by: user
+        )
+
+        next unless je
+
+        entries << { jurisdiction: slot, rate: rate, amount: amount, journal_entry_id: je.id }
+        je_ids << je.id
+        total_tax += amount
+      end
+
+      @deal.update!(
+        delivery_state: state_code,
+        state_tax_rate: rates[:state],
+        county_tax_rate: rates[:county],
+        city_tax_rate: rates[:city],
+        total_tax_amount: total_tax,
+        tax_posted: entries.any?,
+        tax_journal_entry_ids: ((@deal.tax_journal_entry_ids || []) + je_ids).uniq
+      )
+
+      { success: true, entries: entries, total_tax: total_tax }
+    end
+
     def profitability_summary
       selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
       vehicle = @deal.try(:vehicle)
       owner = @deal.try(:owner) || @deal.try(:user)
 
-      # Calculate front gross on-the-fly if not stored
-      front_gross = @deal.try(:front_gross)
-      if front_gross.nil? || front_gross.zero?
-        front_gross = selling_price - total_front_costs
-      end
+      # ALWAYS recalculate from current data — stored values go stale when costs change
+      front_gross = selling_price - total_front_costs
 
-      back_gross = @deal.try(:back_gross)
-      if back_gross.nil? || back_gross.zero?
-        products = @deal.try(:deal_products) || []
-        back_gross = products.sum { |p| p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0') }
-      end
+      # Exclude the home/vehicle line item from back_gross. It's already counted
+      # in selling_price (front side), so summing it again double-counts the
+      # entire home as profit. Back-end revenue is only F&I, accessories, fees.
+      back_products = (@deal.try(:deal_products) || []).reject { |p| home_line_item?(p) }
+      back_gross = back_products.sum { |p| p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0') }
 
-      total_gross = @deal.try(:total_gross)
-      if total_gross.nil? || total_gross.zero?
-        total_gross = front_gross + back_gross
-      end
+      total_gross = front_gross + back_gross
 
       commission = @deal.try(:commission_amount) || BigDecimal('0')
-      net_profit = @deal.try(:net_deal_profit)
-      if net_profit.nil? || net_profit.zero?
-        net_profit = total_gross - commission
-      end
+      net_profit = total_gross - commission
 
       {
         deal_id: @deal.id,
@@ -204,13 +262,24 @@ module Accounting
           delivery: @deal.delivery_setup_cost || 0,
           pack: @deal.pack_amount || 0
         },
-        back_detail: (@deal.try(:deal_products) || []).map { |p|
+        back_detail: back_products.map { |p|
           {
             name: p.try(:name) || p.try(:product_name) || p.try(:product_type),
             amount: p.try(:price) || p.try(:amount) || p.try(:total) || 0
           }
         },
-        gl_posted: @deal.gl_posted?
+        gl_posted: @deal.gl_posted?,
+        tax: tax_summary
+      }
+    end
+
+    def tax_summary
+      {
+        state_rate: @deal.try(:state_tax_rate),
+        county_rate: @deal.try(:county_tax_rate),
+        city_rate: @deal.try(:city_tax_rate),
+        total_tax: @deal.try(:total_tax_amount) || BigDecimal('0'),
+        posted: @deal.try(:tax_posted) || false
       }
     end
 
@@ -222,10 +291,37 @@ module Accounting
     end
 
     def calculate_back_gross!
-      products = @deal.try(:deal_products) || []
+      products = (@deal.try(:deal_products) || []).reject { |p| home_line_item?(p) }
       @deal.back_gross = products.sum { |p|
         p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0')
       }
+    end
+
+    # The home/vehicle is stored as a deal_product line in addition to being
+    # represented by deal.selling_price. Identify it so back_gross doesn't
+    # double-count it. DealProduct has no category/source_type columns, so we
+    # detect it by:
+    #   - product_name matching the linked vehicle's "year make model"
+    #   - or unit_price equal to the deal's selling_price (custom-line fallback)
+    def home_line_item?(product)
+      return false unless product
+
+      pname = product.try(:product_name).to_s.strip
+      vname = deal_vehicle_name
+      return true if vname.present? && pname.casecmp(vname).zero?
+
+      selling = (@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount)).to_f
+      return false unless selling > 0
+
+      unit = product.try(:unit_price).to_f
+      unit > 0 && (unit - selling).abs < 0.01
+    end
+
+    def deal_vehicle_name
+      v = @deal.try(:vehicle)
+      return nil unless v
+      [v.try(:year), v.try(:make), v.try(:model)]
+        .compact.map(&:to_s).reject(&:empty?).join(' ').strip.presence
     end
 
     def total_front_costs
@@ -264,6 +360,14 @@ module Accounting
       else
         title || "Deal ##{@deal.id}"
       end
+    end
+
+    def deal_state_code
+      raw = @deal.try(:delivery_state).presence ||
+            @deal.try(:state).presence ||
+            @deal.try(:billing_state).presence ||
+            @deal.try(:location)&.try(:state).presence
+      raw&.to_s&.strip&.upcase.presence
     end
 
     def resolve_fi_account(product)
