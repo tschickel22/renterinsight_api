@@ -11,7 +11,7 @@ module Accounting
       total_interest = BigDecimal('0')
 
       floor_planned_vehicles.find_each do |vehicle|
-        daily_rate = (vehicle.floor_plan_rate || 0) / 365.0
+        daily_rate = (vehicle.floor_plan_rate || 0) / 100.0 / 365.0
         daily_interest = (vehicle.floor_plan_amount || 0) * daily_rate
 
         next if daily_interest.zero?
@@ -87,7 +87,7 @@ module Accounting
 
       rows = vehicles.map do |v|
         days = v.floor_plan_start_date ? (Date.current - v.floor_plan_start_date).to_i : 0
-        daily_rate = (v.floor_plan_rate || 0) / 365.0
+        daily_rate = (v.floor_plan_rate || 0) / 100.0 / 365.0
         monthly_interest = (v.floor_plan_amount || 0) * daily_rate * 30
 
         {
@@ -98,9 +98,9 @@ module Accounting
           model: v.model,
           vin: v.try(:vin),
           location_id: v.try(:location_id),
-          floor_plan_amount: v.floor_plan_amount,
-          floor_plan_rate: v.floor_plan_rate,
-          floor_plan_lender: v.floor_plan_lender,
+          principal: v.floor_plan_amount || 0,
+          rate: v.floor_plan_rate || 0,
+          lender: v.floor_plan_lender,
           start_date: v.floor_plan_start_date,
           days_on_plan: days,
           accrued_interest: v.floor_plan_accrued_interest || 0,
@@ -109,7 +109,7 @@ module Accounting
         }
       end
 
-      total_principal = rows.sum { |r| r[:floor_plan_amount] || 0 }
+      total_principal = rows.sum { |r| r[:principal] || 0 }
       total_accrued = rows.sum { |r| r[:accrued_interest] }
 
       {

@@ -5,7 +5,8 @@ class FloorPlanAccrualJob < ApplicationJob
 
   def perform
     Company.find_each do |company|
-      next unless company.accounting_settings.present?
+      settings = AccountingSettings.for_company(company)
+      next unless settings.floor_plan_tracking_enabled
       next unless company.chart_of_accounts.exists?
 
       service = Accounting::FloorPlanService.new(company)

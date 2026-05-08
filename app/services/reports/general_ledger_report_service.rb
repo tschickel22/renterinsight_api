@@ -6,7 +6,7 @@ module Reports
       @company = company
     end
 
-    def generate(account_id:, start_date:, end_date:, location_id: nil)
+    def generate(account_id:, start_date:, end_date:, location_id: nil, basis: 'accrual')
       account = @company.chart_of_accounts.find(account_id)
 
       lines = JournalEntryLine
@@ -22,7 +22,13 @@ module Reports
       lines = lines.where(location_id: location_id) if location_id
 
       balance_service = AccountBalanceService.new(@company)
-      opening_balance = balance_service.balance_as_of(account, start_date - 1.day, location_id: location_id)
+
+      if basis.to_s == 'cash'
+        cash_je_ids = balance_service.cash_basis_je_ids_in_range(start_date, end_date)
+        lines = cash_je_ids.any? ? lines.where(journal_entries: { id: cash_je_ids }) : lines.none
+      end
+
+      opening_balance = balance_service.balance_as_of(account, start_date - 1.day, location_id: location_id, basis: basis)
 
       running_balance = opening_balance
       transactions = lines.map do |line|
@@ -54,6 +60,7 @@ module Reports
           normal_balance: account.normal_balance
         },
         period: { start_date: start_date, end_date: end_date },
+        basis: basis,
         opening_balance: opening_balance,
         closing_balance: running_balance,
         transactions: transactions,

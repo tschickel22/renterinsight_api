@@ -46,8 +46,12 @@ class Api::V1::AccountingSettingsController < ApplicationController
       :auto_post_invoices,
       :auto_post_payments,
       :auto_post_purchases,
+      :accounting_method,
       :lock_period_on_close,
-      :check_number_sequence
+      :check_number_sequence,
+      :floor_plan_tracking_enabled,
+      :default_floor_plan_rate,
+      :default_floor_plan_lender
     )
   end
 end

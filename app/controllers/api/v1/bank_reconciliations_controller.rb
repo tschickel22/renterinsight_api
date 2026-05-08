@@ -75,7 +75,8 @@ class Api::V1::BankReconciliationsController < ApplicationController
     service = BankReconciliationService.new(@company)
     service.toggle_item(item)
 
-    render json: @reconciliation.reload
+    @reconciliation.reload
+    render_reconciliation_detail
   end
 
   # POST /api/v1/bank_reconciliations/:id/clear_all
@@ -85,7 +86,8 @@ class Api::V1::BankReconciliationsController < ApplicationController
     service = BankReconciliationService.new(@company)
     service.clear_all(@reconciliation)
 
-    render json: @reconciliation.reload
+    @reconciliation.reload
+    render_reconciliation_detail
   end
 
   # POST /api/v1/bank_reconciliations/:id/unclear_all
@@ -95,7 +97,8 @@ class Api::V1::BankReconciliationsController < ApplicationController
     service = BankReconciliationService.new(@company)
     service.unclear_all(@reconciliation)
 
-    render json: @reconciliation.reload
+    @reconciliation.reload
+    render_reconciliation_detail
   end
 
   # POST /api/v1/bank_reconciliations/:id/complete
@@ -106,7 +109,8 @@ class Api::V1::BankReconciliationsController < ApplicationController
     result = service.complete(@reconciliation, current_user)
 
     if result
-      render json: @reconciliation.reload
+      @reconciliation.reload
+      render_reconciliation_detail
     else
       render json: { errors: @reconciliation.errors.full_messages }, status: :unprocessable_entity
     end
@@ -146,6 +150,31 @@ class Api::V1::BankReconciliationsController < ApplicationController
   end
 
   private
+
+  def render_reconciliation_detail
+    items = @reconciliation.bank_reconciliation_items
+      .includes(journal_entry_line: { journal_entry: :posted_by })
+      .order('journal_entry_lines.id')
+
+    deposits = items.select { |i| i.amount > 0 }
+    payments = items.select { |i| i.amount <= 0 }
+
+    render json: {
+      reconciliation: @reconciliation.as_json(
+        include: {
+          bank_account: { only: [:id, :bank_name, :account_type] },
+          completed_by: { only: [:id, :first_name, :last_name] }
+        }
+      ),
+      deposits: deposits.map { |i| reconciliation_item_json(i) },
+      payments: payments.map { |i| reconciliation_item_json(i) },
+      summary: {
+        total_items: items.count,
+        cleared_items: items.cleared.count,
+        uncleared_items: items.uncleared.count
+      }
+    }
+  end
 
   def set_reconciliation
     @reconciliation = @company.bank_reconciliations.find(params[:id])

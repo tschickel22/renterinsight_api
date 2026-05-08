@@ -14,7 +14,7 @@ class Api::V1::AccountingReportsController < ApplicationController
     department = params[:department]
 
     service = Reports::TrialBalanceReportService.new(@company)
-    report = service.generate(as_of_date: as_of, location_id: location_id, department: department)
+    report = service.generate(as_of_date: as_of, location_id: location_id, department: department, basis: report_basis)
 
     render json: report
   end
@@ -36,7 +36,8 @@ class Api::V1::AccountingReportsController < ApplicationController
       account_id: account_id,
       start_date: start_date,
       end_date: end_date,
-      location_id: params[:location_id]
+      location_id: params[:location_id],
+      basis: report_basis
     )
 
     render json: report
@@ -55,7 +56,8 @@ class Api::V1::AccountingReportsController < ApplicationController
       end_date: end_date,
       location_id: params[:location_id].presence || accounting_location_id,
       department: params[:department],
-      compare_prior: params[:compare_prior] == 'true'
+      compare_prior: params[:compare_prior] == 'true',
+      basis: report_basis
     )
 
     render json: report
@@ -68,7 +70,11 @@ class Api::V1::AccountingReportsController < ApplicationController
     as_of = params[:as_of_date] ? Date.parse(params[:as_of_date]) : Date.current
 
     service = Reports::BalanceSheetReportService.new(@company)
-    report = service.generate(as_of_date: as_of, location_id: params[:location_id].presence || accounting_location_id)
+    report = service.generate(
+      as_of_date: as_of,
+      location_id: params[:location_id].presence || accounting_location_id,
+      basis: report_basis
+    )
 
     render json: report
   end
@@ -116,7 +122,12 @@ class Api::V1::AccountingReportsController < ApplicationController
     end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
 
     service = Reports::SalesTaxSummaryReportService.new(@company)
-    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id].presence || accounting_location_id)
+    render json: service.generate(
+      start_date: start_date,
+      end_date: end_date,
+      location_id: params[:location_id].presence || accounting_location_id,
+      basis: report_basis
+    )
   end
 
   # GET /api/v1/accounting/reports/cash_flow_statement
@@ -127,7 +138,12 @@ class Api::V1::AccountingReportsController < ApplicationController
     end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
 
     service = Reports::CashFlowStatementReportService.new(@company)
-    render json: service.generate(start_date: start_date, end_date: end_date, location_id: params[:location_id].presence || accounting_location_id)
+    render json: service.generate(
+      start_date: start_date,
+      end_date: end_date,
+      location_id: params[:location_id].presence || accounting_location_id,
+      basis: report_basis
+    )
   end
 
   # GET /api/v1/accounting/dashboard
@@ -206,5 +222,16 @@ class Api::V1::AccountingReportsController < ApplicationController
       ),
       total: entries.count
     }
+  end
+
+  private
+
+  # Resolve the reporting basis: explicit param wins, otherwise fall back to the
+  # company's configured accounting_method, otherwise 'accrual'.
+  def report_basis
+    raw = params[:basis].to_s.downcase.strip
+    return raw if %w[cash accrual].include?(raw)
+
+    AccountingSettings.for_company(@company).accounting_method.presence || 'accrual'
   end
 end

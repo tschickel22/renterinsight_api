@@ -1419,6 +1419,9 @@ module Api
           totalCost: :total_cost,
           holdbackAmount: :holdback_amount,
           floorPlanRate: :floor_plan_rate,
+          floorPlanAmount: :floor_plan_amount,
+          floorPlanLender: :floor_plan_lender,
+          floorPlanStartDate: :floor_plan_start_date,
           targetGross: :target_gross,
           minimumPrice: :minimum_price,
           # Special Discount
@@ -1478,6 +1481,8 @@ module Api
           # Cost details
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
           :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          # Floor plan tracking
+          :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
           # Special Discount
           :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
           # RV fields
@@ -1569,6 +1574,8 @@ module Api
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
           :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          # Floor plan tracking
+          :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
           # Special Discount
           :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
           # Location ID and address override
@@ -1860,6 +1867,18 @@ module Api
         if detailed
           json[:deals] = vehicle.deals.active.map { |d| deal_summary(d) }
           json[:quotes] = vehicle.quotes.active.map { |q| quote_summary(q) }
+
+          # Floor plan tracking — exposed only on detailed views (typically the
+          # vehicle detail page or accounting flows that need accrual context).
+          json.merge!(
+            floorPlanAmount: vehicle.floor_plan_amount&.to_f,
+            floorPlanRate: vehicle.floor_plan_rate&.to_f,
+            floorPlanLender: vehicle.floor_plan_lender,
+            floorPlanStartDate: vehicle.floor_plan_start_date,
+            floorPlanAccruedInterest: vehicle.floor_plan_accrued_interest&.to_f,
+            daysOnFloorPlan: vehicle.days_on_floor_plan,
+            floorPlanCurtailedAt: vehicle.floor_plan_curtailed_at
+          )
         end
 
         json

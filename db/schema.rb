@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_07_220001) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_08_020001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -121,6 +121,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_07_220001) do
     t.bigint "default_vehicle_inventory_account_id"
     t.boolean "auto_post_purchase_orders", default: true
     t.boolean "auto_post_parts_usage", default: true
+    t.string "accounting_method", default: "accrual", null: false
+    t.boolean "floor_plan_tracking_enabled", default: false, null: false
+    t.decimal "default_floor_plan_rate", precision: 8, scale: 5
+    t.string "default_floor_plan_lender"
     t.index ["company_id"], name: "index_accounting_settings_on_company_id", unique: true
     t.index ["default_ap_account_id"], name: "index_accounting_settings_on_default_ap_account_id"
     t.index ["default_ar_account_id"], name: "index_accounting_settings_on_default_ar_account_id"

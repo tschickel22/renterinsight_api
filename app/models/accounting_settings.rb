@@ -14,6 +14,7 @@ class AccountingSettings < ApplicationRecord
 
   validates :company_id, uniqueness: true
   validates :fiscal_year_start_month, inclusion: { in: 1..12 }
+  validates :accounting_method, inclusion: { in: %w[accrual cash] }, allow_nil: true
 
   # New companies should have auto-posting enabled by default
   after_initialize :set_auto_post_defaults, if: :new_record?

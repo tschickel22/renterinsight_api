@@ -6,9 +6,9 @@ module Reports
       @company = company
     end
 
-    def generate(as_of_date: Date.current, location_id: nil)
+    def generate(as_of_date: Date.current, location_id: nil, basis: 'accrual')
       balance_service = AccountBalanceService.new(@company)
-      raw_balances = balance_service.all_balances(as_of_date: as_of_date, location_id: location_id)
+      raw_balances = balance_service.all_balances(as_of_date: as_of_date, location_id: location_id, basis: basis)
 
       accounts = @company.chart_of_accounts.active.postable.ordered
 
@@ -31,9 +31,9 @@ module Reports
         row = {
           account_id: account.id,
           account_number: account.account_number,
-          name: account.name,
+          account_name: account.name,
           sub_type: account.sub_type,
-          balance: net
+          amount: net
         }
 
         case account.account_type
@@ -54,27 +54,29 @@ module Reports
       pnl = ProfitAndLossReportService.new(@company).generate(
         start_date: fy_start,
         end_date: as_of_date,
-        location_id: location_id
+        location_id: location_id,
+        basis: basis
       )
 
       if pnl[:net_income] != 0
         equity << {
           account_id: nil,
           account_number: '',
-          name: 'Current Year Earnings',
+          account_name: 'Current Year Earnings',
           sub_type: 'retained_earnings',
-          balance: pnl[:net_income],
+          amount: pnl[:net_income],
           is_calculated: true
         }
       end
 
-      total_assets = assets.sum { |r| r[:balance] }
-      total_liabilities = liabilities.sum { |r| r[:balance] }
-      total_equity = equity.sum { |r| r[:balance] }
+      total_assets = assets.sum { |r| r[:amount] }
+      total_liabilities = liabilities.sum { |r| r[:amount] }
+      total_equity = equity.sum { |r| r[:amount] }
 
       {
         as_of_date: as_of_date,
         location_id: location_id,
+        basis: basis,
         assets: assets,
         total_assets: total_assets,
         liabilities: liabilities,

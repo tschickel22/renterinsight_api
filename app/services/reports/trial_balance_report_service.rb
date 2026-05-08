@@ -6,12 +6,13 @@ module Reports
       @company = company
     end
 
-    def generate(as_of_date: Date.current, location_id: nil, department: nil)
+    def generate(as_of_date: Date.current, location_id: nil, department: nil, basis: 'accrual')
       balance_service = AccountBalanceService.new(@company)
       raw_balances = balance_service.all_balances(
         as_of_date: as_of_date,
         location_id: location_id,
-        department: department
+        department: department,
+        basis: basis
       )
 
       accounts = @company.chart_of_accounts.active.postable.ordered
@@ -54,6 +55,7 @@ module Reports
         as_of_date: as_of_date,
         location_id: location_id,
         department: department,
+        basis: basis,
         rows: rows,
         total_debits: total_debits,
         total_credits: total_credits,

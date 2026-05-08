@@ -6,16 +6,16 @@ module Reports
       @company = company
     end
 
-    def generate(start_date:, end_date:, location_id: nil)
+    def generate(start_date:, end_date:, location_id: nil, basis: 'accrual')
       balance_service = AccountBalanceService.new(@company)
 
       pnl = ProfitAndLossReportService.new(@company).generate(
-        start_date: start_date, end_date: end_date, location_id: location_id
+        start_date: start_date, end_date: end_date, location_id: location_id, basis: basis
       )
       net_income = pnl[:net_income]
 
       period_balances = balance_service.period_balances(
-        start_date: start_date, end_date: end_date, location_id: location_id
+        start_date: start_date, end_date: end_date, location_id: location_id, basis: basis
       )
       accounts = @company.chart_of_accounts.active.postable.ordered.index_by(&:id)
 
@@ -85,11 +85,12 @@ module Reports
       net_change = total_operating + total_investing + total_financing
 
       cash_accounts = @company.chart_of_accounts.where(sub_type: 'bank', is_active: true)
-      beginning_cash = cash_accounts.sum { |a| balance_service.balance_as_of(a, start_date - 1.day, location_id: location_id) }
+      beginning_cash = cash_accounts.sum { |a| balance_service.balance_as_of(a, start_date - 1.day, location_id: location_id, basis: basis) }
       ending_cash = beginning_cash + net_change
 
       {
         period: { start_date: start_date, end_date: end_date },
+        basis: basis,
         operating: {
           net_income: net_income,
           adjustments: operating_adjustments,

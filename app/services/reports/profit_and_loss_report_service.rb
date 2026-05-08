@@ -6,13 +6,14 @@ module Reports
       @company = company
     end
 
-    def generate(start_date:, end_date:, location_id: nil, department: nil, compare_prior: false)
+    def generate(start_date:, end_date:, location_id: nil, department: nil, compare_prior: false, basis: 'accrual')
       balance_service = AccountBalanceService.new(@company)
       period_balances = balance_service.period_balances(
         start_date: start_date,
         end_date: end_date,
         location_id: location_id,
-        department: department
+        department: department,
+        basis: basis
       )
 
       accounts = @company.chart_of_accounts.active.postable.ordered
@@ -32,9 +33,9 @@ module Reports
           revenue_rows << {
             account_id: account.id,
             account_number: account.account_number,
-            name: account.name,
+            account_name: account.name,
             sub_type: account.sub_type,
-            balance: net
+            amount: net
           }
         when 'expense'
           net = bal[:total_debits] - bal[:total_credits]
@@ -43,23 +44,24 @@ module Reports
           target << {
             account_id: account.id,
             account_number: account.account_number,
-            name: account.name,
+            account_name: account.name,
             sub_type: account.sub_type,
-            balance: net
+            amount: net
           }
         end
       end
 
-      total_revenue = revenue_rows.sum { |r| r[:balance] }
-      total_cogs = cogs_rows.sum { |r| r[:balance] }
+      total_revenue = revenue_rows.sum { |r| r[:amount] }
+      total_cogs = cogs_rows.sum { |r| r[:amount] }
       gross_profit = total_revenue - total_cogs
-      total_expenses = expense_rows.sum { |r| r[:balance] }
+      total_expenses = expense_rows.sum { |r| r[:amount] }
       net_income = gross_profit - total_expenses
 
       result = {
         period: { start_date: start_date, end_date: end_date },
         location_id: location_id,
         department: department,
+        basis: basis,
         revenue: revenue_rows,
         total_revenue: total_revenue,
         cogs: cogs_rows,
@@ -82,7 +84,8 @@ module Reports
           end_date: prior_end,
           location_id: location_id,
           department: department,
-          compare_prior: false
+          compare_prior: false,
+          basis: basis
         )
 
         result[:prior_period] = prior
