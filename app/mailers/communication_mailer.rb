@@ -53,8 +53,9 @@ class CommunicationMailer < ApplicationMailer
     
     # Now create and send the mail
     mail(mail_options) do |format|
-      if body&.include?('<html') || body&.include?('<body')
+      if body&.include?('<html') || body&.include?('<body') || body&.include?('<div') || body&.include?('<table') || body&.include?('<p ')
         format.html { render html: body.html_safe }
+        format.text { render plain: ActionController::Base.helpers.strip_tags(body) }
       else
         format.text { render plain: body }
       end

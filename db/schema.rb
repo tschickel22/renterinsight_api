@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_10_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_11_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1501,7 +1501,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_10_000002) do
   create_table "champion_lead_feed_configs", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
-    t.string "api_token_ciphertext", null: false
+    t.string "api_token", null: false
     t.string "environment", default: "production", null: false
     t.string "champion_account_number"
     t.string "retailer_name"
@@ -3411,6 +3411,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_10_000002) do
     t.bigint "champion_config_id"
     t.datetime "champion_accepted_at"
     t.datetime "champion_declined_at"
+    t.string "champion_action_token"
+    t.datetime "champion_action_token_expires_at"
+    t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"
     t.index ["company_id", "champion_salesforce_id"], name: "idx_leads_company_champion_sf_id", unique: true

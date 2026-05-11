@@ -13,6 +13,14 @@ Rails.application.routes.draw do
   get  'r/:token',       to: 'sms_replies#show'
   post 'r/:token/reply', to: 'sms_replies#reply'
 
+  # ==================== PUBLIC CHAMPION LEAD ACCEPT/DECLINE (No Auth Required) ====================
+  # One-click Accept/Decline links sent in the Champion lead notification email.
+  scope '/cl' do
+    get  ':token/accept',  to: 'public/champion_lead_actions#accept',       as: :public_champion_lead_accept
+    get  ':token/decline', to: 'public/champion_lead_actions#decline_form', as: :public_champion_lead_decline_form
+    post ':token/decline', to: 'public/champion_lead_actions#decline',      as: :public_champion_lead_decline
+  end
+
   # ==================== PUBLIC AGREEMENT SIGNING (No Auth Required) ====================
   get  'sign/:token',          to: 'public/agreement_signing#show'
   post 'sign/:token/view',    to: 'public/agreement_signing#view_agreement'

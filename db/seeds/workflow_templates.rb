@@ -352,6 +352,49 @@ templates << {
 # NOTE: No create_activity step because Champion leads have no phone/email
 # until the lead is accepted via Champion's API. The rep must accept first,
 # then contact info is revealed and a follow-up activity can be created.
+
+# Reminder email body builder. Same lead-details table + accept/decline buttons as
+# the initial notification, but with a customizable header colour and warning panel.
+# The SendEmail step executor reloads the lead and skips the send if champion_status
+# is no longer 'new', so accepted/declined leads never receive reminders.
+champion_reminder_body = lambda do |opts|
+  header_bg = opts[:header_bg] || '#f97316'
+  header_text = opts[:header_text]
+  intro = opts[:intro]
+  warning_bg = opts[:warning_bg] || '#fff7ed'
+  warning_border = opts[:warning_border] || '#fed7aa'
+  warning_color = opts[:warning_color] || '#9a3412'
+  warning_text = opts[:warning_text]
+
+  <<~HTML.gsub(/\s+/, ' ').strip
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+      <div style="background: #{header_bg}; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+        <h2 style="margin: 0; font-size: 20px;">#{header_text}</h2>
+      </div>
+      <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+        <p style="margin: 0 0 16px; font-size: 15px; color: #374151;">#{intro}</p>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+          <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; width: 160px; color: #374151;">Name</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.first_name}} {{entity.last_name}}</td></tr>
+          <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Model</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.modelName}}</td></tr>
+          <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Manufacturer</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.manufacturer}}</td></tr>
+          <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Build Location</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.buildCity}}, {{entity.champion_lead_data.buildDetails.buildState}}</td></tr>
+          <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Source</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">Champion Homes — Retailer API</td></tr>
+        </table>
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="{{frontend_url}}/cl/{{entity.champion_action_token}}/accept" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px; margin-right: 8px;">Accept Lead</a>
+          <a href="{{frontend_url}}/cl/{{entity.champion_action_token}}/decline" style="display: inline-block; background: #dc2626; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px;">Decline Lead</a>
+        </div>
+        <div style="background: #{warning_bg}; border: 1px solid #{warning_border}; border-radius: 6px; padding: 14px 16px; margin: 20px 0;">
+          <p style="margin: 0; font-size: 13px; color: #{warning_color};"><strong>#{warning_text}</strong></p>
+        </div>
+        <div style="text-align: center; margin-top: 24px;">
+          <a href="{{frontend_url}}/crm/leads/{{entity.id}}" style="color: #{header_bg}; font-size: 13px; text-decoration: underline;">Review in CRM</a>
+        </div>
+      </div>
+    </div>
+  HTML
+end
+
 templates << {
   key: 'champion_lead_intake_round_robin',
   name: 'Champion Lead Intake - Round Robin',
@@ -370,16 +413,107 @@ templates << {
       { 'id' => 'n1', 'type' => 'assign_owner', 'config' => { 'strategy' => 'round_robin' } },
       { 'id' => 'n2', 'type' => 'send_email', 'config' => {
         'to' => '{{entity.owner_email}}',
-        'subject' => '{{params.notify_subject}}',
-        'body' => '{{params.notify_body}}'
+        'subject' => 'New Champion Lead: {{entity.first_name}} {{entity.last_name}} — Accept or Decline',
+        'body' => '<div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;"> <div style="background: #f97316; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;"> <h2 style="margin: 0; font-size: 20px;">New Champion Lead — Action Required</h2> </div> <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;"> <p style="margin: 0 0 16px; font-size: 15px; color: #374151;"> A new lead from <strong>Champion Homes</strong> has been assigned to you. Use the buttons below to accept or decline directly from this email. </p> <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;"> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; width: 160px; color: #374151;">Name</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.first_name}} {{entity.last_name}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Model</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.modelName}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Manufacturer</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.manufacturer}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Build Location</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.buildCity}}, {{entity.champion_lead_data.buildDetails.buildState}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Timing</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.timing}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Placement</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.homePlacement}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Financing</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.hasFinancing}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Customer Comment</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.customerComment.text}}</td></tr> <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Source</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">Champion Homes — Retailer API</td></tr> </table> <div style="text-align: center; margin: 28px 0;"> <a href="{{frontend_url}}/cl/{{entity.champion_action_token}}/accept" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px; margin-right: 8px;">Accept Lead</a> <a href="{{frontend_url}}/cl/{{entity.champion_action_token}}/decline" style="display: inline-block; background: #dc2626; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px;">Decline Lead</a> </div> <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 14px 16px; margin: 20px 0;"> <p style="margin: 0; font-size: 13px; color: #9a3412;"> <strong>You have ~48 hours to respond</strong> before Champion may reassign this lead to another dealer. Contact info (email and phone) will only be revealed after you accept. </p> </div> <div style="text-align: center; margin-top: 24px;"> <a href="{{frontend_url}}/crm/leads/{{entity.id}}" style="color: #f97316; font-size: 13px; text-decoration: underline;">Review in CRM</a> </div> </div> </div>'
+      } },
+      { 'id' => 'n3', 'type' => 'wait', 'config' => { 'duration' => 4, 'unit' => 'hours' } },
+      { 'id' => 'n4', 'type' => 'send_email', 'config' => {
+        'to' => '{{entity.owner_email}}',
+        'subject' => '4-Hour Reminder: Champion Lead Still Waiting — {{entity.first_name}} {{entity.last_name}}',
+        'body' => champion_reminder_body.call(
+          header_bg: '#f97316',
+          header_text: '4-Hour Reminder — Champion Lead Waiting',
+          intro: 'A Champion lead assigned to you <strong>4 hours ago</strong> has not been accepted or declined yet. Please respond using the buttons below.',
+          warning_text: 'This lead has been waiting 4 hours. Please accept or decline soon — Champion may reassign it if it sits too long.'
+        )
+      } },
+      { 'id' => 'n5', 'type' => 'wait', 'config' => { 'duration' => 20, 'unit' => 'hours' } },
+      { 'id' => 'n6', 'type' => 'send_email', 'config' => {
+        'to' => '{{entity.owner_email}}',
+        'subject' => '24-Hour Escalation: Champion Lead Requires Attention — {{entity.first_name}} {{entity.last_name}}',
+        'body' => champion_reminder_body.call(
+          header_bg: '#ea580c',
+          header_text: '24-Hour Escalation — Immediate Action Required',
+          intro: 'This Champion lead has been assigned to you for <strong>24 hours</strong> without a response. Immediate action is required.',
+          warning_bg: '#fef2f2',
+          warning_border: '#fecaca',
+          warning_color: '#991b1b',
+          warning_text: 'This lead has been waiting 24 hours without a response. It will be reassigned to another rep within 12 hours if not actioned.'
+        )
+      } },
+      { 'id' => 'n7', 'type' => 'wait', 'config' => { 'duration' => 12, 'unit' => 'hours' } },
+      { 'id' => 'n8', 'type' => 'assign_owner', 'config' => { 'strategy' => 'round_robin' } },
+      { 'id' => 'n9', 'type' => 'send_email', 'config' => {
+        'to' => '{{entity.owner_email}}',
+        'subject' => 'Champion Lead Reassigned to You — {{entity.first_name}} {{entity.last_name}}',
+        'body' => champion_reminder_body.call(
+          header_bg: '#f97316',
+          header_text: 'Champion Lead Reassigned to You',
+          intro: 'The previous sales rep did not respond within 36 hours, so this Champion lead has been <strong>reassigned to you</strong>. Please accept or decline using the buttons below.',
+          warning_text: 'You have approximately 12 hours before Champion may recall this lead entirely. Please act quickly.'
+        )
+      } },
+      { 'id' => 'n10', 'type' => 'wait', 'config' => { 'duration' => 12, 'unit' => 'hours' } },
+      { 'id' => 'n11', 'type' => 'send_email', 'config' => {
+        'to' => '{{entity.owner_email}}',
+        'subject' => 'FINAL: Champion Lead Expiring Soon — {{entity.first_name}} {{entity.last_name}}',
+        'body' => champion_reminder_body.call(
+          header_bg: '#dc2626',
+          header_text: 'FINAL WARNING — Champion Lead Expiring',
+          intro: 'This is your <strong>final warning</strong>. This Champion lead has been waiting nearly 48 hours and will likely be recalled by Champion shortly.',
+          warning_bg: '#fef2f2',
+          warning_border: '#fecaca',
+          warning_color: '#991b1b',
+          warning_text: 'Champion will likely reassign this lead to another dealer within hours. This is your last chance to accept.'
+        )
       } }
     ],
-    'edges' => linear_edges(%w[n1 n2])
+    'edges' => linear_edges(%w[n1 n2 n3 n4 n5 n6 n7 n8 n9 n10 n11])
   },
-  version: 2,
+  version: 5,
   parameters: {
     'notify_subject' => 'New Champion Lead: {{entity.first_name}} {{entity.last_name}} — Accept or Decline',
-    'notify_body' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;"><div style="background: #f97316; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;"><h2 style="margin: 0; font-size: 20px;">New Champion Lead Assigned to You</h2></div><div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;"><p style="margin: 0 0 16px; font-size: 15px; color: #374151;">A new lead from <strong>Champion Homes</strong> has been assigned to you and requires your attention.</p><table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;"><tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; width: 140px; color: #374151;">Name</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.first_name}} {{entity.last_name}}</td></tr><tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Source</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">Champion Homes — Retailer API</td></tr><tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Status</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_status}}</td></tr></table><div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 16px; margin-bottom: 20px;"><p style="margin: 0; font-size: 14px; color: #9a3412;"><strong>⚠️ Action Required:</strong> You must <strong>Accept</strong> or <strong>Decline</strong> this lead. Contact information (email and phone) will only be revealed after you accept the lead.</p></div><div style="text-align: center; margin: 24px 0;"><a href="{{frontend_url}}/crm/prospecting" style="display: inline-block; background: #f97316; color: white; padding: 12px 32px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px;">Review Lead in CRM →</a></div><p style="margin: 0; font-size: 13px; color: #6b7280; text-align: center;">Log in to your CRM and search for "{{entity.first_name}} {{entity.last_name}}" to view the full Champion lead panel.</p></div></div>'
+    'notify_body' => <<~HTML.gsub(/\s+/, ' ').strip
+      <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+        <div style="background: #f97316; color: white; padding: 16px 24px; border-radius: 8px 8px 0 0;">
+          <h2 style="margin: 0; font-size: 20px;">New Champion Lead — Action Required</h2>
+        </div>
+        <div style="border: 1px solid #e5e7eb; border-top: none; padding: 24px; border-radius: 0 0 8px 8px;">
+          <p style="margin: 0 0 16px; font-size: 15px; color: #374151;">
+            A new lead from <strong>Champion Homes</strong> has been assigned to you.
+            Use the buttons below to accept or decline directly from this email.
+          </p>
+
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; width: 160px; color: #374151;">Name</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.first_name}} {{entity.last_name}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Model</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.modelName}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Manufacturer</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.manufacturer}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Build Location</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.buildDetails.buildCity}}, {{entity.champion_lead_data.buildDetails.buildState}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Timing</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.timing}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Placement</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.homePlacement}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Financing</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.hasFinancing}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Customer Comment</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">{{entity.champion_lead_data.additionalDetails.customerComment.text}}</td></tr>
+            <tr><td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; color: #374151;">Source</td><td style="padding: 8px 12px; border: 1px solid #e5e7eb; color: #111827;">Champion Homes — Retailer API</td></tr>
+          </table>
+
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="{{frontend_url}}/cl/{{entity.champion_action_token}}/accept" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px; margin-right: 8px;">✓ Accept Lead</a>
+            <a href="{{frontend_url}}/cl/{{entity.champion_action_token}}/decline" style="display: inline-block; background: #dc2626; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px;">✗ Decline Lead</a>
+          </div>
+
+          <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; padding: 14px 16px; margin: 20px 0;">
+            <p style="margin: 0; font-size: 13px; color: #9a3412;">
+              <strong>⚠️ You have ~48 hours to respond</strong> before Champion may reassign this lead to another dealer.
+              Contact info (email and phone) will only be revealed after you accept.
+            </p>
+          </div>
+
+          <div style="text-align: center; margin-top: 24px;">
+            <a href="{{frontend_url}}/crm/leads/{{entity.id}}" style="color: #f97316; font-size: 13px; text-decoration: underline;">Review in CRM →</a>
+          </div>
+        </div>
+      </div>
+    HTML
   },
   parameter_schema: [
     { 'key' => 'notify_subject', 'label' => 'Notification Email Subject', 'type' => 'string', 'required' => true, 'default' => 'New Champion Lead: {{entity.first_name}} {{entity.last_name}} — Accept or Decline' },

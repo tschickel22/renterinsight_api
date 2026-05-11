@@ -36,17 +36,30 @@ class ChampionLeadSyncJob < ApplicationJob
     client     = ChampionLeadsApiClient.new(config)
     company    = config.company
 
-    # Use bulk download for a full reconciliation every run.
-    # Champion's data set per retailer is small (dozens–hundreds), so this is fine.
-    result = client.download_all
+    # Use paginated /leads endpoint (returns proper JSON objects).
+    # The /download endpoint returns CSV-style arrays which need conversion.
+    all_leads = []
+    page = 1
+    loop do
+      result = client.list_leads(page: page, page_size: 100)
 
-    unless result[:success]
-      config.record_sync_failure!(result[:error])
-      Rails.logger.error "[ChampionLeadSync] Config #{config.id} (#{config.display_label}): #{result[:error]}"
-      return
+      unless result[:success]
+        config.record_sync_failure!(result[:error])
+        Rails.logger.error "[ChampionLeadSync] Config #{config.id} (#{config.display_label}): #{result[:error]}"
+        return
+      end
+
+      batch = Array.wrap(result[:data])
+      break if batch.empty?
+
+      all_leads.concat(batch)
+      break if batch.size < 100 # last page
+
+      page += 1
+      break if page > 50 # safety cap
     end
 
-    leads_data = Array.wrap(result[:data])
+    leads_data = all_leads
 
     created = 0
     updated = 0
@@ -119,6 +132,11 @@ class ChampionLeadSyncJob < ApplicationJob
     )
 
     lead.save!
+
+    lead.update_columns(
+      champion_action_token:            SecureRandom.urlsafe_base64(32),
+      champion_action_token_expires_at: 72.hours.from_now
+    )
   end
 
   # ------------------------------------------------------------------
@@ -219,9 +237,8 @@ class ChampionLeadSyncJob < ApplicationJob
       if config.default_lead_owner_id.present?
         config.default_lead_owner_id
       else
-        # Fall back to first active admin
+        # Fall back to first admin user
         admin = config.company.users
-                      .where(is_active: true)
                       .where(role: %w[company_admin admin])
                       .order(:created_at)
                       .first

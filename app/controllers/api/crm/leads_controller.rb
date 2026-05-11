@@ -694,6 +694,8 @@ module Api
           champion_config_id: l.champion_config_id,
           champion_accepted_at: l.champion_accepted_at,
           champion_declined_at: l.champion_declined_at,
+          champion_action_token: l.champion_action_token,
+          champion_action_token_expires_at: l.champion_action_token_expires_at,
           score: l.lead_scores.max_by(&:updated_at)&.score,
           tags: l.tags.map { |t| { id: t.id, name: t.name, color: t.respond_to?(:color) ? t.color : nil } },
           createdAt: l.created_at,

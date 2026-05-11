@@ -58,8 +58,11 @@ module Api
       end
 
       def destroy
-        @rule.update(status: 'archived')
-        render json: { message: 'Archived' }
+        @rule.workflow_runs.active.find_each do |run|
+          run.update!(status: 'cancelled', completed_at: Time.current, error_details: { reason: 'rule_deleted' })
+        end
+        @rule.destroy!
+        render json: { message: 'Workflow deleted successfully' }
       end
 
       def activate
