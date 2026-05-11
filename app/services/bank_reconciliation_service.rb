@@ -54,6 +54,45 @@ class BankReconciliationService
     { success: true }
   end
 
+  # Undo the most recent completed reconciliation for its bank account.
+  # Validates this IS the latest completed one — you can't undo older ones
+  # because that would break the beginning-balance chain.
+  def undo(reconciliation)
+    unless reconciliation.status == 'completed'
+      return { error: 'Only completed reconciliations can be undone' }
+    end
+
+    latest_completed = reconciliation.bank_account
+      .bank_reconciliations
+      .where(status: 'completed')
+      .order(statement_date: :desc, id: :desc)
+      .first
+
+    if latest_completed.nil? || latest_completed.id != reconciliation.id
+      return { error: 'Only the most recent completed reconciliation can be undone. Undo newer reconciliations first.' }
+    end
+
+    # Check no in-progress reconciliation exists for this account
+    in_progress = reconciliation.bank_account
+      .bank_reconciliations
+      .where(status: 'in_progress')
+      .exists?
+
+    if in_progress
+      return { error: 'Cannot undo while another reconciliation is in progress for this account. Complete or delete it first.' }
+    end
+
+    reconciliation.update!(
+      status: 'in_progress',
+      completed_at: nil,
+      completed_by_id: nil
+    )
+    reconciliation.bank_reconciliation_items.update_all(cleared: false)
+    reconciliation.recalculate!
+
+    { success: true }
+  end
+
   def add_adjustment(reconciliation, amount:, account_id:, memo:, user:)
     return { error: 'Reconciliation is already completed' } unless reconciliation.in_progress?
 

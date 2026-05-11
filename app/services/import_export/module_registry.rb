@@ -15,7 +15,9 @@ module ImportExport
       'parts'           => { model: 'Part',          scope: :parts,           match_fields: %w[sku barcode],           label: 'Parts',           supports_images: true  },
       'service_tickets' => { model: 'ServiceTicket', scope: :service_tickets, match_fields: %w[ticket_number],         label: 'Service Tickets', supports_images: true  },
       'quotes'          => { model: 'Quote',         scope: :quotes,          match_fields: %w[quote_number],          label: 'Quotes',          supports_images: false },
-      'invoices'        => { model: 'Invoice',       scope: :invoices,        match_fields: %w[invoice_number],        label: 'Invoices',        supports_images: false }
+      'invoices'        => { model: 'Invoice',       scope: :invoices,        match_fields: %w[invoice_number],        label: 'Invoices',        supports_images: false },
+      'budget_lines'    => { model: 'BudgetLine',    scope: :budget_lines,    match_fields: %w[account_number],        label: 'Budget Lines',    supports_images: false,
+                             requires_context: true, context_params: %w[budget_id] }
     }.freeze
 
     EXCLUDED_COLUMN_PATTERNS = [
@@ -99,6 +101,10 @@ module ImportExport
         'loan_id'      => { association: :loan,      attr: :name },
         'quote_id'     => { association: :quote,     attr: :name },
         'sales_rep_id' => { association: :sales_rep, attr: :name }
+      },
+      'budget_lines' => {
+        'chart_of_account_id' => { association: :chart_of_account, attr: :account_number },
+        'budget_id'           => { association: :budget,           attr: :name }
       }
     }.freeze
 
@@ -131,6 +137,9 @@ module ImportExport
       'deal_name'           => { label: 'Deal (by name)',          target_column: 'deal_id',       model: 'Deal',   scope: :deals,    search_fields: %w[name deal_number] },
       'sales_rep_email'     => { label: 'Sales Rep (by email)',    target_column: 'sales_rep_id',  model: 'User',   scope: :users,    search_fields: %w[email] },
       'sales_rep_name'      => { label: 'Sales Rep (by name)',     target_column: 'sales_rep_id',  model: 'User',   scope: :users,    search_fields: %w[name email] },
+      # --- Budget lines (Chart of Account lookups, distinct from CRM Account lookups above) ---
+      'account_number'      => { label: 'Account Number',          target_column: 'chart_of_account_id', model: 'ChartOfAccount', scope: :chart_of_accounts, search_fields: %w[account_number] },
+      'coa_account_name'    => { label: 'Account Name (CoA)',      target_column: 'chart_of_account_id', model: 'ChartOfAccount', scope: :chart_of_accounts, search_fields: %w[name] },
     }.freeze
 
     # Which lookup fields are available per module (keyed by the `_id` columns
@@ -168,6 +177,12 @@ module ImportExport
       # Dynamic field discovery — standard columns + custom fields + lookup fields.
       # Pass for_import: true to exclude foreign key _id columns and add lookup fields.
       def fields_for(module_type, company_id: nil, for_import: false)
+        # Modules that don't follow the standard column-introspection pattern
+        # supply their own field list (e.g. budget_lines has a fixed monthly
+        # column layout that doesn't match the CSV format dealers upload).
+        custom_override = custom_fields_override(module_type)
+        return custom_override if custom_override
+
         klass = model_class(module_type)
         return [] unless klass
 
@@ -189,6 +204,45 @@ module ImportExport
         lookups = for_import ? lookup_fields_for(module_type) : []
 
         standard + custom + lookups
+      end
+
+      # Hardcoded fields for modules that don't follow the standard
+      # ActiveRecord column-introspection flow. Returns nil for normal modules.
+      def custom_fields_override(module_type)
+        case module_type.to_s
+        when 'budget_lines'
+          [
+            { key: 'account_number', label: 'Account Number', type: 'string',   required: true,  source: 'standard' },
+            { key: 'account_name',   label: 'Account Name',   type: 'string',   required: false, source: 'standard' },
+            { key: 'month_1',        label: 'Month 1 (Jan)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_2',        label: 'Month 2 (Feb)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_3',        label: 'Month 3 (Mar)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_4',        label: 'Month 4 (Apr)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_5',        label: 'Month 5 (May)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_6',        label: 'Month 6 (Jun)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_7',        label: 'Month 7 (Jul)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_8',        label: 'Month 8 (Aug)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_9',        label: 'Month 9 (Sep)',  type: 'currency', required: false, source: 'standard' },
+            { key: 'month_10',       label: 'Month 10 (Oct)', type: 'currency', required: false, source: 'standard' },
+            { key: 'month_11',       label: 'Month 11 (Nov)', type: 'currency', required: false, source: 'standard' },
+            { key: 'month_12',       label: 'Month 12 (Dec)', type: 'currency', required: false, source: 'standard' },
+            { key: 'notes',          label: 'Notes',          type: 'string',   required: false, source: 'standard' }
+          ]
+        end
+      end
+
+      # True for modules that require additional context params (e.g. budget_id
+      # for budget_lines) on top of the file/module selection. The UI uses this
+      # to prompt for the required selectors before allowing upload.
+      def requires_context?(module_type)
+        cfg = config_for(module_type)
+        cfg ? cfg[:requires_context] == true : false
+      end
+
+      def context_params(module_type)
+        cfg = config_for(module_type)
+        return [] unless cfg
+        Array(cfg[:context_params])
       end
 
       def required_fields_for(module_type)

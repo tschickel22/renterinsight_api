@@ -13,6 +13,11 @@ module ImportExport
     end
 
     def process!
+      # Modules with bespoke layouts (e.g. budget_lines, which has a
+      # monthly column structure that doesn't map 1:1 to CSV uploads)
+      # delegate to their own specialized importer.
+      return BudgetLineImporter.new(@job).process! if @job.module_type.to_s == 'budget_lines'
+
       @job.update!(status: 'processing', started_at: Time.current)
 
       file_path = download_source

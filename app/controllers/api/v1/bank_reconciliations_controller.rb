@@ -2,7 +2,7 @@
 
 class Api::V1::BankReconciliationsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_reconciliation, only: [:show, :toggle_item, :clear_all, :unclear_all, :complete, :add_adjustment, :destroy]
+  before_action :set_reconciliation, only: [:show, :toggle_item, :clear_all, :unclear_all, :complete, :add_adjustment, :destroy, :undo]
 
   def index
     return unless authorize_action!('bank_reconciliation', 'read')
@@ -146,6 +146,21 @@ class Api::V1::BankReconciliationsController < ApplicationController
       render json: { error: result[:error] }, status: :unprocessable_entity
     else
       head :no_content
+    end
+  end
+
+  # POST /api/v1/bank_reconciliations/:id/undo
+  def undo
+    return unless authorize_action!('bank_reconciliation', 'update')
+
+    service = BankReconciliationService.new(@company)
+    result = service.undo(@reconciliation)
+
+    if result[:error]
+      render json: { error: result[:error] }, status: :unprocessable_entity
+    else
+      @reconciliation.reload
+      render_reconciliation_detail
     end
   end
 

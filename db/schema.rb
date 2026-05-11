@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_08_050002) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_10_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1079,6 +1079,60 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_08_050002) do
     t.index ["created_at"], name: "index_brochures_on_created_at"
     t.index ["location_id"], name: "index_brochures_on_location_id"
     t.index ["public_id"], name: "index_brochures_on_public_id", unique: true
+  end
+
+  create_table "budget_lines", force: :cascade do |t|
+    t.bigint "budget_id", null: false
+    t.bigint "chart_of_account_id", null: false
+    t.decimal "month_1", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_2", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_3", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_4", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_5", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_6", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_7", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_8", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_9", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_10", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_11", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "month_12", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "annual_total", precision: 15, scale: 2, default: "0.0", null: false
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["budget_id", "chart_of_account_id"], name: "index_budget_lines_on_budget_and_account", unique: true
+    t.index ["budget_id"], name: "index_budget_lines_on_budget_id"
+    t.index ["chart_of_account_id"], name: "index_budget_lines_on_chart_of_account_id"
+  end
+
+  create_table "budgets", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.integer "fiscal_year", null: false
+    t.string "name", null: false
+    t.text "description"
+    t.string "budget_type", default: "annual", null: false
+    t.string "status", default: "draft", null: false
+    t.string "consolidation_type", default: "standalone", null: false
+    t.bigint "created_by_id"
+    t.bigint "approved_by_id"
+    t.datetime "approved_at"
+    t.datetime "locked_at"
+    t.bigint "locked_by_id"
+    t.text "notes"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["approved_by_id"], name: "index_budgets_on_approved_by_id"
+    t.index ["company_id", "consolidation_type"], name: "index_budgets_on_company_id_and_consolidation_type"
+    t.index ["company_id", "fiscal_year", "location_id", "name"], name: "index_budgets_on_company_year_location_name", unique: true
+    t.index ["company_id", "fiscal_year"], name: "index_budgets_on_company_id_and_fiscal_year"
+    t.index ["company_id", "location_id"], name: "index_budgets_on_company_id_and_location_id"
+    t.index ["company_id", "status"], name: "index_budgets_on_company_id_and_status"
+    t.index ["company_id"], name: "index_budgets_on_company_id"
+    t.index ["created_by_id"], name: "index_budgets_on_created_by_id"
+    t.index ["location_id"], name: "index_budgets_on_location_id"
+    t.index ["locked_by_id"], name: "index_budgets_on_locked_by_id"
   end
 
   create_table "buyer_portal_accesses", force: :cascade do |t|
@@ -6762,6 +6816,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_08_050002) do
   add_foreign_key "blog_posts_categories", "blog_categories"
   add_foreign_key "blog_posts_categories", "blog_posts"
   add_foreign_key "brochures", "companies"
+  add_foreign_key "budget_lines", "budgets", on_delete: :cascade
+  add_foreign_key "budget_lines", "chart_of_accounts"
+  add_foreign_key "budgets", "companies"
+  add_foreign_key "budgets", "locations"
+  add_foreign_key "budgets", "users", column: "approved_by_id"
+  add_foreign_key "budgets", "users", column: "created_by_id"
+  add_foreign_key "budgets", "users", column: "locked_by_id"
   add_foreign_key "campaign_audiences", "audiences", column: "saved_audience_id"
   add_foreign_key "campaign_audiences", "campaigns"
   add_foreign_key "campaign_enrollments", "campaigns"

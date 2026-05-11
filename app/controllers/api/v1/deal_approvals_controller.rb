@@ -155,6 +155,12 @@ class Api::V1::DealApprovalsController < ApplicationController
 
   # POST /api/v1/deal_approvals/:id/approve_commission
   def approve_commission
+    # CRITICAL: Deal must be GL-posted before commission can be approved
+    unless @deal.gl_posted?
+      render json: { error: 'Cannot approve commission: deal must be GL-approved first' }, status: :unprocessable_entity
+      return
+    end
+
     result = post_commission_for_deal(@deal)
 
     if result[:error]

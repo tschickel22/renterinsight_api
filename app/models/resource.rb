@@ -164,7 +164,8 @@ public
       { key: 'bank_accounts_accounting', name: 'Bank Accounts (Accounting)', category: 'operations', description: 'Bank feed and reconciliation', position: 133 },
       { key: 'bank_reconciliation', name: 'Bank Reconciliation', category: 'operations', description: 'Bank statement reconciliation', position: 134 },
       { key: 'bills', name: 'Bills & Expenses', category: 'operations', description: 'Manage vendor bills, expenses, and payments', position: 135 },
-      { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 137 }
+      { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 137 },
+      { key: 'budgets', name: 'Budgets', category: 'operations', description: 'Budget planning, forecasting, and variance analysis', position: 135 }
     ]
     
     resources_data.each do |resource_data|

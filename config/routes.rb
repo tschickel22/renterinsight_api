@@ -1040,6 +1040,27 @@ Rails.application.routes.draw do
           post :calculate
         end
       end
+
+      # ==================== BUDGETS ====================
+      resources :budgets do
+        member do
+          post :lock
+          post :unlock
+          post :activate
+          post :deactivate
+          post :archive
+          get  :variance_report, path: 'variance-report'
+          get  :pl_overview,     path: 'pl-overview'
+        end
+        collection do
+          post :copy_from_prior_year, path: 'copy-from-prior-year'
+          post :wizard
+          post :ai_suggest, path: 'ai-suggest'
+          post :rebuild_consolidated, path: 'rebuild-consolidated'
+          get  :data_coverage, path: 'data-coverage'
+          get  :stats
+        end
+      end
       
       # ==================== PORTAL USERS ====================
       resources :portal_users, path: 'portal_users' do
@@ -1826,6 +1847,7 @@ Rails.application.routes.draw do
           post :unclear_all
           post :complete
           post :add_adjustment
+          post :undo
         end
       end
 

@@ -76,6 +76,8 @@ class Company < ApplicationRecord
   # Accounting Module Associations
   has_many :chart_of_accounts, dependent: :destroy
   has_many :journal_entries, dependent: :destroy
+  has_many :budgets, dependent: :destroy
+  has_many :budget_lines, through: :budgets
   has_many :fiscal_periods, dependent: :destroy
   has_many :account_links, dependent: :destroy
   has_many :recurring_journal_entries, dependent: :destroy
