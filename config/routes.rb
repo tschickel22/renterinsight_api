@@ -252,6 +252,7 @@ Rails.application.routes.draw do
         get 'profile'
         patch 'profile', action: 'update_profile'
         post 'change_password'
+        post 'test_digest'
         get 'security'
         patch 'security', action: 'update_security'
         get 'login_activity'

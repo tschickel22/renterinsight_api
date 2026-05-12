@@ -301,6 +301,31 @@ module Api
         end
       end
 
+      # POST /api/v1/user_settings/test_digest
+      def test_digest
+        unless @user_type == 'admin'
+          return render json: { success: false, error: 'Not available for portal users' }, status: :forbidden
+        end
+
+        unless @user.respond_to?(:has_email_connection?) && @user.has_email_connection?
+          return render json: {
+            success: false,
+            error: 'No email connection configured. Connect Gmail or Outlook in Account Settings.'
+          }, status: :unprocessable_entity
+        end
+
+        result = DailyDigestService.new(@user).send_digest!
+
+        if result[:success]
+          render json: { success: true, message: 'Digest email sent to ' + @user.email }
+        else
+          render json: { success: false, error: result[:error] }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error('[test_digest] Error: ' + e.message)
+        render json: { success: false, error: e.message }, status: :internal_server_error
+      end
+
       private
 
       # Coerces and constrains workqueue_preferences input so users can't
