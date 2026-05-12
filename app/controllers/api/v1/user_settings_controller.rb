@@ -21,6 +21,7 @@ module Api
           zip: extract_zip,
           user_type: @user_type,
           landing_page: @user.respond_to?(:landing_page) ? @user.landing_page : nil,
+          booking_url: @user.respond_to?(:booking_url) ? @user.booking_url : nil,
           workqueue_preferences: @user.respond_to?(:workqueue_preferences) ? (@user.workqueue_preferences || {}) : {}
         }, status: :ok
       end
@@ -28,7 +29,7 @@ module Api
       # PATCH /api/v1/user_settings/profile
       def update_profile
         profile_params = params.permit(
-          :first_name, :last_name, :phone, :email, :address, :city, :state, :zip, :landing_page,
+          :first_name, :last_name, :phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
           workqueue_preferences: {}
         )
 
@@ -61,6 +62,7 @@ module Api
             updates[:phone] = profile_params[:phone] if profile_params[:phone].present?
             updates[:email] = profile_params[:email] if profile_params[:email].present?
             updates[:landing_page] = profile_params[:landing_page] if profile_params[:landing_page].present?
+            updates[:booking_url] = profile_params[:booking_url] if profile_params.key?(:booking_url)
 
             if params.key?(:workqueue_preferences) && @user.respond_to?(:workqueue_preferences)
               raw = profile_params[:workqueue_preferences] || {}

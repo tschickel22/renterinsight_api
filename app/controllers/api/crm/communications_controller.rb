@@ -1452,7 +1452,7 @@ module Api
           from_email: config[:fromEmail],
           from_name: config[:fromName],
           sender_user_id: current_user&.id,
-          assigned_user_id: @lead&.assigned_user_id
+          assigned_user_id: @lead&.owner_id
         }
         meta[:impersonated_by] = original_user.id if impersonating?
         meta.compact
@@ -1467,7 +1467,7 @@ module Api
           character_count: sms_params[:content]&.length,
           from_number: config[:fromNumber],
           sender_user_id: current_user&.id,
-          assigned_user_id: @lead&.assigned_user_id
+          assigned_user_id: @lead&.owner_id
         }
         meta[:impersonated_by] = original_user.id if impersonating?
         meta.compact

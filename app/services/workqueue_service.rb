@@ -13,6 +13,8 @@ class WorkqueueService
     'activity_meetings_today'     => :activity_meetings_today,
     'activity_calls_due'          => :activity_calls_due,
     'activity_reminders_upcoming' => :activity_reminders_upcoming,
+    'leads_replied'               => :leads_replied,
+    'contacts_replied'            => :contacts_replied,
     'leads_mine'                  => :leads_mine,
     'leads_new_24h'               => :leads_new_24h,
     'leads_stale_48h'             => :leads_stale_48h,
@@ -33,7 +35,7 @@ class WorkqueueService
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
-      queue_ids: %w[leads_mine leads_new_24h leads_stale_48h] },
+      queue_ids: %w[leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
     { id: 'my_deals', label: 'My Deals',
       queue_ids: %w[deals_mine deals_closing_month deals_closing_week deals_stale_30d] },
     { id: 'my_service', label: 'My Service Work',
@@ -50,6 +52,7 @@ class WorkqueueService
     reminders_window_days:  1,
     closing_week_days:      7,
     tasks_week_days:        7,
+    replied_window_days:    7,
     hidden_queues:          [],
   }.freeze
 
@@ -94,7 +97,11 @@ class WorkqueueService
     total_pages = (total.to_f / @per_page).ceil
     records = scope.offset((@page - 1) * @per_page).limit(@per_page).to_a
 
-    preload_lead_engagement(records.select { |r| r.is_a?(Lead) })
+    lead_records = records.select { |r| r.is_a?(Lead) }
+    preload_lead_engagement(lead_records)
+    preload_lead_communications(lead_records)
+    preload_contact_communications(records.select { |r| r.is_a?(Contact) })
+    preload_activity_parents(records.select { |r| r.is_a?(WorkqueueActivity) })
 
     {
       items: records.map { |r| normalize(r) },
@@ -139,6 +146,8 @@ class WorkqueueService
     when 'activity_meetings_today'     then 'Meetings — Today'
     when 'activity_calls_due'          then 'Calls — Due'
     when 'activity_reminders_upcoming' then "Reminders — Next #{prefs[:reminders_window_days]}d"
+    when 'leads_replied'               then 'Replied — Needs Response'
+    when 'contacts_replied'            then 'Contact Replies'
     when 'leads_mine'                  then 'My Leads'
     when 'leads_new_24h'               then "New — Last #{prefs[:new_leads_days]}d"
     when 'leads_stale_48h'             then "Untouched #{prefs[:stale_leads_days]}d+"
@@ -255,6 +264,58 @@ class WorkqueueService
                   .where.not(status: %w[converted lost unqualified])
                   .where('(leads.last_activity_at IS NULL AND leads.created_at < :t) OR leads.last_activity_at < :t',
                          t: cutoff)
+  end
+
+  # Leads owned by the user who have sent an inbound reply within the configured
+  # window AND the user hasn't responded since. Implemented with a correlated
+  # NOT EXISTS so the filter happens in one round-trip and stays an AR scope
+  # (compatible with apply_search / apply_sort / pagination above).
+  def leads_replied
+    cutoff = prefs[:replied_window_days].to_i.days.ago
+    @company.leads
+            .where(owner_id: @user.id)
+            .where.not(status: %w[converted lost unqualified])
+            .where(<<~SQL.squish, cutoff: cutoff)
+              EXISTS (
+                SELECT 1 FROM communications c_in
+                WHERE c_in.communicable_type = 'Lead'
+                  AND c_in.communicable_id = leads.id
+                  AND c_in.direction = 'inbound'
+                  AND c_in.created_at >= :cutoff
+                  AND NOT EXISTS (
+                    SELECT 1 FROM communications c_out
+                    WHERE c_out.communicable_type = 'Lead'
+                      AND c_out.communicable_id = leads.id
+                      AND c_out.direction = 'outbound'
+                      AND c_out.created_at > c_in.created_at
+                  )
+              )
+            SQL
+  end
+
+  # Contact equivalent of leads_replied. Contacts.owner_id mirrors leads.owner_id
+  # in this schema, and the communicable_type differs ('Contact').
+  def contacts_replied
+    cutoff = prefs[:replied_window_days].to_i.days.ago
+    @company.contacts
+            .where(owner_id: @user.id)
+            .where(is_deleted: [false, nil])
+            .where(<<~SQL.squish, cutoff: cutoff)
+              EXISTS (
+                SELECT 1 FROM communications c_in
+                WHERE c_in.communicable_type = 'Contact'
+                  AND c_in.communicable_id = contacts.id
+                  AND c_in.direction = 'inbound'
+                  AND c_in.created_at >= :cutoff
+                  AND NOT EXISTS (
+                    SELECT 1 FROM communications c_out
+                    WHERE c_out.communicable_type = 'Contact'
+                      AND c_out.communicable_id = contacts.id
+                      AND c_out.direction = 'outbound'
+                      AND c_out.created_at > c_in.created_at
+                  )
+              )
+            SQL
   end
 
   # ─── Engagement queues ───────────────────────────────────────────
@@ -396,6 +457,8 @@ class WorkqueueService
       scope.where('title ILIKE :p OR description ILIKE :p', p: pattern)
     when 'Lead'
       scope.where('first_name ILIKE :p OR last_name ILIKE :p OR email ILIKE :p OR phone ILIKE :p', p: pattern)
+    when 'Contact'
+      scope.where('first_name ILIKE :p OR last_name ILIKE :p OR email ILIKE :p OR phone ILIKE :p', p: pattern)
     when 'Deal'
       scope.where('name ILIKE :p OR deal_number ILIKE :p OR customer_name ILIKE :p', p: pattern)
     when 'ServiceTicket'
@@ -423,6 +486,8 @@ class WorkqueueService
       scope.order(Arel.sql('due_date ASC NULLS LAST'))
     when 'Lead'
       scope.order(created_at: :desc)
+    when 'Contact'
+      scope.order(created_at: :desc)
     when 'Deal'
       scope.order(Arel.sql('expected_close_date ASC NULLS LAST'))
     when 'ServiceTicket'
@@ -440,6 +505,7 @@ class WorkqueueService
     case record
     when Task          then normalize_task(record)
     when Lead          then normalize_lead(record)
+    when Contact       then normalize_contact(record)
     when Deal          then normalize_deal(record)
     when ServiceTicket then normalize_ticket(record)
     when Quote         then normalize_quote(record)
@@ -472,23 +538,36 @@ class WorkqueueService
 
   def normalize_lead(r)
     eng = lead_engagement_for(r.id)
+    full_name = [r.first_name, r.last_name].compact.join(' ').presence
+    outbound = (@last_outbounds ||= {})[r.id]
+    inbound  = (@last_inbounds  ||= {})[r.id]
+    has_unread_reply = inbound.present? && (outbound.nil? || inbound.created_at > outbound.created_at)
+
     {
-      uid:                "lead-#{r.id}",
-      entity_type:        'lead',
-      entity_id:          r.id,
-      title:              [r.first_name, r.last_name].compact.join(' ').presence || 'Unnamed Lead',
-      subtitle:           r.email,
-      status:             r.status,
-      priority:           nil,
-      badge:              r.try(:source)&.try(:name),
-      amount:             nil,
-      due_at:             nil,
-      last_activity_at:   r.try(:last_activity_at),
-      link:               "/crm/leads/#{r.id}",
-      engagement_opens:   eng[:opens],
-      engagement_clicks:  eng[:clicks],
-      last_engagement_at: eng[:last_at],
-      engagement_source:  eng[:source],
+      uid:                   "lead-#{r.id}",
+      entity_type:           'lead',
+      entity_id:             r.id,
+      title:                 full_name || 'Unnamed Lead',
+      subtitle:              r.email,
+      status:                r.status,
+      priority:              nil,
+      badge:                 r.try(:source)&.try(:name),
+      amount:                nil,
+      due_at:                nil,
+      last_activity_at:      r.try(:last_activity_at),
+      link:                  "/crm/leads/#{r.id}",
+      entity_phone:          r.try(:phone),
+      entity_email:          r.email,
+      entity_name:           full_name,
+      engagement_opens:      eng[:opens],
+      engagement_clicks:     eng[:clicks],
+      last_engagement_at:    eng[:last_at],
+      engagement_source:     eng[:source],
+      last_outbound_at:      outbound&.created_at,
+      last_outbound_channel: outbound&.channel,
+      last_inbound_at:       inbound&.created_at,
+      last_inbound_channel:  inbound&.channel,
+      has_unread_reply:      has_unread_reply,
     }
   end
 
@@ -496,6 +575,84 @@ class WorkqueueService
 
   def lead_engagement_for(lead_id)
     (@lead_engagement ||= {})[lead_id] || EMPTY_ENGAGEMENT
+  end
+
+  # Loads the most recent outbound and inbound Communication for each lead in a
+  # single round-trip per direction using PostgreSQL's DISTINCT ON. Populates
+  # @last_outbounds / @last_inbounds, keyed by lead id, so normalize_lead can
+  # surface last_outbound_at / last_inbound_at / has_unread_reply without
+  # per-row queries.
+  def preload_lead_communications(leads)
+    @last_outbounds = {}
+    @last_inbounds  = {}
+    return if leads.empty?
+
+    lead_ids = leads.map(&:id)
+
+    @last_outbounds = Communication
+                        .where(communicable_type: 'Lead', communicable_id: lead_ids, direction: 'outbound')
+                        .select('DISTINCT ON (communicable_id) communicable_id, created_at, channel')
+                        .order('communicable_id, created_at DESC')
+                        .index_by(&:communicable_id)
+
+    @last_inbounds = Communication
+                       .where(communicable_type: 'Lead', communicable_id: lead_ids, direction: 'inbound')
+                       .select('DISTINCT ON (communicable_id) communicable_id, created_at, channel')
+                       .order('communicable_id, created_at DESC')
+                       .index_by(&:communicable_id)
+  end
+
+  # Same shape as preload_lead_communications but for the Contact pipeline.
+  # Populates @contact_last_outbounds / @contact_last_inbounds, keyed by
+  # contact id, so normalize_contact can surface reply context cheaply.
+  def preload_contact_communications(contacts)
+    @contact_last_outbounds = {}
+    @contact_last_inbounds  = {}
+    return if contacts.empty?
+
+    contact_ids = contacts.map(&:id)
+
+    @contact_last_outbounds = Communication
+                                .where(communicable_type: 'Contact', communicable_id: contact_ids, direction: 'outbound')
+                                .select('DISTINCT ON (communicable_id) communicable_id, created_at, channel')
+                                .order('communicable_id, created_at DESC')
+                                .index_by(&:communicable_id)
+
+    @contact_last_inbounds = Communication
+                               .where(communicable_type: 'Contact', communicable_id: contact_ids, direction: 'inbound')
+                               .select('DISTINCT ON (communicable_id) communicable_id, created_at, channel')
+                               .order('communicable_id, created_at DESC')
+                               .index_by(&:communicable_id)
+  end
+
+  def normalize_contact(r)
+    full_name = [r.first_name, r.last_name].compact.join(' ').presence
+    outbound = (@contact_last_outbounds ||= {})[r.id]
+    inbound  = (@contact_last_inbounds  ||= {})[r.id]
+    has_unread_reply = inbound.present? && (outbound.nil? || inbound.created_at > outbound.created_at)
+
+    {
+      uid:                   "contact-#{r.id}",
+      entity_type:           'contact',
+      entity_id:             r.id,
+      title:                 full_name || 'Unnamed Contact',
+      subtitle:              r.email,
+      status:                nil,
+      priority:              nil,
+      badge:                 nil,
+      amount:                nil,
+      due_at:                nil,
+      last_activity_at:      r.try(:last_activity_at),
+      link:                  "/contacts/#{r.id}",
+      entity_phone:          r.try(:phone),
+      entity_email:          r.email,
+      entity_name:           full_name,
+      last_outbound_at:      outbound&.created_at,
+      last_outbound_channel: outbound&.channel,
+      last_inbound_at:       inbound&.created_at,
+      last_inbound_channel:  inbound&.channel,
+      has_unread_reply:      has_unread_reply,
+    }
   end
 
   def preload_lead_engagement(leads)
@@ -649,19 +806,74 @@ class WorkqueueService
                   else '#'
                   end
 
+    parent_info = activity_parent_info(r.parent_type, r.parent_id)
+
     {
-      uid:              r.uid,
-      entity_type:      'activity',
-      entity_id:        r.source_id,
-      title:            r.subject.presence || "#{r.activity_type&.titleize} Activity",
-      subtitle:         "#{r.parent_type} ##{r.parent_id}",
-      status:           r.status,
-      priority:         r.priority,
-      badge:            r.activity_type,
-      amount:           nil,
-      due_at:           r.due_date,
-      last_activity_at: r.updated_at,
-      link:             parent_link,
+      uid:                r.uid,
+      entity_type:        'activity',
+      entity_id:          r.source_id,
+      title:              r.subject.presence || "#{r.activity_type&.titleize} Activity",
+      subtitle:           "#{r.parent_type} ##{r.parent_id}",
+      status:             r.status,
+      priority:           r.priority,
+      badge:              r.activity_type,
+      amount:             nil,
+      due_at:             r.due_date,
+      last_activity_at:   r.updated_at,
+      link:               parent_link,
+      parent_entity_type: r.parent_type&.downcase,
+      parent_entity_id:   r.parent_id,
+      entity_name:        parent_info[:name],
+      entity_phone:       parent_info[:phone],
+      entity_email:       parent_info[:email],
     }
+  end
+
+  EMPTY_PARENT_INFO = { name: nil, phone: nil, email: nil }.freeze
+
+  # Looks up cached parent info populated by preload_activity_parents. Falls
+  # back to an empty hash so callers can always safely chain into [:name] etc.
+  def activity_parent_info(parent_type, parent_id)
+    return EMPTY_PARENT_INFO if parent_type.blank? || parent_id.blank?
+
+    (@activity_parents || {}).dig(parent_type, parent_id) || EMPTY_PARENT_INFO
+  end
+
+  # Batches the parent-entity lookup for a page of WorkqueueActivity records so
+  # normalize_activity doesn't hit the DB per item. One SELECT per parent type
+  # actually present on the page; Deal returns name-only since deals carry no
+  # phone/email of their own.
+  def preload_activity_parents(activities)
+    @activity_parents = {}
+    return if activities.empty?
+
+    grouped = activities.group_by(&:parent_type)
+
+    grouped.each do |parent_type, rows|
+      ids = rows.map(&:parent_id).compact.uniq
+      next if ids.empty?
+
+      @activity_parents[parent_type] =
+        case parent_type
+        when 'Lead'
+          Lead.where(id: ids).pluck(:id, :first_name, :last_name, :phone, :email).each_with_object({}) do |(id, fn, ln, ph, em), h|
+            h[id] = { name: [fn, ln].compact.reject(&:blank?).join(' ').presence, phone: ph, email: em }
+          end
+        when 'Contact'
+          Contact.where(id: ids).pluck(:id, :first_name, :last_name, :phone, :email).each_with_object({}) do |(id, fn, ln, ph, em), h|
+            h[id] = { name: [fn, ln].compact.reject(&:blank?).join(' ').presence, phone: ph, email: em }
+          end
+        when 'Account'
+          Account.where(id: ids).pluck(:id, :name, :phone, :email).each_with_object({}) do |(id, name, ph, em), h|
+            h[id] = { name: name, phone: ph, email: em }
+          end
+        when 'Deal'
+          Deal.where(id: ids).pluck(:id, :name).each_with_object({}) do |(id, name), h|
+            h[id] = { name: name, phone: nil, email: nil }
+          end
+        else
+          {}
+        end
+    end
   end
 end

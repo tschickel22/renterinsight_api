@@ -50,6 +50,7 @@ class AccountActivity < ApplicationRecord
   
   after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
   after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
+  after_commit :touch_parent_last_activity, on: :create
   
   def complete!
     update!(status: 'completed', completed_at: Time.current)
@@ -141,5 +142,16 @@ class AccountActivity < ApplicationRecord
     Rails.logger.info "[AccountActivity] Rescheduled reminder for activity #{id}"
   rescue => e
     Rails.logger.error "[AccountActivity] Failed to reschedule reminder: #{e.message}"
+  end
+
+  # Accounts use last_activity_date (not last_activity_at). update_columns skips
+  # validations and callbacks — just a timestamp touch so workqueue stale
+  # filters refresh after the activity is logged.
+  def touch_parent_last_activity
+    return unless account && Account.column_names.include?('last_activity_date')
+
+    account.update_columns(last_activity_date: created_at || Time.current)
+  rescue => e
+    Rails.logger.warn "[AccountActivity] touch_parent_last_activity failed: #{e.message}"
   end
 end

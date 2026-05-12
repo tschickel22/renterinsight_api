@@ -284,6 +284,7 @@ module Api
             email: user.email,
             firstName: user.first_name,
             lastName: user.last_name,
+            landing_page: user.try(:landing_page),
             user_type: determine_user_type(user),
             role: user.role,
             company_id: (user.platform_admin? || user.super_admin?) ? nil : user.company_id,

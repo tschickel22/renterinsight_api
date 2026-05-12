@@ -592,6 +592,18 @@ module Api
       pipeline_stages = Setting.get('Company', @company.id, 'pipeline_stages', nil)
       base_settings[:pipeline_stages] = pipeline_stages if pipeline_stages.present?
 
+      # SMS availability flag for non-admin UI checks (e.g., workqueue quick actions).
+      # Only exposes a boolean and the from_number (already visible to recipients) —
+      # no credentials.
+      begin
+        sms_cfg = CommunicationSettingsService.for_company(@company).sms_config
+        base_settings[:sms_available] = sms_cfg[:enabled] == true && sms_cfg[:from_number].present?
+        base_settings[:sms_from_number] = sms_cfg[:from_number] if base_settings[:sms_available]
+      rescue => e
+        Rails.logger.warn "[serialize_basic_settings] SMS check failed: #{e.message}"
+        base_settings[:sms_available] = false
+      end
+
       base_settings
     end
 
