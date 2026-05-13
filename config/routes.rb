@@ -1797,6 +1797,7 @@ Rails.application.routes.draw do
       get 'accounting/reports/departmental_pnl', to: 'accounting_reports#departmental_pnl'
       get 'accounting/reports/sales_tax_summary', to: 'accounting_reports#sales_tax_summary'
       get 'accounting/reports/cash_flow_statement', to: 'accounting_reports#cash_flow_statement'
+      get 'accounting/reports/cash_flow_forecast', to: 'accounting_reports#cash_flow_forecast'
       get 'accounting/dashboard', to: 'accounting_reports#dashboard'
       get 'accounting/locations', to: 'accounting_reports#accounting_locations'
 

@@ -155,6 +155,21 @@ class Api::V1::AccountingReportsController < ApplicationController
     render json: service.widgets
   end
 
+  # GET /api/v1/accounting/reports/cash_flow_forecast
+  def cash_flow_forecast
+    return unless authorize_action!('financial_reports', 'read')
+
+    horizon = (params[:horizon_days] || 90).to_i.clamp(7, 365)
+
+    service = Reports::CashFlowForecastService.new(@company)
+    report = service.generate(
+      horizon_days: horizon,
+      location_id: params[:location_id].presence || accounting_location_id
+    )
+
+    render json: report
+  end
+
   # GET /api/v1/accounting/reports/floor_plan
   def floor_plan
     return unless authorize_action!('financial_reports', 'read')
