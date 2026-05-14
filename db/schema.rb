@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_13_001000) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_14_155105) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2477,6 +2477,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_13_001000) do
     t.boolean "commission_posted", default: false, null: false
     t.datetime "commission_posted_at"
     t.bigint "commission_journal_entry_id"
+    t.string "payment_type"
+    t.string "lender_name"
+    t.decimal "financed_amount", precision: 12, scale: 2
+    t.date "down_payment_due_date"
+    t.integer "deal_invoice_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -2489,6 +2494,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_13_001000) do
     t.index ["company_id"], name: "index_deals_on_company_id"
     t.index ["contact_id"], name: "index_deals_on_contact_id"
     t.index ["custom_field_values"], name: "index_deals_on_custom_field_values", using: :gin
+    t.index ["deal_invoice_id"], name: "index_deals_on_deal_invoice_id"
     t.index ["deal_type"], name: "index_deals_on_deal_type"
     t.index ["deleted_at"], name: "index_deals_on_deleted_at"
     t.index ["desk_manager_id"], name: "index_deals_on_desk_manager_id"
@@ -2499,6 +2505,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_13_001000) do
     t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["owner_id"], name: "index_deals_on_owner_id"
+    t.index ["payment_type"], name: "index_deals_on_payment_type"
     t.index ["primary_salesperson_id", "delivery_date"], name: "index_deals_on_salesperson_and_delivery"
     t.index ["project_id"], name: "index_deals_on_project_id"
     t.index ["sales_manager_id"], name: "index_deals_on_sales_manager_id"
@@ -2525,7 +2532,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_13_001000) do
     t.datetime "updated_at", null: false
     t.string "addon_mode", default: "included", null: false
     t.string "tax_timing", default: "per_draw", null: false
+    t.integer "location_id"
     t.index ["company_id", "is_default"], name: "idx_draw_templates_company_default"
+    t.index ["company_id", "location_id", "is_default"], name: "idx_draw_templates_company_location_default"
     t.index ["company_id"], name: "index_draw_schedule_templates_on_company_id"
   end
 

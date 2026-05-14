@@ -1802,6 +1802,9 @@ Rails.application.routes.draw do
       get 'accounting/locations', to: 'accounting_reports#accounting_locations'
 
       resources :deals, only: [] do
+        member do
+          post :record_payment, to: 'deal_payments#record_payment'
+        end
         resource :accounting, controller: 'deal_accounting', only: [:show] do
           post :calculate
           post :post_closing

@@ -253,11 +253,19 @@ module Api
             # Update quote status
             @quote.send! if @quote.may_send?
             
+            # Build per-channel status for frontend
+            channel_results = result[:sent].map { |r| { channel: r[:channel], to: r[:to], status: 'success' } }
+            channel_results += result[:failed].map { |r| { channel: r[:channel], to: r[:to], status: 'failed', reason: r[:reason] } }
+            
             render json: {
               success: true,
+              partial_failure: result[:failed].any?,
               quote: @quote.as_json(include_account: true, include_contact: true),
               sent_via: result[:sent].map { |r| { channel: r[:channel], to: r[:to] } },
-              communications: result[:sent].map { |r| r[:communication]&.id }
+              failed: result[:failed],
+              channel_results: channel_results,
+              communications: result[:sent].map { |r| r[:communication]&.id },
+              errors: result[:errors]
             }
           else
             render json: {

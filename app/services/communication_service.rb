@@ -406,7 +406,7 @@ class CommunicationService
     
     # Final fallback: try to find any active user in the company
     if communicable.respond_to?(:company) && communicable.company.present?
-      return communicable.company.users.where(is_active: true).first
+      return communicable.company.users.where(status: 'active').first
     end
     
     nil

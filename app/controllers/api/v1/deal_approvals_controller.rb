@@ -142,10 +142,23 @@ class Api::V1::DealApprovalsController < ApplicationController
       render json: { error: result[:error] }, status: :unprocessable_entity
     else
       @deal.reload
+
+      # Auto-create invoice with draw schedule. GL posting succeeded; treat invoice
+      # creation as best-effort so a failure here never reverts the approval.
+      invoice_id = nil
+      begin
+        invoice = DealInvoiceService.new(@deal, user: current_user).create_invoice!
+        invoice_id = invoice&.id
+        Rails.logger.info("[DealApprovals] Auto-created invoice #{invoice_id} for deal #{@deal.id}") if invoice_id
+      rescue => e
+        Rails.logger.error("[DealApprovals] Invoice creation failed for deal #{@deal.id}: #{e.message}")
+      end
+
       render json: {
         success: true,
         gl_posted: @deal.gl_posted?,
         gl_journal_entry_id: @deal.gl_journal_entry_id,
+        deal_invoice_id: invoice_id || @deal.deal_invoice_id,
         tax: result[:tax],
         lines_count: result[:lines_count],
         message: result[:message]
@@ -443,7 +456,8 @@ class Api::V1::DealApprovalsController < ApplicationController
       :selling_price, :home_cost, :unit_cost, :reconditioning_cost, :floor_plan_interest,
       :delivery_setup_cost, :pack_amount, :commission_amount, :commission, :delivery_state,
       :state_tax_rate, :county_tax_rate, :city_tax_rate, :total_tax_amount,
-      :front_gross, :total_gross, :net_deal_profit, :net_profit
+      :front_gross, :total_gross, :net_deal_profit, :net_profit,
+      :payment_type, :lender_name, :financed_amount, :delivery_date, :down_payment_due_date
     )
     # Map aliases: unit_cost → home_cost, commission → commission_amount, net_profit → net_deal_profit
     permitted[:home_cost] = permitted.delete(:unit_cost) if permitted.key?(:unit_cost) && !permitted.key?(:home_cost)

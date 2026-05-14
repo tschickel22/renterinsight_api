@@ -19,16 +19,20 @@ module Reports
 
       cash_now = current_cash_position(location_id)
 
-      upcoming_bills      = fetch_upcoming_bills(today, horizon_end, location_id)
-      upcoming_receivables = fetch_upcoming_receivables(today, horizon_end, location_id)
-      upcoming_recurring   = project_recurring_bills(today, horizon_end, location_id)
-      upcoming_commissions = fetch_pending_commissions(today, horizon_end, location_id)
-      upcoming_loans       = fetch_upcoming_loan_payments(today, horizon_end)
+      upcoming_bills          = fetch_upcoming_bills(today, horizon_end, location_id)
+      upcoming_receivables    = fetch_upcoming_receivables(today, horizon_end, location_id)
+      upcoming_recurring      = project_recurring_bills(today, horizon_end, location_id)
+      upcoming_commissions    = fetch_pending_commissions(today, horizon_end, location_id)
+      upcoming_loans          = fetch_upcoming_loan_payments(today, horizon_end)
+      upcoming_draws          = fetch_upcoming_draw_schedule_inflows(today, horizon_end, location_id)
+      upcoming_deal_ar        = fetch_deal_ar_inflows(today, horizon_end, location_id)
+
+      all_receivables = upcoming_receivables + upcoming_draws + upcoming_deal_ar
 
       # Build weekly buckets
       weeks = build_weekly_projection(
         today, horizon_end, cash_now,
-        upcoming_bills, upcoming_receivables, upcoming_recurring,
+        upcoming_bills, all_receivables, upcoming_recurring,
         upcoming_commissions, upcoming_loans
       )
 
@@ -42,7 +46,7 @@ module Reports
         current_cash: cash_now.round(2),
         weekly_projection: weeks,
         summary: {
-          total_expected_inflows: upcoming_receivables.sum { |r| r[:amount] }.round(2),
+          total_expected_inflows: all_receivables.sum { |r| r[:amount] }.round(2),
           total_expected_outflows: (
             upcoming_bills.sum { |b| b[:amount] } +
             upcoming_recurring.sum { |r| r[:amount] } +
@@ -54,6 +58,8 @@ module Reports
         },
         upcoming_bills: upcoming_bills.first(20),
         upcoming_receivables: upcoming_receivables.first(20),
+        upcoming_draws: upcoming_draws.first(20),
+        upcoming_deal_ar: upcoming_deal_ar.first(20),
         upcoming_recurring: upcoming_recurring.first(20),
         upcoming_commissions: upcoming_commissions.first(10),
         upcoming_loans: upcoming_loans.first(10),
@@ -122,6 +128,101 @@ module Reports
           due_date: inv.due_date&.iso8601,
         }
       end
+    end
+
+    # =========================================================================
+    # DRAW SCHEDULE INFLOWS (unpaid draws on deal-backed invoices)
+    # =========================================================================
+
+    def fetch_upcoming_draw_schedule_inflows(from_date, to_date, location_id)
+      scope = @company.invoices
+        .where(is_deleted: [false, nil])
+        .where.not(status: %w[paid cancelled draft])
+        .where("draw_schedule IS NOT NULL AND draw_schedule::text <> '{}'")
+
+      scope = scope.where(location_id: location_id) if location_id.present?
+
+      items = []
+      scope.find_each do |inv|
+        next unless inv.draw_schedule.is_a?(Hash)
+        draws = inv.draw_schedule['draws'] || inv.draw_schedule[:draws]
+        next unless draws.is_a?(Array)
+
+        draws.each_with_index do |draw, idx|
+          status = draw['status'].to_s
+          next if status == 'paid'
+
+          amount = (draw['amount'] || 0).to_f
+          paid_amount = (draw['paid_amount'] || 0).to_f
+          remaining = (amount - paid_amount).round(2)
+          next if remaining <= 0
+
+          due_str = draw['due_date'] || draw[:due_date]
+          next if due_str.blank?
+          due = parse_iso_date(due_str)
+          next unless due && due.between?(from_date, to_date)
+
+          label = draw['description'].presence || "Draw #{idx + 1}"
+          items << {
+            id: "#{inv.id}-d#{idx}",
+            type: 'draw_schedule',
+            description: "Invoice ##{inv.invoice_number} — #{label}",
+            reference: inv.invoice_number,
+            amount: remaining,
+            due_date: due.iso8601,
+          }
+        end
+      end
+
+      items.sort_by { |i| i[:due_date] }
+    end
+
+    # =========================================================================
+    # DEAL AR INFLOWS (deals posted to GL but with no invoice yet)
+    # =========================================================================
+
+    def fetch_deal_ar_inflows(from_date, to_date, location_id)
+      scope = @company.deals
+        .where(gl_posted: true)
+        .where(deal_invoice_id: nil)
+        .where('selling_price > 0')
+
+      scope = scope.where(location_id: location_id) if location_id.present?
+
+      items = []
+      scope.find_each do |deal|
+        close = deal.try(:actual_close_date) || deal.try(:won_at)&.to_date || deal.try(:gl_posted_at)&.to_date
+        next unless close
+
+        total = deal.try(:selling_price).to_f
+        next unless total > 0
+
+        # Spread over 90 days from close date in 30-day buckets.
+        per_bucket = (total / 3.0).round(2)
+        [0, 30, 60].each_with_index do |offset, idx|
+          due = close + offset.days
+          next unless due.between?(from_date, to_date)
+
+          amount = idx == 2 ? (total - per_bucket * 2).round(2) : per_bucket
+          items << {
+            id: "deal-#{deal.id}-#{idx}",
+            type: 'deal_ar',
+            description: "Deal #{deal.try(:deal_number) || deal.id} (estimated)",
+            reference: deal.try(:deal_number) || "D-#{deal.id}",
+            amount: amount,
+            due_date: due.iso8601,
+          }
+        end
+      end
+
+      items.sort_by { |i| i[:due_date] }
+    end
+
+    def parse_iso_date(value)
+      return value if value.is_a?(Date)
+      Date.parse(value.to_s)
+    rescue ArgumentError, TypeError
+      nil
     end
 
     # =========================================================================

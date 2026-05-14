@@ -47,6 +47,7 @@ class Deal < ApplicationRecord
   belongs_to :source, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship
   belongs_to :commission_plan, optional: true  # Commission plan for this deal
+  belongs_to :deal_invoice, class_name: 'Invoice', optional: true
   
   # Deal participants for commission calculation
   belongs_to :primary_salesperson, class_name: 'User', foreign_key: 'primary_salesperson_id', optional: true
@@ -56,6 +57,7 @@ class Deal < ApplicationRecord
   belongs_to :secondary_salesperson, class_name: 'User', foreign_key: 'secondary_salesperson_id', optional: true
   
   has_many :deal_products, dependent: :destroy
+  has_many :invoices, dependent: :nullify
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
