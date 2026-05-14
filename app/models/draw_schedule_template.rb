@@ -1,9 +1,16 @@
 class DrawScheduleTemplate < ApplicationRecord
   belongs_to :company
+  belongs_to :location, optional: true
 
   validates :name, presence: true
   validates :draws, presence: true
   validate :draws_must_sum_to_100
+
+  # Pick the single best default template for a location:
+  #   prefer a location-specific default; fall back to the company default (location_id IS NULL).
+  scope :for_location, ->(loc_id) {
+    where(location_id: [loc_id, nil]).order(Arel.sql('location_id IS NULL')).limit(1)
+  }
 
   # addon_mode: how add-on line items (concrete, septic, HVAC, etc.) are handled
   #   "included"    — (Default) Draw percentages are of the TOTAL INVOICE price.
@@ -21,7 +28,11 @@ class DrawScheduleTemplate < ApplicationRecord
   scope :default_template, -> { where(is_default: true) }
 
   # Format: [{ "percentage" => 10, "description" => "Due upon closing", "position" => 1,
+  #            "days_after_close" => 0,
   #            "sub_items" => [{ "description" => "Concrete Foundation", "position" => 1 }] }, ...]
+  # `days_after_close` is an optional integer added to the base date (deal close date) to compute
+  # the draw's `due_date`. Draws whose description references "delivery" or "setup" use the deal's
+  # delivery_date as base instead of the close date when one is provided.
 
   # Returns effective addon_mode (defaults to 'included' for backward compat)
   def effective_addon_mode
@@ -86,6 +97,49 @@ class DrawScheduleTemplate < ApplicationRecord
       'total_amount' => total_amount.to_f,
       'home_price' => home_price&.to_f,
       'draws' => calculate_draws(total_amount, home_price: home_price)
+    }
+  end
+
+  # Same as calculate_draws but also stamps a due_date on each draw based on the
+  # template's days_after_close. Delivery/setup draws use delivery_date when present.
+  def calculate_draws_with_dates(total_amount, base_date:, delivery_date: nil, home_price: nil)
+    rows = calculate_draws(total_amount, home_price: home_price)
+    base = base_date.is_a?(String) ? Date.parse(base_date) : base_date
+    delivery = delivery_date.is_a?(String) ? Date.parse(delivery_date) : delivery_date
+
+    rows.each_with_index do |draw, idx|
+      source = (draws || [])[idx] || {}
+      days = (source['days_after_close'] || source[:days_after_close]).to_i
+
+      description = draw['description'].to_s.downcase
+      delivery_related = description.include?('delivery') || description.include?('setup')
+      anchor = (delivery_related && delivery) ? delivery : base
+
+      draw['days_after_close'] = days
+      draw['due_date'] = (anchor + days.days).iso8601
+      draw['status'] = 'pending'
+      draw['paid_amount'] = 0.0
+    end
+
+    rows
+  end
+
+  # Build an invoice draw schedule with calculated due dates.
+  def to_invoice_schedule_with_dates(total_amount, base_date:, delivery_date: nil, home_price: nil)
+    {
+      'template_name' => name,
+      'template_id' => id,
+      'addon_mode' => effective_addon_mode,
+      'total_amount' => total_amount.to_f,
+      'home_price' => home_price&.to_f,
+      'base_date' => base_date.is_a?(Date) ? base_date.iso8601 : base_date.to_s,
+      'delivery_date' => delivery_date.is_a?(Date) ? delivery_date.iso8601 : delivery_date&.to_s,
+      'draws' => calculate_draws_with_dates(
+        total_amount,
+        base_date: base_date,
+        delivery_date: delivery_date,
+        home_price: home_price
+      )
     }
   end
 

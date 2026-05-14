@@ -3,7 +3,7 @@ class AiQueryLog < ApplicationRecord
   belongs_to :user, optional: true
   belongs_to :location, optional: true
 
-  FEATURES = %w[report_ai vision_scan ai_campaign_generate ai_campaign_refine ai_audience_generate ai_audience_refine].freeze
+  FEATURES = %w[report_ai vision_scan ai_campaign_generate ai_campaign_refine ai_audience_generate ai_audience_refine bill_scan].freeze
   STATUSES = %w[success error rate_limited no_results classified no_match disambiguation].freeze
 
   validates :feature, inclusion: { in: FEATURES }

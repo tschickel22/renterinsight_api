@@ -20,9 +20,10 @@ module Messaging
         'full_name'  => extract_full_name(recipient),
         'email'      => extract_email(recipient),
         'phone'      => extract_phone(recipient),
-        'rep_name'   => rep_full_name(rep),
-        'rep_email'  => rep&.try(:email),
-        'rep_phone'  => rep&.try(:phone),
+        'rep_name'         => rep_full_name(rep),
+        'rep_email'        => rep&.try(:email),
+        'rep_phone'        => rep&.try(:phone),
+        'rep_booking_link' => rep&.try(:booking_url).presence || '',
         'company' => {
           'name'    => company&.name,
           'phone'   => company&.try(:phone),

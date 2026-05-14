@@ -3,35 +3,48 @@
 class BankAccount < ApplicationRecord
   # Associations
   belongs_to :company
-  belongs_to :location
+  belongs_to :location, optional: true
+  belongs_to :chart_of_account, optional: true
+
+  has_many :bank_transactions, dependent: :destroy
+  has_many :bank_reconciliations, dependent: :destroy
+  has_many :bank_rules, dependent: :destroy
   
   # Constants
   ACCOUNT_PURPOSE_OPERATING = 'operating'
   ACCOUNT_PURPOSE_DEPOSIT = 'deposit'
-  ACCOUNT_PURPOSES = [ACCOUNT_PURPOSE_OPERATING, ACCOUNT_PURPOSE_DEPOSIT].freeze
-  
-  ACCOUNT_TYPES = %w[checking savings].freeze
-  
+  ACCOUNT_PURPOSE_SYNC_ONLY = 'sync_only'
+  ACCOUNT_PURPOSES = [ACCOUNT_PURPOSE_OPERATING, ACCOUNT_PURPOSE_DEPOSIT, ACCOUNT_PURPOSE_SYNC_ONLY].freeze
+
+  ACCOUNT_TYPES = %w[checking savings credit_card].freeze
+
+  # Sync-only accounts (Stripe Financial Connections) skip the routing/account/location
+  # requirements so a user can connect a bank feed without entering raw banking details.
+  def requires_banking_details?
+    account_purpose != ACCOUNT_PURPOSE_SYNC_ONLY && account_type != 'credit_card'
+  end
+
   # Validations
   validates :company, presence: true
-  validates :location, presence: true
+  validates :location, presence: true, if: :requires_banking_details?
   validates :account_type, presence: true, inclusion: { in: ACCOUNT_TYPES }
-  validates :routing_number, presence: true, length: { is: 9 }
-  validates :account_number, presence: true
+  validates :routing_number, presence: true, length: { is: 9 }, if: :requires_banking_details?
+  validates :account_number, presence: true, if: :requires_banking_details?
   validates :bank_name, presence: true
-  
+
   # Make account_purpose optional with default
   validates :account_purpose, inclusion: { in: ACCOUNT_PURPOSES }, allow_nil: true
   before_validation :set_default_account_purpose
-  
-  # Only one account per purpose per location (unless deleted) - only if purpose is set
-  validates :account_purpose, 
-    uniqueness: { 
+
+  # Only one account per purpose per location (unless deleted). Skipped for sync_only —
+  # multiple Stripe-feed accounts can coexist (each tied to a different institution).
+  validates :account_purpose,
+    uniqueness: {
       scope: [:location_id, :is_deleted],
       conditions: -> { where(is_deleted: [false, nil]) },
       message: "already exists for this location"
     },
-    if: -> { account_purpose.present? }
+    if: -> { account_purpose.present? && account_purpose != ACCOUNT_PURPOSE_SYNC_ONLY }
   
   validates :display_last_four, length: { is: 4 }, allow_blank: true
   
@@ -46,8 +59,37 @@ class BankAccount < ApplicationRecord
   scope :deposit, -> { where(account_purpose: ACCOUNT_PURPOSE_DEPOSIT) }
   scope :for_location, ->(location_id) { where(location_id: location_id) }
   scope :synced_to_zego, -> { where.not(external_id: nil) }
-  
+  scope :with_active_feed, -> { where(stripe_fc_status: 'active') }
+  scope :stripe_connected, -> { where(stripe_fc_status: 'active').where.not(stripe_fc_account_id: nil) }
+
   # Instance Methods
+
+  def feed_connected?
+    stripe_fc_status == 'active'
+  end
+
+  # Alias matching the spec naming used by the bank-feed webhook + sync job.
+  # Same semantics as feed_connected? but also requires the FC account ID to
+  # be present so callers can rely on stripe_fc_account_id without a nil check.
+  def stripe_connected?
+    stripe_fc_status == 'active' && stripe_fc_account_id.present?
+  end
+
+  def needs_reauth?
+    stripe_fc_status.in?(['disconnected', 'requires_reauth'])
+  end
+
+  def unconfirmed_transaction_count
+    bank_transactions.unmatched.count
+  end
+
+  def last_reconciliation
+    bank_reconciliations.completed.order(statement_date: :desc).first
+  end
+
+  def last_reconciled_balance
+    last_reconciliation&.statement_ending_balance
+  end
   
   # Display name for UI
   def display_name

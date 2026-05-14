@@ -43,6 +43,7 @@ class ContactActivity < ApplicationRecord
   after_create :schedule_reminders, if: -> { activity_type == 'reminder' }
   after_update :reschedule_reminders_if_changed, if: -> { activity_type == 'reminder' && saved_change_to_reminder_time? }
   after_update :update_contact_last_activity
+  after_commit :touch_parent_last_activity, on: :create
   before_validation :ensure_reminder_method_array
   before_validation :set_account_from_contact
   
@@ -144,5 +145,15 @@ class ContactActivity < ApplicationRecord
     contact.touch(:updated_at) if contact
   rescue => e
     Rails.logger.error "[ContactActivity] Failed to touch contact: #{e.message}"
+  end
+
+  # Skips validations/callbacks — just a timestamp touch. No-op if the
+  # contacts table doesn't have last_activity_at yet (column is optional).
+  def touch_parent_last_activity
+    return unless contact && Contact.column_names.include?('last_activity_at')
+
+    contact.update_columns(last_activity_at: created_at || Time.current)
+  rescue => e
+    Rails.logger.warn "[ContactActivity] touch_parent_last_activity failed: #{e.message}"
   end
 end

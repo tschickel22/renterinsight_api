@@ -24,16 +24,24 @@ class LeadHealthScoreService
   }.freeze
 
   ACTIVITY_SCORES = {
-    'call'         => 20,
-    'visit'        => 40,
-    'meeting'      => 30,
-    'deal_created' => 50,
-    'email_reply'  => 15,
-    'sms_reply'    => 15,
-    'note'         => 5,
-    'task'         => 5,
-    'reminder'     => 2
+    'call'                   => 20,
+    'visit'                  => 40,
+    'meeting'                => 30,
+    'deal_created'           => 50,
+    'email_reply'            => 15,
+    'sms_reply'              => 15,
+    'note'                   => 5,
+    'task'                   => 5,
+    'reminder'               => 2,
+    'campaign_email_opened'  => 3,
+    'campaign_link_clicked'  => 20,
+    'campaign_replied'       => 25,
+    'quote_viewed'           => 30,
+    'email_opened'           => 2
   }.freeze
+
+  ENGAGEMENT_CAP    = 60
+  HOT_REOPENER_BONUS = 15
 
   FIT_SCORES = {
     'timeline_asap'       => 25,
@@ -142,7 +150,80 @@ class LeadHealthScoreService
       total += ACTIVITY_SCORES['deal_created']
     end
 
-    { total: total, activities: breakdown }
+    # Campaign engagement signals
+    campaign_enrollments = CampaignEnrollment.where(recipient_type: 'Lead', recipient_id: lead.id)
+    if campaign_enrollments.any?
+      sends = CampaignSend.where(campaign_enrollment_id: campaign_enrollments.select(:id))
+
+      # Opens — recency-weighted (today full, older 50%)
+      recent_opens = sends.where('opened_at >= ?', 7.days.ago)
+      opens_today  = recent_opens.where('opened_at >= ?', 24.hours.ago).sum(:open_count)
+      opens_week   = recent_opens.where('opened_at < ?', 24.hours.ago).sum(:open_count)
+
+      open_points = (opens_today * ACTIVITY_SCORES['campaign_email_opened']) +
+                    (opens_week  * ACTIVITY_SCORES['campaign_email_opened'] * 0.5).to_i
+
+      if open_points.positive?
+        breakdown['campaign_email_opened'] = { count: opens_today + opens_week, points: open_points }
+        total += open_points
+      end
+
+      # Clicks — full weight, strong intent signal
+      click_count  = sends.where('clicked_at >= ?', 7.days.ago).sum(:click_count)
+      click_points = click_count * ACTIVITY_SCORES['campaign_link_clicked']
+
+      if click_points.positive?
+        breakdown['campaign_link_clicked'] = { count: click_count, points: click_points }
+        total += click_points
+      end
+
+      # Replies
+      reply_count  = sends.where('replied_at >= ?', 30.days.ago).count
+      reply_points = reply_count * ACTIVITY_SCORES['campaign_replied']
+      if reply_points.positive?
+        breakdown['campaign_replied'] = { count: reply_count, points: reply_points }
+        total += reply_points
+      end
+
+      # Hot reopener bonus — single send opened 3+ times in last 48h
+      hot_reopener = sends.where('open_count >= ? AND opened_at >= ?', 3, 48.hours.ago).exists?
+      if hot_reopener
+        breakdown['hot_reopener_bonus'] = { points: HOT_REOPENER_BONUS }
+        total += HOT_REOPENER_BONUS
+      end
+    end
+
+    # Non-campaign email opens (CommunicationEvent)
+    direct_opens = CommunicationEvent.joins(:communication)
+                                     .where(communications: { communicable_type: 'Lead', communicable_id: lead.id })
+                                     .where(event_type: 'opened')
+                                     .where('communication_events.occurred_at >= ?', 7.days.ago)
+                                     .count
+
+    if direct_opens.positive?
+      direct_open_points = direct_opens * ACTIVITY_SCORES['email_opened']
+      breakdown['email_opened'] = { count: direct_opens, points: direct_open_points }
+      total += direct_open_points
+    end
+
+    # Quote views — public quote token URLs (/q/...)
+    if lead.respond_to?(:deals) || lead.respond_to?(:quotes)
+      quote_views = CommunicationEvent.joins(:communication)
+                                      .where(communications: { communicable_type: 'Lead', communicable_id: lead.id, channel: 'email' })
+                                      .where(event_type: 'clicked')
+                                      .where('communication_events.occurred_at >= ?', 30.days.ago)
+                                      .where("communication_events.details IS NOT NULL AND (communication_events.details::jsonb)->>'url' LIKE '%/q/%'")
+                                      .count
+
+      if quote_views.positive?
+        quote_points = quote_views * ACTIVITY_SCORES['quote_viewed']
+        breakdown['quote_viewed'] = { count: quote_views, points: quote_points }
+        total += quote_points
+      end
+    end
+
+    capped = [total, ENGAGEMENT_CAP].min
+    { total: capped, activities: breakdown, raw_total: total, capped_at: ENGAGEMENT_CAP }
   end
 
   def fit_score

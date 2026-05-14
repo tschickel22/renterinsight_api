@@ -5,6 +5,9 @@ class ProjectCostItem < ApplicationRecord
   CATEGORIES = %w[foundation electrical plumbing hvac skirting roofing transport setup trim drywall utility_hookup other].freeze
   STATUSES = %w[pending approved paid disputed].freeze
 
+  # FK column was renamed contractor_id -> vendor_id in the unify-vendors migration.
+  alias_attribute :contractor_id, :vendor_id
+
   belongs_to :company
   belongs_to :project
   belongs_to :project_phase, optional: true
@@ -12,7 +15,7 @@ class ProjectCostItem < ApplicationRecord
   belongs_to :approved_by, class_name: 'User', foreign_key: 'approved_by_id', optional: true
   belongs_to :part, optional: true
   belongs_to :inventory_transaction, optional: true
-  belongs_to :contractor, optional: true
+  belongs_to :contractor, foreign_key: :vendor_id, optional: true
 
   validates :description, presence: true
   validates :amount, presence: true, numericality: true

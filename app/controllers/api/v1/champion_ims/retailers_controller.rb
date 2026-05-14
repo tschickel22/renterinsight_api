@@ -95,7 +95,8 @@ module Api
             :location_id,
             :apply_to_all_locations,
             :active,
-            :sync_frequency
+            :sync_frequency,
+            :custom_retailer_sentence
           )
         end
 
@@ -115,6 +116,7 @@ module Api
             last_sync_error:        retailer.last_sync_error,
             last_sync_stats:        retailer.last_sync_stats,
             next_scheduled_sync_at: retailer.next_scheduled_sync_at,
+            custom_retailer_sentence: retailer.custom_retailer_sentence,
             created_at:             retailer.created_at,
             updated_at:             retailer.updated_at
           }

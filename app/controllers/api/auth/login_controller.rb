@@ -238,6 +238,7 @@ module Api
           firstName: user.first_name,
           lastName: user.last_name,
           phone: user.phone,
+          landing_page: user.try(:landing_page),
           user_type: determine_user_type(user),
           role: user.role,
           company_id: (user.platform_admin? || user.super_admin?) ? nil : user.company_id,

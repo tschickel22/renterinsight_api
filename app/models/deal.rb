@@ -47,6 +47,7 @@ class Deal < ApplicationRecord
   belongs_to :source, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship
   belongs_to :commission_plan, optional: true  # Commission plan for this deal
+  belongs_to :deal_invoice, class_name: 'Invoice', optional: true
   
   # Deal participants for commission calculation
   belongs_to :primary_salesperson, class_name: 'User', foreign_key: 'primary_salesperson_id', optional: true
@@ -56,6 +57,7 @@ class Deal < ApplicationRecord
   belongs_to :secondary_salesperson, class_name: 'User', foreign_key: 'secondary_salesperson_id', optional: true
   
   has_many :deal_products, dependent: :destroy
+  has_many :invoices, dependent: :nullify
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
   has_one :win_loss_report, dependent: :destroy
@@ -119,6 +121,19 @@ class Deal < ApplicationRecord
   # Auto-generate commission payment when deal is marked closed_won
   after_save :generate_commission_payment, if: :just_closed_won?
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
+  # Deals queue for accountant approval by default. Auto-posting only fires when the
+  # company opts in via AccountingSettings.auto_post_deals; otherwise the deal sits in
+  # the Deal Approvals queue until reviewed.
+  after_commit :auto_post_closing_to_accounting, on: [:create, :update], if: -> { saved_change_to_stage? && stage == 'closed_won' && !gl_posted? }
+
+  def auto_post_closing_to_accounting
+    settings = AccountingSettings.for_company(company)
+    return unless settings.try(:auto_post_deals)
+
+    Accounting::DealAccountingService.new(self).post_closing_entries!(user: try(:owner) || try(:user))
+  rescue => e
+    Rails.logger.error("[AutoPost] Deal #{id} closing entries failed: #{e.message}")
+  end
   
   def normalize_stage
     self.stage = stage&.downcase

@@ -13,6 +13,14 @@ Rails.application.routes.draw do
   get  'r/:token',       to: 'sms_replies#show'
   post 'r/:token/reply', to: 'sms_replies#reply'
 
+  # ==================== PUBLIC CHAMPION LEAD ACCEPT/DECLINE (No Auth Required) ====================
+  # One-click Accept/Decline links sent in the Champion lead notification email.
+  scope '/cl' do
+    get  ':token/accept',  to: 'public/champion_lead_actions#accept',       as: :public_champion_lead_accept
+    get  ':token/decline', to: 'public/champion_lead_actions#decline_form', as: :public_champion_lead_decline_form
+    post ':token/decline', to: 'public/champion_lead_actions#decline',      as: :public_champion_lead_decline
+  end
+
   # ==================== PUBLIC AGREEMENT SIGNING (No Auth Required) ====================
   get  'sign/:token',          to: 'public/agreement_signing#show'
   post 'sign/:token/view',    to: 'public/agreement_signing#view_agreement'
@@ -55,6 +63,9 @@ Rails.application.routes.draw do
     
     # QuickBooks webhooks
     post 'quickbooks/notifications', to: 'quickbooks#notifications'
+
+    # Stripe Financial Connections webhooks (signature-verified, no auth)
+    post 'stripe', to: '/api/v1/stripe_webhooks#receive'
 
     # Facebook Lead Ads webhooks
     get  'facebook/leads', to: 'facebook_leads#verify'
@@ -241,6 +252,7 @@ Rails.application.routes.draw do
         get 'profile'
         patch 'profile', action: 'update_profile'
         post 'change_password'
+        post 'test_digest'
         get 'security'
         patch 'security', action: 'update_security'
         get 'login_activity'
@@ -483,6 +495,9 @@ Rails.application.routes.draw do
         end
       end
       
+      # ==================== VENDORS (unified contractors + suppliers) ====================
+      resources :vendors
+
       # ==================== CONTRACTORS ====================
       resources :contractors do
         collection do
@@ -612,6 +627,25 @@ Rails.application.routes.draw do
         end
       end
 
+      # ==================== CHAMPION LEADS API INTEGRATION ====================
+      # Polls Champion's Retailer API for leads, supports accept/decline workflow.
+      # Config CRUD + accept/decline/refresh actions on individual leads.
+      namespace :champion_leads, path: 'champion-leads' do
+        resources :configs do
+          member do
+            post :test_connection
+            post :sync_now
+          end
+        end
+
+        # Accept/decline/refresh actions on individual CRM leads
+        scope 'actions/:id', controller: 'actions' do
+          post :accept
+          post :decline
+          post :refresh
+        end
+      end
+
       # ==================== VEHICLES/INVENTORY ====================
       resources :vehicles do
         member do
@@ -621,6 +655,7 @@ Rails.application.routes.draw do
           get :tags
           post :tags, to: 'vehicles#add_tags'
           delete 'tags/:tag_name', to: 'vehicles#remove_tag'
+          post :post_to_accounting
         end
         
         collection do
@@ -1014,6 +1049,27 @@ Rails.application.routes.draw do
           post :calculate
         end
       end
+
+      # ==================== BUDGETS ====================
+      resources :budgets do
+        member do
+          post :lock
+          post :unlock
+          post :activate
+          post :deactivate
+          post :archive
+          get  :variance_report, path: 'variance-report'
+          get  :pl_overview,     path: 'pl-overview'
+        end
+        collection do
+          post :copy_from_prior_year, path: 'copy-from-prior-year'
+          post :wizard
+          post :ai_suggest, path: 'ai-suggest'
+          post :rebuild_consolidated, path: 'rebuild-consolidated'
+          get  :data_coverage, path: 'data-coverage'
+          get  :stats
+        end
+      end
       
       # ==================== PORTAL USERS ====================
       resources :portal_users, path: 'portal_users' do
@@ -1083,6 +1139,7 @@ Rails.application.routes.draw do
           post :send_to_supplier, path: 'send'
           post :cancel
           get :receiving_history, path: 'receiving-history'
+          post :post_to_accounting
         end
         collection do
           get :stats
@@ -1679,6 +1736,198 @@ Rails.application.routes.draw do
           post :test
           post :send_verification
         end
+      end
+
+      # ==================== ACCOUNTING MODULE ====================
+      resources :chart_of_accounts do
+        collection do
+          post :import
+        end
+      end
+
+      resources :journal_entries do
+        member do
+          post :void
+          post :upload_attachment
+          delete :delete_attachment
+        end
+      end
+
+      resource :accounting_settings, only: [:show, :update] do
+        get :tax_rates_for_state
+      end
+
+      resources :deal_approvals, only: [:show, :update] do
+        collection do
+          get :pending
+          get :stats
+          post :bulk_approve_commissions
+        end
+        member do
+          post :approve
+          post :approve_commission
+        end
+      end
+
+      resources :fiscal_periods, only: [:index] do
+        collection do
+          post :generate
+        end
+        member do
+          post :close
+          post :reopen
+        end
+      end
+
+      resources :account_links do
+        collection do
+          post :resolve
+        end
+      end
+
+      get 'accounting/reports/trial_balance', to: 'accounting_reports#trial_balance'
+      get 'accounting/reports/general_ledger', to: 'accounting_reports#general_ledger'
+      get 'accounting/reports/profit_and_loss', to: 'accounting_reports#profit_and_loss'
+      get 'accounting/reports/balance_sheet', to: 'accounting_reports#balance_sheet'
+      get 'accounting/reports/ar_aging', to: 'accounting_reports#ar_aging'
+      get 'accounting/reports/ap_aging', to: 'accounting_reports#ap_aging'
+      get 'accounting/reports/source_entries', to: 'accounting_reports#source_entries'
+      get 'accounting/reports/deal_profitability', to: 'accounting_reports#deal_profitability'
+      get 'accounting/reports/floor_plan', to: 'accounting_reports#floor_plan'
+      get 'accounting/reports/departmental_pnl', to: 'accounting_reports#departmental_pnl'
+      get 'accounting/reports/sales_tax_summary', to: 'accounting_reports#sales_tax_summary'
+      get 'accounting/reports/cash_flow_statement', to: 'accounting_reports#cash_flow_statement'
+      get 'accounting/reports/cash_flow_forecast', to: 'accounting_reports#cash_flow_forecast'
+      get 'accounting/dashboard', to: 'accounting_reports#dashboard'
+      get 'accounting/locations', to: 'accounting_reports#accounting_locations'
+
+      resources :deals, only: [] do
+        member do
+          post :record_payment, to: 'deal_payments#record_payment'
+        end
+        resource :accounting, controller: 'deal_accounting', only: [:show] do
+          post :calculate
+          post :post_closing
+        end
+      end
+
+      resources :recurring_journal_entries do
+        member do
+          post :generate_now
+        end
+      end
+
+      # ==================== BANKING & RECONCILIATION ====================
+      resources :bank_accounts, only: [:index, :create, :update] do
+        collection do
+          get :check_enabled
+        end
+        resources :transactions, controller: 'bank_transactions', only: [:index, :show] do
+          member do
+            post :categorize
+            post :match
+            post :exclude
+            post :unmatch
+            get  :suggestions
+          end
+          collection do
+            post :auto_match
+            post :import_csv
+            post :bulk_action
+          end
+        end
+      end
+
+      scope 'bank_accounts/:bank_account_id/feed', controller: 'bank_account_feeds' do
+        post :create_session
+        post :complete_connection
+        post :sync
+        post :disconnect
+        get  :status
+      end
+
+      resources :bank_rules do
+        collection do
+          post :test
+          post :create_from_transaction
+        end
+      end
+
+      resources :bank_reconciliations do
+        member do
+          post :toggle_item
+          post :clear_all
+          post :unclear_all
+          post :complete
+          post :add_adjustment
+          post :undo
+        end
+      end
+
+      resources :recurring_bills do
+        member do
+          post :generate_now
+        end
+      end
+
+      resources :bills do
+        collection do
+          post :bulk_action
+          post :scan_receipt
+        end
+        member do
+          post   :void
+          post   :record_payment
+          post   :upload_attachment
+          delete :delete_attachment
+        end
+      end
+
+      resources :cash_receipts, only: [:index, :show, :create, :destroy] do
+      collection do
+      get :open_invoices
+      end
+      member do
+      post :void
+      end
+      end
+
+    # Year-End Close
+      get 'accounting/year_end_close/preview', to: 'accounting_year_end_close#preview'
+      post 'accounting/year_end_close/execute', to: 'accounting_year_end_close#execute'
+
+      resources :record_transactions, only: [:create], path: 'record-transactions'
+
+      resources :printed_checks, only: [:index, :create] do
+        collection do
+          post :print_batch
+          post :reprint
+          get  :check_settings
+        end
+        member do
+          post :void
+        end
+      end
+
+      resources :accounting_imports, only: [:index, :show] do
+        collection do
+          post :preview
+          post :run_import
+          post :parse_iif
+          post :parse_csv
+        end
+      end
+
+      scope :quickbooks, controller: :quickbooks do
+        get    :authorize
+        get    :callback
+        post   :exchange_token
+        get    :status
+        delete :disconnect
+        post   :sync
+        get    :qb_accounts
+        get    :sync_logs
+        patch  :update_settings
       end
     end
   end

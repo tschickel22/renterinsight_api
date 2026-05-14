@@ -443,6 +443,9 @@ GEM
       net-ssh (>= 2.8.0)
       ostruct
     stringio (3.1.7)
+    stripe (19.1.0)
+      bigdecimal
+      logger
     strscan (3.1.5)
     thor (1.4.0)
     thruster (0.1.15)
@@ -524,6 +527,7 @@ DEPENDENCIES
   solid_cable
   solid_cache
   solid_queue
+  stripe
   thruster
   twilio-ruby (~> 7.3)
   tzinfo-data

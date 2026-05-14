@@ -1,13 +1,38 @@
 class JsonWebToken
-  # Lazy load secret key to avoid initialization errors
+  # Resolve the JWT signing secret once at first use.
+  # Priority: ENV['JWT_SECRET'] > credentials.jwt_secret > secret_key_base
+  #
+  # IMPORTANT: ENV['JWT_SECRET'] must be a stable value across deploys.
+  # If it changes (or is missing), ALL existing tokens become invalid
+  # and every user is logged out on the next server restart.
   def self.secret_key
-    @secret_key ||= begin
-      # Try credentials first (may fail if RAILS_MASTER_KEY not set)
-      Rails.application.credentials.jwt_secret
-    rescue ActiveSupport::MessageEncryptor::InvalidMessage
-      nil
-    end || ENV['JWT_SECRET'] || Rails.application.secret_key_base
+    @secret_key ||= resolve_secret_key
   end
+
+  def self.resolve_secret_key
+    # 1. Prefer explicit JWT_SECRET env var (most reliable across restarts)
+    if ENV['JWT_SECRET'].present?
+      Rails.logger.info "[JsonWebToken] Using JWT_SECRET env var for token signing"
+      return ENV['JWT_SECRET']
+    end
+
+    # 2. Try encrypted credentials
+    begin
+      cred_secret = Rails.application.credentials.jwt_secret
+      if cred_secret.present?
+        Rails.logger.info "[JsonWebToken] Using credentials.jwt_secret for token signing"
+        return cred_secret
+      end
+    rescue ActiveSupport::MessageEncryptor::InvalidMessage => e
+      Rails.logger.warn "[JsonWebToken] Could not decrypt credentials: #{e.message}"
+    end
+
+    # 3. Fall back to secret_key_base (stable if SECRET_KEY_BASE env var is set)
+    Rails.logger.warn "[JsonWebToken] ⚠️  Falling back to secret_key_base for JWT signing. " \
+                      "Set JWT_SECRET env var for explicit control."
+    Rails.application.secret_key_base
+  end
+  private_class_method :resolve_secret_key
   
   # Extended token expiry: 7 days (for staging/production stability)
   STANDARD_EXP = 7.days

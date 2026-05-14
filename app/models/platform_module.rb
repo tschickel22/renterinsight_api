@@ -35,6 +35,7 @@ class PlatformModule
     'finance.invoices' => { name: 'Invoice & Payments', category: 'Finance & Agreements', icon: 'Receipt', description: 'Billing and payment processing' },
     'finance.documents' => { name: 'Document Management', category: 'Finance & Agreements', icon: 'FolderOpen', description: 'Client document storage and management' },
     'finance.applications' => { name: 'Finance Applications', category: 'Finance & Agreements', icon: 'FileCheck', description: 'Customer finance application processing' },
+    'finance.accounting' => { name: 'Accounting', category: 'Finance & Agreements', icon: 'Calculator', description: 'Chart of accounts, journal entries, bank reconciliation, and financial reporting' },
     
     # Service & Support
     'service.operations' => { name: 'Service Operations', category: 'Service & Support', icon: 'Wrench', description: 'Service ticket and work order management' },
@@ -85,7 +86,7 @@ class PlatformModule
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
       marketing.listings marketing.brochures marketing.social_media
-      finance.loans finance.agreements finance.invoices finance.documents finance.applications
+      finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal
       management.reports management.tags management.tasks management.calendar management.projects
       admin.settings admin.users admin.locations
@@ -94,7 +95,7 @@ class PlatformModule
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
       marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media
-      finance.loans finance.agreements finance.invoices finance.documents finance.applications
+      finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 
       management.calendar management.contractors management.projects management.workflows management.territories

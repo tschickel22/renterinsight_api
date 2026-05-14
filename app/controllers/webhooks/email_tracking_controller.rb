@@ -5,21 +5,23 @@ module Webhooks
     # GET /webhooks/email/:communication_id/pixel.gif
     def pixel
       communication = Communication.find_by(id: params[:communication_id])
-      
-      if communication && communication.read_at.nil?
-        # Mark as read
-        communication.update!(read_at: Time.current)
-        
-        # Track event
+
+      if communication
+        # Track every open event (count > 1 = re-opens).
         CommunicationEvent.track_open(
           communication,
           ip_address: request.remote_ip,
           user_agent: request.user_agent
         )
-        
-        Rails.logger.info "[EmailTracking] Email #{communication.id} opened by #{communication.to_address}"
+
+        # Only stamp read_at on the first open.
+        if communication.read_at.nil?
+          communication.update_column(:read_at, Time.current)
+        end
+
+        Rails.logger.info "[EmailTracking] Email #{communication.id} opened by #{communication.to_address} (open ##{communication.communication_events.opened.count})"
       end
-      
+
       # Serve 1x1 transparent GIF
       send_data(
         Base64.decode64('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'),

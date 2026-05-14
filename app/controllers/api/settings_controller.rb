@@ -592,6 +592,18 @@ module Api
       pipeline_stages = Setting.get('Company', @company.id, 'pipeline_stages', nil)
       base_settings[:pipeline_stages] = pipeline_stages if pipeline_stages.present?
 
+      # SMS availability flag for non-admin UI checks (e.g., workqueue quick actions).
+      # Only exposes a boolean and the from_number (already visible to recipients) —
+      # no credentials.
+      begin
+        sms_cfg = CommunicationSettingsService.for_company(@company).sms_config
+        base_settings[:sms_available] = sms_cfg[:enabled] == true && sms_cfg[:from_number].present?
+        base_settings[:sms_from_number] = sms_cfg[:from_number] if base_settings[:sms_available]
+      rescue => e
+        Rails.logger.warn "[serialize_basic_settings] SMS check failed: #{e.message}"
+        base_settings[:sms_available] = false
+      end
+
       base_settings
     end
 
@@ -658,13 +670,48 @@ module Api
       company_settings.each do |key, value|
         begin
           parsed_value = JSON.parse(value)
-          base_settings[key.to_sym] = parsed_value
+          
+          # CRITICAL: For nested settings like 'communications', deep merge
+          # so company email overrides don't wipe out platform SMS (and vice versa)
+          if parsed_value.is_a?(Hash) && base_settings[key.to_sym].is_a?(Hash)
+            # Remove empty/stub sub-sections before merging
+            # e.g., sms: {provider: "twilio", fromNumber: "", isEnabled: false} is a stub
+            cleaned = parsed_value.reject do |sub_key, sub_val|
+              next false unless sub_val.is_a?(Hash)
+              next true if sub_key.to_s.start_with?('_') # skip _sources
+              # A stub section: disabled with no real credentials configured
+              sub_val_str = sub_val.stringify_keys
+              next false unless sub_val_str['isEnabled'] == false
+              # Check if any meaningful config exists
+              has_from = sub_val_str['fromNumber'].present? || sub_val_str['fromEmail'].present?
+              has_creds = sub_val_str['twilioAccountSid'].present? ||
+                          sub_val_str['twilioAuthToken'].present? ||
+                          sub_val_str['smtpHost'].present? ||
+                          sub_val_str['awsAccessKeyId'].present?
+              !has_from && !has_creds
+            end
+            
+            base_settings[key.to_sym] = base_settings[key.to_sym].deep_merge(cleaned)
+          else
+            base_settings[key.to_sym] = parsed_value
+          end
           
           # Update source tracking for company overrides
           if parsed_value.is_a?(Hash)
             sources[key.to_sym] ||= {}
             parsed_value.keys.each do |nested_key|
-              sources[key.to_sym][nested_key.to_sym] = 'company'
+              # Only mark as company source if the sub-section has real config
+              sub_val = parsed_value[nested_key]
+              if sub_val.is_a?(Hash)
+                sub_str = sub_val.stringify_keys
+                is_stub = sub_str['isEnabled'] == false &&
+                  !sub_str['fromNumber'].present? && !sub_str['fromEmail'].present? &&
+                  !sub_str['twilioAccountSid'].present? && !sub_str['twilioAuthToken'].present? &&
+                  !sub_str['smtpHost'].present? && !sub_str['awsAccessKeyId'].present?
+                sources[key.to_sym][nested_key.to_sym] = 'company' unless is_stub
+              else
+                sources[key.to_sym][nested_key.to_sym] = 'company'
+              end
             end
           end
           

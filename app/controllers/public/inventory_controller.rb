@@ -160,7 +160,8 @@ class Public::InventoryController < ApplicationController
           id: @company.id,
           name: @company.name
         },
-        branding: branding
+        branding: branding,
+        champion_disclaimer: ChampionDisclaimer.for_company(@company, vehicle_scope: @vehicles)
       }
     }
   end
@@ -192,7 +193,8 @@ class Public::InventoryController < ApplicationController
     render json: {
       vehicle: vehicle_detail_json(@vehicle),
       company: company_data,
-      branding: branding
+      branding: branding,
+      champion_disclaimer: @vehicle.source == 'champion_ims' ? ChampionDisclaimer.for_company(@company) : { show: false }
     }
   end
   

@@ -90,6 +90,49 @@ module Webhooks
         head :ok and return
       end
 
+      # Campaign auto-pause on SMS reply — any non-keyword reply from a number
+      # currently enrolled in a campaign pauses those enrollments so the rep can
+      # take over the conversation. Runs additively: the reply still flows through
+      # to the logging + forwarding code below.
+      from_digits_10 = from_number.to_s.gsub(/\D/, '').last(10)
+      if from_digits_10.present?
+        matching_enrollments = CampaignEnrollment
+          .where(status: %w[pending active])
+          .where(
+            "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sms_phone_snapshot, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?",
+            "%#{from_digits_10}"
+          )
+
+        paused_count = 0
+        matching_enrollments.find_each do |enrollment|
+          enrollment.update!(status: 'paused')
+          CampaignEvent.create!(
+            company_id: enrollment.company_id,
+            campaign_id: enrollment.campaign_id,
+            campaign_enrollment_id: enrollment.id,
+            event_type: 'paused',
+            occurred_at: Time.current,
+            payload: { reason: 'sms_reply', from: from_number, body: body.to_s.truncate(200) }
+          )
+          if defined?(WebhookService)
+            WebhookService.fire(
+              company_id: enrollment.company_id,
+              event: 'campaign.paused',
+              payload: {
+                campaign_id: enrollment.campaign_id,
+                enrollment_id: enrollment.id,
+                reason: 'sms_reply'
+              }
+            )
+          end
+          paused_count += 1
+        end
+
+        if paused_count.positive?
+          Rails.logger.info "[TwilioWebhook] Paused #{paused_count} campaign enrollment(s) for SMS reply from #{from_number}"
+        end
+      end
+
       # Handle STOP/START keyword opt-out/opt-in (A2P compliance)
       stripped_body = body.to_s.strip.upcase
       stop_keywords  = %w[STOP STOPALL UNSUBSCRIBE CANCEL END QUIT].freeze

@@ -189,9 +189,6 @@ class QuickbooksApiService
   end
 end
 
-# Custom exception classes
-class QuickbooksApiError < StandardError; end
-class QuickbooksAuthError < QuickbooksApiError; end
-class QuickbooksValidationError < QuickbooksApiError; end
-class QuickbooksRateLimitError < QuickbooksApiError; end
-class QuickbooksServerError < QuickbooksApiError; end
+# Custom exception classes defined in app/services/quickbooks/client.rb
+# QuickbooksApiError, QuickbooksAuthError, QuickbooksValidationError,
+# QuickbooksRateLimitError, QuickbooksServerError

@@ -293,6 +293,8 @@ module Api
       end
 
       def invoice_json(invoice)
+        deal = invoice.deal
+        payment_type = deal&.payment_type
         {
           id: invoice.id,
           invoice_number: invoice.invoice_number,
@@ -305,11 +307,18 @@ module Api
           amount_paid: invoice.amount_paid,
           amount_due: invoice.amount_due,
           is_overdue: invoice.due_date && invoice.due_date < Date.today && invoice.amount_due > 0,
-          days_overdue: invoice.due_date && invoice.due_date < Date.today ? (Date.today - invoice.due_date).to_i : 0
+          days_overdue: invoice.due_date && invoice.due_date < Date.today ? (Date.today - invoice.due_date).to_i : 0,
+          payment_type: payment_type,
+          lender_name: deal&.lender_name,
+          financed_amount: deal&.financed_amount,
+          is_financed: %w[financed cash_and_finance].include?(payment_type.to_s),
+          draw_schedule: invoice.draw_schedule
         }
       end
 
       def invoice_detail_json(invoice)
+        deal = invoice.deal
+        payment_type = deal&.payment_type
         invoice_json(invoice).merge(
           invoice_items: invoice.invoice_items.map { |item| invoice_item_json(item) },
           location: invoice.location ? {
@@ -327,7 +336,12 @@ module Api
           } : nil,
           notes: invoice.notes,
           payment_terms: invoice.terms,
-          pdf_url: invoice.respond_to?(:pdf_url) ? invoice.pdf_url : nil
+          pdf_url: invoice.respond_to?(:pdf_url) ? invoice.pdf_url : nil,
+          payment_type: payment_type,
+          lender_name: deal&.lender_name,
+          financed_amount: deal&.financed_amount,
+          is_financed: %w[financed cash_and_finance].include?(payment_type.to_s),
+          draw_schedule: invoice.draw_schedule
         )
       end
 

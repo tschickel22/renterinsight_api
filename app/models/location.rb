@@ -55,6 +55,19 @@ class Location < ApplicationRecord
   scope :for_company, ->(company_id) { where(company_id: company_id, is_deleted: false) }
   scope :by_name, -> { order(:name) }
   scope :recent, -> { order(created_at: :desc) }
+  scope :corporate, -> { where(is_corporate: true) }
+
+  # Find or create the Corporate location for a given company.
+  # Corporate is a real location with is_corporate=true used by the accounting
+  # module for overhead expenses, shared bank accounts, admin salaries, etc.
+  def self.ensure_corporate_for(company)
+    company.locations.corporate.first_or_create!(
+      name: 'Corporate',
+      code: 'CORP',
+      is_corporate: true,
+      active: true
+    )
+  end
 
   # Callbacks
   before_validation :normalize_fields

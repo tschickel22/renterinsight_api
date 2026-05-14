@@ -1751,6 +1751,544 @@ class DashboardMetricsService
     }
   end
 
+  # ============================================================
+  # GM OVERVIEW CARDS
+  # ============================================================
+
+  # ==================== LEAD CONVERSION FUNNEL ====================
+  def lead_conversion_funnel
+    stage_keys = %w[new contacted qualified proposal converted lost]
+    range = @date_range[:start_date]..@date_range[:end_date]
+
+    leads_in_range = @company.leads.where(created_at: range)
+    leads_in_range = leads_in_range.where(location_id: Current.location_id) if location_filtered?
+
+    counts = leads_in_range.group(:status).count
+    total  = counts.values.sum
+    converted_count = counts['converted'].to_i
+
+    stages = stage_keys.map do |key|
+      count = counts[key].to_i
+      pct   = total.positive? ? (count.to_f / total * 100).round(1) : 0.0
+      { name: key.titleize, stage_key: key, count: count, percentage: pct }
+    end
+
+    conversion_rate = total.positive? ? (converted_count.to_f / total * 100).round(1) : 0.0
+
+    prev_range = previous_period_range
+    prev_leads = @company.leads.where(created_at: prev_range)
+    prev_leads = prev_leads.where(location_id: Current.location_id) if location_filtered?
+    prev_total     = prev_leads.count
+    prev_converted = prev_leads.where(status: 'converted').count
+    prev_rate      = prev_total.positive? ? (prev_converted.to_f / prev_total * 100).round(1) : 0.0
+    trend          = calculate_trend(conversion_rate, prev_rate)
+
+    {
+      stages: stages,
+      conversion_rate: conversion_rate,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      total_leads: total,
+      drill_down_url: '/crm/leads'
+    }
+  end
+
+  # ==================== LEAD VELOCITY ====================
+  def lead_velocity
+    weeks = []
+    end_date = Date.today.end_of_week
+
+    8.times do |i|
+      week_start = (end_date - (i * 7).days).beginning_of_week
+      week_end   = week_start.end_of_week
+      scope = @company.leads.where(created_at: week_start.beginning_of_day..week_end.end_of_day)
+      scope = scope.where(location_id: Current.location_id) if location_filtered?
+      weeks.unshift(week_label: week_start.strftime('%b %d'), week_start: week_start, count: scope.count)
+    end
+
+    current_week  = weeks.last[:count]
+    previous_week = weeks[-2] ? weeks[-2][:count] : 0
+    trend         = calculate_trend(current_week, previous_week)
+
+    {
+      weeks: weeks.map { |w| { week_label: w[:week_label], count: w[:count] } },
+      current_week: current_week,
+      previous_week: previous_week,
+      change_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      drill_down_url: '/crm/leads'
+    }
+  end
+
+  # ==================== ACCOUNT GROWTH ====================
+  def account_growth
+    range      = @date_range[:start_date]..@date_range[:end_date]
+    prev_range = previous_period_range
+
+    new_scope  = @company.accounts.where(created_at: range)
+    prev_scope = @company.accounts.where(created_at: prev_range)
+    if location_filtered? && @company.accounts.column_names.include?('location_id')
+      new_scope  = new_scope.where(location_id: Current.location_id)
+      prev_scope = prev_scope.where(location_id: Current.location_id)
+    end
+
+    new_accounts          = new_scope.count
+    previous_new_accounts = prev_scope.count
+    trend                 = calculate_trend(new_accounts, previous_new_accounts)
+
+    total_accounts = @company.accounts.count
+
+    active_account_ids  = @company.deals.where('deals.updated_at >= ?', 90.days.ago).where.not(account_id: nil).distinct.pluck(:account_id)
+    active_account_ids += @company.invoices.where('invoices.created_at >= ?', 90.days.ago).joins('LEFT JOIN deals ON deals.id = invoices.deal_id').where.not('deals.account_id' => nil).pluck('deals.account_id')
+    active_accounts = active_account_ids.uniq.count
+
+    active_rate = total_accounts.positive? ? (active_accounts.to_f / total_accounts * 100).round(1) : 0.0
+
+    {
+      new_accounts: new_accounts,
+      previous_new_accounts: previous_new_accounts,
+      trend_percentage: trend[:percentage],
+      trend_direction: trend[:direction],
+      active_accounts: active_accounts,
+      total_accounts: total_accounts,
+      active_rate: active_rate,
+      drill_down_url: '/crm/accounts'
+    }
+  end
+
+  # ==================== SALES VELOCITY ====================
+  def sales_velocity
+    range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
+
+    closed_deals = @company.deals.where(deleted_at: nil)
+    closed_deals = closed_deals.where(location_id: Current.location_id) if location_filtered?
+
+    won = closed_deals.where(stage: 'closed_won').where(won_at: range)
+    lost = closed_deals.where(stage: 'closed_lost').where(lost_at: range)
+
+    won_count  = won.count
+    lost_count = lost.count
+
+    cycle_seconds_avg = won.where.not(won_at: nil)
+                          .pluck(Arel.sql('EXTRACT(EPOCH FROM (won_at - created_at))'))
+                          .compact
+    avg_cycle_days = cycle_seconds_avg.any? ? (cycle_seconds_avg.sum / cycle_seconds_avg.size / 86_400.0).round(1) : 0.0
+
+    avg_deal_value = won_count.positive? ? (won.sum(:value).to_f / won_count).round(2) : 0.0
+    win_rate       = (won_count + lost_count).positive? ? (won_count.to_f / (won_count + lost_count) * 100).round(1) : 0.0
+
+    pipeline_scope = @company.deals.where(deleted_at: nil).where.not(stage: %w[closed_won closed_lost])
+    pipeline_scope = pipeline_scope.where(location_id: Current.location_id) if location_filtered?
+    total_pipeline_value = pipeline_scope.sum(:value).to_f
+
+    {
+      avg_cycle_days: avg_cycle_days,
+      avg_deal_value: avg_deal_value,
+      formatted_avg_deal_value: format_currency(avg_deal_value),
+      win_rate: win_rate,
+      deals_closed: won_count,
+      deals_lost: lost_count,
+      total_pipeline_value: total_pipeline_value,
+      formatted_pipeline_value: format_currency(total_pipeline_value),
+      drill_down_url: '/deals'
+    }
+  end
+
+  # ==================== PROJECT VELOCITY ====================
+  def project_velocity
+    range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
+
+    projects_scope = @company.projects.where(is_deleted: [false, nil])
+    projects_scope = projects_scope.where(location_id: Current.location_id) if location_filtered?
+
+    active_scope = projects_scope.where(status: 'active')
+    active_count = active_scope.count
+
+    by_phase = ProjectPhase.joins('INNER JOIN projects ON projects.current_phase_id = project_phases.id')
+                           .where(projects: { id: active_scope.pluck(:id) })
+                           .group('project_phases.name')
+                           .count
+                           .map { |name, count| { phase_name: name, count: count } }
+
+    avg_pairs = ProjectPhase.where(company_id: @company.id, status: 'completed')
+                            .where.not(started_at: nil, completed_at: nil)
+                            .group(:name)
+                            .pluck(:name, Arel.sql('AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) / 86400.0)'))
+
+    avg_days_per_phase = avg_pairs.map { |name, avg| { phase_name: name, avg_days: avg.to_f.round(1) } }
+
+    completed_count = projects_scope.where(status: 'completed').where(actual_completion_date: @date_range[:start_date]..@date_range[:end_date]).count
+
+    {
+      by_phase: by_phase,
+      avg_days_per_phase: avg_days_per_phase,
+      completed_count: completed_count,
+      active_count: active_count,
+      drill_down_url: '/projects'
+    }
+  end
+
+  # ==================== BUSINESS HEALTH SUMMARY ====================
+  def business_health_summary
+    # Revenue trend
+    current_rev   = calculate_revenue(@date_range[:start_date], @date_range[:end_date])
+    prev_range    = previous_period_range
+    previous_rev  = calculate_revenue(prev_range.first, prev_range.last)
+    rev_trend     = calculate_trend(current_rev, previous_rev)
+    rev_status    = case rev_trend[:direction]
+                    when 'up'   then 'green'
+                    when 'down' then 'red'
+                    else 'yellow'
+                    end
+
+    # Lead trend
+    leads_current  = @company.leads.where(created_at: @date_range[:start_date]..@date_range[:end_date]).count
+    leads_previous = @company.leads.where(created_at: prev_range).count
+    lead_trend     = calculate_trend(leads_current, leads_previous)
+    lead_status    = case lead_trend[:direction]
+                     when 'up'   then 'green'
+                     when 'down' then 'red'
+                     else 'yellow'
+                     end
+
+    # Win rate
+    range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
+    won_count  = @company.deals.where(stage: 'closed_won', won_at: range).count
+    lost_count = @company.deals.where(stage: 'closed_lost', lost_at: range).count
+    win_rate   = (won_count + lost_count).positive? ? (won_count.to_f / (won_count + lost_count) * 100).round(1) : 0.0
+    win_status = if win_rate > 30 then 'green'
+                 elsif win_rate >= 15 then 'yellow'
+                 else 'red'
+                 end
+
+    # Overdue invoices
+    overdue_count = @company.invoices.where(is_deleted: [false, nil], status: 'sent').where('due_date < ?', Date.current).count
+    overdue_status = if overdue_count > 10 then 'red'
+                     elsif overdue_count >= 3 then 'yellow'
+                     else 'green'
+                     end
+
+    # Active projects
+    active_projects = @company.projects.where(is_deleted: [false, nil], status: 'active').count
+
+    {
+      indicators: [
+        { name: 'revenue',          status: rev_status,     value: current_rev,      label: "#{rev_trend[:direction] == 'up' ? '+' : ''}#{rev_trend[:percentage]}% vs prev" },
+        { name: 'lead_flow',        status: lead_status,    value: leads_current,    label: "#{leads_current} new leads" },
+        { name: 'win_rate',         status: win_status,     value: win_rate,         label: "#{win_rate}% win rate" },
+        { name: 'overdue_invoices', status: overdue_status, value: overdue_count,    label: "#{overdue_count} overdue" },
+        { name: 'active_projects',  status: 'green',        value: active_projects,  label: "#{active_projects} active" }
+      ]
+    }
+  end
+
+  # ============================================================
+  # SALES MANAGER CARDS
+  # ============================================================
+
+  # ==================== REP LEADERBOARD ====================
+  def rep_leaderboard
+    owner_field = find_dashboard_owner_field
+    return { reps: [] } unless owner_field
+
+    range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
+
+    deals_scope = @company.deals.where(deleted_at: nil)
+    deals_scope = deals_scope.where(location_id: Current.location_id) if location_filtered?
+
+    user_ids = deals_scope.where.not(owner_field => nil).distinct.pluck(owner_field)
+    return { reps: [] } if user_ids.empty?
+
+    users = User.where(id: user_ids, company_id: @company.id, status: 'active')
+
+    rep_rows = users.map do |user|
+      user_deals = deals_scope.where(owner_field => user.id)
+
+      closed_won_scope = user_deals.where(stage: 'closed_won', won_at: range)
+      closed_count = closed_won_scope.count
+      closed_value = closed_won_scope.sum(:value).to_f
+
+      pipeline_scope = user_deals.where.not(stage: %w[closed_won closed_lost])
+      pipeline_count = pipeline_scope.count
+      pipeline_value = pipeline_scope.sum(:value).to_f
+
+      activities = LeadActivity.joins(:lead)
+                               .where(leads: { company_id: @company.id })
+                               .where(user_id: user.id)
+                               .where(activity_type: %w[call meeting email email_sent sms])
+                               .where(created_at: range)
+                               .count
+
+      lead_total     = @company.leads.where(owner_id: user.id).where(created_at: range).count
+      lead_converted = @company.leads.where(owner_id: user.id, status: 'converted').where(created_at: range).count
+      conversion_rate = lead_total.positive? ? (lead_converted.to_f / lead_total * 100).round(1) : 0.0
+
+      name = [user.first_name, user.last_name].compact.join(' ').presence || user.name.presence || user.email
+      {
+        user_id: user.id,
+        name: name,
+        avatar_url: user.try(:avatar_url),
+        closed_count: closed_count,
+        closed_value: closed_value,
+        formatted_closed_value: format_currency(closed_value),
+        pipeline_count: pipeline_count,
+        pipeline_value: pipeline_value,
+        formatted_pipeline_value: format_currency(pipeline_value),
+        activities: activities,
+        conversion_rate: conversion_rate
+      }
+    end
+
+    {
+      reps: rep_rows.sort_by { |r| -r[:closed_value] },
+      drill_down_url: '/deals'
+    }
+  end
+
+  # ==================== PIPELINE COVERAGE ====================
+  def pipeline_coverage
+    pipeline_scope = @company.deals.where(deleted_at: nil).where.not(stage: %w[closed_won closed_lost])
+    pipeline_scope = pipeline_scope.where(location_id: Current.location_id) if location_filtered?
+
+    pipeline_value = pipeline_scope.sum(:value).to_f
+    deals_count    = pipeline_scope.count
+
+    target = if @company.respond_to?(:revenue_target) && @company.revenue_target.to_f.positive?
+               @company.revenue_target.to_f
+             else
+               last_month_start = Date.today.last_month.beginning_of_month
+               last_month_end   = Date.today.last_month.end_of_month
+               (calculate_revenue(last_month_start, last_month_end).to_f * 1.1)
+             end
+
+    coverage_ratio = target.positive? ? (pipeline_value / target).round(2) : 0.0
+
+    {
+      pipeline_value: pipeline_value,
+      formatted_pipeline_value: format_currency(pipeline_value),
+      target: target,
+      formatted_target: format_currency(target),
+      coverage_ratio: coverage_ratio,
+      deals_count: deals_count,
+      drill_down_url: '/deals'
+    }
+  end
+
+  # ==================== STALE DEALS ALERT ====================
+  def stale_deals_alert
+    cutoff = 14.days.ago
+    owner_field = find_dashboard_owner_field
+
+    stale = @company.deals.where(deleted_at: nil)
+                          .where.not(stage: %w[closed_won closed_lost])
+                          .where('(deals.last_activity_at IS NULL AND deals.created_at < :c) OR deals.last_activity_at < :c', c: cutoff)
+    stale = stale.where(location_id: Current.location_id) if location_filtered?
+
+    total_stale = stale.count
+
+    by_owner = []
+    if owner_field
+      grouped = stale.where.not(owner_field => nil).group(owner_field).count
+      user_lookup = User.where(id: grouped.keys, company_id: @company.id).index_by(&:id)
+      by_owner = grouped.map do |uid, count|
+        u = user_lookup[uid]
+        oldest = stale.where(owner_field => uid).minimum(Arel.sql('COALESCE(deals.last_activity_at, deals.created_at)'))
+        days = oldest ? ((Time.current - oldest) / 1.day).to_i : 0
+        {
+          user_id: uid,
+          user_name: u ? ([u.first_name, u.last_name].compact.join(' ').presence || u.name.presence || u.email) : "User ##{uid}",
+          count: count,
+          oldest_days: days
+        }
+      end.sort_by { |row| -row[:count] }
+    end
+
+    deals_payload = stale.order(Arel.sql('COALESCE(deals.last_activity_at, deals.created_at) ASC')).limit(20).map do |d|
+      anchor = d.last_activity_at || d.created_at
+      days = anchor ? ((Time.current - anchor) / 1.day).to_i : 0
+      owner_id = owner_field ? d.public_send(owner_field) : nil
+      owner = owner_id ? User.where(id: owner_id, company_id: @company.id).pick(:first_name, :last_name, :email) : nil
+      owner_name = owner ? ([owner[0], owner[1]].compact.join(' ').presence || owner[2]) : nil
+      {
+        id: d.id,
+        name: d.try(:name) || "Deal ##{d.id}",
+        owner: owner_name,
+        days_stale: days,
+        value: d.value.to_f,
+        formatted_value: format_currency(d.value),
+        stage: d.stage
+      }
+    end
+
+    {
+      total_stale: total_stale,
+      by_owner: by_owner,
+      deals: deals_payload,
+      drill_down_url: '/deals?stale=true'
+    }
+  end
+
+  # ==================== ENGAGEMENT HEATMAP ====================
+  def engagement_heatmap
+    cutoff = 7.days.ago.beginning_of_day
+
+    daily_opens = CampaignSend.where(company_id: @company.id)
+                              .where('opened_at >= ?', cutoff)
+                              .group(Arel.sql("DATE(opened_at AT TIME ZONE 'UTC')"))
+                              .sum(:open_count)
+
+    daily_clicks = CampaignSend.where(company_id: @company.id)
+                               .where('clicked_at >= ?', cutoff)
+                               .group(Arel.sql("DATE(clicked_at AT TIME ZONE 'UTC')"))
+                               .sum(:click_count)
+
+    daily = (0..6).map do |i|
+      d = (Date.today - (6 - i).days)
+      key = d.to_s
+      {
+        date: key,
+        opens: daily_opens[d].to_i || daily_opens[key].to_i,
+        clicks: daily_clicks[d].to_i || daily_clicks[key].to_i
+      }
+    end
+
+    total_opens  = daily.sum { |r| r[:opens] }
+    total_clicks = daily.sum { |r| r[:clicks] }
+    most_active  = daily.max_by { |r| r[:opens] + r[:clicks] }
+
+    {
+      daily: daily,
+      total_opens: total_opens,
+      total_clicks: total_clicks,
+      most_active_day: most_active && (most_active[:opens] + most_active[:clicks]).positive? ? most_active[:date] : nil,
+      drill_down_url: '/marketing/campaigns'
+    }
+  end
+
+  # ============================================================
+  # MARKETING CARDS
+  # ============================================================
+
+  # ==================== CAMPAIGN PERFORMANCE ====================
+  def campaign_performance
+    range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
+
+    campaigns = @company.campaigns.where(is_deleted: false)
+                                  .where(status: %w[active running scheduled completed])
+
+    sends_scope = CampaignSend.where(company_id: @company.id, sent_at: range)
+
+    total_sends      = sends_scope.where.not(sent_at: nil).count
+    total_delivered  = sends_scope.where.not(delivered_at: nil).count
+    total_opened     = sends_scope.where.not(opened_at: nil).count
+    total_clicked    = sends_scope.where.not(clicked_at: nil).count
+    total_bounced    = sends_scope.where.not(bounced_at: nil).count
+    total_unsub      = sends_scope.where.not(unsubscribed_at: nil).count
+
+    open_rate   = total_delivered.positive? ? (total_opened.to_f / total_delivered * 100).round(1) : 0.0
+    click_rate  = total_delivered.positive? ? (total_clicked.to_f / total_delivered * 100).round(1) : 0.0
+    bounce_rate = total_sends.positive?     ? (total_bounced.to_f / total_sends * 100).round(1)     : 0.0
+
+    per_campaign = campaigns.map do |c|
+      cs = sends_scope.where(campaign_id: c.id)
+      sent = cs.where.not(sent_at: nil).count
+      delivered = cs.where.not(delivered_at: nil).count
+      opened = cs.where.not(opened_at: nil).count
+      clicked = cs.where.not(clicked_at: nil).count
+      next nil if sent.zero?
+      {
+        id: c.id,
+        name: c.name,
+        sends: sent,
+        open_rate:  delivered.positive? ? (opened.to_f / delivered * 100).round(1) : 0.0,
+        click_rate: delivered.positive? ? (clicked.to_f / delivered * 100).round(1) : 0.0
+      }
+    end.compact.sort_by { |r| -r[:sends] }
+
+    {
+      total_sends: total_sends,
+      total_delivered: total_delivered,
+      total_opened: total_opened,
+      total_clicked: total_clicked,
+      total_bounced: total_bounced,
+      total_unsubscribed: total_unsub,
+      open_rate: open_rate,
+      click_rate: click_rate,
+      bounce_rate: bounce_rate,
+      campaigns: per_campaign,
+      drill_down_url: '/marketing/campaigns'
+    }
+  end
+
+  # ==================== LEAD SOURCE BREAKDOWN ====================
+  def lead_source_breakdown
+    range = @date_range[:start_date]..@date_range[:end_date]
+
+    leads_scope = @company.leads.where(created_at: range)
+    leads_scope = leads_scope.where(location_id: Current.location_id) if location_filtered?
+
+    total_leads = leads_scope.count
+    by_source   = leads_scope.left_joins(:source).group('sources.id, sources.name').count
+    ad_costs    = ad_campaign_cost_per_source(range)
+
+    sources = by_source.map do |(source_id, source_name), count|
+      pct = total_leads.positive? ? (count.to_f / total_leads * 100).round(1) : 0.0
+      cpl = ad_costs[source_id] && count.positive? ? (ad_costs[source_id] / count).round(2) : nil
+      {
+        source_id: source_id,
+        source_name: source_name || 'Unknown',
+        count: count,
+        percentage: pct,
+        cost_per_lead: cpl
+      }
+    end.sort_by { |r| -r[:count] }
+
+    {
+      sources: sources,
+      total_leads: total_leads,
+      drill_down_url: '/crm/leads'
+    }
+  end
+
+  # ==================== COMMUNICATION STATS ====================
+  def communication_stats
+    range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
+
+    emails_sent = Communication.where(company_id: @company.id, channel: 'email', direction: 'outbound')
+                               .where(sent_at: range).count
+
+    emails_opened = CommunicationEvent.joins(:communication)
+                                      .where(communications: { company_id: @company.id, channel: 'email' })
+                                      .where(event_type: 'opened')
+                                      .where('communication_events.occurred_at' => range).count
+
+    emails_clicked = CommunicationEvent.joins(:communication)
+                                       .where(communications: { company_id: @company.id, channel: 'email' })
+                                       .where(event_type: 'clicked')
+                                       .where('communication_events.occurred_at' => range).count
+
+    sms_sent = Communication.where(company_id: @company.id, channel: 'sms', direction: 'outbound')
+                            .where(sent_at: range).count
+
+    inbound = Communication.where(company_id: @company.id, direction: 'inbound')
+                           .where(received_at: range).count
+    outbound_total = Communication.where(company_id: @company.id, direction: 'outbound')
+                                  .where(sent_at: range).count
+
+    open_rate     = emails_sent.positive? ? (emails_opened.to_f / emails_sent * 100).round(1) : 0.0
+    response_rate = outbound_total.positive? ? (inbound.to_f / outbound_total * 100).round(1) : 0.0
+
+    {
+      emails_sent: emails_sent,
+      emails_opened: emails_opened,
+      emails_clicked: emails_clicked,
+      email_open_rate: open_rate,
+      sms_sent: sms_sent,
+      response_rate: response_rate,
+      drill_down_url: '/communications'
+    }
+  end
+
   private
 
   # Calculate total revenue from payments
@@ -1759,6 +2297,41 @@ class DashboardMetricsService
       .where(status: 'completed')
       .where(payment_date: start_date..end_date)
       .sum(:amount)
+  end
+
+  # Range covering the period immediately preceding @date_range, same length.
+  def previous_period_range
+    days = (@date_range[:end_date] - @date_range[:start_date]).to_i
+    prev_start = @date_range[:start_date] - (days + 1).days
+    prev_end   = @date_range[:start_date] - 1.day
+    prev_start..prev_end
+  end
+
+  def location_filtered?
+    defined?(Current) && Current.respond_to?(:location_filtered?) && Current.location_filtered?
+  end
+
+  # Determine which deal column holds the rep — mirrors top_performers logic.
+  def find_dashboard_owner_field
+    cols = @company.deals.column_names
+    %w[owner_id user_id assigned_to_id primary_salesperson_id created_by_id].find { |f| cols.include?(f) }
+  end
+
+  # Returns { source_id => total ad spend in range } for sources matched by name to ad_campaigns.
+  def ad_campaign_cost_per_source(range)
+    return {} unless defined?(AdCampaign)
+
+    ad_spend_by_name = AdCampaign.where(company_id: @company.id, is_deleted: [false, nil])
+                                 .where(updated_at: range)
+                                 .group(:name).sum(:spend)
+    return {} if ad_spend_by_name.empty?
+
+    sources = @company.sources.where(name: ad_spend_by_name.keys).pluck(:id, :name)
+    sources.each_with_object({}) do |(id, name), acc|
+      acc[id] = ad_spend_by_name[name].to_f
+    end
+  rescue StandardError
+    {}
   end
 
   # Generate sparkline data for revenue (last 30 days)

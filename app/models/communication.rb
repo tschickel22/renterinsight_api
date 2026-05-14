@@ -143,6 +143,19 @@ class Communication < ApplicationRecord
   def inbound?
     direction == 'inbound'
   end
+
+  # Status query methods
+  def sent?
+    status == 'sent'
+  end
+
+  def delivered?
+    status == 'delivered'
+  end
+
+  def failed?
+    status == 'failed'
+  end
   
   # Metadata helpers
   def add_metadata(key, value)
@@ -166,6 +179,10 @@ class Communication < ApplicationRecord
   
   def opened?
     communication_events.where(event_type: 'opened').exists?
+  end
+
+  def open_count
+    communication_events.where(event_type: 'opened').count
   end
   
   def clicked?
@@ -302,24 +319,5 @@ class Communication < ApplicationRecord
   rescue => e
     Rails.logger.error "[Communication#notify_workflow_of_inbound] failed: #{e.message}"
   end
-
-  public
-
-# Status query methods
-def sent?
-  status == 'sent'
-end
-
-def delivered?
-  status == 'delivered'
-end
-
-def failed?
-  status == 'failed'
-end
-
-def opened?
-  opened_at.present?
-end
 
 end

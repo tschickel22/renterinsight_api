@@ -122,10 +122,25 @@ module Api
       # POST /api/crm/leads/:lead_id/communications/sms
       # POST /api/crm/leads/:lead_id/communications/send_sms
       def send_sms
-        # Check if SMS is configured
-        settings = get_effective_settings
-        sms_config = settings.dig(:communications, :sms) || settings.dig('communications', 'sms') || {}
-        
+        # Check if SMS is configured.
+        # NOTE: previously used the controller's local get_effective_settings waterfall,
+        # which returned the platform fromNumber even when the company had its own
+        # dedicated number. CommunicationSettingsService applies the correct
+        # Location → Company → Platform waterfall (and decrypts the auth token),
+        # so we delegate to it and remap to the camelCase keys the rest of
+        # send_sms_via_twilio / sms_configured? already expect.
+        comm_service = CommunicationSettingsService.for_company(@company)
+        sms_cfg      = comm_service.sms_config
+        sms_config = {
+          provider:                  sms_cfg[:provider] || 'twilio',
+          fromNumber:                sms_cfg[:from_number],
+          isEnabled:                 sms_cfg[:enabled],
+          twilioAccountSid:          sms_cfg[:twilio_account_sid],
+          twilioAuthToken:           sms_cfg[:twilio_auth_token],
+          twilioMessagingServiceSid: sms_cfg[:twilio_messaging_service_sid]
+        }.compact
+
+        Rails.logger.info "[CommunicationsController#send_sms] SMS config via CommSettingsService: fromNumber=#{sms_config[:fromNumber]}"
         Rails.logger.info "[CommunicationsController#send_sms] SMS config: #{sms_config.inspect}"
         Rails.logger.info "[CommunicationsController#send_sms] SMS configured check: #{sms_configured?(sms_config)}"
         
@@ -1452,7 +1467,7 @@ module Api
           from_email: config[:fromEmail],
           from_name: config[:fromName],
           sender_user_id: current_user&.id,
-          assigned_user_id: @lead&.assigned_user_id
+          assigned_user_id: @lead&.owner_id
         }
         meta[:impersonated_by] = original_user.id if impersonating?
         meta.compact
@@ -1467,7 +1482,7 @@ module Api
           character_count: sms_params[:content]&.length,
           from_number: config[:fromNumber],
           sender_user_id: current_user&.id,
-          assigned_user_id: @lead&.assigned_user_id
+          assigned_user_id: @lead&.owner_id
         }
         meta[:impersonated_by] = original_user.id if impersonating?
         meta.compact

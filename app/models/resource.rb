@@ -124,6 +124,9 @@ public
       # Contractors (position 163)
       { key: 'contractors', name: 'Contractors', category: 'operations', description: 'Manage contractors, assignments, and portal access', position: 163 },
 
+      # Vendors (unified contractors + suppliers)
+      { key: 'vendors', name: 'Vendors', category: 'operations', description: 'Manage vendors (contractors, suppliers, service providers)', position: 164 },
+
       # Warranty Resources (position 160-165)
       { key: 'warranty_claims', name: 'Warranty Claims', category: 'operations', description: 'Manage warranty claims and submissions to manufacturers', position: 160 },
       { key: 'manufacturer_ar', name: 'Manufacturer AR', category: 'operations', description: 'Track and manage manufacturer accounts receivable', position: 161 },
@@ -152,7 +155,17 @@ public
 
       # Social Media Content Engine
       { key: 'social_posts', name: 'Social Media', category: 'operations', position: 135, description: 'Create, manage, and publish social media posts' },
-      { key: 'facebook_ads', name: 'Facebook Ads', category: 'operations', position: 136, description: 'Create, manage, pause, and delete Facebook ad campaigns' }
+      { key: 'facebook_ads', name: 'Facebook Ads', category: 'operations', position: 136, description: 'Create, manage, pause, and delete Facebook ad campaigns' },
+
+      # Accounting Module (position 130-139)
+      { key: 'accounting', name: 'Accounting', category: 'operations', description: 'Accounting module access', position: 130 },
+      { key: 'chart_of_accounts', name: 'Chart of Accounts', category: 'operations', description: 'Manage chart of accounts', position: 131 },
+      { key: 'journal_entries', name: 'Journal Entries', category: 'operations', description: 'Create and manage journal entries', position: 132 },
+      { key: 'bank_accounts_accounting', name: 'Bank Accounts (Accounting)', category: 'operations', description: 'Bank feed and reconciliation', position: 133 },
+      { key: 'bank_reconciliation', name: 'Bank Reconciliation', category: 'operations', description: 'Bank statement reconciliation', position: 134 },
+      { key: 'bills', name: 'Bills & Expenses', category: 'operations', description: 'Manage vendor bills, expenses, and payments', position: 135 },
+      { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 137 },
+      { key: 'budgets', name: 'Budgets', category: 'operations', description: 'Budget planning, forecasting, and variance analysis', position: 135 }
     ]
     
     resources_data.each do |resource_data|

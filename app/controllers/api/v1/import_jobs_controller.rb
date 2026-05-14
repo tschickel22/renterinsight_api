@@ -35,6 +35,10 @@ module Api
           return render json: { error: "Unknown module: #{params[:module_type]}" }, status: :unprocessable_entity
         end
 
+        options = build_import_options
+        context_error = validate_required_context(params[:module_type], options)
+        return render json: { error: context_error }, status: :unprocessable_entity if context_error
+
         source_key = upload_to_s3(file, folder: "imports/#{@company.id}")
         zip_key    = params[:image_zip].present? ? upload_to_s3(params[:image_zip], folder: "imports/#{@company.id}/images") : nil
 
@@ -48,7 +52,7 @@ module Api
           image_zip_url: zip_key,
           duplicate_strategy: params[:duplicate_strategy].presence || 'skip',
           duplicate_match_fields: parse_array(params[:duplicate_match_fields]),
-          options: build_import_options
+          options: options
         )
 
         render json: serialize(job), status: :created
@@ -65,15 +69,25 @@ module Api
         path   = ImportExport::S3Helper.download_to_tempfile(@job.source_file_url)
         parsed = ImportExport::CsvParser.new(path).parse
         fields = ImportExport::ModuleRegistry.fields_for(@job.module_type, company_id: @company.id, for_import: true)
-        mapper = ImportExport::FieldMapper.new(parsed[:headers], fields).call
+
+        if @job.module_type.to_s == 'budget_lines'
+          # Budget lines have specialized month-name awareness ('Jan'/'January'
+          # /'Month 1' all → month_1) that the generic FieldMapper doesn't know.
+          suggested = ImportExport::BudgetLineImporter.suggest_mapping(parsed[:headers])
+          unmapped  = parsed[:headers].reject { |h| suggested.key?(h) }
+        else
+          mapper    = ImportExport::FieldMapper.new(parsed[:headers], fields).call
+          suggested = mapper[:suggested_mapping]
+          unmapped  = mapper[:unmapped_headers]
+        end
 
         render json: {
           headers: parsed[:headers],
           sample_rows: parsed[:rows].first(10),
           total_rows: parsed[:total_rows],
           fields: fields,
-          suggested_mapping: mapper[:suggested_mapping],
-          unmapped_headers: mapper[:unmapped_headers]
+          suggested_mapping: suggested,
+          unmapped_headers: unmapped
         }
       rescue StandardError => e
         Rails.logger.error "[ImportJobs#preview] #{e.message}"
@@ -145,11 +159,36 @@ module Api
       # Merge frontend-provided options with request context defaults.
       # location_id falls back to the user's current location (X-Location-ID header).
       # owner_id falls back to the importing user.
+      # Module-specific context params (e.g. budget_id for budget_lines) are
+      # accepted via params[:context] and folded into options so the importer
+      # can read them from job.options later.
       def build_import_options
         opts = parse_options(params[:options])
         opts['location_id'] ||= Current.location_id if Current.location_id.present?
         opts['owner_id']    ||= current_user.id
+
+        context = parse_options(params[:context])
+        context.each { |k, v| opts[k.to_s] = v unless v.nil? }
         opts
+      end
+
+      # Validates that all required context params for the module are present
+      # in options, and that the referenced records belong to the company and
+      # are editable. Returns an error message string, or nil on success.
+      def validate_required_context(module_type, options)
+        return nil unless ImportExport::ModuleRegistry.requires_context?(module_type)
+
+        required = ImportExport::ModuleRegistry.context_params(module_type)
+        missing  = required.select { |k| options[k.to_s].blank? }
+        return "Missing required context: #{missing.join(', ')}" if missing.any?
+
+        if module_type.to_s == 'budget_lines'
+          budget = @company.budgets.find_by(id: options['budget_id'])
+          return "Budget not found: #{options['budget_id']}" unless budget
+          return "Budget '#{budget.name}' is not editable (status: #{budget.status})" unless budget.editable?
+        end
+
+        nil
       end
 
       def serialize(job, include_errors: false)

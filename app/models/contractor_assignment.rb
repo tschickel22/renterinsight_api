@@ -8,7 +8,11 @@ class ContractorAssignment < ApplicationRecord
 
   REVIEWABLE_STATUSES = [REVIEW_STATUS_PENDING, REVIEW_STATUS_APPROVED, REVIEW_STATUS_REVISION_REQUESTED, REVIEW_STATUS_REJECTED].freeze
 
-  belongs_to :contractor
+  # FK column was renamed contractor_id -> vendor_id in the unify-vendors migration.
+  # Existing callers reference contractor_id; alias keeps them working.
+  alias_attribute :contractor_id, :vendor_id
+
+  belongs_to :contractor, foreign_key: :vendor_id
   belongs_to :assignable, polymorphic: true
   belongs_to :company
   belongs_to :assigned_by, class_name: 'User', optional: true

@@ -28,7 +28,7 @@ module WorkflowEngine
       entity_id: entity.id,
       status: 'pending',
       current_step_id: rule_entry_step_id(rule),
-      variables: build_initial_variables(entity, event),
+      variables: build_initial_variables(entity, event).merge('params' => rule.parameters || {}),
       rule_snapshot: rule.snapshot_steps,
       started_at: Time.current
     )
@@ -107,7 +107,8 @@ module WorkflowEngine
       vars = {
         'entity' => entity_as_hash_with_denormalized(entity),
         'trigger' => event&.payload || {},
-        'started_at' => Time.current.iso8601
+        'started_at' => Time.current.iso8601,
+        'frontend_url' => ENV['FRONTEND_URL'].presence || 'https://localhost:5173'
       }
       vars.merge!(related_entity_snapshots(entity))
       vars

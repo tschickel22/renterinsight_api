@@ -1,3 +1,5 @@
+require 'ostruct'
+
 class Campaign < ApplicationRecord
   STATUSES = %w[draft scheduled running paused completed archived].freeze
   TYPES = %w[blast drip triggered recurring_digest].freeze
@@ -73,7 +75,10 @@ class Campaign < ApplicationRecord
 
   # SMS sender resolution — NEVER falls back to master account.
   # Prefers location-specific number when campaign has location_id and a
-  # matching TwilioAccount exists; otherwise company-wide; else nil.
+  # matching TwilioAccount exists; otherwise company-wide; else falls back to
+  # the CommunicationSettings waterfall (Location → Company → Platform) for
+  # companies whose Twilio is configured via settings rather than a
+  # TwilioAccount row. Returns nil if no usable sender is configured anywhere.
   def resolve_sms_sender
     return nil unless sms_channel?
 
@@ -82,7 +87,13 @@ class Campaign < ApplicationRecord
       return loc_match if loc_match
     end
 
-    TwilioAccount.where(company_id: company_id, location_id: nil, status: 'active').first
+    twilio_acct = TwilioAccount.where(company_id: company_id, location_id: nil, status: 'active').first
+    return twilio_acct if twilio_acct
+
+    sms_cfg = CommunicationSettingsService.for_company(Company.find(company_id)).sms_config
+    if sms_cfg[:enabled] && sms_cfg[:from_number].present?
+      OpenStruct.new(phone_number: sms_cfg[:from_number])
+    end
   end
 
   # Step-level email resolver — bypasses campaign-channel guard for mixed-channel
@@ -110,7 +121,14 @@ class Campaign < ApplicationRecord
       loc_match = TwilioAccount.where(company_id: company_id, location_id: location_id, status: 'active').first
       return loc_match if loc_match
     end
-    TwilioAccount.where(company_id: company_id, location_id: nil, status: 'active').first
+
+    twilio_acct = TwilioAccount.where(company_id: company_id, location_id: nil, status: 'active').first
+    return twilio_acct if twilio_acct
+
+    sms_cfg = CommunicationSettingsService.for_company(Company.find(company_id)).sms_config
+    if sms_cfg[:enabled] && sms_cfg[:from_number].present?
+      OpenStruct.new(phone_number: sms_cfg[:from_number])
+    end
   end
 
   private

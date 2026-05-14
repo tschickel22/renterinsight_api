@@ -13,6 +13,10 @@ module Api
         
         payments = @company.commission_payments.active
         
+        # CRITICAL: Only show commissions for GL-approved deals
+        # Commissions are not available for approval/payment until the deal is GL-posted
+        payments = payments.joins(:deal).where(deals: { gl_posted: true })
+        
         # Filter by deal if nested route
         if params[:deal_id].present?
           payments = payments.where(deal_id: params[:deal_id])
@@ -37,7 +41,7 @@ module Api
         if params[:start_date].present? && params[:end_date].present?
           start_date = Date.parse(params[:start_date])
           end_date = Date.parse(params[:end_date])
-          payments = payments.where('created_at >= ? AND created_at <= ?', start_date.beginning_of_day, end_date.end_of_day)
+          payments = payments.where('commission_payments.created_at >= ? AND commission_payments.created_at <= ?', start_date.beginning_of_day, end_date.end_of_day)
         end
         
         # Apply location selector filter
@@ -124,6 +128,8 @@ module Api
         return unless authorize_action!('commission_payments', 'read')
         
         base_payments = @company.commission_payments.active
+        # Only count commissions for GL-approved deals
+        base_payments = base_payments.joins(:deal).where(deals: { gl_posted: true })
         base_payments = base_payments.for_current_location if Current.location_filtered?
         
         # Apply RBAC filtering
@@ -158,8 +164,8 @@ module Api
             amount: base_payments.sum(:amount).round(2)
           },
           this_month: {
-            count: base_payments.where('created_at >= ?', Date.today.beginning_of_month).count,
-            amount: base_payments.where('created_at >= ?', Date.today.beginning_of_month).sum(:amount).round(2)
+            count: base_payments.where('commission_payments.created_at >= ?', Date.today.beginning_of_month).count,
+            amount: base_payments.where('commission_payments.created_at >= ?', Date.today.beginning_of_month).sum(:amount).round(2)
           }
         }
       end
@@ -170,9 +176,9 @@ module Api
         return unless authorize_action!('commission_payments', 'read')
         
         base_payments = @company.commission_payments.active
+        # Only count commissions for GL-approved deals
+        base_payments = base_payments.joins(:deal).where(deals: { gl_posted: true })
         base_payments = base_payments.for_current_location if Current.location_filtered?
-        
-        # Apply RBAC filtering
         if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           base_payments = location_ids.any? ? 
@@ -190,8 +196,8 @@ module Api
         pending_payments = base_payments.pending
         approved_payments = base_payments.approved
         paid_payments = base_payments.paid
-        this_month_payments = base_payments.where('created_at >= ?', this_month_start)
-        last_month_payments = base_payments.where('created_at >= ? AND created_at <= ?', last_month_start, last_month_end)
+        this_month_payments = base_payments.where('commission_payments.created_at >= ?', this_month_start)
+        last_month_payments = base_payments.where('commission_payments.created_at >= ? AND commission_payments.created_at <= ?', last_month_start, last_month_end)
         
         # Calculate month-over-month change
         this_month_total = this_month_payments.sum(:amount)
@@ -275,7 +281,7 @@ module Api
         timeline = (0..5).reverse_each.map do |months_ago|
           month_start = (today - months_ago.months).beginning_of_month
           month_end = month_start.end_of_month
-          month_payments = base_payments.where('created_at >= ? AND created_at <= ?', month_start, month_end)
+          month_payments = base_payments.where('commission_payments.created_at >= ? AND commission_payments.created_at <= ?', month_start, month_end)
           
           {
             month: month_start.strftime('%b %Y'),
@@ -336,13 +342,19 @@ module Api
             base_payments.none
         end
         
+        # users.name can be NULL for some accounts; fall back to first+last, then email,
+        # so the frontend always has a non-empty userName to render.
+        user_name_sql = "COALESCE(NULLIF(TRIM(users.name), ''), " \
+                        "NULLIF(TRIM(CONCAT_WS(' ', users.first_name, users.last_name)), ''), " \
+                        "users.email)"
+
         # Payroll Export Data - Group by user and pay period
         payroll_data = base_payments
           .joins(:payee_user)
-          .group('users.id', 'users.name', 'users.email')
+          .group('users.id', 'users.name', 'users.first_name', 'users.last_name', 'users.email')
           .select(
             'users.id as user_id',
-            'users.name as user_name',
+            "#{user_name_sql} as user_name",
             'users.email as user_email',
             'COUNT(commission_payments.id) as payment_count',
             'COALESCE(SUM(commission_payments.amount_paid), 0) as total_paid',
@@ -359,14 +371,14 @@ module Api
               netPay: record.total_paid.round(2) # In real scenario, deductions would be calculated here
             }
           end
-        
+
         # Tax Reporting (1099) - Annual totals
         tax_data = base_payments
           .joins(:payee_user)
-          .group('users.id', 'users.name', 'users.email')
+          .group('users.id', 'users.name', 'users.first_name', 'users.last_name', 'users.email')
           .select(
             'users.id as user_id',
-            'users.name as user_name',
+            "#{user_name_sql} as user_name",
             'users.email as user_email',
             'COUNT(commission_payments.id) as payment_count',
             'COALESCE(SUM(commission_payments.amount_paid), 0) as total_paid'
@@ -607,6 +619,12 @@ module Api
       def approve
         return unless authorize_action!('commission_payments', 'approve')
         
+        # CRITICAL: Commission cannot be approved until deal is GL-posted
+        if @payment.deal && !@payment.deal.gl_posted?
+          render json: { error: 'Cannot approve commission: deal has not been GL-approved yet. Approve the deal first in Accounting > Deals & Commissions.' }, status: :unprocessable_entity
+          return
+        end
+        
         if @payment.approve!(approved_by: current_user)
           render json: { payment: payment_json(@payment, detailed: true) }
         else
@@ -805,6 +823,13 @@ module Api
         end
         
         deal = @company.deals.find(deal_id)
+        
+        # Commission payments cannot be generated until deal is GL-posted
+        unless deal.gl_posted?
+          render json: { error: 'Cannot generate commission: deal has not been GL-approved yet' }, status: :unprocessable_entity
+          return
+        end
+        
         payment = CommissionPaymentGeneratorService.generate_for_deal(deal)
         
         if payment.present?
@@ -947,6 +972,7 @@ module Api
           # Relationships
           dealId: payment.deal_id,
           dealName: payment.deal&.name,
+          dealGlPosted: payment.deal&.gl_posted || false,
           payeeUserId: payment.payee_user_id,
           payeeName: payment.payee_user&.name,
           locationId: payment.location_id,

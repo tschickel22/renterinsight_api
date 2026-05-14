@@ -7,6 +7,10 @@ class PurchaseOrder < ApplicationRecord
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :supplier
+  # Parallel association to the unified vendors table. supplier_id and
+  # vendor_id hold identical values after the unify-vendors migration; new
+  # callers should use :vendor.
+  belongs_to :vendor, optional: true
   belongs_to :created_by, class_name: 'User', optional: true
   belongs_to :approved_by, class_name: 'User', optional: true
   
@@ -30,6 +34,7 @@ class PurchaseOrder < ApplicationRecord
   before_validation :set_defaults, on: :create
   before_validation :generate_po_number, on: :create
   before_save :calculate_totals
+  after_save :post_to_accounting, if: :status_changed_to_received?
   
   # Scopes
   scope :active, -> { where(is_deleted: [false, nil]) }
@@ -140,5 +145,15 @@ class PurchaseOrder < ApplicationRecord
     
     # Total = subtotal + tax + shipping
     self.total_amount = subtotal + tax_amount + shipping_cost
+  end
+
+  def status_changed_to_received?
+    saved_change_to_status? && status.in?(%w[received partially_received])
+  end
+
+  def post_to_accounting
+    Accounting::PurchaseOrderPostingService.new(self).post!
+  rescue => e
+    Rails.logger.error("[Accounting] PO #{id} auto-post failed: #{e.message}")
   end
 end

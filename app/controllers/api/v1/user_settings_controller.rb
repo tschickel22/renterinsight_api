@@ -21,6 +21,7 @@ module Api
           zip: extract_zip,
           user_type: @user_type,
           landing_page: @user.respond_to?(:landing_page) ? @user.landing_page : nil,
+          booking_url: @user.respond_to?(:booking_url) ? @user.booking_url : nil,
           workqueue_preferences: @user.respond_to?(:workqueue_preferences) ? (@user.workqueue_preferences || {}) : {}
         }, status: :ok
       end
@@ -28,7 +29,7 @@ module Api
       # PATCH /api/v1/user_settings/profile
       def update_profile
         profile_params = params.permit(
-          :first_name, :last_name, :phone, :email, :address, :city, :state, :zip, :landing_page,
+          :first_name, :last_name, :phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
           workqueue_preferences: {}
         )
 
@@ -61,6 +62,7 @@ module Api
             updates[:phone] = profile_params[:phone] if profile_params[:phone].present?
             updates[:email] = profile_params[:email] if profile_params[:email].present?
             updates[:landing_page] = profile_params[:landing_page] if profile_params[:landing_page].present?
+            updates[:booking_url] = profile_params[:booking_url] if profile_params.key?(:booking_url)
 
             if params.key?(:workqueue_preferences) && @user.respond_to?(:workqueue_preferences)
               raw = profile_params[:workqueue_preferences] || {}
@@ -297,6 +299,31 @@ module Api
             error: 'Failed to update notification preferences'
           }, status: :internal_server_error
         end
+      end
+
+      # POST /api/v1/user_settings/test_digest
+      def test_digest
+        unless @user_type == 'admin'
+          return render json: { success: false, error: 'Not available for portal users' }, status: :forbidden
+        end
+
+        unless @user.respond_to?(:has_email_connection?) && @user.has_email_connection?
+          return render json: {
+            success: false,
+            error: 'No email connection configured. Connect Gmail or Outlook in Account Settings.'
+          }, status: :unprocessable_entity
+        end
+
+        result = DailyDigestService.new(@user).send_digest!
+
+        if result[:success]
+          render json: { success: true, message: 'Digest email sent to ' + @user.email }
+        else
+          render json: { success: false, error: result[:error] }, status: :unprocessable_entity
+        end
+      rescue => e
+        Rails.logger.error('[test_digest] Error: ' + e.message)
+        render json: { success: false, error: e.message }, status: :internal_server_error
       end
 
       private

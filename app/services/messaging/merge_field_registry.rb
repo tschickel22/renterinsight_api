@@ -11,7 +11,8 @@ module Messaging
     REP_FIELDS = [
       { key: 'rep_name', label: 'Sales rep name', group: 'Sales rep', sample: 'Tom Schickel', available_for: %w[Lead Contact Account], channels: %w[email sms] },
       { key: 'rep_email', label: 'Sales rep email', group: 'Sales rep', sample: 'tom@dealership.com', available_for: %w[Lead Contact Account], channels: %w[email] },
-      { key: 'rep_phone', label: 'Sales rep phone', group: 'Sales rep', sample: '(303) 555-0100', available_for: %w[Lead Contact Account], channels: %w[email sms] }
+      { key: 'rep_phone', label: 'Sales rep phone', group: 'Sales rep', sample: '(303) 555-0100', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'rep_booking_link', label: 'Booking link', group: 'Sales rep', sample: 'https://calendly.com/tom', available_for: %w[Lead Contact Account], channels: %w[email sms] }
     ].freeze
 
     COMPANY_FIELDS = [
