@@ -331,6 +331,7 @@ class Api::V1::CampaignsController < ApplicationController
     )
     render json: {
       generation_id: generation.id, plan: generation.generated_plan,
+      has_questions: generation.generated_plan['questions'].present?,
       model_version: generation.model_version,
       input_tokens: generation.input_tokens, output_tokens: generation.output_tokens
     }
@@ -369,7 +370,7 @@ class Api::V1::CampaignsController < ApplicationController
     return render(json: { error: 'feedback is required' }, status: :unprocessable_entity) if feedback.blank?
 
     new_gen = Campaigns::AiBuilder.new(company: @company, user: current_user).refine(generation: generation, feedback: feedback)
-    render json: { generation_id: new_gen.id, plan: new_gen.generated_plan, parent_id: generation.id }
+    render json: { generation_id: new_gen.id, plan: new_gen.generated_plan, has_questions: new_gen.generated_plan['questions'].present?, parent_id: generation.id }
   rescue Campaigns::AiBuilder::CreditLimitError => e
     render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
   rescue Campaigns::AiBuilder::GenerationError => e

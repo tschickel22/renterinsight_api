@@ -26,6 +26,7 @@ puts "📚 Seeding knowledge base from #{SCAN_PATH.basename} " \
 # =============================================================================
 MODULE_META = {
   'accounts'            => { name: 'Accounts',               icon: 'building-2',    desc: 'Customer and business accounts — the B2B side of your CRM.' },
+  'accounting'          => { name: 'Accounting',             icon: 'calculator',    desc: 'Chart of accounts, journal entries, bills, bank transactions, reconciliation, and financial reports.' },
   'activities'          => { name: 'Activities',             icon: 'activity',      desc: 'Activity log across leads, deals, and users.' },
   'agreements'          => { name: 'Agreements & E-Sign',    icon: 'file-signature', desc: 'Contracts, agreement templates, and e-signature workflows.' },
   'ai'                  => { name: 'AI Insights',            icon: 'sparkles',      desc: 'AI-generated insights, suggestions, and smart actions.' },
@@ -290,7 +291,8 @@ ENTITY_ALIASES = [
   ['portal',      %w[buyer-portal customer-portal client-portal],                        'module'],
   ['service',     %w[repair repairs warranty-claim ticket tickets],                      'module'],
   ['nurture',     %w[drip sequence sequences campaign-flow],                             'module'],
-  ['calendar',    %w[appointment appointments meeting meetings schedule],                'module']
+  ['calendar',    %w[appointment appointments meeting meetings schedule],                'module'],
+  ['accounting', %w[accounting gl general-ledger chart-of-accounts coa journal-entry journal-entries bills expenses bank-transactions reconciliation p-and-l profit-and-loss balance-sheet ap accounts-payable ar-aging], 'module']
 ].freeze
 
 alias_count = 0

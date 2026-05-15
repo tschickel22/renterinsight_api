@@ -803,6 +803,10 @@ module Api
         sales revenue commission staff rep salesperson
         close closed won lost stage pipeline
         follow followup overdue unpaid pending open
+        bill bills expense expenses vendor vendors payable receivable
+        journal entry entries ledger gl chart bank transaction deposit
+        withdrawal reconcile reconciliation balance budget profit loss pnl
+        debit credit accounting fiscal period
         show list find who which how many what when
         today week month year this last past
       ].freeze
@@ -827,6 +831,11 @@ module Api
         { category: 'operations', module_key: 'service_tickets', icon: 'wrench',         question: 'Open high priority service tickets' },
         { category: 'inventory',  module_key: 'vehicles',        icon: 'home',           question: 'Homes available in stock' },
         { category: 'inventory',  module_key: 'vehicles',        icon: 'tag',            question: 'Show me homes sold this month' },
+        { category: 'accounting', module_key: 'bills',             icon: 'file-text',      question: 'Show me unpaid bills' },
+        { category: 'accounting', module_key: 'bills',             icon: 'alert-circle',   question: 'Bills due this week' },
+        { category: 'accounting', module_key: 'bills',             icon: 'dollar-sign',    question: 'Total accounts payable outstanding' },
+        { category: 'accounting', module_key: 'journal_entries',   icon: 'book-open',      question: 'Journal entries posted this month' },
+        { category: 'accounting', module_key: 'bank_transactions', icon: 'landmark',       question: 'Unmatched bank transactions' },
       ].freeze
     end
   end

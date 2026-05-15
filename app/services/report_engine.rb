@@ -13,11 +13,15 @@ class ReportEngine
     { key: "warranty_claims", model: "WarrantyClaim", category: "operations" },
     { key: "units",           model: "Unit",          category: "inventory" },
     { key: "properties",      model: "Property",      category: "inventory" },
-    { key: "vehicles",        model: "Vehicle",       category: "inventory" }
+    { key: "vehicles",         model: "Vehicle",        category: "inventory" },
+    { key: "journal_entries",  model: "JournalEntry",   category: "accounting" },
+    { key: "bills",            model: "Bill",           category: "accounting" },
+    { key: "bank_transactions",model: "BankTransaction", category: "accounting" }
   ].freeze
 
   # { "leads" => Lead, ... } — silently drops modules whose model class
   # doesn't exist in this codebase.
+  # NOTE: Clear cache on code reload since MODULE_DEFINITIONS may change.
   def self.available_modules
     @available_modules ||= MODULE_DEFINITIONS.each_with_object({}) do |entry, h|
       begin

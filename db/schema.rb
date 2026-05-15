@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_14_155105) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_14_162343) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6581,6 +6581,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_14_155105) do
     t.index ["user_id"], name: "index_win_loss_reports_on_user_id"
   end
 
+  create_table "workflow_ai_generations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "workflow_rule_id"
+    t.bigint "parent_generation_id"
+    t.bigint "ai_query_log_id"
+    t.text "prompt", null: false
+    t.jsonb "context_snapshot", default: {}, null: false
+    t.jsonb "generated_plan", default: {}, null: false
+    t.string "status", default: "generated", null: false
+    t.string "model_version"
+    t.integer "input_tokens"
+    t.integer "output_tokens"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["ai_query_log_id"], name: "index_workflow_ai_generations_on_ai_query_log_id"
+    t.index ["company_id", "created_at"], name: "index_workflow_ai_generations_on_company_id_and_created_at"
+    t.index ["parent_generation_id"], name: "index_workflow_ai_generations_on_parent_generation_id"
+    t.index ["user_id"], name: "index_workflow_ai_generations_on_user_id"
+    t.index ["workflow_rule_id"], name: "index_workflow_ai_generations_on_workflow_rule_id"
+  end
+
   create_table "workflow_approvals", force: :cascade do |t|
     t.bigint "workflow_run_id", null: false
     t.string "step_id", null: false
@@ -7252,6 +7274,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_14_155105) do
   add_foreign_key "websites", "locations"
   add_foreign_key "win_loss_reports", "deals"
   add_foreign_key "win_loss_reports", "users"
+  add_foreign_key "workflow_ai_generations", "companies"
+  add_foreign_key "workflow_ai_generations", "users"
+  add_foreign_key "workflow_ai_generations", "workflow_rules"
   add_foreign_key "workflow_approvals", "companies"
   add_foreign_key "workflow_approvals", "users", column: "approver_user_id"
   add_foreign_key "workflow_approvals", "workflow_runs"

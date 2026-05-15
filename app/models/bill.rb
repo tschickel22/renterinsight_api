@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Bill < ApplicationRecord
+  include Reportable
+
   belongs_to :company
   belongs_to :vendor, optional: true
   belongs_to :contact, optional: true
@@ -117,6 +119,27 @@ class Bill < ApplicationRecord
   end
 
   alias_method :recalculate_balance!, :refresh_payment_status!
+
+  def self.reportable_config
+    {
+      label: 'Bills',
+      fields: [
+        { key: 'id',             label: 'ID',             type: 'number',  filterable: true,  sortable: true },
+        { key: 'bill_number',    label: 'Bill #',         type: 'string',  filterable: true,  sortable: true },
+        { key: 'vendor_name',    label: 'Vendor',         type: 'string',  filterable: true,  sortable: true },
+        { key: 'bill_date',      label: 'Bill Date',      type: 'date',    filterable: true,  sortable: true },
+        { key: 'due_date',       label: 'Due Date',       type: 'date',    filterable: true,  sortable: true },
+        { key: 'status',         label: 'Status',         type: 'enum',    filterable: true,  sortable: true },
+        { key: 'subtotal',       label: 'Subtotal',       type: 'number',  filterable: true,  sortable: true },
+        { key: 'tax_amount',     label: 'Tax',            type: 'number',  filterable: false, sortable: true },
+        { key: 'total_amount',   label: 'Total',          type: 'number',  filterable: true,  sortable: true },
+        { key: 'amount_paid',    label: 'Amount Paid',    type: 'number',  filterable: true,  sortable: true },
+        { key: 'balance_due',    label: 'Balance Due',    type: 'number',  filterable: true,  sortable: true },
+        { key: 'payment_terms',  label: 'Payment Terms',  type: 'enum',    filterable: true,  sortable: false },
+        { key: 'created_at',     label: 'Created',        type: 'date',    filterable: true,  sortable: true },
+      ]
+    }
+  end
 
   private
 
