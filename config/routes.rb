@@ -65,7 +65,7 @@ Rails.application.routes.draw do
     post 'quickbooks/notifications', to: 'quickbooks#notifications'
 
     # Stripe Financial Connections webhooks (signature-verified, no auth)
-    post 'stripe', to: '/api/v1/stripe_webhooks#receive'
+    post 'stripe', to: 'stripe#receive'
 
     # Facebook Lead Ads webhooks
     get  'facebook/leads', to: 'facebook_leads#verify'
