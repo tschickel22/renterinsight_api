@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class BankTransaction < ApplicationRecord
+  include Reportable
+
   belongs_to :company
   belongs_to :bank_account
   belongs_to :matched_journal_entry, class_name: 'JournalEntry', optional: true
@@ -41,6 +43,24 @@ class BankTransaction < ApplicationRecord
 
   def excluded?
     status == 'excluded'
+  end
+
+  def self.reportable_config
+    {
+      label: 'Bank Transactions',
+      fields: [
+        { key: 'id',                label: 'ID',              type: 'number',  filterable: true,  sortable: true },
+        { key: 'transaction_date',  label: 'Date',            type: 'date',    filterable: true,  sortable: true },
+        { key: 'description',       label: 'Description',     type: 'string',  filterable: true,  sortable: false },
+        { key: 'amount',            label: 'Amount',          type: 'number',  filterable: true,  sortable: true },
+        { key: 'transaction_type',  label: 'Type',            type: 'enum',    filterable: true,  sortable: true },
+        { key: 'status',            label: 'Status',          type: 'enum',    filterable: true,  sortable: true },
+        { key: 'payee_name',        label: 'Payee',           type: 'string',  filterable: true,  sortable: true },
+        { key: 'check_number',      label: 'Check #',         type: 'string',  filterable: true,  sortable: false },
+        { key: 'memo',              label: 'Memo',            type: 'string',  filterable: true,  sortable: false },
+        { key: 'created_at',        label: 'Imported',        type: 'date',    filterable: true,  sortable: true },
+      ]
+    }
   end
 
   def match_to_journal_entry!(je, source: 'manual')

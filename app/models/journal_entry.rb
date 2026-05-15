@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class JournalEntry < ApplicationRecord
+  include Reportable
+
   belongs_to :company
   belongs_to :posted_by, class_name: 'User', optional: true
   belongs_to :voided_by, class_name: 'User', optional: true
@@ -119,5 +121,22 @@ class JournalEntry < ApplicationRecord
 
   def total_credits
     journal_entry_lines.sum(:credit_amount)
+  end
+
+  def self.reportable_config
+    {
+      label: 'Journal Entries',
+      fields: [
+        { key: 'id',             label: 'ID',             type: 'number',  filterable: true,  sortable: true },
+        { key: 'entry_number',   label: 'Entry #',        type: 'string',  filterable: true,  sortable: true },
+        { key: 'entry_date',     label: 'Date',           type: 'date',    filterable: true,  sortable: true },
+        { key: 'memo',           label: 'Memo',           type: 'string',  filterable: true,  sortable: false },
+        { key: 'source_type',    label: 'Source',         type: 'string',  filterable: true,  sortable: true },
+        { key: 'is_void',        label: 'Voided',         type: 'boolean', filterable: true,  sortable: true },
+        { key: 'fiscal_year',    label: 'Fiscal Year',    type: 'number',  filterable: true,  sortable: true },
+        { key: 'fiscal_period',  label: 'Fiscal Period',  type: 'number',  filterable: true,  sortable: true },
+        { key: 'created_at',     label: 'Created',        type: 'date',    filterable: true,  sortable: true },
+      ]
+    }
   end
 end

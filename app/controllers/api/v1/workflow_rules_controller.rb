@@ -8,7 +8,7 @@ module Api
       before_action :set_rule, only: [:show, :update, :destroy, :activate, :pause, :resume, :archive, :validate, :runs, :preview]
       rbac_resource :workflow_automation,
         read_actions: [:index, :show, :runs, :validate, :preview, :preview_unsaved],
-        create_actions: [:create],
+        create_actions: [:create, :ai_generate, :ai_accept, :ai_refine],
         update_actions: [:update, :activate, :pause, :resume, :archive],
         delete_actions: [:destroy]
 
@@ -120,6 +120,51 @@ module Api
         rule = @company.workflow_rules.new(rule_params)
         result = WorkflowPreviewService.preview(rule, company: @company)
         render json: result
+      end
+
+      # POST /api/v1/workflow_rules/ai_generate
+      def ai_generate
+        return unless authorize_action!('workflow_automation', 'create')
+        builder = Workflows::AiBuilder.new(company: @company, user: current_user)
+        generation = builder.generate(
+          prompt: params[:prompt],
+          context_overrides: params[:context_overrides]&.to_unsafe_h
+        )
+        render json: {
+          generation_id: generation.id,
+          plan: generation.generated_plan,
+          has_questions: generation.generated_plan['questions'].present?
+        }
+      rescue Workflows::AiBuilder::CreditLimitError => e
+        render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
+      rescue Workflows::AiBuilder::GenerationError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # POST /api/v1/workflow_rules/ai_accept
+      def ai_accept
+        return unless authorize_action!('workflow_automation', 'create')
+        generation = @company.workflow_ai_generations.find(params[:generation_id])
+        builder = Workflows::AiBuilder.new(company: @company, user: current_user)
+        rule = builder.accept(generation: generation)
+        render json: rule_json(rule, full: true), status: :created
+      end
+
+      # POST /api/v1/workflow_rules/ai_refine
+      def ai_refine
+        return unless authorize_action!('workflow_automation', 'create')
+        generation = @company.workflow_ai_generations.find(params[:generation_id])
+        builder = Workflows::AiBuilder.new(company: @company, user: current_user)
+        new_gen = builder.refine(generation: generation, feedback: params[:feedback])
+        render json: {
+          generation_id: new_gen.id,
+          plan: new_gen.generated_plan,
+          has_questions: new_gen.generated_plan['questions'].present?
+        }
+      rescue Workflows::AiBuilder::CreditLimitError => e
+        render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
+      rescue Workflows::AiBuilder::GenerationError => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       private

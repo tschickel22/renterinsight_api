@@ -323,6 +323,9 @@ Rails.application.routes.draw do
       resources :workflow_rules do
         collection do
           post :preview_unsaved, path: 'preview'
+          post :ai_generate
+          post :ai_accept
+          post :ai_refine
         end
         member do
           post :activate

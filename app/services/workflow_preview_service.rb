@@ -158,7 +158,11 @@ class WorkflowPreviewService
       type = step['type'].to_s
       config = step['config'] || {}
       sim = simulate_step(type, config, matched_count)
-      sim if sim
+      next unless sim
+      # Include the raw step config so the frontend can render rich previews
+      # (email body HTML, SMS text, activity details, etc.)
+      sim[:step_config] = config.except('_canvas_position', '_canvas_size')
+      sim
     end
   end
 

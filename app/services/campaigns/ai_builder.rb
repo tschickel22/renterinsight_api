@@ -218,7 +218,18 @@ module Campaigns
                 "inventory_block_config": null
               }
             ]
+          },
+            "questions": ["string", ...] | null
           }
+
+        QUESTIONS FIELD (CRITICAL):
+        - If the user's prompt is too vague to confidently build a campaign, return 1-3 clarifying questions in "questions" and set "steps" to null.
+        - Be CONSERVATIVE — most prompts have enough to work with. Only ask when you truly cannot decide channel, audience, or what the content should say.
+        - Examples:
+          - "send something to my leads" → ambiguous, ask what the message should be about and what channel
+          - "welcome email series for new MH leads" → clear enough, just build it
+          - "blast about our sale" → mostly clear but what sale? ask 1 question about the offer details
+        - If the prompt is clear, set "questions" to null and produce full "steps".
 
         VOICE:
         - Direct, specific, no "I hope this email finds you well".

@@ -9,6 +9,7 @@ class Company < ApplicationRecord
   has_many :workflow_events, dependent: :destroy
   has_many :workflow_approvals, dependent: :destroy
   has_many :workflow_inbound_triggers, dependent: :destroy
+  has_many :workflow_ai_generations, dependent: :destroy
   has_many :reports, dependent: :destroy
   has_many :contacts, dependent: :destroy
   has_many :deals, dependent: :destroy
