@@ -106,6 +106,12 @@ class BankTransactionMatchingService
   def handle_rule_match(bank_transaction, rule)
     rule.record_match!
 
+    if rule.exclude_rule?
+      bank_transaction.exclude!(reason: rule.exclude_reason.presence || "Auto-excluded by rule: #{rule.name}")
+      bank_transaction.update!(rule_id: rule.id)
+      return
+    end
+
     bank_transaction.update!(
       category_account_id: rule.assign_account_id,
       contact_id: rule.assign_contact_id,

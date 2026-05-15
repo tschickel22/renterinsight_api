@@ -88,9 +88,10 @@ class Api::V1::BankRulesController < ApplicationController
     return unless authorize_action!('bank_accounts_accounting', 'create')
 
     txn = BankTransaction.where(company_id: @company.id).find(params[:transaction_id])
+    action_type = params[:action_type] || 'categorize'
 
-    unless txn.category_account_id.present?
-      return render json: { error: 'Categorize this transaction first before creating a rule from it.' }, status: :unprocessable_entity
+    if action_type == 'categorize' && !txn.category_account_id.present?
+      return render json: { error: 'Categorize this transaction first before creating a categorize rule from it.' }, status: :unprocessable_entity
     end
 
     is_deposit = txn.try(:deposit?) || txn.amount.to_f >= 0
@@ -102,9 +103,11 @@ class Api::V1::BankRulesController < ApplicationController
       match_field: 'description',
       match_value: extract_rule_pattern(txn.description),
       transaction_direction: is_deposit ? 'deposit' : 'withdrawal',
-      assign_account_id: txn.category_account_id,
-      assign_contact_id: txn.contact_id,
-      assign_memo: txn.memo,
+      action_type: action_type,
+      assign_account_id: action_type == 'categorize' ? txn.category_account_id : nil,
+      assign_contact_id: action_type == 'categorize' ? txn.contact_id : nil,
+      assign_memo: action_type == 'categorize' ? txn.memo : nil,
+      exclude_reason: action_type == 'exclude' ? (params[:exclude_reason] || 'Auto-excluded by rule') : nil,
       auto_confirm: false,
       priority: 100,
       is_active: true
@@ -130,7 +133,8 @@ class Api::V1::BankRulesController < ApplicationController
       :name, :bank_account_id, :match_type, :match_field, :match_value,
       :min_amount, :max_amount, :transaction_direction,
       :assign_account_id, :assign_contact_id, :assign_memo,
-      :auto_confirm, :priority, :is_active
+      :auto_confirm, :priority, :is_active,
+      :action_type, :exclude_reason
     )
   end
 

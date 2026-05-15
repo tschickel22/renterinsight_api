@@ -3,21 +3,31 @@
 class BankRule < ApplicationRecord
   belongs_to :company
   belongs_to :bank_account, optional: true
-  belongs_to :assign_account, class_name: 'ChartOfAccount'
+  belongs_to :assign_account, class_name: 'ChartOfAccount', optional: true
   belongs_to :assign_contact, class_name: 'Contact', optional: true
 
   has_many :bank_transactions, foreign_key: :rule_id
 
+  ACTION_TYPES = %w[categorize exclude].freeze
   MATCH_TYPES = %w[contains starts_with exact regex].freeze
   MATCH_FIELDS = %w[description reference_number].freeze
   DIRECTIONS = %w[deposit withdrawal any].freeze
 
   validates :name, presence: true
+  validates :action_type, presence: true, inclusion: { in: ACTION_TYPES }
   validates :match_type, presence: true, inclusion: { in: MATCH_TYPES }
   validates :match_field, inclusion: { in: MATCH_FIELDS }
   validates :match_value, presence: true
-  validates :assign_account_id, presence: true
+  validates :assign_account_id, presence: true, if: -> { action_type == 'categorize' }
   validates :transaction_direction, inclusion: { in: DIRECTIONS }
+
+  def exclude_rule?
+    action_type == 'exclude'
+  end
+
+  def categorize_rule?
+    action_type == 'categorize' || action_type.blank?
+  end
 
   scope :active, -> { where(is_active: true) }
   scope :by_priority, -> { order(:priority, :name) }
