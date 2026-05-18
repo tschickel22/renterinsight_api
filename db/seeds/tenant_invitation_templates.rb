@@ -56,7 +56,7 @@ email_template = CommunicationTemplate.create!(
                 <table role="presentation" class="container" cellspacing="0" cellpadding="0" border="0" width="100%">
                   <tr>
                     <td class="header">
-                      <img src="{{platform_logo_url}}" alt="Logo" class="logo" />
+                      <img src="{{platform_logo_url}}" alt="{{platform_name}}" class="logo" />
                     </td>
                   </tr>
                   <tr>

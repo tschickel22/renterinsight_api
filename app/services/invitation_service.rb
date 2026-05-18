@@ -459,14 +459,20 @@ class InvitationService
   def send_email_invitation(invitation, template, context)
     # Get email-specific template if needed
     email_template = template.channel == 'email' ? template : find_template_for_channel(invitation, 'email')
-    
+
     unless email_template
       raise TemplateNotFoundError, "No email template found"
     end
-    
+
     # Render template
     rendered = email_template.render(context)
-    
+
+    # Embed the platform logo as a CID-attached inline image so Outlook (and
+    # other clients that block remote images) renders it. Falls back silently
+    # to the rendered <img src="..."> URL if the fetch fails — recipients then
+    # see the alt text from the template.
+    inline_images = build_inline_logo_attachments(context['platform_logo_url'])
+
     # Send via CommunicationService
     result = CommunicationService.send_email(
       communicable: invitation,
@@ -476,17 +482,72 @@ class InvitationService
       category: 'invitations',
       skip_preference_check: true, # Invitations always send
       reply_to: 'support@renterinsight.com', # Invitations don't support reply tracking
+      inline_images: inline_images,
       metadata: {
         invitation_id: invitation.id,
         invitation_type: invitation.invitation_type
       }
     )
-    
+
     unless result[:success]
       raise DeliveryFailedError, "Email delivery failed: #{result[:error]}"
     end
-    
+
     Rails.logger.info("✅ Invitation email sent to #{invitation.email}")
+  end
+
+  # Fetch the platform logo and return it as an inline-image descriptor for the
+  # mailer. Cached for 1 hour to avoid hammering the asset host on every send.
+  # Returns [] if the URL is blank or the fetch fails — the mailer just leaves
+  # the original <img src> alone in that case.
+  def build_inline_logo_attachments(logo_url)
+    return [] if logo_url.blank?
+
+    cached = Rails.cache.fetch("invitation_logo:#{logo_url}", expires_in: 1.hour) do
+      fetch_logo_bytes(logo_url)
+    end
+
+    return [] unless cached.is_a?(Hash) && cached[:content].present?
+
+    [{
+      filename: cached[:filename],
+      content: cached[:content],
+      content_type: cached[:content_type],
+      replace_url: logo_url
+    }]
+  rescue => e
+    Rails.logger.warn "[InvitationService] Failed to build inline logo attachment: #{e.message}"
+    []
+  end
+
+  # Download the logo bytes. Returns nil on any failure so the cache can decide
+  # not to memoize (Rails.cache will memoize nil; we wrap it with a hash so a
+  # failed fetch caches as an empty hash and the caller short-circuits).
+  def fetch_logo_bytes(logo_url)
+    require 'open-uri'
+    require 'uri'
+
+    uri = URI.parse(logo_url)
+    return {} unless %w[http https].include?(uri.scheme)
+
+    bytes = uri.open(read_timeout: 5, open_timeout: 5) { |io| io.read }
+    return {} if bytes.blank?
+
+    filename = File.basename(uri.path.to_s).presence || 'logo.png'
+    ext = File.extname(filename).downcase
+    content_type = case ext
+                   when '.png'         then 'image/png'
+                   when '.jpg', '.jpeg' then 'image/jpeg'
+                   when '.gif'         then 'image/gif'
+                   when '.svg'         then 'image/svg+xml'
+                   when '.webp'        then 'image/webp'
+                   else 'application/octet-stream'
+                   end
+
+    { filename: filename, content: bytes, content_type: content_type }
+  rescue => e
+    Rails.logger.warn "[InvitationService] Failed to fetch logo from #{logo_url}: #{e.message}"
+    {}
   end
   
   # Send invitation via SMS

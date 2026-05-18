@@ -3,16 +3,16 @@
 module Providers
   module Email
     class SmtpProvider < BaseProvider
-      def send_message(to:, from: nil, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [], **options)
+      def send_message(to:, from: nil, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [], inline_images: [], **options)
         validate_config!
-        
+
         # Use from parameter or fall back to config
         from_address = from || config[:from_email]
         from_name = config[:from_name] || 'Platform DMS'
-        
+
         Rails.logger.info "📧 Sending email via SMTP to #{to} from #{from_address}"
         Rails.logger.info "📧 Reply-To: #{reply_to}" if reply_to.present?
-        
+
         # Build the mail message
         mail = CommunicationMailer.send_communication(
           to: to,
@@ -23,7 +23,8 @@ module Providers
           cc: cc,
           bcc: bcc,
           reply_to: reply_to,
-          file_attachments: attachments
+          file_attachments: attachments,
+          inline_images: inline_images
         )
         
         # CRITICAL: Set delivery method PER-MESSAGE (thread-safe)
