@@ -209,6 +209,17 @@ class Company < ApplicationRecord
   
   validates :status, inclusion: { in: %w[active trial suspended cancelled], allow_nil: true }
   validates :subscription_tier, inclusion: { in: %w[free starter professional enterprise], allow_nil: true }
+
+  # Industry classification — drives label defaults and module visibility
+  INDUSTRIES = %w[manufactured_housing rv property_management storage saas].freeze
+  INDUSTRY_OPTIONS = {
+    'manufactured_housing' => 'Manufactured Housing',
+    'rv'                   => 'RV Dealer',
+    'property_management'  => 'Property Management',
+    'storage'              => 'Storage',
+    'saas'                 => 'SaaS / Software'
+  }.freeze
+  validates :industry, inclusion: { in: INDUSTRIES }
   
   # SMS Provisioning Mode
   SMS_PROVISIONING_MODES = %w[platform dedicated disabled].freeze
@@ -837,6 +848,153 @@ class Company < ApplicationRecord
     "#{base_url}/public/inventory?#{query_params.to_query}"
   end
   
+  # ====================
+  # Industry Label System
+  # ====================
+
+  LABEL_DEFAULTS = {
+    'manufactured_housing' => {
+      'vehicle'       => 'Home',
+      'vehicles'      => 'Homes',
+      'vin'           => 'Serial Number',
+      'stock_number'  => 'Stock #',
+      'make'          => 'Manufacturer',
+      'model'         => 'Model Name',
+      'year'          => 'Year',
+      'listing_type'  => 'Home Type',
+      'lot'           => 'Lot/Space',
+      'bedrooms'      => 'Bedrooms',
+      'bathrooms'     => 'Bathrooms',
+      'sqft'          => 'Sq Ft',
+      'inventory'     => 'Inventory',
+      'deal'          => 'Deal',
+      'deals'         => 'Deals',
+      'lead'          => 'Lead',
+      'leads'         => 'Leads'
+    }.freeze,
+    'rv' => {
+      'vehicle'       => 'Unit',
+      'vehicles'      => 'Units',
+      'vin'           => 'VIN',
+      'stock_number'  => 'Stock #',
+      'make'          => 'Manufacturer',
+      'model'         => 'Model',
+      'year'          => 'Year',
+      'listing_type'  => 'Unit Type',
+      'lot'           => 'Space',
+      'bedrooms'      => 'Sleeping Capacity',
+      'bathrooms'     => 'Bathrooms',
+      'sqft'          => 'Length (ft)',
+      'inventory'     => 'Inventory',
+      'deal'          => 'Deal',
+      'deals'         => 'Deals',
+      'lead'          => 'Lead',
+      'leads'         => 'Leads'
+    }.freeze,
+    'saas' => {
+      'vehicle'       => 'Product',
+      'vehicles'      => 'Products',
+      'vin'           => 'SKU',
+      'stock_number'  => 'Product ID',
+      'make'          => 'Category',
+      'model'         => 'Product Name',
+      'year'          => 'Version',
+      'listing_type'  => 'Product Type',
+      'lot'           => 'N/A',
+      'bedrooms'      => 'N/A',
+      'bathrooms'     => 'N/A',
+      'sqft'          => 'N/A',
+      'inventory'     => 'Products',
+      'deal'          => 'Opportunity',
+      'deals'         => 'Opportunities',
+      'lead'          => 'Prospect',
+      'leads'         => 'Prospects'
+    }.freeze,
+    'property_management' => {
+      'vehicle'       => 'Unit',
+      'vehicles'      => 'Units',
+      'vin'           => 'Unit ID',
+      'stock_number'  => 'Unit #',
+      'make'          => 'Property',
+      'model'         => 'Unit Type',
+      'year'          => 'Year Built',
+      'listing_type'  => 'Unit Type',
+      'lot'           => 'Unit/Suite',
+      'bedrooms'      => 'Beds',
+      'bathrooms'     => 'Baths',
+      'sqft'          => 'Sq Ft',
+      'inventory'     => 'Properties',
+      'deal'          => 'Lease',
+      'deals'         => 'Leases',
+      'lead'          => 'Applicant',
+      'leads'         => 'Applicants'
+    }.freeze,
+    'storage' => {
+      'vehicle'       => 'Unit',
+      'vehicles'      => 'Units',
+      'vin'           => 'Unit ID',
+      'stock_number'  => 'Unit #',
+      'make'          => 'Facility',
+      'model'         => 'Unit Size',
+      'year'          => 'N/A',
+      'listing_type'  => 'Unit Type',
+      'lot'           => 'Unit',
+      'bedrooms'      => 'N/A',
+      'bathrooms'     => 'N/A',
+      'sqft'          => 'Sq Ft',
+      'inventory'     => 'Units',
+      'deal'          => 'Rental',
+      'deals'         => 'Rentals',
+      'lead'          => 'Inquiry',
+      'leads'         => 'Inquiries'
+    }.freeze
+  }.freeze
+
+  def label_defaults
+    LABEL_DEFAULTS[industry] || LABEL_DEFAULTS['manufactured_housing']
+  end
+
+  def label_overrides
+    Setting.get('Company', id, 'label_overrides') || {}
+  end
+
+  def resolved_labels
+    label_defaults.merge(label_overrides)
+  end
+
+  def save_label_overrides(submitted)
+    return {} if submitted.blank?
+
+    defaults = label_defaults
+    overrides = label_overrides.dup
+
+    submitted.each do |key, value|
+      key = key.to_s
+      next unless defaults.key?(key)
+
+      if value.blank? || value.to_s == defaults[key]
+        overrides.delete(key)
+      else
+        overrides[key] = value.to_s
+      end
+    end
+
+    Setting.set('Company', id, 'label_overrides', overrides)
+    overrides
+  end
+
+  def clear_label_override!(key)
+    overrides = label_overrides.dup
+    overrides.delete(key.to_s)
+    Setting.set('Company', id, 'label_overrides', overrides)
+    overrides
+  end
+
+  def reset_label_overrides!
+    Setting.set('Company', id, 'label_overrides', {})
+    {}
+  end
+
   # Get inventory embed code (iframe)
   def inventory_embed_code(filters = {}, options = {})
     return nil unless public_inventory_enabled?

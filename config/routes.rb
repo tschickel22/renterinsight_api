@@ -278,6 +278,15 @@ Rails.application.routes.draw do
         patch :company
         post :regenerate_public_inventory_token
       end
+
+      # ==================== COMPANY LABELS ====================
+      scope path: 'company', controller: 'labels' do
+        get    'labels',         action: :show
+        put    'labels',         action: :update
+        patch  'labels',         action: :update
+        post   'labels/reset',   action: :reset
+        delete 'labels/:key',    action: :destroy
+      end
       
       # ==================== NOTIFICATIONS ====================
       resources :notifications, only: [:index, :show, :destroy] do

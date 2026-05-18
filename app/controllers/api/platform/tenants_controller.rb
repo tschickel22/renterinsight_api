@@ -761,6 +761,7 @@ module Api
           :owner_phone,
           :send_invitation,  # NEW: Allow sending invitation immediately
           :sms_provisioning_mode,  # Phase 0: platform/dedicated/disabled
+          :industry,               # Industry classification — drives labels + module visibility
           # New subscription params (extracted separately in create)
           :subscription_plan_id,
           :billing_cycle,
@@ -779,6 +780,7 @@ module Api
           subscription_tier: tenant.subscription_tier,
           users_count: tenant.users.count,
           sms_provisioning_mode: tenant.try(:sms_provisioning_mode) || 'platform',
+          industry: tenant.try(:industry),
           created_at: tenant.created_at,
           updated_at: tenant.updated_at
         }

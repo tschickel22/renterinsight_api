@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_14_162343) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_18_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -833,7 +833,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_14_162343) do
     t.decimal "min_amount", precision: 15, scale: 2
     t.decimal "max_amount", precision: 15, scale: 2
     t.string "transaction_direction", default: "any"
-    t.bigint "assign_account_id", null: false
+    t.bigint "assign_account_id"
     t.bigint "assign_contact_id"
     t.string "assign_memo"
     t.boolean "auto_confirm", default: false
@@ -843,6 +843,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_14_162343) do
     t.datetime "last_matched_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "action_type", default: "categorize", null: false
+    t.string "exclude_reason"
     t.index ["assign_account_id"], name: "index_bank_rules_on_assign_account_id"
     t.index ["assign_contact_id"], name: "index_bank_rules_on_assign_contact_id"
     t.index ["bank_account_id"], name: "index_bank_rules_on_bank_account_id"
@@ -1904,11 +1906,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_14_162343) do
     t.jsonb "allowed_form_states", default: [], null: false
     t.jsonb "state_tax_rates", default: {}, null: false
     t.string "meta_catalog_token"
+    t.string "industry", default: "manufactured_housing", null: false
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
     t.index ["domain"], name: "index_companies_on_domain", unique: true
     t.index ["external_payments_id"], name: "index_companies_on_external_payments_id"
+    t.index ["industry"], name: "index_companies_on_industry"
     t.index ["is_demo"], name: "index_companies_on_is_demo"
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["public_inventory_settings"], name: "index_companies_on_public_inventory_settings", using: :gin
