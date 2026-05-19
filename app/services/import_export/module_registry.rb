@@ -123,17 +123,21 @@ module ImportExport
     # ---------------------------------------------------------------------------
     LOOKUP_FIELDS = {
       # --- Shared across many modules ---
-      'account_name'        => { label: 'Account (by name)',        target_column: 'account_id',    model: 'Account',  scope: :accounts,   search_fields: %w[name] },
-      'contact_email'       => { label: 'Contact (by email)',       target_column: 'contact_id',    model: 'Contact',  scope: :contacts,   search_fields: %w[email] },
-      'contact_name'        => { label: 'Contact (by name)',        target_column: 'contact_id',    model: 'Contact',  scope: :contacts,   search_fields: %w[first_name last_name] },
+      # `auto_create: true` means the Importer will create the record on the fly
+      # when the value doesn't match an existing row. Reserved for low-risk, freely-
+      # creatable entities (sources, accounts, categories, contacts). Users,
+      # locations, vehicles, and deals are never auto-created — too sensitive.
+      'account_name'        => { label: 'Account (by name)',        target_column: 'account_id',    model: 'Account',  scope: :accounts,   search_fields: %w[name],           auto_create: true },
+      'contact_email'       => { label: 'Contact (by email)',       target_column: 'contact_id',    model: 'Contact',  scope: :contacts,   search_fields: %w[email],          auto_create: true },
+      'contact_name'        => { label: 'Contact (by name)',        target_column: 'contact_id',    model: 'Contact',  scope: :contacts,   search_fields: %w[first_name last_name], auto_create: true },
       'owner_email'         => { label: 'Owner (by email)',         target_column: 'owner_id',      model: 'User',     scope: :users,      search_fields: %w[email] },
       'owner_name'          => { label: 'Owner (by name)',          target_column: 'owner_id',      model: 'User',     scope: :users,      search_fields: %w[name email] },
       'location_name'       => { label: 'Location (by name)',       target_column: 'location_id',   model: 'Location', scope: :locations,  search_fields: %w[name code] },
-      'source_name'         => { label: 'Source (by name)',         target_column: 'source_id',     model: 'Source',   scope: :sources,    search_fields: %w[name] },
+      'source_name'         => { label: 'Source (by name)',         target_column: 'source_id',     model: 'Source',   scope: :sources,    search_fields: %w[name],           auto_create: true },
       'vehicle_stock'       => { label: 'Vehicle (by stock #)',     target_column: 'vehicle_id',    model: 'Vehicle',  scope: :vehicles,   search_fields: %w[stock_number] },
       'vehicle_vin'         => { label: 'Vehicle (by VIN)',         target_column: 'vehicle_id',    model: 'Vehicle',  scope: :vehicles,   search_fields: %w[vin] },
       'salesperson_email'   => { label: 'Salesperson (by email)',   target_column: 'primary_salesperson_id', model: 'User', scope: :users, search_fields: %w[email] },
-      'category_name'       => { label: 'Category (by name)',      target_column: 'category_id',   model: 'PartCategory', scope: :part_categories, search_fields: %w[name] },
+      'category_name'       => { label: 'Category (by name)',      target_column: 'category_id',   model: 'PartCategory', scope: :part_categories, search_fields: %w[name], auto_create: true },
       'deal_name'           => { label: 'Deal (by name)',          target_column: 'deal_id',       model: 'Deal',   scope: :deals,    search_fields: %w[name deal_number] },
       'sales_rep_email'     => { label: 'Sales Rep (by email)',    target_column: 'sales_rep_id',  model: 'User',   scope: :users,    search_fields: %w[email] },
       'sales_rep_name'      => { label: 'Sales Rep (by name)',     target_column: 'sales_rep_id',  model: 'User',   scope: :users,    search_fields: %w[name email] },
@@ -272,7 +276,8 @@ module ImportExport
             target_column: cfg[:target_column],
             search_fields: cfg[:search_fields],
             model: cfg[:model],
-            scope: cfg[:scope]
+            scope: cfg[:scope],
+            auto_create: cfg[:auto_create] == true
           }
         end
       end

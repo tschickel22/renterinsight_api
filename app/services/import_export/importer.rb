@@ -169,6 +169,16 @@ module ImportExport
         record = find_lookup_record(defn, value)
         if record
           row_hash[target] = record.id
+        elsif defn[:auto_create]
+          created = auto_create_lookup(defn, value)
+          if created
+            row_hash[target] = created.id
+            label_name = defn[:label].to_s.split('(').first.strip
+            Rails.logger.info "[ImportExport::Importer] Auto-created #{label_name}: '#{value}' (id=#{created.id})"
+            warnings << "Auto-created #{label_name}: '#{value}'"
+          else
+            warnings << "#{defn[:label]}: could not find or create '#{value}' (skipped)"
+          end
         else
           # Log warning but don't block the row — association is optional
           Rails.logger.info "[ImportExport::Importer] Lookup miss: #{defn[:label]} '#{value}' not found, skipping association"
@@ -205,6 +215,36 @@ module ImportExport
       conditions = search_fields.map { |f| "#{f} ILIKE ?" }.join(' OR ')
       placeholders = search_fields.map { value }
       base.where(conditions, *placeholders).first
+    end
+
+    # Auto-creates a missing lookup record within the company scope. Only invoked
+    # when the lookup definition is marked `auto_create: true` (e.g. Source,
+    # Account, PartCategory, Contact). Returns the new record, or nil on
+    # validation failure / unsupported model.
+    def auto_create_lookup(defn, value)
+      scope_sym = defn[:scope]
+      base = @company.respond_to?(scope_sym) ? @company.public_send(scope_sym) : nil
+      return nil unless base
+
+      case defn[:model]
+      when 'Source'
+        base.create!(name: value)
+      when 'Account'
+        base.create!(name: value, status: 'active', account_type: 'prospect')
+      when 'PartCategory'
+        base.create!(name: value, active: true)
+      when 'Contact'
+        # contact_email lookup → use the email; contact_name → split "First Last"
+        if Array(defn[:search_fields]).include?('email')
+          base.create!(email: value, first_name: value.split('@').first.presence || value)
+        else
+          parts = value.strip.split(/\s+/, 2)
+          base.create!(first_name: parts[0], last_name: parts[1].to_s)
+        end
+      end
+    rescue ActiveRecord::RecordInvalid => e
+      Rails.logger.warn "[ImportExport::Importer] Auto-create failed for #{defn[:model]} '#{value}': #{e.message}"
+      nil
     end
 
     # Name-aware search: handles "Benny", "Benny Smith", "benny smith"
