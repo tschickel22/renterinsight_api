@@ -101,10 +101,20 @@ module Api
         mapping = params[:column_mapping]&.to_unsafe_h || {}
         return render json: { error: 'column_mapping is required' }, status: :unprocessable_entity if mapping.empty?
 
+        # Merge per-import default_values (e.g. { status: 'new' } for leads) into
+        # the existing options bag. The importer applies these after column-mapping
+        # resolution, so any actual CSV value still wins.
+        merged_options = @job.options || {}
+        if params[:default_values].present?
+          defaults = parse_default_values(params[:default_values])
+          merged_options = merged_options.merge('default_values' => defaults) if defaults.any?
+        end
+
         @job.update!(
           column_mapping: mapping,
           duplicate_strategy: params[:duplicate_strategy].presence || @job.duplicate_strategy || 'skip',
-          duplicate_match_fields: parse_array(params[:duplicate_match_fields]).presence || @job.duplicate_match_fields
+          duplicate_match_fields: parse_array(params[:duplicate_match_fields]).presence || @job.duplicate_match_fields,
+          options: merged_options
         )
         ProcessImportJob.perform_later(@job.id)
         render json: serialize(@job)
@@ -145,6 +155,17 @@ module Api
         return [] if val.blank?
         return val if val.is_a?(Array)
         val.to_s.split(',').map(&:strip).reject(&:empty?)
+      end
+
+      # Coerces the default_values param into a plain Hash with string keys.
+      # Accepts ActionController::Parameters, Hash, or a JSON string.
+      def parse_default_values(val)
+        return {} if val.blank?
+        h = if val.respond_to?(:to_unsafe_h) then val.to_unsafe_h
+            elsif val.is_a?(Hash)             then val
+            else                                   (JSON.parse(val.to_s) rescue {})
+            end
+        h.transform_keys(&:to_s)
       end
 
       def parse_options(val)

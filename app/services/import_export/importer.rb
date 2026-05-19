@@ -47,6 +47,15 @@ module ImportExport
       options       = @job.options || {}
       auto_location = options['location_id'].presence
       auto_owner    = options['owner_id'].presence
+
+      # Per-import default values for unmapped fields (e.g. { status: 'new' } so
+      # imported Leads land in the active list when the CSV has no Status column).
+      # Restricted to real model attributes (standard/custom) — virtual fields
+      # like 'tags' and lookup keys are filled through their dedicated paths.
+      @default_values     = (options['default_values'] || {}).to_h
+      @default_field_keys = fields.select { |f| %w[standard custom].include?(f[:source].to_s) }
+                                  .map { |f| f[:key].to_s }
+                                  .to_set
       created_ids   = []
       updated_snaps = []
       errors        = []
@@ -64,6 +73,10 @@ module ImportExport
         # Unresolvable lookups are warnings, not blocking errors — the deal is still
         # created without that association.
         lookup_warnings = resolve_lookups!(row_hash)
+
+        # Fill blank attrs from the per-import default_values bag (any actual CSV
+        # value wins; unknown field keys are silently ignored).
+        apply_default_values!(row_hash)
 
         result = validator.call(row_hash)
         unless result[:valid]
@@ -328,6 +341,21 @@ module ImportExport
         errors << { row: row_number, errors: ['Duplicate record exists'] }
         @job.error_count += 1
         nil
+      end
+    end
+
+    # Fills blank attrs from the per-import default_values bag. Mutates row_hash.
+    # Only applies to keys whose target field is a real model attribute (standard
+    # or custom) — virtual lookups and 'tags' have their own paths. Unknown keys
+    # are silently dropped, which keeps the API forward-compatible with frontend
+    # versions that send keys older models don't define.
+    def apply_default_values!(row_hash)
+      return if @default_values.empty?
+      @default_values.each do |key, value|
+        k = key.to_s
+        next unless @default_field_keys.include?(k)
+        next if row_hash[k].present?
+        row_hash[k] = value
       end
     end
 
