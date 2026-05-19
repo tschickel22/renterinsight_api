@@ -33,6 +33,8 @@ module ImportExport
       'deal_name'         => %w[dealname deal_name deal deal_number],
       'sales_rep_email'   => %w[salesrepemail sales_rep_email rep_email],
       'sales_rep_name'    => %w[salesrepname sales_rep_name salesrep rep],
+      # Tag column — pipe- or comma-separated values resolved to Tag records.
+      'tags'              => %w[tag tags label labels tag_names],
     }.freeze
 
     def initialize(headers, fields)

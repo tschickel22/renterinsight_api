@@ -146,6 +146,12 @@ module ImportExport
       'coa_account_name'    => { label: 'Account Name (CoA)',      target_column: 'chart_of_account_id', model: 'ChartOfAccount', scope: :chart_of_accounts, search_fields: %w[name] },
     }.freeze
 
+    # Modules whose target model is `has_many :tag_assignments, as: :entity`.
+    # The import engine exposes a virtual 'tags' column for these so users can
+    # bulk-assign tags from a CSV (pipe- or comma-separated). Vehicles use a
+    # separate dedicated importer and aren't listed here.
+    TAGGABLE_MODULES = %w[accounts contacts leads deals quotes].freeze
+
     # Which lookup fields are available per module (keyed by the `_id` columns
     # that actually exist on the model).
     MODULE_LOOKUPS = {
@@ -207,7 +213,10 @@ module ImportExport
         # Add virtual lookup fields for import (e.g. "Account (by name)" → account_id)
         lookups = for_import ? lookup_fields_for(module_type) : []
 
-        standard + custom + lookups
+        # Add virtual 'tags' field for taggable modules on import.
+        tag_field = (for_import && taggable?(module_type)) ? [tag_field_definition] : []
+
+        standard + custom + lookups + tag_field
       end
 
       # Hardcoded fields for modules that don't follow the standard
@@ -285,6 +294,25 @@ module ImportExport
       def supports_images?(module_type)
         cfg = config_for(module_type)
         cfg ? cfg[:supports_images] == true : false
+      end
+
+      def taggable?(module_type)
+        TAGGABLE_MODULES.include?(module_type.to_s)
+      end
+
+      # Virtual import-only field definition for tags. Pipe- or comma-
+      # separated CSV values are parsed by the Importer, then resolved
+      # against the company's Tags (case-insensitive find-or-create) and
+      # attached via TagAssignment.
+      def tag_field_definition
+        {
+          key:         'tags',
+          label:       'Tags',
+          type:        'string',
+          required:    false,
+          source:      'tag',
+          placeholder: 'Pipe- or comma-separated. Example: VIP|Hot Lead|Trade Show'
+        }
       end
 
       def image_association(module_type)

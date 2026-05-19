@@ -35,6 +35,9 @@ module ImportExport
       @lookup_defs = ModuleRegistry.lookup_fields_for(@job.module_type)
       @lookup_by_key = @lookup_defs.index_by { |f| f[:key] }
 
+      # Whether this module supports tag assignment via the virtual 'tags' column.
+      @taggable = ModuleRegistry.taggable?(@job.module_type)
+
       validator = RowValidator.new(fields)
       @match_fields = (@job.duplicate_match_fields.presence || cfg[:match_fields] || []).map(&:to_s)
       detector  = DuplicateDetector.new(scope, @match_fields)
@@ -51,6 +54,11 @@ module ImportExport
       parsed[:rows].each_with_index do |row, idx|
         row_number = idx + 2 # +1 header, +1 1-based
         row_hash   = build_row_hash(row, parsed[:headers], mapping)
+
+        # Extract the virtual 'tags' column (if present) before validation/save —
+        # the value is a free-text string that will be parsed and resolved to
+        # Tag records after the record itself is saved.
+        tag_names = @taggable ? extract_tag_names!(row_hash) : []
 
         # Resolve lookup fields (e.g. "account_name" → account_id) before validation.
         # Unresolvable lookups are warnings, not blocking errors — the deal is still
@@ -70,21 +78,28 @@ module ImportExport
 
         ActiveRecord::Base.transaction(requires_new: true) do
           existing = detector.find(data[:standard])
-          if existing
-            handle_duplicate(existing, data, strategy, scope, created_ids, updated_snaps, errors, row_number)
-          else
-            record = scope.new(data[:standard])
-            record.location_id = auto_location if auto_location && record.respond_to?(:location_id=) && record.location_id.blank?
-            record.owner_id = auto_owner if auto_owner && record.respond_to?(:owner_id=) && record.owner_id.blank?
-            apply_custom_fields(record, data[:custom])
-            record.save!
-            created_ids << record.id
-            @job.success_count += 1
-          end
+          saved_record =
+            if existing
+              handle_duplicate(existing, data, strategy, scope, created_ids, updated_snaps, errors, row_number)
+            else
+              record = scope.new(data[:standard])
+              record.location_id = auto_location if auto_location && record.respond_to?(:location_id=) && record.location_id.blank?
+              record.owner_id = auto_owner if auto_owner && record.respond_to?(:owner_id=) && record.owner_id.blank?
+              apply_custom_fields(record, data[:custom])
+              record.save!
+              created_ids << record.id
+              @job.success_count += 1
+              record
+            end
 
-          # Record lookup warnings (non-blocking) so user can see skipped associations
-          if lookup_warnings.any?
-            errors << { row: row_number, warnings: lookup_warnings }
+          # Apply tags to the saved/updated record. Per-tag failures are
+          # captured as warnings and never bubble out to roll back the row.
+          tag_warnings = saved_record ? assign_tags!(saved_record, tag_names) : []
+
+          # Record lookup + tag warnings (non-blocking) so user can see skipped associations
+          combined_warnings = lookup_warnings + tag_warnings
+          if combined_warnings.any?
+            errors << { row: row_number, warnings: combined_warnings }
           end
         rescue ActiveRecord::RecordInvalid => e
           errors << { row: row_number, errors: e.record.errors.full_messages }
@@ -285,11 +300,15 @@ module ImportExport
       record.custom_field_values = current.merge(custom)
     end
 
+    # Returns the saved/updated record on success, or nil if no record was
+    # persisted (skip / error strategies). Callers use the return value to
+    # decide whether to run downstream per-row work like tag assignment.
     def handle_duplicate(existing, data, strategy, scope, created_ids, updated_snaps, errors, row_number)
       case strategy
       when 'skip'
         @job.skipped_count += 1
         errors << { row: row_number, skipped: true, warnings: [skip_reason(existing, data[:standard])] }
+        nil
       when 'update'
         snapshot = existing.attributes.slice(*data[:standard].keys)
         existing.assign_attributes(data[:standard])
@@ -297,16 +316,83 @@ module ImportExport
         existing.save!
         updated_snaps << { id: existing.id, before: snapshot }
         @job.success_count += 1
+        existing
       when 'create_new'
         record = scope.new(data[:standard])
         apply_custom_fields(record, data[:custom])
         record.save!
         created_ids << record.id
         @job.success_count += 1
+        record
       when 'error'
         errors << { row: row_number, errors: ['Duplicate record exists'] }
         @job.error_count += 1
+        nil
       end
+    end
+
+    # Removes the virtual 'tags' column from row_hash and returns the parsed
+    # list of tag names. Supports pipe and comma separators (so 'VIP|Hot Lead,
+    # Trade Show' yields ['VIP', 'Hot Lead', 'Trade Show']). Case-preserving
+    # at this stage — case-insensitive matching happens during resolution.
+    def extract_tag_names!(row_hash)
+      raw = row_hash.delete('tags')
+      parse_tag_list(raw)
+    end
+
+    def parse_tag_list(raw)
+      return [] if raw.nil?
+      values = raw.is_a?(Array) ? raw : raw.to_s.split(/[|,]/)
+      values.map { |v| v.to_s.strip }.reject(&:empty?).uniq { |v| v.downcase }
+    end
+
+    # For each tag name on the row, find-or-create the Tag (case-insensitive,
+    # company-scoped) and attach it to the saved record via TagAssignment.
+    # Per-tag failures are captured as warning strings and returned; they do
+    # not raise, so a tag problem never rolls back a successful record save.
+    def assign_tags!(record, tag_names)
+      return [] if tag_names.empty?
+      warnings = []
+      entity_type = record.class.name
+
+      tag_names.each do |raw_name|
+        name = raw_name.to_s.strip
+        next if name.blank?
+
+        begin
+          tag = find_or_create_tag!(name)
+          TagAssignment.find_or_create_by!(
+            tag_id:      tag.id,
+            entity_type: entity_type,
+            entity_id:   record.id
+          ) do |a|
+            a.company_id  = @company.id
+            a.assigned_by = @job.user_id&.to_s
+            a.assigned_at = Time.current
+          end
+        rescue ActiveRecord::RecordInvalid => e
+          warnings << "Tag '#{name}': #{e.record.errors.full_messages.join(', ')} (skipped)"
+        rescue StandardError => e
+          Rails.logger.warn "[ImportExport::Importer] Tag assignment failed for '#{name}' on #{entity_type} ##{record.id}: #{e.message}"
+          warnings << "Tag '#{name}': could not assign (skipped)"
+        end
+      end
+
+      warnings
+    end
+
+    # Case-insensitive find within the company scope; creates a new Tag with
+    # the supplied name (case preserved as given) if no match exists.
+    def find_or_create_tag!(name)
+      existing = @company.tags.where('LOWER(name) = ?', name.downcase).first
+      return existing if existing
+
+      @company.tags.create!(
+        name:       name,
+        color:      '#6B7280',
+        is_active:  true,
+        created_by: @job.user_id&.to_s
+      )
     end
 
     def skip_reason(existing, row_data)
