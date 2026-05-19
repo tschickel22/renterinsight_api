@@ -15,16 +15,16 @@ class Api::V1::SearchController < ApplicationController
       leads = @company.leads
                      .where(is_converted: [false, nil])
                      .where.not(status: %w[lost unqualified dead])
-                     .where("first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ?", 
-                            "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                     .where("first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q OR phone ILIKE :q OR company_name ILIKE :q",
+                            q: "%#{query}%")
                      .limit(5)
-      
+
       results += leads.map do |lead|
         {
           id: lead.id,
           type: 'lead',
           title: lead.full_name || "#{lead.first_name} #{lead.last_name}".strip,
-          subtitle: lead.email || lead.phone,
+          subtitle: lead.company_name.presence || lead.email || lead.phone,
           badge: lead.status&.titleize,
           score: calculate_score(query, lead.first_name, lead.last_name, lead.email)
         }

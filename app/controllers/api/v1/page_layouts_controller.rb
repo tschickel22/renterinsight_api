@@ -381,6 +381,8 @@ module Api
           { key: 'last_name', label: 'Last Name', type: 'text', source: 'standard', required: true, protected: true },
           { key: 'email', label: 'Email', type: 'email', source: 'standard', required: true, protected: true },
           { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: true, protected: true },
+          { key: 'company_name', label: 'Company Name', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'title', label: 'Job Title', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'created_at', label: 'Lead Created', type: 'datetime', source: 'standard', required: false, protected: false },
           { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false,
             options: %w[new not_contacted attempted_to_contact contact_in_future contacted engaged pre_qualified qualified showing_scheduled proposal negotiation application_submitted closed_won closed_lost lost_lead not_qualified junk_lead],

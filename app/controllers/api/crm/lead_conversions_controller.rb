@@ -16,8 +16,11 @@ module Api
           return
         end
 
+        # Prefer the lead's company_name (org the lead represents) as the Account name.
+        # Fall back to the person's name only when the lead has no company.
         account_name =
-          (@lead.respond_to?(:name) && @lead.name.present?) ? @lead.name :
+          @lead.try(:company_name).presence ||
+          (@lead.respond_to?(:name) && @lead.name.present? ? @lead.name : nil) ||
           [@lead.try(:first_name), @lead.try(:last_name)].compact.join(' ').presence ||
           "Lead #{@lead.id}"
 

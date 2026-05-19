@@ -292,7 +292,10 @@ module Api
             location_id = @lead.location_id || Current.location_id
 
             # 1. FIND OR CREATE ACCOUNT
-            account_name = params[:account_name].presence || "#{@lead.first_name} #{@lead.last_name}".strip
+            # Priority: explicit param > lead.company_name > person name fallback.
+            account_name = params[:account_name].presence ||
+                           @lead.try(:company_name).presence ||
+                           "#{@lead.first_name} #{@lead.last_name}".strip
             account_name = "Converted Lead #{@lead.id}" if account_name.blank?
 
             Rails.logger.info "✅ [ConvertLead] Finding or creating account: #{account_name}"
@@ -324,7 +327,7 @@ module Api
             if create_contact
               Rails.logger.info "✅ [ConvertLead] Creating contact"
               
-              contact = Contact.new(
+              contact_attrs = {
                 first_name: @lead.first_name,
                 last_name: @lead.last_name,
                 email: @lead.email,
@@ -339,7 +342,10 @@ module Api
                 state: @lead.state,
                 zip: @lead.zip,
                 country: @lead.country
-              )
+              }
+              contact_attrs[:title] = @lead.title if @lead.try(:title).present? && Contact.column_names.include?('title')
+
+              contact = Contact.new(contact_attrs)
               
               if contact.save
                 Rails.logger.info "✅ [ConvertLead] Contact created: #{contact.id}"
@@ -561,6 +567,8 @@ module Api
                    :rv_experience, :rvExperience, :preferred_contact_method, :preferredContactMethod,
                    :interests_requirements, :interestsRequirements,
                    :vehicle_id, :vehicleId,
+                   # Company/title (org context for B2B-style leads)
+                   :company_name, :companyName, :title,
                    # Address fields
                    :street, :city, :state, :zip, :country]
 
@@ -586,6 +594,9 @@ module Api
           preferred_contact_method: raw['preferred_contact_method'] || raw['preferredContactMethod'],
           interests_requirements: raw['interests_requirements'] || raw['interestsRequirements'],
           vehicle_id: (raw['vehicle_id'] || raw['vehicleId']).presence&.to_i,
+          # Company / job title (free-text, distinct from the tenant company_id)
+          company_name: raw['company_name'] || raw['companyName'],
+          title:        raw['title'],
           # Address
           street:  raw['street'],
           city:    raw['city'],
@@ -654,6 +665,8 @@ module Api
           phone:     l.phone,
           notes:     l.notes,
           status:    l.status,
+          companyName: l.company_name,
+          title:       l.title,
           sourceId:  l.source_id,
           source:    (l.source ? { id: l.source.id, name: l.source.name } : nil),
           ownerId:   l.owner_id,

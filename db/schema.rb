@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_18_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_19_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3426,12 +3426,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_18_000001) do
     t.datetime "champion_declined_at"
     t.string "champion_action_token"
     t.datetime "champion_action_token_expires_at"
+    t.string "company_name"
+    t.string "title"
     t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"
     t.index ["company_id", "champion_salesforce_id"], name: "idx_leads_company_champion_sf_id", unique: true
     t.index ["company_id", "location_id"], name: "index_leads_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_leads_on_company_id"
+    t.index ["company_name"], name: "index_leads_on_company_name"
     t.index ["converted_account_id"], name: "index_leads_on_converted_account_id"
     t.index ["health_score"], name: "index_leads_on_health_score"
     t.index ["location_id"], name: "index_leads_on_location_id"
