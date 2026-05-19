@@ -36,7 +36,8 @@ module ImportExport
       @lookup_by_key = @lookup_defs.index_by { |f| f[:key] }
 
       validator = RowValidator.new(fields)
-      detector  = DuplicateDetector.new(scope, @job.duplicate_match_fields.presence || cfg[:match_fields])
+      @match_fields = (@job.duplicate_match_fields.presence || cfg[:match_fields] || []).map(&:to_s)
+      detector  = DuplicateDetector.new(scope, @match_fields)
 
       mapping       = @job.column_mapping || {}
       strategy      = @job.duplicate_strategy.presence || 'skip'
@@ -288,6 +289,7 @@ module ImportExport
       case strategy
       when 'skip'
         @job.skipped_count += 1
+        errors << { row: row_number, skipped: true, warnings: [skip_reason(existing, data[:standard])] }
       when 'update'
         snapshot = existing.attributes.slice(*data[:standard].keys)
         existing.assign_attributes(data[:standard])
@@ -305,6 +307,13 @@ module ImportExport
         errors << { row: row_number, errors: ['Duplicate record exists'] }
         @job.error_count += 1
       end
+    end
+
+    def skip_reason(existing, row_data)
+      fields = Array(@match_fields).select { |f| row_data[f].present? }
+      match_summary = fields.map { |f| "#{f}=#{row_data[f].to_s.truncate(60)}" }.join(', ')
+      base = "Skipped: duplicate of existing record ##{existing.id}"
+      match_summary.present? ? "#{base} (matched on #{match_summary})" : base
     end
 
     def process_images!(created_ids)

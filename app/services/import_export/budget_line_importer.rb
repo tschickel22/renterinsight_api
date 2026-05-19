@@ -67,6 +67,7 @@ module ImportExport
             raise ActiveRecord::Rollback
           elsif result[:skipped]
             @job.skipped_count += 1
+            errors << { row: row_number, skipped: true, warnings: [result[:reason].presence || 'Skipped: no values to import'] }
           elsif result[:updated]
             updated_snaps << { id: result[:line].id, before: result[:before] }
             @job.success_count += 1
@@ -160,7 +161,8 @@ module ImportExport
       end
 
       unless any_value_set || !was_persisted
-        return { skipped: true }
+        identifier = account_number.presence || account_name || "account ##{acct.id}"
+        return { skipped: true, reason: "Skipped: no month values to import for #{identifier} (existing line left unchanged)" }
       end
 
       line.save!
