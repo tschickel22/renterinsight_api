@@ -40,10 +40,33 @@ class InvitationService
     
     # Normalize phone number if provided
     phone = PhoneNumberService.normalize(phone) if phone.present?
-    
+
     # Validate phone number is required for SMS delivery
     if delivery_method.in?(['sms', 'both']) && phone.blank?
       raise Error, "Phone number is required for SMS delivery"
+    end
+
+    # Normalize email for dedupe checks below (Invitation also normalizes on save)
+    normalized_email = email&.downcase&.strip
+
+    # For tenant invitations there's no placeholder User created at invite time,
+    # so the User.email uniqueness validation never fires until the invitee
+    # accepts. That made it possible to silently issue two tenant invites for
+    # the same email pointing at different companies; only one could ever be
+    # accepted. Guard here.
+    if invitation_type == 'tenant' && normalized_email.present?
+      existing_user = User.where('LOWER(email) = ?', normalized_email).exists?
+      if existing_user
+        raise Error, "A user account with email #{normalized_email} already exists"
+      end
+
+      existing_invite = Invitation
+        .active
+        .where(invitation_type: 'tenant', email: normalized_email)
+        .exists?
+      if existing_invite
+        raise Error, "A pending tenant invitation already exists for #{normalized_email}"
+      end
     end
     
     # Normalize location_ids to array of integers

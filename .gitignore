@@ -156,3 +156,4 @@ seed_stderr.log
 
 # Local env backups (created during Render→Mac migration)
 .env.backup-*
+CLAUDE.md
