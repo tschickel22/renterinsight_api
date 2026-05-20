@@ -99,6 +99,7 @@ module ImportExport
               record.location_id = auto_location if auto_location && record.respond_to?(:location_id=) && record.location_id.blank?
               record.owner_id = auto_owner if auto_owner && record.respond_to?(:owner_id=) && record.owner_id.blank?
               apply_custom_fields(record, data[:custom])
+              apply_import_skip_flags!(record)
               record.save!
               created_ids << record.id
               @job.success_count += 1
@@ -137,6 +138,7 @@ module ImportExport
         updated_record_snapshots: updated_snaps,
         error_log: errors
       )
+      log_import_summary_activity!(cfg)
       broadcast_progress
     rescue StandardError => e
       Rails.logger.error "[ImportExport::Importer] #{e.class}: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
@@ -255,22 +257,27 @@ module ImportExport
       base = @company.respond_to?(scope_sym) ? @company.public_send(scope_sym) : nil
       return nil unless base
 
-      case defn[:model]
-      when 'Source'
-        base.create!(name: value)
-      when 'Account'
-        base.create!(name: value, status: 'active', account_type: 'prospect')
-      when 'PartCategory'
-        base.create!(name: value, active: true)
-      when 'Contact'
-        # contact_email lookup → use the email; contact_name → split "First Last"
-        if Array(defn[:search_fields]).include?('email')
-          base.create!(email: value, first_name: value.split('@').first.presence || value)
-        else
-          parts = value.strip.split(/\s+/, 2)
-          base.create!(first_name: parts[0], last_name: parts[1].to_s)
+      attrs =
+        case defn[:model]
+        when 'Source'       then { name: value }
+        when 'Account'      then { name: value, status: 'active', account_type: 'prospect' }
+        when 'PartCategory' then { name: value, active: true }
+        when 'Contact'
+          # contact_email lookup → use the email; contact_name → split "First Last"
+          if Array(defn[:search_fields]).include?('email')
+            { email: value, first_name: value.split('@').first.presence || value }
+          else
+            parts = value.strip.split(/\s+/, 2)
+            { first_name: parts[0], last_name: parts[1].to_s }
+          end
         end
-      end
+
+      return nil unless attrs
+
+      record = base.new(attrs)
+      apply_import_skip_flags!(record)
+      record.save!
+      record
     rescue ActiveRecord::RecordInvalid => e
       Rails.logger.warn "[ImportExport::Importer] Auto-create failed for #{defn[:model]} '#{value}': #{e.message}"
       nil
@@ -326,6 +333,7 @@ module ImportExport
         snapshot = existing.attributes.slice(*data[:standard].keys)
         existing.assign_attributes(data[:standard])
         apply_custom_fields(existing, data[:custom])
+        apply_import_skip_flags!(existing)
         existing.save!
         updated_snaps << { id: existing.id, before: snapshot }
         @job.success_count += 1
@@ -333,6 +341,7 @@ module ImportExport
       when 'create_new'
         record = scope.new(data[:standard])
         apply_custom_fields(record, data[:custom])
+        apply_import_skip_flags!(record)
         record.save!
         created_ids << record.id
         @job.success_count += 1
@@ -342,6 +351,51 @@ module ImportExport
         @job.error_count += 1
         nil
       end
+    end
+
+    # Writes a single ActivityLog row summarizing the import — replaces the
+    # per-record entries that ActivityTrackable would otherwise have created
+    # before we set skip_activity_tracking on each saved record. Best-effort:
+    # any failure (missing model, missing column, validation drift) is logged
+    # and swallowed so a logging hiccup never marks the job failed.
+    def log_import_summary_activity!(cfg)
+      return unless defined?(ActivityLog)
+      label = cfg[:label].to_s
+      module_label = label.empty? ? @job.module_type.to_s : label.downcase
+      description = "Imported #{@job.success_count} #{module_label} " \
+                    "(#{@job.skipped_count} skipped, #{@job.error_count} errors)"
+
+      ActivityLog.create!(
+        company_id:        @company.id,
+        user_id:           @job.user_id,
+        action:            'import',
+        module_name:       @job.module_type.to_s,
+        entity_type_label: label.presence || @job.module_type.to_s.titleize,
+        description:       description,
+        metadata: {
+          'import_job_id'    => @job.id,
+          'module_type'      => @job.module_type.to_s,
+          'source_filename'  => @job.source_filename,
+          'total_rows'       => @job.total_rows,
+          'success_count'    => @job.success_count,
+          'skipped_count'    => @job.skipped_count,
+          'error_count'      => @job.error_count
+        }
+      )
+    rescue StandardError => e
+      Rails.logger.warn "[ImportExport::Importer] Failed to write import summary ActivityLog for job ##{@job.id}: #{e.message}"
+    end
+
+    # Suppresses per-record side effects (notifications, webhooks, activity
+    # logs, workflow triggers) while the bulk importer saves a record. All
+    # four flags live on ApplicationRecord so every AR descendant responds.
+    # A single summary ActivityLog row is written by the importer itself
+    # after the run completes, in place of the per-row entries we suppress.
+    def apply_import_skip_flags!(record)
+      record.skip_notifications     = true
+      record.skip_webhooks          = true
+      record.skip_activity_tracking = true
+      record.skip_workflows         = true
     end
 
     # Fills blank attrs from the per-import default_values bag. Mutates row_hash.

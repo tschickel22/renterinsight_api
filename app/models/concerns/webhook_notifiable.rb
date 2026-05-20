@@ -20,9 +20,9 @@ module WebhookNotifiable
   extend ActiveSupport::Concern
 
   included do
-    after_create_commit :fire_webhook_created
-    after_update_commit :fire_webhook_updated_or_deleted
-    after_destroy_commit :fire_webhook_destroyed
+    after_create_commit :fire_webhook_created,           unless: -> { skip_webhooks }
+    after_update_commit :fire_webhook_updated_or_deleted, unless: -> { skip_webhooks }
+    after_destroy_commit :fire_webhook_destroyed,         unless: -> { skip_webhooks }
   end
 
   private

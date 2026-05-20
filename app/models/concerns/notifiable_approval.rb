@@ -3,8 +3,8 @@ module NotifiableApproval
   extend ActiveSupport::Concern
   
   included do
-    after_create :notify_approver
-    after_update :notify_requester_on_completion
+    after_create :notify_approver,                  unless: -> { skip_notifications }
+    after_update :notify_requester_on_completion,   unless: -> { skip_notifications }
   end
   
   private

@@ -4,8 +4,8 @@ module NotifiableAccount
   extend ActiveSupport::Concern
 
   included do
-    after_create :notify_assigned_owner, if: -> { owner_id.present? }
-    after_update :notify_on_owner_change, if: -> { saved_change_to_owner_id? }
+    after_create :notify_assigned_owner,  if: -> { owner_id.present? && !skip_notifications }
+    after_update :notify_on_owner_change, if: -> { saved_change_to_owner_id? && !skip_notifications }
   end
 
   private

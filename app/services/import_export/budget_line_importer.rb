@@ -165,6 +165,10 @@ module ImportExport
         return { skipped: true, reason: "Skipped: no month values to import for #{identifier} (existing line left unchanged)" }
       end
 
+      line.skip_notifications     = true
+      line.skip_webhooks          = true
+      line.skip_activity_tracking = true
+      line.skip_workflows         = true
       line.save!
 
       { line: line, updated: was_persisted, before: snapshot }

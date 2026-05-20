@@ -3,8 +3,8 @@ module NotifiableCommunication
   extend ActiveSupport::Concern
   
   included do
-    after_create :notify_on_portal_message
-    after_create :notify_on_internal_message
+    after_create :notify_on_portal_message,   unless: -> { skip_notifications }
+    after_create :notify_on_internal_message, unless: -> { skip_notifications }
   end
   
   private

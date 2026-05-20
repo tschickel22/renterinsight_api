@@ -3,8 +3,8 @@ module NotifiableTask
   extend ActiveSupport::Concern
   
   included do
-    after_create :notify_assigned_user
-    after_update :notify_on_reassignment
+    after_create :notify_assigned_user,   unless: -> { skip_notifications }
+    after_update :notify_on_reassignment, unless: -> { skip_notifications }
   end
   
   # Class method for background job to call

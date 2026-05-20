@@ -3,7 +3,7 @@ module NotifiableQuote
   extend ActiveSupport::Concern
   
   included do
-    after_update :notify_on_status_change
+    after_update :notify_on_status_change, unless: -> { skip_notifications }
   end
   
   private

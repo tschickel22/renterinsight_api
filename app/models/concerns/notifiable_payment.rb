@@ -3,8 +3,8 @@ module NotifiablePayment
   extend ActiveSupport::Concern
   
   included do
-    after_create :notify_on_payment_received
-    after_update :notify_on_payment_failed
+    after_create :notify_on_payment_received, unless: -> { skip_notifications }
+    after_update :notify_on_payment_failed,   unless: -> { skip_notifications }
   end
   
   private

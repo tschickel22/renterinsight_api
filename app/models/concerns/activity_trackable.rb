@@ -15,9 +15,9 @@ module ActivityTrackable
   ].freeze
 
   included do
-    after_create_commit :log_create_activity
-    after_update_commit :log_update_activity
-    after_destroy_commit :log_destroy_activity
+    after_create_commit :log_create_activity,  unless: -> { skip_activity_tracking }
+    after_update_commit :log_update_activity,  unless: -> { skip_activity_tracking }
+    after_destroy_commit :log_destroy_activity, unless: -> { skip_activity_tracking }
   end
 
   # Override in each model

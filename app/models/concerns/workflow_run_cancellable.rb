@@ -2,7 +2,7 @@ module WorkflowRunCancellable
   extend ActiveSupport::Concern
 
   included do
-    before_destroy :cancel_active_workflow_runs
+    before_destroy :cancel_active_workflow_runs, unless: -> { skip_workflows }
   end
 
   private
