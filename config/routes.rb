@@ -293,6 +293,8 @@ Rails.application.routes.draw do
         collection do
           get :unread_count
           patch :mark_all_read
+          delete :bulk_destroy
+          post :bulk_mark_read
           post :broadcast
           post :preview_recipients
           get :stats

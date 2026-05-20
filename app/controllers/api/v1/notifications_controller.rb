@@ -111,12 +111,55 @@ class Api::V1::NotificationsController < ApplicationController
   def destroy
     # Skip RBAC for now
     # return unless authorize_action!('notifications', 'delete')
-    
+
     @notification.destroy
-    
+
     render json: { success: true, message: 'Notification deleted' }
   end
-  
+
+  # Bulk delete notifications for current_user. Two modes:
+  #   - { ids: [1,2,3] }                          → delete just those ids
+  #   - { all: true, filters: { ... } }           → delete every notification
+  #                                                 matching the current view's
+  #                                                 filters (unread_only,
+  #                                                 category, notification_type)
+  # Always goes through base_scope so users can never touch records that
+  # don't belong to them. Uses delete_all for performance; Notification has
+  # no destroy callbacks (just ActiveStorage attachments, which become
+  # orphan blobs — acceptable for the notification-purge use case).
+  def bulk_destroy
+    scope = base_scope
+    if ActiveModel::Type::Boolean.new.cast(params[:all])
+      scope = apply_bulk_filters(scope, params[:filters])
+      deleted = scope.delete_all
+    else
+      ids = Array(params[:ids]).map(&:to_i).reject(&:zero?)
+      return render(json: { error: 'No ids' }, status: :bad_request) if ids.empty?
+      deleted = scope.where(id: ids).delete_all
+    end
+    render json: { deleted: deleted, message: "Deleted #{deleted} notifications" }
+  end
+
+  # Bulk mark-as-read for current_user. Two modes:
+  #   - { ids: [...] }                            → mark just those ids
+  #   - { all: true, filters: { ... } }           → mark every unread
+  #                                                 notification matching the
+  #                                                 current view's filters
+  # Always restricts to unread rows so the returned `marked` count reflects
+  # rows that actually changed (idempotent re-runs return 0).
+  def bulk_mark_read
+    scope = base_scope.unread
+    if ActiveModel::Type::Boolean.new.cast(params[:all])
+      scope = apply_bulk_filters(scope, params[:filters])
+      marked = scope.update_all(read: true, read_at: Time.current)
+    else
+      ids = Array(params[:ids]).map(&:to_i).reject(&:zero?)
+      return render(json: { error: 'No ids' }, status: :bad_request) if ids.empty?
+      marked = scope.where(id: ids).update_all(read: true, read_at: Time.current)
+    end
+    render json: { marked: marked, message: "Marked #{marked} as read" }
+  end
+
   def broadcast
     # Skip RBAC for now, but still check admin
     # return unless authorize_action!('notifications', 'create')
@@ -392,5 +435,29 @@ class Api::V1::NotificationsController < ApplicationController
     end
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Notification not found' }, status: :not_found
+  end
+
+  # Notifications belonging to current_user. Platform admins see every
+  # notification regardless of the active-company view; everyone else is
+  # scoped to the company the request is set against. Mirrors the
+  # platform_admin pattern in index / mark_all_read.
+  def base_scope
+    if current_user.platform_admin?
+      current_user.notifications
+    else
+      current_user.notifications.where(company_id: @company.id)
+    end
+  end
+
+  # Applies the same filters the index view honors so the all-pages bulk
+  # actions act on exactly the rows the user sees. Shape mirrors what the
+  # FE sends from NotificationCenter.currentFilters().
+  def apply_bulk_filters(scope, filters)
+    return scope if filters.blank?
+    filters = filters.to_unsafe_h if filters.respond_to?(:to_unsafe_h)
+    scope = scope.unread                                       if ActiveModel::Type::Boolean.new.cast(filters['unread_only'])
+    scope = scope.by_category(filters['category'])             if filters['category'].present?
+    scope = scope.by_type(filters['notification_type'])        if filters['notification_type'].present?
+    scope
   end
 end
