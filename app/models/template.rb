@@ -5,11 +5,25 @@ class Template < ApplicationRecord
   # String-backed enum on the `template_type` column
   enum :template_type, { email: 'email', sms: 'sms' }
 
+  CATEGORIES = %w[
+    general cold_outreach warm_followup nurture re_engagement
+    appointment post_sale onboarding service referral_request
+    announcement event_promo seasonal
+  ].freeze
+
+  SOURCES = %w[manual ai_generated].freeze
+
   # Attachments for email templates (PDFs, documents, images, etc.)
   has_many_attached :attachments
 
   validates :name, presence: true
   validates :template_type, presence: true
+  validates :category, inclusion: { in: CATEGORIES }, allow_nil: true
+  validates :source, inclusion: { in: SOURCES }, allow_nil: true
+
+  scope :for_category, ->(cat) { where(category: cat) }
+  scope :ai_generated, -> { where(source: 'ai_generated') }
+  scope :manual, -> { where(source: 'manual') }
   
   # Validate attachment size and type
   validate :validate_attachments, if: -> { attachments.attached? }

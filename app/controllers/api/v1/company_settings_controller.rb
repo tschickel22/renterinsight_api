@@ -6,8 +6,8 @@ module Api
       before_action :set_company_scope
       
       # RBAC Authorization - map to appropriate resources
-      before_action :authorize_settings_read!, only: [:show_operational, :show_communication]
-      before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac, :save_communication_settings, :clear_communication_settings]
+      before_action :authorize_settings_read!, only: [:show_operational, :show_communication, :show_company_profile]
+      before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac, :save_communication_settings, :clear_communication_settings, :update_company_profile]
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
       before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
@@ -56,6 +56,46 @@ module Api
         }
       rescue => e
         Rails.logger.error "❌ [CompanySettings#update_operational] Error: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: {
+          errors: [e.message]
+        }, status: :unprocessable_entity
+      end
+
+      # GET /api/v1/company_settings/company_profile
+      def show_company_profile
+        profile = Setting.get('Company', @company.id, 'company_profile') || {}
+
+        render json: {
+          company_profile: profile
+        }
+      end
+
+      # PATCH /api/v1/company_settings/company_profile
+      def update_company_profile
+        Rails.logger.info "🏷️  [CompanySettings#update_company_profile] Received params: #{params.inspect}"
+        Rails.logger.info "🏷️  [CompanySettings#update_company_profile] Company: #{@company&.name} (ID: #{@company&.id})"
+
+        profile_params = params[:company_profile]
+        if profile_params.present?
+          profile = profile_params.to_unsafe_h
+        else
+          profile = {}
+        end
+
+        Rails.logger.info "📊 [CompanySettings#update_company_profile] Company profile to save: #{profile.inspect}"
+
+        Setting.set('Company', @company.id, 'company_profile', profile)
+
+        saved_profile = Setting.get('Company', @company.id, 'company_profile')
+        Rails.logger.info "✅ [CompanySettings#update_company_profile] Profile saved successfully: #{saved_profile.inspect}"
+
+        render json: {
+          company_profile: saved_profile,
+          message: 'Company profile updated successfully'
+        }
+      rescue => e
+        Rails.logger.error "❌ [CompanySettings#update_company_profile] Error: #{e.message}"
         Rails.logger.error e.backtrace.join("\n")
         render json: {
           errors: [e.message]

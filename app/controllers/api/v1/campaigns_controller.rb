@@ -326,7 +326,7 @@ class Api::V1::CampaignsController < ApplicationController
     return render(json: { error: 'prompt is required' }, status: :unprocessable_entity) if prompt.blank?
     channel = params[:channel].presence || 'email'
 
-    generation = Campaigns::AiBuilder.new(company: @company, user: current_user).generate(
+    generation = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).generate(
       prompt: prompt, channel: channel, context_overrides: params[:context_overrides].try(:to_unsafe_h) || {}
     )
     render json: {
@@ -355,7 +355,7 @@ class Api::V1::CampaignsController < ApplicationController
       location_id: params[:location_id]
     }
 
-    campaign = Campaigns::AiBuilder.new(company: @company, user: current_user).accept(generation: generation, sender_params: sender)
+    campaign = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).accept(generation: generation, sender_params: sender)
     render json: { campaign_id: campaign.id, name: campaign.name, status: campaign.status }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -369,7 +369,7 @@ class Api::V1::CampaignsController < ApplicationController
     feedback = params[:feedback].to_s.strip
     return render(json: { error: 'feedback is required' }, status: :unprocessable_entity) if feedback.blank?
 
-    new_gen = Campaigns::AiBuilder.new(company: @company, user: current_user).refine(generation: generation, feedback: feedback)
+    new_gen = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).refine(generation: generation, feedback: feedback)
     render json: { generation_id: new_gen.id, plan: new_gen.generated_plan, has_questions: new_gen.generated_plan['questions'].present?, parent_id: generation.id }
   rescue Campaigns::AiBuilder::CreditLimitError => e
     render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests

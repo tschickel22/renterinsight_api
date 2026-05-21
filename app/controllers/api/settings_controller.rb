@@ -592,6 +592,10 @@ module Api
       pipeline_stages = Setting.get('Company', @company.id, 'pipeline_stages', nil)
       base_settings[:pipeline_stages] = pipeline_stages if pipeline_stages.present?
 
+      # Company profile ("About Us for AI") — surfaced via TenantContext so any
+      # frontend feature can access it without an extra API call.
+      base_settings[:company_profile] = Setting.get('Company', @company.id, 'company_profile') || {}
+
       # SMS availability flag for non-admin UI checks (e.g., workqueue quick actions).
       # Only exposes a boolean and the from_number (already visible to recipients) —
       # no credentials.

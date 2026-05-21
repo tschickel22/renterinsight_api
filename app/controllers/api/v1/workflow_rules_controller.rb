@@ -125,7 +125,7 @@ module Api
       # POST /api/v1/workflow_rules/ai_generate
       def ai_generate
         return unless authorize_action!('workflow_automation', 'create')
-        builder = Workflows::AiBuilder.new(company: @company, user: current_user)
+        builder = Workflows::AiBuilder.new(company: @company, user: current_user, location: current_location)
         generation = builder.generate(
           prompt: params[:prompt],
           context_overrides: params[:context_overrides]&.to_unsafe_h
@@ -145,7 +145,7 @@ module Api
       def ai_accept
         return unless authorize_action!('workflow_automation', 'create')
         generation = @company.workflow_ai_generations.find(params[:generation_id])
-        builder = Workflows::AiBuilder.new(company: @company, user: current_user)
+        builder = Workflows::AiBuilder.new(company: @company, user: current_user, location: current_location)
         rule = builder.accept(generation: generation)
         render json: rule_json(rule, full: true), status: :created
       end
@@ -154,7 +154,7 @@ module Api
       def ai_refine
         return unless authorize_action!('workflow_automation', 'create')
         generation = @company.workflow_ai_generations.find(params[:generation_id])
-        builder = Workflows::AiBuilder.new(company: @company, user: current_user)
+        builder = Workflows::AiBuilder.new(company: @company, user: current_user, location: current_location)
         new_gen = builder.refine(generation: generation, feedback: params[:feedback])
         render json: {
           generation_id: new_gen.id,

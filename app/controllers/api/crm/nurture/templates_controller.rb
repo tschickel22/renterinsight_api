@@ -10,7 +10,11 @@ module Api
         before_action :set_company_scope
 
         def index
-          templates = @company.templates.where(template_type: %w[email sms]).order(created_at: :desc)
+          templates = @company.templates.where(template_type: %w[email sms])
+          templates = templates.where(template_type: params[:channel]) if params[:channel].present?
+          templates = templates.where(category: params[:category]) if params[:category].present?
+          templates = templates.where(source: params[:source]) if params[:source].present?
+          templates = templates.order(created_at: :desc)
           render json: templates.map { |t| template_json(t) }, status: :ok
         end
 
@@ -171,7 +175,7 @@ module Api
         end
 
         def template_params
-          params.require(:template).permit(:name, :template_type, :subject, :body, :is_active)
+          params.require(:template).permit(:name, :template_type, :subject, :body, :is_active, :category, :source)
         end
 
         def template_params_from_hash(hash)
@@ -180,6 +184,8 @@ module Api
             template_type: hash[:template_type],
             subject: hash[:subject],
             body: hash[:body],
+            category: hash[:category],
+            source: hash[:source],
             is_active: hash[:is_active].nil? ? true : hash[:is_active]
           }.compact
         end
@@ -214,6 +220,8 @@ module Api
             type: template.template_type,
             subject: template.subject,
             body: template.body,
+            category: template.category,
+            source: template.source,
             isActive: template.is_active,
             is_active: template.is_active,
             attachments: attachments_data,

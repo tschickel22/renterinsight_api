@@ -14,6 +14,7 @@ module Api
           email: @user.email,
           first_name: extract_first_name,
           last_name: extract_last_name,
+          title: @user.respond_to?(:title) ? @user.title : nil,
           phone: extract_phone,
           address: extract_address,
           city: extract_city,
@@ -29,7 +30,7 @@ module Api
       # PATCH /api/v1/user_settings/profile
       def update_profile
         profile_params = params.permit(
-          :first_name, :last_name, :phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
+          :first_name, :last_name, :title, :phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
           workqueue_preferences: {}
         )
 
@@ -59,6 +60,7 @@ module Api
             updates = {}
             updates[:first_name] = profile_params[:first_name] if profile_params[:first_name].present?
             updates[:last_name] = profile_params[:last_name] if profile_params[:last_name].present?
+            updates[:title] = profile_params[:title] if profile_params.key?(:title)
             updates[:phone] = profile_params[:phone] if profile_params[:phone].present?
             updates[:email] = profile_params[:email] if profile_params[:email].present?
             updates[:landing_page] = profile_params[:landing_page] if profile_params[:landing_page].present?

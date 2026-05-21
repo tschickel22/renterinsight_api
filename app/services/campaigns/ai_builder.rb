@@ -11,9 +11,10 @@ module Campaigns
 
     DEFAULT_MONTHLY_CREDIT = 50
 
-    def initialize(company:, user:)
+    def initialize(company:, user:, location: nil)
       @company = company
       @user = user
+      @location = location
     end
 
     def generate(prompt:, channel: 'email', context_overrides: {})
@@ -141,11 +142,21 @@ module Campaigns
     end
 
     def build_context(channel, overrides)
+      profile = Setting.get('Company', @company.id, 'company_profile') || {}
+
       base = {
         'company' => {
           'name' => @company.name,
-          'vertical' => detect_vertical
-        },
+          'display_name' => business_display_name,
+          'vertical' => detect_vertical,
+          'business_description' => profile['business_description'],
+          'target_audience' => profile['target_audience'],
+          'products_services' => profile['products_services'],
+          'unique_value_props' => profile['unique_value_props'],
+          'industry_vertical' => profile['industry_vertical'],
+          'brand_voice' => profile['brand_voice']
+        }.compact,
+        'sender' => sender_context_hash,
         'channel' => channel,
         'inventory_summary' => inventory_summary,
         'lead_count' => safe_count(@company.try(:leads)),
@@ -153,6 +164,23 @@ module Campaigns
         'available_templates' => CampaignTemplate.seeded.where(channel: channel).pluck(:slug)
       }
       base.merge((overrides || {}).stringify_keys)
+    end
+
+    def business_display_name
+      loc_name = @location&.name.to_s.strip
+      return loc_name if loc_name.present? && loc_name.downcase != 'main'
+      @company.name
+    end
+
+    def sender_context_hash
+      return {} unless @user
+      {
+        'full_name' => [@user.try(:first_name), @user.try(:last_name)].compact.join(' ').strip,
+        'title' => @user.try(:title).to_s.strip,
+        'phone' => @user.try(:phone).to_s.strip,
+        'signature' => @user.try(:typed_signature).to_s.strip,
+        'booking_url' => @user.try(:booking_url).to_s.strip
+      }.reject { |_, v| v.blank? }
     end
 
     def safe_count(rel)
@@ -235,6 +263,10 @@ module Campaigns
         - Direct, specific, no "I hope this email finds you well".
         - Reference real industry pain points (spreadsheets, lost leads, AR aging, factory wait times).
         - Use merge tags: {{first_name}}, {{last_name}}, {{full_name}}, {{rep_name}}, {{rep_email}}, {{company.name}}, {{public_inventory_url}}, {{unsubscribe_url}}.
+        - Match the brand voice from context.company.brand_voice when set; lean on context.company.business_description / target_audience / unique_value_props for what to say.
+        - When referring to the sender's own business in copy, use context.company.display_name (NOT {{company_name}}, which is reserved for the recipient's company).
+        - Never use placeholders like "[Your name]". If context.sender.signature is present, use it verbatim at the end of email bodies. Otherwise build a sign-off from context.sender.full_name + title + phone + display_name (omit blank pieces, but the business display_name MUST be in the sign-off — that's how the recipient knows who's reaching out). For SMS use first name only.
+        - If context.sender.booking_url is present and the step's CTA is to schedule/demo/tour/talk live: prefer a button block `{ type: "button", text: "Book a time" | "View my calendar", href: booking_url }`. For inline links inside text blocks, use `<a href="booking_url">Book here</a>` — never expose the raw URL in email. For SMS, include the raw URL with framing text. Don't shove it into every step.
 
         CADENCE:
         - Day 1, then space subsequent steps (3, 7, 14, 30, 60 days are sensible).

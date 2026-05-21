@@ -834,6 +834,8 @@ module Api
           if tenant.respond_to?(:module_access)
             base[:modules] = tenant.modules_with_status
           end
+
+          base[:company_profile] = Setting.get('Company', tenant.id, 'company_profile') || {}
         end
         
         base

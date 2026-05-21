@@ -207,6 +207,8 @@ Rails.application.routes.draw do
       scope path: 'company_settings', controller: 'company_settings' do
         get 'operational', action: :show_operational
         patch 'operational', action: :update_operational
+        get 'company_profile', action: :show_company_profile
+        patch 'company_profile', action: :update_company_profile
         get 'branding', action: :show_branding
         patch 'branding', action: :update_branding
         get 'communication', action: :show_communication
@@ -2244,6 +2246,22 @@ Rails.application.routes.draw do
         resources :templates, only: %i[index create update destroy] do
           collection { post :bulk }
           member { delete 'attachments/:attachment_id', to: 'templates#delete_attachment' }
+        end
+
+        # AI Template Generation
+        resources :ai_templates, only: [] do
+          collection do
+            post :generate
+            post :save
+          end
+        end
+
+        # AI Sequence Generation
+        resources :ai_sequences, only: [] do
+          collection do
+            post :generate
+            post :save
+          end
         end
       end
 

@@ -27,9 +27,10 @@ module Workflows
       call_webhook require_approval wait_for_reply score_entity classify_reply
     ].freeze
 
-    def initialize(company:, user:)
+    def initialize(company:, user:, location: nil)
       @company = company
       @user = user
+      @location = location
     end
 
     def generate(prompt:, context_overrides: {})
@@ -128,11 +129,21 @@ module Workflows
     end
 
     def build_context(overrides)
+      profile = Setting.get('Company', @company.id, 'company_profile') || {}
+
       base = {
         'company' => {
           'name' => @company.name,
-          'vertical' => detect_vertical
-        },
+          'display_name' => business_display_name,
+          'vertical' => detect_vertical,
+          'business_description' => profile['business_description'],
+          'target_audience' => profile['target_audience'],
+          'products_services' => profile['products_services'],
+          'unique_value_props' => profile['unique_value_props'],
+          'industry_vertical' => profile['industry_vertical'],
+          'brand_voice' => profile['brand_voice']
+        }.compact,
+        'sender' => sender_context_hash,
         'entity_types' => ENTITY_TYPES,
         'trigger_event_types' => TRIGGER_EVENT_TYPES,
         'step_types' => STEP_TYPES,
@@ -140,6 +151,23 @@ module Workflows
         'merge_tags_by_entity' => merge_tags_summary
       }
       base.merge((overrides || {}).stringify_keys)
+    end
+
+    def sender_context_hash
+      return {} unless @user
+      {
+        'full_name' => [@user.try(:first_name), @user.try(:last_name)].compact.join(' ').strip,
+        'title' => @user.try(:title).to_s.strip,
+        'phone' => @user.try(:phone).to_s.strip,
+        'signature' => @user.try(:typed_signature).to_s.strip,
+        'booking_url' => @user.try(:booking_url).to_s.strip
+      }.reject { |_, v| v.blank? }
+    end
+
+    def business_display_name
+      loc_name = @location&.name.to_s.strip
+      return loc_name if loc_name.present? && loc_name.downcase != 'main'
+      @company.name
     end
 
     def safe_pluck(rel, column)
@@ -294,9 +322,13 @@ module Workflows
         - "true" — cancel the run on any inbound reply.
         - "branch" — sets reply_received=true variable so a branch node can route differently.
 
-        VOICE (for email/SMS bodies):
+        VOICE (for email/SMS bodies in send_email / send_sms / create_activity steps):
         - Direct, specific to MH/RV dealer industry where relevant. No "I hope this email finds you well".
         - Reference real pain points: lost leads, spreadsheet chaos, AR aging, factory wait times, walk-ins.
+        - Match the brand voice from context.company.brand_voice when set; lean on context.company.business_description / target_audience / unique_value_props for what to say.
+        - When referring to the sender's own business in copy, use context.company.display_name (NOT {{company.name}}, which refers to the platform's company record).
+        - Never use placeholders like "[Your name]". If context.sender.signature is present, use it verbatim at the end of email bodies. Otherwise build a sign-off from context.sender.full_name + title + phone + display_name (omit blank pieces, but display_name MUST be in the sign-off — that's how the recipient knows who's reaching out). SMS = first name only.
+        - If context.sender.booking_url is present and an action's natural CTA is to schedule / demo / tour / talk live: for send_email actions, render as HTML — `<a href="booking_url">Book here</a>` inside a body wrapped in `<p>` tags so the mail renderer treats it as HTML. For send_sms, include the raw URL with framing like "Book a time:". Don't shove it into unrelated steps.
       SYS
 
       mode == :refine ? base + "\n\nThe user is iterating on a previous plan. Apply their feedback and return the COMPLETE updated plan in the same JSON shape." : base

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_19_000001) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_21_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4020,6 +4020,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_19_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.integer "template_id"
+    t.string "channel", default: "email"
     t.index ["nurture_sequence_id", "position"], name: "index_nurture_steps_on_nurture_sequence_id_and_position"
     t.index ["nurture_sequence_id"], name: "index_nurture_steps_on_nurture_sequence_id"
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
@@ -5794,7 +5795,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_19_000001) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "company_id", null: false
+    t.string "category", default: "general"
+    t.string "source", default: "manual"
+    t.index ["category"], name: "index_templates_on_category"
+    t.index ["company_id", "category"], name: "index_templates_on_company_id_and_category"
     t.index ["company_id"], name: "index_templates_on_company_id"
+    t.index ["source"], name: "index_templates_on_source"
     t.index ["template_type", "name"], name: "index_templates_on_template_type_and_name"
   end
 
