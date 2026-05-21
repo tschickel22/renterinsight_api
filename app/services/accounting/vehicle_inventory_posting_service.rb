@@ -39,7 +39,7 @@ module Accounting
           debit_amount: cost,
           credit_amount: 0,
           memo: "Vehicle inventory — #{vehicle_label}",
-          location_id: @vehicle.try(:location_id),
+          location_id: @vehicle.try(:location_id) || Current.location_id,
           department: department_for_vehicle,
           vehicle_id: @vehicle.id
         )
@@ -49,7 +49,7 @@ module Accounting
           debit_amount: 0,
           credit_amount: cost,
           memo: "AP — Vehicle #{vehicle_label}",
-          location_id: @vehicle.try(:location_id),
+          location_id: @vehicle.try(:location_id) || Current.location_id,
           department: department_for_vehicle,
           vehicle_id: @vehicle.id
         )

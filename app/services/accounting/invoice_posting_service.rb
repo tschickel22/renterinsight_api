@@ -39,7 +39,7 @@ module Accounting
             debit_amount: invoice_total,
             credit_amount: 0,
             memo: "Invoice #{@invoice.invoice_number}",
-            location_id: @invoice.try(:location_id),
+            location_id: @invoice.try(:location_id) || Current.location_id,
             contact_id: @invoice.try(:contact_id) || @invoice.try(:customer_id)
           )
         end
@@ -51,7 +51,7 @@ module Accounting
             debit_amount: 0,
             credit_amount: line_data[:amount],
             memo: line_data[:memo],
-            location_id: @invoice.try(:location_id),
+            location_id: @invoice.try(:location_id) || Current.location_id,
             department: line_data[:department],
             deal_id: line_data[:deal_id],
             vehicle_id: line_data[:vehicle_id],
@@ -65,7 +65,7 @@ module Accounting
             debit_amount: 0,
             credit_amount: tax_amount,
             memo: "Sales tax — Invoice #{@invoice.invoice_number}",
-            location_id: @invoice.try(:location_id)
+            location_id: @invoice.try(:location_id) || Current.location_id
           )
         end
 

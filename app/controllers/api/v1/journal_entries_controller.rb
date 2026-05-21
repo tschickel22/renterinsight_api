@@ -15,13 +15,37 @@ class Api::V1::JournalEntriesController < ApplicationController
     je_ids = je_ids_for_accounting_location
     entries = entries.where(id: je_ids) if je_ids
 
+    # Stats are computed BEFORE the user's source_type / is_void / date filters,
+    # so the cards always show the unfiltered baseline within the current
+    # accounting location. (Matches CLAUDE.md: "Count stats BEFORE search filter".)
+    manual_sources    = %w[manual quick_entry]
+    recurring_sources = %w[recurring]
+    posted_scope = entries.where(is_void: false)
+
     stats = {
-      total: entries.count,
+      total:  entries.count,
       posted: entries.posted.count,
-      voided: entries.voided.count
+      voided: entries.voided.count,
+      manual: posted_scope.where(source_type: manual_sources).count,
+      auto:   posted_scope.where(
+                'source_type IS NULL OR source_type NOT IN (?)',
+                manual_sources + recurring_sources
+              ).count,
     }
 
-    entries = entries.where(source_type: params[:source_type]) if params[:source_type].present?
+    # Translate the "auto" pseudo-source into the same NOT IN clause so the
+    # Auto-Posted card click filters to the broad bucket (not just literal 'auto').
+    case params[:source_type]
+    when 'auto'
+      entries = entries.where(
+        'source_type IS NULL OR source_type NOT IN (?)',
+        manual_sources + recurring_sources
+      )
+    when nil, ''
+      # no-op
+    else
+      entries = entries.where(source_type: params[:source_type])
+    end
     entries = entries.where(is_void: params[:is_void]) if params[:is_void].present?
     if params[:start_date].present? && params[:end_date].present?
       entries = entries.for_date_range(params[:start_date], params[:end_date])

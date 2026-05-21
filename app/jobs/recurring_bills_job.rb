@@ -7,9 +7,10 @@ class RecurringBillsJob < ApplicationJob
     RecurringBill.active.due.find_each do |bill|
       next unless bill.auto_post
 
-      result = bill.generate_entry!
-      if result.is_a?(Hash) && result[:error]
-        Rails.logger.error("[RecurringBills] Failed to generate for #{bill.id}: #{result[:error]}")
+      je = bill.generate_entry!
+      unless je
+        err = bill.last_error || { message: 'unknown error' }
+        Rails.logger.error("[RecurringBills] Failed to generate for #{bill.id}: #{err[:message]}")
       end
     rescue => e
       Rails.logger.error("[RecurringBills] Error processing bill #{bill.id}: #{e.message}")

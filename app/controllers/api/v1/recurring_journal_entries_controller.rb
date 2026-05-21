@@ -51,12 +51,13 @@ class Api::V1::RecurringJournalEntriesController < ApplicationController
   def generate_now
     return unless authorize_action!('journal_entries', 'create')
 
-    je = @recurring_entry.generate_entry!
+    je = @recurring_entry.generate_entry!(force: true)
 
     if je
       render json: { message: "Generated JE #{je.entry_number}", journal_entry: je }
     else
-      render json: { error: 'Failed to generate entry' }, status: :unprocessable_entity
+      err = @recurring_entry.last_error || { code: 'generate_failed', message: 'Failed to generate entry' }
+      render json: err, status: :unprocessable_entity
     end
   end
 

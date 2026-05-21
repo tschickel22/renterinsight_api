@@ -1906,6 +1906,13 @@ Rails.application.routes.draw do
       end
       end
 
+      # Unassigned Location Items
+      scope 'accounting/unassigned_items', controller: 'accounting/unassigned_items' do
+        get '', action: :index
+        get 'count', action: :count
+        patch 'assign', action: :assign
+      end
+
     # Year-End Close
       get 'accounting/year_end_close/preview', to: 'accounting_year_end_close#preview'
       post 'accounting/year_end_close/execute', to: 'accounting_year_end_close#execute'

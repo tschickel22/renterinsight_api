@@ -41,7 +41,7 @@ module Accounting
             debit_amount: line[:debit_amount],
             credit_amount: 0,
             memo: line[:memo],
-            location_id: @po.try(:location_id),
+            location_id: @po.try(:location_id) || Current.location_id,
             department: 'parts'
           )
         end
@@ -51,7 +51,7 @@ module Accounting
           debit_amount: 0,
           credit_amount: total,
           memo: "AP — PO #{@po.po_number}",
-          location_id: @po.try(:location_id),
+          location_id: @po.try(:location_id) || Current.location_id,
           department: 'parts'
         )
 

@@ -23,22 +23,32 @@ class RecurringBill < ApplicationRecord
   scope :due, -> { where('next_due_date <= ?', Date.current) }
   scope :ordered, -> { order(:next_due_date) }
 
-  def generate_entry!
-    return unless is_active? && next_due_date <= Date.current
+  attr_reader :last_error
+
+  # `force: true` skips the date check — used by the "Generate now" UI button.
+  # The scheduled RecurringBillsJob still calls without force.
+  def generate_entry!(force: false)
+    return false_with_reason(:inactive, 'Template is inactive') unless is_active?
+    unless force || next_due_date <= Date.current
+      return false_with_reason(:not_due,
+        "Not due until #{next_due_date.strftime('%b %-d, %Y')}",
+        next_due_date: next_due_date)
+    end
 
     settings = AccountingSettings.for_company(company)
     posting_service = Accounting::ManualPostingService.new(company)
+    entry_date = force && next_due_date > Date.current ? Date.current : next_due_date
 
     je = if posting_type == 'ap'
            ap_account = payment_account || settings.default_ap_account
-           return { error: 'No AP account configured' } unless ap_account
+           return false_with_reason(:no_ap_account, 'No AP account configured') unless ap_account
 
            posting_service.post_simple!(
              debit_account: expense_account,
              credit_account: ap_account,
              amount: amount,
              memo: memo.presence || "Recurring: #{name}",
-             entry_date: next_due_date,
+             entry_date: entry_date,
              source_entity: self,
              location_id: location_id,
              department: department,
@@ -46,14 +56,14 @@ class RecurringBill < ApplicationRecord
            )
          else
            bank = company.chart_of_accounts.where(sub_type: 'bank', is_active: true).order(:account_number).first
-           return { error: 'No bank account configured' } unless bank
+           return false_with_reason(:no_bank_account, 'No bank account configured') unless bank
 
            posting_service.post_simple!(
              debit_account: expense_account,
              credit_account: bank,
              amount: amount,
              memo: memo.presence || "Recurring: #{name}",
-             entry_date: next_due_date,
+             entry_date: entry_date,
              source_entity: self,
              location_id: location_id,
              department: department,
@@ -64,13 +74,18 @@ class RecurringBill < ApplicationRecord
     if je
       advance_next_due_date!
       update!(last_generated_at: Time.current, generated_count: (generated_count || 0) + 1)
-      { success: true, journal_entry: je }
+      je
     else
-      { error: 'Failed to generate entry' }
+      false_with_reason(:posting_failed, 'Failed to generate entry')
     end
   end
 
   private
+
+  def false_with_reason(code, message, **extra)
+    @last_error = { code: code.to_s, message: message, **extra }
+    nil
+  end
 
   def advance_next_due_date!
     new_date = case frequency

@@ -37,7 +37,7 @@ module Accounting
           debit_amount: payment_amount,
           credit_amount: 0,
           memo: "Payment received",
-          location_id: @payment.try(:location_id),
+          location_id: @payment.try(:location_id) || Current.location_id,
           contact_id: resolve_contact_id
         )
 
@@ -46,7 +46,7 @@ module Accounting
           debit_amount: 0,
           credit_amount: payment_amount,
           memo: "Payment applied",
-          location_id: @payment.try(:location_id),
+          location_id: @payment.try(:location_id) || Current.location_id,
           contact_id: resolve_contact_id,
           deal_id: @payment.try(:deal_id)
         )
@@ -86,7 +86,7 @@ module Accounting
           debit_amount: refund_amount,
           credit_amount: 0,
           memo: "Payment refund",
-          location_id: @payment.try(:location_id),
+          location_id: @payment.try(:location_id) || Current.location_id,
           contact_id: resolve_contact_id
         )
 
@@ -95,7 +95,7 @@ module Accounting
           debit_amount: 0,
           credit_amount: refund_amount,
           memo: "Payment refund",
-          location_id: @payment.try(:location_id),
+          location_id: @payment.try(:location_id) || Current.location_id,
           contact_id: resolve_contact_id
         )
 

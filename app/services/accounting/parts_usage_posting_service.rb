@@ -50,7 +50,7 @@ module Accounting
           debit_amount: total_cost,
           credit_amount: 0,
           memo: "COGS — #{part&.try(:name) || source_label}",
-          location_id: @source.try(:location_id),
+          location_id: @source.try(:location_id) || Current.location_id,
           department: @department
         )
 
@@ -59,7 +59,7 @@ module Accounting
           debit_amount: 0,
           credit_amount: total_cost,
           memo: "Inventory relief — #{part&.try(:name) || source_label}",
-          location_id: @source.try(:location_id),
+          location_id: @source.try(:location_id) || Current.location_id,
           department: @department
         )
 
