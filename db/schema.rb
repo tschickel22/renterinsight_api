@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_21_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4021,6 +4021,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_000002) do
     t.datetime "updated_at", null: false
     t.integer "template_id"
     t.string "channel", default: "email"
+    t.jsonb "attachments", default: []
     t.index ["nurture_sequence_id", "position"], name: "index_nurture_steps_on_nurture_sequence_id_and_position"
     t.index ["nurture_sequence_id"], name: "index_nurture_steps_on_nurture_sequence_id"
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
@@ -5926,6 +5927,41 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_000002) do
     t.index ["trigger_route"], name: "index_tours_on_trigger_route"
   end
 
+  create_table "tracked_link_events", force: :cascade do |t|
+    t.bigint "tracked_link_id", null: false
+    t.string "ip_address"
+    t.string "user_agent"
+    t.datetime "clicked_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["clicked_at"], name: "index_tracked_link_events_on_clicked_at"
+    t.index ["tracked_link_id"], name: "index_tracked_link_events_on_tracked_link_id"
+  end
+
+  create_table "tracked_links", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "communication_id"
+    t.string "token", null: false
+    t.string "s3_key", null: false
+    t.string "filename"
+    t.string "content_type"
+    t.integer "file_size"
+    t.string "entity_type"
+    t.bigint "entity_id"
+    t.string "source_type"
+    t.bigint "source_id"
+    t.integer "click_count", default: 0
+    t.datetime "first_clicked_at"
+    t.datetime "last_clicked_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["communication_id"], name: "index_tracked_links_on_communication_id"
+    t.index ["company_id"], name: "index_tracked_links_on_company_id"
+    t.index ["entity_type", "entity_id"], name: "index_tracked_links_on_entity_type_and_entity_id"
+    t.index ["source_type", "source_id"], name: "index_tracked_links_on_source_type_and_source_id"
+    t.index ["token"], name: "index_tracked_links_on_token", unique: true
+  end
+
   create_table "twilio_accounts", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "sub_account_sid"
@@ -7251,6 +7287,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_000002) do
   add_foreign_key "territory_users", "users"
   add_foreign_key "tour_steps", "tours"
   add_foreign_key "tours", "knowledge_modules"
+  add_foreign_key "tracked_link_events", "tracked_links"
+  add_foreign_key "tracked_links", "communications"
+  add_foreign_key "tracked_links", "companies"
   add_foreign_key "twilio_accounts", "companies"
   add_foreign_key "user_email_connections", "companies"
   add_foreign_key "user_email_connections", "users"

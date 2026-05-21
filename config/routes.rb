@@ -13,6 +13,9 @@ Rails.application.routes.draw do
   get  'r/:token',       to: 'sms_replies#show'
   post 'r/:token/reply', to: 'sms_replies#reply'
 
+  # Public tokenized tracked-link redirects (nurture/campaign attachments)
+  get 't/:token', to: 'public/tracked_links#show', as: :tracked_link_redirect
+
   # ==================== PUBLIC CHAMPION LEAD ACCEPT/DECLINE (No Auth Required) ====================
   # One-click Accept/Decline links sent in the Champion lead notification email.
   scope '/cl' do
@@ -168,6 +171,9 @@ Rails.application.routes.draw do
     namespace :v1 do
       # Lightweight auth/token health check
       get 'health/ping', to: 'health#ping'
+
+      # ==================== TRACKED LINKS (Attachment Engagement) ====================
+      resources :tracked_links, only: %i[index show]
 
       # ==================== IMPORT / EXPORT ENGINE ====================
       resources :import_jobs, only: %i[index show create destroy] do
@@ -2235,7 +2241,12 @@ Rails.application.routes.draw do
       namespace :nurture do
         resources :sequences, only: %i[index create update destroy] do
           collection { post :bulk }
-          resources :steps, only: %i[index create update destroy]
+          resources :steps, only: %i[index create update destroy] do
+            member do
+              post :upload_attachment
+              delete :remove_attachment
+            end
+          end
         end
 
         resources :enrollments, only: %i[index create update destroy] do

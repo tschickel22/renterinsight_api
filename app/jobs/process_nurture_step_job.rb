@@ -84,6 +84,12 @@ class ProcessNurtureStepJob < ApplicationJob
     # Render template if present, otherwise use step content with merge fields
     subject, body = render_content(step, context, entity)
 
+    # Process attachments: tracked links append to body, inline files load into upload
+    company = entity.respond_to?(:company) ? entity.company : nil
+    tracked_link_records, inline_uploads, attachment_metadata =
+      process_step_attachments(step, entity, company)
+    body = append_tracked_link_section(body, tracked_link_records) if tracked_link_records.any?
+
     Rails.logger.info "[Nurture] Sending email to #{email} for #{entity.class.name} #{entity.id}, step #{step.id}"
 
     # Use CommunicationService - it handles:
@@ -97,15 +103,35 @@ class ProcessNurtureStepJob < ApplicationJob
       subject: subject,
       body: body,
       category: 'nurture',
+      attachments: inline_uploads,
       metadata: {
         nurture_step_id: step.id,
         nurture_sequence_id: step.nurture_sequence_id,
         nurture_enrollment_id: enrollment.id,
         step_type: 'email',
-        step_position: step.position
-      },
+        step_position: step.position,
+        attachments: attachment_metadata
+      }.deep_stringify_keys,
       skip_preference_check: false # Respect user email preferences
     )
+
+    # Backfill communication_id on tracked links once the Communication exists
+    if result[:success] && result[:communication].present? && tracked_link_records.any?
+      tracked_link_records.each do |tl|
+        tl.update_columns(communication_id: result[:communication].id) rescue nil
+      end
+    end
+
+    # Clean up any tempfiles created for inline attachments
+    inline_uploads.each do |u|
+      tmp = u.respond_to?(:tempfile) ? u.tempfile : nil
+      begin
+        tmp&.close
+        tmp&.unlink
+      rescue StandardError
+        nil
+      end
+    end
 
     if result[:success]
       Rails.logger.info "[Nurture] ✅ Email sent successfully (comm_id: #{result[:communication].id}, external_id: #{result[:external_id]})"
@@ -362,6 +388,106 @@ class ProcessNurtureStepJob < ApplicationJob
     body = render_merge_fields(step.body.presence || "This is an automated follow-up message.", context)
     
     [subject, body]
+  end
+
+  # ---- Attachment handling for nurture emails ----
+  #
+  # Returns [tracked_link_records, inline_uploads, attachment_metadata]:
+  #   tracked_link_records — TrackedLink ARs created for tracked_link mode
+  #   inline_uploads       — ActionDispatch::Http::UploadedFile objects to pass to CommunicationService
+  #   attachment_metadata  — array of hashes to merge into Communication.metadata (already stringified)
+  def process_step_attachments(step, entity, company)
+    tracked_link_records = []
+    inline_uploads       = []
+    metadata             = []
+
+    attachments = Array(step.attachments)
+    return [tracked_link_records, inline_uploads, metadata] if attachments.empty?
+
+    attachments.each do |att|
+      filename      = att['filename']
+      s3_key        = att['s3_key']
+      content_type  = att['content_type']
+      file_size     = att['size']
+      delivery_mode = att['delivery_mode'].presence || 'tracked_link'
+
+      next if s3_key.blank? || filename.blank?
+
+      if delivery_mode == 'inline_attachment'
+        uploaded = download_s3_object_as_upload(s3_key: s3_key, filename: filename, content_type: content_type)
+        if uploaded
+          inline_uploads << uploaded
+          metadata << {
+            filename: filename,
+            delivery_mode: 'inline_attachment',
+            s3_key: s3_key
+          }
+        else
+          Rails.logger.error "[Nurture] Skipping inline attachment #{filename} (#{s3_key}) — download failed"
+        end
+      else
+        tl = TrackedLink.create_for_attachment!(
+          company:      company,
+          s3_key:       s3_key,
+          filename:     filename,
+          content_type: content_type,
+          file_size:    file_size,
+          entity_type:  entity.class.name,
+          entity_id:    entity.id,
+          source_type:  'NurtureStep',
+          source_id:    step.id
+        )
+        tracked_link_records << tl
+        metadata << {
+          filename: filename,
+          delivery_mode: 'tracked_link',
+          s3_key: s3_key,
+          tracked_link_id: tl.id,
+          tracking_url: tl.tracking_url
+        }
+      end
+    rescue => e
+      Rails.logger.error "[Nurture] Attachment processing error (#{filename}): #{e.message}"
+    end
+
+    [tracked_link_records, inline_uploads, metadata]
+  end
+
+  def append_tracked_link_section(body, tracked_links)
+    return body if tracked_links.empty?
+
+    section = tracked_links.map do |tl|
+      safe_filename = ERB::Util.html_escape(tl.filename.to_s)
+      "<p><a href=\"#{tl.tracking_url}\">📎 #{safe_filename}</a></p>"
+    end.join("\n")
+
+    "#{body}\n#{section}"
+  end
+
+  def download_s3_object_as_upload(s3_key:, filename:, content_type:)
+    require 'aws-sdk-s3'
+    s3 = Aws::S3::Client.new(
+      region: ENV['AWS_REGION'] || 'us-west-2',
+      access_key_id: ENV['AWS_ACCESS_KEY_ID'],
+      secret_access_key: ENV['AWS_SECRET_ACCESS_KEY']
+    )
+    bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
+
+    tempfile = Tempfile.new(['nurture_att', File.extname(filename)])
+    tempfile.binmode
+    s3.get_object({ bucket: bucket, key: s3_key }) do |chunk|
+      tempfile.write(chunk)
+    end
+    tempfile.rewind
+
+    ActionDispatch::Http::UploadedFile.new(
+      tempfile:     tempfile,
+      filename:     filename,
+      type:         content_type || 'application/octet-stream'
+    )
+  rescue => e
+    Rails.logger.error "[Nurture] S3 download failed for #{s3_key}: #{e.message}"
+    nil
   end
 
   # Helper to render merge fields in content

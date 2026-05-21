@@ -22,13 +22,18 @@ module Api
           channels = params[:channels] || ['email']
           max_steps = [params[:max_steps]&.to_i || 6, 12].min
           custom_instructions = params[:custom_instructions] || ''
+          attachment_context = params[:attachment_context].to_s
+          attachments_payload = sanitize_attachments_param(params[:attachments])
 
           company_profile = Setting.get('Company', @company.id, 'company_profile') || {}
           sender_context = build_sender_context(current_user)
           business_name = business_display_name(current_location, @company)
 
           system_prompt = build_sequence_system_prompt(company_profile, sender_context, business_name)
-          user_prompt = build_sequence_user_prompt(goal, entity_type, audience_stage, channels, max_steps, custom_instructions)
+          user_prompt = build_sequence_user_prompt(
+            goal, entity_type, audience_stage, channels, max_steps, custom_instructions,
+            attachment_context: attachment_context, attachments: attachments_payload
+          )
 
           api_key = Rails.application.credentials.dig(:anthropic, :api_key) || ENV['ANTHROPIC_API_KEY']
           unless api_key.present?
@@ -84,6 +89,8 @@ module Api
         def save
           sequence_data = params[:sequence] || {}
           steps_data = params[:steps] || []
+          available_attachments = sanitize_attachments_param(params[:attachments])
+          attachments_by_filename = available_attachments.index_by { |a| a['filename'] }
 
           ActiveRecord::Base.transaction do
             sequence = @company.nurture_sequences.create!(
@@ -105,6 +112,8 @@ module Api
                 )
               end
 
+              step_attachments = build_step_attachments(step[:attachments], attachments_by_filename)
+
               sequence.nurture_steps.create!(
                 position: index,
                 step_type: step[:step_type] || step[:channel] || 'email',
@@ -112,7 +121,8 @@ module Api
                 wait_days: step[:wait_days] || 0,
                 subject: step[:subject],
                 body: step[:body],
-                template_id: template&.id
+                template_id: template&.id,
+                attachments: step_attachments
               )
             end
 
@@ -265,7 +275,8 @@ module Api
           PROMPT
         end
 
-        def build_sequence_user_prompt(goal, entity_type, audience_stage, channels, max_steps, custom_instructions)
+        def build_sequence_user_prompt(goal, entity_type, audience_stage, channels, max_steps, custom_instructions,
+                                       attachment_context: '', attachments: [])
           stage_descriptions = {
             'cold' => 'Never interacted or very first contact. They may not know the business.',
             'warm' => 'Showed interest — visited website, downloaded content, inquired, attended event.',
@@ -273,6 +284,8 @@ module Api
             'customer' => 'Already purchased. Goal is relationship building, upsell, review/referral.',
             'churned' => 'Was interested or was a customer but went silent. Need to re-engage.'
           }
+
+          attachment_block = build_attachment_prompt_block(attachment_context, attachments)
 
           <<~PROMPT
             Build a nurture sequence with these specifications:
@@ -285,8 +298,90 @@ module Api
 
             #{custom_instructions.present? ? "ADDITIONAL INSTRUCTIONS: #{custom_instructions}" : ''}
 
+            #{attachment_block}
+
             Generate the full sequence as a JSON object.
           PROMPT
+        end
+
+        # Sanitize attachment metadata coming from the frontend so we only retain
+        # the small set of fields we actually use downstream.
+        def sanitize_attachments_param(raw)
+          return [] if raw.blank?
+          arr = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h.values : Array(raw)
+          arr.map do |a|
+            h = a.respond_to?(:to_unsafe_h) ? a.to_unsafe_h : a.to_h
+            {
+              'filename'      => h['filename'] || h[:filename],
+              's3_key'        => h['s3_key']   || h[:s3_key],
+              'content_type'  => h['content_type'] || h[:content_type],
+              'size'          => h['size'] || h[:size],
+              'delivery_mode' => h['delivery_mode'] || h[:delivery_mode] || 'tracked_link'
+            }.compact
+          end.select { |a| a['filename'].present? && a['s3_key'].present? }
+        end
+
+        # Build the attachment-aware prompt block. Only injected when the user
+        # has actually uploaded documents.
+        def build_attachment_prompt_block(attachment_context, attachments)
+          return '' if attachment_context.blank? && attachments.blank?
+
+          lines = []
+          lines << 'ATTACHMENTS AVAILABLE:'
+          if attachments.any?
+            lines << 'The user has uploaded the following files. Each step may reference zero or more of them by filename.'
+            attachments.each do |a|
+              lines << "  - #{a['filename']} (#{a['content_type'] || 'file'})"
+            end
+          end
+
+          if attachment_context.present?
+            lines << ''
+            lines << 'The user has uploaded the following documents that should be referenced in the sequence:'
+            lines << '---'
+            # Cap to keep prompt size reasonable
+            lines << attachment_context.to_s.first(8000)
+            lines << '---'
+            lines << 'When appropriate, reference these documents naturally in your email copy. Indicate which step should include each attachment.'
+          end
+
+          lines << ''
+          lines << 'For each step you generate, include an "attachments" array. Each entry should be:'
+          lines << '  { "filename": "<exact filename from list above>", "recommended": true }'
+          lines << 'Only include an attachment when it is genuinely relevant to that step. Omit the array if no files apply.'
+
+          lines.join("\n")
+        end
+
+        # Map AI step-level attachment hints to step.attachments JSONB entries,
+        # only honoring files the user actually uploaded.
+        def build_step_attachments(step_attachments, attachments_by_filename)
+          return [] if step_attachments.blank? || attachments_by_filename.blank?
+
+          list = if step_attachments.respond_to?(:to_unsafe_h)
+                   step_attachments.to_unsafe_h.values
+                 else
+                   Array(step_attachments)
+                 end
+
+          list.map do |hint|
+            h = hint.respond_to?(:to_unsafe_h) ? hint.to_unsafe_h : hint.to_h
+            recommended = h['recommended']
+            recommended = h[:recommended] if recommended.nil?
+            next nil if recommended == false
+
+            filename = h['filename'] || h[:filename]
+            source   = attachments_by_filename[filename]
+            next nil unless source
+
+            {
+              's3_key'        => source['s3_key'],
+              'filename'      => source['filename'],
+              'content_type'  => source['content_type'],
+              'size'          => source['size'],
+              'delivery_mode' => source['delivery_mode'] || 'tracked_link'
+            }
+          end.compact
         end
 
         def call_anthropic(api_key, system_prompt, user_prompt)

@@ -64,6 +64,7 @@ class Company < ApplicationRecord
   has_many :champion_lead_feed_configs, dependent: :destroy
   has_many :nurture_sequences, dependent: :destroy
   has_many :nurture_enrollments, dependent: :destroy
+  has_many :tracked_links, dependent: :destroy
   
   # Finance Module Associations
   has_many :payment_methods, dependent: :destroy
