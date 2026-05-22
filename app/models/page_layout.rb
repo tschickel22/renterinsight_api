@@ -239,6 +239,21 @@ class PageLayout < ApplicationRecord
           ]
         },
         {
+          id: 'home_preferences',
+          title: 'Home Preferences',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'preferred_vehicle_id', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'budget_range', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_home_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_bedrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_bathrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_min_sqft', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_max_sqft', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
           id: 'billing_address',
           title: 'Billing Address',
           columns: 2,
@@ -1158,10 +1173,23 @@ class PageLayout < ApplicationRecord
             { key: 'status', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'owner_id', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'source_id', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'budget_range', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'purchase_timeframe', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'rv_experience', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'vehicle_id', type: 'standard', visible: true, required: false, width: 2 }
+            { key: 'rv_experience', type: 'standard', visible: true, required: false, width: 1 }
+          ]
+        },
+        {
+          id: 'home_preferences',
+          title: 'Home Preferences',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'vehicle_id', type: 'standard', visible: true, required: false, width: 2 },
+            { key: 'budget_range', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_home_type', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_bedrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_bathrooms', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_min_sqft', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'preferred_max_sqft', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {
