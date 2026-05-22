@@ -3,7 +3,7 @@
 module Providers
   module Email
     class SmtpProvider < BaseProvider
-      def send_message(to:, from: nil, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [], inline_images: [], **options)
+      def send_message(to:, from: nil, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [], inline_images: [], content_type: 'text/html', **options)
         validate_config!
 
         # Use from parameter or fall back to config
@@ -24,7 +24,8 @@ module Providers
           bcc: bcc,
           reply_to: reply_to,
           file_attachments: attachments,
-          inline_images: inline_images
+          inline_images: inline_images,
+          content_type: content_type
         )
         
         # CRITICAL: Set delivery method PER-MESSAGE (thread-safe)

@@ -2249,6 +2249,7 @@ Rails.application.routes.draw do
             member do
               post :upload_attachment
               delete :remove_attachment
+              post :send_test
             end
           end
         end

@@ -5,7 +5,7 @@ module Providers
     class MicrosoftGraphProvider < BaseProvider
       GRAPH_SEND_URL = 'https://graph.microsoft.com/v1.0/me/sendMail'
 
-      def send_message(to:, from: nil, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [], **options)
+      def send_message(to:, from: nil, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [], content_type: 'text/html', **options)
         validate_config!
 
         access_token = ensure_valid_token!
@@ -24,7 +24,8 @@ module Providers
           cc: cc,
           bcc: bcc,
           reply_to: reply_to,
-          attachments: attachments
+          attachments: attachments,
+          content_type: content_type
         )
 
         response = post_to_graph(access_token, payload)
@@ -128,8 +129,9 @@ module Providers
         @user_connection = user&.default_email_connection
       end
 
-      def build_graph_payload(to:, from_address:, from_name:, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [])
-        is_html = body&.include?('<') && (body&.include?('</') || body&.include?('/>'))
+      def build_graph_payload(to:, from_address:, from_name:, subject:, body:, cc: nil, bcc: nil, reply_to: nil, attachments: [], content_type: 'text/html')
+        is_html = content_type.to_s.downcase.include?('html') ||
+                  (body.to_s.include?('<') && (body.to_s.include?('</') || body.to_s.include?('/>')))
 
         message = {
           subject: subject,

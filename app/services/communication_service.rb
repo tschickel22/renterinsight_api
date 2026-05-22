@@ -68,13 +68,17 @@ class CommunicationService
   end
   
   # Convenience methods for specific channels
-  def self.send_email(communicable:, to:, subject:, body:, **options)
+  # content_type defaults to 'text/html' — every nurture/transactional email
+  # injects HTML (tracked links, inventory blocks, tracking pixel), so the
+  # MIME type must be HTML or recipients see raw tags.
+  def self.send_email(communicable:, to:, subject:, body:, content_type: 'text/html', **options)
     send_communication(
       communicable: communicable,
       channel: 'email',
       to: to,
       subject: subject,
       body: body,
+      content_type: content_type,
       **options
     )
   end

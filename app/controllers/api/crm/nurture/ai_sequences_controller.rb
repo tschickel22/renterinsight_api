@@ -139,6 +139,9 @@ module Api
                 step[:include_inventory].nil? ? step['include_inventory'] : step[:include_inventory]
               )
 
+              step_inventory_display_mode =
+                (step[:inventory_display_mode].presence || step['inventory_display_mode'].presence || 'auto').to_s
+
               sequence.nurture_steps.create!(
                 position: index,
                 step_type: step[:step_type] || step[:channel] || 'email',
@@ -148,7 +151,8 @@ module Api
                 body: step[:body],
                 template_id: template&.id,
                 attachments: step_attachments,
-                include_inventory: step_include_inventory ? true : false
+                include_inventory: step_include_inventory ? true : false,
+                inventory_display_mode: step_inventory_display_mode
               )
             end
 

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class CommunicationMailer < ApplicationMailer
-  def send_communication(to:, subject:, body:, from_email:, from_name:, cc: nil, bcc: nil, reply_to: nil, file_attachments: [], inline_images: [])
+  def send_communication(to:, subject:, body:, from_email:, from_name:, cc: nil, bcc: nil, reply_to: nil, file_attachments: [], inline_images: [], content_type: 'text/html')
     # Add file attachments if present (BEFORE calling mail)
     # Renamed parameter from 'attachments' to 'file_attachments' to avoid shadowing the mail attachments method
 
@@ -75,13 +75,19 @@ class CommunicationMailer < ApplicationMailer
     # Add reply_to if provided
     mail_options[:reply_to] = reply_to if reply_to.present?
 
-    # Now create and send the mail
+    # Decide whether to send as HTML or plain text.
+    # Default behavior is HTML — nurture/marketing/transactional bodies routinely
+    # contain anchors, images (tracking pixel), and inline blocks that render
+    # unreadably when sent as text/plain.
+    treat_as_html = content_type.to_s.downcase.include?('html') ||
+                    rewritten_body.to_s.match?(/<[a-zA-Z!\/]/)
+
     mail(mail_options) do |format|
-      if rewritten_body&.include?('<html') || rewritten_body&.include?('<body') || rewritten_body&.include?('<div') || rewritten_body&.include?('<table') || rewritten_body&.include?('<p ')
-        format.html { render html: rewritten_body.html_safe }
-        format.text { render plain: ActionController::Base.helpers.strip_tags(rewritten_body) }
+      if treat_as_html
+        format.html { render html: rewritten_body.to_s.html_safe }
+        format.text { render plain: ActionController::Base.helpers.strip_tags(rewritten_body.to_s) }
       else
-        format.text { render plain: rewritten_body }
+        format.text { render plain: rewritten_body.to_s }
       end
     end
   end
