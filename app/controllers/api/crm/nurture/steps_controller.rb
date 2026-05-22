@@ -338,7 +338,7 @@ module Api
             when 'Contact' then return @company.contacts.find_by(id: params[:entity_id])
             end
           end
-          @company.leads.where(is_deleted: [false, nil]).order(created_at: :desc).first
+          @company.leads.order(created_at: :desc).first
         end
 
         def build_test_merge_data(entity)
