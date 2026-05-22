@@ -771,18 +771,22 @@ class Company < ApplicationRecord
   # Public Inventory Methods
   # ====================
   
-  # Generate public inventory token for secure access
+  # Generate public inventory token for secure access (collision-safe)
   def generate_public_inventory_token
-    self.public_inventory_token = SecureRandom.urlsafe_base64(32)
+    return if public_inventory_token.present?
+    self.public_inventory_token = loop do
+      candidate = SecureRandom.urlsafe_base64(32)
+      break candidate unless Company.exists?(public_inventory_token: candidate)
+    end
   end
-  
+
   # Set default public inventory settings on company creation
   def set_default_public_inventory_settings
     # Only set defaults if public_inventory_settings is blank/nil
     return if public_inventory_settings.present?
-    
+
     self.public_inventory_settings = {}
-    self.public_inventory_enabled = false  # Disabled by default
+    self.public_inventory_enabled = true  # Enabled by default so nurture email links work
     self.public_statuses = ['available', 'available_to_order']  # Include both statuses
     self.show_pricing = true
     self.show_contact_button = true
