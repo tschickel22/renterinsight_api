@@ -56,9 +56,10 @@ class TrackedLink < ApplicationRecord
   end
 
   def tracking_url
-    base = (ENV['APP_BASE_URL'].presence || ENV['CAMPAIGN_BASE_URL'].presence ||
-            (Rails.application.routes.default_url_options[:host] && Rails.application.routes.url_helpers.root_url) ||
-            'https://app.renterinsight.com').to_s.chomp('/')
+    base = (ENV['RENDER_EXTERNAL_URL'].presence ||
+            ENV['DMS_API_URL'].presence ||
+            ENV['APP_BASE_URL'].presence ||
+            'https://renterinsight-api-staging.onrender.com').to_s.chomp('/')
     "#{base}/t/#{token}"
   end
 
