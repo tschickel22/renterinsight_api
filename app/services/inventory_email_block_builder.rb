@@ -100,7 +100,11 @@ class InventoryEmailBlockBuilder
   end
 
   def public_base_url
-    ENV['FRONTEND_URL'].presence || ENV['APP_HOST'].presence || 'https://staging.crm.landlordinsight.com'
+    # DMS frontend URL — check company-specific setting first, then env vars
+    @company.try(:dms_frontend_url).presence ||
+      ENV['DMS_FRONTEND_URL'].presence ||
+      ENV['FRONTEND_URL'].presence ||
+      'https://staging-dms.renterinsight.com'
   end
 
   def extract_primary_image(vehicle)
