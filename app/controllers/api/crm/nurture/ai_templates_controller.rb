@@ -64,6 +64,22 @@ module Api
                 output_tokens: response.dig('usage', 'output_tokens')
               }
             }
+          rescue Net::ReadTimeout, Net::OpenTimeout => e
+            AiQueryLog.create!(
+              company: @company,
+              user: current_user,
+              feature: 'ai_template_generate',
+              module_key: 'nurture',
+              question: "Generate #{channel} template for #{category}",
+              execution_status: 'error',
+              input_tokens: 0, output_tokens: 0, cost_cents: 0,
+              generated_params: { error: "Timeout: #{e.message}" }
+            )
+            Rails.logger.error "[AI Template] Timeout: #{e.message}"
+            render json: {
+              error: 'ai_timeout',
+              message: 'The AI took too long to respond. Try shorter instructions and retry.'
+            }, status: :gateway_timeout
           rescue => e
             AiQueryLog.create!(
               company: @company,
@@ -79,7 +95,10 @@ module Api
             )
 
             Rails.logger.error "[AI Template] Error: #{e.message}"
-            render json: { error: 'AI generation failed. Please try again.' }, status: :unprocessable_entity
+            render json: {
+              error: 'ai_generation_failed',
+              message: "AI generation failed: #{e.message.to_s.first(200)}"
+            }, status: :unprocessable_entity
           end
         end
 
@@ -266,7 +285,8 @@ module Api
           uri = URI('https://api.anthropic.com/v1/messages')
           http = Net::HTTP.new(uri.host, uri.port)
           http.use_ssl = true
-          http.read_timeout = 30
+          http.open_timeout = 10
+          http.read_timeout = 60
 
           request = Net::HTTP::Post.new(uri)
           request['Content-Type'] = 'application/json'

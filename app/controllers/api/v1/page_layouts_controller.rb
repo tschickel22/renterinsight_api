@@ -370,6 +370,18 @@ module Api
           { key: 'delivery_country', label: 'Delivery Country', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'opt_out_email', label: 'Opt Out Email', type: 'boolean', source: 'standard', required: false, protected: false },
           { key: 'opt_out_sms', label: 'Opt Out SMS', type: 'boolean', source: 'standard', required: false, protected: false },
+          # Inventory preferences
+          { key: 'preferred_bedrooms', label: 'Preferred Bedrooms', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['1', '2', '3', '4', '5', '6+'] },
+          { key: 'preferred_bathrooms', label: 'Preferred Bathrooms', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['1', '1.5', '2', '2.5', '3', '3+'] },
+          { key: 'preferred_min_sqft', label: 'Min Square Feet', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'preferred_max_sqft', label: 'Max Square Feet', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'preferred_home_type', label: 'Preferred Home Type', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['manufactured', 'rv', 'tiny_home', 'modular'] },
+          { key: 'budget_range', label: 'Budget Range', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['Under $50k', '$50k-$100k', '$100k-$150k', '$150k-$200k', '$200k-$300k', '$300k+'] },
+          { key: 'preferred_vehicle_id', label: 'Interested Home', type: 'vehicle', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
         ]
       end
@@ -404,6 +416,14 @@ module Api
           { key: 'rv_experience', label: 'RV Experience', type: 'select', source: 'standard', required: false, protected: false,
             options: ['First Time Buyer', 'Some Experience', 'Experienced', 'Very Experienced'] },
           { key: 'vehicle_id', label: 'Interested Home', type: 'vehicle_picker', source: 'standard', required: false, protected: false },
+          { key: 'preferred_bedrooms', label: 'Preferred Bedrooms', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['1', '2', '3', '4', '5', '6+'] },
+          { key: 'preferred_bathrooms', label: 'Preferred Bathrooms', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['1', '1.5', '2', '2.5', '3', '3+'] },
+          { key: 'preferred_min_sqft', label: 'Min Square Feet', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'preferred_max_sqft', label: 'Max Square Feet', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'preferred_home_type', label: 'Preferred Home Type', type: 'select', source: 'standard', required: false, protected: false,
+            options: ['manufactured', 'rv', 'tiny_home', 'modular'] },
           { key: 'interests_requirements', label: 'Interests/Requirements', type: 'longtext', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false },
           # Address

@@ -13,7 +13,12 @@ module Public
         ip_address: request.remote_ip,
         user_agent: request.user_agent
       )
-      redirect_to tracked_link.presigned_download_url, allow_other_host: true
+      target = tracked_link.redirect_url
+      if target.blank?
+        render plain: 'Link has no destination', status: :unprocessable_entity
+        return
+      end
+      redirect_to target, allow_other_host: true
     rescue ActiveRecord::RecordNotFound
       render plain: 'Link not found or expired', status: :not_found
     rescue => e

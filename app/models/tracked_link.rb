@@ -5,11 +5,14 @@ class TrackedLink < ApplicationRecord
   belongs_to :communication, optional: true
   belongs_to :entity, polymorphic: true, optional: true
   belongs_to :source, polymorphic: true, optional: true
+  belongs_to :vehicle, class_name: 'Vehicle', optional: true
   has_many :tracked_link_events, dependent: :destroy
 
   before_create :generate_token
 
   scope :for_entity, ->(type, id) { where(entity_type: type, entity_id: id) }
+  scope :with_vehicle, -> { where.not(vehicle_id: nil) }
+  scope :clicked,      -> { where('click_count > 0') }
 
   def self.create_for_attachment!(company:, s3_key:, filename:, content_type:, file_size:,
                                   entity_type: nil, entity_id: nil,
@@ -26,6 +29,30 @@ class TrackedLink < ApplicationRecord
       source_id: source_id,
       communication: communication
     )
+  end
+
+  def self.create_for_inventory!(company:, vehicle:, url:,
+                                 entity_type: nil, entity_id: nil,
+                                 source_type: nil, source_id: nil, communication: nil)
+    create!(
+      company: company,
+      vehicle_id: vehicle.id,
+      url: url,
+      link_type: 'inventory_view',
+      entity_type: entity_type,
+      entity_id: entity_id,
+      source_type: source_type,
+      source_id: source_id,
+      communication: communication
+    )
+  end
+
+  def redirect_url
+    if s3_key.present?
+      presigned_download_url
+    elsif url.present?
+      url
+    end
   end
 
   def tracking_url

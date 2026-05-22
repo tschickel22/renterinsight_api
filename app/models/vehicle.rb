@@ -47,7 +47,8 @@ class Vehicle < ApplicationRecord
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   has_many :inventory_packages, dependent: :destroy
-  
+  has_many :tracked_links, dependent: :nullify
+
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments

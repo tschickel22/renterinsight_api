@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_22_084234) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2152,6 +2152,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
     t.string "delivery_country"
     t.boolean "email_invalid", default: false, null: false
     t.boolean "opt_in_sms", default: false, null: false
+    t.integer "preferred_bedrooms"
+    t.integer "preferred_bathrooms"
+    t.integer "preferred_min_sqft"
+    t.integer "preferred_max_sqft"
+    t.string "preferred_home_type"
+    t.bigint "preferred_vehicle_id"
+    t.string "budget_range"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
@@ -2161,6 +2168,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
     t.index ["opt_out_email"], name: "index_contacts_on_opt_out_email"
     t.index ["opt_out_sms"], name: "index_contacts_on_opt_out_sms"
     t.index ["owner_id"], name: "index_contacts_on_owner_id"
+    t.index ["preferred_vehicle_id"], name: "index_contacts_on_preferred_vehicle_id"
     t.index ["quickbooks_id"], name: "index_contacts_on_quickbooks_id"
   end
 
@@ -3428,6 +3436,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
     t.datetime "champion_action_token_expires_at"
     t.string "company_name"
     t.string "title"
+    t.integer "preferred_bedrooms"
+    t.integer "preferred_bathrooms"
+    t.integer "preferred_min_sqft"
+    t.integer "preferred_max_sqft"
+    t.string "preferred_home_type"
     t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"
@@ -4022,6 +4035,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
     t.integer "template_id"
     t.string "channel", default: "email"
     t.jsonb "attachments", default: []
+    t.boolean "include_inventory", default: false
+    t.string "inventory_display_mode", default: "auto"
     t.index ["nurture_sequence_id", "position"], name: "index_nurture_steps_on_nurture_sequence_id_and_position"
     t.index ["nurture_sequence_id"], name: "index_nurture_steps_on_nurture_sequence_id"
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"
@@ -5942,7 +5957,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
     t.bigint "company_id", null: false
     t.bigint "communication_id"
     t.string "token", null: false
-    t.string "s3_key", null: false
+    t.string "s3_key"
     t.string "filename"
     t.string "content_type"
     t.integer "file_size"
@@ -5955,11 +5970,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_21_230046) do
     t.datetime "last_clicked_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "vehicle_id"
+    t.string "link_type", default: "attachment"
+    t.string "url"
     t.index ["communication_id"], name: "index_tracked_links_on_communication_id"
     t.index ["company_id"], name: "index_tracked_links_on_company_id"
+    t.index ["entity_type", "entity_id", "vehicle_id"], name: "idx_tracked_links_entity_vehicle"
     t.index ["entity_type", "entity_id"], name: "index_tracked_links_on_entity_type_and_entity_id"
     t.index ["source_type", "source_id"], name: "index_tracked_links_on_source_type_and_source_id"
     t.index ["token"], name: "index_tracked_links_on_token", unique: true
+    t.index ["vehicle_id"], name: "index_tracked_links_on_vehicle_id"
   end
 
   create_table "twilio_accounts", force: :cascade do |t|

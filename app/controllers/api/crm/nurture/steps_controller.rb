@@ -185,6 +185,7 @@ module Api
         def step_params
           params.require(:step).permit(
             :position, :step_type, :subject, :body, :wait_hours, :wait_days, :template_id,
+            :include_inventory, :inventory_display_mode,
             attachments: [:s3_key, :filename, :size, :content_type, :delivery_mode]
           )
         end
@@ -205,6 +206,10 @@ module Api
             nurture_sequence_id: step.nurture_sequence_id,
             nurtureSequenceId: step.nurture_sequence_id,
             attachments: Array(step.attachments),
+            include_inventory: !!step.include_inventory,
+            includeInventory: !!step.include_inventory,
+            inventory_display_mode: step.inventory_display_mode,
+            inventoryDisplayMode: step.inventory_display_mode,
             createdAt: step.created_at&.iso8601,
             updatedAt: step.updated_at&.iso8601
           }

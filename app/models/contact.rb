@@ -31,6 +31,8 @@ class Contact < ApplicationRecord
   belongs_to :company, optional: true
   belongs_to :location, optional: true
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
+  belongs_to :preferred_vehicle, class_name: 'Vehicle', foreign_key: 'preferred_vehicle_id', optional: true
+  has_many :tracked_links, as: :entity, dependent: :destroy
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
   has_many :note_records, class_name: 'Note', as: :entity, dependent: :destroy

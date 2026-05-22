@@ -90,7 +90,47 @@ class ProcessNurtureStepJob < ApplicationJob
       process_step_attachments(step, entity, company)
     body = append_tracked_link_section(body, tracked_link_records) if tracked_link_records.any?
 
+    # Inject inventory block when the step opts in. The matcher waterfalls
+    # (preferred → click-inferred → criteria → rotation); on no match we
+    # silently skip so the email still goes out.
+    inventory_meta = nil
+    if step.include_inventory && company
+      begin
+        matcher  = InventoryMatcherService.new(entity, company)
+        vehicles = matcher.match
+        if vehicles.present?
+          block_builder = InventoryEmailBlockBuilder.new(
+            company:     company,
+            entity:      entity,
+            vehicles:    vehicles,
+            source_type: 'NurtureStep',
+            source_id:   step.id
+          )
+          body += block_builder.build_html
+          inventory_meta = {
+            inventory_vehicles: vehicles.map { |v|
+              { id: v.id, name: [v.year, v.make, v.model].compact.join(' ') }
+            },
+            inventory_match_mode: matcher.match_mode,
+            inventory_tracked_link_ids: block_builder.tracked_link_ids
+          }
+        end
+      rescue => e
+        Rails.logger.error "[Nurture] Inventory injection failed for step #{step.id}: #{e.message}"
+      end
+    end
+
     Rails.logger.info "[Nurture] Sending email to #{email} for #{entity.class.name} #{entity.id}, step #{step.id}"
+
+    metadata_hash = {
+      nurture_step_id: step.id,
+      nurture_sequence_id: step.nurture_sequence_id,
+      nurture_enrollment_id: enrollment.id,
+      step_type: 'email',
+      step_position: step.position,
+      attachments: attachment_metadata
+    }
+    metadata_hash.merge!(inventory_meta) if inventory_meta
 
     # Use CommunicationService - it handles:
     # - Waterfall settings (Location → Company → Platform)
@@ -104,21 +144,19 @@ class ProcessNurtureStepJob < ApplicationJob
       body: body,
       category: 'nurture',
       attachments: inline_uploads,
-      metadata: {
-        nurture_step_id: step.id,
-        nurture_sequence_id: step.nurture_sequence_id,
-        nurture_enrollment_id: enrollment.id,
-        step_type: 'email',
-        step_position: step.position,
-        attachments: attachment_metadata
-      }.deep_stringify_keys,
+      metadata: metadata_hash.deep_stringify_keys,
       skip_preference_check: false # Respect user email preferences
     )
 
     # Backfill communication_id on tracked links once the Communication exists
-    if result[:success] && result[:communication].present? && tracked_link_records.any?
+    if result[:success] && result[:communication].present?
       tracked_link_records.each do |tl|
         tl.update_columns(communication_id: result[:communication].id) rescue nil
+      end
+
+      inv_link_ids = inventory_meta&.dig(:inventory_tracked_link_ids) || []
+      if inv_link_ids.any?
+        TrackedLink.where(id: inv_link_ids).update_all(communication_id: result[:communication].id)
       end
     end
 

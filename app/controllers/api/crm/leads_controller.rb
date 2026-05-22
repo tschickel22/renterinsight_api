@@ -567,6 +567,12 @@ module Api
                    :rv_experience, :rvExperience, :preferred_contact_method, :preferredContactMethod,
                    :interests_requirements, :interestsRequirements,
                    :vehicle_id, :vehicleId,
+                   # Inventory preferences
+                   :preferred_bedrooms, :preferredBedrooms,
+                   :preferred_bathrooms, :preferredBathrooms,
+                   :preferred_min_sqft, :preferredMinSqft,
+                   :preferred_max_sqft, :preferredMaxSqft,
+                   :preferred_home_type, :preferredHomeType,
                    # Company/title (org context for B2B-style leads)
                    :company_name, :companyName, :title,
                    # Address fields
@@ -594,6 +600,12 @@ module Api
           preferred_contact_method: raw['preferred_contact_method'] || raw['preferredContactMethod'],
           interests_requirements: raw['interests_requirements'] || raw['interestsRequirements'],
           vehicle_id: (raw['vehicle_id'] || raw['vehicleId']).presence&.to_i,
+          # Inventory preferences
+          preferred_bedrooms:  (raw['preferred_bedrooms']  || raw['preferredBedrooms']).presence&.to_i,
+          preferred_bathrooms: (raw['preferred_bathrooms'] || raw['preferredBathrooms']).presence&.to_i,
+          preferred_min_sqft:  (raw['preferred_min_sqft']  || raw['preferredMinSqft']).presence&.to_i,
+          preferred_max_sqft:  (raw['preferred_max_sqft']  || raw['preferredMaxSqft']).presence&.to_i,
+          preferred_home_type: raw['preferred_home_type'] || raw['preferredHomeType'],
           # Company / job title (free-text, distinct from the tenant company_id)
           company_name: raw['company_name'] || raw['companyName'],
           title:        raw['title'],
@@ -681,6 +693,11 @@ module Api
           preferredContactMethod: l.respond_to?(:preferred_contact_method) ? l.preferred_contact_method : nil,
           interestsRequirements: l.respond_to?(:interests_requirements) ? l.interests_requirements : nil,
           vehicleId: l.vehicle_id,
+          preferredBedrooms:  l.respond_to?(:preferred_bedrooms)  ? l.preferred_bedrooms  : nil,
+          preferredBathrooms: l.respond_to?(:preferred_bathrooms) ? l.preferred_bathrooms : nil,
+          preferredMinSqft:   l.respond_to?(:preferred_min_sqft)  ? l.preferred_min_sqft  : nil,
+          preferredMaxSqft:   l.respond_to?(:preferred_max_sqft)  ? l.preferred_max_sqft  : nil,
+          preferredHomeType:  l.respond_to?(:preferred_home_type) ? l.preferred_home_type : nil,
           vehicle: l.vehicle ? {
             id: l.vehicle.id,
             inventoryId: l.vehicle.inventory_id,

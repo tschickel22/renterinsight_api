@@ -24,6 +24,7 @@ module Api
           custom_instructions = params[:custom_instructions] || ''
           attachment_context = params[:attachment_context].to_s
           attachments_payload = sanitize_attachments_param(params[:attachments])
+          include_inventory = ActiveModel::Type::Boolean.new.cast(params[:include_inventory])
 
           company_profile = Setting.get('Company', @company.id, 'company_profile') || {}
           sender_context = build_sender_context(current_user)
@@ -32,7 +33,8 @@ module Api
           system_prompt = build_sequence_system_prompt(company_profile, sender_context, business_name)
           user_prompt = build_sequence_user_prompt(
             goal, entity_type, audience_stage, channels, max_steps, custom_instructions,
-            attachment_context: attachment_context, attachments: attachments_payload
+            attachment_context: attachment_context, attachments: attachments_payload,
+            include_inventory: include_inventory
           )
 
           api_key = Rails.application.credentials.dig(:anthropic, :api_key) || ENV['ANTHROPIC_API_KEY']
@@ -68,6 +70,22 @@ module Api
                 output_tokens: response.dig('usage', 'output_tokens')
               }
             }
+          rescue Net::ReadTimeout, Net::OpenTimeout => e
+            AiQueryLog.create!(
+              company: @company,
+              user: current_user,
+              feature: 'ai_sequence_generate',
+              module_key: 'nurture',
+              question: "Generate sequence: #{goal}",
+              execution_status: 'error',
+              input_tokens: 0, output_tokens: 0, cost_cents: 0,
+              generated_params: { error: "Timeout: #{e.message}" }
+            )
+            Rails.logger.error "[AI Sequence] Timeout: #{e.message}"
+            render json: {
+              error: 'ai_timeout',
+              message: "The AI took too long to respond. This usually happens with very detailed goals or many uploaded files — try a shorter goal or fewer attachments and retry."
+            }, status: :gateway_timeout
           rescue => e
             AiQueryLog.create!(
               company: @company,
@@ -80,7 +98,10 @@ module Api
               generated_params: { error: e.message }
             )
             Rails.logger.error "[AI Sequence] Error: #{e.message}"
-            render json: { error: 'AI generation failed. Please try again.' }, status: :unprocessable_entity
+            render json: {
+              error: 'ai_generation_failed',
+              message: "AI generation failed: #{e.message.to_s.first(200)}"
+            }, status: :unprocessable_entity
           end
         end
 
@@ -114,6 +135,10 @@ module Api
 
               step_attachments = build_step_attachments(step[:attachments], attachments_by_filename)
 
+              step_include_inventory = ActiveModel::Type::Boolean.new.cast(
+                step[:include_inventory].nil? ? step['include_inventory'] : step[:include_inventory]
+              )
+
               sequence.nurture_steps.create!(
                 position: index,
                 step_type: step[:step_type] || step[:channel] || 'email',
@@ -122,7 +147,8 @@ module Api
                 subject: step[:subject],
                 body: step[:body],
                 template_id: template&.id,
-                attachments: step_attachments
+                attachments: step_attachments,
+                include_inventory: step_include_inventory ? true : false
               )
             end
 
@@ -276,7 +302,7 @@ module Api
         end
 
         def build_sequence_user_prompt(goal, entity_type, audience_stage, channels, max_steps, custom_instructions,
-                                       attachment_context: '', attachments: [])
+                                       attachment_context: '', attachments: [], include_inventory: false)
           stage_descriptions = {
             'cold' => 'Never interacted or very first contact. They may not know the business.',
             'warm' => 'Showed interest — visited website, downloaded content, inquired, attended event.',
@@ -286,6 +312,7 @@ module Api
           }
 
           attachment_block = build_attachment_prompt_block(attachment_context, attachments)
+          inventory_block  = build_inventory_prompt_block(include_inventory)
 
           <<~PROMPT
             Build a nurture sequence with these specifications:
@@ -300,8 +327,23 @@ module Api
 
             #{attachment_block}
 
+            #{inventory_block}
+
             Generate the full sequence as a JSON object.
           PROMPT
+        end
+
+        # When the user opts in to inventory injection, tell the model to mark
+        # email steps with include_inventory: true. The runtime swaps in matching
+        # homes at send time based on the recipient's preferences.
+        def build_inventory_prompt_block(include_inventory)
+          return '' unless include_inventory
+          <<~INV.strip
+            INVENTORY:
+            Include personalized home recommendations in email steps. Set "include_inventory": true on email steps.
+            The system auto-injects matching homes at send time based on the recipient's preferences, prior clicks, and budget.
+            Write copy that naturally references available homes (e.g. "I picked a few homes that match what you're looking for") so the injected gallery feels intentional.
+          INV
         end
 
         # Sanitize attachment metadata coming from the frontend so we only retain
@@ -388,7 +430,8 @@ module Api
           uri = URI('https://api.anthropic.com/v1/messages')
           http = Net::HTTP.new(uri.host, uri.port)
           http.use_ssl = true
-          http.read_timeout = 45
+          http.open_timeout = 10
+          http.read_timeout = 90
 
           request = Net::HTTP::Post.new(uri)
           request['Content-Type'] = 'application/json'

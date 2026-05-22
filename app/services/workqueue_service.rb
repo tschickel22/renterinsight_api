@@ -3,7 +3,12 @@
 require 'digest'
 
 class WorkqueueService
+  # Queues whose data doesn't fit the standard AR-scope pipeline (counts, search,
+  # sort, paginate, normalize). These have their own count/items implementation.
+  HASH_QUEUES = %w[inventory_hot_interest].freeze
+
   QUEUES = {
+    'inventory_hot_interest'      => :prospect_hot_signals,
     'engagement_opened_today'     => :engagement_opened_today,
     'engagement_opened_week'      => :engagement_opened_week,
     'engagement_clicked_today'    => :engagement_clicked_today,
@@ -31,7 +36,7 @@ class WorkqueueService
 
   GROUPS = [
     { id: 'engagement', label: 'Hot Engagement',
-      queue_ids: %w[engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week] },
+      queue_ids: %w[inventory_hot_interest engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week] },
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
@@ -70,11 +75,10 @@ class WorkqueueService
     Rails.cache.fetch(cache_key, expires_in: 60.seconds) do
       GROUPS.map do |group|
         queues = group[:queue_ids].reject { |qid| hidden_queue?(qid) }.map do |qid|
-          scope = build_scope(qid)
           {
             id:    qid,
             label: queue_label(qid),
-            count: scope ? scope.count : 0,
+            count: count_for(qid),
           }
         end
         { id: group[:id], label: group[:label], queues: queues }
@@ -83,11 +87,14 @@ class WorkqueueService
   end
 
   def count
-    scope = build_scope(@queue_id)
-    scope ? scope.count : 0
+    count_for(@queue_id)
   end
 
   def items
+    if hash_queue?(@queue_id)
+      return paginate_hash_queue(hash_queue_items(@queue_id))
+    end
+
     scope = build_scope(@queue_id)
     return { items: [], meta: { total: 0, page: @page, per_page: @per_page, total_pages: 0 } } unless scope
 
@@ -108,6 +115,51 @@ class WorkqueueService
       meta: { total: total, page: @page, per_page: @per_page, total_pages: total_pages },
     }
   end
+
+  private
+
+  def hash_queue?(queue_id)
+    HASH_QUEUES.include?(queue_id.to_s)
+  end
+
+  def count_for(queue_id)
+    if hash_queue?(queue_id)
+      hash_queue_items(queue_id).size
+    else
+      scope = build_scope(queue_id)
+      scope ? scope.count : 0
+    end
+  end
+
+  def hash_queue_items(queue_id)
+    @hash_queue_cache ||= {}
+    @hash_queue_cache[queue_id] ||= begin
+      method = QUEUES[queue_id]
+      method ? Array(send(method)) : []
+    rescue => e
+      Rails.logger.warn "[WorkqueueService] hash_queue_items(#{queue_id}) failed: #{e.message}"
+      []
+    end
+  end
+
+  def paginate_hash_queue(items)
+    term = @filters[:search].to_s.strip
+    if term.present?
+      pattern = term.downcase
+      items = items.select { |it| it[:title].to_s.downcase.include?(pattern) || it[:subtitle].to_s.downcase.include?(pattern) }
+    end
+
+    total = items.size
+    total_pages = (total.to_f / @per_page).ceil
+    page_items = items[((@page - 1) * @per_page), @per_page] || []
+
+    {
+      items: page_items,
+      meta: { total: total, page: @page, per_page: @per_page, total_pages: total_pages },
+    }
+  end
+
+  public
 
   private
 
@@ -137,6 +189,7 @@ class WorkqueueService
   # Dynamic labels that reflect the current threshold values.
   def queue_label(queue_id)
     case queue_id
+    when 'inventory_hot_interest'      then 'Hot Inventory Interest'
     when 'engagement_opened_today'     then 'Opened Email Today'
     when 'engagement_opened_week'      then 'Opened Email This Week'
     when 'engagement_clicked_today'    then 'Clicked Link Today'
@@ -316,6 +369,70 @@ class WorkqueueService
                   )
               )
             SQL
+  end
+
+  # ─── Inventory interest signals ──────────────────────────────────
+
+  # Hot-inventory-interest signals: TrackedLinks scoped to a vehicle that the
+  # entity (Lead/Contact) clicked recently. Used as a workqueue surface so reps
+  # can act on prospects who showed they're shopping a specific home.
+  def prospect_hot_signals
+    hot_links = TrackedLink
+                  .where(company_id: @company.id)
+                  .where.not(vehicle_id: nil)
+                  .where('click_count >= ?', 2)
+                  .where('last_clicked_at >= ?', 48.hours.ago)
+                  .order(click_count: :desc)
+                  .limit(20)
+
+    return [] if hot_links.empty?
+
+    vehicle_ids = hot_links.map(&:vehicle_id).uniq
+    vehicles_by_id = Vehicle.where(id: vehicle_ids).index_by(&:id)
+
+    leads_by_id    = preload_entities(hot_links, 'Lead',    Lead)
+    contacts_by_id = preload_entities(hot_links, 'Contact', Contact)
+
+    hot_links.filter_map do |link|
+      vehicle = vehicles_by_id[link.vehicle_id]
+      next unless vehicle
+
+      entity = case link.entity_type
+               when 'Lead'    then leads_by_id[link.entity_id]
+               when 'Contact' then contacts_by_id[link.entity_id]
+               end
+      next unless entity
+
+      entity_name  = if entity.respond_to?(:first_name)
+                       [entity.first_name, entity.last_name].compact.join(' ').presence
+                     end
+      entity_name ||= entity.try(:name) || 'Unknown'
+
+      vehicle_name = [vehicle.year, vehicle.make, vehicle.model].compact.join(' ')
+      time_ago_h   = ((Time.current - link.last_clicked_at) / 3600).round
+      link_path    = link.entity_type == 'Lead' ? "/crm/leads/#{link.entity_id}" : "/contacts/#{link.entity_id}"
+
+      {
+        uid:              "inventory_interest_#{link.entity_type}_#{link.entity_id}_#{link.vehicle_id}",
+        entity_type:      link.entity_type.downcase,
+        entity_id:        link.entity_id,
+        title:            entity_name,
+        subtitle:         "Viewed #{vehicle_name} #{link.click_count}x (#{time_ago_h}h ago)",
+        status:           'hot_interest',
+        priority:         link.click_count >= 4 ? 'high' : 'medium',
+        badge:            "🔥 #{link.click_count} views",
+        amount:           nil,
+        link:             link_path,
+        due_at:           nil,
+        last_activity_at: link.last_clicked_at,
+      }
+    end
+  end
+
+  def preload_entities(links, type, klass)
+    ids = links.select { |l| l.entity_type == type }.map(&:entity_id).compact.uniq
+    return {} if ids.empty?
+    klass.where(id: ids).index_by(&:id)
   end
 
   # ─── Engagement queues ───────────────────────────────────────────

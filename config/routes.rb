@@ -173,7 +173,11 @@ Rails.application.routes.draw do
       get 'health/ping', to: 'health#ping'
 
       # ==================== TRACKED LINKS (Attachment Engagement) ====================
-      resources :tracked_links, only: %i[index show]
+      resources :tracked_links, only: %i[index show] do
+        collection do
+          get :prospect_interest
+        end
+      end
 
       # ==================== IMPORT / EXPORT ENGINE ====================
       resources :import_jobs, only: %i[index show create destroy] do

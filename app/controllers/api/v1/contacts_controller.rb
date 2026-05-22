@@ -784,7 +784,15 @@ module Api
           :delivery_city,
           :delivery_state,
           :delivery_zip,
-          :delivery_country
+          :delivery_country,
+          # Inventory preferences
+          :preferred_bedrooms,
+          :preferred_bathrooms,
+          :preferred_min_sqft,
+          :preferred_max_sqft,
+          :preferred_home_type,
+          :preferred_vehicle_id,
+          :budget_range
         )
       end
 
@@ -889,6 +897,14 @@ module Api
           deliveryZip: contact.delivery_zip,
           deliveryCountry: contact.delivery_country,
           accountName: contact.account&.name,
+          # Inventory preferences
+          preferredBedrooms:  contact.respond_to?(:preferred_bedrooms)   ? contact.preferred_bedrooms   : nil,
+          preferredBathrooms: contact.respond_to?(:preferred_bathrooms)  ? contact.preferred_bathrooms  : nil,
+          preferredMinSqft:   contact.respond_to?(:preferred_min_sqft)   ? contact.preferred_min_sqft   : nil,
+          preferredMaxSqft:   contact.respond_to?(:preferred_max_sqft)   ? contact.preferred_max_sqft   : nil,
+          preferredHomeType:  contact.respond_to?(:preferred_home_type)  ? contact.preferred_home_type  : nil,
+          preferredVehicleId: contact.respond_to?(:preferred_vehicle_id) ? contact.preferred_vehicle_id : nil,
+          budgetRange:        contact.respond_to?(:budget_range)         ? contact.budget_range         : nil,
           customFieldValues: contact.respond_to?(:custom_field_values) ? contact.custom_field_values : {},
           tags: contact.tags.map { |t| { id: t.id, name: t.name, color: t.color } },
           createdAt: contact.created_at,

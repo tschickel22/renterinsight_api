@@ -37,6 +37,7 @@ class Lead < ApplicationRecord
   belongs_to :source, class_name: "Source", optional: true
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   belongs_to :vehicle, optional: true
+  belongs_to :preferred_vehicle, class_name: 'Vehicle', foreign_key: 'vehicle_id', optional: true
   belongs_to :social_post, optional: true
 
   # Core CRM associations
@@ -46,6 +47,7 @@ class Lead < ApplicationRecord
   has_many :lead_scores,          dependent: :destroy
   has_many :ai_insights,          dependent: :destroy
   has_many :nurture_enrollments, as: :enrollable, dependent: :destroy
+  has_many :tracked_links, as: :entity, dependent: :destroy
 
   has_many :tag_assignments, as: :entity, dependent: :destroy
   has_many :tags, through: :tag_assignments
