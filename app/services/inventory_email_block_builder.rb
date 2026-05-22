@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'net/http'
+require 'uri'
+
 # Builds an HTML "Homes You Might Like" block for nurture/campaign emails.
 # Each vehicle card and the catalog CTA use TrackedLinks so click attribution
 # back to the vehicle, source, and entity is automatic.
@@ -11,12 +14,13 @@ class InventoryEmailBlockBuilder
     @source_type          = source_type
     @source_id            = source_id
     @created_tracked_links = []
+    @inline_images        = []
   end
 
   def build_html
     return '' if @vehicles.empty?
 
-    cards         = @vehicles.map { |v| build_vehicle_card(v) }
+    cards         = @vehicles.each_with_index.map { |v, i| build_vehicle_card(v, i) }
     catalog_link  = build_catalog_tracked_link
 
     html  = '<div style="margin: 20px 0; padding: 16px 0; border-top: 1px solid #e5e7eb;">'
@@ -37,9 +41,18 @@ class InventoryEmailBlockBuilder
     @created_tracked_links.map(&:id)
   end
 
+  # Inline image attachments collected during build_html. Each entry is
+  # { filename:, content:, replace_url: } — pass directly to
+  # CommunicationService.send_email(inline_images: ...) so CommunicationMailer
+  # can attach them as CID-referenced inline images (Outlook renders them
+  # without prompting to download external images).
+  def inline_images
+    @inline_images
+  end
+
   private
 
-  def build_vehicle_card(vehicle)
+  def build_vehicle_card(vehicle, index = 0)
     tl = TrackedLink.create_for_inventory!(
       company:     @company,
       vehicle:     vehicle,
@@ -53,6 +66,20 @@ class InventoryEmailBlockBuilder
 
     image_url = extract_primary_image(vehicle)
     title     = [vehicle.year, vehicle.make, vehicle.model].compact.join(' ')
+
+    # Try to download the image so the mailer can embed it as a CID inline
+    # attachment. If the download fails we fall back to the original URL
+    # (still renders in clients that allow remote images).
+    if image_url.present?
+      bytes = download_image(image_url)
+      if bytes.present?
+        @inline_images << {
+          filename:    "vehicle_#{index}.jpg",
+          content:     bytes,
+          replace_url: image_url
+        }
+      end
+    end
 
     specs = []
     specs << "#{vehicle.bedrooms} bed"    if vehicle.bedrooms.present?    && vehicle.bedrooms.to_i  > 0
@@ -77,12 +104,15 @@ class InventoryEmailBlockBuilder
   end
 
   def build_catalog_tracked_link
-    token = @company.try(:public_inventory_token)
+    token = @company.public_inventory_token
     return nil if token.blank?
 
+    # /public/:slug/listings does not exist on the frontend with token auth;
+    # the public catalog lives at /embed/inventory and requires both token
+    # and company_id as query params.
     tl = TrackedLink.create!(
       company:     @company,
-      url:         "#{public_base_url}/public/#{token}/inventory",
+      url:         "#{public_base_url}/embed/inventory?token=#{token}&company_id=#{@company.id}",
       link_type:   'inventory_catalog',
       entity_type: @entity.class.name,
       entity_id:   @entity.id,
@@ -94,9 +124,9 @@ class InventoryEmailBlockBuilder
   end
 
   def build_public_inventory_url(vehicle)
-    token = @company.try(:public_inventory_token)
+    token = @company.public_inventory_token
     return '#' if token.blank?
-    "#{public_base_url}/public/#{token}/inventory/#{vehicle.id}"
+    "#{public_base_url}/public/inventory/#{vehicle.id}?token=#{token}&company_id=#{@company.id}"
   end
 
   def public_base_url
@@ -119,5 +149,33 @@ class InventoryEmailBlockBuilder
   def number_to_currency(amount)
     return '$0' unless amount
     '$' + amount.to_i.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
+  end
+
+  # Fetch image bytes for CID inline embedding. Returns nil on any failure
+  # (timeout, non-2xx, network error) so the caller can fall back to the
+  # remote URL. Follows one redirect (S3 → presigned URL is common).
+  def download_image(url, timeout: 5, redirects_left: 1)
+    return nil if url.blank?
+
+    uri = URI.parse(url)
+    return nil unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl     = (uri.scheme == 'https')
+    http.open_timeout = timeout
+    http.read_timeout = timeout
+
+    response = http.request(Net::HTTP::Get.new(uri.request_uri))
+
+    case response
+    when Net::HTTPSuccess
+      response.body
+    when Net::HTTPRedirection
+      return nil unless redirects_left > 0 && response['location'].present?
+      download_image(response['location'], timeout: timeout, redirects_left: redirects_left - 1)
+    end
+  rescue => e
+    Rails.logger.warn "[InventoryEmailBlockBuilder] Image download failed for #{url}: #{e.message}"
+    nil
   end
 end

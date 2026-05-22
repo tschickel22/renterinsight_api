@@ -184,6 +184,7 @@ module Api
           end
 
           inventory_info = nil
+          inventory_inline_images = []
           if step.include_inventory
             matcher  = InventoryMatcherService.new(test_entity, @company)
             vehicles = matcher.match
@@ -196,6 +197,7 @@ module Api
                 source_id:   step.id
               )
               body += block_builder.build_html
+              inventory_inline_images = block_builder.inline_images
               inventory_info = {
                 match_mode:      matcher.match_mode,
                 vehicles_count:  vehicles.size,
@@ -221,6 +223,7 @@ module Api
               category:               'nurture',
               content_type:           'text/html',
               attachments:            inline_attachments.presence,
+              inline_images:          inventory_inline_images,
               skip_preference_check:  true,
               metadata:               {
                 nurture_step_id:        step.id,

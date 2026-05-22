@@ -94,6 +94,7 @@ class ProcessNurtureStepJob < ApplicationJob
     # (preferred → click-inferred → criteria → rotation); on no match we
     # silently skip so the email still goes out.
     inventory_meta = nil
+    inventory_inline_images = []
     if step.include_inventory && company
       begin
         matcher  = InventoryMatcherService.new(entity, company)
@@ -107,6 +108,7 @@ class ProcessNurtureStepJob < ApplicationJob
             source_id:   step.id
           )
           body += block_builder.build_html
+          inventory_inline_images = block_builder.inline_images
           inventory_meta = {
             inventory_vehicles: vehicles.map { |v|
               { id: v.id, name: [v.year, v.make, v.model].compact.join(' ') }
@@ -144,6 +146,7 @@ class ProcessNurtureStepJob < ApplicationJob
       body: body,
       category: 'nurture',
       attachments: inline_uploads,
+      inline_images: inventory_inline_images,
       metadata: metadata_hash.deep_stringify_keys,
       skip_preference_check: false # Respect user email preferences
     )
