@@ -1609,10 +1609,12 @@ if defined?(JournalEntry) && defined?(JournalEntryLine)
     cogs_acct = is_new ? cogs_new : cogs_used
     next unless ar_acct && rev_acct && inv_acct && cogs_acct
 
+    # Use the deal's id (stable across re-runs) so re-running with more
+    # closed-won deals doesn't collide with previously-issued entry numbers.
     je = company.journal_entries.new(
       memo: je_memo,
       entry_date: (35 + idx * 4).days.ago.to_date,
-      entry_number: "#{DEMO_PREFIX.upcase}-JE-2026-#{(idx + 1).to_s.rjust(4, '0')}",
+      entry_number: "#{DEMO_PREFIX.upcase}-JE-D#{deal.id}-2026",
       source_type: "deal_closing",
       is_void: false
     )
