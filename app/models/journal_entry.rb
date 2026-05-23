@@ -59,8 +59,22 @@ class JournalEntry < ApplicationRecord
 
   def assign_entry_number
     return if entry_number.present?
-    max = company.journal_entries.maximum(:entry_number).to_i
-    self.entry_number = (max + 1).to_s.rjust(6, '0')
+    # Only consider numeric entry numbers when computing the next sequence
+    # value; entries with prefixed/labelled numbers (e.g., from seed data
+    # or future imports) must not shadow the running counter.
+    max = company.journal_entries
+                 .where("entry_number ~ '^[0-9]+$'")
+                 .maximum("entry_number::int") || 0
+    # Defensive: loop past any unexpected collisions so a duplicate
+    # numeric entry can't crash the save with a unique-violation.
+    loop do
+      candidate = (max + 1).to_s.rjust(6, '0')
+      unless company.journal_entries.exists?(entry_number: candidate)
+        self.entry_number = candidate
+        break
+      end
+      max += 1
+    end
   end
 
   def set_fiscal_period

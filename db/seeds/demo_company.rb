@@ -736,6 +736,10 @@ if company.respond_to?(:project_templates)
     t.description = "Standard manufactured home purchase, delivery, and setup"
     t.is_active = true
   end
+  # Make Standard Home Setup the default template selection so the
+  # Projects list / new-project flows preselect it.
+  company.project_templates.where.not(id: template.id).update_all(is_default: false)
+  template.update_columns(is_default: true, is_active: true) unless template.is_default && template.is_active
 
   tp_data = [
     { name: "Contract Signed",         pos: 1,  days: 0,  color: "#3B82F6", icon: "file-signature" },
@@ -1609,12 +1613,14 @@ if defined?(JournalEntry) && defined?(JournalEntryLine)
     cogs_acct = is_new ? cogs_new : cogs_used
     next unless ar_acct && rev_acct && inv_acct && cogs_acct
 
-    # Use the deal's id (stable across re-runs) so re-running with more
-    # closed-won deals doesn't collide with previously-issued entry numbers.
+    # Use a non-numeric entry_number so JournalEntry#assign_entry_number
+    # (which auto-increments based on numeric entries) ignores these seed
+    # rows when handing out numbers to user-created entries. Otherwise
+    # the "Approve" flow can collide with seeded JEs.
     je = company.journal_entries.new(
       memo: je_memo,
       entry_date: (35 + idx * 4).days.ago.to_date,
-      entry_number: "#{DEMO_PREFIX.upcase}-JE-D#{deal.id}-2026",
+      entry_number: "SEED-#{DEMO_PREFIX.upcase}-D#{deal.id}",
       source_type: "deal_closing",
       is_void: false
     )
@@ -1639,7 +1645,16 @@ if defined?(JournalEntry) && defined?(JournalEntryLine)
     end
 
     je.save!
-    deal.update_columns(tax_posted: true, commission_posted: true, commission_posted_at: Time.current)
+    # Mark the deal posted so the in-app "Approve" button reports
+    # "already posted to GL" instead of trying to create a duplicate JE.
+    deal.update_columns(
+      tax_posted: true,
+      commission_posted: true,
+      commission_posted_at: Time.current,
+      gl_posted: true,
+      gl_posted_at: je.entry_date.to_time,
+      gl_journal_entry_id: je.id
+    )
   end
   puts "  Journal entries: #{company.journal_entries.count} (#{JournalEntryLine.joins(:journal_entry).where(journal_entries: { company_id: company.id }).count} lines)"
 end
