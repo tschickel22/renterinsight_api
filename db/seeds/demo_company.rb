@@ -162,6 +162,27 @@ auburn = company.locations.find_or_create_by!(name: "Auburn Showroom") do |l|
   l.active = true
 end
 locations["AUB"] = auburn
+
+# Clean up locations from prior seed runs (Fort Wayne, Indianapolis).
+# Reassign any dependent records to Auburn first, then delete the locations.
+stale = company.locations.where(name: ["Fort Wayne Center", "Indianapolis South"])
+if stale.any?
+  stale_ids = stale.pluck(:id)
+  conn = ActiveRecord::Base.connection
+  tables_with_location = conn.exec_query(
+    "SELECT DISTINCT table_name FROM information_schema.columns " \
+    "WHERE column_name = 'location_id' AND table_schema = 'public'"
+  ).rows.map(&:first)
+  tables_with_location.each do |t|
+    conn.execute(
+      "UPDATE #{t} SET location_id = #{auburn.id} " \
+      "WHERE location_id IN (#{stale_ids.join(',')})"
+    ) rescue nil
+  end
+  removed = stale.delete_all
+  puts "  Removed #{removed} stale locations (Fort Wayne / Indianapolis), reassigned data to Auburn"
+end
+
 # Both FTW and IND are aliased to AUB so prior code that picks AUB/FTW/IND
 # still works without re-routing every reference.
 locations["FTW"] = auburn
