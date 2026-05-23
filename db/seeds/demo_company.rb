@@ -504,7 +504,11 @@ deal_data.each_with_index do |dd, idx|
   # Force-refresh cost/profit/tax fields each run so previously-seeded
   # demo companies pick up new fields without needing a reset.
   # update_columns skips validations and callbacks (no workflow events fire).
-  deal.update_columns(
+  closed_at_date = case dd[:stage]
+                   when "closed_won"  then (15 + idx * 3).days.ago
+                   when "closed_lost" then (10 + idx * 2).days.ago
+                   end
+  updates = {
     selling_price:       dd[:amount],
     home_cost:           dd[:home_cost],
     reconditioning_cost: dd[:recon],
@@ -517,8 +521,13 @@ deal_data.each_with_index do |dd, idx|
     state_tax_rate:      6.0,
     net_deal_profit:     net_profit,
     location_id:         locations["AUB"].id,
-    updated_at:          Time.current
-  )
+    # Backdate updated_at so the deal profitability report (which falls
+    # back to updated_at when closed_at/won_at are missing) finds these
+    # deals in the default date range.
+    updated_at:          closed_at_date || 30.days.ago
+  }
+  updates[:won_at] = closed_at_date if dd[:stage] == "closed_won" && deal.respond_to?(:won_at)
+  deal.update_columns(updates)
   deals[dd[:title]] = deal
 end
 puts "  Created/updated #{deal_data.length} deals (with cost/profit fields for profitability report)"

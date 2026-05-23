@@ -11,8 +11,16 @@ module Reports
       deals = deals.where(location_id: location_id) if location_id && deals.column_names.include?('location_id')
 
       if start_date && end_date
-        date_col = deals.column_names.include?('closed_at') ? 'closed_at' : 'updated_at'
-        deals = deals.where("#{date_col} BETWEEN ? AND ?", start_date, end_date)
+        # Prefer the semantic close date over updated_at — updated_at advances
+        # on any edit and would knock a closed deal out of the report whenever
+        # someone touches it.
+        date_col =
+          if deals.column_names.include?('closed_at') then 'closed_at'
+          elsif deals.column_names.include?('won_at')  then 'won_at'
+          else 'updated_at'
+          end
+        # Inclusive end_date: cover the full end-day, not midnight.
+        deals = deals.where("#{date_col} >= ? AND #{date_col} < ?", start_date, end_date.to_date + 1)
       end
 
       if salesperson_id
