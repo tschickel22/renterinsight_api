@@ -476,24 +476,31 @@ deal_data.each_with_index do |dd, idx|
     d.location_id = locations["AUB"].id
     d.value = dd[:amount]
     d.total_amount = dd[:amount]
-    d.selling_price = dd[:amount]
-    d.home_cost = dd[:home_cost]
-    d.reconditioning_cost = dd[:recon]
-    d.floor_plan_interest = dd[:fp_int]
-    d.delivery_setup_cost = dd[:delivery]
-    d.pack_amount = dd[:pack]
-    d.commission_amount = commission_amt
-    d.tax_amount = tax_amount
-    d.total_tax_amount = tax_amount
-    d.state_tax_rate = 6.0
-    d.net_deal_profit = net_profit
     d.customer_name = dd[:contact]
     d.deal_number = "#{DEMO_PREFIX.upcase}-DL-#{(idx + 1).to_s.rjust(3, '0')}"
     d.custom_field_values = {}
   end
+  # Force-refresh cost/profit/tax fields each run so previously-seeded
+  # demo companies pick up new fields without needing a reset.
+  # update_columns skips validations and callbacks (no workflow events fire).
+  deal.update_columns(
+    selling_price:       dd[:amount],
+    home_cost:           dd[:home_cost],
+    reconditioning_cost: dd[:recon],
+    floor_plan_interest: dd[:fp_int],
+    delivery_setup_cost: dd[:delivery],
+    pack_amount:         dd[:pack],
+    commission_amount:   commission_amt,
+    tax_amount:          tax_amount,
+    total_tax_amount:    tax_amount,
+    state_tax_rate:      6.0,
+    net_deal_profit:     net_profit,
+    location_id:         locations["AUB"].id,
+    updated_at:          Time.current
+  )
   deals[dd[:title]] = deal
 end
-puts "  Created #{deal_data.length} deals (with cost/profit fields for profitability report)"
+puts "  Created/updated #{deal_data.length} deals (with cost/profit fields for profitability report)"
 
 # ── 11. Quotes ─────────────────────────────────────────────
 puts "\n11. Creating quotes..."
