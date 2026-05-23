@@ -38,6 +38,7 @@ if ENV['RESET'] == 'true'
     puts "\nResetting existing demo company (ID: #{existing.id})..."
     %i[
       buyer_portal_accesses
+      budgets budget_lines
       manufacturer_ar_payments manufacturer_ar_transactions
       payments payment_methods
       bills bill_line_items bill_payments
@@ -1711,6 +1712,66 @@ if defined?(ManufacturerArTransaction)
   puts "  Manufacturer AR transactions: #{ManufacturerArTransaction.where(company_id: company.id).count}"
 end
 
+# ── 33b. Annual Budget + Budget Lines (drives Budget vs Actual) ─
+puts "\n33b. Setting up annual budget..."
+if defined?(Budget) && defined?(BudgetLine)
+  fiscal_year = Date.current.year
+  budget = company.budgets.find_or_create_by!(name: "#{fiscal_year} Operating Budget — #{DEMO_PREFIX.capitalize}") do |b|
+    b.fiscal_year = fiscal_year
+    b.budget_type = "annual"
+    b.consolidation_type = "consolidated"
+    b.status = "active"
+    b.description = "Annual operating budget for #{fiscal_year} (auto-seeded)"
+    b.created_by_id = users[:admin].id
+  end
+
+  # Annual budget targets keyed to the chart-of-accounts numbers seeded
+  # by DefaultChartOfAccountsSeeder. Variance report uses these vs the
+  # JournalEntryLine amounts on the same accounts.
+  budget_targets = {
+    '4010' => 1_500_000,  # New Home Sales
+    '4020' =>   500_000,  # Used Home Sales
+    '4110' =>    60_000,  # Extended Warranty Revenue
+    '4120' =>    40_000,  # Insurance Products
+    '4140' =>    80_000,  # Finance Reserve
+    '4210' =>   180_000,  # Service Labor
+    '4220' =>   120_000,  # Parts Sales
+    '4300' =>   200_000,  # Delivery & Setup Income
+    '5010' => 1_050_000,  # COGS — New Home
+    '5020' =>   320_000,  # COGS — Used Home
+    '5200' =>   140_000,  # Delivery & Setup Costs
+    '5300' =>    45_000,  # Floor Plan Interest Expense
+    '5400' =>    65_000,  # Parts COGS
+    '5500' =>    35_000,  # Warranty Expense
+    '6010' =>   180_000,  # Sales Salaries & Commissions
+    '6020' =>   240_000,  # Admin Salaries
+    '6030' =>   140_000,  # Service Tech Pay
+    '6040' =>    52_000,  # Payroll Taxes
+    '6050' =>    65_000,  # Employee Benefits
+    '6100' =>    72_000,  # Advertising & Marketing
+    '6200' =>   120_000,  # Rent & Occupancy
+    '6300' =>    36_000,  # Utilities
+    '6400' =>    42_000,  # Insurance
+    '6500' =>    24_000,  # Office & Admin
+    '6700' =>    36_000,  # Professional Fees
+  }
+
+  created = 0
+  budget_targets.each do |acct_number, annual|
+    acct = company.chart_of_accounts.find_by(account_number: acct_number)
+    next unless acct
+    monthly = (annual / 12.0).round(2)
+    line = budget.budget_lines.find_or_initialize_by(chart_of_account_id: acct.id)
+    (1..12).each { |m| line.public_send("month_#{m}=", monthly) }
+    line.annual_total = annual
+    if line.new_record? || line.changed?
+      line.save!
+      created += 1
+    end
+  end
+  puts "  Budget: #{budget.name} (#{budget.budget_lines.count} lines, status=#{budget.status})"
+end
+
 # ── 34. Buyer Portal Access (proxy-able client portal) ────
 puts "\n34. Setting up client portal access..."
 if defined?(BuyerPortalAccess)
@@ -1790,6 +1851,8 @@ puts "-" * 55
   "Journal Entries"   => company.respond_to?(:journal_entries)    ? company.journal_entries.count : 0,
   "Bill Payments"     => defined?(BillPayment)                    ? BillPayment.where(company_id: company.id).count : 0,
   "Mfr AR Txns"       => defined?(ManufacturerArTransaction)      ? ManufacturerArTransaction.where(company_id: company.id).count : 0,
+  "Budgets"           => company.respond_to?(:budgets)            ? company.budgets.count : 0,
+  "Budget Lines"      => company.respond_to?(:budgets)            ? BudgetLine.joins(:budget).where(budgets: { company_id: company.id }).count : 0,
   "Portal Accounts"   => defined?(BuyerPortalAccess)              ? BuyerPortalAccess.where(company_id: company.id).count : 0,
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
