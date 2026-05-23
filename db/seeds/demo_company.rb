@@ -37,6 +37,9 @@ if ENV['RESET'] == 'true'
   if existing
     puts "\nResetting existing demo company (ID: #{existing.id})..."
     %i[
+      buyer_portal_accesses
+      manufacturer_ar_payments manufacturer_ar_transactions
+      payments payment_methods
       bills bill_line_items bill_payments
       journal_entries journal_entry_lines
       bank_reconciliations bank_reconciliation_items bank_transactions
@@ -126,26 +129,44 @@ else
 end
 
 # ── 2. Locations ───────────────────────────────────────────
+# Company auto-creates "Main Location" and "Corporate" on create.
+# For a clean demo, drop Main Location, keep Corporate, and add Auburn Showroom
+# as the single data-bearing location so all demo activity rolls up there.
 puts "\n2. Creating locations..."
 locations = {}
 
-[
-  { name: "Auburn Showroom",    code: "AUB", address: "4520 Homestead Road", city: "Auburn",       state: "IN", zip: "46706", phone: "(260) 555-0100" },
-  { name: "Fort Wayne Center",  code: "FTW", address: "8900 Lima Road",      city: "Fort Wayne",   state: "IN", zip: "46818", phone: "(260) 555-0200" },
-  { name: "Indianapolis South", code: "IND", address: "3200 S Meridian St",  city: "Indianapolis", state: "IN", zip: "46217", phone: "(317) 555-0300" },
-].each do |d|
-  loc = company.locations.find_or_create_by!(name: d[:name]) do |l|
-    l.code = d[:code]
-    l.address_line1 = d[:address]
-    l.city = d[:city]
-    l.state = d[:state]
-    l.zip_code = d[:zip]
-    l.phone = d[:phone]
-    l.active = true
+main_loc = company.locations.find_by(name: "Main Location")
+if main_loc
+  begin
+    main_loc.destroy
+    puts "  Removed auto-created 'Main Location'"
+  rescue => e
+    puts "  ⚠ Could not remove 'Main Location' (#{e.message}); leaving it"
   end
-  locations[d[:code]] = loc
-  puts "  Location: #{loc.name} (#{loc.code})"
 end
+
+corporate = company.locations.find_by(name: "Corporate")
+if corporate
+  corporate.update!(code: "CORP") if corporate.code.blank?
+  locations["CORP"] = corporate
+  puts "  Location: #{corporate.name} (#{corporate.code})"
+end
+
+auburn = company.locations.find_or_create_by!(name: "Auburn Showroom") do |l|
+  l.code = "AUB"
+  l.address_line1 = "4520 Homestead Road"
+  l.city = "Auburn"
+  l.state = "IN"
+  l.zip_code = "46706"
+  l.phone = "(260) 555-0100"
+  l.active = true
+end
+locations["AUB"] = auburn
+# Both FTW and IND are aliased to AUB so prior code that picks AUB/FTW/IND
+# still works without re-routing every reference.
+locations["FTW"] = auburn
+locations["IND"] = auburn
+puts "  Location: #{auburn.name} (#{auburn.code})"
 
 # ── 3. Users ───────────────────────────────────────────────
 puts "\n3. Creating users..."
@@ -426,37 +447,53 @@ puts "\n10. Creating deals..."
 deals = {}
 
 deal_data = [
-  { title: "Smuts - Champion Aspire",      stage: "closed_won",    amount: 114235, contact: "Jeretta Smuts",     account: nil },
-  { title: "Martin - Emerald Sky 4483",    stage: "negotiation",   amount: 124900, contact: "William Martin",    account: "Martin Family Properties" },
-  { title: "O'Brien - Redman RM2856A",     stage: "proposal",      amount: 89500,  contact: "Kevin O'Brien",     account: nil },
-  { title: "Lakeside - Dutch 2872A",       stage: "proposal",      amount: 105000, contact: "Dennis Hopper",     account: "Lakeside MH Community" },
-  { title: "Gonzalez - Heritage 1676H",    stage: "qualification", amount: 62900,  contact: "Maria Gonzalez",    account: nil },
-  { title: "Crawford - Redman RM3264A",    stage: "qualification", amount: 96700,  contact: "Daniel Crawford",   account: nil },
-  { title: "Fisher - Dutch 1676S",         stage: "prospecting",   amount: 62000,  contact: "Tammy Fisher",      account: nil },
-  { title: "Hoosier Dev - Bulk Order",     stage: "needs_analysis", amount: 450000, contact: "Marcus Johnson",   account: "Hoosier Land Development" },
-  { title: "Keller - Used Clayton",        stage: "closed_won",    amount: 38500,  contact: "Brian Keller",      account: nil },
-  { title: "Turner - Skyline Amber Cove",  stage: "closed_lost",   amount: 42500,  contact: "Jason Turner",      account: nil },
+  { title: "Smuts - Champion Aspire",      stage: "closed_won",    amount: 114235, contact: "Jeretta Smuts",     account: nil,                            home_cost: 65000, recon: 2500, fp_int: 400,  delivery: 3500, pack: 2000 },
+  { title: "Martin - Emerald Sky 4483",    stage: "negotiation",   amount: 124900, contact: "William Martin",    account: "Martin Family Properties",     home_cost: 92000, recon: 0,    fp_int: 350,  delivery: 4200, pack: 2200 },
+  { title: "O'Brien - Redman RM2856A",     stage: "proposal",      amount: 89500,  contact: "Kevin O'Brien",     account: nil,                            home_cost: 60000, recon: 0,    fp_int: 0,    delivery: 3200, pack: 1800 },
+  { title: "Lakeside - Dutch 2872A",       stage: "proposal",      amount: 105000, contact: "Dennis Hopper",     account: "Lakeside MH Community",        home_cost: 77000, recon: 0,    fp_int: 0,    delivery: 4500, pack: 2100 },
+  { title: "Gonzalez - Heritage 1676H",    stage: "qualification", amount: 62900,  contact: "Maria Gonzalez",    account: nil,                            home_cost: 40000, recon: 0,    fp_int: 0,    delivery: 2800, pack: 1500 },
+  { title: "Crawford - Redman RM3264A",    stage: "qualification", amount: 96700,  contact: "Daniel Crawford",   account: nil,                            home_cost: 71000, recon: 0,    fp_int: 0,    delivery: 3800, pack: 1900 },
+  { title: "Fisher - Dutch 1676S",         stage: "prospecting",   amount: 62000,  contact: "Tammy Fisher",      account: nil,                            home_cost: 45000, recon: 0,    fp_int: 0,    delivery: 2800, pack: 1500 },
+  { title: "Hoosier Dev - Bulk Order",     stage: "needs_analysis", amount: 450000, contact: "Marcus Johnson",   account: "Hoosier Land Development",     home_cost: 320000, recon: 0,   fp_int: 1200, delivery: 18000, pack: 8000 },
+  { title: "Keller - Used Clayton",        stage: "closed_won",    amount: 38500,  contact: "Brian Keller",      account: nil,                            home_cost: 22000, recon: 3200, fp_int: 0,    delivery: 1800, pack: 900 },
+  { title: "Turner - Skyline Amber Cove",  stage: "closed_lost",   amount: 42500,  contact: "Jason Turner",      account: nil,                            home_cost: 28000, recon: 0,    fp_int: 0,    delivery: 2000, pack: 1000 },
 ]
 
 deal_data.each_with_index do |dd, idx|
   contact = contacts[dd[:contact]]
   account = dd[:account] ? accounts[dd[:account]] : nil
 
+  # Sales tax (~6% IN state tax, simplified flat for demo)
+  tax_amount = (dd[:amount] * 0.06).round(2)
+  commission_amt = (dd[:amount] * 0.03).round(2)
+  net_profit = (dd[:amount] - dd[:home_cost] - dd[:recon] - dd[:fp_int] - dd[:delivery] - dd[:pack] - commission_amt).round(2)
+
   deal = company.deals.find_or_create_by!(name: dd[:title]) do |d|
     d.stage = dd[:stage]
     d.contact_id = contact&.id
     d.account_id = account&.id
     d.assigned_to = [users[:sales1].id, users[:sales2].id].sample
-    d.location_id = [locations["AUB"], locations["FTW"]].sample.id
+    d.location_id = locations["AUB"].id
     d.value = dd[:amount]
     d.total_amount = dd[:amount]
+    d.selling_price = dd[:amount]
+    d.home_cost = dd[:home_cost]
+    d.reconditioning_cost = dd[:recon]
+    d.floor_plan_interest = dd[:fp_int]
+    d.delivery_setup_cost = dd[:delivery]
+    d.pack_amount = dd[:pack]
+    d.commission_amount = commission_amt
+    d.tax_amount = tax_amount
+    d.total_tax_amount = tax_amount
+    d.state_tax_rate = 6.0
+    d.net_deal_profit = net_profit
     d.customer_name = dd[:contact]
     d.deal_number = "#{DEMO_PREFIX.upcase}-DL-#{(idx + 1).to_s.rjust(3, '0')}"
     d.custom_field_values = {}
   end
   deals[dd[:title]] = deal
 end
-puts "  Created #{deal_data.length} deals"
+puts "  Created #{deal_data.length} deals (with cost/profit fields for profitability report)"
 
 # ── 11. Quotes ─────────────────────────────────────────────
 puts "\n11. Creating quotes..."
@@ -1416,6 +1453,216 @@ if defined?(Listing)
   puts "  Listings: #{company.listings.count}"
 end
 
+# ── 29. Payment Methods (needed for Payment records) ──────
+puts "\n29. Setting up payment methods..."
+payment_methods = {}
+if defined?(PaymentMethod)
+  payor_contacts = ["Jeretta Smuts", "Brian Keller", "Raymond Price", "Angela Brooks", "William Martin", "Kevin O'Brien", "Dennis Hopper"]
+  payor_contacts.each do |name|
+    contact = contacts[name]
+    next unless contact
+    pm = PaymentMethod.find_or_create_by!(
+      owner_type: "Contact", owner_id: contact.id, method_type: "cash"
+    ) do |m|
+      m.company_id = company.id
+      m.location_id = locations["AUB"].id
+      m.nickname = "#{name.split.first}'s Cash/Check"
+      m.is_default = true
+      m.is_active = true
+      m.is_verified = true
+      m.billing_first_name = contact.first_name
+      m.billing_last_name = contact.last_name
+    end
+    payment_methods[name] = pm
+  end
+  puts "  Payment methods: #{payment_methods.size}"
+end
+
+# ── 30. Payments (drives dashboard revenue tile) ──────────
+puts "\n30. Setting up payments..."
+if defined?(Payment)
+  # Map: (invoice_number suffix) → contact name; mirrors invoice_data above.
+  paid_invoice_payments = [
+    { inv: "INV-2026-001", contact: "Jeretta Smuts",  amount: 6_400,   days_ago: 25 },
+    { inv: "INV-2026-002", contact: "Jeretta Smuts",  amount: 107_835, days_ago: 18 },
+    { inv: "INV-2026-005", contact: "Brian Keller",   amount: 38_500,  days_ago: 10 },
+    { inv: "INV-2025-047", contact: "Raymond Price",  amount: 68_500,  days_ago: 60 },
+    { inv: "INV-2025-048", contact: "Angela Brooks",  amount: 74_900,  days_ago: 45 },
+  ]
+  # Add a few more recent payments so the dashboard revenue tile has
+  # something for the current period regardless of when the seed runs.
+  paid_invoice_payments += [
+    { inv: "INV-2026-001", contact: "Jeretta Smuts",  amount: 2_500, days_ago: 2, suffix: "-supp" },
+    { inv: "INV-2026-005", contact: "Brian Keller",   amount: 1_200, days_ago: 5, suffix: "-supp" },
+  ]
+
+  created = 0
+  paid_invoice_payments.each_with_index do |pp, idx|
+    contact = contacts[pp[:contact]]
+    pm      = payment_methods[pp[:contact]]
+    next unless contact && pm
+    invoice = company.invoices.find_by(invoice_number: pp[:inv])
+    pnum = "#{DEMO_PREFIX.upcase}-PAY-2026-#{(idx + 1).to_s.rjust(4, '0')}#{pp[:suffix]}"
+    Payment.find_or_create_by!(payment_number: pnum) do |p|
+      p.company_id = company.id
+      p.location_id = locations["AUB"].id
+      p.payment_type = "one_time"
+      p.status = "completed"
+      p.amount = pp[:amount]
+      p.payment_date = pp[:days_ago].days.ago.to_date
+      p.processed_at = pp[:days_ago].days.ago
+      p.payment_method_id = pm.id
+      p.payer_type = "Contact"
+      p.payer_id = contact.id
+      if invoice
+        p.payable_type = "Invoice"
+        p.payable_id = invoice.id
+      end
+      p.gateway_name = "manual"
+    end
+    created += 1
+  end
+  total_collected = company.payments.where(status: "completed").sum(:amount)
+  puts "  Payments: #{company.payments.count} ($#{total_collected.to_i} collected)"
+end
+
+# ── 31. Journal Entries (GL postings for closed_won deals) ─
+puts "\n31. Posting closed-won deals to GL..."
+if defined?(JournalEntry) && defined?(JournalEntryLine)
+  ar_acct           = company.chart_of_accounts.find_by(account_number: '1110')
+  cash_acct         = company.chart_of_accounts.find_by(account_number: '1010')
+  inventory_new     = company.chart_of_accounts.find_by(account_number: '1210')
+  inventory_used    = company.chart_of_accounts.find_by(account_number: '1220')
+  new_sales_rev     = company.chart_of_accounts.find_by(account_number: '4010')
+  used_sales_rev    = company.chart_of_accounts.find_by(account_number: '4020')
+  cogs_new          = company.chart_of_accounts.find_by(account_number: '5010')
+  cogs_used         = company.chart_of_accounts.find_by(account_number: '5020')
+  sales_tax_acct    = company.chart_of_accounts.find_by(account_number: '2210')
+  delivery_rev      = company.chart_of_accounts.find_by(account_number: '4300')
+  commission_exp    = company.chart_of_accounts.find_by(account_number: '6010')
+  accrued_exp       = company.chart_of_accounts.find_by(account_number: '2020')
+
+  won_deals = deals.values.select { |d| d.stage == "closed_won" }
+  won_deals.each_with_index do |deal, idx|
+    next if deal.tax_posted
+    je_memo = "Closing entry — #{deal.name}"
+    next if company.journal_entries.exists?(memo: je_memo)
+
+    is_new = (deal.home_cost || 0) > 30_000  # rough heuristic for demo
+    rev_acct = is_new ? new_sales_rev : used_sales_rev
+    inv_acct = is_new ? inventory_new : inventory_used
+    cogs_acct = is_new ? cogs_new : cogs_used
+    next unless ar_acct && rev_acct && inv_acct && cogs_acct
+
+    je = company.journal_entries.new(
+      memo: je_memo,
+      entry_date: (35 + idx * 4).days.ago.to_date,
+      entry_number: "#{DEMO_PREFIX.upcase}-JE-2026-#{(idx + 1).to_s.rjust(4, '0')}",
+      source_type: "deal_closing",
+      is_void: false
+    )
+
+    rev_credit = deal.selling_price - (deal.delivery_setup_cost || 0)
+    # Sale recognition
+    je.journal_entry_lines.build(chart_of_account_id: ar_acct.id, debit_amount: deal.selling_price + (deal.tax_amount || 0), credit_amount: 0, memo: "AR — #{deal.customer_name}", location_id: locations["AUB"].id)
+    je.journal_entry_lines.build(chart_of_account_id: rev_acct.id, debit_amount: 0, credit_amount: rev_credit, memo: "Home sale revenue", location_id: locations["AUB"].id, department: is_new ? "new_sales" : "used_sales")
+    if deal.delivery_setup_cost.to_f > 0 && delivery_rev
+      je.journal_entry_lines.build(chart_of_account_id: delivery_rev.id, debit_amount: 0, credit_amount: deal.delivery_setup_cost, memo: "Delivery & setup", location_id: locations["AUB"].id, department: is_new ? "new_sales" : "used_sales")
+    end
+    if (deal.tax_amount || 0) > 0 && sales_tax_acct
+      je.journal_entry_lines.build(chart_of_account_id: sales_tax_acct.id, debit_amount: 0, credit_amount: deal.tax_amount, memo: "Sales tax collected", location_id: locations["AUB"].id)
+    end
+    # COGS recognition
+    je.journal_entry_lines.build(chart_of_account_id: cogs_acct.id, debit_amount: deal.home_cost, credit_amount: 0, memo: "Cost of home sold", location_id: locations["AUB"].id, department: is_new ? "new_sales" : "used_sales")
+    je.journal_entry_lines.build(chart_of_account_id: inv_acct.id, debit_amount: 0, credit_amount: deal.home_cost, memo: "Inventory relief", location_id: locations["AUB"].id)
+    # Commission accrual
+    if (deal.commission_amount || 0) > 0 && commission_exp && accrued_exp
+      je.journal_entry_lines.build(chart_of_account_id: commission_exp.id, debit_amount: deal.commission_amount, credit_amount: 0, memo: "Sales commission accrual", location_id: locations["AUB"].id, department: is_new ? "new_sales" : "used_sales")
+      je.journal_entry_lines.build(chart_of_account_id: accrued_exp.id, debit_amount: 0, credit_amount: deal.commission_amount, memo: "Accrued commissions payable", location_id: locations["AUB"].id)
+    end
+
+    je.save!
+    deal.update_columns(tax_posted: true, commission_posted: true, commission_posted_at: Time.current)
+  end
+  puts "  Journal entries: #{company.journal_entries.count} (#{JournalEntryLine.joins(:journal_entry).where(journal_entries: { company_id: company.id }).count} lines)"
+end
+
+# ── 32. Bill Payments ─────────────────────────────────────
+puts "\n32. Setting up bill payments..."
+if defined?(BillPayment)
+  bank = company.bank_accounts.find_by(account_purpose: "operating")
+  paid_bills = company.bills.where(status: %w[paid partially_paid])
+  paid_bills.each do |bill|
+    next if BillPayment.exists?(bill_id: bill.id)
+    BillPayment.create!(
+      bill_id: bill.id,
+      company_id: company.id,
+      amount: bill.amount_paid,
+      payment_date: (bill.bill_date + 20.days),
+      payment_method: "check",
+      bank_account_id: bank&.id
+    )
+  end
+  puts "  Bill payments: #{BillPayment.where(company_id: company.id).count}"
+end
+
+# ── 33. Manufacturer AR (warranty receivables from mfr) ───
+puts "\n33. Setting up manufacturer AR..."
+if defined?(ManufacturerArTransaction)
+  company.warranty_claims.includes(:manufacturer).find_each.with_index do |claim, idx|
+    next if ManufacturerArTransaction.exists?(warranty_claim_id: claim.id)
+    original = claim.estimated_amount || 500
+    paid_to_date = idx.zero? ? 0 : original * 0.5
+    txn = ManufacturerArTransaction.create!(
+      company_id: company.id,
+      warranty_claim_id: claim.id,
+      manufacturer_id: claim.manufacturer_id,
+      transaction_number: "#{DEMO_PREFIX.upcase}-MAR-#{(idx + 1).to_s.rjust(3, '0')}",
+      original_claim_amount: original,
+      amount_paid_to_date: paid_to_date,
+      amount_outstanding: original - paid_to_date,
+      status: idx.zero? ? "open" : "partial",
+      claim_date: 5.days.ago.to_date
+    )
+    if paid_to_date > 0 && defined?(ManufacturerArPayment)
+      ManufacturerArPayment.create!(
+        company_id: company.id,
+        manufacturer_ar_transaction_id: txn.id,
+        payment_number: "#{DEMO_PREFIX.upcase}-MARP-#{(idx + 1).to_s.rjust(3, '0')}",
+        amount: paid_to_date,
+        payment_date: 2.days.ago.to_date,
+        payment_method: "check",
+        recorded_by: users[:admin].email
+      )
+    end
+  end
+  puts "  Manufacturer AR transactions: #{ManufacturerArTransaction.where(company_id: company.id).count}"
+end
+
+# ── 34. Buyer Portal Access (proxy-able client portal) ────
+puts "\n34. Setting up client portal access..."
+if defined?(BuyerPortalAccess)
+  portal_contacts = ["Jeretta Smuts", "Brian Keller", "William Martin", "Dennis Hopper"]
+  portal_contacts.each do |name|
+    contact = contacts[name]
+    next unless contact
+    BuyerPortalAccess.find_or_create_by!(email: contact.email) do |bpa|
+      bpa.buyer_type = "Contact"
+      bpa.buyer_id = contact.id
+      bpa.company_id = company.id
+      bpa.password = DEMO_PASSWORD
+      bpa.password_confirmation = DEMO_PASSWORD
+      bpa.status = "Active"
+      bpa.role = "Client"
+      bpa.portal_enabled = true
+      bpa.email_opt_in = true
+      bpa.sms_opt_in = false
+      bpa.marketing_opt_in = true
+    end
+  end
+  puts "  Portal accounts: #{BuyerPortalAccess.where(company_id: company.id).count} (login with contact email + #{DEMO_PASSWORD})"
+end
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
@@ -1465,6 +1712,13 @@ puts "-" * 55
   "Agreements"        => company.respond_to?(:agreements)        ? company.agreements.count : 0,
   "Brochures"         => company.respond_to?(:brochures)         ? company.brochures.count : 0,
   "Listings"          => company.respond_to?(:listings)          ? company.listings.count : 0,
+  "Payment Methods"   => defined?(PaymentMethod)                  ? PaymentMethod.where(company_id: company.id).count : 0,
+  "Payments"          => company.respond_to?(:payments)           ? company.payments.count : 0,
+  "  → Revenue (completed)" => company.respond_to?(:payments)     ? company.payments.where(status: 'completed').sum(:amount).to_i : 0,
+  "Journal Entries"   => company.respond_to?(:journal_entries)    ? company.journal_entries.count : 0,
+  "Bill Payments"     => defined?(BillPayment)                    ? BillPayment.where(company_id: company.id).count : 0,
+  "Mfr AR Txns"       => defined?(ManufacturerArTransaction)      ? ManufacturerArTransaction.where(company_id: company.id).count : 0,
+  "Portal Accounts"   => defined?(BuyerPortalAccess)              ? BuyerPortalAccess.where(company_id: company.id).count : 0,
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
 end
