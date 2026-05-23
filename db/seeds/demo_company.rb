@@ -37,18 +37,28 @@ if ENV['RESET'] == 'true'
   if existing
     puts "\nResetting existing demo company (ID: #{existing.id})..."
     %i[
+      bills bill_line_items bill_payments
+      journal_entries journal_entry_lines
+      bank_reconciliations bank_reconciliation_items bank_transactions
+      chart_of_accounts accounting_settings
+      campaigns campaign_audiences campaign_enrollments campaign_sends
+        campaign_steps campaign_events
+      workflow_rules workflow_runs
       deals quotes invoices
       projects project_templates project_phases project_tasks
       project_cost_items project_material_usages project_documents
-      purchase_orders parts suppliers service_tickets
+      purchase_orders purchase_order_lines
+      parts suppliers vendors service_tickets
       contacts accounts
       leads vehicles units properties
-      nurture_sequences nurture_enrollments page_layouts custom_fields
+      nurture_sequences nurture_steps nurture_enrollments
+      page_layouts custom_fields
       tasks sources territories
       commission_payments commissions commission_rules commission_plans
       tags bank_accounts
       tenant_module_overrides api_keys webhook_endpoints
-      brochures listings agreements agreement_templates agreement_categories
+      brochures listings
+      agreements agreement_signers agreement_templates agreement_categories
       warranty_claims contractor_assignments contractors
       company_hidden_roles company_manufacturers
       payments payment_methods loans land_parcels invitations templates
@@ -56,10 +66,17 @@ if ENV['RESET'] == 'true'
       commission_components
       locations
     ].each do |assoc|
-      if existing.respond_to?(assoc)
-        count = existing.send(assoc).count
-        existing.send(assoc).destroy_all
+      next unless existing.respond_to?(assoc)
+      ref = existing.class.reflect_on_association(assoc)
+      next unless ref
+      target = existing.send(assoc)
+      if ref.macro == :has_many
+        count = target.count
+        target.destroy_all
         puts "  Deleted #{count} #{assoc}" if count > 0
+      elsif ref.macro == :has_one && target
+        target.destroy
+        puts "  Deleted 1 #{assoc}"
       end
     end
     existing.users.destroy_all
@@ -443,12 +460,13 @@ puts "  Created #{deal_data.length} deals"
 
 # ── 11. Quotes ─────────────────────────────────────────────
 puts "\n11. Creating quotes..."
+qp = DEMO_PREFIX.upcase
 quote_data = [
-  { number: "Q-2026-001", status: "accepted", subtotal: 88350,  tax: 4971, total: 114235, contact: "Jeretta Smuts",  notes: "Champion Aspire DAP1676H32222 with upgrades" },
-  { number: "Q-2026-002", status: "sent",     subtotal: 124900, tax: 7494, total: 137394, contact: "William Martin", notes: "Emerald Sky 4483A" },
-  { number: "Q-2026-003", status: "draft",    subtotal: 82500,  tax: 4950, total: 91950,  contact: "Kevin O'Brien",  notes: "Redman RM2856A" },
-  { number: "Q-2026-004", status: "sent",     subtotal: 105000, tax: 6300, total: 116300, contact: "Dennis Hopper",  notes: "Dutch 2872A for Lakeside" },
-  { number: "Q-2026-005", status: "expired",  subtotal: 42500,  tax: 2550, total: 47550,  contact: "Jason Turner",   notes: "Skyline Amber Cove" },
+  { number: "#{qp}-Q-2026-001", status: "accepted", subtotal: 88350,  tax: 4971, total: 114235, contact: "Jeretta Smuts",  notes: "Champion Aspire DAP1676H32222 with upgrades" },
+  { number: "#{qp}-Q-2026-002", status: "sent",     subtotal: 124900, tax: 7494, total: 137394, contact: "William Martin", notes: "Emerald Sky 4483A" },
+  { number: "#{qp}-Q-2026-003", status: "draft",    subtotal: 82500,  tax: 4950, total: 91950,  contact: "Kevin O'Brien",  notes: "Redman RM2856A" },
+  { number: "#{qp}-Q-2026-004", status: "sent",     subtotal: 105000, tax: 6300, total: 116300, contact: "Dennis Hopper",  notes: "Dutch 2872A for Lakeside" },
+  { number: "#{qp}-Q-2026-005", status: "expired",  subtotal: 42500,  tax: 2550, total: 47550,  contact: "Jason Turner",   notes: "Skyline Amber Cove" },
 ]
 
 quote_data.each do |qd|
@@ -525,7 +543,7 @@ ticket_data.each_with_index do |td, idx|
     st.account_id = contact&.account_id
     st.assigned_to = users[:tech].id
     st.location_id = locations["AUB"].id
-    st.ticket_number = "ST-2026-#{(idx + 1).to_s.rjust(3, '0')}"
+    st.ticket_number = "#{DEMO_PREFIX.upcase}-ST-2026-#{(idx + 1).to_s.rjust(3, '0')}"
     st.description = td[:title]
     st.is_warranty_suspected = false
     st.is_warranty_confirmed = false
@@ -718,6 +736,668 @@ else
   puts "  Skipped (Project model not found)"
 end
 
+# ── 19. Accounting: Chart of Accounts, Bank, Bills ────────
+puts "\n19. Setting up accounting..."
+begin
+  require Rails.root.join('db/seeds/seed_default_chart_of_accounts.rb').to_s
+  DefaultChartOfAccountsSeeder.seed(company)
+  puts "  Chart of accounts: #{company.chart_of_accounts.count} accounts"
+rescue => e
+  puts "  ⚠ Chart of accounts skipped: #{e.message}"
+end
+
+# Bank Account (one operating, idempotent on account_purpose)
+if defined?(BankAccount)
+  bank_coa = company.chart_of_accounts.find_by(account_number: '1010')
+  bank = company.bank_accounts.find_or_create_by!(account_purpose: 'operating') do |b|
+    b.location_id = locations["AUB"].id
+    b.account_type = 'checking'
+    b.bank_name = 'First Indiana Bank'
+    b.routing_number = '074000010'
+    b.account_number = "#{DEMO_PREFIX.upcase}-OP-1001"
+    b.account_holder_name = company.name
+    b.is_active = true
+    b.is_verified = true
+    b.verified_at = 30.days.ago
+    b.display_last_four = '1001'
+    b.opening_balance = 50_000
+    b.current_balance = 124_350.42
+    b.opened_on = 6.months.ago.to_date
+    b.chart_of_account_id = bank_coa&.id
+    b.currency = 'USD'
+  end
+  puts "  Bank account: #{bank.bank_name} (#{bank.account_purpose})"
+end
+
+# Bills (vendor invoices payable)
+ap_account = company.chart_of_accounts.find_by(account_number: '2010')
+parts_cogs = company.chart_of_accounts.find_by(account_number: '5400')
+opex_acct  = company.chart_of_accounts.find_by(account_number: '6500')
+
+bill_data = [
+  { vendor: "Midwest MH Parts Supply",  number: "MWP-23491", date: 25.days.ago, due: 5.days.from_now,  total: 1_245.50, status: "pending",        memo: "Replacement door hinges + window cranks", acct: parts_cogs },
+  { vendor: "Indiana Skirting & Supply", number: "ISS-88112", date: 18.days.ago, due: 12.days.from_now, total: 3_480.00, status: "pending",        memo: "Skirting panels for Auburn lot",         acct: parts_cogs },
+  { vendor: "Hoosier HVAC Distribution", number: "HVD-44021", date: 45.days.ago, due: 15.days.ago,     total: 2_180.75, status: "partially_paid", memo: "HVAC unit + install supplies",           acct: parts_cogs },
+  { vendor: "Hoosier HVAC Distribution", number: "HVD-44188", date: 6.days.ago,  due: 24.days.from_now, total: 875.00,   status: "draft",          memo: "Filter inventory restock",               acct: parts_cogs },
+  { vendor: "Midwest MH Parts Supply",  number: "MWP-23612", date: 60.days.ago, due: 30.days.ago,     total: 4_120.00, status: "paid",           memo: "Q4 parts order",                          acct: parts_cogs },
+].each_with_index do |bd, idx|
+  next unless defined?(Bill)
+  vendor = suppliers[bd[:vendor]]
+  next unless vendor
+  bill = company.bills.find_or_create_by!(bill_number: bd[:number]) do |b|
+    b.vendor_id = vendor.id
+    b.vendor_name = vendor.name
+    b.location_id = locations["AUB"].id
+    b.bill_date = bd[:date]
+    b.due_date = bd[:due]
+    b.status = bd[:status]
+    b.subtotal = bd[:total]
+    b.tax_amount = 0
+    b.total_amount = bd[:total]
+    b.amount_paid = bd[:status] == 'paid' ? bd[:total] : (bd[:status] == 'partially_paid' ? (bd[:total] * 0.5).round(2) : 0)
+    b.balance_due = bd[:total] - b.amount_paid
+    b.memo = bd[:memo]
+    b.payment_terms = "Net 30"
+    b.ap_account_id = ap_account&.id
+    b.is_deleted = false
+  end
+  if bd[:acct] && bill.bill_line_items.empty?
+    bill.bill_line_items.create!(
+      chart_of_account_id: bd[:acct].id,
+      amount: bd[:total],
+      description: bd[:memo],
+      position: 1,
+      location_id: locations["AUB"].id
+    )
+  end
+end
+puts "  Bills: #{company.bills.count} (#{company.bills.where(status: 'pending').count} pending, #{company.bills.where(status: 'paid').count} paid)" if defined?(Bill)
+
+# ── 20. Commissions ───────────────────────────────────────
+puts "\n20. Setting up commissions..."
+if defined?(CommissionPlan) && defined?(CommissionRule) && defined?(CommissionPayment)
+  plan = company.commission_plans.find_or_create_by!(name: "Sales Rep — Standard MH") do |p|
+    p.description = "Standard 3% of gross profit on new and used home sales"
+    p.effective_date = 1.year.ago.to_date
+    p.is_active = true
+    p.is_default = true
+    p.assigned_role = "sales_rep"
+  end
+
+  rule = company.commission_rules.find_or_create_by!(name: "3% of Gross Profit") do |r|
+    r.rule_type = "percentage"
+    r.rate = 0.03
+    r.amount = 0
+    r.tiers = []
+    r.is_active = true
+    r.description = "3% of (sale price - dealer cost) on closed_won deals"
+  end
+
+  won_deals = deals.values.select { |d| d.stage == "closed_won" }
+  won_deals.each_with_index do |deal, idx|
+    next unless deal.assigned_to.present?
+    company.commission_payments.find_or_create_by!(payment_number: "CP-#{(idx + 1).to_s.rjust(4, '0')}") do |cp|
+      cp.deal_id = deal.id
+      cp.commission_plan_id = plan.id
+      cp.location_id = deal.location_id
+      cp.payee_user_id = deal.assigned_to
+      cp.status = idx.zero? ? "paid" : "approved"
+      cp.amount = (deal.value.to_f * 0.03).round(2)
+      cp.earned_date = deal.updated_at.to_date
+      cp.calculation_details = { "rule" => rule.name, "rate" => 0.03, "basis" => "gross_profit" }
+      if cp.status == "paid"
+        cp.payment_method = "ach"
+        cp.paid_at = 5.days.ago
+        cp.paid_date = 5.days.ago.to_date
+        cp.paid_by_user_id = users[:admin].id
+        cp.amount_paid = cp.amount
+        cp.remaining_balance = 0
+      end
+      cp.approved_at = 7.days.ago
+      cp.approved_by_user_id = users[:manager].id
+    end
+  end
+  puts "  Plan: #{plan.name}, Payments: #{company.commission_payments.count}"
+else
+  puts "  Skipped (commission models missing)"
+end
+
+# ── 21. Nurture Sequence + Enrollments ────────────────────
+puts "\n21. Setting up nurture sequence..."
+if defined?(NurtureSequence) && defined?(NurtureStep) && defined?(NurtureEnrollment)
+  seq = company.nurture_sequences.find_or_create_by!(name: "New Lead — 7 Day Welcome") do |s|
+    s.description = "Auto-enrolls new leads. Mix of email and SMS over 7 days."
+    s.is_active = true
+  end
+
+  step_data = [
+    { pos: 1, wait: 0, channel: "email", subject: "Welcome to #{DEMO_COMPANY_NAME}, {{first_name}}",
+      body: "Thanks for reaching out. We'll be in touch shortly — in the meantime here's our most-toured floor plans." },
+    { pos: 2, wait: 1, channel: "sms",
+      body: "Hi {{first_name}}, this is the team at #{DEMO_COMPANY_NAME}. Want to schedule a quick tour this week?" },
+    { pos: 3, wait: 2, channel: "email", subject: "Top 3 questions buyers ask us",
+      body: "Most folks new to manufactured housing have the same questions. Here are the three we hear most." },
+    { pos: 4, wait: 4, channel: "email", subject: "Financing options that surprise people",
+      body: "Modern MH financing looks nothing like it did ten years ago. Quick overview inside." },
+    { pos: 5, wait: 7, channel: "sms",
+      body: "Last note from #{DEMO_COMPANY_NAME} — happy to answer any questions, just reply to this message." },
+  ]
+  step_data.each do |sd|
+    seq.nurture_steps.find_or_create_by!(position: sd[:pos]) do |st|
+      st.step_type = sd[:channel]
+      st.channel = sd[:channel]
+      st.subject = sd[:subject]
+      st.body = sd[:body]
+      st.wait_days = sd[:wait]
+    end
+  end
+
+  # Enroll a few leads
+  leads.values.first(4).each_with_index do |lead, idx|
+    NurtureEnrollment.find_or_create_by!(
+      enrollable_type: "Lead",
+      enrollable_id: lead.id,
+      nurture_sequence_id: seq.id
+    ) do |ne|
+      ne.lead_id = lead.id
+      ne.company_id = company.id
+      ne.status = idx < 2 ? "running" : (idx == 2 ? "completed" : "idle")
+      ne.current_step_index = idx < 2 ? (idx + 1) : (idx == 2 ? step_data.length : 0)
+    end
+  end
+  puts "  Sequence: #{seq.name} (#{seq.nurture_steps.count} steps, #{NurtureEnrollment.where(nurture_sequence_id: seq.id).count} enrolled)"
+else
+  puts "  Skipped (nurture models missing)"
+end
+
+# ── 22. Campaigns ─────────────────────────────────────────
+puts "\n22. Setting up campaigns..."
+if defined?(Campaign)
+  campaign = company.campaigns.find_or_create_by!(name: "Spring 2026 — New Inventory Showcase") do |c|
+    c.description = "Featured new homes available now"
+    c.status = "running"
+    c.campaign_type = "blast"
+    c.channel = "email"
+    c.audience_mode = "static"
+    c.from_identity_type = "User"
+    c.from_identity_id = users[:manager].id
+    c.from_display_name = "#{users[:manager].first_name} at #{DEMO_COMPANY_NAME}"
+    c.reply_to_address = users[:manager].email
+    c.subject_default = "New manufactured homes just hit the lot"
+    c.goal_config = { "primary_goal" => "clicked", "remove_on_goal_met" => true }
+    c.send_window = { "timezone" => "America/Indianapolis", "days" => %w[tue wed thu], "hour_start" => 10, "hour_end" => 18 }
+    c.throttle_per_day = 200
+    c.utm_source = "campaign"
+    c.utm_medium = "email"
+    c.utm_campaign = "spring-2026-showcase"
+    c.scheduled_at = 3.days.ago
+    c.started_at = 3.days.ago
+    c.created_by_user_id = users[:manager].id
+    c.location_id = locations["AUB"].id
+  end
+
+  # Audience (static snapshot of contacts)
+  CampaignAudience.find_or_create_by!(campaign_id: campaign.id) do |a|
+    a.source_type = "Contact"
+    a.filter_tree = { "type" => "and", "children" => [{ "field" => "is_deleted", "operator" => "equals", "value" => false }] }
+    a.estimated_count = contacts.size
+    a.estimated_at = 3.days.ago
+  end
+
+  # Single step (blast)
+  step = campaign.campaign_steps.find_or_create_by!(position: 1) do |s|
+    s.wait_days = 0
+    s.wait_hours = 0
+    s.channel = "email"
+    s.subject = "New manufactured homes just hit the lot"
+    s.preheader = "3 brand-new Champion and Redman floor plans available"
+    s.body_blocks = [
+      { "type" => "text", "html" => "<p>Hi {{first_name}},</p><p>Three brand-new floor plans just landed at our Auburn showroom and we wanted you to be the first to see them.</p>" },
+      { "type" => "inventory", "ref" => "step.inventory_block_config" },
+      { "type" => "button", "label" => "Browse inventory", "url" => "https://example.com/inventory", "style" => "primary" },
+      { "type" => "footer_unsubscribe" }
+    ]
+    s.is_active = true
+  end
+
+  # Sample enrollments + sends for first 5 contacts
+  contacts.values.first(5).each_with_index do |contact, idx|
+    enr = CampaignEnrollment.find_or_create_by!(campaign_id: campaign.id, recipient_type: "Contact", recipient_id: contact.id) do |e|
+      e.company_id = company.id
+      e.email_address_snapshot = contact.email
+      e.status = idx == 4 ? "unsubscribed" : "completed"
+      e.current_step_index = 1
+      e.last_sent_at = 3.days.ago
+      e.unsubscribed_at = (3.days.ago if idx == 4)
+    end
+    CampaignSend.find_or_create_by!(campaign_step_id: step.id, campaign_enrollment_id: enr.id) do |snd|
+      snd.company_id = company.id
+      snd.campaign_id = campaign.id
+      snd.sent_at = 3.days.ago
+      snd.delivered_at = 3.days.ago + 5.minutes
+      snd.opened_at = idx < 3 ? (3.days.ago + 2.hours) : nil
+      snd.open_count = idx < 3 ? rand(1..3) : 0
+      snd.clicked_at = idx < 2 ? (3.days.ago + 2.hours + 30.seconds) : nil
+      snd.click_count = idx < 2 ? 1 : 0
+    end
+  end
+  puts "  Campaign: #{campaign.name} (#{CampaignSend.where(campaign_id: campaign.id).count} sends)"
+else
+  puts "  Skipped (Campaign model missing)"
+end
+
+# ── 23. Workflow Rules ────────────────────────────────────
+puts "\n23. Setting up workflow rules..."
+if defined?(WorkflowRule)
+  workflows = [
+    {
+      name: "New Lead Alert (Facebook)",
+      description: "Email the lead owner when a new Facebook lead lands.",
+      entity_type: "Lead",
+      trigger: { "event_type" => "lead.created", "entity_type_filter" => "Lead" },
+      conditions: [{ "type" => "and", "conditions" => [{ "field" => "source", "operator" => "equals", "value" => "Facebook" }] }],
+      steps: { "nodes" => [{ "id" => "n1", "type" => "send_email", "config" => {
+        "to" => "{{entity.owner_email}}",
+        "subject" => "New Facebook Lead: {{entity.first_name}} {{entity.last_name}}",
+        "body" => "A new lead came in from Facebook. Call within 5 minutes for best results."
+      } }], "edges" => [] }
+    },
+    {
+      name: "Deal Closed Notification",
+      description: "Notify the deal owner when a deal is marked closed_won.",
+      entity_type: "Deal",
+      trigger: { "event_type" => "deal.status_changed", "entity_type_filter" => "Deal" },
+      conditions: [{ "type" => "and", "conditions" => [{ "field" => "stage", "operator" => "equals", "value" => "closed_won" }] }],
+      steps: { "nodes" => [{ "id" => "n1", "type" => "send_email", "config" => {
+        "to" => "{{entity.owner_email}}",
+        "subject" => "Deal Closed — {{entity.name}}",
+        "body" => "Closed-won deal: {{entity.name}} ({{entity.amount}})."
+      } }], "edges" => [] }
+    },
+    {
+      name: "Service Ticket Acknowledgment",
+      description: "Send customer an acknowledgment when they open a service ticket.",
+      entity_type: "ServiceTicket",
+      trigger: { "event_type" => "service_ticket.created", "entity_type_filter" => "ServiceTicket" },
+      conditions: [],
+      steps: { "nodes" => [{ "id" => "n1", "type" => "send_email", "config" => {
+        "to" => "{{entity.contact_email}}",
+        "subject" => "Your service request — Ticket {{entity.id}}",
+        "body" => "Thanks for opening a service request. A team member will reach out shortly."
+      } }], "edges" => [] }
+    },
+  ]
+  workflows.each do |wf|
+    company.workflow_rules.find_or_create_by!(name: wf[:name]) do |r|
+      r.description = wf[:description]
+      r.entity_type = wf[:entity_type]
+      r.status = "active"
+      r.trigger = wf[:trigger]
+      r.conditions = wf[:conditions]
+      r.steps = wf[:steps]
+      r.parameters = {}
+      r.version = 1
+      r.is_seeded = true
+      r.created_by_user_id = users[:admin].id
+    end
+  end
+  puts "  Workflow rules: #{company.workflow_rules.count}"
+else
+  puts "  Skipped (WorkflowRule model missing)"
+end
+
+# ── 24. Loans ─────────────────────────────────────────────
+puts "\n24. Setting up loans..."
+if defined?(Loan)
+  loan_data = [
+    { contact: "Jeretta Smuts",  number: "L-2026-001", principal: 107_835.00, rate: 7.25, term: 240, status: "active",   start_offset: 30,
+      home: "112-000-H-A-C412800D" },
+    { contact: "Brian Keller",   number: "L-2026-002", principal: 30_500.00,  rate: 8.50, term: 120, status: "active",   start_offset: 60,
+      home: "CLT-2019-T-889900" },
+    { contact: "Raymond Price",  number: "L-2025-099", principal: 60_000.00,  rate: 7.75, term: 180, status: "paid_off", start_offset: 540,
+      home: "RMN-2025-A-001150" },
+  ]
+  loan_data.each do |ld|
+    contact = contacts[ld[:contact]]
+    next unless contact
+    vehicle = vehicles[ld[:home]]
+    company.loans.find_or_create_by!(loan_number: ld[:number]) do |l|
+      l.location_id = locations["AUB"].id
+      l.loan_type = "retail_installment"
+      l.status = ld[:status]
+      l.borrower_type = "Contact"
+      l.borrower_id = contact.id
+      l.financed_entity_type = vehicle ? "Vehicle" : nil
+      l.financed_entity_id   = vehicle&.id
+      l.principal_amount = ld[:principal]
+      l.interest_rate = ld[:rate]
+      l.term_months = ld[:term]
+      l.origination_date = ld[:start_offset].days.ago.to_date
+      l.first_payment_date = (ld[:start_offset] - 30).days.ago.to_date
+      l.maturity_date = (ld[:term].months.from_now - ld[:start_offset].days).to_date
+      l.payment_frequency = "monthly"
+      monthly = (ld[:principal] * (ld[:rate] / 100 / 12)) / (1 - (1 + ld[:rate] / 100 / 12)**(-ld[:term]))
+      l.regular_payment_amount = monthly.round(2)
+      l.day_of_month_due = 1
+      l.current_balance = ld[:status] == "paid_off" ? 0 : (ld[:principal] * 0.92).round(2)
+      l.total_paid = ld[:status] == "paid_off" ? ld[:principal] : (ld[:principal] * 0.08).round(2)
+      l.payments_made = ld[:status] == "paid_off" ? ld[:term] : (ld[:start_offset] / 30).to_i
+      l.payments_remaining = ld[:status] == "paid_off" ? 0 : (ld[:term] - (ld[:start_offset] / 30).to_i)
+      l.last_payment_date = 25.days.ago.to_date
+      l.next_payment_date = ld[:status] == "paid_off" ? nil : 5.days.from_now.to_date
+      l.auto_pay_enabled = false
+      l.is_deleted = false
+    end
+  end
+  puts "  Loans: #{company.loans.count} (#{company.loans.where(status: 'active').count} active)"
+else
+  puts "  Skipped (Loan model missing)"
+end
+
+# ── 25. Purchase Orders ───────────────────────────────────
+puts "\n25. Setting up purchase orders..."
+if defined?(PurchaseOrder)
+  parts_list = company.parts.limit(5).to_a
+
+  # purchase_orders.supplier_id has a DB-level FK to the legacy `suppliers`
+  # table, but the model `belongs_to :supplier` resolves to the STI Supplier
+  # (vendors table, vendor_type='supplier'). For both checks to pass, the
+  # supplier_id must exist in BOTH tables with the SAME id. Mirror our
+  # vendors-suppliers into the legacy table using each vendor's own id.
+  suppliers.each do |name, vendor|
+    exists = ActiveRecord::Base.connection.exec_query(
+      "SELECT 1 FROM suppliers WHERE id = #{vendor.id} LIMIT 1"
+    ).rows.any?
+    next if exists
+    ActiveRecord::Base.connection.execute(
+      "INSERT INTO suppliers (id, company_id, name, contact_name, email, phone, vendor_id, active, is_deleted, created_at, updated_at) " \
+      "VALUES (#{vendor.id}, #{company.id}, " \
+      "#{ActiveRecord::Base.connection.quote(name)}, " \
+      "#{ActiveRecord::Base.connection.quote(vendor.contact_name)}, " \
+      "#{ActiveRecord::Base.connection.quote(vendor.email)}, " \
+      "#{ActiveRecord::Base.connection.quote(vendor.phone)}, " \
+      "#{vendor.id}, true, false, NOW(), NOW())"
+    )
+  end
+  # Bump suppliers sequence past the inserted IDs to avoid future PK conflicts
+  ActiveRecord::Base.connection.execute(
+    "SELECT setval('suppliers_id_seq', GREATEST((SELECT MAX(id) FROM suppliers), 1))"
+  )
+
+  po_data = [
+    { supplier: "Midwest MH Parts Supply",  number: "PO-2026-001", date: 10.days.ago, status: "received",            qty: 25 },
+    { supplier: "Indiana Skirting & Supply", number: "PO-2026-002", date: 5.days.ago,  status: "sent",                qty: 40 },
+    { supplier: "Hoosier HVAC Distribution", number: "PO-2026-003", date: 1.day.ago,   status: "draft",               qty: 12 },
+  ]
+  po_data.each do |pod|
+    supplier = suppliers[pod[:supplier]]
+    next unless supplier && parts_list.any?
+    po = company.purchase_orders.find_or_create_by!(po_number: pod[:number]) do |p|
+      p.supplier_id = supplier.id
+      p.vendor_id = supplier.id
+      p.location_id = locations["AUB"].id
+      p.created_by_id = users[:manager].id
+      p.status = pod[:status]
+      p.order_date = pod[:date].to_date
+      p.expected_delivery_date = (pod[:date] + 14.days).to_date
+      p.delivery_date = (pod[:status] == "received" ? pod[:date] + 7.days : nil)&.to_date
+      p.received_date = pod[:status] == "received" ? pod[:date] + 7.days : nil
+      p.ship_to_name = company.name
+      p.ship_to_address1 = locations["AUB"].address_line1
+      p.ship_to_city = locations["AUB"].city
+      p.ship_to_state = locations["AUB"].state
+      p.ship_to_zip = locations["AUB"].zip_code
+      p.subtotal = 0
+      p.tax_amount = 0
+      p.shipping_cost = 0
+      p.total_amount = 0
+    end
+    if po.purchase_order_lines.empty?
+      subtotal = 0
+      parts_list.first(3).each_with_index do |part, i|
+        qty = pod[:qty] + i * 5
+        line_total = (part.default_cost.to_f * qty).round(2)
+        subtotal += line_total
+        po.purchase_order_lines.create!(
+          part_id: part.id,
+          line_number: i + 1,
+          quantity_ordered: qty,
+          quantity_received: pod[:status] == "received" ? qty : 0,
+          unit_cost: part.default_cost,
+          line_total: line_total,
+          description: part.name
+        )
+      end
+      po.update!(subtotal: subtotal, total_amount: subtotal)
+    end
+  end
+  puts "  Purchase orders: #{company.purchase_orders.count}"
+else
+  puts "  Skipped (PurchaseOrder model missing)"
+end
+
+# ── 26. Contractors + Warranty Claims ─────────────────────
+puts "\n26. Setting up contractors and warranty claims..."
+if defined?(Contractor)
+  contractor_data = [
+    { name: "B&B Skirting Pros",    contact: "Bill Boykins",   email: "bill@bbskirting.com",    phone: "(260) 555-7001", trade: "skirting",   rate: 65 },
+    { name: "Reliant HVAC Service", contact: "Rita Gonzalez",  email: "rita@relianthvac.com",   phone: "(317) 555-7002", trade: "hvac",       rate: 95 },
+    { name: "Anchor Set Crew",      contact: "Carl Anchorson", email: "carl@anchorsetcrew.com", phone: "(260) 555-7003", trade: "foundation", rate: 85 },
+  ]
+  contractors_hash = {}
+  contractor_data.each do |cd|
+    c = company.contractors.find_or_create_by!(email: cd[:email]) do |ct|
+      ct.name = cd[:name]
+      ct.contact_name = cd[:contact]
+      ct.phone = cd[:phone]
+      ct.trade_type = cd[:trade]
+      ct.hourly_rate = cd[:rate]
+      ct.status = "active"
+      ct.active = true
+      ct.is_deleted = false
+      ct.rating = [4.5, 4.7, 4.9].sample
+    end
+    contractors_hash[cd[:name]] = c
+  end
+  puts "  Contractors: #{contractors_hash.size}"
+
+  # Assign contractors to a couple of service tickets
+  if defined?(ContractorAssignment)
+    open_tickets = company.service_tickets.where(status: %w[open in_progress]).limit(2)
+    open_tickets.each_with_index do |ticket, idx|
+      contractor = contractors_hash.values[idx % contractors_hash.size]
+      ContractorAssignment.find_or_create_by!(
+        vendor_id: contractor.id,
+        assignable_type: "ServiceTicket",
+        assignable_id: ticket.id
+      ) do |a|
+        a.company_id = company.id
+        a.assigned_by_id = users[:manager].id
+        a.status = idx.zero? ? "in_progress" : "assigned"
+        a.assigned_at = 3.days.ago
+        a.accepted_at = idx.zero? ? 2.days.ago : nil
+        a.notes = "On-site visit needed."
+      end
+    end
+    puts "  Contractor assignments: #{ContractorAssignment.where(company_id: company.id).count}"
+  end
+else
+  puts "  Skipped (Contractor model missing)"
+end
+
+# Warranty claims (require manufacturer + service_ticket)
+if defined?(WarrantyClaim)
+  champ_mfr = Manufacturer.where("name ILIKE ?", "%champion%").first
+  champ_mfr ||= Manufacturer.where(active: true).first
+  if champ_mfr
+    CompanyManufacturer.find_or_create_by!(company_id: company.id, manufacturer_id: champ_mfr.id) { |cm| cm.active = true }
+  else
+    puts "  ⚠ No manufacturers in DB — skipping warranty claims"
+  end
+  warranty_source_tickets = champ_mfr ? company.service_tickets.where(status: %w[open in_progress completed]).limit(2) : []
+  warranty_source_tickets.each_with_index do |ticket, idx|
+    company.warranty_claims.find_or_create_by!(claim_number: "WC-2026-#{(idx + 1).to_s.rjust(3, '0')}") do |w|
+      w.service_ticket_id = ticket.id
+      w.manufacturer_id = champ_mfr.id
+      w.location_id = ticket.location_id || locations["AUB"].id
+      w.status = idx.zero? ? "submitted" : "approved"
+      w.estimated_amount = [350, 850, 1_200].sample
+      w.approved_amount = idx.zero? ? nil : w.estimated_amount
+      w.parts = [{ "name" => "Door hinge assembly", "qty" => 2, "cost" => 25 }]
+      w.labor = [{ "description" => "Adjust door alignment", "hours" => 1.5, "rate" => 95 }]
+      w.submitted_at = 5.days.ago
+      w.approved_at = (3.days.ago if idx == 1)
+      w.public_token = SecureRandom.hex(16)
+      w.is_deleted = false
+      w.submitted_by = users[:tech].first_name
+    end
+  end
+  puts "  Warranty claims: #{company.warranty_claims.count}"
+end
+
+# ── 27. Agreements ────────────────────────────────────────
+puts "\n27. Setting up agreement templates and agreements..."
+if defined?(AgreementTemplate)
+  cat = company.agreement_categories.find_or_create_by!(name: "Sales Agreement") do |c|
+    c.description = "Purchase agreements and addenda"
+    c.color = "#3B82F6"
+    c.position = 1
+    c.is_system = false
+  end
+
+  templates = [
+    { name: "MH Purchase Agreement (IN)",    form_type: "purchase_agreement", state: "IN" },
+    { name: "Delivery & Setup Addendum",      form_type: "addendum",           state: "IN" },
+    { name: "Limited Warranty Disclosure",    form_type: "disclosure",         state: nil  },
+  ]
+  template_objs = {}
+  templates.each do |td|
+    t = company.agreement_templates.find_or_create_by!(name: td[:name]) do |at|
+      at.description = "Standard #{td[:name]} for #{DEMO_COMPANY_NAME}"
+      at.category = "Sales Agreement"
+      at.agreement_category_id = cat.id
+      at.template_type = "editor"
+      at.form_type = td[:form_type]
+      at.state_code = td[:state]
+      at.status = "active"
+      at.version = 1
+      at.content = "<h1>#{td[:name]}</h1><p>Auto-generated demo template for {{customer_name}}.</p>"
+      at.merge_fields = ["customer_name", "vehicle_make", "vehicle_model", "sale_price"]
+      at.default_signers = [{ "role" => "signer", "name" => "Buyer" }]
+      at.is_system_template = false
+      at.created_by_id = users[:admin].id
+    end
+    template_objs[td[:name]] = t
+  end
+  puts "  Templates: #{template_objs.size}"
+
+  # Sample agreements
+  sales_template = template_objs["MH Purchase Agreement (IN)"]
+  smuts = contacts["Jeretta Smuts"]
+  martin = contacts["William Martin"]
+  smuts_deal = deals["Smuts - Champion Aspire"]
+  martin_deal = deals["Martin - Emerald Sky 4483"]
+
+  if sales_template && smuts && smuts_deal
+    ag = company.agreements.find_or_create_by!(agreement_number: "AG-2026-001") do |a|
+      a.agreement_template_id = sales_template.id
+      a.title = "Purchase Agreement — Smuts — Champion Aspire"
+      a.category = "Sales Agreement"
+      a.status = "completed"
+      a.contact_id = smuts.id
+      a.deal_id = smuts_deal.id
+      a.location_id = locations["AUB"].id
+      a.prepared_by_id = users[:sales1].id
+      a.merge_field_values = { "customer_name" => "Jeretta Smuts", "sale_price" => "$114,235" }
+      a.sent_at = 21.days.ago
+      a.completed_at = 18.days.ago
+      a.delivery_method = "email"
+      a.signing_order = "parallel"
+      a.is_deleted = false
+    end
+    ag.agreement_signers.find_or_create_by!(email: smuts.email) do |s|
+      s.name = "Jeretta Smuts"
+      s.role = "signer"
+      s.signing_order = 1
+      s.status = "signed"
+      s.signed_at = 18.days.ago
+      s.viewed_at = 20.days.ago
+      s.access_token = SecureRandom.hex(20)
+      s.typed_signature = "Jeretta Smuts"
+      s.signature_method = "typed"
+    end
+  end
+
+  if sales_template && martin && martin_deal
+    ag2 = company.agreements.find_or_create_by!(agreement_number: "AG-2026-002") do |a|
+      a.agreement_template_id = sales_template.id
+      a.title = "Purchase Agreement — Martin — Emerald Sky"
+      a.category = "Sales Agreement"
+      a.status = "sent"
+      a.contact_id = martin.id
+      a.deal_id = martin_deal.id
+      a.location_id = locations["AUB"].id
+      a.prepared_by_id = users[:sales2].id
+      a.merge_field_values = { "customer_name" => "William Martin", "sale_price" => "$137,394" }
+      a.sent_at = 2.days.ago
+      a.delivery_method = "email"
+      a.signing_order = "parallel"
+      a.is_deleted = false
+    end
+    ag2.agreement_signers.find_or_create_by!(email: martin.email) do |s|
+      s.name = "William Martin"
+      s.role = "signer"
+      s.signing_order = 1
+      s.status = "viewed"
+      s.viewed_at = 1.day.ago
+      s.access_token = SecureRandom.hex(20)
+    end
+  end
+  puts "  Agreements: #{company.agreements.count}"
+end
+
+# ── 28. Brochures + Listings ──────────────────────────────
+puts "\n28. Setting up brochures and listings..."
+if defined?(Brochure)
+  featured_vehicles = company.vehicles.where(status: "available").limit(3)
+  if featured_vehicles.any?
+    company.brochures.find_or_create_by!(title: "Spring 2026 Featured Homes") do |b|
+      b.description = "Hand-picked new homes available right now"
+      b.public_id = "#{DEMO_PREFIX}-spring-2026-#{SecureRandom.hex(4)}"
+      b.template_name = "mh_family_living"
+      b.template_data = { "theme" => "warm", "highlight_color" => "#3B82F6" }
+      b.vehicle_ids = featured_vehicles.pluck(:id)
+      b.is_public = true
+      b.status = "active"
+      b.location_id = locations["AUB"].id
+    end
+  end
+  puts "  Brochures: #{company.brochures.count}"
+end
+
+if defined?(Listing)
+  company.vehicles.where(status: "available").limit(2).each_with_index do |vehicle, idx|
+    company.listings.find_or_create_by!(vehicle_id: vehicle.id) do |l|
+      l.status = "active"
+      l.offer_type = "sale"
+      l.sale_price = vehicle.sale_price || 0
+      l.rent_price = 0
+      l.rent_period = "monthly"
+      l.description = "#{vehicle.year} #{vehicle.make} #{vehicle.model} — #{vehicle.bedrooms}BR / #{vehicle.bathrooms}BA, #{vehicle.square_feet} sqft. Available now at our #{locations['AUB'].city} location."
+      l.location_id = vehicle.location_id
+      l.contact_email = users[:manager].email
+      l.contact_phone = "(260) 555-0100"
+      l.published_at = idx.days.ago
+      l.has_appliances = true
+      l.has_ac = true
+      l.financing_available = "yes"
+      l.delivery_available = "yes"
+      l.is_deleted = false
+    end
+  end
+  puts "  Listings: #{company.listings.count}"
+end
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
@@ -736,21 +1416,37 @@ puts ""
 puts "Data Summary:"
 puts "-" * 55
 {
-  "Locations"       => company.respond_to?(:locations)       ? company.locations.count : 0,
-  "Users"           => company.users.count,
-  "Vehicles"        => company.respond_to?(:vehicles)        ? company.vehicles.count : 0,
-  "Leads"           => company.respond_to?(:leads)           ? company.leads.count : 0,
-  "Accounts"        => company.respond_to?(:accounts)        ? company.accounts.count : 0,
-  "Contacts"        => company.respond_to?(:contacts)        ? company.contacts.count : 0,
-  "Deals"           => company.respond_to?(:deals)           ? company.deals.count : 0,
-  "Quotes"          => company.respond_to?(:quotes)          ? company.quotes.count : 0,
-  "Invoices"        => company.respond_to?(:invoices)        ? company.invoices.count : 0,
-  "Service Tickets" => company.respond_to?(:service_tickets) ? company.service_tickets.count : 0,
-  "Projects"        => company.respond_to?(:projects)        ? company.projects.count : 0,
-  "Parts"           => company.respond_to?(:parts)           ? company.parts.count : 0,
-  "Suppliers"       => company.respond_to?(:suppliers)       ? company.suppliers.count : 0,
-  "Tags"            => company.respond_to?(:tags)            ? company.tags.count : 0,
-  "Sources"         => Source.where(company_id: company.id).count,
+  "Locations"         => company.respond_to?(:locations)         ? company.locations.count : 0,
+  "Users"             => company.users.count,
+  "Vehicles"          => company.respond_to?(:vehicles)          ? company.vehicles.count : 0,
+  "Leads"             => company.respond_to?(:leads)             ? company.leads.count : 0,
+  "Accounts"          => company.respond_to?(:accounts)          ? company.accounts.count : 0,
+  "Contacts"          => company.respond_to?(:contacts)          ? company.contacts.count : 0,
+  "Deals"             => company.respond_to?(:deals)             ? company.deals.count : 0,
+  "Quotes"            => company.respond_to?(:quotes)            ? company.quotes.count : 0,
+  "Invoices"          => company.respond_to?(:invoices)          ? company.invoices.count : 0,
+  "Service Tickets"   => company.respond_to?(:service_tickets)   ? company.service_tickets.count : 0,
+  "Projects"          => company.respond_to?(:projects)          ? company.projects.count : 0,
+  "Parts"             => company.respond_to?(:parts)             ? company.parts.count : 0,
+  "Suppliers"         => company.respond_to?(:suppliers)         ? company.suppliers.count : 0,
+  "Tags"              => company.respond_to?(:tags)              ? company.tags.count : 0,
+  "Sources"           => Source.where(company_id: company.id).count,
+  "Chart of Accounts" => company.respond_to?(:chart_of_accounts) ? company.chart_of_accounts.count : 0,
+  "Bills"             => company.respond_to?(:bills)             ? company.bills.count : 0,
+  "Bank Accounts"     => company.respond_to?(:bank_accounts)     ? company.bank_accounts.count : 0,
+  "Commission Plans"  => company.respond_to?(:commission_plans)  ? company.commission_plans.count : 0,
+  "Commission Pmts"   => company.respond_to?(:commission_payments) ? company.commission_payments.count : 0,
+  "Nurture Sequences" => company.respond_to?(:nurture_sequences) ? company.nurture_sequences.count : 0,
+  "Campaigns"         => company.respond_to?(:campaigns)         ? company.campaigns.count : 0,
+  "Workflow Rules"    => company.respond_to?(:workflow_rules)    ? company.workflow_rules.count : 0,
+  "Loans"             => company.respond_to?(:loans)             ? company.loans.count : 0,
+  "Purchase Orders"   => company.respond_to?(:purchase_orders)   ? company.purchase_orders.count : 0,
+  "Contractors"       => company.respond_to?(:contractors)       ? company.contractors.count : 0,
+  "Warranty Claims"   => company.respond_to?(:warranty_claims)   ? company.warranty_claims.count : 0,
+  "Agreement Tplts"   => company.respond_to?(:agreement_templates) ? company.agreement_templates.count : 0,
+  "Agreements"        => company.respond_to?(:agreements)        ? company.agreements.count : 0,
+  "Brochures"         => company.respond_to?(:brochures)         ? company.brochures.count : 0,
+  "Listings"          => company.respond_to?(:listings)          ? company.listings.count : 0,
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
 end
