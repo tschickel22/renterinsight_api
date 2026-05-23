@@ -469,13 +469,13 @@ deals = {}
 
 deal_data = [
   { title: "Smuts - Champion Aspire",      stage: "closed_won",    amount: 114235, contact: "Jeretta Smuts",     account: nil,                            home_cost: 65000, recon: 2500, fp_int: 400,  delivery: 3500, pack: 2000 },
-  { title: "Martin - Emerald Sky 4483",    stage: "negotiation",   amount: 124900, contact: "William Martin",    account: "Martin Family Properties",     home_cost: 92000, recon: 0,    fp_int: 350,  delivery: 4200, pack: 2200 },
-  { title: "O'Brien - Redman RM2856A",     stage: "proposal",      amount: 89500,  contact: "Kevin O'Brien",     account: nil,                            home_cost: 60000, recon: 0,    fp_int: 0,    delivery: 3200, pack: 1800 },
-  { title: "Lakeside - Dutch 2872A",       stage: "proposal",      amount: 105000, contact: "Dennis Hopper",     account: "Lakeside MH Community",        home_cost: 77000, recon: 0,    fp_int: 0,    delivery: 4500, pack: 2100 },
-  { title: "Gonzalez - Heritage 1676H",    stage: "qualification", amount: 62900,  contact: "Maria Gonzalez",    account: nil,                            home_cost: 40000, recon: 0,    fp_int: 0,    delivery: 2800, pack: 1500 },
-  { title: "Crawford - Redman RM3264A",    stage: "qualification", amount: 96700,  contact: "Daniel Crawford",   account: nil,                            home_cost: 71000, recon: 0,    fp_int: 0,    delivery: 3800, pack: 1900 },
+  { title: "Martin - Emerald Sky 4483",    stage: "closed_won",    amount: 124900, contact: "William Martin",    account: "Martin Family Properties",     home_cost: 92000, recon: 0,    fp_int: 350,  delivery: 4200, pack: 2200 },
+  { title: "O'Brien - Redman RM2856A",     stage: "closed_won",    amount: 89500,  contact: "Kevin O'Brien",     account: nil,                            home_cost: 60000, recon: 0,    fp_int: 0,    delivery: 3200, pack: 1800 },
+  { title: "Lakeside - Dutch 2872A",       stage: "closed_won",    amount: 105000, contact: "Dennis Hopper",     account: "Lakeside MH Community",        home_cost: 77000, recon: 0,    fp_int: 0,    delivery: 4500, pack: 2100 },
+  { title: "Gonzalez - Heritage 1676H",    stage: "closed_won",    amount: 62900,  contact: "Maria Gonzalez",    account: nil,                            home_cost: 40000, recon: 0,    fp_int: 0,    delivery: 2800, pack: 1500 },
+  { title: "Crawford - Redman RM3264A",    stage: "closed_won",    amount: 96700,  contact: "Daniel Crawford",   account: nil,                            home_cost: 71000, recon: 0,    fp_int: 0,    delivery: 3800, pack: 1900 },
   { title: "Fisher - Dutch 1676S",         stage: "prospecting",   amount: 62000,  contact: "Tammy Fisher",      account: nil,                            home_cost: 45000, recon: 0,    fp_int: 0,    delivery: 2800, pack: 1500 },
-  { title: "Hoosier Dev - Bulk Order",     stage: "needs_analysis", amount: 450000, contact: "Marcus Johnson",   account: "Hoosier Land Development",     home_cost: 320000, recon: 0,   fp_int: 1200, delivery: 18000, pack: 8000 },
+  { title: "Hoosier Dev - Bulk Order",     stage: "closed_won",    amount: 450000, contact: "Marcus Johnson",    account: "Hoosier Land Development",     home_cost: 320000, recon: 0,   fp_int: 1200, delivery: 18000, pack: 8000 },
   { title: "Keller - Used Clayton",        stage: "closed_won",    amount: 38500,  contact: "Brian Keller",      account: nil,                            home_cost: 22000, recon: 3200, fp_int: 0,    delivery: 1800, pack: 900 },
   { title: "Turner - Skyline Amber Cove",  stage: "closed_lost",   amount: 42500,  contact: "Jason Turner",      account: nil,                            home_cost: 28000, recon: 0,    fp_int: 0,    delivery: 2000, pack: 1000 },
 ]
@@ -509,6 +509,7 @@ deal_data.each_with_index do |dd, idx|
                    when "closed_lost" then (10 + idx * 2).days.ago
                    end
   updates = {
+    stage:               dd[:stage],
     selling_price:       dd[:amount],
     home_cost:           dd[:home_cost],
     reconditioning_cost: dd[:recon],
@@ -567,10 +568,14 @@ puts "\n12. Creating invoices..."
 invoice_data = [
   { number: "INV-2026-001", status: "paid",    total: 6400,   contact: "Jeretta Smuts",  notes: "Down payment - Champion Aspire" },
   { number: "INV-2026-002", status: "paid",    total: 107835, contact: "Jeretta Smuts",  notes: "Balance - Champion Aspire" },
-  { number: "INV-2026-003", status: "sent",    total: 12490,  contact: "William Martin", notes: "10% deposit - Emerald Sky" },
-  { number: "INV-2026-004", status: "sent",    total: 8250,   contact: "Kevin O'Brien",  notes: "Deposit - Redman RM2856A" },
+  { number: "INV-2026-003", status: "paid",    total: 124900, contact: "William Martin", notes: "Full payment - Emerald Sky" },
+  { number: "INV-2026-004", status: "paid",    total: 89500,  contact: "Kevin O'Brien",  notes: "Full payment - Redman RM2856A" },
   { number: "INV-2026-005", status: "paid",    total: 38500,  contact: "Brian Keller",   notes: "Full payment - Used Clayton" },
-  { number: "INV-2026-006", status: "overdue", total: 10500,  contact: "Dennis Hopper",  notes: "Deposit - Dutch 2872A" },
+  { number: "INV-2026-006", status: "paid",    total: 105000, contact: "Dennis Hopper",  notes: "Lakeside - Dutch 2872A" },
+  { number: "INV-2026-007", status: "paid",    total: 62900,  contact: "Maria Gonzalez", notes: "Heritage 1676H" },
+  { number: "INV-2026-008", status: "paid",    total: 96700,  contact: "Daniel Crawford", notes: "Redman RM3264A" },
+  { number: "INV-2026-009", status: "sent",    total: 45000,  contact: "Marcus Johnson", notes: "Bulk order - milestone 1" },
+  { number: "INV-2026-010", status: "overdue", total: 10500,  contact: "Tammy Fisher",   notes: "Deposit - Dutch 1676S" },
   { number: "INV-2025-047", status: "paid",    total: 68500,  contact: "Raymond Price",  notes: "Redman RM2448A" },
   { number: "INV-2025-048", status: "paid",    total: 74900,  contact: "Angela Brooks",  notes: "Dutch 2460A" },
 ]
@@ -763,11 +768,19 @@ if company.respond_to?(:project_templates)
   puts "  Template: #{template.name} (#{tp_data.length} phases)"
 
   # ── 18. Projects for Won Deals ──────────────────────────
+  # One project per closed-won deal at varied progress so the projects
+  # list shows a realistic mix (completed, late-stage, early-stage).
   puts "\n18. Creating projects..."
 
   [
-    { deal: "Smuts - Champion Aspire",  name: "Smuts - Champion Aspire Setup",   status: "active",    done: 8,  current: 9 },
-    { deal: "Keller - Used Clayton",    name: "Keller - Used Clayton Setup",     status: "completed",   done: 17, current: nil },
+    { deal: "Smuts - Champion Aspire",      name: "Smuts - Champion Aspire Setup",        status: "active",    done: 12, current: 13 },
+    { deal: "Keller - Used Clayton",        name: "Keller - Used Clayton Setup",          status: "completed", done: 17, current: nil },
+    { deal: "Martin - Emerald Sky 4483",    name: "Martin - Emerald Sky Setup",           status: "active",    done: 8,  current: 9 },
+    { deal: "O'Brien - Redman RM2856A",     name: "O'Brien - Redman Setup",               status: "active",    done: 5,  current: 6 },
+    { deal: "Lakeside - Dutch 2872A",       name: "Lakeside MH - Dutch Community Setup",  status: "active",    done: 3,  current: 4 },
+    { deal: "Gonzalez - Heritage 1676H",    name: "Gonzalez - Heritage Setup",            status: "active",    done: 15, current: 16 },
+    { deal: "Crawford - Redman RM3264A",    name: "Crawford - Redman 3264 Setup",         status: "active",    done: 10, current: 11 },
+    { deal: "Hoosier Dev - Bulk Order",     name: "Hoosier Dev - 4-Home Bulk Setup",      status: "active",    done: 2,  current: 3 },
   ].each do |pc|
     deal = deals[pc[:deal]]
     next unless deal
@@ -1494,7 +1507,7 @@ end
 puts "\n29. Setting up payment methods..."
 payment_methods = {}
 if defined?(PaymentMethod)
-  payor_contacts = ["Jeretta Smuts", "Brian Keller", "Raymond Price", "Angela Brooks", "William Martin", "Kevin O'Brien", "Dennis Hopper"]
+  payor_contacts = ["Jeretta Smuts", "Brian Keller", "Raymond Price", "Angela Brooks", "William Martin", "Kevin O'Brien", "Dennis Hopper", "Maria Gonzalez", "Daniel Crawford", "Marcus Johnson"]
   payor_contacts.each do |name|
     contact = contacts[name]
     next unless contact
@@ -1520,11 +1533,16 @@ puts "\n30. Setting up payments..."
 if defined?(Payment)
   # Map: (invoice_number suffix) → contact name; mirrors invoice_data above.
   paid_invoice_payments = [
-    { inv: "INV-2026-001", contact: "Jeretta Smuts",  amount: 6_400,   days_ago: 25 },
-    { inv: "INV-2026-002", contact: "Jeretta Smuts",  amount: 107_835, days_ago: 18 },
-    { inv: "INV-2026-005", contact: "Brian Keller",   amount: 38_500,  days_ago: 10 },
-    { inv: "INV-2025-047", contact: "Raymond Price",  amount: 68_500,  days_ago: 60 },
-    { inv: "INV-2025-048", contact: "Angela Brooks",  amount: 74_900,  days_ago: 45 },
+    { inv: "INV-2026-001", contact: "Jeretta Smuts",   amount: 6_400,   days_ago: 25 },
+    { inv: "INV-2026-002", contact: "Jeretta Smuts",   amount: 107_835, days_ago: 18 },
+    { inv: "INV-2026-003", contact: "William Martin",  amount: 124_900, days_ago: 16 },
+    { inv: "INV-2026-004", contact: "Kevin O'Brien",   amount: 89_500,  days_ago: 14 },
+    { inv: "INV-2026-005", contact: "Brian Keller",    amount: 38_500,  days_ago: 10 },
+    { inv: "INV-2026-006", contact: "Dennis Hopper",   amount: 105_000, days_ago: 8 },
+    { inv: "INV-2026-007", contact: "Maria Gonzalez",  amount: 62_900,  days_ago: 7 },
+    { inv: "INV-2026-008", contact: "Daniel Crawford", amount: 96_700,  days_ago: 6 },
+    { inv: "INV-2025-047", contact: "Raymond Price",   amount: 68_500,  days_ago: 60 },
+    { inv: "INV-2025-048", contact: "Angela Brooks",   amount: 74_900,  days_ago: 45 },
   ]
   # Add a few more recent payments so the dashboard revenue tile has
   # something for the current period regardless of when the seed runs.
