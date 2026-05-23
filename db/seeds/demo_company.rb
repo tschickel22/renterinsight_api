@@ -613,20 +613,38 @@ if defined?(Resource) && Resource.respond_to?(:seed_defaults)
   puts "  Resources seeded (#{Resource.active.count} active)"
   
   # Refresh company_admin system role permissions for any NEW resources
-  # added after the initial rbac_system_seed.rb ran
+  # added after the initial rbac_system_seed.rb ran.
+  #
+  # RolePermission#invalidate_cache fires an after_save that does
+  # Rails.cache.delete_matched, which on a FileStore walks the entire
+  # cache directory per row — ~285 inserts * full-tree scan = effective
+  # hang on staging. Skip the callback for the bulk loop, then clear
+  # role-permission cache keys once at the end.
   ca_role = Role.system_roles.find_by(key: 'company_admin')
   if ca_role
     all_scope = Scope.find_by(key: 'all')
-    added = 0
-    Resource.active.each do |resource|
-      Action.all.each do |action|
-        rp = RolePermission.find_or_create_by!(
-          role: ca_role, resource: resource, action: action, scope: all_scope
-        ) { |p| p.granted = true }
-        added += 1 if rp.previously_new_record?
+    expected = Resource.active.count * Action.count
+    existing = ca_role.role_permissions.count
+    if existing >= expected
+      puts "  Company Admin role already complete (#{existing} permissions)"
+    else
+      added = 0
+      had_cb = RolePermission.respond_to?(:skip_callback)
+      RolePermission.skip_callback(:save, :after, :invalidate_cache) if had_cb
+      begin
+        Resource.active.find_each do |resource|
+          Action.all.each do |action|
+            rp = RolePermission.find_or_create_by!(
+              role: ca_role, resource: resource, action: action, scope: all_scope
+            ) { |p| p.granted = true }
+            added += 1 if rp.previously_new_record?
+          end
+        end
+      ensure
+        RolePermission.set_callback(:save, :after, :invalidate_cache) if had_cb
       end
+      puts "  Company Admin role refreshed (#{added} new permissions added)"
     end
-    puts "  Company Admin role refreshed (#{added} new permissions added)"
   end
 else
   puts "  Skipped"
