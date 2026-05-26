@@ -33,6 +33,8 @@ module Messaging
       return true if href.start_with?('mailto:', 'tel:', '#')
       return true if href.start_with?("#{@base_url}/t/")
       return true if href.start_with?("#{@base_url}/u/")
+      # Also skip tracked links from TrackedLink model (may use a different base URL)
+      return true if href.match?(%r{/t/[A-Za-z0-9_-]{10,}\z})
       false
     end
 

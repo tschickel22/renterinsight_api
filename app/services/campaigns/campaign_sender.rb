@@ -19,7 +19,10 @@ module Campaigns
       @enrollment = enrollment
       @campaign = enrollment.campaign
       @company = @campaign.company
-      @base_url = base_url || ENV['CAMPAIGN_BASE_URL'].presence || 'https://app.renterinsight.com'
+      # Must point to the Rails API server for tracked links, unsubscribe links, and pixel URLs
+      @base_url = base_url || ENV['DMS_API_URL'].presence ||
+                  ENV['CAMPAIGN_BASE_URL'].presence ||
+                  'https://renterinsight-api-staging.onrender.com'
     end
 
     def deliver_current_step
