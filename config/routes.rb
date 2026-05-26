@@ -1716,7 +1716,13 @@ Rails.application.routes.draw do
         end
         resources :events, controller: 'campaign_events', only: [:index]
         resources :sends, controller: 'campaign_sends', only: [:index, :show]
-        resources :steps, controller: 'campaign_steps', only: [:create, :update, :destroy]
+        resources :steps, controller: 'campaign_steps', only: [:create, :update, :destroy] do
+          member do
+            post :upload_attachment
+            delete :remove_attachment
+            patch :update_attachment_mode
+          end
+        end
         resources :campaign_uploads, only: [:create], path: 'uploads' do
           collection do
             delete :destroy

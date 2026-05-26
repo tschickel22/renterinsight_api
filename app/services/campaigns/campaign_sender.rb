@@ -104,6 +104,10 @@ module Campaigns
 
       return { success: false, error: 'inventory_empty_abort' } if rendered[:error] == 'inventory_empty_abort'
 
+      inline_uploads        = Array(rendered[:inline_attachments])
+      tracked_link_records  = Array(rendered[:tracked_link_records])
+      attachment_metadata   = Array(rendered[:attachment_metadata])
+
       from_address = formatted_from_for(conn)
       reply_to = "reply+campaign-#{send_record.id}@#{ENV['INBOUND_EMAIL_DOMAIN'].presence || 'mail.renterinsight.com'}"
 
@@ -112,6 +116,14 @@ module Campaigns
                      when 'oauth_outlook' then :oauth_microsoft
                      else :smtp
                      end
+
+      metadata_hash = {
+        campaign_id: @campaign.id,
+        campaign_send_id: send_record.id,
+        campaign_step_id: step.id,
+        source: 'campaign',
+        attachments: attachment_metadata.map { |a| { 'filename' => a['filename'], 'delivery_mode' => a['delivery_mode'] } }
+      }
 
       result = CommunicationService.send_email(
         communicable: recipient,
@@ -122,12 +134,8 @@ module Campaigns
         reply_to: reply_to,
         provider: provider_sym,
         category: 'campaign',
-        metadata: {
-          campaign_id: @campaign.id,
-          campaign_send_id: send_record.id,
-          campaign_step_id: step.id,
-          source: 'campaign'
-        },
+        attachments: inline_uploads.presence,
+        metadata: metadata_hash.deep_stringify_keys,
         skip_preference_check: true,
         sender_user_id: conn.try(:user_id),
         user: conn.try(:user)
@@ -138,6 +146,11 @@ module Campaigns
         final_html = Messaging::PixelInjector.inject(rendered[:html_body], communication_id: comm.id, base_url: @base_url)
         comm.update_column(:body, final_html) if final_html != rendered[:html_body]
         comm.update_column(:campaign_send_id, send_record.id) if Communication.column_names.include?('campaign_send_id')
+
+        tracked_link_records.each do |tl|
+          tl.update_columns(communication_id: comm.id) rescue nil
+        end
+
         { success: true, communication_id: comm.id }
       else
         err = result.is_a?(Hash) ? (result[:error] || 'send_failed') : 'send_failed'
@@ -146,6 +159,16 @@ module Campaigns
     rescue => e
       Rails.logger.error "[CampaignSender#deliver_email] #{e.class}: #{e.message}"
       { success: false, error: e.message.to_s[0, 200] }
+    ensure
+      Array(inline_uploads).each do |u|
+        tmp = u.respond_to?(:tempfile) ? u.tempfile : nil
+        begin
+          tmp&.close
+          tmp&.unlink
+        rescue StandardError
+          nil
+        end
+      end
     end
 
     def deliver_sms(step, send_record)

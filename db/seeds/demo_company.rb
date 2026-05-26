@@ -600,22 +600,25 @@ end
 puts "  Created #{invoice_data.length} invoices"
 
 # ── 13. Service Tickets ────────────────────────────────────
+# scheduled_date / scheduledTime / estimatedHours populated so tickets
+# surface on the Calendar (CalendarService#service_ticket_to_event reads them).
 puts "\n13. Creating service tickets..."
 ticket_data = [
-  { title: "Door alignment after delivery",           status: "open",        priority: "high",   contact: "Jeretta Smuts" },
-  { title: "HVAC not heating properly",               status: "in_progress", priority: "high",   contact: "Brian Keller" },
-  { title: "Kitchen faucet leak",                     status: "open",        priority: "medium", contact: "Angela Brooks" },
-  { title: "Carpet seam separation - master bedroom", status: "open",        priority: "medium", contact: "Raymond Price" },
-  { title: "Skirting installation",                   status: "pending_review", priority: "low",    contact: "Jeretta Smuts" },
-  { title: "Pre-delivery inspection - Emerald Sky",   status: "open",        priority: "high",   contact: "William Martin" },
-  { title: "Window crank replacement",                status: "completed",   priority: "low",    contact: "Sandra Mitchell" },
-  { title: "Smoke detector installation",             status: "completed",   priority: "medium", contact: "Brian Keller" },
-  { title: "Marriage line drywall crack",              status: "in_progress", priority: "medium", contact: "Angela Brooks" },
-  { title: "Electrical outlet not working - kitchen",  status: "open",       priority: "high",   contact: "Raymond Price" },
+  { title: "Door alignment after delivery",           status: "open",        priority: "high",   contact: "Jeretta Smuts",  sched_offset:  0, time: "09:00", hours: 2 },
+  { title: "HVAC not heating properly",               status: "in_progress", priority: "high",   contact: "Brian Keller",   sched_offset:  0, time: "13:00", hours: 3 },
+  { title: "Kitchen faucet leak",                     status: "open",        priority: "medium", contact: "Angela Brooks",  sched_offset:  1, time: "10:30", hours: 1 },
+  { title: "Carpet seam separation - master bedroom", status: "open",        priority: "medium", contact: "Raymond Price",  sched_offset:  2, time: "14:00", hours: 2 },
+  { title: "Skirting installation",                   status: "pending_review", priority: "low", contact: "Jeretta Smuts",  sched_offset:  3, time: "09:00", hours: 4 },
+  { title: "Pre-delivery inspection - Emerald Sky",   status: "open",        priority: "high",   contact: "William Martin", sched_offset:  4, time: "11:00", hours: 2 },
+  { title: "Window crank replacement",                status: "completed",   priority: "low",    contact: "Sandra Mitchell", sched_offset: -3, time: "10:00", hours: 1 },
+  { title: "Smoke detector installation",             status: "completed",   priority: "medium", contact: "Brian Keller",   sched_offset: -5, time: "09:30", hours: 1 },
+  { title: "Marriage line drywall crack",             status: "in_progress", priority: "medium", contact: "Angela Brooks",  sched_offset:  5, time: "13:00", hours: 3 },
+  { title: "Electrical outlet not working - kitchen", status: "open",        priority: "high",   contact: "Raymond Price",  sched_offset:  7, time: "10:00", hours: 2 },
 ]
 
 ticket_data.each_with_index do |td, idx|
   contact = contacts[td[:contact]]
+  sched_date = Date.current + td[:sched_offset].days
   company.service_tickets.find_or_create_by!(title: td[:title]) do |st|
     st.status = td[:status]
     st.priority = td[:priority]
@@ -625,12 +628,14 @@ ticket_data.each_with_index do |td, idx|
     st.location_id = locations["AUB"].id
     st.ticket_number = "#{DEMO_PREFIX.upcase}-ST-2026-#{(idx + 1).to_s.rjust(3, '0')}"
     st.description = td[:title]
+    st.scheduled_date = sched_date
+    st.custom_fields = { "scheduledTime" => td[:time], "estimatedHours" => td[:hours] }
     st.is_warranty_suspected = false
     st.is_warranty_confirmed = false
     st.portal_visible = false
   end
 end
-puts "  Created #{ticket_data.length} service tickets"
+puts "  Created #{ticket_data.length} service tickets (scheduled across calendar)"
 
 # ── 14. Suppliers ──────────────────────────────────────────
 puts "\n14. Creating suppliers..."
@@ -1796,6 +1801,261 @@ if defined?(BuyerPortalAccess)
   puts "  Portal accounts: #{BuyerPortalAccess.where(company_id: company.id).count} (login with contact email + #{DEMO_PASSWORD})"
 end
 
+# ── 35. Work Queue + Calendar (Tasks & Activities) ────────
+# Populates the Work Queue tiles (Tasks today/week, Meetings today,
+# Calls due, Reminders upcoming) and the Calendar (LeadActivity,
+# ContactActivity, DealActivity, AccountActivity, Tasks).
+#
+# reminder_sent: true on past/completed records skips the
+# after_create :schedule_reminders callback (which would otherwise
+# call ActivityReminderService for any reminder_time in the past).
+puts "\n35. Seeding work queue + calendar data..."
+
+sales_users = [users[:sales1], users[:sales2]].compact
+manager     = users[:manager]
+tech        = users[:tech]
+
+today_9am = Date.current.to_time.change(hour: 9)
+def at_hour(date, hour, min = 0) date.to_time.change(hour: hour, min: min) end
+
+# ── Tasks ───────────────────────────────────────────────
+lead_baker    = leads["Steven Baker"]
+lead_hughes   = leads["Dorothy Hughes"]
+lead_stewart  = leads["Kenneth Stewart"]
+lead_morris   = leads["Ronald Morris"]
+deal_smuts    = deals["Smuts - Champion Aspire"]
+deal_martin   = deals["Martin - Emerald Sky 4483"]
+deal_fisher   = deals["Fisher - Dutch 1676S"]
+ticket_first  = company.service_tickets.where(status: ['open', 'in_progress']).first
+
+task_specs = [
+  { title: "Call back about financing options",     desc: "Customer asked about 21st Mortgage pre-qual",     due: at_hour(Date.current - 2.days, 14), priority: :high,   status: :pending,     assignee: sales_users[0], taskable: lead_baker,    mod: 'crm' },
+  { title: "Email updated quote PDF",               desc: "Send revised quote with delivery fees",            due: at_hour(Date.current - 1.day,  10), priority: :urgent, status: :pending,     assignee: sales_users[1], taskable: deal_fisher,   mod: 'deals' },
+  { title: "Confirm delivery date with Champion",   desc: "Need ship-from-factory ETA",                       due: at_hour(Date.current,          11), priority: :high,   status: :pending,     assignee: manager,        taskable: deal_martin,   mod: 'deals' },
+  { title: "Walk-through prep for Stewart visit",   desc: "Stage the Emerald Sky unit on lot 12",             due: at_hour(Date.current,          15), priority: :medium, status: :pending,     assignee: sales_users[0], taskable: lead_stewart,  mod: 'crm' },
+  { title: "Order replacement HVAC blower motor",   desc: "Part #BLM-2200 for Keller ticket",                 due: at_hour(Date.current,          16), priority: :high,   status: :in_progress, assignee: tech,           taskable: ticket_first,  mod: 'service' },
+  { title: "Follow up on financing paperwork",      desc: "Hughes mailed in W-2 — confirm received",          due: at_hour(Date.current + 1.day,  10), priority: :medium, status: :pending,     assignee: sales_users[1], taskable: lead_hughes,   mod: 'crm' },
+  { title: "Site inspection - Lakeside pad #34",    desc: "Verify pier spacing before delivery",              due: at_hour(Date.current + 2.days, 13), priority: :high,   status: :pending,     assignee: tech,           taskable: nil,           mod: 'service' },
+  { title: "Prep Smuts closing paperwork",          desc: "Title transfer, retail installment contract",      due: at_hour(Date.current + 3.days,  9), priority: :high,   status: :pending,     assignee: manager,        taskable: deal_smuts,    mod: 'deals' },
+  { title: "Demo new Skyline model to Morris",      desc: "Schedule 1hr walkthrough on lot",                  due: at_hour(Date.current + 4.days, 14), priority: :medium, status: :pending,     assignee: sales_users[0], taskable: lead_morris,   mod: 'crm' },
+  { title: "Submit warranty claim - drywall crack", desc: "Champion warranty form + photos",                  due: at_hour(Date.current + 5.days, 10), priority: :medium, status: :pending,     assignee: tech,           taskable: nil,           mod: 'service' },
+  { title: "Q2 sales pipeline review",              desc: "Forecast vs target — Auburn showroom",             due: at_hour(Date.current + 7.days, 16), priority: :low,    status: :pending,     assignee: manager,        taskable: nil,           mod: 'admin' },
+  { title: "Refresh website inventory photos",      desc: "Five new units need lot photos",                   due: at_hour(Date.current + 10.days, 11), priority: :low,   status: :pending,     assignee: sales_users[1], taskable: nil,           mod: 'marketing' },
+]
+
+task_count = 0
+task_specs.each do |spec|
+  next unless spec[:assignee]
+  existing = Task.where(company_id: company.id, title: spec[:title]).first
+  next if existing
+  Task.create!(
+    company:        company,
+    location:       locations["AUB"],
+    title:          spec[:title],
+    description:    spec[:desc],
+    status:         spec[:status],
+    priority:       spec[:priority],
+    task_module:    spec[:mod],
+    assigned_to_id: spec[:assignee].id,
+    due_date:       spec[:due],
+    taskable:       spec[:taskable],
+    created_by:     spec[:assignee].email,
+  )
+  task_count += 1
+end
+puts "  Tasks: #{task_count} created (overdue/today/week/next-week mix)"
+
+# ── Lead Activities ─────────────────────────────────────
+# Meetings today/this week, Calls due today/overdue, Reminders within
+# the next day, plus a few completed in the past for context.
+la_specs = [
+  # Meetings — today + this week
+  { lead: lead_stewart, type: 'meeting', subject: 'Lot walkthrough — Skyline Amber Cove',
+    start: at_hour(Date.current, 15), finish: at_hour(Date.current, 16, 30),
+    meeting_location: 'Auburn Showroom — Lot 12', assignee: sales_users[0] },
+  { lead: lead_baker, type: 'meeting', subject: 'Financing options consultation',
+    start: at_hour(Date.current + 1.day, 11), finish: at_hour(Date.current + 1.day, 12),
+    meeting_location: 'Auburn Showroom Office', assignee: sales_users[0] },
+  { lead: lead_hughes, type: 'meeting', subject: 'Custom upgrade options review',
+    start: at_hour(Date.current + 3.days, 14), finish: at_hour(Date.current + 3.days, 15),
+    meeting_location: 'Auburn Showroom Office', assignee: sales_users[1] },
+
+  # Calls — overdue + due today (work queue: activity_calls_due)
+  { lead: lead_baker, type: 'call', subject: 'Follow-up: floorplan questions',
+    due: at_hour(Date.current - 1.day, 10), phone: lead_baker&.phone, dir: 'outbound',
+    assignee: sales_users[0] },
+  { lead: lead_morris, type: 'call', subject: 'Confirm Saturday demo',
+    due: at_hour(Date.current, 13), phone: lead_morris&.phone, dir: 'outbound',
+    assignee: sales_users[0] },
+  { lead: lead_hughes, type: 'call', subject: 'Returned voicemail — financing',
+    due: at_hour(Date.current, 16), phone: lead_hughes&.phone, dir: 'inbound',
+    assignee: sales_users[1] },
+
+  # Reminders — upcoming (work queue: activity_reminders_upcoming)
+  { lead: lead_stewart, type: 'reminder', subject: 'Send pre-walkthrough checklist',
+    reminder: 2.hours.from_now, assignee: sales_users[0] },
+  { lead: lead_morris, type: 'reminder', subject: 'Check trade-in valuation',
+    reminder: 6.hours.from_now, assignee: sales_users[0] },
+
+  # Tasks — overdue + today (work queue: activity_tasks_today)
+  { lead: lead_baker, type: 'task', subject: 'Send Champion brochure PDF',
+    due: at_hour(Date.current - 1.day, 9), assignee: sales_users[0] },
+  { lead: lead_stewart, type: 'task', subject: 'Prepare offer sheet',
+    due: at_hour(Date.current, 17), assignee: sales_users[0] },
+
+  # Completed (past) — for timeline / not in workqueue
+  { lead: lead_baker, type: 'call', subject: 'Initial discovery call',
+    due: at_hour(Date.current - 3.days, 11), phone: lead_baker&.phone, dir: 'outbound',
+    assignee: sales_users[0], status: 'completed' },
+]
+
+la_count = 0
+la_specs.each do |s|
+  next unless s[:lead] && s[:assignee]
+  existing = LeadActivity.where(lead_id: s[:lead].id, subject: s[:subject]).first
+  next if existing
+
+  attrs = {
+    lead:             s[:lead],
+    user:             s[:assignee],
+    assigned_to:      s[:assignee],
+    activity_type:    s[:type],
+    subject:          s[:subject],
+    status:           s[:status] || 'pending',
+    priority:         'medium',
+    reminder_sent:    (s[:status] == 'completed'),  # skip after_create reminder
+  }
+
+  case s[:type]
+  when 'meeting'
+    attrs[:start_time] = s[:start]
+    attrs[:end_time]   = s[:finish]
+    attrs[:due_date]   = s[:start]
+    attrs[:meeting_location] = s[:meeting_location]
+  when 'call'
+    attrs[:due_date]       = s[:due]
+    attrs[:phone_number]   = s[:phone].presence || '(260) 555-0000'
+    attrs[:call_direction] = s[:dir]
+  when 'reminder'
+    attrs[:reminder_time]  = s[:reminder]
+    attrs[:due_date]       = s[:reminder]
+    attrs[:reminder_method] = ['popup']
+  when 'task'
+    attrs[:due_date]       = s[:due]
+  end
+
+  if s[:status] == 'completed'
+    attrs[:completed_at] = (s[:due] || s[:start] || Time.current) + 30.minutes
+  end
+
+  LeadActivity.create!(attrs)
+  la_count += 1
+end
+puts "  Lead activities: #{la_count} created (meetings/calls/reminders/tasks)"
+
+# ── Deal Activities ─────────────────────────────────────
+da_specs = [
+  { deal: deal_martin, type: 'meeting', subject: 'Contract signing — Emerald Sky',
+    start: at_hour(Date.current + 1.day, 10), finish: at_hour(Date.current + 1.day, 11),
+    assignee: sales_users[1] },
+  { deal: deal_smuts, type: 'call', subject: 'Final close-out confirmation',
+    due: at_hour(Date.current, 14), phone: '(260) 227-0394', dir: 'outbound',
+    assignee: manager },
+  { deal: deal_fisher, type: 'reminder', subject: 'Send updated proposal',
+    reminder: 4.hours.from_now, assignee: sales_users[1] },
+]
+
+da_count = 0
+da_specs.each do |s|
+  next unless s[:deal] && s[:assignee]
+  existing = DealActivity.where(deal_id: s[:deal].id, subject: s[:subject]).first
+  next if existing
+
+  attrs = {
+    deal:           s[:deal],
+    user:           s[:assignee],
+    assigned_to:    s[:assignee],
+    activity_type:  s[:type],
+    subject:        s[:subject],
+    status:         'pending',
+    priority:       'medium',
+    reminder_sent:  false,
+  }
+
+  case s[:type]
+  when 'meeting'
+    attrs[:start_time] = s[:start]
+    attrs[:end_time]   = s[:finish]
+    attrs[:due_date]   = s[:start]
+    attrs[:location]   = 'Auburn Showroom Office'
+  when 'call'
+    attrs[:due_date]       = s[:due]
+    attrs[:phone_number]   = s[:phone]
+    attrs[:call_direction] = s[:dir]
+  when 'reminder'
+    attrs[:reminder_time]   = s[:reminder]
+    attrs[:due_date]        = s[:reminder]
+    attrs[:reminder_method] = ['popup']
+  end
+
+  DealActivity.create!(attrs)
+  da_count += 1
+end
+puts "  Deal activities: #{da_count} created"
+
+# ── Contact Activities ──────────────────────────────────
+contact_keller  = contacts["Brian Keller"]
+contact_smuts   = contacts["Jeretta Smuts"]
+contact_martin  = contacts["William Martin"]
+
+ca_specs = [
+  { contact: contact_keller, type: 'call', subject: 'Service follow-up call',
+    due: at_hour(Date.current, 11), phone: contact_keller&.phone, dir: 'outbound',
+    assignee: tech },
+  { contact: contact_smuts, type: 'meeting', subject: 'Post-delivery walkthrough',
+    start: at_hour(Date.current + 2.days, 10), finish: at_hour(Date.current + 2.days, 11),
+    assignee: manager },
+  { contact: contact_martin, type: 'task', subject: 'Confirm utility hookup schedule',
+    due: at_hour(Date.current + 1.day, 9), assignee: manager },
+]
+
+ca_count = 0
+ca_specs.each do |s|
+  next unless s[:contact] && s[:assignee]
+  existing = ContactActivity.where(contact_id: s[:contact].id, subject: s[:subject]).first
+  next if existing
+
+  attrs = {
+    contact_id:    s[:contact].id,
+    account_id:    s[:contact].account_id,
+    user_id:       s[:assignee].id,
+    assigned_to_id: s[:assignee].id,
+    activity_type: s[:type],
+    subject:       s[:subject],
+    status:        'pending',
+    priority:      'medium',
+    reminder_sent: false,
+  }
+
+  case s[:type]
+  when 'meeting'
+    attrs[:start_time] = s[:start]
+    attrs[:end_time]   = s[:finish]
+    attrs[:due_date]   = s[:start]
+    attrs[:meeting_location] = 'Auburn Showroom Office'
+  when 'call'
+    attrs[:due_date]       = s[:due]
+    attrs[:phone_number]   = s[:phone].presence || '(260) 555-0000'
+    attrs[:call_direction] = s[:dir]
+  when 'task'
+    attrs[:due_date]       = s[:due]
+  end
+
+  ContactActivity.create!(attrs)
+  ca_count += 1
+end
+puts "  Contact activities: #{ca_count} created"
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
@@ -1854,6 +2114,11 @@ puts "-" * 55
   "Budgets"           => company.respond_to?(:budgets)            ? company.budgets.count : 0,
   "Budget Lines"      => company.respond_to?(:budgets)            ? BudgetLine.joins(:budget).where(budgets: { company_id: company.id }).count : 0,
   "Portal Accounts"   => defined?(BuyerPortalAccess)              ? BuyerPortalAccess.where(company_id: company.id).count : 0,
+  "Tasks"             => company.respond_to?(:tasks)              ? company.tasks.count : 0,
+  "Lead Activities"   => LeadActivity.joins(:lead).where(leads: { company_id: company.id }).count,
+  "Deal Activities"   => DealActivity.joins(:deal).where(deals: { company_id: company.id }).count,
+  "Contact Activities" => ContactActivity.joins(:contact).where(contacts: { company_id: company.id }).count,
+  "Tickets Scheduled" => company.service_tickets.where.not(scheduled_date: nil).count,
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
 end

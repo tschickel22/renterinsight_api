@@ -54,13 +54,30 @@ module Messaging
         unsubscribe_url: urls[:unsubscribe_url], inventory_units: inventory_units
       ).render
 
+      # Process step attachments only on real sends (skip on preview where @send is unsaved).
+      # Tracked links appended to body, inline files returned for delivery.
+      tracked_link_records, inline_uploads, attachment_metadata =
+        if @send && @send.persisted?
+          process_step_attachments
+        else
+          [[], [], []]
+        end
+      raw_html = append_tracked_link_section(raw_html, tracked_link_records) if tracked_link_records.any?
+
       tokenized = if @send && @send.persisted?
                     LinkTokenizer.new(campaign_send: @send, base_url: @base_url).tokenize_html(raw_html)
                   else
                     raw_html
                   end
 
-      { subject: subject, html_body: tokenized, error: nil }
+      {
+        subject: subject,
+        html_body: tokenized,
+        inline_attachments: inline_uploads,
+        tracked_link_records: tracked_link_records,
+        attachment_metadata: attachment_metadata,
+        error: nil
+      }
     end
 
     private
@@ -82,6 +99,106 @@ module Messaging
     def public_inventory_url
       return nil unless @company.respond_to?(:public_inventory_token) && @company.public_inventory_token.present?
       "#{@base_url.to_s.chomp('/')}/public/inventory/#{@company.public_inventory_token}"
+    end
+
+    # ---- Attachment handling for campaign emails ----
+    # Mirrors ProcessNurtureStepJob#process_step_attachments.
+    # Returns [tracked_link_records, inline_uploads, attachment_metadata].
+    def process_step_attachments
+      tracked_link_records = []
+      inline_uploads       = []
+      metadata             = []
+
+      attachments = Array(@step.try(:attachments))
+      return [tracked_link_records, inline_uploads, metadata] if attachments.empty?
+
+      entity = @recipient.is_a?(ActiveRecord::Base) ? @recipient : nil
+
+      attachments.each do |att|
+        att = att.is_a?(Hash) ? att.deep_stringify_keys : {}
+        filename      = att['filename']
+        s3_key        = att['s3_key']
+        content_type  = att['content_type']
+        file_size     = att['size']
+        delivery_mode = att['delivery_mode'].presence || 'tracked_link'
+
+        next if s3_key.blank? || filename.blank?
+
+        if delivery_mode == 'inline_attachment'
+          uploaded = download_s3_object_as_upload(s3_key: s3_key, filename: filename, content_type: content_type)
+          if uploaded
+            inline_uploads << uploaded
+            metadata << {
+              'filename'      => filename,
+              'delivery_mode' => 'inline_attachment',
+              's3_key'        => s3_key
+            }
+          else
+            Rails.logger.error "[Campaign] Skipping inline attachment #{filename} (#{s3_key}) — download failed"
+          end
+        else
+          tl = TrackedLink.create_for_attachment!(
+            company:      @company,
+            s3_key:       s3_key,
+            filename:     filename,
+            content_type: content_type,
+            file_size:    file_size,
+            entity_type:  entity&.class&.name,
+            entity_id:    entity&.id,
+            source_type:  'CampaignStep',
+            source_id:    @step.id
+          )
+          tracked_link_records << tl
+          metadata << {
+            'filename'        => filename,
+            'delivery_mode'   => 'tracked_link',
+            's3_key'          => s3_key,
+            'tracked_link_id' => tl.id,
+            'tracking_url'    => tl.tracking_url
+          }
+        end
+      rescue => e
+        Rails.logger.error "[Campaign] Attachment processing error (#{filename}): #{e.message}"
+      end
+
+      [tracked_link_records, inline_uploads, metadata]
+    end
+
+    def append_tracked_link_section(body, tracked_links)
+      return body if tracked_links.empty?
+
+      section = tracked_links.map do |tl|
+        safe_filename = ERB::Util.html_escape(tl.filename.to_s)
+        "<p><a href=\"#{tl.tracking_url}\">📎 #{safe_filename}</a></p>"
+      end.join("\n")
+
+      "#{body}\n#{section}"
+    end
+
+    def download_s3_object_as_upload(s3_key:, filename:, content_type:)
+      require 'aws-sdk-s3'
+      s3 = Aws::S3::Client.new(
+        region: ENV['AWS_REGION'] || 'us-west-2',
+        access_key_id: ENV['AWS_ACCESS_KEY_ID'],
+        secret_access_key: ENV['AWS_SECRET_ACCESS_KEY']
+      )
+      bucket = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
+
+      tempfile = Tempfile.new(['campaign_att', File.extname(filename)])
+      tempfile.binmode
+      s3.get_object({ bucket: bucket, key: s3_key }) do |chunk|
+        tempfile.write(chunk)
+      end
+      tempfile.rewind
+
+      ActionDispatch::Http::UploadedFile.new(
+        tempfile: tempfile,
+        filename: filename,
+        type:     content_type || 'application/octet-stream'
+      )
+    rescue => e
+      Rails.logger.error "[Campaign] S3 download failed for #{s3_key}: #{e.message}"
+      nil
     end
   end
 end

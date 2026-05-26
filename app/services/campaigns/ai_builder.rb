@@ -17,12 +17,19 @@ module Campaigns
       @location = location
     end
 
-    def generate(prompt:, channel: 'email', context_overrides: {})
+    def generate(prompt:, channel: 'email', context_overrides: {}, attachment_context: [])
       check_credit!
 
       context = build_context(channel, context_overrides)
       system_prompt = system_prompt_for(:generate)
-      user_message = "#{prompt}\n\nContext:\n#{context.to_json}"
+
+      # Build user message with optional document context
+      user_parts = ["#{prompt}\n\nContext:\n#{context.to_json}"]
+      if attachment_context.is_a?(Array) && attachment_context.any?
+        doc_summaries = attachment_context.map { |a| "[Document: #{a['filename']}]\n#{decode_base64_text(a['data_base64'])}" }.join("\n\n")
+        user_parts << "\n\nAttached documents for reference — use their content to inform the campaign copy:\n#{doc_summaries}"
+      end
+      user_message = user_parts.join
 
       response = call_claude(
         system_prompt: system_prompt, user_message: user_message,
@@ -361,6 +368,18 @@ module Campaigns
                 (input_tokens * 0.25 + output_tokens * 1.25) / 10_000.0
               end
       cents.round
+    end
+
+    # Decode base64-encoded document text for AI context.
+    # Strips binary content gracefully; returns first 50K chars to stay within token limits.
+    def decode_base64_text(b64)
+      return '' if b64.blank?
+      raw = Base64.decode64(b64)
+      text = raw.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+      text[0, 50_000]
+    rescue => e
+      Rails.logger.warn "[Campaigns::AiBuilder] decode_base64_text failed: #{e.message}"
+      ''
     end
   end
 end

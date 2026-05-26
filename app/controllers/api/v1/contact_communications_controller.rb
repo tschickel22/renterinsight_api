@@ -209,6 +209,7 @@ module Api
           openedAt: comm.read_at,
           clickedAt: nil,
           createdAt: comm.created_at,
+          source: metadata_obj['source'] || 'manual',
           metadata: metadata_obj  # Returns object, not string!
         }
       end

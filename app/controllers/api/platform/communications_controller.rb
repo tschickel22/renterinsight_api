@@ -1093,7 +1093,8 @@ module Api
       def comm_log_json(comm)
         # Strip HTML from body for clean preview
         clean_body = strip_html_tags(comm.body || '')
-        
+        metadata_obj = comm.metadata.is_a?(Hash) ? comm.metadata : {}
+
         {
           id: comm.id,
           leadId: comm.communicable_id,
@@ -1108,7 +1109,8 @@ module Api
           sentAt: comm.sent_at&.iso8601,
           deliveredAt: comm.delivered_at&.iso8601,
           readAt: comm.read_at&.iso8601,
-          metadata: comm.metadata || {},
+          source: metadata_obj['source'] || 'manual',
+          metadata: metadata_obj,
           createdAt: comm.created_at&.iso8601,
           updatedAt: comm.updated_at&.iso8601
         }.compact
