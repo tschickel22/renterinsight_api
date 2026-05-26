@@ -286,7 +286,7 @@ class Api::V1::CampaignsController < ApplicationController
       campaign_step_id: step.id, campaign_enrollment_id: 0
     )
 
-    base_url = ENV['CAMPAIGN_BASE_URL'].presence || 'https://app.renterinsight.com'
+    base_url = ENV['DMS_API_URL'].presence || ENV['CAMPAIGN_BASE_URL'].presence || 'https://renterinsight-api-staging.onrender.com'
 
     if @campaign.email_channel?
       rendered = Messaging::EmailRenderer.new(
