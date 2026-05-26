@@ -326,8 +326,20 @@ class Api::V1::CampaignsController < ApplicationController
     return render(json: { error: 'prompt is required' }, status: :unprocessable_entity) if prompt.blank?
     channel = params[:channel].presence || 'email'
 
+    # Extract document context (base64-encoded files uploaded for AI to reference)
+    attachment_context = if params[:attachment_context].present?
+                           Array(params[:attachment_context]).map { |a|
+                             ac = a.respond_to?(:to_unsafe_h) ? a.to_unsafe_h : a.to_h
+                             ac.stringify_keys
+                           }
+                         else
+                           []
+                         end
+
     generation = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).generate(
-      prompt: prompt, channel: channel, context_overrides: params[:context_overrides].try(:to_unsafe_h) || {}
+      prompt: prompt, channel: channel,
+      context_overrides: params[:context_overrides].try(:to_unsafe_h) || {},
+      attachment_context: attachment_context
     )
     render json: {
       generation_id: generation.id, plan: generation.generated_plan,
