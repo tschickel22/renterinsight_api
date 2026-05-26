@@ -367,7 +367,14 @@ class Api::V1::CampaignsController < ApplicationController
       location_id: params[:location_id]
     }
 
-    campaign = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).accept(generation: generation, sender_params: sender)
+    plan_override = nil
+    if params[:plan_override].present?
+      plan_override = params[:plan_override].respond_to?(:to_unsafe_h) ? params[:plan_override].to_unsafe_h : params[:plan_override].to_h
+    end
+
+    campaign = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).accept(
+      generation: generation, sender_params: sender, plan_override: plan_override
+    )
     render json: { campaign_id: campaign.id, name: campaign.name, status: campaign.status }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
