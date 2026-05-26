@@ -52,17 +52,27 @@ module Campaigns
       )
     end
 
-    def refine(generation:, feedback:)
+    def refine(generation:, feedback:, attachment_context: [])
       check_credit!
 
       channel = generation.generated_plan['channel'] || 'email'
       system_prompt = system_prompt_for(:refine)
+
+      # Include document context in refine so AI retains knowledge of uploaded docs
+      doc_section = ''
+      if attachment_context.is_a?(Array) && attachment_context.any?
+        doc_summaries = attachment_context.map { |a| "[Document: #{a['filename']}]\n#{decode_base64_text(a['data_base64'])}" }.join("\n\n")
+        doc_section = "\n\nUploaded documents for reference:\n#{doc_summaries}"
+      end
+
       user_message = <<~MSG
         Existing plan: #{generation.generated_plan.to_json}
 
-        Feedback: #{feedback}
+        Company context: #{generation.context_snapshot.to_json}
 
-        Return the COMPLETE updated plan in the same JSON shape.
+        Feedback: #{feedback}#{doc_section}
+
+        Return the COMPLETE updated plan in the same JSON shape. ALWAYS include steps — never return steps as null.
       MSG
 
       response = call_claude(
@@ -149,20 +159,29 @@ module Campaigns
     end
 
     def build_context(channel, overrides)
-      profile = Setting.get('Company', @company.id, 'company_profile') || {}
+      # Try both casings for the setting key (historically inconsistent)
+      profile = Setting.get('Company', @company.id, 'company_profile') ||
+                Setting.get('company', @company.id, 'company_profile') || {}
+
+      # Also pull from company model columns directly as fallback
+      company_hash = {
+        'name' => @company.name,
+        'display_name' => business_display_name,
+        'vertical' => detect_vertical,
+        'business_description' => profile['business_description'].presence || @company.try(:description).to_s.presence,
+        'target_audience' => profile['target_audience'],
+        'products_services' => profile['products_services'],
+        'unique_value_props' => profile['unique_value_props'],
+        'industry_vertical' => profile['industry_vertical'],
+        'brand_voice' => profile['brand_voice'],
+        'website' => @company.try(:website).to_s.presence,
+        'phone' => @company.try(:phone).to_s.presence,
+        'email' => @company.try(:email).to_s.presence,
+        'address' => [@company.try(:address), @company.try(:city), @company.try(:state), @company.try(:zip)].compact.join(', ').presence
+      }.compact
 
       base = {
-        'company' => {
-          'name' => @company.name,
-          'display_name' => business_display_name,
-          'vertical' => detect_vertical,
-          'business_description' => profile['business_description'],
-          'target_audience' => profile['target_audience'],
-          'products_services' => profile['products_services'],
-          'unique_value_props' => profile['unique_value_props'],
-          'industry_vertical' => profile['industry_vertical'],
-          'brand_voice' => profile['brand_voice']
-        }.compact,
+        'company' => company_hash,
         'sender' => sender_context_hash,
         'channel' => channel,
         'inventory_summary' => inventory_summary,
@@ -188,6 +207,34 @@ module Campaigns
         'signature' => @user.try(:typed_signature).to_s.strip,
         'booking_url' => @user.try(:booking_url).to_s.strip
       }.reject { |_, v| v.blank? }
+    end
+
+    # Build a rich sender context block for the system prompt (ported from nurture AI builder)
+    def sender_context_block
+      sender = sender_context_hash
+      biz_name = business_display_name
+      return '' if sender.blank? && biz_name.blank?
+
+      lines = []
+      if sender['signature'].present?
+        lines << "Sender's email signature (use this verbatim at the end of email bodies):"
+        lines << sender['signature']
+      elsif sender['full_name'].present?
+        lines << '  - Build a sign-off at the bottom of email bodies, in this order (omit blank fields, but always end with the business name):'
+        lines << "      Name: #{sender['full_name']}"
+        lines << "      Title: #{sender['title']}" if sender['title'].present?
+        lines << "      Phone: #{sender['phone']}" if sender['phone'].present?
+        lines << "      Business: #{biz_name}" if biz_name.present?
+      end
+      if sender['booking_url'].present?
+        lines << ''
+        lines << "Sender's booking link: #{sender['booking_url']}"
+        lines << '  - For EMAIL: render as HTML anchor with short link text — <a href="URL">Book here</a>. Do NOT expose the raw URL.'
+        lines << '  - For SMS: include the raw URL with framing text.'
+        lines << "  - Don't include the booking link in every step — only where it's the right CTA."
+      end
+      return '' if lines.empty?
+      "\nSENDER CONTEXT:\n#{lines.join("\n")}\n"
     end
 
     def safe_count(rel)
@@ -222,8 +269,21 @@ module Campaigns
     end
 
     def system_prompt_for(mode)
+      profile = Setting.get('Company', @company.id, 'company_profile') ||
+                Setting.get('company', @company.id, 'company_profile') || {}
+
       base = <<~SYS
         You are an expert email/SMS marketing strategist for RenterInsight, a Dealer Management System used by manufactured home and RV dealers. You help dealers build campaigns to either (a) sell DMS to other dealers (B2B) or (b) sell homes/RVs to buyers (B2C).
+
+        BUSINESS CONTEXT:
+        Business name: #{business_display_name}
+        #{profile['business_description'].present? ? "About: #{profile['business_description']}" : ''}
+        #{profile['target_audience'].present? ? "Target audience: #{profile['target_audience']}" : ''}
+        #{profile['products_services'].present? ? "Products/services: #{profile['products_services']}" : ''}
+        #{profile['unique_value_props'].present? ? "Value proposition: #{profile['unique_value_props']}" : ''}
+        Industry: #{profile['industry_vertical'] || 'general'}
+        Brand voice: #{profile['brand_voice'] || 'professional'}
+        #{sender_context_block}
 
         OUTPUT RULES:
         - You MUST respond with a single JSON object, nothing else. No prose, no markdown, no explanation.
@@ -259,12 +319,21 @@ module Campaigns
 
         QUESTIONS FIELD (CRITICAL):
         - If the user's prompt is too vague to confidently build a campaign, return 1-3 clarifying questions in "questions" and set "steps" to null.
-        - Be CONSERVATIVE — most prompts have enough to work with. Only ask when you truly cannot decide channel, audience, or what the content should say.
+        - Be EXTREMELY CONSERVATIVE about asking questions — ALWAYS prefer generating steps over asking.
+        - If you have ANY uploaded documents or company context, you have enough to build the campaign. NEVER ask questions when documents are provided.
+        - Even for vague prompts, attempt to generate steps. Only ask when you literally cannot determine the channel AND the topic.
         - Examples:
-          - "send something to my leads" → ambiguous, ask what the message should be about and what channel
+          - "send something to my leads" → ambiguous but still generate a general outreach series
           - "welcome email series for new MH leads" → clear enough, just build it
-          - "blast about our sale" → mostly clear but what sale? ask 1 question about the offer details
-        - If the prompt is clear, set "questions" to null and produce full "steps".
+          - "blast about our sale" → generate a sale-focused campaign, assume reasonable offer details from company context
+        - If the prompt is clear OR if uploaded documents are provided, set "questions" to null and produce full "steps".
+
+        UPLOADED DOCUMENTS:
+        - When documents are attached, treat them as the PRIMARY source of content for the campaign.
+        - Extract key messaging, product details, pricing, features, and value propositions from the documents.
+        - Weave document content naturally into email copy — don't just summarize, use it to write compelling campaign steps.
+        - If the user uploaded a document, they want that content used. Always generate steps when documents are provided.
+        - Reference specific details from documents (pricing, features, benefits) to make emails specific and valuable.
 
         VOICE:
         - Direct, specific, no "I hope this email finds you well".
@@ -370,16 +439,37 @@ module Campaigns
       cents.round
     end
 
-    # Decode base64-encoded document text for AI context.
-    # Strips binary content gracefully; returns first 50K chars to stay within token limits.
+    # Decode base64-encoded document for AI context.
+    # Handles PDFs (extracts text via pdf-reader gem), plain text, and other formats.
+    # Returns first 50K chars to stay within token limits.
     def decode_base64_text(b64)
       return '' if b64.blank?
       raw = Base64.decode64(b64)
-      text = raw.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
-      text[0, 50_000]
+
+      # Detect PDF by magic bytes (%PDF)
+      if raw[0, 5]&.force_encoding('ASCII-8BIT')&.start_with?('%PDF')
+        extract_pdf_text(raw)
+      else
+        text = raw.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+        text[0, 50_000]
+      end
     rescue => e
       Rails.logger.warn "[Campaigns::AiBuilder] decode_base64_text failed: #{e.message}"
       ''
+    end
+
+    # Extract text from PDF binary data using pdf-reader gem.
+    def extract_pdf_text(pdf_bytes)
+      require 'pdf-reader'
+      io = StringIO.new(pdf_bytes)
+      reader = PDF::Reader.new(io)
+      pages_text = reader.pages.first(30).map { |p| p.text.to_s }.join("\n\n")
+      pages_text[0, 50_000]
+    rescue => e
+      Rails.logger.warn "[Campaigns::AiBuilder] PDF text extraction failed: #{e.message}"
+      # Fallback: try raw UTF-8 extraction
+      raw_text = pdf_bytes.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+      raw_text.gsub(/[^\x20-\x7E\n\r\t]/, ' ').squeeze(' ')[0, 50_000]
     end
   end
 end
