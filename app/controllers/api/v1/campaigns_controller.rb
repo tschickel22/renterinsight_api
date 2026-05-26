@@ -214,8 +214,15 @@ class Api::V1::CampaignsController < ApplicationController
   def test_send
     return unless authorize_action!('campaigns', 'update')
 
-    step = @campaign.campaign_steps.active.ordered.first
-    return render(json: { error: 'Campaign has no active steps' }, status: :unprocessable_entity) unless step
+    # Allow testing a specific step (defaults to first active step)
+    step = if params[:step_id].present?
+             @campaign.campaign_steps.active.find_by(id: params[:step_id])
+           else
+             @campaign.campaign_steps.active.ordered.first
+           end
+    return render(json: { error: 'Step not found or campaign has no active steps' }, status: :unprocessable_entity) unless step
+
+    step_index = @campaign.campaign_steps.active.ordered.pluck(:id).index(step.id) || 0
 
     if @campaign.email_channel?
       return render(json: { error: 'No valid email connection for this campaign' }, status: :unprocessable_entity) if @campaign.resolve_email_connection.nil?
@@ -231,7 +238,7 @@ class Api::V1::CampaignsController < ApplicationController
       campaign_id: @campaign.id, recipient_type: 'User', recipient_id: current_user.id
     )
     enrollment.assign_attributes(
-      company_id: @company.id, status: 'pending', current_step_index: 0,
+      company_id: @company.id, status: 'pending', current_step_index: step_index,
       email_address_snapshot: @campaign.email_channel? ? test_address : nil,
       sms_phone_snapshot: @campaign.sms_channel? ? test_address : nil,
       metadata: { 'test_send' => 'true', 'sent_by_user_id' => current_user.id }
@@ -240,7 +247,7 @@ class Api::V1::CampaignsController < ApplicationController
 
     result = Campaigns::CampaignSender.new(enrollment: enrollment).deliver_current_step
     if result
-      render json: { success: true, recipient: test_address, channel: @campaign.channel }
+      render json: { success: true, recipient: test_address, channel: @campaign.channel, step_position: step.position, step_subject: step.subject }
     else
       last_send = enrollment.campaign_sends.order(created_at: :desc).first
       err = last_send&.metadata.is_a?(Hash) ? last_send.metadata['error'] : nil
