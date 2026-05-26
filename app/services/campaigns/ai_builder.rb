@@ -97,8 +97,8 @@ module Campaigns
       )
     end
 
-    def accept(generation:, sender_params:)
-      plan = generation.generated_plan
+    def accept(generation:, sender_params:, plan_override: nil)
+      plan = plan_override.present? ? plan_override.deep_stringify_keys : generation.generated_plan
       campaign = nil
       ActiveRecord::Base.transaction do
         campaign = @company.campaigns.create!(
@@ -316,6 +316,12 @@ module Campaigns
           },
             "questions": ["string", ...] | null
           }
+
+        HTML FORMATTING:
+        - CRITICAL: Each paragraph MUST be wrapped in its own <p>...</p> tag
+        - Do NOT put all content in a single <p> tag — separate paragraphs need separate <p> blocks
+        - Sign-off should be in its own <p> tag with <br> between lines
+        - Example: <p>First paragraph here.</p><p>Second paragraph about something else.</p><p>Best,<br>Tom Schickel<br>Renter Insight</p>
 
         QUESTIONS FIELD (CRITICAL):
         - If the user's prompt is too vague to confidently build a campaign, return 1-3 clarifying questions in "questions" and set "steps" to null.

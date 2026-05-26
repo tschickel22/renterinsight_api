@@ -149,12 +149,23 @@ class Api::V1::CampaignStepsController < ApplicationController
   end
 
   def step_params
-    params.require(:campaign_step).permit(
+    permitted = params.require(:campaign_step).permit(
       :position, :channel, :wait_days, :wait_hours,
       :subject, :preheader, :sms_body, :media_url, :is_active,
-      body_blocks: [], inventory_block_config: {},
+      inventory_block_config: {},
       attachments: [:s3_key, :filename, :size, :content_type, :delivery_mode]
     )
+
+    if params[:campaign_step][:body_blocks].present?
+      raw_blocks = params[:campaign_step][:body_blocks]
+      permitted[:body_blocks] = if raw_blocks.respond_to?(:map)
+        raw_blocks.map { |b| b.respond_to?(:to_unsafe_h) ? b.to_unsafe_h : b.to_h }
+      else
+        []
+      end
+    end
+
+    permitted
   end
 
   def step_json(s)
