@@ -381,7 +381,19 @@ class Api::V1::CampaignsController < ApplicationController
     feedback = params[:feedback].to_s.strip
     return render(json: { error: 'feedback is required' }, status: :unprocessable_entity) if feedback.blank?
 
-    new_gen = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).refine(generation: generation, feedback: feedback)
+    # Pass document context for refine so AI retains knowledge of uploaded docs
+    attachment_context = if params[:attachment_context].present?
+                           Array(params[:attachment_context]).map { |a|
+                             ac = a.respond_to?(:to_unsafe_h) ? a.to_unsafe_h : a.to_h
+                             ac.stringify_keys
+                           }
+                         else
+                           []
+                         end
+
+    new_gen = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).refine(
+      generation: generation, feedback: feedback, attachment_context: attachment_context
+    )
     render json: { generation_id: new_gen.id, plan: new_gen.generated_plan, has_questions: new_gen.generated_plan['questions'].present?, parent_id: generation.id }
   rescue Campaigns::AiBuilder::CreditLimitError => e
     render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
