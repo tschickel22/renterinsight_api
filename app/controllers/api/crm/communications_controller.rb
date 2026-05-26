@@ -1580,6 +1580,7 @@ module Api
           sentAt:      comm.sent_at&.iso8601,
           deliveredAt: comm.delivered_at&.iso8601,
           readAt:      comm.read_at&.iso8601,
+          source:      metadata_obj['source'] || 'manual',
           metadata:    metadata_obj,
           createdAt:   comm.created_at&.iso8601,
           updatedAt:   comm.updated_at&.iso8601

@@ -507,6 +507,7 @@ class Api::V1::CampaignsController < ApplicationController
       sms_body: s.sms_body,
       media_url: s.media_url,
       inventory_block_config: s.inventory_block_config,
+      attachments: Array(s.attachments),
       is_active: s.is_active
     }
   end
