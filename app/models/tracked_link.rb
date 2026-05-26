@@ -56,10 +56,11 @@ class TrackedLink < ApplicationRecord
   end
 
   def tracking_url
-    # Must point to the Rails API server (where /t/:token route lives), NOT the frontend app
-    base = (ENV['RENDER_EXTERNAL_URL'].presence ||
+    # Must point to the Rails API server (where /t/:token route lives), NOT the frontend app.
+    # RENDER_EXTERNAL_URL is auto-set by Render but may point to a custom domain (e.g. PM platform).
+    # Use DMS_API_URL (explicitly set to the DMS API domain) as the primary source.
+    base = (ENV['DMS_API_URL'].presence ||
             ENV['CAMPAIGN_BASE_URL'].presence ||
-            ENV['DMS_API_URL'].presence ||
             'https://renterinsight-api-staging.onrender.com').to_s.chomp('/')
     "#{base}/t/#{token}"
   end
@@ -72,10 +73,13 @@ class TrackedLink < ApplicationRecord
       secret_access_key: ENV['AWS_SECRET_ACCESS_KEY']
     )
     bucket = s3.bucket(ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging')
+    # Use inline disposition so PDFs/images open in browser; other types download
+    disposition = content_type&.start_with?('image/') || content_type == 'application/pdf' ? 'inline' : 'attachment'
+    safe_filename = (filename || 'download').gsub('"', '')
     bucket.object(s3_key).presigned_url(
       :get,
       expires_in: expires_in.to_i,
-      response_content_disposition: "attachment; filename=\"#{filename}\""
+      response_content_disposition: "#{disposition}; filename=\"#{safe_filename}\""
     )
   end
 
