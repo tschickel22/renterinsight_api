@@ -619,7 +619,7 @@ ticket_data = [
 ticket_data.each_with_index do |td, idx|
   contact = contacts[td[:contact]]
   sched_date = Date.current + td[:sched_offset].days
-  company.service_tickets.find_or_create_by!(title: td[:title]) do |st|
+  ticket = company.service_tickets.find_or_create_by!(title: td[:title]) do |st|
     st.status = td[:status]
     st.priority = td[:priority]
     st.contact_id = contact&.id
@@ -628,14 +628,19 @@ ticket_data.each_with_index do |td, idx|
     st.location_id = locations["AUB"].id
     st.ticket_number = "#{DEMO_PREFIX.upcase}-ST-2026-#{(idx + 1).to_s.rjust(3, '0')}"
     st.description = td[:title]
-    st.scheduled_date = sched_date
-    st.custom_fields = { "scheduledTime" => td[:time], "estimatedHours" => td[:hours] }
     st.is_warranty_suspected = false
     st.is_warranty_confirmed = false
     st.portal_visible = false
   end
+  # Always (re)set scheduled_date + custom_fields so re-runs without RESET
+  # still surface tickets on the Calendar. find_or_create_by's block only
+  # fires on create, so an existing ticket would otherwise stay unscheduled.
+  ticket.update!(
+    scheduled_date: sched_date,
+    custom_fields:  { "scheduledTime" => td[:time], "estimatedHours" => td[:hours] }
+  )
 end
-puts "  Created #{ticket_data.length} service tickets (scheduled across calendar)"
+puts "  Created/updated #{ticket_data.length} service tickets (scheduled across calendar)"
 
 # ── 14. Suppliers ──────────────────────────────────────────
 puts "\n14. Creating suppliers..."
@@ -1778,13 +1783,19 @@ if defined?(Budget) && defined?(BudgetLine)
 end
 
 # ── 34. Buyer Portal Access (proxy-able client portal) ────
+# BuyerPortalAccess.email is globally unique, but seeded contact emails are
+# hardcoded and shared across every demo company (e.g. jsmuts1959@gmail.com).
+# Whichever demo is seeded first claims those emails; subsequent demos would
+# end up with 0 portal accounts. Namespace the portal login with DEMO_PREFIX
+# so each demo company gets its own portal accounts.
 puts "\n34. Setting up client portal access..."
 if defined?(BuyerPortalAccess)
   portal_contacts = ["Jeretta Smuts", "Brian Keller", "William Martin", "Dennis Hopper"]
   portal_contacts.each do |name|
     contact = contacts[name]
     next unless contact
-    BuyerPortalAccess.find_or_create_by!(email: contact.email) do |bpa|
+    portal_email = contact.email.sub('@', "+#{DEMO_PREFIX}@")
+    BuyerPortalAccess.find_or_create_by!(email: portal_email) do |bpa|
       bpa.buyer_type = "Contact"
       bpa.buyer_id = contact.id
       bpa.company_id = company.id
@@ -1798,7 +1809,8 @@ if defined?(BuyerPortalAccess)
       bpa.marketing_opt_in = true
     end
   end
-  puts "  Portal accounts: #{BuyerPortalAccess.where(company_id: company.id).count} (login with contact email + #{DEMO_PASSWORD})"
+  count = BuyerPortalAccess.where(company_id: company.id).count
+  puts "  Portal accounts: #{count} (login email format: <contact>+#{DEMO_PREFIX}@<domain>, password #{DEMO_PASSWORD})"
 end
 
 # ── 35. Work Queue + Calendar (Tasks & Activities) ────────
@@ -1814,6 +1826,7 @@ puts "\n35. Seeding work queue + calendar data..."
 sales_users = [users[:sales1], users[:sales2]].compact
 manager     = users[:manager]
 tech        = users[:tech]
+admin       = users[:admin]
 
 today_9am = Date.current.to_time.change(hour: 9)
 def at_hour(date, hour, min = 0) date.to_time.change(hour: hour, min: min) end
@@ -1841,6 +1854,12 @@ task_specs = [
   { title: "Submit warranty claim - drywall crack", desc: "Champion warranty form + photos",                  due: at_hour(Date.current + 5.days, 10), priority: :medium, status: :pending,     assignee: tech,           taskable: nil,           mod: 'service' },
   { title: "Q2 sales pipeline review",              desc: "Forecast vs target — Auburn showroom",             due: at_hour(Date.current + 7.days, 16), priority: :low,    status: :pending,     assignee: manager,        taskable: nil,           mod: 'admin' },
   { title: "Refresh website inventory photos",      desc: "Five new units need lot photos",                   due: at_hour(Date.current + 10.days, 11), priority: :low,   status: :pending,     assignee: sales_users[1], taskable: nil,           mod: 'marketing' },
+
+  # Admin-owned (Tom Mitchell / admin@<prefix>demo.com)
+  { title: "Approve Hoosier bulk-order pricing",    desc: "Sign off on $450k Hoosier Land bulk discount",     due: at_hour(Date.current - 1.day, 16),  priority: :urgent, status: :pending,     assignee: admin,          taskable: deals["Hoosier Dev - Bulk Order"], mod: 'deals' },
+  { title: "Review weekly KPI dashboard",           desc: "Pipeline + close rate review for Monday standup",  due: at_hour(Date.current,         9),   priority: :high,   status: :pending,     assignee: admin,          taskable: nil,           mod: 'admin' },
+  { title: "Sign month-end commission run",         desc: "Validate commission payouts against closed deals", due: at_hour(Date.current + 2.days, 11), priority: :high,   status: :pending,     assignee: admin,          taskable: nil,           mod: 'admin' },
+  { title: "Annual budget vs actual review",        desc: "Walk through Budget vs Actual report with CFO",    due: at_hour(Date.current + 6.days, 14), priority: :medium, status: :pending,     assignee: admin,          taskable: nil,           mod: 'admin' },
 ]
 
 task_count = 0
@@ -1907,6 +1926,27 @@ la_specs = [
   { lead: lead_baker, type: 'call', subject: 'Initial discovery call',
     due: at_hour(Date.current - 3.days, 11), phone: lead_baker&.phone, dir: 'outbound',
     assignee: sales_users[0], status: 'completed' },
+
+  # Admin (Tom Mitchell) — exec-level oversight
+  { lead: lead_stewart, type: 'meeting', subject: 'Exec intro — high-value prospect',
+    start: at_hour(Date.current + 2.days, 9), finish: at_hour(Date.current + 2.days, 10),
+    meeting_location: 'Auburn Showroom Conference Room', assignee: admin },
+  { lead: lead_hughes, type: 'call', subject: 'Owner intro call',
+    due: at_hour(Date.current, 15), phone: lead_hughes&.phone, dir: 'outbound',
+    assignee: admin },
+  { lead: lead_morris, type: 'reminder', subject: 'Check on financing escalation',
+    reminder: 4.hours.from_now, assignee: admin },
+
+  # Manager (Sarah Collins) — sales coaching / oversight
+  { lead: lead_morris, type: 'meeting', subject: 'Sales coaching ride-along',
+    start: at_hour(Date.current + 1.day, 14), finish: at_hour(Date.current + 1.day, 15, 30),
+    meeting_location: 'Auburn Showroom — Lot', assignee: manager },
+  { lead: lead_baker, type: 'task', subject: 'Review Baker proposal before send',
+    due: at_hour(Date.current, 12), assignee: manager },
+
+  # Tech (Dave Torres) — service follow-ups tied to leads
+  { lead: lead_hughes, type: 'reminder', subject: 'Schedule pre-delivery inspection',
+    reminder: 3.hours.from_now, assignee: tech },
 ]
 
 la_count = 0
@@ -1963,6 +2003,14 @@ da_specs = [
     assignee: manager },
   { deal: deal_fisher, type: 'reminder', subject: 'Send updated proposal',
     reminder: 4.hours.from_now, assignee: sales_users[1] },
+  { deal: deals["Hoosier Dev - Bulk Order"], type: 'meeting', subject: 'VP signoff — Hoosier bulk pricing',
+    start: at_hour(Date.current + 2.days, 13), finish: at_hour(Date.current + 2.days, 14),
+    assignee: admin },
+  { deal: deal_martin, type: 'call', subject: 'Pre-delivery walk-through scheduling',
+    due: at_hour(Date.current + 1.day, 9), phone: '(260) 555-2001', dir: 'outbound',
+    assignee: tech },
+  { deal: deal_smuts, type: 'task', subject: 'Owner review of Smuts deal margin',
+    due: at_hour(Date.current, 10), assignee: admin },
 ]
 
 da_count = 0
@@ -1996,6 +2044,8 @@ da_specs.each do |s|
     attrs[:reminder_time]   = s[:reminder]
     attrs[:due_date]        = s[:reminder]
     attrs[:reminder_method] = ['popup']
+  when 'task'
+    attrs[:due_date]       = s[:due]
   end
 
   DealActivity.create!(attrs)
@@ -2017,6 +2067,21 @@ ca_specs = [
     assignee: manager },
   { contact: contact_martin, type: 'task', subject: 'Confirm utility hookup schedule',
     due: at_hour(Date.current + 1.day, 9), assignee: manager },
+
+  # Admin (Tom Mitchell) — quarterly check-ins / VIP relationships
+  { contact: contacts["Marcus Johnson"], type: 'meeting', subject: 'Quarterly check-in — Hoosier Land',
+    start: at_hour(Date.current + 4.days, 10), finish: at_hour(Date.current + 4.days, 11),
+    assignee: admin },
+  { contact: contact_smuts, type: 'call', subject: 'Owner thank-you call',
+    due: at_hour(Date.current, 17), phone: contact_smuts&.phone, dir: 'outbound',
+    assignee: admin },
+
+  # Sales reps — contact follow-ups
+  { contact: contacts["Dennis Hopper"], type: 'call', subject: 'Lakeside community follow-up',
+    due: at_hour(Date.current + 1.day, 11), phone: contacts["Dennis Hopper"]&.phone, dir: 'outbound',
+    assignee: sales_users[0] },
+  { contact: contacts["Robert Chen"], type: 'task', subject: 'Send Q2 loan pricing sheet',
+    due: at_hour(Date.current + 2.days, 14), assignee: sales_users[1] },
 ]
 
 ca_count = 0
