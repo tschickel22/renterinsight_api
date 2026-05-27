@@ -179,15 +179,44 @@ class Public::InventoryController < ApplicationController
                (params[:location_id].present? ? @company.locations.find_by(id: params[:location_id]) : nil)
     branding = resolve_branding(location)
     
-    # Contact info - from location if available, otherwise company name only
+    # Contact location resolution:
+    # 1. contact_location_id param (from embed config URL) → use that specific location
+    # 2. Saved embed config (fallback when no param) → check company's saved settings
+    # 3. vehicle's own location → use that
+    # 4. Corporate location fallback
+    contact_location = if params[:contact_location_id].present?
+      @company.locations.find_by(id: params[:contact_location_id], is_deleted: [false, nil])
+    else
+      # Check saved embed config for contact location preference
+      saved_config = Setting.get('Company', @company.id, 'embed_inventory_config') rescue nil
+      if saved_config.is_a?(Hash)
+        mode = saved_config['contactLocationMode'] || saved_config['contact_location_mode'] || 'vehicle'
+        case mode
+        when 'specific'
+          loc_id = saved_config['contactLocationId'] || saved_config['contact_location_id']
+          @company.locations.find_by(id: loc_id, is_deleted: [false, nil]) if loc_id.present?
+        when 'corporate'
+          @company.locations.where(is_deleted: [false, nil], active: true, is_corporate: true).first
+        else
+          nil # 'vehicle' mode — fall through to vehicle's location below
+        end
+      end
+    end
+    contact_location ||= @vehicle.location
+    contact_location ||= @company.locations.where(is_deleted: [false, nil], active: true, is_corporate: true).first
+    contact_location ||= @company.locations.where(is_deleted: [false, nil], active: true).order(:created_at).first
+    
+    # Contact info - from resolved contact location
     company_data = {
       name: @company.name,
-      phone: location&.phone,
-      email: location&.email,
-      address: location&.address_line1,
-      city: location&.city,
-      state: location&.state,
-      zip: location&.zip_code
+      phone: contact_location&.phone,
+      email: contact_location&.email,
+      address: contact_location&.address_line1,
+      city: contact_location&.city,
+      state: contact_location&.state,
+      zip: contact_location&.zip_code,
+      full_address: contact_location&.full_address,
+      location_name: contact_location&.name
     }
     
     render json: {

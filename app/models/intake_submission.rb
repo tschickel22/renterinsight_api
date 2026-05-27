@@ -181,28 +181,96 @@ class IntakeSubmission < ApplicationRecord
   end
   
   def create_activity_and_notify(lead, form)
+    Rails.logger.info "[IntakeSubmission] >>> create_activity_and_notify called for lead #{lead.id}, form #{form.id}"
     return unless form.notified_user_id.present?
+    
+    notified_user = User.find_by(id: form.notified_user_id)
+    Rails.logger.info "[IntakeSubmission] Notified user: #{notified_user&.email || 'NOT FOUND'} (ID: #{form.notified_user_id})"
+    return unless notified_user
     
     # Create activity for the notified user
     activity = LeadActivity.create!(
       lead_id: lead.id,
       user_id: form.notified_user_id,
+      assigned_to_id: form.notified_user_id,
       activity_type: 'reminder',
       subject: "New Lead from Intake Form: #{lead.first_name} #{lead.last_name}",
       description: "Lead captured via intake form '#{form.name}'. Contact: #{lead.email || lead.phone || 'N/A'}",
       priority: 'high',
       status: 'pending',
-      reminder_time: Time.current,  # Fixed: use reminder_time instead of due_at
+      reminder_time: Time.current,
       reminder_sent: false
     )
     
-    # Send immediate popup notification
-    ActivityReminderService.send_popup_notification(activity)
+    # Send popup + bell notification (real-time toast in browser)
+    ActivityReminderService.send_reminder(activity)
     
-    Rails.logger.info "Created activity #{activity.id} and sent notification for lead #{lead.id}"
+    # ALWAYS send email for new intake form leads, regardless of user notification preferences.
+    # This is a direct lead notification — the dealer configured this person to receive it.
+    send_intake_lead_email(lead, form, notified_user)
+    
+    Rails.logger.info "Created activity #{activity.id} and sent full notification for lead #{lead.id} to user #{notified_user.email}"
   rescue => e
     Rails.logger.error "Failed to create activity/notification for lead #{lead.id}: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
+  end
+  
+  def send_intake_lead_email(lead, form, user)
+    return unless user.email.present?
+    
+    company = Company.find_by(id: form.company_id)
+    submission_data = data || {}
+    
+    # Build vehicle info if from inventory embed
+    vehicle_info = ""
+    if submission_data['vehicle_title'].present?
+      vehicle_info = "<br><br><strong>Home of Interest:</strong> #{submission_data['vehicle_title']}"
+      vehicle_info += "<br>Price: $#{submission_data['vehicle_price']}" if submission_data['vehicle_price'].present?
+      vehicle_info += "<br>Stock #: #{submission_data['vehicle_stock_number']}" if submission_data['vehicle_stock_number'].present?
+      vehicle_info += "<br><a href='#{submission_data['vehicle_url']}'>View Listing</a>" if submission_data['vehicle_url'].present?
+    end
+    
+    frontend_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+    
+    subject = "New Lead: #{lead.first_name} #{lead.last_name} - #{form.name}"
+    body = <<~HTML
+      <h2>New Lead from Intake Form</h2>
+      <p>A new lead has been captured via your intake form <strong>"#{form.name}"</strong>.</p>
+      
+      <h3>Contact Information</h3>
+      <p>
+        <strong>Name:</strong> #{lead.first_name} #{lead.last_name}<br>
+        <strong>Email:</strong> #{lead.email || 'Not provided'}<br>
+        <strong>Phone:</strong> #{lead.phone || 'Not provided'}
+        #{vehicle_info}
+      </p>
+      
+      <p><a href="#{frontend_url}/crm/leads/#{lead.id}" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">View Lead in CRM</a></p>
+      
+      <hr>
+      <p style="color: #6b7280; font-size: 12px;">#{company&.name || 'RenterInsight'} - Automated Lead Notification</p>
+    HTML
+    
+    begin
+      CommunicationService.send_email(
+        communicable: lead,
+        to: user.email,
+        subject: subject,
+        body: body,
+        category: 'system',
+        content_type: 'text/html',
+        skip_preference_check: true,
+        metadata: {
+          source: 'intake_form',
+          form_id: form.id,
+          form_name: form.name
+        }
+      )
+      Rails.logger.info "[IntakeSubmission] \u2705 Sent intake lead email via CommunicationService to #{user.email}"
+    rescue => e
+      Rails.logger.error "[IntakeSubmission] \u274c Failed to send intake lead email: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.first(5).join("\n")
+    end
   end
   
   private

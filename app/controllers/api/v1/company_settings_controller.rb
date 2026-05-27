@@ -10,6 +10,8 @@ module Api
       before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac, :save_communication_settings, :clear_communication_settings, :update_company_profile]
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
+      before_action :authorize_settings_read!, only: [:show_embed_inventory_config]
+      before_action :authorize_settings_update!, only: [:update_embed_inventory_config]
       before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
       before_action :authorize_settings_update!, only: [:show_portal_modules, :update_portal_modules]
       before_action :authorize_settings_read!, only: [:show_form_states]
@@ -419,6 +421,57 @@ module Api
             source: state_tax_rates.key?(state_code) ? 'state' : 'default'
           }
         end
+      end
+
+      # GET /api/v1/company_settings/embed_inventory_config
+      # Returns the saved embed inventory configuration (lead form, location, source filter, etc.)
+      def show_embed_inventory_config
+        config = Setting.get('Company', @company.id, 'embed_inventory_config') || {}
+
+        # Also return available locations for the dropdown
+        locations = @company.locations.where(is_deleted: [false, nil], active: true).order(:name).map do |loc|
+          {
+            id: loc.id,
+            name: loc.name,
+            code: loc.code,
+            address_line1: loc.address_line1,
+            city: loc.city,
+            state: loc.state,
+            zip_code: loc.zip_code,
+            phone: loc.phone,
+            email: loc.email,
+            full_address: loc.full_address,
+            is_corporate: loc.is_corporate
+          }
+        end
+
+        render json: {
+          embed_inventory_config: config,
+          locations: locations
+        }
+      end
+
+      # PATCH /api/v1/company_settings/embed_inventory_config
+      # Saves the embed inventory configuration
+      def update_embed_inventory_config
+        config_params = params[:embed_inventory_config]
+        if config_params.present?
+          config = config_params.to_unsafe_h
+        else
+          config = {}
+        end
+
+        Setting.set('Company', @company.id, 'embed_inventory_config', config)
+
+        saved_config = Setting.get('Company', @company.id, 'embed_inventory_config')
+
+        render json: {
+          embed_inventory_config: saved_config,
+          message: 'Embed inventory configuration saved successfully'
+        }
+      rescue => e
+        Rails.logger.error "[CompanySettings#update_embed_inventory_config] Error: #{e.message}"
+        render json: { errors: [e.message] }, status: :unprocessable_entity
       end
 
       # GET /api/v1/company_settings/loan

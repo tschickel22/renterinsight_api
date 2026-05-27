@@ -12,7 +12,10 @@ Rails.application.configure do
         email_config = platform_settings['email']
         
         # Only configure SMTP if enabled and has credentials
-        if email_config['isEnabled'] && email_config['smtpHost'].present?
+        # NOTE: When provider is 'aws_ses', emails are sent via AwsSesProvider
+        # per-message (not through ActionMailer SMTP). This initializer only
+        # configures the global fallback for ActionMailer-based mailers.
+        if email_config['isEnabled'] && email_config['smtpHost'].present? && email_config['provider'] != 'aws_ses'
           Rails.logger.info "📧 Configuring ActionMailer from Platform Settings"
           
           # Decrypt password if encrypted

@@ -1,6 +1,6 @@
 Hi <%= @user.name %>,
 
-<%= activity_type_label %>
+<%= case @activity.activity_type; when 'task' then 'New Task'; when 'meeting' then 'Meeting Scheduled'; when 'call' then 'Call Scheduled'; when 'reminder' then 'Reminder'; else 'Activity'; end %>
 
 Subject: <%= @activity.subject %>
 <% if @activity.description.present? %>
@@ -16,7 +16,7 @@ Meeting Time: <%= @activity.start_time.strftime("%B %d, %Y at %I:%M %p") %>
 <% if @activity.meeting_location.present? %>
 Location: <%= @activity.meeting_location %>
 <% end %>
-<% if @activity.meeting_link.present% %>
+<% if @activity.meeting_link.present? %>
 Meeting Link: <%= @activity.meeting_link %>
 <% end %>
 <% end %>

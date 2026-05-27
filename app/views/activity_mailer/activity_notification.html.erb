@@ -22,7 +22,7 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1 style="margin: 0;"><%= activity_type_label %></h1>
+        <h1 style="margin: 0;"><%= case @activity.activity_type; when 'task' then 'New Task'; when 'meeting' then 'Meeting Scheduled'; when 'call' then 'Call Scheduled'; when 'reminder' then 'Reminder'; else 'Activity'; end %></h1>
       </div>
       
       <div class="content">

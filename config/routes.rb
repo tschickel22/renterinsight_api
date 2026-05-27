@@ -235,6 +235,8 @@ Rails.application.routes.draw do
         get 'tax_rate_for_state', action: :tax_rate_for_state
         get 'ai_settings', action: :ai_settings
         patch 'ai_settings', action: :update_ai_settings
+        get 'embed_inventory_config', action: :show_embed_inventory_config
+        patch 'embed_inventory_config', action: :update_embed_inventory_config
       end
       
       # ==================== GLOBAL SEARCH ====================
