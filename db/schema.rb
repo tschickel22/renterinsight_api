@@ -3446,6 +3446,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_27_224859) do
     t.integer "preferred_min_sqft"
     t.integer "preferred_max_sqft"
     t.string "preferred_home_type"
+    t.datetime "source_created_at"
     t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"
@@ -3460,6 +3461,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_27_224859) do
     t.index ["owner_id", "last_activity_at"], name: "index_leads_on_owner_id_and_last_activity_at"
     t.index ["owner_id"], name: "index_leads_on_owner_id"
     t.index ["social_post_id"], name: "index_leads_on_social_post_id"
+    t.index ["source_created_at"], name: "index_leads_on_source_created_at"
     t.index ["source_id"], name: "index_leads_on_source_id"
     t.index ["utm_campaign"], name: "index_leads_on_utm_campaign"
     t.index ["utm_medium"], name: "index_leads_on_utm_medium"
