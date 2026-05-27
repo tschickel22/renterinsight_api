@@ -53,10 +53,9 @@ Rails.application.configure do
   # Replace the default in-process memory cache store with a durable alternative.
   # config.cache_store = :mem_cache_store
 
-  # Use async adapter for background jobs in all environments
-  # Jobs run in background threads within the Rails process
-  # Good for low-to-medium volume jobs like nurture sequences
-  config.active_job.queue_adapter = :async
+  # Solid Queue runs inside Puma (set SOLID_QUEUE_IN_PUMA=true on Render).
+  # Jobs and recurring tasks (config/recurring.yml) persist in the primary DB.
+  config.active_job.queue_adapter = :solid_queue
 
   # Ignore bad email addresses and do not raise email delivery errors.
   # Set this to true and configure the email server for immediate delivery to raise delivery errors.
