@@ -170,7 +170,7 @@ class ChampionLeadSyncJob < ApplicationJob
     # Track decline
     if declined && lead.champion_declined_at.nil?
       attrs[:champion_declined_at] = declined['declinedDateTime']
-      attrs[:status] = 'lost' unless lead.status.in?(%w[won converted])
+      attrs[:status] = 'lost_lead' unless lead.status.in?(%w[won converted])
     end
 
     lead.update!(attrs)
@@ -185,7 +185,7 @@ class ChampionLeadSyncJob < ApplicationJob
     case champion_status
     when 'new'      then 'new'
     when 'active'   then 'contacted'
-    when 'declined' then 'lost'
+    when 'declined' then 'lost_lead'
     else 'new'
     end
   end

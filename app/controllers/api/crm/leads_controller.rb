@@ -7,7 +7,7 @@ module Api
       # Dead-end statuses excluded from "All Active" view.
       # Any status NOT in this list (including custom statuses) is considered active.
       EXCLUDED_STATUSES = %w[
-        lost closed_lost lost_lead not_qualified junk_lead
+        closed_lost lost_lead not_qualified junk_lead
       ].freeze
 
       def index
