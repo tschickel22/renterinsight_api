@@ -7,7 +7,7 @@ module Api
       # Dead-end statuses excluded from "All Active" view.
       # Any status NOT in this list (including custom statuses) is considered active.
       EXCLUDED_STATUSES = %w[
-        closed_lost lost_lead not_qualified junk_lead
+        lost closed_lost lost_lead not_qualified junk_lead
       ].freeze
 
       def index
@@ -97,7 +97,8 @@ module Api
         # Count AFTER search filter (for pagination)
         filtered_count = leads.count
         
-        leads = leads.includes(:source, :owner, :vehicle, :lead_scores, :tags).order(created_at: :desc)
+        leads = leads.includes(:source, :owner, :vehicle, :lead_scores, :tags)
+                     .order(Arel.sql('COALESCE(source_created_at, created_at) DESC'))
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -729,6 +730,7 @@ module Api
           score: l.lead_scores.max_by(&:updated_at)&.score,
           tags: l.tags.map { |t| { id: t.id, name: t.name, color: t.respond_to?(:color) ? t.color : nil } },
           createdAt: l.created_at,
+          sourceCreatedAt: l.source_created_at,
           updatedAt: l.updated_at
         }
       end

@@ -123,6 +123,7 @@ class ChampionLeadSyncJob < ApplicationJob
       champion_status:         data['status'],
       champion_lead_data:      data,
       champion_config_id:      config.id,
+      source_created_at:       data['createdDateTime'],
       champion_accepted_at:    accepted&.dig('acceptedDateTime'),
       notes:                   build_notes(data),
       location_id:             config.location_id,
@@ -152,6 +153,9 @@ class ChampionLeadSyncJob < ApplicationJob
       champion_status:    data['status'],
       champion_lead_data: data
     }
+
+    # Backfill source_created_at for leads that pre-date this column
+    attrs[:source_created_at] = data['createdDateTime'] if lead.source_created_at.nil? && data['createdDateTime'].present?
 
     # Fill in contact info once the lead has been accepted on Champion's side
     attrs[:email] = contact['email'] if contact['email'].present? && lead.email.blank?
