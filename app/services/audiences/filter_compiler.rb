@@ -15,20 +15,55 @@ module Audiences
       tags_include tags_exclude tags_any_of
     ].freeze
 
-    def initialize(company:, source_type:, filter_tree:, exclude_filter_tree: nil)
+    VIRTUAL_FIELDS = %w[source_name owner_name].freeze
+
+    def initialize(company:, source_type:, filter_tree:,
+                   exclude_filter_tree: nil,
+                   manual_include_ids: nil,
+                   manual_exclude_ids: nil,
+                   exclude_active_campaign_enrollees: false,
+                   exclude_active_nurture_enrollees: false)
       @company = company
       @source_type = source_type
       @filter_tree = filter_tree.is_a?(Hash) ? filter_tree.deep_stringify_keys : {}
       @exclude_filter_tree = exclude_filter_tree.is_a?(Hash) ? exclude_filter_tree.deep_stringify_keys : nil
+      @manual_include_ids = Array(manual_include_ids).map(&:to_i).reject(&:zero?)
+      @manual_exclude_ids = Array(manual_exclude_ids).map(&:to_i).reject(&:zero?)
+      @exclude_active_campaign_enrollees = ActiveModel::Type::Boolean.new.cast(exclude_active_campaign_enrollees)
+      @exclude_active_nurture_enrollees = ActiveModel::Type::Boolean.new.cast(exclude_active_nurture_enrollees)
     end
 
     def scope
       base = base_relation
       base = apply_node(base, @filter_tree) if @filter_tree.present?
 
+      if @manual_include_ids.any?
+        base = base.or(base_relation.where(id: @manual_include_ids))
+      end
+
       if @exclude_filter_tree.present?
         excluded_ids_scope = apply_node(base_relation, @exclude_filter_tree).select(:id)
         base = base.where.not(id: excluded_ids_scope)
+      end
+
+      if @manual_exclude_ids.any?
+        base = base.where.not(id: @manual_exclude_ids)
+      end
+
+      if @exclude_active_campaign_enrollees
+        active_campaign_recipient_ids = CampaignEnrollment
+          .where(status: %w[pending active])
+          .where(recipient_type: @source_type)
+          .select(:recipient_id)
+        base = base.where.not(id: active_campaign_recipient_ids)
+      end
+
+      if @exclude_active_nurture_enrollees
+        active_nurture_ids = NurtureEnrollment
+          .where(status: 'running')
+          .where(enrollable_type: @source_type)
+          .select(:enrollable_id)
+        base = base.where.not(id: active_nurture_ids)
       end
 
       base
@@ -105,6 +140,10 @@ module Audiences
 
       return apply_tag_leaf(scope, operator, value) if operator.start_with?('tags_')
 
+      if VIRTUAL_FIELDS.include?(field)
+        return apply_virtual_leaf(scope, field, operator, value)
+      end
+
       column = resolve_column(field)
       raise CompilationError, "Unknown field: #{field}" unless column
 
@@ -143,6 +182,77 @@ module Audiences
       when 'days_since_greater_than'
         days = value.to_i
         scope.where("#{qualified} < ?", days.days.ago)
+      end
+    end
+
+    # Virtual fields resolve through a join (source_name, owner_name).
+    # We compute matching IDs in a subquery so we don't pollute the outer scope's joins.
+    def apply_virtual_leaf(scope, field, operator, value)
+      table = scope.model.table_name
+
+      case field
+      when 'source_name'
+        return scope.where("#{table}.source_id IS NOT NULL") if operator == 'is_set'
+        return scope.where("#{table}.source_id IS NULL") if operator == 'is_blank'
+
+        matching_source_ids = Source.where(company_id: @company.id)
+        case operator
+        when 'equals'
+          matching_source_ids = matching_source_ids.where('sources.name = ?', value)
+        when 'not_equals'
+          matching_source_ids = matching_source_ids.where('sources.name <> ?', value)
+        when 'contains'
+          matching_source_ids = matching_source_ids.where('sources.name ILIKE ?', "%#{escape_like(value.to_s)}%")
+        when 'in'
+          matching_source_ids = matching_source_ids.where('sources.name IN (?)', Array(value))
+        when 'not_in'
+          matching_source_ids = matching_source_ids.where.not('sources.name IN (?)', Array(value))
+        else
+          raise CompilationError, "Operator #{operator} not supported on source_name"
+        end
+
+        ids_sub = matching_source_ids.select(:id)
+        if operator == 'not_equals' || operator == 'not_in'
+          scope.where("#{table}.source_id IS NULL OR #{table}.source_id IN (?)", ids_sub)
+        else
+          scope.where("#{table}.source_id IN (?)", ids_sub)
+        end
+
+      when 'owner_name'
+        return scope.where("#{table}.owner_id IS NOT NULL") if operator == 'is_set'
+        return scope.where("#{table}.owner_id IS NULL") if operator == 'is_blank'
+
+        name_expr = "(COALESCE(users.first_name, '') || ' ' || COALESCE(users.last_name, ''))"
+        matching_user_ids = User.all
+        case operator
+        when 'equals'
+          v = value.to_s
+          matching_user_ids = matching_user_ids.where(
+            "TRIM(#{name_expr}) = ? OR users.email = ? OR users.name = ?",
+            v, v, v
+          )
+        when 'not_equals'
+          v = value.to_s
+          matching_user_ids = matching_user_ids.where.not(
+            "TRIM(#{name_expr}) = ? OR users.email = ? OR users.name = ?",
+            v, v, v
+          )
+        when 'contains'
+          pattern = "%#{escape_like(value.to_s)}%"
+          matching_user_ids = matching_user_ids.where(
+            "#{name_expr} ILIKE ? OR users.email ILIKE ? OR users.name ILIKE ?",
+            pattern, pattern, pattern
+          )
+        else
+          raise CompilationError, "Operator #{operator} not supported on owner_name"
+        end
+
+        ids_sub = matching_user_ids.select(:id)
+        if operator == 'not_equals'
+          scope.where("#{table}.owner_id IS NULL OR #{table}.owner_id IN (?)", ids_sub)
+        else
+          scope.where("#{table}.owner_id IN (?)", ids_sub)
+        end
       end
     end
 
@@ -194,9 +304,9 @@ module Audiences
     def allowed_columns_for_source
       case @source_type
       when 'Lead'
-        %w[first_name last_name email phone status source_id health_score opt_in_sms last_activity_at created_at updated_at]
+        %w[first_name last_name email phone status source_id health_score opt_in_sms last_activity_at created_at updated_at company_name title location_id owner_id]
       when 'Contact'
-        %w[first_name last_name email phone opt_in_sms account_id created_at updated_at]
+        %w[first_name last_name email phone opt_in_sms account_id created_at updated_at company_name title location_id owner_id]
       when 'Account'
         %w[name account_type website created_at updated_at]
       else
