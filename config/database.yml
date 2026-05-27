@@ -24,43 +24,13 @@ test:
   url: <%= ENV['DATABASE_URL']&.gsub('ri_dms_dev', 'ri_dms_test') || 'postgres://postgres:postgres@localhost:5432/ri_dms_test' %>
 
 staging:
-  primary:
-    <<: *default
-    # Render provides DATABASE_URL automatically
-    url: <%= ENV['DATABASE_URL'] %>
-  cache:
-    <<: *default
-    database: ri_dms_staging_cache
-    url: <%= ENV['CACHE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_staging_cache') %>
-    migrations_paths: db/cache_migrate
-  queue:
-    <<: *default
-    database: ri_dms_staging_queue
-    url: <%= ENV['QUEUE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_staging_queue') %>
-    migrations_paths: db/queue_migrate
-  cable:
-    <<: *default
-    database: ri_dms_staging_cable
-    url: <%= ENV['CABLE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_staging_cable') %>
-    migrations_paths: db/cable_migrate
+  <<: *default
+  # Render provides DATABASE_URL automatically.
+  # Solid Queue tables live in this DB (see db/migrate/*install_solid_queue*).
+  url: <%= ENV['DATABASE_URL'] %>
 
 production:
-  primary:
-    <<: *default
-    # Render provides DATABASE_URL automatically
-    url: <%= ENV['DATABASE_URL'] %>
-  cache:
-    <<: *default
-    database: ri_dms_production_cache
-    url: <%= ENV['CACHE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_production_cache') %>
-    migrations_paths: db/cache_migrate
-  queue:
-    <<: *default
-    database: ri_dms_production_queue
-    url: <%= ENV['QUEUE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_production_queue') %>
-    migrations_paths: db/queue_migrate
-  cable:
-    <<: *default
-    database: ri_dms_production_cable
-    url: <%= ENV['CABLE_DATABASE_URL'] || ENV['DATABASE_URL']&.gsub(/\/[^\/]+$/, '/ri_dms_production_cable') %>
-    migrations_paths: db/cable_migrate
+  <<: *default
+  # Render provides DATABASE_URL automatically.
+  # Solid Queue tables live in this DB (see db/migrate/*install_solid_queue*).
+  url: <%= ENV['DATABASE_URL'] %>

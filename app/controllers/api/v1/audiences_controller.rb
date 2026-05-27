@@ -2,7 +2,7 @@ require 'csv'
 
 class Api::V1::AudiencesController < ApplicationController
   before_action :set_company_scope
-  before_action :set_audience, only: %i[show update destroy preview refresh archive unarchive members export]
+  before_action :set_audience, only: %i[show update destroy preview refresh archive unarchive members export add_members remove_members]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -62,7 +62,8 @@ class Api::V1::AudiencesController < ApplicationController
     return unless authorize_action!('campaigns', 'update')
 
     if @audience.update(audience_params)
-      compute_estimate(@audience) if audience_params.key?(:filter_tree) || audience_params.key?(:exclude_filter_tree)
+      estimate_keys = %i[filter_tree exclude_filter_tree manual_include_ids manual_exclude_ids exclude_active_campaign_enrollees exclude_active_nurture_enrollees]
+      compute_estimate(@audience) if estimate_keys.any? { |k| audience_params.key?(k) }
       render json: audience_json(@audience, full: true)
     else
       render json: { errors: @audience.errors.full_messages }, status: :unprocessable_entity
@@ -102,10 +103,22 @@ class Api::V1::AudiencesController < ApplicationController
 
     filter_tree = params[:filter_tree].present? ? to_hash(params[:filter_tree]) : @audience.filter_tree
     exclude = params[:exclude_filter_tree].present? ? to_hash(params[:exclude_filter_tree]) : @audience.exclude_filter_tree
+    manual_include_ids = params.key?(:manual_include_ids) ? Array(params[:manual_include_ids]) : @audience.manual_include_ids
+    manual_exclude_ids = params.key?(:manual_exclude_ids) ? Array(params[:manual_exclude_ids]) : @audience.manual_exclude_ids
+    exclude_active_campaign_enrollees = params.key?(:exclude_active_campaign_enrollees) ?
+      ActiveModel::Type::Boolean.new.cast(params[:exclude_active_campaign_enrollees]) :
+      @audience.exclude_active_campaign_enrollees
+    exclude_active_nurture_enrollees = params.key?(:exclude_active_nurture_enrollees) ?
+      ActiveModel::Type::Boolean.new.cast(params[:exclude_active_nurture_enrollees]) :
+      @audience.exclude_active_nurture_enrollees
 
     compiler = Audiences::FilterCompiler.new(
       company: @company, source_type: @audience.source_type,
-      filter_tree: filter_tree, exclude_filter_tree: exclude
+      filter_tree: filter_tree, exclude_filter_tree: exclude,
+      manual_include_ids: manual_include_ids,
+      manual_exclude_ids: manual_exclude_ids,
+      exclude_active_campaign_enrollees: exclude_active_campaign_enrollees,
+      exclude_active_nurture_enrollees: exclude_active_nurture_enrollees
     )
 
     render json: {
@@ -131,7 +144,11 @@ class Api::V1::AudiencesController < ApplicationController
 
     compiler = Audiences::FilterCompiler.new(
       company: @company, source_type: source_type,
-      filter_tree: filter_tree, exclude_filter_tree: exclude
+      filter_tree: filter_tree, exclude_filter_tree: exclude,
+      manual_include_ids: Array(params[:manual_include_ids]),
+      manual_exclude_ids: Array(params[:manual_exclude_ids]),
+      exclude_active_campaign_enrollees: ActiveModel::Type::Boolean.new.cast(params[:exclude_active_campaign_enrollees]),
+      exclude_active_nurture_enrollees: ActiveModel::Type::Boolean.new.cast(params[:exclude_active_nurture_enrollees])
     )
 
     render json: {
@@ -146,10 +163,7 @@ class Api::V1::AudiencesController < ApplicationController
   def members
     return unless authorize_action!('campaigns', 'read')
 
-    scope = Audiences::FilterCompiler.new(
-      company: @company, source_type: @audience.source_type,
-      filter_tree: @audience.filter_tree, exclude_filter_tree: @audience.exclude_filter_tree
-    ).scope
+    scope = compiler_for(@audience).scope
 
     scope = apply_member_search(scope, params[:search]) if params[:search].present?
 
@@ -172,10 +186,7 @@ class Api::V1::AudiencesController < ApplicationController
   def export
     return unless authorize_action!('campaigns', 'read')
 
-    scope = Audiences::FilterCompiler.new(
-      company: @company, source_type: @audience.source_type,
-      filter_tree: @audience.filter_tree, exclude_filter_tree: @audience.exclude_filter_tree
-    ).scope
+    scope = compiler_for(@audience).scope
 
     scope = apply_member_search(scope, params[:search]) if params[:search].present?
 
@@ -251,6 +262,40 @@ class Api::V1::AudiencesController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  def add_members
+    return unless authorize_action!('campaigns', 'update')
+
+    ids = Array(params[:ids]).map(&:to_i).reject(&:zero?)
+    return render(json: { error: 'ids is required' }, status: :unprocessable_entity) if ids.empty?
+
+    current_includes = Array(@audience.manual_include_ids).map(&:to_i)
+    current_excludes = Array(@audience.manual_exclude_ids).map(&:to_i)
+
+    new_includes = (current_includes + ids).uniq
+    new_excludes = current_excludes - ids
+
+    @audience.update!(manual_include_ids: new_includes, manual_exclude_ids: new_excludes)
+    compute_estimate(@audience)
+    render json: audience_json(@audience, full: true)
+  end
+
+  def remove_members
+    return unless authorize_action!('campaigns', 'update')
+
+    ids = Array(params[:ids]).map(&:to_i).reject(&:zero?)
+    return render(json: { error: 'ids is required' }, status: :unprocessable_entity) if ids.empty?
+
+    current_includes = Array(@audience.manual_include_ids).map(&:to_i)
+    current_excludes = Array(@audience.manual_exclude_ids).map(&:to_i)
+
+    new_excludes = (current_excludes + ids).uniq
+    new_includes = current_includes - ids
+
+    @audience.update!(manual_include_ids: new_includes, manual_exclude_ids: new_excludes)
+    compute_estimate(@audience)
+    render json: audience_json(@audience, full: true)
+  end
+
   def ai_accept
     return unless authorize_action!('campaigns', 'create')
 
@@ -279,7 +324,22 @@ class Api::V1::AudiencesController < ApplicationController
   def audience_params
     params.require(:audience).permit(
       :name, :description, :source_type, :location_id,
-      filter_tree: {}, exclude_filter_tree: {}, metadata: {}
+      :exclude_active_campaign_enrollees, :exclude_active_nurture_enrollees,
+      filter_tree: {}, exclude_filter_tree: {}, metadata: {},
+      manual_include_ids: [], manual_exclude_ids: []
+    )
+  end
+
+  def compiler_for(audience)
+    Audiences::FilterCompiler.new(
+      company: @company,
+      source_type: audience.source_type,
+      filter_tree: audience.filter_tree,
+      exclude_filter_tree: audience.exclude_filter_tree,
+      manual_include_ids: audience.manual_include_ids,
+      manual_exclude_ids: audience.manual_exclude_ids,
+      exclude_active_campaign_enrollees: audience.exclude_active_campaign_enrollees,
+      exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees
     )
   end
 
@@ -290,10 +350,7 @@ class Api::V1::AudiencesController < ApplicationController
   end
 
   def compute_estimate(audience)
-    compiler = Audiences::FilterCompiler.new(
-      company: @company, source_type: audience.source_type,
-      filter_tree: audience.filter_tree, exclude_filter_tree: audience.exclude_filter_tree
-    )
+    compiler = compiler_for(audience)
     audience.update_columns(estimated_count: compiler.count, estimated_at: Time.current)
   rescue Audiences::FilterCompiler::CompilationError => e
     Rails.logger.warn "[AudiencesController] estimate compute failed: #{e.message}"
@@ -304,11 +361,17 @@ class Api::V1::AudiencesController < ApplicationController
       id: a.id, name: a.name, description: a.description, source_type: a.source_type,
       estimated_count: a.estimated_count, estimated_at: a.estimated_at,
       is_archived: a.is_archived, location_id: a.location_id,
+      exclude_active_campaign_enrollees: a.exclude_active_campaign_enrollees,
+      exclude_active_nurture_enrollees: a.exclude_active_nurture_enrollees,
+      manual_include_count: Array(a.manual_include_ids).size,
+      manual_exclude_count: Array(a.manual_exclude_ids).size,
       created_by_user_id: a.created_by_user_id, created_at: a.created_at, updated_at: a.updated_at
     }
     return base unless full
     base.merge(
       filter_tree: a.filter_tree, exclude_filter_tree: a.exclude_filter_tree,
+      manual_include_ids: Array(a.manual_include_ids),
+      manual_exclude_ids: Array(a.manual_exclude_ids),
       generated_from_ai_generation_id: a.generated_from_ai_generation_id,
       campaigns_using_count: a.campaign_audiences.count,
       campaigns_using: a.campaign_audiences.includes(:campaign).map { |ca|

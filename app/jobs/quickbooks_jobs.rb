@@ -57,9 +57,7 @@ module QuickbooksJobs
     def perform
       deleted_logs = QuickbooksSyncLog.where('created_at < ?', 30.days.ago).delete_all
       deleted_webhooks = QuickbooksWebhook.cleanup_old(30)
-      
-      QuickbooksSyncMapping.with_errors.where('sync_error_count > 10').update_all(sync_status: 'disabled')
-      
+
       Rails.logger.info("QB Cleanup: Deleted #{deleted_logs} logs, #{deleted_webhooks} webhooks")
     end
   end

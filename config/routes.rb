@@ -1746,6 +1746,8 @@ Rails.application.routes.draw do
           post :unarchive
           get :members
           get :export, defaults: { format: 'csv' }
+          post :add_members
+          post :remove_members
         end
         collection do
           post :preview_dry_run

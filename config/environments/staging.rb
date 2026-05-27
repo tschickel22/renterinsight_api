@@ -46,8 +46,9 @@ Rails.application.configure do
   # Show deprecations in staging to catch issues before production.
   config.active_support.report_deprecations = true
   
-  # Use async adapter for background jobs (processes in background threads)
-  config.active_job.queue_adapter = :async
+  # Solid Queue runs inside Puma (set SOLID_QUEUE_IN_PUMA=true on Render).
+  # Jobs and recurring tasks (config/recurring.yml) persist in the primary DB.
+  config.active_job.queue_adapter = :solid_queue
 
   # Set host for mailer templates
   config.action_mailer.default_url_options = { 
