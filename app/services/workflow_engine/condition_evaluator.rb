@@ -35,17 +35,20 @@ module WorkflowEngine
       when 'equals' then field_value == value
       when 'not_equals' then field_value != value
       when 'contains'
-        if field_value.is_a?(String) then field_value.include?(value.to_s)
+        # Case-insensitive to match the SQL ILIKE semantics used by Audiences::FilterCompiler
+        # (the audience preview/count). Without this, enrollment silently matches fewer records
+        # than the preview promised whenever case differs (e.g. "Champion" vs "champion").
+        if field_value.is_a?(String) then field_value.downcase.include?(value.to_s.downcase)
         elsif field_value.is_a?(Array) then field_value.include?(value)
         else false
         end
       when 'not_contains'
-        if field_value.is_a?(String) then !field_value.include?(value.to_s)
+        if field_value.is_a?(String) then !field_value.downcase.include?(value.to_s.downcase)
         elsif field_value.is_a?(Array) then !field_value.include?(value)
         else true
         end
-      when 'starts_with' then field_value.to_s.start_with?(value.to_s)
-      when 'ends_with' then field_value.to_s.end_with?(value.to_s)
+      when 'starts_with' then field_value.to_s.downcase.start_with?(value.to_s.downcase)
+      when 'ends_with' then field_value.to_s.downcase.end_with?(value.to_s.downcase)
       when 'greater_than' then field_value.to_f > value.to_f
       when 'less_than' then field_value.to_f < value.to_f
       when 'greater_than_or_equal' then field_value.to_f >= value.to_f
