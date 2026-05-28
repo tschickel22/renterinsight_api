@@ -472,6 +472,13 @@ class Company < ApplicationRecord
   def operational_settings
     @operational_settings ||= Setting.get('Company', id, 'operational') || {}
   end
+
+  # Timezone used for campaign send-window scheduling (Messaging::SendWindowCalculator).
+  # Sourced from the company's operational settings; falls back to Eastern when unset.
+  # Accepts IANA names (e.g. "America/Denver") which ActiveSupport#in_time_zone understands.
+  def time_zone
+    operational_settings['timezone'].presence || 'America/New_York'
+  end
   
   def branding_settings
     @branding_settings ||= Setting.get('Company', id, 'branding') || {}
