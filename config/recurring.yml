@@ -66,6 +66,10 @@ default: &default
     class: FloorPlanAccrualJob
     queue: default
     schedule: every day at 6am
+  send_ai_digest:
+    class: SendAiDigestJob
+    queue: default
+    schedule: every monday at 7am
 
 production:
   <<: *default

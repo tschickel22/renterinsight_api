@@ -59,10 +59,8 @@ module ChampionDisclaimer
         heading: 'About Champion Homes',
         body: BOILERPLATE,
         retailer_sentence: retailer_sentence,
-        learn_more_url: 'https://www.championhomes.com',
-        learn_more_text: LEARN_MORE,
         # Full combined text for simple rendering
-        full_text: [BOILERPLATE, retailer_sentence, LEARN_MORE].compact.reject(&:blank?).join(' ')
+        full_text: [BOILERPLATE, retailer_sentence].compact.reject(&:blank?).join(' ')
       }
     end
 
