@@ -512,9 +512,9 @@ class Api::V1::CampaignsController < ApplicationController
   def campaign_member_row(r, source_type, enrollments = [])
     base = case source_type
            when 'Lead'
-             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, status: r.status, created_at: r.created_at }
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email, phone: r.phone, status: r.status, created_at: r.created_at }
            when 'Contact'
-             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, account_id: r.try(:account_id), created_at: r.created_at }
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email, phone: r.phone, account_id: r.try(:account_id), created_at: r.created_at }
            when 'Account'
              { id: r.id, name: r.name, account_type: r.account_type, website: r.website, created_at: r.created_at }
            else
