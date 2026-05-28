@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_27_234715) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_28_143900) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6368,6 +6368,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_27_234715) do
     t.integer "days_on_floor_plan", default: 0
     t.date "floor_plan_curtailed_at"
     t.string "floor_plan_lender"
+    t.string "matterport_url"
+    t.string "champion_pdp_url"
+    t.jsonb "elevation_images", default: [], null: false
+    t.string "champion_series_name"
+    t.string "champion_brand_name"
+    t.string "champion_brand_logo_url"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
