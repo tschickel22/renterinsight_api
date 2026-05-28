@@ -58,7 +58,8 @@ RSpec.describe Messaging::SendWindowCalculator do
   end
 
   it 'uses the company timezone when the recipient has no state' do
-    Setting.set('Company', company.id, 'operational', { 'timezone' => 'America/Denver' })
+    # 'operational_settings' is the key the Company Settings UI writes (CompanySettingsController)
+    Setting.set('Company', company.id, 'operational_settings', { 'timezone' => 'America/Denver' })
     recipient = Struct.new(:state).new(nil)
     # 8:00 AM Mountain is before the 9 AM window. If it (wrongly) used Eastern, local time
     # would be 10 AM — inside the window — and it would return :ok instead of a deferral.
