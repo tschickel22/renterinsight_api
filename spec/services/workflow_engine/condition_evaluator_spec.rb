@@ -10,6 +10,40 @@ RSpec.describe WorkflowEngine::ConditionEvaluator do
       expect(described_class.evaluate({}, {})).to eq(true)
     end
 
+    context 'string operators are case-insensitive (match SQL ILIKE used by audience preview)' do
+      it 'contains matches regardless of case' do
+        leaf = { 'field' => 'company_name', 'operator' => 'contains', 'value' => 'champion' }
+        expect(described_class.evaluate(leaf, { 'company_name' => 'Champion Homes' })).to eq(true)
+        expect(described_class.evaluate(leaf, { 'company_name' => 'CHAMPION' })).to eq(true)
+      end
+
+      it 'not_contains is case-insensitive' do
+        leaf = { 'field' => 'company_name', 'operator' => 'not_contains', 'value' => 'champion' }
+        expect(described_class.evaluate(leaf, { 'company_name' => 'Champion Homes' })).to eq(false)
+        expect(described_class.evaluate(leaf, { 'company_name' => 'Skyline' })).to eq(true)
+      end
+
+      it 'starts_with and ends_with are case-insensitive' do
+        starts = { 'field' => 'company_name', 'operator' => 'starts_with', 'value' => 'champ' }
+        expect(described_class.evaluate(starts, { 'company_name' => 'Champion Homes' })).to eq(true)
+        ends = { 'field' => 'email', 'operator' => 'ends_with', 'value' => 'SKYLINEHOMES.COM' }
+        expect(described_class.evaluate(ends, { 'email' => 'tbarker@skylinehomes.com' })).to eq(true)
+      end
+
+      it 'matches the production audience filter that previously enrolled 0 of 5 leads' do
+        # company_name contains "champion" AND email contains "skyline"
+        filter = {
+          'type' => 'and',
+          'children' => [
+            { 'field' => 'company_name', 'operator' => 'contains', 'value' => 'champion' },
+            { 'field' => 'email', 'operator' => 'contains', 'value' => 'skyline' }
+          ]
+        }
+        lead = { 'company_name' => 'Champion Homes', 'email' => 'mnagy@skylinehomes.com' }
+        expect(described_class.evaluate(filter, lead)).to eq(true)
+      end
+    end
+
     context 'tag operators' do
       let(:string_tags_ctx) { { 'tags' => %w[hot_lead vip] } }
       let(:hash_tags_ctx)   { { 'tags' => [{ 'id' => 1, 'name' => 'hot_lead' }, { 'id' => 2, 'name' => 'vip' }] } }

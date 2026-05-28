@@ -6,7 +6,7 @@ class Api::V1::CampaignEnrollmentsController < ApplicationController
   def index
     return unless authorize_action!('campaigns', 'read')
 
-    enrollments = @campaign.campaign_enrollments
+    enrollments = @campaign.campaign_enrollments.real
     enrollments = enrollments.where(status: params[:status]) if params[:status].present?
 
     page = (params[:page] || 1).to_i

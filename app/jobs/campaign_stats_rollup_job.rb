@@ -3,8 +3,8 @@ class CampaignStatsRollupJob < ApplicationJob
 
   def perform
     Campaign.where(status: %w[running paused completed]).find_each do |c|
-      sends = c.campaign_sends
-      enrollments = c.campaign_enrollments
+      sends = c.campaign_sends.real
+      enrollments = c.campaign_enrollments.real
       stats = {
         'total_sent'   => sends.where.not(sent_at: nil).count,
         'delivered'    => sends.where.not(delivered_at: nil).count,

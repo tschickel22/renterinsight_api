@@ -13,6 +13,12 @@ class CampaignEnrollment < ApplicationRecord
   scope :active, -> { where(status: %w[pending active]) }
   scope :due_for_send, -> { active.where('next_send_at <= ?', Time.current) }
 
+  # Test sends (CampaignsController#test_send) create a real enrollment with this metadata
+  # flag so the sender pipeline works. They must be excluded from analytics and recipient
+  # lists so they don't inflate "sent" counts or show the admin as a campaign recipient.
+  scope :test_sends, -> { where("metadata->>'test_send' = 'true'") }
+  scope :real, -> { where("metadata->>'test_send' IS DISTINCT FROM 'true'") }
+
   def contact_snapshot_present
     if email_address_snapshot.blank? && sms_phone_snapshot.blank?
       errors.add(:base, 'Either email_address_snapshot or sms_phone_snapshot must be present')

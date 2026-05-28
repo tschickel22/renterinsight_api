@@ -44,7 +44,7 @@ module Campaigns
     private
 
     def sends_per_day
-      @campaign.campaign_sends
+      @campaign.campaign_sends.real
         .where('sent_at >= ? AND sent_at < ?', @start_date.beginning_of_day, (@end_date + 1.day).beginning_of_day)
         .where.not(sent_at: nil)
         .group("DATE(sent_at)")
@@ -53,7 +53,7 @@ module Campaigns
     end
 
     def events_per_day
-      base = @campaign.campaign_sends
+      base = @campaign.campaign_sends.real
                      .where('sent_at >= ? AND sent_at < ?', @start_date.beginning_of_day, (@end_date + 1.day).beginning_of_day)
 
       result = {}
@@ -77,7 +77,7 @@ module Campaigns
     end
 
     def bounces_per_day
-      @campaign.campaign_sends
+      @campaign.campaign_sends.real
         .where('bounced_at >= ? AND bounced_at < ?', @start_date.beginning_of_day, (@end_date + 1.day).beginning_of_day)
         .where.not(bounced_at: nil)
         .group("DATE(bounced_at)")
