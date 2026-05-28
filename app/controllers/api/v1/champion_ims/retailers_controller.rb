@@ -71,10 +71,15 @@ module Api
             return
           end
 
+          # Mark as running BEFORE enqueuing so the immediate response reflects
+          # the new status. This prevents a race where the frontend sees the old
+          # 'success' status and doesn't start polling until the next reload.
+          @retailer.update!(last_sync_status: 'running', last_sync_error: nil)
+
           ChampionImsSyncJob.perform_later(@retailer.id, trigger: 'manual')
           render json: {
             message: "Sync queued for #{@retailer.display_label}",
-            retailer: retailer_json(@retailer)
+            retailer: retailer_json(@retailer.reload)
           }, status: :accepted
         end
 
