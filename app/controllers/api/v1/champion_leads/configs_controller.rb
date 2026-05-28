@@ -76,11 +76,16 @@ class Api::V1::ChampionLeads::ConfigsController < ApplicationController
   def sync_now
     return unless authorize_action!('leads', 'update')
 
-    ChampionLeadSyncJob.perform_later(@config.id)
+    # Run synchronously so the UI gets the real result immediately
+    ChampionLeadSyncJob.perform_now(@config.id)
+
+    # Reload to get updated stats/error fields
+    @config.reload
 
     render json: {
-      success: true,
-      message: 'Sync job queued. Leads will appear within a few minutes.'
+      success: @config.last_sync_error.blank?,
+      message: sync_result_message(@config),
+      config: config_json(@config)
     }
   end
 
@@ -98,6 +103,20 @@ class Api::V1::ChampionLeads::ConfigsController < ApplicationController
       :retailer_name, :active, :location_id, :sync_interval_minutes,
       :default_lead_owner_id
     )
+  end
+
+  def sync_result_message(config)
+    if config.last_sync_error.present?
+      config.last_sync_error
+    else
+      stats = config.last_sync_stats || {}
+      created = stats['created'] || stats[:created] || 0
+      updated = stats['updated'] || stats[:updated] || 0
+      parts = []
+      parts << "#{created} new" if created > 0
+      parts << "#{updated} updated" if updated > 0
+      parts.any? ? "Sync complete: #{parts.join(', ')}" : 'Sync complete — no new leads'
+    end
   end
 
   def config_json(config)
