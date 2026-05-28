@@ -88,7 +88,9 @@ class LocationSettingsResolver
 
   def resolved_operational_settings
     platform_operational = Setting.get('Platform', 0, 'operational') || {}
-    company_operational = Setting.get('Company', @company.id, 'operational') || {}
+    # The Company Settings UI writes the 'operational_settings' key; fall back to legacy 'operational'.
+    company_operational = (Setting.get('Company', @company.id, 'operational_settings').presence ||
+                           Setting.get('Company', @company.id, 'operational')) || {}
     location_operational = Setting.get('Location', @location.id, 'operational') || {}
 
     Rails.logger.debug "⚙️ [LocationSettingsResolver] Resolving operational for Location #{@location.id}"

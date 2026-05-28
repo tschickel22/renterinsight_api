@@ -56,4 +56,19 @@ RSpec.describe Messaging::SendWindowCalculator do
     out = described_class.new(send_window: {}, channel: 'sms', recipient: recipient, company: nil, now: nogo).evaluate
     expect(out).to be_a(Time)
   end
+
+  it 'uses the company timezone when the recipient has no state' do
+    # 'operational_settings' is the key the Company Settings UI writes (CompanySettingsController)
+    Setting.set('Company', company.id, 'operational_settings', { 'timezone' => 'America/Denver' })
+    recipient = Struct.new(:state).new(nil)
+    # 8:00 AM Mountain is before the 9 AM window. If it (wrongly) used Eastern, local time
+    # would be 10 AM — inside the window — and it would return :ok instead of a deferral.
+    now = Time.use_zone('America/Denver') { Time.zone.local(2026, 4, 27, 8, 0, 0) }
+    out = described_class.new(
+      send_window: { 'business_hours_only' => true, 'start_hour' => 9, 'end_hour' => 17 },
+      channel: 'email', recipient: recipient, company: company, now: now
+    ).evaluate
+    expect(out).to be_a(Time)
+    expect(out.in_time_zone('America/Denver').hour).to eq(9)
+  end
 end

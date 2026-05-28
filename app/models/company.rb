@@ -469,8 +469,21 @@ class Company < ApplicationRecord
   end
   
   # Settings helpers
+  # The Company Settings UI (CompanySettingsController) persists operational settings under
+  # the 'operational_settings' key. Prefer that; fall back to the legacy 'operational' key
+  # for any older data. (Previously this read only 'operational', which the UI never writes,
+  # so it returned {} for every UI-configured company.)
   def operational_settings
-    @operational_settings ||= Setting.get('Company', id, 'operational') || {}
+    @operational_settings ||= Setting.get('Company', id, 'operational_settings').presence ||
+                              Setting.get('Company', id, 'operational') ||
+                              {}
+  end
+
+  # Timezone used for campaign send-window scheduling (Messaging::SendWindowCalculator).
+  # Stored as an IANA name (e.g. "America/Denver"), which ActiveSupport#in_time_zone accepts.
+  # Falls back to Eastern when unset.
+  def time_zone
+    operational_settings['timezone'].presence || 'America/New_York'
   end
   
   def branding_settings
