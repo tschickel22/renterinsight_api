@@ -13,7 +13,11 @@ class SendAiDigestJob < ApplicationJob
     companies = if company_id
       Company.where(id: company_id)
     else
-      Company.where(subscription_status: %w[active trial]).order(:id)
+      # Companies with active subscriptions — subscription status lives in
+      # tenant_subscriptions table (has_one :tenant_subscription on Company).
+      Company.joins(:tenant_subscription)
+             .where(tenant_subscriptions: { status: %w[active trial] })
+             .order(:id)
     end
 
     companies.each do |company|
@@ -39,23 +43,19 @@ class SendAiDigestJob < ApplicationJob
           cost_cents:    result[:cost_cents]
         )
 
-        # Broadcast to all admin-tier users of this company + platform admins.
-        # IMPORTANT: roles are stored as display strings e.g. "Company Administrator",
-        # not snake_case. Match both formats for safety.
+        # Broadcast to all admin-tier users of this company (including platform
+        # admins who belong to THIS company). Platform admins span all companies
+        # but company.users only returns users whose company_id matches, so they
+        # only get a digest for the company they actually belong to.
         admin_role_strings = [
           'Company Administrator', 'Location Administrator',
           'admin', 'company_admin', 'platform_admin', 'super_admin'
         ]
 
-        company_admins = company.users
+        admin_users = company.users
           .where(deleted_at: nil)
           .where(role: admin_role_strings)
-
-        platform_admins = User
-          .where(deleted_at: nil)
-          .where(role: ['platform_admin', 'super_admin'])
-
-        admin_users = (company_admins.to_a + platform_admins.to_a).uniq(&:id)
+          .to_a
 
         admin_users.each do |admin|
           # 1. Save a persistent notification so it appears in the bell
