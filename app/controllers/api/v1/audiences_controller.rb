@@ -170,10 +170,13 @@ class Api::V1::AudiencesController < ApplicationController
     total = scope.count
     page = (params[:page] || 1).to_i
     per_page = [(params[:per_page] || 50).to_i, 200].min
-    records = scope.offset((page - 1) * per_page).limit(per_page)
+    records = scope.offset((page - 1) * per_page).limit(per_page).to_a
+
+    enrollment_map = load_enrollment_data(records.map(&:id), @audience.source_type)
+    items = records.map { |r| member_row(r, enrollment_map[r.id] || []) }
 
     render json: {
-      items: records.map { |r| member_row(r) },
+      items: items,
       meta: {
         total: total, page: page, per_page: per_page,
         total_pages: (total.to_f / per_page).ceil
@@ -401,19 +404,63 @@ class Api::V1::AudiencesController < ApplicationController
     end
   end
 
-  def member_row(r)
-    case @audience.source_type
-    when 'Lead'
-      { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
-        phone: r.phone, status: r.status, created_at: r.created_at }
-    when 'Contact'
-      { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
-        phone: r.phone, account_id: r.account_id, created_at: r.created_at }
-    when 'Account'
-      { id: r.id, name: r.name, account_type: r.account_type, website: r.website,
-        created_at: r.created_at }
-    else
-      { id: r.id }
+  def member_row(r, enrollments = [])
+    base = case @audience.source_type
+           when 'Lead'
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
+               phone: r.phone, status: r.status, created_at: r.created_at }
+           when 'Contact'
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
+               phone: r.phone, account_id: r.account_id, created_at: r.created_at }
+           when 'Account'
+             { id: r.id, name: r.name, account_type: r.account_type, website: r.website,
+               created_at: r.created_at }
+           else
+             { id: r.id }
+           end
+    base.merge(last_activity_at: r.try(:last_activity_at), enrollments: enrollments)
+  end
+
+  # Batch-load active campaign + nurture enrollments for the given record ids,
+  # keyed by record id, to avoid N+1 queries when building member rows.
+  def load_enrollment_data(record_ids, source_type)
+    return {} if record_ids.empty?
+
+    result = Hash.new { |h, k| h[k] = [] }
+
+    CampaignEnrollment
+      .where(recipient_type: source_type, recipient_id: record_ids, status: %w[pending active])
+      .includes(:campaign)
+      .each do |ce|
+        result[ce.recipient_id] << {
+          type: 'campaign', id: ce.campaign_id,
+          name: ce.campaign&.name || 'Unknown Campaign', status: ce.status
+        }
+      end
+
+    nurture_scope =
+      if source_type == 'Lead'
+        # Legacy enrollments may use lead_id instead of the polymorphic enrollable.
+        NurtureEnrollment
+          .where(status: %w[idle running])
+          .where('(enrollable_type = ? AND enrollable_id IN (?)) OR lead_id IN (?)', 'Lead', record_ids, record_ids)
+          .includes(:nurture_sequence)
+      else
+        NurtureEnrollment
+          .where(enrollable_type: source_type, enrollable_id: record_ids, status: %w[idle running])
+          .includes(:nurture_sequence)
+      end
+
+    nurture_scope.each do |ne|
+      entity_id = ne.enrollable_id || ne.lead_id
+      next unless entity_id
+
+      result[entity_id] << {
+        type: 'nurture', id: ne.nurture_sequence_id,
+        name: ne.nurture_sequence&.name || 'Unknown Sequence', status: ne.status
+      }
     end
+
+    result
   end
 end

@@ -1,6 +1,6 @@
 class Api::V1::CampaignsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries audience_members exclude_audience_members]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -437,7 +437,134 @@ class Api::V1::CampaignsController < ApplicationController
     }
   end
 
+  def audience_members
+    return unless authorize_action!('campaigns', 'read')
+
+    ca = @campaign.campaign_audience
+    return render(json: { error: 'No audience configured' }, status: :not_found) unless ca
+
+    compiler = Audiences::FilterCompiler.new(
+      company: @company,
+      source_type: ca.source_type,
+      filter_tree: ca.filter_tree,
+      exclude_filter_tree: ca.exclude_filter_tree
+    )
+    scope = compiler.scope
+
+    # Exclude manually excluded IDs
+    excluded_ids = Array(ca.manual_exclude_ids).map(&:to_i).reject(&:zero?)
+    scope = scope.where.not(id: excluded_ids) if excluded_ids.any?
+
+    # Search
+    if params[:search].present?
+      term = '%' + params[:search] + '%'
+      case ca.source_type
+      when 'Lead', 'Contact'
+        scope = scope.where('first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ?', term, term, term, term)
+      when 'Account'
+        scope = scope.where('name ILIKE ? OR website ILIKE ?', term, term)
+      end
+    end
+
+    total = scope.count
+    page = (params[:page] || 1).to_i
+    per_page = [(params[:per_page] || 25).to_i, 200].min
+    records = scope.offset((page - 1) * per_page).limit(per_page).to_a
+
+    enrollment_map = load_enrollment_data(records.map(&:id), ca.source_type)
+    items = records.map { |r| campaign_member_row(r, ca.source_type, enrollment_map[r.id] || []) }
+
+    render json: {
+      items: items,
+      meta: { total: total, page: page, per_page: per_page, total_pages: (total.to_f / per_page).ceil }
+    }
+  rescue Audiences::FilterCompiler::CompilationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  def exclude_audience_members
+    return unless authorize_action!('campaigns', 'update')
+
+    ca = @campaign.campaign_audience
+    return render(json: { error: 'No audience configured' }, status: :not_found) unless ca
+
+    ids = Array(params[:ids]).map(&:to_i).reject(&:zero?)
+    return render(json: { error: 'ids required' }, status: :unprocessable_entity) if ids.empty?
+
+    current_excludes = Array(ca.manual_exclude_ids).map(&:to_i)
+    new_excludes = (current_excludes + ids).uniq
+
+    ca.update!(manual_exclude_ids: new_excludes)
+
+    # Recompute estimated count
+    compiler = Audiences::FilterCompiler.new(
+      company: @company, source_type: ca.source_type,
+      filter_tree: ca.filter_tree, exclude_filter_tree: ca.exclude_filter_tree
+    )
+    excluded_scope = compiler.scope.where.not(id: new_excludes)
+    ca.update_columns(estimated_count: excluded_scope.count, estimated_at: Time.current)
+
+    render json: { success: true, excluded_count: new_excludes.size, estimated_count: excluded_scope.count }
+  end
+
   private
+
+  def campaign_member_row(r, source_type, enrollments = [])
+    base = case source_type
+           when 'Lead'
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, status: r.status, created_at: r.created_at }
+           when 'Contact'
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, account_id: r.try(:account_id), created_at: r.created_at }
+           when 'Account'
+             { id: r.id, name: r.name, account_type: r.account_type, website: r.website, created_at: r.created_at }
+           else
+             { id: r.id }
+           end
+    base.merge(last_activity_at: r.try(:last_activity_at), enrollments: enrollments)
+  end
+
+  # Batch-load active campaign + nurture enrollments for the given record ids,
+  # keyed by record id, to avoid N+1 queries when building member rows.
+  def load_enrollment_data(record_ids, source_type)
+    return {} if record_ids.empty?
+
+    result = Hash.new { |h, k| h[k] = [] }
+
+    CampaignEnrollment
+      .where(recipient_type: source_type, recipient_id: record_ids, status: %w[pending active])
+      .includes(:campaign)
+      .each do |ce|
+        result[ce.recipient_id] << {
+          type: 'campaign', id: ce.campaign_id,
+          name: ce.campaign&.name || 'Unknown Campaign', status: ce.status
+        }
+      end
+
+    nurture_scope =
+      if source_type == 'Lead'
+        # Legacy enrollments may use lead_id instead of the polymorphic enrollable.
+        NurtureEnrollment
+          .where(status: %w[idle running])
+          .where('(enrollable_type = ? AND enrollable_id IN (?)) OR lead_id IN (?)', 'Lead', record_ids, record_ids)
+          .includes(:nurture_sequence)
+      else
+        NurtureEnrollment
+          .where(enrollable_type: source_type, enrollable_id: record_ids, status: %w[idle running])
+          .includes(:nurture_sequence)
+      end
+
+    nurture_scope.each do |ne|
+      entity_id = ne.enrollable_id || ne.lead_id
+      next unless entity_id
+
+      result[entity_id] << {
+        type: 'nurture', id: ne.nurture_sequence_id,
+        name: ne.nurture_sequence&.name || 'Unknown Sequence', status: ne.status
+      }
+    end
+
+    result
+  end
 
   def resolve_from_identity_name(c)
     case c.from_identity_type
