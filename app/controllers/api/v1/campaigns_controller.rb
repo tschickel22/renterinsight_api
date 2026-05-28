@@ -447,7 +447,9 @@ class Api::V1::CampaignsController < ApplicationController
       company: @company,
       source_type: ca.source_type,
       filter_tree: ca.filter_tree,
-      exclude_filter_tree: ca.exclude_filter_tree
+      exclude_filter_tree: ca.exclude_filter_tree,
+      exclude_active_campaign_enrollees: ca.try(:exclude_active_campaign_enrollees) || false,
+      exclude_active_nurture_enrollees: ca.try(:exclude_active_nurture_enrollees) || false
     )
     scope = compiler.scope
 
@@ -512,9 +514,9 @@ class Api::V1::CampaignsController < ApplicationController
   def campaign_member_row(r, source_type, enrollments = [])
     base = case source_type
            when 'Lead'
-             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, status: r.status, created_at: r.created_at }
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email, phone: r.phone, status: r.status, created_at: r.created_at }
            when 'Contact'
-             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email, phone: r.phone, account_id: r.try(:account_id), created_at: r.created_at }
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email, phone: r.phone, account_id: r.try(:account_id), created_at: r.created_at }
            when 'Account'
              { id: r.id, name: r.name, account_type: r.account_type, website: r.website, created_at: r.created_at }
            else
@@ -684,7 +686,9 @@ class Api::V1::CampaignsController < ApplicationController
       filter_tree: a.filter_tree,
       exclude_filter_tree: a.exclude_filter_tree,
       estimated_count: a.estimated_count,
-      estimated_at: a.estimated_at
+      estimated_at: a.estimated_at,
+      exclude_active_campaign_enrollees: a.try(:exclude_active_campaign_enrollees) || false,
+      exclude_active_nurture_enrollees: a.try(:exclude_active_nurture_enrollees) || false
     }
   end
 end

@@ -407,10 +407,10 @@ class Api::V1::AudiencesController < ApplicationController
   def member_row(r, enrollments = [])
     base = case @audience.source_type
            when 'Lead'
-             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email,
                phone: r.phone, status: r.status, created_at: r.created_at }
            when 'Contact'
-             { id: r.id, first_name: r.first_name, last_name: r.last_name, email: r.email,
+             { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email,
                phone: r.phone, account_id: r.account_id, created_at: r.created_at }
            when 'Account'
              { id: r.id, name: r.name, account_type: r.account_type, website: r.website,
