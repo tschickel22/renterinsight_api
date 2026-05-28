@@ -1707,6 +1707,8 @@ Rails.application.routes.draw do
           get :preview
           get :stats
           get :analytics_timeseries
+          get 'audience/members', action: :audience_members
+          post 'audience/exclude_members', action: :exclude_audience_members
         end
         resource :audience, controller: 'campaign_audiences', only: [:create, :update] do
           post :preview
