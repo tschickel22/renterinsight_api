@@ -154,6 +154,12 @@ class ChampionLeadSyncJob < ApplicationJob
       champion_lead_data: data
     }
 
+    # Backfill owner if lead is currently unassigned
+    if lead.owner_id.nil? && lead.champion_config_id.present?
+      config = ChampionLeadFeedConfig.find_by(id: lead.champion_config_id)
+      attrs[:owner_id] = resolve_default_owner(config) if config
+    end
+
     # Backfill source_created_at for leads that pre-date this column
     attrs[:source_created_at] = data['createdDateTime'] if lead.source_created_at.nil? && data['createdDateTime'].present?
 
@@ -234,19 +240,23 @@ class ChampionLeadSyncJob < ApplicationJob
   end
 
   # Resolve the default owner for new champion leads.
-  # Priority: config.default_lead_owner_id → first company admin → nil
+  # Priority: config.default_lead_owner_id → first company admin → first active user → nil
   def resolve_default_owner(config)
     @owner_cache ||= {}
     @owner_cache[config.id] ||= begin
       if config.default_lead_owner_id.present?
         config.default_lead_owner_id
       else
-        # Fall back to first admin user
+        # Fall back to first admin-level user, then any active user
         admin = config.company.users
-                      .where(role: %w[company_admin admin])
+                      .where(is_active: true)
+                      .where(role: %w[company_admin admin platform_admin])
                       .order(:created_at)
                       .first
-        admin&.id
+        admin&.id || config.company.users
+                          .where(is_active: true)
+                          .order(:created_at)
+                          .first&.id
       end
     end
   end
