@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_28_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_28_151000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1214,6 +1214,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_28_150000) do
     t.jsonb "metadata", default: {}, null: false
     t.bigint "saved_audience_id"
     t.jsonb "manual_exclude_ids", default: []
+    t.boolean "exclude_active_campaign_enrollees", default: false, null: false
+    t.boolean "exclude_active_nurture_enrollees", default: false, null: false
     t.index ["campaign_id"], name: "index_campaign_audiences_on_campaign_id", unique: true
     t.index ["saved_audience_id"], name: "idx_campaign_audiences_saved_audience"
   end

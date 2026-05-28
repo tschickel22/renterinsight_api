@@ -37,6 +37,12 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     update_attrs = {}
     update_attrs[:filter_tree] = attrs[:filter_tree] if attrs.key?(:filter_tree)
     update_attrs[:exclude_filter_tree] = attrs[:exclude_filter_tree] if attrs.key?(:exclude_filter_tree)
+    if attrs.key?(:exclude_active_campaign_enrollees)
+      update_attrs[:exclude_active_campaign_enrollees] = ActiveModel::Type::Boolean.new.cast(attrs[:exclude_active_campaign_enrollees])
+    end
+    if attrs.key?(:exclude_active_nurture_enrollees)
+      update_attrs[:exclude_active_nurture_enrollees] = ActiveModel::Type::Boolean.new.cast(attrs[:exclude_active_nurture_enrollees])
+    end
 
     if audience.update(update_attrs)
       recompute_estimate(audience)
@@ -142,6 +148,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
   def audience_params
     params.require(:campaign_audience).permit(
       :source_type, :location_id, :saved_audience_id,
+      :exclude_active_campaign_enrollees, :exclude_active_nurture_enrollees,
       filter_tree: {}, exclude_filter_tree: {}
     )
   end
@@ -151,7 +158,9 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       company: @company,
       source_type: audience.source_type,
       filter_tree: audience.filter_tree,
-      exclude_filter_tree: audience.exclude_filter_tree
+      exclude_filter_tree: audience.exclude_filter_tree,
+      exclude_active_campaign_enrollees: audience.exclude_active_campaign_enrollees,
+      exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees
     ).count
     audience.update!(estimated_count: count, estimated_at: Time.current)
   end
@@ -164,6 +173,8 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       saved_audience_id: audience.saved_audience_id,
       filter_tree: audience.filter_tree,
       exclude_filter_tree: audience.exclude_filter_tree,
+      exclude_active_campaign_enrollees: audience.exclude_active_campaign_enrollees,
+      exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees,
       estimated_count: audience.estimated_count,
       estimated_at: audience.estimated_at,
       metadata: audience.metadata

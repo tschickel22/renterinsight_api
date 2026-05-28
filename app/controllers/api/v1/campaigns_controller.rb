@@ -447,7 +447,9 @@ class Api::V1::CampaignsController < ApplicationController
       company: @company,
       source_type: ca.source_type,
       filter_tree: ca.filter_tree,
-      exclude_filter_tree: ca.exclude_filter_tree
+      exclude_filter_tree: ca.exclude_filter_tree,
+      exclude_active_campaign_enrollees: ca.try(:exclude_active_campaign_enrollees) || false,
+      exclude_active_nurture_enrollees: ca.try(:exclude_active_nurture_enrollees) || false
     )
     scope = compiler.scope
 
@@ -684,7 +686,9 @@ class Api::V1::CampaignsController < ApplicationController
       filter_tree: a.filter_tree,
       exclude_filter_tree: a.exclude_filter_tree,
       estimated_count: a.estimated_count,
-      estimated_at: a.estimated_at
+      estimated_at: a.estimated_at,
+      exclude_active_campaign_enrollees: a.try(:exclude_active_campaign_enrollees) || false,
+      exclude_active_nurture_enrollees: a.try(:exclude_active_nurture_enrollees) || false
     }
   end
 end
