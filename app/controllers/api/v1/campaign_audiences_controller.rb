@@ -35,6 +35,21 @@ class Api::V1::CampaignAudiencesController < ApplicationController
 
     attrs = audience_params
     update_attrs = {}
+
+    # Selecting a saved audience must adopt ITS source_type + filters, otherwise a Lead
+    # audience's filter (e.g. last_activity_at) lands on a Contact campaign audience and the
+    # FilterCompiler rejects the field. When saved_audience_id is provided, copy from it.
+    if attrs.key?(:saved_audience_id)
+      update_attrs[:saved_audience_id] = attrs[:saved_audience_id]
+      if attrs[:saved_audience_id].present? && (saved = @company.audiences.find_by(id: attrs[:saved_audience_id]))
+        update_attrs[:source_type] = saved.source_type
+        update_attrs[:filter_tree] = saved.filter_tree
+        update_attrs[:exclude_filter_tree] = saved.exclude_filter_tree
+      end
+    end
+
+    # Explicit values still override (inline edits after selecting).
+    update_attrs[:source_type] = attrs[:source_type] if attrs.key?(:source_type)
     update_attrs[:filter_tree] = attrs[:filter_tree] if attrs.key?(:filter_tree)
     update_attrs[:exclude_filter_tree] = attrs[:exclude_filter_tree] if attrs.key?(:exclude_filter_tree)
     if attrs.key?(:exclude_active_campaign_enrollees)
@@ -179,6 +194,11 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees
     ).count
     audience.update!(estimated_count: count, estimated_at: Time.current)
+  rescue Audiences::FilterCompiler::CompilationError => e
+    # A filter referencing a field invalid for the source type (e.g. a Lead field on a
+    # Contact audience) must not 500 the save — persist the audience, blank the estimate.
+    Rails.logger.warn "[CampaignAudiences] estimate compile failed: #{e.message}"
+    audience.update_columns(estimated_count: 0, estimated_at: Time.current)
   end
 
   def audience_json(audience)

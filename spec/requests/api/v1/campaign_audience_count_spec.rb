@@ -41,4 +41,26 @@ RSpec.describe 'Campaign audience filtered count', type: :request do
     expect(body['sample'].size).to eq(1)
     expect(body['filter_evaluation']).to eq('applied')
   end
+
+  it 'does not 500 when the filter references a field invalid for the source type' do
+    # Contact audience with a Lead-only field (last_activity_at) → must save, blank estimate
+    campaign.campaign_audience.update!(source_type: 'Contact')
+    patch "/api/v1/campaigns/#{campaign.id}/audience", headers: headers,
+          params: { campaign_audience: { filter_tree: { 'type' => 'and', 'children' => [{ 'field' => 'last_activity_at', 'operator' => 'days_since_greater_than', 'value' => 90 }] } } }.to_json
+    expect(response).to have_http_status(:ok)
+    expect(campaign.campaign_audience.reload.estimated_count).to eq(0)
+  end
+
+  it 'selecting a saved audience adopts its source_type and filters' do
+    saved = Audience.create!(company_id: company.id, name: "Saved-#{SecureRandom.hex(3)}", source_type: 'Lead',
+                             filter_tree: { 'type' => 'and', 'children' => [{ 'field' => 'last_activity_at', 'operator' => 'days_since_greater_than', 'value' => 30 }] })
+    campaign.campaign_audience.update!(source_type: 'Contact')
+    patch "/api/v1/campaigns/#{campaign.id}/audience", headers: headers,
+          params: { campaign_audience: { saved_audience_id: saved.id } }.to_json
+    expect(response).to have_http_status(:ok)
+    a = campaign.campaign_audience.reload
+    expect(a.source_type).to eq('Lead')          # synced from the saved audience
+    expect(a.saved_audience_id).to eq(saved.id)
+    expect(a.filter_tree['children'].first['field']).to eq('last_activity_at')
+  end
 end
