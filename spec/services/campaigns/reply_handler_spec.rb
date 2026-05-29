@@ -59,6 +59,21 @@ RSpec.describe Campaigns::ReplyHandler do
     expect(cs.reload.replied_at).to be_nil
   end
 
+  it 'stamps opened_at on a genuine reply (a reply implies an open)' do
+    cs = campaign_send
+    expect(cs.opened_at).to be_nil
+    described_class.process(token: "campaign-#{cs.id}", parsed_email: parsed)
+    cs.reload
+    expect(cs.opened_at).to be_present
+    expect(cs.open_count).to be >= 1
+  end
+
+  it 'does not stamp opened_at on an out-of-office reply' do
+    cs = campaign_send
+    described_class.process(token: "campaign-#{cs.id}", parsed_email: parsed(subject: 'Automatic reply'))
+    expect(cs.reload.opened_at).to be_nil
+  end
+
   it 'notifies the original sender of the campaign email on a genuine reply' do
     sender = User.create!(email: "snd-#{SecureRandom.hex(3)}@example.com", first_name: 'Snd', last_name: 'R', password: 'Pass1234!', company_id: company.id)
     comm = Communication.create!(company_id: company.id, communicable: lead, channel: 'email', direction: 'outbound',
