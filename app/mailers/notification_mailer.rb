@@ -49,7 +49,10 @@ class NotificationMailer < ApplicationMailer
     )
   end
 
-  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:, reply_to_address: nil)
+  # Relays the recipient's reply to the rep so they can carry on the conversation straight
+  # from their inbox. Replies are captured back into Renter Insight by the Gmail/Outlook
+  # sent-email polling, so no "view in app" round-trip is required.
+  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:, reply_to_address: nil, body_html: nil, to_address: nil)
     @user = user
     @entity_name = entity_name
     @entity_type = entity_type
@@ -57,6 +60,8 @@ class NotificationMailer < ApplicationMailer
     @subject = subject
     @preview = preview
     @link = link
+    # The actual reply content to relay (falls back to the short preview).
+    @reply_body = body_html.presence || preview
 
     # Get frontend URL
     @frontend_url = ENV['FRONTEND_URL'] ||
@@ -65,14 +70,25 @@ class NotificationMailer < ApplicationMailer
     # Full link with domain
     @full_link = "#{@frontend_url}#{@link}"
 
-    mail_options = {
-      to: @user.email,
-      from: default_from_address,
-      subject: "📧 Reply from #{@entity_name}"
-    }
-    # Reply-To = the person who replied, so the rep can respond directly from their inbox.
-    mail_options[:reply_to] = reply_to_address if reply_to_address.present?
+    # Resolve per-send provider creds from communications settings (the SES-authorized
+    # keys), matching InvoiceMailer/SocialPostMailer. Without this the mailer falls back to
+    # the boot-time global delivery method, which used the wrong (S3-only) ENV AWS creds and
+    # failed SES with AccessDenied.
+    delivery = MailerDeliveryConfigurator.resolve(company: @user.try(:company))
 
-    mail(mail_options)
+    # Use the reply's own subject so it threads naturally; show the contact as the sender
+    # name (SES still sends from the verified identity), and Reply-To = the contact so a
+    # plain "Reply" in the rep's inbox goes straight to them.
+    relay_subject = @subject.presence || "Reply from #{@entity_name}"
+    # Deliver to the original sending mailbox (the rep's connected inbox) when provided,
+    # so they reply in place and the sent-email polling captures it; else the account email.
+    mail_options = { to: (to_address.presence || @user.email), subject: relay_subject }
+    mail_options[:reply_to] = reply_to_address if reply_to_address.present?
+    from_email = delivery && delivery[:from_address].presence
+    mail_options[:from] = from_email.present? ? "#{@entity_name} <#{from_email}>" : default_from_address
+
+    message = mail(mail_options)
+    message.delivery_method(delivery[:delivery_method], delivery[:delivery_method_options]) if delivery && message
+    message
   end
 end

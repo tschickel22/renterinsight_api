@@ -8,9 +8,7 @@ module Campaigns
     def enroll_all
       return 0 unless @audience
 
-      base = @audience.compute_matches
-      filter_tree = @audience.filter_tree
-      exclude_tree = @audience.exclude_filter_tree
+      base = audience_scope
 
       first_step = @campaign.campaign_steps.active.ordered.first
       first_wait_seconds = ((first_step&.wait_days || 0) * 86400) + ((first_step&.wait_hours || 0) * 3600)
@@ -18,9 +16,6 @@ module Campaigns
 
       enrolled = 0
       base.find_each do |record|
-        next unless WorkflowEngine::ConditionEvaluator.evaluate(filter_tree, record)
-        next if exclude_tree.present? && WorkflowEngine::ConditionEvaluator.evaluate(exclude_tree, record)
-
         contact_value = if @campaign.email_channel?
                           record.try(:email)
                         else
@@ -75,6 +70,38 @@ module Campaigns
     end
 
     private
+
+    # The exact audience set — the SAME Audiences::FilterCompiler the count/preview/members
+    # use — so who gets enrolled matches what the audience screen shows. This applies the
+    # filter AND every exclusion (exclude_filter_tree, manual_exclude_ids, active-campaign
+    # and active-nurture excludes), which the old per-record ConditionEvaluator path skipped.
+    # SMS opt-in compliance is layered on top for SMS campaigns.
+    def audience_scope
+      scope = Audiences::FilterCompiler.new(
+        company: @campaign.company,
+        source_type: @audience.source_type,
+        filter_tree: @audience.filter_tree,
+        exclude_filter_tree: @audience.exclude_filter_tree,
+        manual_exclude_ids: @audience.try(:manual_exclude_ids),
+        exclude_active_campaign_enrollees: @audience.try(:exclude_active_campaign_enrollees),
+        exclude_active_nurture_enrollees: @audience.try(:exclude_active_nurture_enrollees)
+      ).scope
+      @campaign.sms_channel? ? scope_for_sms_compliance(scope) : scope
+    rescue Audiences::FilterCompiler::CompilationError => e
+      Rails.logger.error "[AudienceEnroller] filter compile failed: #{e.message}"
+      @audience.source_type.constantize.none
+    end
+
+    # Mirror CampaignAudience#compute_matches SMS handling: only opted-in recipients
+    # unless compliance is explicitly overridden; SMS to Accounts is unsupported.
+    def scope_for_sms_compliance(scope)
+      return scope if @audience.sms_compliance_override?
+      return scope.none if @audience.source_type == 'Account'
+      col = if scope.klass.column_names.include?('opt_in_sms') then :opt_in_sms
+            elsif scope.klass.column_names.include?('sms_opt_in') then :sms_opt_in
+            end
+      col ? scope.where(col => true) : scope
+    end
 
     def normalize_phone(phone)
       return nil if phone.blank?

@@ -6,6 +6,9 @@ class SchedulePreviewVehiclePicker
   NO_VEHICLE_INTENTS = %w[social_proof education lifestyle seasonal financing].freeze
 
   def self.pick(company:, intent:)
+    # Only inventory-centric (dealer) industries feature a specific vehicle/unit.
+    # SaaS / generic industries never attach a vehicle.
+    return nil unless SocialPostIntentCatalog.for_company(company).family == :dealer
     return nil if NO_VEHICLE_INTENTS.include?(intent.to_s)
     scope = company.vehicles.where(is_deleted: false, status: 'available')
 

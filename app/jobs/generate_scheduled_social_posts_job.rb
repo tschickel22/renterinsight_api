@@ -30,12 +30,13 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
     intent  = ScheduleIntentPicker.next(rotation: schedule.intent_rotation, last: schedule.last_intent_used)
     vehicle = SchedulePreviewVehiclePicker.pick(company: company, intent: intent)
 
-    return reschedule(schedule, last_intent: intent, reason: 'no_vehicle_available') if schedule.require_vehicle && vehicle.nil? && vehicle_required_for_intent?(intent)
+    return reschedule(schedule, last_intent: intent, reason: 'no_vehicle_available') if schedule.require_vehicle && vehicle.nil? && vehicle_required_for_intent?(company, intent)
 
     intake_form = resolve_intake_form(schedule)
 
-    # Pull seasonal topic when intent is 'seasonal' for contextually relevant content
-    topic_details = intent == 'seasonal' ? SeasonalContentService.topic_for_seasonal_post : nil
+    # User's per-intent idea wins; else seasonal auto-topic; else context-only (today's behavior).
+    user_note = (schedule.intent_notes || {})[intent].presence
+    topic_details = user_note || (intent == 'seasonal' ? SeasonalContentService.topic_for_seasonal_post : nil)
 
     result = SocialPostGeneratorService.generate(
       company:         company,
@@ -132,8 +133,8 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
     schedule.company.intake_forms.order(:id).first if schedule.company.respond_to?(:intake_forms)
   end
 
-  def vehicle_required_for_intent?(intent)
-    !SchedulePreviewVehiclePicker::NO_VEHICLE_INTENTS.include?(intent.to_s)
+  def vehicle_required_for_intent?(company, intent)
+    SocialPostIntentCatalog.for_company(company).requires_subject?(intent)
   end
 
   def send_approval_email(post, schedule)

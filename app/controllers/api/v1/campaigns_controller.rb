@@ -500,7 +500,7 @@ class Api::V1::CampaignsController < ApplicationController
       when 'Lead', 'Contact'
         scope = scope.where('first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ?', term, term, term, term)
       when 'Account'
-        scope = scope.where('name ILIKE ? OR website ILIKE ?', term, term)
+        scope = scope.where('name ILIKE ? OR email ILIKE ? OR website ILIKE ?', term, term, term)
       end
     end
 
@@ -554,7 +554,7 @@ class Api::V1::CampaignsController < ApplicationController
            when 'Contact'
              { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email, phone: r.phone, account_id: r.try(:account_id), created_at: r.created_at }
            when 'Account'
-             { id: r.id, name: r.name, account_type: r.account_type, website: r.website, created_at: r.created_at }
+             { id: r.id, name: r.name, account_type: r.account_type, email: r.email, website: r.website, created_at: r.created_at }
            else
              { id: r.id }
            end

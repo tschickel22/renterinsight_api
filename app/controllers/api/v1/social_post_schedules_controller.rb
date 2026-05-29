@@ -148,13 +148,14 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
       :tone, :intake_form_id, :notify_user_id, :location_id, :active, :ends_at,
       preferred_times:  [],
       preferred_days:   [],
-      intent_rotation:  []
+      intent_rotation:  [],
+      intent_notes:     {} # { intent => optional idea text }
     )
   end
 
   def build_ephemeral_schedule_from_params
     raw = params.permit(:frequency, :platform, :post_type, :tone, :auto_approve,
-                        preferred_times: [], preferred_days: [], intent_rotation: []).to_h
+                        preferred_times: [], preferred_days: [], intent_rotation: [], intent_notes: {}).to_h
     return nil if raw[:frequency].blank?
     SocialPostSchedule.new(raw.merge(company_id: @company.id))
   end
@@ -182,6 +183,7 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
       preferred_times:    s.preferred_times,
       preferred_days:     s.preferred_days,
       intent_rotation:    s.intent_rotation,
+      intent_notes:       s.intent_notes,
       last_generated_at:  s.last_generated_at,
       next_scheduled_at:  s.next_scheduled_at,
       last_intent_used:   s.last_intent_used,

@@ -58,4 +58,12 @@ RSpec.describe InboundEmail::ReplyNotifier do
       described_class.notify(entity: lead, communication: inbound_comm)
     }.to have_enqueued_mail(NotificationMailer, :email_reply)
   end
+
+  it 'relays the email to the mailbox the original was sent FROM (the connected inbox)' do
+    outbound_from(sender) # from_address: 'rep@example.com'
+    expect(NotificationMailer).to receive(:email_reply)
+      .with(hash_including(to_address: 'rep@example.com'))
+      .and_return(double(deliver_later: true))
+    described_class.notify(entity: lead, communication: inbound_comm)
+  end
 end

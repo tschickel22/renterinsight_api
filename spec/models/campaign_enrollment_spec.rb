@@ -51,5 +51,11 @@ RSpec.describe CampaignEnrollment, type: :model do
       enr.advance_to_next_step
       expect(enr.status).to eq("completed")
     end
+
+    it "moves a pending enrollment to active once the drip advances" do
+      enr.update!(status: "pending", current_step_index: 0)
+      enr.advance_to_next_step
+      expect(enr.status).to eq("active")
+    end
   end
 end

@@ -25,7 +25,16 @@ module Campaigns
       inbound = nil
 
       ActiveRecord::Base.transaction do
-        send.update_columns(replied_at: send.replied_at || Time.current) unless ooo
+        unless ooo
+          # A reply implies an open (open pixels are often blocked) — stamp opened_at so the
+          # overview stats, analytics, and workqueue count it, mirroring click-implies-open.
+          now = Time.current
+          send.update_columns(
+            replied_at: send.replied_at || now,
+            opened_at:  send.opened_at || now,
+            open_count: [send.open_count.to_i, 1].max
+          )
+        end
 
         inbound = Communication.create!(
           communicable: enrollment.recipient,

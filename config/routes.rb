@@ -1438,6 +1438,7 @@ Rails.application.routes.draw do
         end
         collection do
           post :generate
+          get  :intent_options
           get  :stats
           get  :seasonal_suggestions
         end
