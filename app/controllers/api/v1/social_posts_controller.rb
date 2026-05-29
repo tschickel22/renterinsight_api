@@ -252,6 +252,25 @@ class Api::V1::SocialPostsController < ApplicationController
     render json: result
   end
 
+  # GET /api/v1/social-posts/intent_options
+  # Returns the intent set + default rotation appropriate for this company's
+  # industry, so the frontend doesn't hardcode dealer-only intents.
+  def intent_options
+    return unless authorize_action!('social_posts', 'read')
+
+    profile = SocialPostIntentCatalog.for_company(@company)
+    render json: {
+      industry:         @company.try(:industry),
+      family:           profile.family.to_s,
+      subject_label:    profile.subject_label,
+      default_rotation: profile.default_rotation,
+      requires_subject: profile.family == :dealer,
+      intents: profile.intents.map do |i|
+        { value: i.value, label: i.label, cta: i.cta, requires_subject: i.requires_subject }
+      end
+    }
+  end
+
   # GET /api/v1/social-posts/stats
   def stats
     return unless authorize_action!('social_posts', 'read')

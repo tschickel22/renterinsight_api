@@ -55,26 +55,37 @@ class Api::V1::CampaignAudiencesController < ApplicationController
   def preview
     return unless authorize_action!('campaigns', 'read')
 
-    source_type = params[:source_type] || @campaign.campaign_audience&.source_type
-    base = case source_type
-           when 'Lead'    then @company.leads
-           when 'Contact' then @company.contacts.where(is_deleted: [false, nil])
-           when 'Account' then @company.accounts.where(is_deleted: [false, nil])
-           else
-             return render(json: { error: 'Invalid source_type' }, status: :unprocessable_entity)
-           end
+    audience = @campaign.campaign_audience
+    source_type = params[:source_type].presence || audience&.source_type
+    unless %w[Lead Contact Account].include?(source_type)
+      return render(json: { error: 'Invalid source_type' }, status: :unprocessable_entity)
+    end
 
-    sample = base.limit(20).map do |r|
+    # Apply the actual filter (was returning the unfiltered company-wide total). Use the
+    # passed-in filter if present (live editing), otherwise the saved audience's.
+    filter_tree  = params[:filter_tree].present? ? to_unsafe(params[:filter_tree]) : (audience&.filter_tree || {})
+    exclude_tree = params[:exclude_filter_tree].present? ? to_unsafe(params[:exclude_filter_tree]) : audience&.exclude_filter_tree
+
+    scope = Audiences::FilterCompiler.new(
+      company: @company, source_type: source_type,
+      filter_tree: filter_tree, exclude_filter_tree: exclude_tree,
+      exclude_active_campaign_enrollees: audience&.exclude_active_campaign_enrollees || false,
+      exclude_active_nurture_enrollees: audience&.exclude_active_nurture_enrollees || false
+    ).scope
+
+    sample = scope.limit(20).map do |r|
       { id: r.id, name: record_display_name(r), email: record_email(r) }
     end
     render json: {
-      count: base.count,
+      count: scope.count,
       sample: sample,
-      filter_evaluation: 'phase_b_pending',
+      filter_evaluation: 'applied',
       channel: @campaign.channel,
-      sms_opt_in_filter_active: @campaign.sms_channel? && !@campaign.campaign_audience&.sms_compliance_override?,
-      sms_compliance_override: @campaign.campaign_audience&.sms_compliance_override? || false
+      sms_opt_in_filter_active: @campaign.sms_channel? && !audience&.sms_compliance_override?,
+      sms_compliance_override: audience&.sms_compliance_override? || false
     }
+  rescue Audiences::FilterCompiler::CompilationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def acknowledge_sms_compliance
@@ -124,13 +135,12 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     audience = @campaign.campaign_audience
     return render(json: { error: 'No audience set' }, status: :unprocessable_entity) unless audience
 
-    base = case audience.source_type
-           when 'Lead'    then @company.leads
-           when 'Contact' then @company.contacts.where(is_deleted: [false, nil])
-           when 'Account' then @company.accounts.where(is_deleted: [false, nil])
-           end
-    audience.update!(estimated_count: base.count, estimated_at: Time.current)
+    # Use the same filtered FilterCompiler count as create/update — NOT a raw base.count,
+    # which ignored the filter and reported the company's entire lead/contact/account total.
+    recompute_estimate(audience)
     render json: { count: audience.estimated_count, estimated_at: audience.estimated_at }
+  rescue Audiences::FilterCompiler::CompilationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   private
@@ -151,6 +161,10 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       :exclude_active_campaign_enrollees, :exclude_active_nurture_enrollees,
       filter_tree: {}, exclude_filter_tree: {}
     )
+  end
+
+  def to_unsafe(value)
+    value.is_a?(ActionController::Parameters) ? value.to_unsafe_h : value
   end
 
   def recompute_estimate(audience)

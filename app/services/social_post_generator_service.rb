@@ -15,16 +15,11 @@ class SocialPostGeneratorService
   MAX_TOKENS = 800
   VERSION    = 'spg-2026-04-19'
 
-  VALID_INTENTS = %w[
-    specific_unit price_drop social_proof education financing
-    lifestyle seasonal rep_personal new_arrival aged_inventory
-    ad_content
-  ].freeze
-
   class << self
     def generate(company:, intent_category:, post_type:, platform:, vehicle: nil, user: nil, tone: 'friendly', topic_details: nil, intake_form_url: nil)
-      unless VALID_INTENTS.include?(intent_category)
-        raise Error, "invalid intent_category '#{intent_category}'. Must be one of: #{VALID_INTENTS.join(', ')}"
+      profile = SocialPostIntentCatalog.for_company(company)
+      unless profile.intent_values.include?(intent_category)
+        raise Error, "invalid intent_category '#{intent_category}' for this industry. Must be one of: #{profile.intent_values.join(', ')}"
       end
 
       api_key = resolve_api_key
@@ -33,7 +28,8 @@ class SocialPostGeneratorService
       ctx = build_context(company: company, vehicle: vehicle, user: user,
                           intent_category: intent_category, post_type: post_type,
                           platform: platform, tone: tone,
-                          topic_details: topic_details, intake_form_url: intake_form_url)
+                          topic_details: topic_details, intake_form_url: intake_form_url,
+                          profile: profile)
 
       prompt        = build_user_prompt(ctx)
       system_prompt = build_system_prompt(ctx)
@@ -55,7 +51,7 @@ class SocialPostGeneratorService
         }
       }
 
-      payload[:ad_settings] = build_ad_settings(company: company, vehicle: vehicle) if intent_category == 'ad_content'
+      payload[:ad_settings] = build_ad_settings(company: company, vehicle: vehicle, profile: profile) if intent_category == 'ad_content'
       payload
     end
 
@@ -68,38 +64,48 @@ class SocialPostGeneratorService
     # ------------------------------------------------------------------
     # Ad settings (for intent_category == 'ad_content')
     # ------------------------------------------------------------------
-    def build_ad_settings(company:, vehicle:)
+    def build_ad_settings(company:, vehicle:, profile:)
       price = vehicle.try(:sale_price).to_f if vehicle
       budget = recommended_budget(price)
-      dealership_city = company&.try(:city).to_s
+      city = company&.try(:city).to_s
 
-      {
-        recommended_audience: {
-          age_min:      25,
-          age_max:      65,
-          radius_miles: 50,
-          interests: [
-            'Manufactured homes',
-            'Home buying',
-            'Real estate',
-            'First-time homebuyer',
-            'Affordable housing'
+      if profile.family == :dealer
+        interests = ['Manufactured homes', 'Home buying', 'Real estate', 'First-time homebuyer', 'Affordable housing']
+        {
+          recommended_audience: { age_min: 25, age_max: 65, radius_miles: 50, interests: interests },
+          recommended_budget:    budget,
+          recommended_objective: 'lead_generation',
+          setup_instructions: [
+            'Go to Facebook Ads Manager (business.facebook.com)',
+            'Click Create → Choose objective: Lead Generation',
+            "Set your daily budget to $#{budget[:daily_min]}-$#{budget[:daily_max]}",
+            "Target: Age 25-65, within 50 miles of #{city.presence || 'your dealership'}",
+            "Add interests: #{interests.first(3).join(', ')}",
+            'Upload the images from this post',
+            'Paste the Primary Text, Headline, and Description from below',
+            'Select your Lead Form (or create one that matches your intake form)',
+            'Review and publish'
           ]
-        },
-        recommended_budget:    budget,
-        recommended_objective: 'lead_generation',
-        setup_instructions: [
-          'Go to Facebook Ads Manager (business.facebook.com)',
-          'Click Create → Choose objective: Lead Generation',
-          "Set your daily budget to $#{budget[:daily_min]}-$#{budget[:daily_max]}",
-          "Target: Age 25-65, within 50 miles of #{dealership_city.presence || 'your dealership'}",
-          'Add interests: Manufactured homes, Home buying, First-time homebuyer',
-          'Upload the images from this post',
-          'Paste the Primary Text, Headline, and Description from below',
-          'Select your Lead Form (or create one that matches your intake form)',
-          'Review and publish'
-        ]
-      }
+        }
+      else
+        # SaaS / generic: no physical radius, audience driven by the business's
+        # own target-audience description rather than fixed home-buying interests.
+        {
+          recommended_audience: { age_min: 25, age_max: 64, radius_miles: nil, interests: [] },
+          recommended_budget:    budget,
+          recommended_objective: 'lead_generation',
+          setup_instructions: [
+            'Go to Facebook Ads Manager (business.facebook.com)',
+            'Click Create → Choose objective: Lead Generation (or Traffic for a trial/demo page)',
+            "Set your daily budget to $#{budget[:daily_min]}-$#{budget[:daily_max]}",
+            'Target your ideal-customer audience (job titles, industries, and interests from your target-audience profile)',
+            'Upload the images from this post',
+            'Paste the Primary Text, Headline, and Description from below',
+            'Select your Lead Form, or point the ad at your trial/demo landing page',
+            'Review and publish'
+          ]
+        }
+      end
     end
 
     # Ladder: smaller unit price → smaller budget. Market size proxy could be
@@ -116,7 +122,8 @@ class SocialPostGeneratorService
     # ------------------------------------------------------------------
     # Context
     # ------------------------------------------------------------------
-    def build_context(company:, vehicle:, user:, intent_category:, post_type:, platform:, tone:, topic_details: nil, intake_form_url: nil)
+    def build_context(company:, vehicle:, user:, intent_category:, post_type:, platform:, tone:, topic_details: nil, intake_form_url: nil, profile: nil)
+      profile ||= SocialPostIntentCatalog.for_company(company)
       {
         company: {
           id:    company&.id,
@@ -125,6 +132,12 @@ class SocialPostGeneratorService
           state: company&.try(:state),
           phone: company&.try(:phone) || company&.try(:primary_phone)
         },
+        business: business_profile(company),
+        industry:      company&.try(:industry),
+        family:        profile.family.to_s,
+        persona:       profile.persona,
+        compliance:    profile.compliance,
+        subject_label: profile.subject_label,
         vehicle: vehicle ? vehicle_context(vehicle) : nil,
         user: user ? {
           id:         user.id,
@@ -168,29 +181,53 @@ class SocialPostGeneratorService
       }
     end
 
+    # Pulls the company "about" profile (business_description, target_audience,
+    # products_services, value props, brand voice) the same way the campaigns
+    # AI builder does. Tolerates the historically inconsistent key casing.
+    def business_profile(company)
+      return {} unless company&.id
+      profile = Setting.get('Company', company.id, 'company_profile') ||
+                Setting.get('company', company.id, 'company_profile') || {}
+      {
+        business_description: profile['business_description'].presence || company.try(:description).to_s.presence,
+        target_audience:      profile['target_audience'],
+        products_services:    profile['products_services'],
+        value_props:          profile['unique_value_props'].presence || profile['key_differentiators'],
+        industry_vertical:    profile['industry_vertical'],
+        brand_voice:          profile['brand_voice'],
+        website:              company.try(:website).to_s.presence
+      }.compact
+    rescue => e
+      Rails.logger.warn "[SocialPostGeneratorService] business_profile failed: #{e.message}"
+      {}
+    end
+
     # ------------------------------------------------------------------
     # Prompts
     # ------------------------------------------------------------------
     def build_system_prompt(ctx)
-      <<~PROMPT.strip
-        You are a social media expert for manufactured housing and RV dealerships.
-        Write content that is warm, local, compliant, and conversion-oriented.
-        Voice: #{ctx[:voice] == 'first_person' ? 'first person ("I", "my")' : 'company plural ("we", "our")'}.
-        Tone: #{ctx[:tone]}.
-        Platform: #{ctx[:platform]} — keep caption #{ctx[:length_hint]} and use #{ctx[:hashtag_hint]}.
-        Compliance: whenever price appears, append "Subject to change. See dealer for details." to the description.
+      lines = []
+      lines << ctx[:persona]
+      lines << "Voice: #{ctx[:voice] == 'first_person' ? 'first person ("I", "my")' : 'company plural ("we", "our")'}."
+      lines << "Tone: #{ctx[:tone]}."
+      lines << "Platform: #{ctx[:platform]} — keep caption #{ctx[:length_hint]} and use #{ctx[:hashtag_hint]}."
+      lines << ctx[:compliance] if ctx[:compliance].present?
+      lines << <<~OUT.strip
         Return ONLY valid JSON — no prose, no markdown, no code fences — with keys:
         caption (string), headline (string, under 80 chars), description (string),
         hashtags (array of strings, no leading '#'), cta_type (one of: learn_more, get_directions, message_us, apply_now, shop_now, call_now).
-      PROMPT
+      OUT
+      lines.join("\n")
     end
 
     def build_user_prompt(ctx)
       sections = []
       sections << intent_instructions(ctx[:intent_category], ctx)
-      sections << "Dealer context:\n#{format_company(ctx[:company])}"
-      sections << "Unit context:\n#{format_vehicle(ctx[:vehicle])}" if ctx[:vehicle]
-      sections << "Sales rep:\n#{format_user(ctx[:user])}"          if ctx[:user] && ctx[:post_type] == 'rep_personal'
+      sections << "Business context:\n#{format_company(ctx[:company])}"
+      biz = format_business(ctx[:business])
+      sections << "About the business (use this as primary context for what to say):\n#{biz}" if biz.present?
+      sections << "#{ctx[:subject_label].to_s.capitalize} context:\n#{format_vehicle(ctx[:vehicle])}" if ctx[:vehicle]
+      sections << "Person posting:\n#{format_user(ctx[:user])}" if ctx[:user] && ctx[:post_type] == 'rep_personal'
       sections << "Additional context from the user:\n#{ctx[:topic_details]}" if ctx[:topic_details].present?
       sections << "Include this lead capture link in the caption (with UTM tracking already applied): #{ctx[:intake_form_url]}" if ctx[:intake_form_url].present?
       sections << "Return JSON only."
@@ -198,48 +235,32 @@ class SocialPostGeneratorService
     end
 
     def intent_instructions(intent, ctx)
-      case intent
-      when 'specific_unit'
-        "Write a social post that features THIS specific home. Lead with the year/make/model, call out bedrooms/bathrooms, price, and photo-worthy feature. CTA = shop_now."
-      when 'price_drop'
-        "Write a short, urgent social post about a price reduction on this home. Use a clear before/after framing if possible, otherwise emphasize that the price just dropped. CTA = shop_now."
-      when 'social_proof'
-        "Write a celebration post about a family getting into their new home. Keep the home specifics light; lead with the feeling of 'welcome home'. CTA = message_us."
-      when 'education'
-        "Write an educational post about the benefits of manufactured housing (affordability, customization, speed, energy efficiency, quality). Do NOT hard-sell a specific unit. CTA = learn_more."
-      when 'financing'
-        "Write an accessible, non-intimidating post about financing options (programs for first-time buyers, land-home, etc.). Avoid rate promises. CTA = apply_now."
-      when 'lifestyle'
-        "Write a lifestyle / community post centered on life in the area (schools, parks, outdoors). Soft tie-in to the dealership. CTA = learn_more."
-      when 'seasonal'
-        "Write a seasonal promotion post tied to current season/holiday. Emphasize timing without being gimmicky. CTA = shop_now."
-      when 'rep_personal'
-        "Write a personal-voice post from a single sales rep's perspective. First person, conversational, warm. Mention one concrete thing happening at the lot this week. CTA = message_us."
-      when 'new_arrival'
-        "Write a 'just arrived' announcement. Lead with the newness. If a unit is provided, showcase it. CTA = shop_now."
-      when 'aged_inventory'
-        dwell = ctx.dig(:vehicle, :days_in_stock)
-        "Write a post that refreshes interest in a home that's been on the lot for #{dwell || '60+'} days. Re-frame it as an opportunity (well-kept, ready-to-move, price negotiation possible). CTA = message_us."
-      when 'ad_content'
-        <<~AD.strip
-          Generate Facebook/Instagram ad content for this unit. Produce three ad fields:
-          1. PRIMARY TEXT  — the main ad copy, 125 characters max for best performance. Put this in `caption`.
-          2. HEADLINE      — 40 characters max, shown below the image. Put this in `headline`.
-          3. DESCRIPTION   — 30 characters max, shown below the headline. Put this in `description`.
-          CTA should be `lead_generation` or `shop_now`. Hashtags optional (≤3).
-          Stay punchy; do not exceed the character limits.
-        AD
-      else
-        "Write a general social post for this dealership."
-      end
+      profile = SocialPostIntentCatalog::PROFILES.fetch(ctx[:family].to_sym)
+      entry   = profile.intent(intent)
+      return "Write a general social post for this business." unless entry
+
+      instr = entry.instruction
+      instr.respond_to?(:call) ? instr.call(ctx) : instr
     end
 
     def format_company(c)
-      return 'unknown dealership' unless c
+      return 'unknown business' unless c
       parts = []
       parts << "Name: #{c[:name]}" if c[:name].present?
       parts << "Location: #{[c[:city], c[:state]].reject(&:blank?).join(', ')}" if c[:city].present? || c[:state].present?
       parts << "Phone: #{c[:phone]}" if c[:phone].present?
+      parts.join("\n")
+    end
+
+    def format_business(b)
+      return '' if b.blank?
+      parts = []
+      parts << "Description: #{b[:business_description]}" if b[:business_description].present?
+      parts << "Target audience: #{b[:target_audience]}" if b[:target_audience].present?
+      parts << "Products/services: #{b[:products_services]}" if b[:products_services].present?
+      parts << "Value proposition: #{b[:value_props]}" if b[:value_props].present?
+      parts << "Brand voice: #{b[:brand_voice]}" if b[:brand_voice].present?
+      parts << "Website: #{b[:website]}" if b[:website].present?
       parts.join("\n")
     end
 

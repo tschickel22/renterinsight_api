@@ -33,6 +33,7 @@ class CampaignEnrollment < ApplicationRecord
     else
       wait_seconds = (next_step.wait_days || 0) * 86400 + (next_step.wait_hours || 0) * 3600
       update!(
+        status: 'active', # in-progress drip (was 'pending'); stays in the active scope
         current_step_index: next_index,
         next_send_at: Time.current + wait_seconds.seconds,
         last_sent_at: Time.current
