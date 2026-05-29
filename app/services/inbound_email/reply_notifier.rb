@@ -26,11 +26,12 @@ module InboundEmail
 
     def notify
       return unless @entity && @communication
-      user = recipient_user
+      outbound = originating_outbound
+      user = recipient_user(outbound)
       return unless user
 
       create_in_app_notification(user)
-      send_email_notification(user)
+      send_email_notification(user, outbound)
       send_sms_notification(user)
       broadcast_toast(user)
     rescue => e
@@ -40,30 +41,29 @@ module InboundEmail
 
     private
 
-    # sender of the original email → most-recent outbound sender → owner → any active user
-    def recipient_user
-      sender_from(@outbound_communication) ||
-        latest_outbound_sender ||
-        owner_fallback
+    # The outbound email this is a reply to: the explicit one (campaigns) or the most
+    # recent outbound to this entity. Drives BOTH who is notified (its sender) and where
+    # the relay email goes (its from_address — the mailbox the rep actually sent from).
+    def originating_outbound
+      @originating_outbound ||=
+        if @outbound_communication.is_a?(Communication)
+          @outbound_communication
+        else
+          Communication
+            .where(communicable_type: @entity.class.name, communicable_id: @entity.id, direction: 'outbound')
+            .order(created_at: :desc).first
+        end
+    end
+
+    # The sender of the original email → entity owner → any active company user.
+    def recipient_user(outbound)
+      sender_from(outbound) || owner_fallback
     end
 
     def sender_from(outbound)
       return nil unless outbound.is_a?(Communication)
       uid = sender_user_id_for(outbound)
       uid.present? ? User.find_by(id: uid.to_i) : nil
-    end
-
-    # Walk recent outbounds to this entity (no jsonb SQL operators — robust to however
-    # metadata is serialized) and return the first recorded sender.
-    def latest_outbound_sender
-      Communication
-        .where(communicable_type: @entity.class.name, communicable_id: @entity.id, direction: 'outbound')
-        .order(created_at: :desc).limit(25)
-        .each do |c|
-          uid = sender_user_id_for(c)
-          return User.find_by(id: uid.to_i) if uid.present?
-        end
-      nil
     end
 
     # Extract sender_user_id from metadata whether it's a Hash, a JSON string, or a
@@ -140,11 +140,15 @@ module InboundEmail
       Rails.logger.error "[ReplyNotifier] in-app notification failed: #{e.message}"
     end
 
-    def send_email_notification(user)
+    def send_email_notification(user, outbound)
       return if notification_settings(user)['email_reply_email'] == false
-      return if user.email.blank?
+      # Relay to the mailbox the original email was sent FROM (the rep's connected,
+      # polled inbox) so they can reply in place; fall back to the account email.
+      relay_to = outbound&.from_address.presence || user.email
+      return if relay_to.blank?
       NotificationMailer.email_reply(
         user: user,
+        to_address: relay_to,
         entity_name: entity_name,
         entity_type: entity_type_slug,
         from_address: @communication.from_address,

@@ -52,7 +52,7 @@ class NotificationMailer < ApplicationMailer
   # Relays the recipient's reply to the rep so they can carry on the conversation straight
   # from their inbox. Replies are captured back into Renter Insight by the Gmail/Outlook
   # sent-email polling, so no "view in app" round-trip is required.
-  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:, reply_to_address: nil, body_html: nil)
+  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:, reply_to_address: nil, body_html: nil, to_address: nil)
     @user = user
     @entity_name = entity_name
     @entity_type = entity_type
@@ -80,7 +80,9 @@ class NotificationMailer < ApplicationMailer
     # name (SES still sends from the verified identity), and Reply-To = the contact so a
     # plain "Reply" in the rep's inbox goes straight to them.
     relay_subject = @subject.presence || "Reply from #{@entity_name}"
-    mail_options = { to: @user.email, subject: relay_subject }
+    # Deliver to the original sending mailbox (the rep's connected inbox) when provided,
+    # so they reply in place and the sent-email polling captures it; else the account email.
+    mail_options = { to: (to_address.presence || @user.email), subject: relay_subject }
     mail_options[:reply_to] = reply_to_address if reply_to_address.present?
     from_email = delivery && delivery[:from_address].presence
     mail_options[:from] = from_email.present? ? "#{@entity_name} <#{from_email}>" : default_from_address
