@@ -69,6 +69,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     scope = Audiences::FilterCompiler.new(
       company: @company, source_type: source_type,
       filter_tree: filter_tree, exclude_filter_tree: exclude_tree,
+      manual_exclude_ids: audience&.manual_exclude_ids,
       exclude_active_campaign_enrollees: audience&.exclude_active_campaign_enrollees || false,
       exclude_active_nurture_enrollees: audience&.exclude_active_nurture_enrollees || false
     ).scope
@@ -173,6 +174,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       source_type: audience.source_type,
       filter_tree: audience.filter_tree,
       exclude_filter_tree: audience.exclude_filter_tree,
+      manual_exclude_ids: audience.try(:manual_exclude_ids),
       exclude_active_campaign_enrollees: audience.exclude_active_campaign_enrollees,
       exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees
     ).count

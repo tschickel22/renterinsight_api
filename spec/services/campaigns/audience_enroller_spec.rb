@@ -46,4 +46,27 @@ RSpec.describe Campaigns::AudienceEnroller do
     expect(second).to eq(0)
     expect(campaign.campaign_enrollments.count).to eq(2)
   end
+
+  it 'enrolls only leads matching the filter_tree' do
+    campaign.campaign_audience.update!(
+      filter_tree: { 'type' => 'and', 'children' => [{ 'field' => 'first_name', 'operator' => 'equals', 'value' => 'A' }] }
+    )
+    described_class.new(campaign: campaign).enroll_all
+    expect(campaign.campaign_enrollments.pluck(:recipient_id)).to contain_exactly(lead_a.id)
+  end
+
+  it 'does NOT enroll manually-excluded recipients (manual_exclude_ids)' do
+    campaign.campaign_audience.update!(manual_exclude_ids: [lead_a.id])
+    enrolled = described_class.new(campaign: campaign).enroll_all
+    expect(enrolled).to eq(1)
+    expect(campaign.campaign_enrollments.pluck(:recipient_id)).to contain_exactly(lead_b.id)
+  end
+
+  it 'applies exclude_filter_tree' do
+    campaign.campaign_audience.update!(
+      exclude_filter_tree: { 'type' => 'and', 'children' => [{ 'field' => 'first_name', 'operator' => 'equals', 'value' => 'B' }] }
+    )
+    described_class.new(campaign: campaign).enroll_all
+    expect(campaign.campaign_enrollments.pluck(:recipient_id)).to contain_exactly(lead_a.id)
+  end
 end
