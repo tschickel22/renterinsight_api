@@ -1708,6 +1708,8 @@ Rails.application.routes.draw do
           get :stats
           get :analytics_timeseries
           get :engagement
+          get 'engagement/by_step', action: :engagement_by_step
+          get 'engagement/by_link', action: :engagement_by_link
           get 'audience/members', action: :audience_members
           post 'audience/exclude_members', action: :exclude_audience_members
         end

@@ -1,6 +1,6 @@
 class Api::V1::CampaignsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement audience_members exclude_audience_members]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -342,6 +342,24 @@ class Api::V1::CampaignsController < ApplicationController
     ).call
 
     render json: result
+  end
+
+  # GET /api/v1/campaigns/:id/engagement/by_step
+  def engagement_by_step
+    return unless authorize_action!('campaigns', 'read')
+    render json: Campaigns::EngagementBreakdown.new(
+      campaign: @campaign, sort: params[:sort],
+      page: params[:page] || 1, per_page: params[:per_page] || 50
+    ).by_step
+  end
+
+  # GET /api/v1/campaigns/:id/engagement/by_link
+  def engagement_by_link
+    return unless authorize_action!('campaigns', 'read')
+    render json: Campaigns::EngagementBreakdown.new(
+      campaign: @campaign, sort: params[:sort], step_id: params[:step_id], search: params[:search],
+      page: params[:page] || 1, per_page: params[:per_page] || 50
+    ).by_link
   end
 
   def ai_generate
