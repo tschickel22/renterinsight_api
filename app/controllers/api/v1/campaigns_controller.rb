@@ -1,6 +1,6 @@
 class Api::V1::CampaignsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries audience_members exclude_audience_members]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement audience_members exclude_audience_members]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -324,6 +324,24 @@ class Api::V1::CampaignsController < ApplicationController
       buckets: service.buckets,
       totals: service.totals
     }
+  end
+
+  # GET /api/v1/campaigns/:id/engagement
+  # Per-recipient engagement breakdown (opens/clicks/last activity/clicked links),
+  # sortable by recent or most active — "who should I call next?".
+  def engagement
+    return unless authorize_action!('campaigns', 'read')
+
+    result = Campaigns::RecipientEngagement.new(
+      campaign:     @campaign,
+      sort:         params[:sort],
+      search:       params[:search],
+      engaged_only: params[:engaged_only],
+      page:         params[:page] || 1,
+      per_page:     params[:per_page] || 50
+    ).call
+
+    render json: result
   end
 
   def ai_generate
