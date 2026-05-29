@@ -19,6 +19,10 @@ module Webhooks
           communication.update_column(:read_at, Time.current)
         end
 
+        # Bridge the open into campaign analytics (campaign_sends.opened_at/open_count),
+        # which the campaign stats rollup and timeseries read. No-op for non-campaign emails.
+        CampaignSend.record_open_for_communication(communication.id)
+
         Rails.logger.info "[EmailTracking] Email #{communication.id} opened by #{communication.to_address} (open ##{communication.communication_events.opened.count})"
       end
 
