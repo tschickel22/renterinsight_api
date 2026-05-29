@@ -47,9 +47,22 @@ RSpec.describe Campaigns::RecipientEngagement do
     link = result[:items].first[:clicked_links].find { |l| l[:url] == "https://example.com/pricing" }
     expect(link).to be_present
     expect(link[:clicks]).to be >= 1
+    expect(link[:kind]).to eq("content_link")
     expect(link[:step_id]).to eq(step.id)
     expect(link[:step_position]).to eq(0)
     expect(link[:step_subject]).to eq("Welcome Step")
+  end
+
+  it 'classifies tracked attachment links with kind=attachment' do
+    comm = Communication.create!(company_id: company.id, communicable: lead, channel: 'email', direction: 'outbound',
+                                 subject: 'S', body: 'B', from_address: 'a@example.com', to_address: lead.email, status: 'sent')
+    send_rec.update_columns(communication_id: comm.id)
+    TrackedLink.create!(company_id: company.id, communication_id: comm.id, filename: 'Deck.pdf',
+                        link_type: 'attachment', click_count: 2, last_clicked_at: 5.minutes.ago)
+
+    link = result[:items].first[:clicked_links].find { |l| l[:label] == "Deck.pdf" }
+    expect(link).to be_present
+    expect(link[:kind]).to eq("attachment")
   end
 
   it 'keys clicked links by (step, url): the same URL in two steps yields two rows' do

@@ -154,7 +154,7 @@ module Campaigns
                        .pluck(:campaign_send_id, :target_url, :click_count, :last_clicked_at)
                        .each do |sid, url, cc, lc|
         eid, stid = send_meta[sid]
-        raw[eid] << { kind: 'link', step_id: stid, label: url, url: url, clicks: cc.to_i, last_clicked_at: lc }
+        raw[eid] << { kind: 'content_link', step_id: stid, label: url, url: url, clicks: cc.to_i, last_clicked_at: lc }
       end
 
       unless comm_meta.empty?
@@ -163,7 +163,7 @@ module Campaigns
                    .pluck(:communication_id, :filename, :url, :link_type, :click_count, :last_clicked_at)
                    .each do |cid, fn, url, lt, cc, lc|
           eid, stid = comm_meta[cid]
-          raw[eid] << { kind: (lt.presence || 'attachment'), step_id: stid,
+          raw[eid] << { kind: 'attachment', step_id: stid,
                         label: (fn.presence || url.presence || lt.to_s), url: url,
                         clicks: cc.to_i, last_clicked_at: lc }
         end
