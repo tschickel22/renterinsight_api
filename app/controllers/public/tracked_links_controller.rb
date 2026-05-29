@@ -38,9 +38,12 @@ module Public
         campaign_token.record_click!
         cs = campaign_token.campaign_send
         if cs
+          # A click implies an open (see CampaignSend.record_click_for_communication).
           cs.update_columns(
             clicked_at: cs.clicked_at || Time.current,
-            click_count: cs.click_count + 1
+            click_count: cs.click_count + 1,
+            opened_at:  cs.opened_at || Time.current,
+            open_count: [cs.open_count, 1].max
           )
         end
         redirect_to campaign_token.target_url, allow_other_host: true
