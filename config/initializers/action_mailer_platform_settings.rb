@@ -43,6 +43,20 @@ Rails.application.configure do
           }
           
           Rails.logger.info "✅ ActionMailer configured with SMTP: #{email_config['smtpHost']}"
+        elsif email_config['provider'] == 'aws_ses'
+          # Provider is AWS SES. CommunicationService sends customer email via the SES API
+          # per-message, but ActionMailer-based mailers (NotificationMailer, invitations,
+          # magic links, etc.) need a delivery method too — otherwise they fall back to the
+          # default SMTP (localhost:25) and fail with ECONNREFUSED. Route them through the
+          # registered :aws_ses_sdk delivery method using the same ENV AWS credentials.
+          ActionMailer::Base.delivery_method = :aws_ses_sdk
+          ActionMailer::Base.aws_ses_sdk_settings = {
+            access_key_id: ENV['AWS_ACCESS_KEY_ID'],
+            secret_access_key: ENV['AWS_SECRET_ACCESS_KEY'],
+            region: ENV['AWS_REGION'] || 'us-west-2'
+          }
+          ActionMailer::Base.perform_deliveries = true
+          Rails.logger.info "✅ ActionMailer configured with AWS SES SDK delivery"
         else
           Rails.logger.info "📧 Email not enabled in Platform Settings, using default config"
         end
