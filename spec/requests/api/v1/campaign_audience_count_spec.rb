@@ -51,6 +51,20 @@ RSpec.describe 'Campaign audience filtered count', type: :request do
     expect(campaign.campaign_audience.reload.estimated_count).to eq(0)
   end
 
+  it 'creating an audience from a saved audience adopts its source_type and filters' do
+    saved = Audience.create!(company_id: company.id, name: "Saved-#{SecureRandom.hex(3)}", source_type: 'Lead',
+                             filter_tree: { 'type' => 'and', 'children' => [{ 'field' => 'last_activity_at', 'operator' => 'days_since_greater_than', 'value' => 30 }] })
+    fresh = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: 'C2',
+                             campaign_type: 'drip', from_identity_type: 'User', from_identity_id: user.id, throttle_per_day: 100)
+    post "/api/v1/campaigns/#{fresh.id}/audience", headers: headers,
+         params: { campaign_audience: { saved_audience_id: saved.id } }.to_json
+    expect(response).to have_http_status(:created)
+    a = fresh.reload.campaign_audience
+    expect(a.source_type).to eq('Lead')
+    expect(a.saved_audience_id).to eq(saved.id)
+    expect(a.filter_tree['children'].first['field']).to eq('last_activity_at')
+  end
+
   it 'selecting a saved audience adopts its source_type and filters' do
     saved = Audience.create!(company_id: company.id, name: "Saved-#{SecureRandom.hex(3)}", source_type: 'Lead',
                              filter_tree: { 'type' => 'and', 'children' => [{ 'field' => 'last_activity_at', 'operator' => 'days_since_greater_than', 'value' => 30 }] })

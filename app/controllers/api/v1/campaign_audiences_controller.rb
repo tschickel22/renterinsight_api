@@ -11,11 +11,15 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     end
 
     attrs = audience_params
+
+    # Selecting a saved audience (no inline definition): adopt its source_type + filters so
+    # the campaign audience matches it. Explicit params still win.
+    saved = (@company.audiences.find_by(id: attrs[:saved_audience_id]) if attrs[:saved_audience_id].present?)
     audience = @campaign.build_campaign_audience(
-      source_type: attrs[:source_type],
-      saved_audience_id: attrs[:saved_audience_id],
-      filter_tree: attrs[:filter_tree] || {},
-      exclude_filter_tree: attrs[:exclude_filter_tree] || {}
+      source_type:         attrs[:source_type].presence || saved&.source_type,
+      saved_audience_id:   attrs[:saved_audience_id],
+      filter_tree:         attrs[:filter_tree] || saved&.filter_tree || {},
+      exclude_filter_tree: attrs[:exclude_filter_tree] || saved&.exclude_filter_tree || {}
     )
 
     if audience.save
