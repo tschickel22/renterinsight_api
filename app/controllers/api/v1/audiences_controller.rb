@@ -389,7 +389,7 @@ class Api::V1::AudiencesController < ApplicationController
     when 'Lead', 'Contact'
       scope.where('first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?', term, term, term)
     when 'Account'
-      scope.where('name ILIKE ? OR website ILIKE ?', term, term)
+      scope.where('name ILIKE ? OR email ILIKE ? OR website ILIKE ?', term, term, term)
     else
       scope
     end
@@ -399,7 +399,7 @@ class Api::V1::AudiencesController < ApplicationController
     case @audience.source_type
     when 'Lead'    then %w[id first_name last_name email phone status created_at]
     when 'Contact' then %w[id first_name last_name email phone account_id created_at]
-    when 'Account' then %w[id name account_type website created_at]
+    when 'Account' then %w[id name account_type email created_at]
     else []
     end
   end
@@ -413,7 +413,7 @@ class Api::V1::AudiencesController < ApplicationController
              { id: r.id, first_name: r.first_name, last_name: r.last_name, title: r.try(:title), email: r.email,
                phone: r.phone, account_id: r.account_id, created_at: r.created_at }
            when 'Account'
-             { id: r.id, name: r.name, account_type: r.account_type, website: r.website,
+             { id: r.id, name: r.name, account_type: r.account_type, email: r.email, website: r.website,
                created_at: r.created_at }
            else
              { id: r.id }

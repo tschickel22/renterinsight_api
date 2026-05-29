@@ -11,7 +11,9 @@ class Audience < ApplicationRecord
 
   validates :name, presence: true, length: { maximum: 200 }
   validates :source_type, inclusion: { in: SOURCE_TYPES }
-  validates :filter_tree, presence: true
+  # An empty filter_tree ({}) is valid and means "entire source" — only reject nil/non-hash.
+  # (presence: true rejected {} because an empty hash is blank in Rails.)
+  validate :filter_tree_is_hash
   validates :name, uniqueness: { scope: :company_id, conditions: -> { where(is_archived: false) }, message: 'already exists' }
 
   before_save :stringify_jsonb_keys
@@ -26,6 +28,10 @@ class Audience < ApplicationRecord
   end
 
   private
+
+  def filter_tree_is_hash
+    errors.add(:filter_tree, "can't be blank") unless filter_tree.is_a?(Hash)
+  end
 
   def stringify_jsonb_keys
     self.filter_tree = filter_tree.deep_stringify_keys if filter_tree.is_a?(Hash)
