@@ -34,8 +34,9 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
 
     intake_form = resolve_intake_form(schedule)
 
-    # Pull seasonal topic when intent is 'seasonal' for contextually relevant content
-    topic_details = intent == 'seasonal' ? SeasonalContentService.topic_for_seasonal_post : nil
+    # User's per-intent idea wins; else seasonal auto-topic; else context-only (today's behavior).
+    user_note = (schedule.intent_notes || {})[intent].presence
+    topic_details = user_note || (intent == 'seasonal' ? SeasonalContentService.topic_for_seasonal_post : nil)
 
     result = SocialPostGeneratorService.generate(
       company:         company,
