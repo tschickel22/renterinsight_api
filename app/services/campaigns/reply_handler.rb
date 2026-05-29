@@ -22,11 +22,12 @@ module Campaigns
       campaign = send.campaign
 
       ooo = ooo?(parsed_email)
+      inbound = nil
 
       ActiveRecord::Base.transaction do
         send.update_columns(replied_at: send.replied_at || Time.current) unless ooo
 
-        Communication.create!(
+        inbound = Communication.create!(
           communicable: enrollment.recipient,
           company_id: send.company_id,
           channel: 'email', direction: 'inbound',
@@ -65,6 +66,17 @@ module Campaigns
             event_type: 'paused', occurred_at: Time.current, payload: { reason: 'replied' }
           )
         end
+      end
+
+      # Notify the user who sent the campaign email (falls back to the lead's owner).
+      # Skipped for auto-replies. Outside the transaction so a notification failure can't
+      # roll back the captured reply; the notifier also rescues internally.
+      unless ooo
+        InboundEmail::ReplyNotifier.notify(
+          entity: enrollment.recipient,
+          communication: inbound,
+          outbound_communication: send.communication
+        )
       end
 
       Result.new(handled: true, enrollment_id: enrollment.id, send_id: send.id, is_ooo: ooo)
