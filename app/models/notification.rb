@@ -71,6 +71,7 @@ class Notification < ApplicationRecord
 
     # SMS / Communications notifications
     sms_reply_received: { category: 'communications', priority: 'high', title: 'SMS Reply Received' },
+    email_reply_received: { category: 'communications', priority: 'high', title: 'Email Reply Received' },
     sms_cap_alert: { category: 'system', priority: 'normal', title: 'SMS Usage Alert' },
 
     # Project / Contractor notifications

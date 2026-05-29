@@ -49,7 +49,7 @@ class NotificationMailer < ApplicationMailer
     )
   end
 
-  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:)
+  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:, reply_to_address: nil)
     @user = user
     @entity_name = entity_name
     @entity_type = entity_type
@@ -57,18 +57,22 @@ class NotificationMailer < ApplicationMailer
     @subject = subject
     @preview = preview
     @link = link
-    
+
     # Get frontend URL
-    @frontend_url = ENV['FRONTEND_URL'] || 
+    @frontend_url = ENV['FRONTEND_URL'] ||
                     (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://staging.crm.landlordinsight.com')
-    
+
     # Full link with domain
     @full_link = "#{@frontend_url}#{@link}"
-    
-    mail(
+
+    mail_options = {
       to: @user.email,
       from: default_from_address,
       subject: "📧 Reply from #{@entity_name}"
-    )
+    }
+    # Reply-To = the person who replied, so the rep can respond directly from their inbox.
+    mail_options[:reply_to] = reply_to_address if reply_to_address.present?
+
+    mail(mail_options)
   end
 end

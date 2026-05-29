@@ -58,4 +58,25 @@ RSpec.describe Campaigns::ReplyHandler do
     expect(enrollment.reload.status).to eq('active')
     expect(cs.reload.replied_at).to be_nil
   end
+
+  it 'notifies the original sender of the campaign email on a genuine reply' do
+    sender = User.create!(email: "snd-#{SecureRandom.hex(3)}@example.com", first_name: 'Snd', last_name: 'R', password: 'Pass1234!', company_id: company.id)
+    comm = Communication.create!(company_id: company.id, communicable: lead, channel: 'email', direction: 'outbound',
+                                 subject: 'Hi', body: 'b', from_address: 'r@e.com', to_address: lead.email,
+                                 status: 'sent', metadata: { 'sender_user_id' => sender.id })
+    cs = campaign_send
+    cs.update_columns(communication_id: comm.id)
+    expect {
+      described_class.process(token: "campaign-#{cs.id}", parsed_email: parsed)
+    }.to change {
+      Notification.where(recipient_id: sender.id, recipient_type: 'User', notification_type: 'email_reply_received').count
+    }.by(1)
+  end
+
+  it 'does not notify on an out-of-office reply' do
+    cs = campaign_send
+    expect {
+      described_class.process(token: "campaign-#{cs.id}", parsed_email: parsed(subject: 'Automatic reply'))
+    }.not_to change { Notification.where(notification_type: 'email_reply_received').count }
+  end
 end
