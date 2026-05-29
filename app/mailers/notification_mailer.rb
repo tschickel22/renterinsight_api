@@ -49,7 +49,10 @@ class NotificationMailer < ApplicationMailer
     )
   end
 
-  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:, reply_to_address: nil)
+  # Relays the recipient's reply to the rep so they can carry on the conversation straight
+  # from their inbox. Replies are captured back into Renter Insight by the Gmail/Outlook
+  # sent-email polling, so no "view in app" round-trip is required.
+  def email_reply(user:, entity_name:, entity_type:, from_address:, subject:, preview:, link:, reply_to_address: nil, body_html: nil)
     @user = user
     @entity_name = entity_name
     @entity_type = entity_type
@@ -57,6 +60,8 @@ class NotificationMailer < ApplicationMailer
     @subject = subject
     @preview = preview
     @link = link
+    # The actual reply content to relay (falls back to the short preview).
+    @reply_body = body_html.presence || preview
 
     # Get frontend URL
     @frontend_url = ENV['FRONTEND_URL'] ||
@@ -71,14 +76,14 @@ class NotificationMailer < ApplicationMailer
     # failed SES with AccessDenied.
     delivery = MailerDeliveryConfigurator.resolve(company: @user.try(:company))
 
-    mail_options = { to: @user.email, subject: "📧 Reply from #{@entity_name}" }
-    # Reply-To = the person who replied, so the rep can respond directly from their inbox.
+    # Use the reply's own subject so it threads naturally; show the contact as the sender
+    # name (SES still sends from the verified identity), and Reply-To = the contact so a
+    # plain "Reply" in the rep's inbox goes straight to them.
+    relay_subject = @subject.presence || "Reply from #{@entity_name}"
+    mail_options = { to: @user.email, subject: relay_subject }
     mail_options[:reply_to] = reply_to_address if reply_to_address.present?
-    if delivery && (from_email = delivery[:from_address].presence)
-      from_name = delivery[:from_name].presence
-      mail_options[:from] = from_name.present? ? "#{from_name} <#{from_email}>" : from_email
-    end
-    mail_options[:from] ||= default_from_address
+    from_email = delivery && delivery[:from_address].presence
+    mail_options[:from] = from_email.present? ? "#{@entity_name} <#{from_email}>" : default_from_address
 
     message = mail(mail_options)
     message.delivery_method(delivery[:delivery_method], delivery[:delivery_method_options]) if delivery && message

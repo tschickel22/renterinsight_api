@@ -150,6 +150,7 @@ module InboundEmail
         from_address: @communication.from_address,
         subject: @communication.subject,
         preview: preview,
+        body_html: @communication.body.to_s, # full reply content to relay
         link: entity_link,
         reply_to_address: @communication.from_address # the replier — rep can respond directly
       ).deliver_later
