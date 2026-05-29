@@ -65,14 +65,23 @@ class NotificationMailer < ApplicationMailer
     # Full link with domain
     @full_link = "#{@frontend_url}#{@link}"
 
-    mail_options = {
-      to: @user.email,
-      from: default_from_address,
-      subject: "📧 Reply from #{@entity_name}"
-    }
+    # Resolve per-send provider creds from communications settings (the SES-authorized
+    # keys), matching InvoiceMailer/SocialPostMailer. Without this the mailer falls back to
+    # the boot-time global delivery method, which used the wrong (S3-only) ENV AWS creds and
+    # failed SES with AccessDenied.
+    delivery = MailerDeliveryConfigurator.resolve(company: @user.try(:company))
+
+    mail_options = { to: @user.email, subject: "📧 Reply from #{@entity_name}" }
     # Reply-To = the person who replied, so the rep can respond directly from their inbox.
     mail_options[:reply_to] = reply_to_address if reply_to_address.present?
+    if delivery && (from_email = delivery[:from_address].presence)
+      from_name = delivery[:from_name].presence
+      mail_options[:from] = from_name.present? ? "#{from_name} <#{from_email}>" : from_email
+    end
+    mail_options[:from] ||= default_from_address
 
-    mail(mail_options)
+    message = mail(mail_options)
+    message.delivery_method(delivery[:delivery_method], delivery[:delivery_method_options]) if delivery && message
+    message
   end
 end
