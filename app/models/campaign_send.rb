@@ -18,9 +18,14 @@ class CampaignSend < ApplicationRecord
       .update_all('opened_at = COALESCE(opened_at, NOW()), open_count = open_count + 1')
   end
 
+  # A click implies an open: the recipient must have opened the email to click a link.
+  # Open pixels are frequently blocked by mail clients, so without this a clicked email
+  # could show 0 opens. Stamp opened_at if not already set (open_count to at least 1).
   def self.record_click_for_communication(communication_id)
     return if communication_id.blank?
-    where(communication_id: communication_id)
-      .update_all('clicked_at = COALESCE(clicked_at, NOW()), click_count = click_count + 1')
+    where(communication_id: communication_id).update_all(
+      'clicked_at = COALESCE(clicked_at, NOW()), click_count = click_count + 1, ' \
+      'opened_at = COALESCE(opened_at, NOW()), open_count = GREATEST(open_count, 1)'
+    )
   end
 end

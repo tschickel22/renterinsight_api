@@ -62,5 +62,24 @@ RSpec.describe CampaignSend, type: :model do
       expect(cs.clicked_at).to eq(first_clicked)
       expect(cs.click_count).to eq(2)
     end
+
+    it 'treats a click as an implied open (open pixels are often blocked by mail clients)' do
+      cs
+      expect(cs.opened_at).to be_nil
+      described_class.record_click_for_communication(communication.id)
+      cs.reload
+      expect(cs.opened_at).to be_present
+      expect(cs.open_count).to be >= 1
+    end
+
+    it 'does not overwrite a real opened_at when a click arrives later' do
+      cs
+      described_class.record_open_for_communication(communication.id)
+      cs.reload
+      real_open = cs.opened_at
+      described_class.record_click_for_communication(communication.id)
+      cs.reload
+      expect(cs.opened_at).to eq(real_open)
+    end
   end
 end
