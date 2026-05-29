@@ -131,40 +131,74 @@ module Campaigns
 
     # Maps each enrollment to the links its recipient clicked (campaign content links via
     # CampaignLinkToken + attachment/document links via TrackedLink), top N by clicks.
+    # A clicked-link row is keyed by (step, url): the same URL appearing in two drip steps
+    # yields two rows, each carrying that step's id/position/subject. Clicks for a given
+    # (step, url) are summed across the recipient's sends.
     def links_by_enrollment(enrollment_ids)
       return {} if enrollment_ids.empty?
 
-      send_to_enr = {}
-      comm_to_enr = {}
+      send_meta = {} # send_id          => [enrollment_id, step_id]
+      comm_meta = {} # communication_id => [enrollment_id, step_id]
       @campaign.campaign_sends
                .where(campaign_enrollment_id: enrollment_ids)
-               .pluck(:id, :campaign_enrollment_id, :communication_id)
-               .each do |sid, eid, cid|
-        send_to_enr[sid] = eid
-        comm_to_enr[cid] = eid if cid
+               .pluck(:id, :campaign_enrollment_id, :campaign_step_id, :communication_id)
+               .each do |sid, eid, stid, cid|
+        send_meta[sid] = [eid, stid]
+        comm_meta[cid] = [eid, stid] if cid
       end
 
-      links = Hash.new { |h, k| h[k] = [] }
+      raw = Hash.new { |h, k| h[k] = [] }
 
-      CampaignLinkToken.where(campaign_send_id: send_to_enr.keys)
+      CampaignLinkToken.where(campaign_send_id: send_meta.keys)
                        .where('click_count > 0')
                        .pluck(:campaign_send_id, :target_url, :click_count, :last_clicked_at)
                        .each do |sid, url, cc, lc|
-        eid = send_to_enr[sid]
-        links[eid] << { label: url, url: url, clicks: cc.to_i, last_clicked_at: lc, kind: 'link' }
+        eid, stid = send_meta[sid]
+        raw[eid] << { kind: 'content_link', step_id: stid, label: url, url: url, clicks: cc.to_i, last_clicked_at: lc }
       end
 
-      unless comm_to_enr.empty?
-        TrackedLink.where(communication_id: comm_to_enr.keys)
+      unless comm_meta.empty?
+        TrackedLink.where(communication_id: comm_meta.keys)
                    .where('click_count > 0')
                    .pluck(:communication_id, :filename, :url, :link_type, :click_count, :last_clicked_at)
                    .each do |cid, fn, url, lt, cc, lc|
-          eid = comm_to_enr[cid]
-          links[eid] << { label: (fn.presence || url.presence || lt.to_s), url: url, clicks: cc.to_i, last_clicked_at: lc, kind: (lt.presence || 'attachment') }
+          eid, stid = comm_meta[cid]
+          raw[eid] << { kind: 'attachment', step_id: stid,
+                        label: (fn.presence || url.presence || lt.to_s), url: url,
+                        clicks: cc.to_i, last_clicked_at: lc }
         end
       end
 
-      links.transform_values { |arr| arr.sort_by { |l| -l[:clicks] }.first(MAX_LINKS_PER_RECIPIENT) }
+      steps = step_meta
+      raw.transform_values do |rows|
+        rows.group_by { |r| [r[:step_id], r[:kind], (r[:url].presence || r[:label])] }
+            .map do |(step_id, kind, _key), grp|
+              meta = steps[step_id] || {}
+              {
+                label:           grp.first[:label],
+                url:             grp.first[:url],
+                clicks:          grp.sum { |x| x[:clicks] },
+                last_clicked_at: grp.filter_map { |x| x[:last_clicked_at] }.max,
+                kind:            kind,
+                step_id:         step_id,
+                step_position:   meta[:position],
+                step_subject:    meta[:subject]
+              }
+            end
+            .sort_by { |l| -l[:clicks] }
+            .first(MAX_LINKS_PER_RECIPIENT)
+      end
+    end
+
+    # step_id => { position:, subject: }. subject falls back to an SMS excerpt for SMS
+    # steps, else nil — same source-of-truth as Campaigns::EngagementBreakdown.
+    def step_meta
+      @step_meta ||= @campaign.campaign_steps
+                              .pluck(:id, :position, :subject, :channel, :sms_body)
+                              .each_with_object({}) do |(id, pos, subj, chan, sms), h|
+        subject = subj.presence || (chan == 'sms' ? sms.to_s.strip[0, 160].presence : nil)
+        h[id] = { position: pos, subject: subject }
+      end
     end
 
     def owner_names(rows)
