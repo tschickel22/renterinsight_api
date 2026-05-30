@@ -120,6 +120,9 @@ class Deal < ApplicationRecord
   
   # Auto-generate commission payment when deal is marked closed_won
   after_save :generate_commission_payment, if: :just_closed_won?
+  # Mirror the deal's lifecycle onto the linked vehicle: close_won → sold,
+  # transition back out → revert to available (only if this deal owns the sale).
+  after_save :sync_vehicle_sold_status, if: :saved_change_to_stage?
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
   # Deals queue for accountant approval by default. Auto-posting only fires when the
   # company opts in via AccountingSettings.auto_post_deals; otherwise the deal sits in
@@ -383,6 +386,13 @@ class Deal < ApplicationRecord
     CommissionPaymentGeneratorService.generate_for_deal(self)
   rescue StandardError => e
     Rails.logger.error "[Deal] Failed to generate commission payment for deal #{id}: #{e.message}"
+  end
+
+  def sync_vehicle_sold_status
+    previous_stage, _ = saved_change_to_stage
+    DealVehicleStatusSync.call(self, previous_stage: previous_stage)
+  rescue StandardError => e
+    Rails.logger.error "[Deal] sync_vehicle_sold_status failed for deal #{id}: #{e.message}"
   end
   
   # Fire custom lifecycle webhook events on stage transitions
