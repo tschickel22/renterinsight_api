@@ -91,13 +91,21 @@ module Api
         rv_count = vehicles.rvs.count
         mh_count = vehicles.manufactured_homes.count
         
-        # Apply search filter (searches year, make, model, trim, vin, serial_number, inventory_id, location_city)
+        # Apply search filter (searches year, make, model, trim, vin, serial_number, inventory_id, location_city,
+        # plus linked-deal buyer names — Contact first/last/full or Account name).
+        # LEFT JOINs so vehicles without any deal still appear; DISTINCT to avoid the
+        # row multiplication a vehicle-with-many-deals would otherwise cause.
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          vehicles = vehicles.where(
-            "CAST(year AS TEXT) ILIKE ? OR make ILIKE ? OR model ILIKE ? OR trim ILIKE ? OR vin ILIKE ? OR serial_number ILIKE ? OR inventory_id ILIKE ? OR location_city ILIKE ?",
-            search_term, search_term, search_term, search_term, search_term, search_term, search_term, search_term
-          )
+          vehicles = vehicles
+            .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
+            .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
+            .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+            .where(
+              "CAST(vehicles.year AS TEXT) ILIKE :q OR vehicles.make ILIKE :q OR vehicles.model ILIKE :q OR vehicles.trim ILIKE :q OR vehicles.vin ILIKE :q OR vehicles.serial_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR vehicles.location_city ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
+              q: search_term
+            )
+            .distinct
         end
 
         # Sorting
@@ -113,8 +121,17 @@ module Api
         per_page = [params[:per_page]&.to_i || 25, 500].min  # Allow up to 500 for dropdown pickers
         vehicles = vehicles.includes(:location).offset((page - 1) * per_page).limit(per_page)
 
+        # For buyer-name matches we want to tell the FE *which* buyer matched —
+        # otherwise a vehicle appears in results with no obvious reason. Compute
+        # the map only over the paginated slice to keep this cheap.
+        matched_buyers_by_vehicle = matched_buyers_for(vehicles, params[:search])
+
         render json: {
-          vehicles: vehicles.map { |v| vehicle_json(v) },
+          vehicles: vehicles.map { |v|
+            vehicle_json(v).merge(
+              matchedBuyers: matched_buyers_by_vehicle[v.id] || []
+            )
+          },
           meta: {
             current_page: page,
             per_page: per_page,
@@ -1094,6 +1111,38 @@ module Api
       end
 
       private
+
+      # Returns { vehicle_id => [{ name:, deal_id: }, ...] } for any vehicle whose
+      # search hit came via a linked deal's contact/account name. Empty hash when
+      # search is blank or no matches — FE then renders no buyer chip.
+      def matched_buyers_for(vehicles_scope, search)
+        return {} if search.blank?
+
+        vehicle_ids = vehicles_scope.map(&:id)
+        return {} if vehicle_ids.empty?
+
+        search_term = "%#{search}%"
+        deals = @company.deals
+          .where(vehicle_id: vehicle_ids)
+          .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
+          .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+          .where(
+            "contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
+            q: search_term
+          )
+          .includes(:contact, :account)
+
+        deals.each_with_object({}) do |deal, acc|
+          name = if deal.contact
+                   "#{deal.contact.first_name} #{deal.contact.last_name}".strip
+                 else
+                   deal.account&.name
+                 end
+          next if name.blank?
+          acc[deal.vehicle_id] ||= []
+          acc[deal.vehicle_id] << { name: name, deal_id: deal.id }
+        end
+      end
 
       # Resolve location from import params: locationId > locationName > Current.location_id
       # Returns [location_id, error_message]

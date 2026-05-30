@@ -96,14 +96,23 @@ class Api::V1::SearchController < ApplicationController
       Rails.logger.error("Search deals error: #{e.message}")
     end
     
-    # Inventory - Vehicles
+    # Inventory - Vehicles (also matches linked deal's contact/account name —
+    # LEFT JOIN deals→contact/account; DISTINCT to dedupe vehicles with many deals.)
     begin
       vehicles = @company.vehicles
                         .where(is_deleted: [false, nil])
-                        .where("vin ILIKE ? OR stock_number ILIKE ? OR inventory_id ILIKE ? OR CONCAT(year::text, ' ', make, ' ', model) ILIKE ?", 
-                               "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                        .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
+                        .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
+                        .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+                        .where(
+                          "vehicles.vin ILIKE :q OR vehicles.stock_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR CONCAT(vehicles.year::text, ' ', vehicles.make, ' ', vehicles.model) ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
+                          q: "%#{query}%"
+                        )
+                        .distinct
                         .limit(5)
-      
+
+      matched_buyers_by_vehicle = vehicle_buyer_matches(vehicles, query)
+
       results += vehicles.map do |vehicle|
         {
           id: vehicle.id,
@@ -111,6 +120,7 @@ class Api::V1::SearchController < ApplicationController
           title: vehicle.display_name || "#{vehicle.year} #{vehicle.make} #{vehicle.model}",
           subtitle: vehicle.inventory_id || vehicle.vin,
           badge: vehicle.status&.titleize,
+          matched_buyers: matched_buyers_by_vehicle[vehicle.id] || [],
           score: calculate_score(query, vehicle.display_name, vehicle.vin, vehicle.stock_number)
         }
       end
@@ -350,7 +360,38 @@ class Api::V1::SearchController < ApplicationController
   end
   
   private
-  
+
+  # For each vehicle in `vehicles_scope`, find linked deals whose contact or
+  # account name matches `query` and return { vehicle_id => [{name:, deal_id:}, ...] }.
+  # Lets the FE surface "matched via Jane Doe" instead of an unexplained hit.
+  def vehicle_buyer_matches(vehicles_scope, query)
+    return {} if query.blank?
+
+    vehicle_ids = vehicles_scope.map(&:id)
+    return {} if vehicle_ids.empty?
+
+    deals = @company.deals
+      .where(vehicle_id: vehicle_ids)
+      .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
+      .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+      .where(
+        "contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
+        q: "%#{query}%"
+      )
+      .includes(:contact, :account)
+
+    deals.each_with_object({}) do |deal, acc|
+      name = if deal.contact
+               "#{deal.contact.first_name} #{deal.contact.last_name}".strip
+             else
+               deal.account&.name
+             end
+      next if name.blank?
+      acc[deal.vehicle_id] ||= []
+      acc[deal.vehicle_id] << { name: name, deal_id: deal.id }
+    end
+  end
+
   # Calculate relevance score (0-100)
   # Exact match = 100, starts with = 75, contains = 50
   def calculate_score(query, *fields)
