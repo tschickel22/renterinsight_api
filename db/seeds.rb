@@ -29,4 +29,8 @@ load Rails.root.join('db', 'seeds', 'subscription_plans.rb')
 # Load campaign templates
 load Rails.root.join('db', 'seeds', 'campaign_templates.rb')
 
+# Load Deal Desk RBAC (resource + actions + role grants) then sample data
+load Rails.root.join('db', 'seeds', 'deal_desk_rbac_seed.rb')
+load Rails.root.join('db', 'seeds', 'deal_desk_seed.rb')
+
 puts "✨ Seed completed!"

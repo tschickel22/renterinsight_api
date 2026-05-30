@@ -12,6 +12,7 @@ class PlatformModule
     'crm.deals' => { name: 'Sales Pipeline', category: 'CRM & Sales', icon: 'TrendingUp', description: 'Deal tracking and sales process' },
     'crm.quotes' => { name: 'Quote Builder', category: 'CRM & Sales', icon: 'FileText', description: 'Professional quote generation' },
     'sales.configurator' => { name: 'Home Configurator', category: 'CRM & Sales', icon: 'Home', description: 'Configure and quote manufactured homes' },
+    'sales.deal_desk' => { name: 'Deal Desk', category: 'CRM & Sales', icon: 'Calculator', description: 'Point-of-sale deal structuring: solve for payment, compare units, present a pencil' },
     
     # Inventory & Operations
     'inventory.vehicles' => { name: 'Inventory Management', category: 'Inventory & Operations', icon: 'Package', description: 'Vehicle and unit inventory tracking' },

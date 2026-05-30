@@ -49,6 +49,12 @@ class Company < ApplicationRecord
   has_many :ad_campaigns, dependent: :destroy
   has_many :social_comments, dependent: :destroy
 
+  # Deal Desk
+  has_many :deal_desk_scenarios, dependent: :destroy
+  has_many :lender_programs, dependent: :destroy
+  has_many :fee_templates, dependent: :destroy
+  has_many :fni_products, dependent: :destroy
+
   # Email Campaigns
   has_many :campaigns, dependent: :destroy
   has_many :campaign_suppressions, dependent: :destroy
@@ -486,6 +492,45 @@ class Company < ApplicationRecord
     operational_settings['timezone'].presence || 'America/New_York'
   end
   
+  # --- Deal Desk settings -------------------------------------------------
+  # Tunable per company (no code change). Stored in the deal_desk_settings jsonb column,
+  # merged over these defaults.
+  DEAL_DESK_SETTING_DEFAULTS = {
+    'price_band_mode'   => 'amount',  # 'amount' (±$) or 'percent' (±%)
+    'price_band_amount' => 15_000,    # ±$15k
+    'price_band_pct'    => 10,        # ±10%
+    'validity_days'     => 30,        # scenario validity window
+    'days_on_lot_tiers' => [90, 120, 180]
+  }.freeze
+
+  def deal_desk_settings_resolved
+    DEAL_DESK_SETTING_DEFAULTS.merge((deal_desk_settings || {}).compact)
+  end
+
+  def deal_desk_scenario_validity_days
+    deal_desk_settings_resolved['validity_days'].to_i
+  end
+
+  def deal_desk_price_band
+    s = deal_desk_settings_resolved
+    { mode: s['price_band_mode'], amount: s['price_band_amount'].to_f, pct: s['price_band_pct'].to_f }
+  end
+
+  def deal_desk_days_on_lot_tiers
+    Array(deal_desk_settings_resolved['days_on_lot_tiers']).map(&:to_i).sort
+  end
+
+  # Default finance APR (whole-number percent). Single source of truth for the rate
+  # resolver's company-default tier. Reads loan_settings (set by the Company Settings UI),
+  # falling back to the platform default. Replaces the value previously hardcoded in
+  # CompanySettingsController#show_loan.
+  DEFAULT_FINANCE_RATE = 8.0
+
+  def default_finance_rate
+    rate = (loan_settings || {})['default_interest_rate']
+    rate.presence ? rate.to_f : DEFAULT_FINANCE_RATE
+  end
+
   def branding_settings
     @branding_settings ||= Setting.get('Company', id, 'branding') || {}
   end

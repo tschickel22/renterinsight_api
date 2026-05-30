@@ -197,6 +197,23 @@ Rails.application.routes.draw do
         get 'modules/:module_type/sample_csv', action: :sample_csv
       end
 
+      # ==================== DEAL DESK ====================
+      scope path: 'deal_desk' do
+        resources :scenarios, only: %i[index show create update destroy],
+                              controller: 'deal_desk_scenarios' do
+          collection do
+            post :solve     # reverse-solve a lever for a target payment
+            post :compare   # comparable-unit matching + ranking
+          end
+          member do
+            post :select          # mark selected + write structure back to the deal
+            post :generate_quote  # turn the selected scenario into a Quote
+            post :transfer_unit   # MANAGER ONLY: commit a cross-location unit
+            get  :summary, defaults: { format: 'pdf' }  # /scenarios/:id/summary.pdf
+          end
+        end
+      end
+
       # ==================== AI REPORT QUERY ====================
       scope 'report-ai', as: 'report_ai' do
         post 'ask',               to: 'report_ai#ask'

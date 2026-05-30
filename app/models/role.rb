@@ -235,6 +235,19 @@ class Role < ApplicationRecord
     )
   end
 
+  # Deal Desk grants at scope 'all' (the controller authorizes with default scope 'all';
+  # location filtering is applied operationally via accessible_location_ids). Reps build/
+  # quote/compare freely; configure + transfer_unit are manager-only.
+  def self.grant_deal_desk!(role, action_keys)
+    resource = Resource.find_by(key: 'deal_desk')
+    all_scope = Scope.find_by!(key: 'all')
+    return unless resource
+
+    Action.where(key: action_keys).each do |action|
+      RolePermission.find_or_create_by!(role: role, resource: resource, action: action, scope: all_scope, granted: true)
+    end
+  end
+
   def self.grant_full_permissions!(role)
     all_scope = Scope.find_by!(key: 'all')
 
@@ -254,6 +267,9 @@ class Role < ApplicationRecord
   def self.grant_manager_permissions!(role)
     assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
     all_scope = Scope.find_by!(key: 'all')
+
+    # Deal Desk: managers get the full set including configure + transfer_unit.
+    grant_deal_desk!(role, %w[read write quote configure transfer_unit])
 
     # Managers can do most operations at assigned locations
     operational_resources = Resource.where(category: ['operations', 'core'])
@@ -340,6 +356,9 @@ class Role < ApplicationRecord
   def self.grant_location_manager_permissions!(role)
     assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
 
+    # Deal Desk: location managers also get configure + transfer_unit (the manager capability).
+    grant_deal_desk!(role, %w[read write quote configure transfer_unit])
+
     # Location managers can do operations but not manage settings
     operational_resources = Resource.where(category: ['operations', 'core'])
     manager_actions = Action.where(key: %w[create read update delete export])
@@ -415,6 +434,9 @@ class Role < ApplicationRecord
   def self.grant_sales_rep_permissions!(role)
     assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
     operational_actions = Action.where(key: %w[create read update delete export])
+
+    # Deal Desk: reps build/quote/compare freely (no configure, no transfer_unit).
+    grant_deal_desk!(role, %w[read write quote])
     
     # Full access to sales resources
     %w[quotes deals sales crm contacts leads].each do |resource_key|

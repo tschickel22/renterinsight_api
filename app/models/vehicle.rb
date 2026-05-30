@@ -44,6 +44,7 @@ class Vehicle < ApplicationRecord
   belongs_to :floor_plan, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  has_many :deal_desk_scenarios, dependent: :nullify
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   has_many :inventory_packages, dependent: :destroy

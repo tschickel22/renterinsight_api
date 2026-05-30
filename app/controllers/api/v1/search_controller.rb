@@ -76,12 +76,45 @@ class Api::V1::SearchController < ApplicationController
     end
     
     # CRM - Deals (NO is_deleted column in production)
+    # Two match paths, both returning a 'deal' result (NO new SearchResultType):
+    #   1. buyer/account/contact via deal name/number (existing behavior)
+    #   2. a unit/stock# living in an ACTIVE deal_desk_scenario -> the PARENT deal, even
+    #      when that unit is not the deal's primary unit (the aged cross-location case).
+    # Deals with active scenarios are badged desked:true and deep-link to the desk tab.
     begin
-      deals = @company.deals
-                     .where("name ILIKE ? OR deal_number ILIKE ?", "%#{query}%", "%#{query}%")
-                     .limit(5)
-      
+      like = "%#{query}%"
+
+      # Path 1 — name / deal number.
+      name_matches = @company.deals
+                            .where('deals.name ILIKE ? OR deals.deal_number ILIKE ?', like, like)
+                            .limit(5).to_a
+
+      # Path 2 — stock#/serial/VIN/inventory-id of a unit in an ACTIVE scenario.
+      # @company.deals JOIN scenarios JOIN vehicles — never an unscoped scenario query.
+      scenario_matches = @company.deals
+                                .joins(deal_desk_scenarios: :vehicle)
+                                .where(deal_desk_scenarios: { status: 'active' })
+                                .where(
+                                  'vehicles.stock_number ILIKE :q OR vehicles.serial_number ILIKE :q ' \
+                                  'OR vehicles.vin ILIKE :q OR vehicles.inventory_id ILIKE :q',
+                                  q: like
+                                )
+                                .distinct.limit(5).to_a
+
+      stock_matched_ids = scenario_matches.map(&:id).to_set
+      deals = (name_matches + scenario_matches).uniq(&:id).first(5)
+
+      # Which of these deals carry ANY active scenario (drives the desked badge)?
+      desked_ids = @company.deal_desk_scenarios.active
+                          .where(deal_id: deals.map(&:id)).distinct.pluck(:deal_id).to_set
+
       results += deals.map do |deal|
+        desked = desked_ids.include?(deal.id)
+        name_score = calculate_score(query, deal.name, deal.deal_number)
+        # Stock#-only matches won't score on name/number — give them a "contains" floor so
+        # they surface.
+        score = stock_matched_ids.include?(deal.id) ? [name_score, 60].max : name_score
+
         {
           id: deal.id,
           type: 'deal',
@@ -89,7 +122,9 @@ class Api::V1::SearchController < ApplicationController
           subtitle: deal.deal_number,
           badge: deal.stage&.titleize,
           amount: deal.value,
-          score: calculate_score(query, deal.name, deal.deal_number)
+          desked: desked,
+          url: desked ? "/deals/#{deal.id}?tab=deal_desk" : "/deals/#{deal.id}",
+          score: score
         }
       end
     rescue => e

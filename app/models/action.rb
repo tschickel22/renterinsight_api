@@ -28,7 +28,12 @@ class Action < ApplicationRecord
       { key: 'manage', name: 'Manage Settings', description: 'Configure resource settings' },
       { key: 'assign', name: 'Assign Access', description: 'Grant access to other users' },
       { key: 'view_pii', name: 'View PII', description: 'Access sensitive personal information' },
-      { key: 'approve', name: 'Approve', description: 'Approve requests and workflows' }
+      { key: 'approve', name: 'Approve', description: 'Approve requests and workflows' },
+      # Deal Desk verbs (Section 25). 'read' is reused above.
+      { key: 'write', name: 'Write/Build', description: 'Build and autosave working structures (Deal Desk)' },
+      { key: 'quote', name: 'Quote', description: 'Generate a quote from a structure (Deal Desk)' },
+      { key: 'configure', name: 'Configure', description: 'Configure lender programs, fees, F&I, desk settings (Deal Desk)' },
+      { key: 'transfer_unit', name: 'Transfer Unit', description: 'Initiate cross-location unit transfer (Deal Desk — manager)' }
     ].each do |action_data|
       find_or_create_by!(key: action_data[:key]) do |action|
         action.name = action_data[:name]
