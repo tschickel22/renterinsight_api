@@ -132,19 +132,20 @@ class Api::V1::SearchController < ApplicationController
     end
     
     # Inventory - Vehicles (also matches linked deal's contact/account name —
-    # LEFT JOIN deals→contact/account; DISTINCT to dedupe vehicles with many deals.)
+    # LEFT JOIN deals→contact/account). Dedupe via an id subquery, NOT DISTINCT:
+    # `SELECT DISTINCT vehicles.*` errors because the table has json (not jsonb) columns
+    # with no equality operator. IN(...) dedupes and keeps the outer scope join-free.
     begin
-      vehicles = @company.vehicles
-                        .where(is_deleted: [false, nil])
-                        .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
-                        .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
-                        .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
-                        .where(
-                          "vehicles.vin ILIKE :q OR vehicles.stock_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR CONCAT(vehicles.year::text, ' ', vehicles.make, ' ', vehicles.model) ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
-                          q: "%#{query}%"
-                        )
-                        .distinct
-                        .limit(5)
+      match_scope = @company.vehicles
+                           .where(is_deleted: [false, nil])
+                           .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
+                           .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
+                           .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+                           .where(
+                             "vehicles.vin ILIKE :q OR vehicles.stock_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR CONCAT(vehicles.year::text, ' ', vehicles.make, ' ', vehicles.model) ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
+                             q: "%#{query}%"
+                           )
+      vehicles = @company.vehicles.where(id: match_scope.select("vehicles.id")).limit(5)
 
       matched_buyers_by_vehicle = vehicle_buyer_matches(vehicles, query)
 

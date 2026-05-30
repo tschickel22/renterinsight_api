@@ -97,7 +97,11 @@ module Api
         # row multiplication a vehicle-with-many-deals would otherwise cause.
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          vehicles = vehicles
+          # Match on vehicle fields OR linked-deal buyer names. Dedupe via an id subquery
+          # rather than DISTINCT: `SELECT DISTINCT vehicles.*` errors because the table has
+          # json (not jsonb) columns, which have no equality operator. IN(...) dedupes cleanly
+          # and keeps the outer scope free of the LEFT JOIN row multiplication.
+          match_scope = vehicles
             .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
             .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
             .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
@@ -105,7 +109,7 @@ module Api
               "CAST(vehicles.year AS TEXT) ILIKE :q OR vehicles.make ILIKE :q OR vehicles.model ILIKE :q OR vehicles.trim ILIKE :q OR vehicles.vin ILIKE :q OR vehicles.serial_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR vehicles.location_city ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
               q: search_term
             )
-            .distinct
+          vehicles = vehicles.where(id: match_scope.select("vehicles.id"))
         end
 
         # Sorting
