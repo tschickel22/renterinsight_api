@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_29_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6178,6 +6178,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
   end
 
+  create_table "vehicle_documents", force: :cascade do |t|
+    t.bigint "vehicle_id", null: false
+    t.string "title", null: false
+    t.string "category", default: "other", null: false
+    t.string "visibility", default: "internal", null: false
+    t.string "file_url"
+    t.string "file_content_type"
+    t.bigint "file_size"
+    t.bigint "uploaded_by_user_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["uploaded_by_user_id"], name: "index_vehicle_documents_on_uploaded_by_user_id"
+    t.index ["vehicle_id", "visibility"], name: "index_vehicle_documents_on_vehicle_id_and_visibility"
+    t.index ["vehicle_id"], name: "index_vehicle_documents_on_vehicle_id"
+    t.index ["visibility"], name: "index_vehicle_documents_on_visibility"
+  end
+
   create_table "vehicles", force: :cascade do |t|
     t.integer "company_id"
     t.string "stock_number"
@@ -7344,6 +7361,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "user_view_preferences", "users"
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
+  add_foreign_key "vehicle_documents", "users", column: "uploaded_by_user_id"
+  add_foreign_key "vehicle_documents", "vehicles"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"

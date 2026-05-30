@@ -696,7 +696,10 @@ Rails.application.routes.draw do
         
         # Vehicle image uploads
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
-        
+
+        # Vehicle documents (3-tier visibility: internal/customer/public)
+        resources :documents, controller: 'vehicle_documents'
+
         # Vehicle packages (Package Builder)
         resources :packages, controller: 'inventory_packages' do
           collection do
