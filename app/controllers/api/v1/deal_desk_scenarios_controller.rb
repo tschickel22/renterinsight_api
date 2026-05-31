@@ -178,6 +178,35 @@ module Api
         render json: { error: 'Deal not found' }, status: :not_found
       end
 
+      # POST /api/v1/deal_desk/scenarios/grid
+      # Payment matrix (the "four-square" grid): every cell is computed by the SAME engine
+      # solve/compare use — one Engine.compute per (term_months, cash_down) pair. No new math,
+      # no LLM. dealer_gross is attached per cell only for cost-viewers.
+      # Body: { deal_id, base_structure?, terms: [number], cash_downs: [number] }
+      MAX_GRID_CELLS = 64
+
+      def grid
+        return unless authorize_action!(RESOURCE, 'read')
+
+        terms      = Array(params[:terms]).map(&:to_i).reject(&:zero?)
+        cash_downs = Array(params[:cash_downs]).map(&:to_f)
+        return render(json: { error: 'terms and cash_downs are required' }, status: :unprocessable_entity) if terms.empty? || cash_downs.empty?
+
+        if terms.length * cash_downs.length > MAX_GRID_CELLS
+          return render json: { error: "Matrix too large: #{terms.length}x#{cash_downs.length} exceeds #{MAX_GRID_CELLS} cells" },
+                        status: :unprocessable_entity
+        end
+
+        base = build_base_structure(params)
+        cells = terms.flat_map do |term|
+          cash_downs.map { |cash_down| grid_cell(base, term, cash_down) }
+        end
+
+        render json: { grid: { terms: terms, cash_downs: cash_downs, cells: cells } }
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Deal not found' }, status: :not_found
+      end
+
       # POST /api/v1/deal_desk/scenarios/:id/generate_quote
       # Optionally turn the selected scenario into a real Quote (reuses the quote system).
       def generate_quote
@@ -306,6 +335,21 @@ module Api
         return {} if value.blank?
 
         (value.respond_to?(:to_unsafe_h) ? value.to_unsafe_h : value.to_h).symbolize_keys
+      end
+
+      # One payment-grid cell: the base structure with this (term, cash_down) pair swapped in,
+      # run through the SAME Engine.compute used everywhere else. Gross gated to cost-viewers.
+      def grid_cell(base, term, cash_down)
+        res = DealDesk::Engine.compute(base.merge(term_months: term, cash_down: cash_down))
+        cell = {
+          term_months: res.term_months,
+          cash_down: cash_down,
+          monthly_payment: res.monthly_payment,
+          amount_financed: res.amount_financed,
+          out_the_door: res.out_the_door
+        }
+        cell[:dealer_gross] = res.gross&.total if can_view_costs? && res.gross
+        cell
       end
 
       def days_on_lot(unit)

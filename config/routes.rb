@@ -209,6 +209,7 @@ Rails.application.routes.draw do
           collection do
             post :solve     # reverse-solve a lever for a target payment
             post :compare   # comparable-unit matching + ranking
+            post :grid      # payment matrix: engine-computed cell per (term, cash_down) pair
             post :ai_solve  # AI interprets intent; engine computes; returns ranked options
           end
           member do
