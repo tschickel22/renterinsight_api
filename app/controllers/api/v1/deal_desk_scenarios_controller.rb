@@ -25,7 +25,14 @@ module Api
         scenarios = deal.deal_desk_scenarios
         scenarios = params[:include_expired].present? ? scenarios.recent : scenarios.offerable.recent
 
-        render json: { scenarios: scenarios.map { |s| scenario_json(s) } }
+        # Surface the company's write-back timing so the desk workspace is mode-aware without
+        # a separate round-trip (and without needing company_settings permission — this list
+        # is gated on deal_desk:read). on_close => the desk shows "applies at close"; on_apply
+        # => the rep must explicitly apply.
+        render json: {
+          scenarios: scenarios.map { |s| scenario_json(s) },
+          deal_desk_writeback_mode: @company.deal_desk_writeback_mode
+        }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Deal not found' }, status: :not_found
       end
@@ -102,7 +109,7 @@ module Api
       def apply
         return unless authorize_action!(RESOURCE, 'write')
 
-        write_back_to_deal!(@scenario)
+        @scenario.write_back_to_deal!
         render json: { scenario: scenario_json(@scenario), applied: true }
       end
 
@@ -355,21 +362,6 @@ module Api
       def days_on_lot(unit)
         received = unit.date_in_stock || unit.created_at
         received ? (Date.current - received.to_date).to_i : nil
-      end
-
-      # --- Write-back to the deal (structured, no close/GL side effects) ------
-      def write_back_to_deal!(scenario)
-        deal = scenario.deal
-        attrs = {
-          vehicle_id: scenario.vehicle_id,
-          selling_price: scenario.unit_price_snapshot,
-          trade_allowance: scenario.trade_allowance,
-          trade_payoff: scenario.trade_payoff,
-          down_payment: scenario.cash_down,
-          doc_fee: scenario.fees&.dig('doc'),
-          financed_amount: scenario.amount_financed
-        }.compact
-        deal.update(attrs)
       end
 
       # --- Quote generation ---------------------------------------------------

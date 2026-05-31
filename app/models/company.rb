@@ -520,6 +520,20 @@ class Company < ApplicationRecord
     Array(deal_desk_settings_resolved['days_on_lot_tiers']).map(&:to_i).sort
   end
 
+  # Deal Desk write-back timing.
+  #   'on_close' (default) — the selected scenario is written back to the deal
+  #                          automatically inside the deal-close -> GL-approval pipeline,
+  #                          so the GL post sees the desked figures.
+  #   'on_apply'           — write-back stays manual (the apply endpoint only).
+  # Stored as a Company Setting (mirrors operational_settings/branding), NOT a column. An
+  # unrecognized stored value falls back to the safe 'on_close' default.
+  WRITEBACK_MODES = %w[on_apply on_close].freeze
+
+  def deal_desk_writeback_mode
+    mode = Setting.get('Company', id, 'deal_desk_writeback_mode').presence || 'on_close'
+    WRITEBACK_MODES.include?(mode) ? mode : 'on_close'
+  end
+
   # Default finance APR (whole-number percent). Single source of truth for the rate
   # resolver's company-default tier. Reads loan_settings (set by the Company Settings UI),
   # falling back to the platform default. Replaces the value previously hardcoded in

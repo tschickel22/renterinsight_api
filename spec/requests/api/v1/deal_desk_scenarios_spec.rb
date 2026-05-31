@@ -43,6 +43,15 @@ RSpec.describe 'Api::V1::DealDeskScenarios', type: :request do
     end
   end
 
+  describe 'GET /scenarios (list — desk workspace fetch)' do
+    it 'includes deal_desk_writeback_mode so the workspace is mode-aware (default on_close)' do
+      created_scenario
+      get '/api/v1/deal_desk/scenarios', params: { deal_id: deal.id }, headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)['deal_desk_writeback_mode']).to eq('on_close')
+    end
+  end
+
   describe 'POST /scenarios/solve' do
     it 'reverse-solves a lever for a target payment' do
       post '/api/v1/deal_desk/scenarios/solve',

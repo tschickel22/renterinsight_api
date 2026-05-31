@@ -118,7 +118,14 @@ class Deal < ApplicationRecord
   
   # Sync vehicle pricing when vehicle is assigned
   before_validation :sync_vehicle_pricing, if: :will_save_change_to_vehicle_id?
-  
+
+  # Deal Desk: in 'on_close' mode, write the selected scenario's structure back to the deal
+  # automatically as part of the close save (before the GL post, an after_commit, reads it).
+  # before_save so the figures fold into THIS UPDATE; the hook assigns only (no nested save).
+  before_save :apply_selected_scenario_on_close,
+              if: -> { will_save_change_to_stage? && stage == 'closed_won' &&
+                       company&.deal_desk_writeback_mode == 'on_close' }
+
   # Auto-generate commission payment when deal is marked closed_won
   after_save :generate_commission_payment, if: :just_closed_won?
   # Mirror the deal's lifecycle onto the linked vehicle: close_won → sold,
@@ -414,6 +421,31 @@ class Deal < ApplicationRecord
   end
 
   # Sync vehicle pricing data when vehicle is assigned
+  # Deal Desk on_close write-back (see the before_save above). Pulls the deal's single
+  # selected scenario and writes its structure onto the deal via ASSIGNMENT ONLY
+  # (assign_only: true) — folded into this in-flight save, so there's no nested deal.update
+  # and no save re-entrancy. Never raises: a deal with no selected scenario simply closes.
+  # Does NOT touch the close/GL/commission pipeline (commissions stay gated on GL-approval).
+  def apply_selected_scenario_on_close
+    scenario = deal_desk_scenarios.selected.first
+    unless scenario
+      Rails.logger.info("[DealDesk] Deal #{id} closing with no selected scenario; no write-back.")
+      return
+    end
+
+    # Divergence guard: the deal was hand-edited after the scenario was selected. The
+    # scenario is the source of truth at close, but make the silent overwrite visible.
+    if selling_price.present? && scenario.unit_price_snapshot.present? &&
+       selling_price.to_d != scenario.unit_price_snapshot.to_d
+      Rails.logger.warn(
+        "[DealDesk] Deal #{id} selling_price=#{selling_price} diverges from selected scenario " \
+        "#{scenario.id} snapshot=#{scenario.unit_price_snapshot}; applying scenario (source of truth at close)."
+      )
+    end
+
+    scenario.write_back_to_deal!(self, assign_only: true)
+  end
+
   def sync_vehicle_pricing
     return unless vehicle_id.present?
     vehicle = Vehicle.find_by(id: vehicle_id)

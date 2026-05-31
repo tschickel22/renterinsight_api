@@ -79,6 +79,39 @@ class DealDeskScenario < ApplicationRecord
     end
   end
 
+  # Write this scenario's structure back onto the deal. Two modes:
+  #   assign_only: false (default) — deal.update; used by the controller #apply action
+  #                                  (the deliberate, manual pre-close write-back).
+  #   assign_only: true            — pure assignment (deal.attr = ...) for use INSIDE a deal
+  #                                  save (the on_close before_save hook). Folding into the
+  #                                  in-flight UPDATE means no nested deal.update and so no
+  #                                  save re-entrancy.
+  # Writes ONLY the structured economic fields — never the close/GL/commission state.
+  def write_back_to_deal!(deal = self.deal, assign_only: false)
+    attrs = {
+      vehicle_id: vehicle_id,
+      selling_price: unit_price_snapshot,
+      # Server-populated snapshot of the unit's real cost (snapshot_unit!), never view-gated.
+      # Written to BOTH cost columns: unit_cost (deal-level gross helper) and home_cost — the
+      # canonical accounting cost the GL COGS line actually reads (DealAccountingService), per
+      # the deal_approvals unit_cost->home_cost alias. Keeps COGS consistent with the swapped
+      # unit's revenue at close. compacted, so a unit with no cost on record nils out neither.
+      unit_cost: unit_cost_snapshot,
+      home_cost: unit_cost_snapshot,
+      trade_allowance: trade_allowance,
+      trade_payoff: trade_payoff,
+      down_payment: cash_down,
+      doc_fee: fees&.dig('doc'),
+      financed_amount: amount_financed
+    }.compact
+
+    if assign_only
+      attrs.each { |attr, value| deal.public_send("#{attr}=", value) }
+    else
+      deal.update(attrs)
+    end
+  end
+
   # Expire unless permanently kept (selected). Used by the expiry sweep.
   def expire!
     return if status == 'selected'

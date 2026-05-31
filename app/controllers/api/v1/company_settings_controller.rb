@@ -33,7 +33,11 @@ module Api
 
         render json: {
           operational_settings: company_settings,
-          defaults: platform_defaults
+          defaults: platform_defaults,
+          # Deal Desk write-back timing lives in its OWN top-level Setting key (the model
+          # reads Setting.get('Company', id, 'deal_desk_writeback_mode')), not inside the
+          # operational_settings hash. Surface the resolved value (defaults to 'on_close').
+          deal_desk_writeback_mode: @company.deal_desk_writeback_mode
         }
       end
 
@@ -41,6 +45,19 @@ module Api
       def update_operational
         Rails.logger.info "🔧 [CompanySettings#update_operational] Received params: #{params.inspect}"
         Rails.logger.info "🔧 [CompanySettings#update_operational] Company: #{@company&.name} (ID: #{@company&.id})"
+
+        # Deal Desk write-back timing: written to its OWN top-level Setting key (the key the
+        # model reader uses), NOT inside operational_settings — a nested key would silently
+        # no-op. Validate against Company::WRITEBACK_MODES; reject an out-of-range value.
+        if params[:deal_desk_writeback_mode].present?
+          mode = params[:deal_desk_writeback_mode].to_s
+          unless ::Company::WRITEBACK_MODES.include?(mode)
+            return render json: {
+              errors: ["deal_desk_writeback_mode must be one of: #{::Company::WRITEBACK_MODES.join(', ')}"]
+            }, status: :unprocessable_entity
+          end
+          Setting.set('Company', @company.id, 'deal_desk_writeback_mode', mode)
+        end
 
         # Get operational_settings and convert to hash (permit all nested keys)
         operational_params = params[:operational_settings]
@@ -62,6 +79,7 @@ module Api
 
         render json: {
           operational_settings: saved_settings,
+          deal_desk_writeback_mode: @company.deal_desk_writeback_mode,
           message: 'Operational settings updated successfully'
         }
       rescue => e
