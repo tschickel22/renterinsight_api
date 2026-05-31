@@ -93,23 +93,25 @@ module Api
         
         # Apply search filter (searches year, make, model, trim, vin, serial_number, inventory_id, location_city,
         # plus linked-deal buyer names — Contact first/last/full or Account name).
-        # LEFT JOINs so vehicles without any deal still appear; DISTINCT to avoid the
-        # row multiplication a vehicle-with-many-deals would otherwise cause.
+        # The match subquery is built from a clean Vehicle scope, NOT chained off the
+        # `vehicles` variable: that scope carries raw-SQL WHERE clauses with unqualified
+        # `location_id` (and other unqualified columns from `.active` / `.by_*` scopes)
+        # that become ambiguous the moment we LEFT JOIN `deals` and `contacts` — both
+        # of which also have a `location_id`. The outer `vehicles.where(id: ...)`
+        # re-applies tenant/RBAC/location filters with the joins already collapsed.
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          # Match on vehicle fields OR linked-deal buyer names. Dedupe via an id subquery
-          # rather than DISTINCT: `SELECT DISTINCT vehicles.*` errors because the table has
-          # json (not jsonb) columns, which have no equality operator. IN(...) dedupes cleanly
-          # and keeps the outer scope free of the LEFT JOIN row multiplication.
-          match_scope = vehicles
+          matching_ids = Vehicle
             .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
             .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
             .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+            .where("vehicles.company_id = ?", @company.id)
             .where(
               "CAST(vehicles.year AS TEXT) ILIKE :q OR vehicles.make ILIKE :q OR vehicles.model ILIKE :q OR vehicles.trim ILIKE :q OR vehicles.vin ILIKE :q OR vehicles.serial_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR vehicles.location_city ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
               q: search_term
             )
-          vehicles = vehicles.where(id: match_scope.select("vehicles.id"))
+            .select("vehicles.id")
+          vehicles = vehicles.where(id: matching_ids)
         end
 
         # Sorting
