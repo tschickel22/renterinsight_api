@@ -212,7 +212,8 @@ Rails.application.routes.draw do
             post :ai_solve  # AI interprets intent; engine computes; returns ranked options
           end
           member do
-            post :select          # mark selected + write structure back to the deal
+            post :select          # flag selected (single per deal); does NOT mutate the deal
+            post :apply           # deliberately write the structure back to the deal
             post :generate_quote  # turn the selected scenario into a Quote
             post :transfer_unit   # MANAGER ONLY: commit a cross-location unit
             get  :summary, defaults: { format: 'pdf' }  # /scenarios/:id/summary.pdf

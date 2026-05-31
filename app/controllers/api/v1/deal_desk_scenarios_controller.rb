@@ -13,7 +13,7 @@ module Api
 
       before_action :set_company_scope
       require_module! 'sales.deal_desk'
-      before_action :set_scenario, only: %i[show update destroy select generate_quote transfer_unit summary]
+      before_action :set_scenario, only: %i[show update destroy select apply generate_quote transfer_unit summary]
 
       RESOURCE = 'deal_desk'
 
@@ -83,14 +83,27 @@ module Api
       end
 
       # POST /api/v1/deal_desk/scenarios/:id/select
-      # Marks the scenario selected and writes its structure back to the deal.
-      # Does NOT touch the close / GL / commission pipeline.
+      # Flags the scenario selected (single-selection per deal — see mark_selected!) and
+      # stamps selected_at. Does NOT write back to the deal: selecting-to-print a pencil
+      # must not mutate the live deal's economics before close. Use #apply for that.
       def select
         return unless authorize_action!(RESOURCE, 'write')
 
         @scenario.mark_selected!
-        write_back_to_deal!(@scenario)
         render json: { scenario: scenario_json(@scenario) }
+      end
+
+      # POST /api/v1/deal_desk/scenarios/:id/apply
+      # The deliberate "apply this structure to the deal" step: writes the scenario's
+      # vehicle/price/trade/down/doc-fee/financed amount back to the live deal. Separate
+      # from #select so printing a pencil never mutates the deal (Section 25: the binding
+      # write-back happens at CLOSE via the deal-close → GL-approval pipeline). Kept callable
+      # pre-close, but it is always the explicit mutate-the-deal action — never auto-run.
+      def apply
+        return unless authorize_action!(RESOURCE, 'write')
+
+        write_back_to_deal!(@scenario)
+        render json: { scenario: scenario_json(@scenario), applied: true }
       end
 
       # POST /api/v1/deal_desk/scenarios/solve

@@ -69,8 +69,14 @@ class DealDeskScenario < ApplicationRecord
     status != 'selected' && valid_through.present? && valid_through < Date.current
   end
 
+  # Single-selection invariant: at most one selected scenario per deal. Selecting this one
+  # first demotes any OTHER currently-selected sibling back to 'active' (never touches
+  # expired ones). Done in a transaction so the flip is atomic.
   def mark_selected!
-    update!(status: 'selected', selected_at: Time.current)
+    transaction do
+      deal.deal_desk_scenarios.selected.where.not(id: id).update_all(status: 'active')
+      update!(status: 'selected', selected_at: Time.current)
+    end
   end
 
   # Expire unless permanently kept (selected). Used by the expiry sweep.

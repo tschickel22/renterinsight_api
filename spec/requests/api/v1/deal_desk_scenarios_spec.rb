@@ -65,15 +65,42 @@ RSpec.describe 'Api::V1::DealDeskScenarios', type: :request do
     end
   end
 
-  describe 'POST /scenarios/:id/select (write-back, no GL)' do
-    it 'marks selected and writes structure back to the deal' do
+  describe 'POST /scenarios/:id/select (flag only — does NOT mutate the deal)' do
+    it 'marks selected without writing economics back to the deal' do
       s = created_scenario
       post "/api/v1/deal_desk/scenarios/#{s['id']}/select", headers: headers
       expect(response).to have_http_status(:ok)
       expect(JSON.parse(response.body)['scenario']['status']).to eq('selected')
       deal.reload
+      # down_payment is written ONLY by apply/write-back (selling_price is auto-synced from
+      # the vehicle at deal creation, so it's not a reliable "untouched" indicator).
+      expect(deal.down_payment.to_f).to eq(0.0)  # scenario cash_down (5_000) NOT written back
+      expect(deal.stage).to eq('qualification')  # close pipeline untouched
+    end
+
+    it 'enforces a single selected scenario per deal (selecting B demotes A to active)' do
+      a = created_scenario
+      b = created_scenario
+      post "/api/v1/deal_desk/scenarios/#{a['id']}/select", headers: headers
+      expect(DealDeskScenario.find(a['id']).status).to eq('selected')
+
+      post "/api/v1/deal_desk/scenarios/#{b['id']}/select", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(DealDeskScenario.find(a['id']).status).to eq('active')   # demoted
+      expect(DealDeskScenario.find(b['id']).status).to eq('selected')
+    end
+  end
+
+  describe 'POST /scenarios/:id/apply (deliberate write-back to the deal)' do
+    it 'writes the scenario structure back to the deal' do
+      s = created_scenario
+      post "/api/v1/deal_desk/scenarios/#{s['id']}/apply", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)['applied']).to eq(true)
+      deal.reload
       expect(deal.selling_price.to_f).to eq(70_000.0)
-      expect(deal.stage).to eq('qualification') # close pipeline untouched
+      expect(deal.down_payment.to_f).to eq(5_000.0)
+      expect(deal.stage).to eq('qualification') # still no close/GL side effects
     end
   end
 
