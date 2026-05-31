@@ -69,6 +69,119 @@ namespace :deals do
     puts "  ❌ Errors: #{error_count} deals"
   end
   
+  # Backfills deal.vehicle_id for deals whose vehicle FK was never set even though a
+  # vehicle line item exists in deal_products. Idempotent — safe to re-run. Conservative:
+  # acts only when the line item carries an unambiguous VEHICLE-<id> SKU AND the
+  # referenced vehicle lives in the same company. Multi-vehicle / cross-company / missing
+  # cases are reported for human review and skipped.
+  desc "Backfill deal.vehicle_id from VEHICLE-<id> line items in deal_products"
+  task backfill_vehicle_links_from_products: :environment do
+    puts "🔄 Starting deal vehicle-link backfill from deal_products..."
+
+    sku_pattern = /\AVEHICLE-(\d+)\z/i
+    sql_pattern = '^VEHICLE-[0-9]+$'
+
+    candidate_deals = Deal.where(vehicle_id: nil)
+      .where(id: DealProduct.where('product_sku ~* ?', sql_pattern).select(:deal_id))
+
+    total = candidate_deals.count
+    puts "📊 Found #{total} deals with NULL vehicle_id and a VEHICLE-<id> line item"
+
+    linked = 0
+    ambiguous = 0
+    cross_company = 0
+    missing_vehicle = 0
+    errors = 0
+
+    candidate_deals.find_each do |deal|
+      begin
+        vehicle_ids = deal.deal_products
+          .where('product_sku ~* ?', sql_pattern)
+          .pluck(:product_sku)
+          .map { |sku| sku.to_s.match(sku_pattern)&.[](1)&.to_i }
+          .compact
+          .uniq
+
+        if vehicle_ids.size > 1
+          puts "  ⚠️  Deal ##{deal.id}: ambiguous — #{vehicle_ids.size} vehicle line items #{vehicle_ids.inspect}; skipping"
+          ambiguous += 1
+          next
+        end
+
+        vehicle_id = vehicle_ids.first
+        next unless vehicle_id
+
+        unless deal.company_id.present?
+          puts "  ⚠️  Deal ##{deal.id}: no company_id; skipping"
+          errors += 1
+          next
+        end
+
+        vehicle = Vehicle.find_by(id: vehicle_id)
+        unless vehicle
+          puts "  ⚠️  Deal ##{deal.id}: line item references vehicle ##{vehicle_id} but vehicle not found; skipping"
+          missing_vehicle += 1
+          next
+        end
+
+        if vehicle.company_id != deal.company_id
+          puts "  ⚠️  Deal ##{deal.id} (company #{deal.company_id}): vehicle ##{vehicle_id} belongs to company #{vehicle.company_id}; skipping"
+          cross_company += 1
+          next
+        end
+
+        deal.update!(vehicle_id: vehicle_id)
+        linked += 1
+        puts "  ✓ Deal ##{deal.id} → vehicle ##{vehicle_id}"
+      rescue StandardError => e
+        puts "  ❌ Error processing deal ##{deal.id}: #{e.message}"
+        errors += 1
+      end
+    end
+
+    puts "\n✅ Backfill complete!"
+    puts "  📈 Linked: #{linked} deals"
+    puts "  ⚠️  Ambiguous (multi-vehicle): #{ambiguous}"
+    puts "  ⚠️  Cross-company: #{cross_company}"
+    puts "  ⚠️  Missing vehicle: #{missing_vehicle}"
+    puts "  ❌ Errors: #{errors}"
+  end
+
+  # One-shot backfill for the new deal_products.source_type column. Conservative:
+  # only tags rows where the SKU prefix gives an unambiguous signal. Untagged rows
+  # stay NULL — writers will fill them in as they're updated.
+  desc "Backfill deal_products.source_type from existing SKU prefixes"
+  task backfill_deal_product_source_type: :environment do
+    puts "🔄 Backfilling deal_products.source_type from SKU prefixes..."
+
+    unless DealProduct.column_names.include?('source_type')
+      puts "❌ deal_products.source_type column not present. Run migrations first."
+      exit 1
+    end
+
+    mapping = {
+      'vehicle'  => '^VEHICLE-',
+      'part'     => '^PART-',
+      'fee'      => '^FEE-',
+      'fni'      => '^FNI-',
+      'discount' => '^DISCOUNT-'
+    }
+
+    total_updated = 0
+    mapping.each do |source_type, sql_pattern|
+      count = DealProduct.where(source_type: nil)
+        .where('product_sku ~* ?', sql_pattern)
+        .update_all(source_type: source_type)
+      puts "  ✓ Tagged #{count} rows as '#{source_type}'"
+      total_updated += count
+    end
+
+    untagged = DealProduct.where(source_type: nil).count
+    puts "\n✅ Backfill complete!"
+    puts "  📈 Tagged: #{total_updated}"
+    puts "  ⏭️  Left untagged (no recognizable SKU prefix): #{untagged}"
+  end
+
   desc "Show deals with missing pricing"
   task check_missing_pricing: :environment do
     puts "🔍 Checking for deals with missing pricing..."
