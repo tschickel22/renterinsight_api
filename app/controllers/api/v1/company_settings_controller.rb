@@ -5,17 +5,25 @@ module Api
     class CompanySettingsController < ApplicationController
       before_action :set_company_scope
       
-      # RBAC Authorization - map to appropriate resources
-      before_action :authorize_settings_read!, only: [:show_operational, :show_communication, :show_company_profile]
-      before_action :authorize_settings_update!, only: [:update_operational, :update_communication, :update_rbac, :save_communication_settings, :clear_communication_settings, :update_company_profile]
+      # RBAC Authorization - map to appropriate resources.
+      # NOTE: each authorize_* must be declared ONCE with the full action list. Declaring the
+      # same before_action method multiple times with different `only:` does NOT union them —
+      # Rails keeps only the LAST registration's conditions, silently un-gating every action
+      # named in the earlier ones. (This had left show_operational/update_operational and the
+      # embed/portal endpoints effectively ungated.)
+      before_action :authorize_settings_read!, only: [
+        :show_operational, :show_communication, :show_company_profile,
+        :show_embed_inventory_config, :show_form_states
+      ]
+      before_action :authorize_settings_update!, only: [
+        :update_operational, :update_communication, :update_rbac,
+        :save_communication_settings, :clear_communication_settings, :update_company_profile,
+        :update_embed_inventory_config, :show_portal_modules, :update_portal_modules,
+        :update_form_states
+      ]
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
-      before_action :authorize_settings_read!, only: [:show_embed_inventory_config]
-      before_action :authorize_settings_update!, only: [:update_embed_inventory_config]
       before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
-      before_action :authorize_settings_update!, only: [:show_portal_modules, :update_portal_modules]
-      before_action :authorize_settings_read!, only: [:show_form_states]
-      before_action :authorize_settings_update!, only: [:update_form_states]
 
       # GET /api/v1/company_settings/operational
       def show_operational
@@ -690,7 +698,10 @@ module Api
         return true if current_user.respond_to?(:platform_admin?) && current_user.platform_admin?
         return true if current_user.respond_to?(:super_admin?) && current_user.super_admin?
         return true if current_user.respond_to?(:effective_admin?) && current_user.effective_admin?
-        return true if %w[platform_admin super_admin company_admin admin].include?(current_user.user_type.to_s)
+        # NOTE: User has no `user_type` column — the admin shortcut keys off `role`. (The prior
+        # `current_user.user_type` raised NoMethodError; it was never hit because this method
+        # itself was un-gated, see the before_action note above.)
+        return true if %w[platform_admin super_admin company_admin admin].include?(current_user.role.to_s)
         return true unless @company&.use_rbac_system
         false
       end
