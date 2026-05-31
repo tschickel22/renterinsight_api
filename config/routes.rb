@@ -199,6 +199,11 @@ Rails.application.routes.draw do
 
       # ==================== DEAL DESK ====================
       scope path: 'deal_desk' do
+        # Config dropdowns (read-only) for the desk workspace.
+        resources :lender_programs, only: [:index], controller: 'deal_desk_lender_programs'
+        resources :fee_templates,   only: [:index], controller: 'deal_desk_fee_templates'
+        resources :fni_products,    only: [:index], controller: 'deal_desk_fni_products'
+
         resources :scenarios, only: %i[index show create update destroy],
                               controller: 'deal_desk_scenarios' do
           collection do
