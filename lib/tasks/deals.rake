@@ -147,6 +147,41 @@ namespace :deals do
     puts "  ❌ Errors: #{errors}"
   end
 
+  # One-shot backfill for the new deal_products.source_type column. Conservative:
+  # only tags rows where the SKU prefix gives an unambiguous signal. Untagged rows
+  # stay NULL — writers will fill them in as they're updated.
+  desc "Backfill deal_products.source_type from existing SKU prefixes"
+  task backfill_deal_product_source_type: :environment do
+    puts "🔄 Backfilling deal_products.source_type from SKU prefixes..."
+
+    unless DealProduct.column_names.include?('source_type')
+      puts "❌ deal_products.source_type column not present. Run migrations first."
+      exit 1
+    end
+
+    mapping = {
+      'vehicle'  => '^VEHICLE-',
+      'part'     => '^PART-',
+      'fee'      => '^FEE-',
+      'fni'      => '^FNI-',
+      'discount' => '^DISCOUNT-'
+    }
+
+    total_updated = 0
+    mapping.each do |source_type, sql_pattern|
+      count = DealProduct.where(source_type: nil)
+        .where('product_sku ~* ?', sql_pattern)
+        .update_all(source_type: source_type)
+      puts "  ✓ Tagged #{count} rows as '#{source_type}'"
+      total_updated += count
+    end
+
+    untagged = DealProduct.where(source_type: nil).count
+    puts "\n✅ Backfill complete!"
+    puts "  📈 Tagged: #{total_updated}"
+    puts "  ⏭️  Left untagged (no recognizable SKU prefix): #{untagged}"
+  end
+
   desc "Show deals with missing pricing"
   task check_missing_pricing: :environment do
     puts "🔍 Checking for deals with missing pricing..."
