@@ -209,6 +209,7 @@ Rails.application.routes.draw do
           collection do
             post :solve     # reverse-solve a lever for a target payment
             post :compare   # comparable-unit matching + ranking
+            post :ai_solve  # AI interprets intent; engine computes; returns ranked options
           end
           member do
             post :select          # mark selected + write structure back to the deal

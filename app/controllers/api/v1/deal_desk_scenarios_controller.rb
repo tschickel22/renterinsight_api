@@ -121,6 +121,29 @@ module Api
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
+      # POST /api/v1/deal_desk/scenarios/ai_solve
+      # Conversational solve. The AI interprets the prompt and explains; the ENGINE computes
+      # every figure (reuses Solver/Engine/CompareService — the LLM never produces a number).
+      # Body: { deal_id, scenario_id?, prompt }
+      def ai_solve
+        return unless authorize_action!(RESOURCE, 'read')
+
+        deal = @company.deals.find(params[:deal_id])
+        api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
+        result = DealDesk::AiSolveService.new(
+          company: @company, deal: deal,
+          base_structure: ai_base_structure(deal),
+          prompt: params[:prompt].to_s,
+          can_view_costs: can_view_costs?,
+          api_key: api_key,
+          user: current_user
+        ).call
+
+        render json: result
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Deal not found' }, status: :not_found
+      end
+
       # POST /api/v1/deal_desk/scenarios/compare
       # Comparable-unit matching + ranking. Cross-location inclusion is visibility-only.
       # Body: { deal_id, base_structure, target_payment, include_orderable, include_other_locations, weights }
@@ -241,6 +264,16 @@ module Api
           scenario.front_gross  = result.gross.front
           scenario.back_gross   = result.gross.back
           scenario.dealer_gross = result.gross.total
+        end
+      end
+
+      # Base structure for AI solve: from an existing scenario's snapshot if given,
+      # otherwise derived from the deal (incl. the deal's unit price/cost).
+      def ai_base_structure(deal)
+        if params[:scenario_id].present?
+          @company.deal_desk_scenarios.find(params[:scenario_id]).engine_inputs
+        else
+          build_base_structure(deal_id: deal.id)
         end
       end
 
