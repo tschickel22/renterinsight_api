@@ -32,10 +32,20 @@ module Accounting
         deal_location_id = @deal.try(:location_id)
 
         selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
-        # COGS basis = the SAME unified vehicle landed cost GP uses (the close-time
-        # snapshot). This ties COGS == GP cost on the GL. Reconditioning posts on its own
-        # line below (scope of the tie-out is vehicle cost + recon).
+        # PRODUCT cost relieved to COGS = vehicle structured cost (close-time snapshot) +
+        # reconditioning, from the SAME snapshot GP uses, so the COGS product cost and GP's
+        # product component can never drift. Floor-plan interest and delivery/setup are
+        # PERIOD costs — included in the GP margin view but NEVER posted to COGS/inventory.
         home_cost = (@deal.vehicle_landed_cost || @deal.home_cost || BigDecimal('0')).to_d
+        recon_cost = (@deal.reconditioning_cost || BigDecimal('0')).to_d
+        recon_cogs = @company.chart_of_accounts.find_by(account_number: '5110')
+        recon_wip  = @company.chart_of_accounts.find_by(account_number: '1240')
+        # Reconditioning relieves its own WIP account when that pair is configured;
+        # otherwise it was capitalized into the unit's inventory value, so fold it into the
+        # main COGS/inventory relief. Either path keeps the COGS debit == vehicle + recon —
+        # recon is never silently dropped from COGS.
+        recon_dedicated = recon_cost > 0 && recon_cogs && recon_wip
+        folded_recon = recon_dedicated ? BigDecimal('0') : recon_cost
 
         if selling_price > 0
           revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
@@ -53,35 +63,31 @@ module Accounting
           end
         end
 
-        if home_cost > 0
+        cogs_relief = home_cost + folded_recon
+        if cogs_relief > 0
           cogs_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'cogs') ||
                          settings.default_cogs_account
           inventory_account = @company.chart_of_accounts.find_by(account_number: '1210')
 
           if cogs_account && inventory_account
-            lines << { chart_of_account_id: cogs_account.id, debit_amount: home_cost, credit_amount: 0,
+            lines << { chart_of_account_id: cogs_account.id, debit_amount: cogs_relief, credit_amount: 0,
                        memo: "COGS — #{deal_description}", location_id: deal_location_id,
                        department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id) }
-            lines << { chart_of_account_id: inventory_account.id, debit_amount: 0, credit_amount: home_cost,
+            lines << { chart_of_account_id: inventory_account.id, debit_amount: 0, credit_amount: cogs_relief,
                        memo: "Inventory relief — #{deal_description}", location_id: deal_location_id,
                        department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id) }
           end
         end
 
-        recon_cost = @deal.reconditioning_cost || BigDecimal('0')
-        if recon_cost > 0
-          recon_cogs = @company.chart_of_accounts.find_by(account_number: '5110')
-          recon_wip = @company.chart_of_accounts.find_by(account_number: '1240')
-          if recon_cogs && recon_wip
-            lines << { chart_of_account_id: recon_cogs.id, debit_amount: recon_cost, credit_amount: 0,
-                       memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id }
-            lines << { chart_of_account_id: recon_wip.id, debit_amount: 0, credit_amount: recon_cost,
-                       memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id }
-          end
+        if recon_dedicated
+          lines << { chart_of_account_id: recon_cogs.id, debit_amount: recon_cost, credit_amount: 0,
+                     memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id }
+          lines << { chart_of_account_id: recon_wip.id, debit_amount: 0, credit_amount: recon_cost,
+                     memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id }
         end
 
         fp_amount = @deal.try(:floor_plan_amount) || BigDecimal('0')
