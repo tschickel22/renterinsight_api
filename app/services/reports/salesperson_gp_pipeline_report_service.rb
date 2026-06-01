@@ -18,10 +18,11 @@ module Reports
     FOOTNOTES = [
       'GP is pre-commission (front-end gross), read from the unified Deal#front_gross — never recomputed.',
       'Full GP credit goes to the primary salesperson; a secondary salesperson is a split indicator only.',
-      'Pending = open deals; Closed Not Funded = closed_won not yet GL-posted; Funded = GL-posted (or closed_won) this month.',
+      'Funded = closing entries posted to the GL this month. Once a deal is approved by the accountant and posted to the GL, it is recorded here as Funded. Closed Not Funded = closed_won but not yet approved/GL-posted.',
+      'Note: "Funded" reflects GL posting (accountant approval), not a confirmed lender disbursement. A future enhancement may add a separate lender-funded flag to distinguish actual lender funding.',
       'Total Pending = Closed Not Funded + Pending. Funded + Pending = Funded + Total Pending.',
       'COST/GP columns and the GP summary are hidden without deals:read:view_cost_details.',
-      'Funded This Month is sub-grouped by lender (no entity model exists to group by).'
+      'Funded This Month is grouped by location (toggle: lender).'
     ].freeze
 
     def initialize(company, current_user: nil)
@@ -46,7 +47,7 @@ module Reports
         meta: build_meta,
         summary: @can_view_costs ? build_summary(groups) : nil,
         groups: groups.map { |g| present_group(g) },
-        funded_this_month: build_funded_by_lender(entries)
+        funded_this_month: build_funded(entries)
       }
     end
 
@@ -85,10 +86,14 @@ module Reports
       { deal: deal, vehicle: vehicle, state: state, row: row, gp: deal.front_gross }
     end
 
+    # Funded = closing entries posted to the GL this month (accountant approval = money
+    # recognized). Lifecycle: closed_won -> accountant approves & posts to GL (gl_posted)
+    # -> Funded. Closed-Not-Funded is the GL-approval gap. A closed_won deal that is NOT
+    # gl_posted is ALWAYS Closed-Not-Funded regardless of close date; the close date no
+    # longer determines funded.
     def classify_closed(deal)
-      funded = (deal.gl_posted? && in_month?(deal.gl_posted_at)) || in_month?(deal.actual_close_date)
-      return :funded if funded
-      return :closed_not_funded unless deal.gl_posted? # closed, awaiting funding
+      return :funded if deal.gl_posted? && in_month?(deal.gl_posted_at)
+      return :closed_not_funded if deal.stage == CLOSED_STAGE && !deal.gl_posted? # closed, awaiting GL approval/posting
 
       nil # gl_posted in a prior month -> historical, out of the current pipeline
     end
@@ -147,16 +152,30 @@ module Reports
       { per_rep: per_rep, total: total }
     end
 
-    # ---- Funded this month (by lender — no entity model exists) --------------
-
-    def build_funded_by_lender(entries)
+    # ---- Funded this month (grouped by location by default; lender toggle) ----
+    # Location is the operating-entity grouping for a multi-location dealer (no selling-
+    # entity model exists). Keyed by a STABLE location_id (not the display string) so
+    # duplicate location names never collide; location_name carries the display label.
+    def build_funded(entries)
       funded = entries.select { |e| e[:state] == :funded }
-      by_lender = funded.group_by { |e| e[:row][:lender].presence || 'Unspecified' }.map do |lender, es|
-        h = { lender: lender, count: es.size, total_price: es.sum { |e| e[:row][:price].to_d } }
-        h[:total_gp] = es.sum { |e| e[:gp].to_d } if @can_view_costs
-        h
-      end
-      { by_lender: by_lender, count: funded.size }
+      group_by = @filters[:funded_group_by].to_s == 'lender' ? 'lender' : 'location'
+
+      groups =
+        if group_by == 'lender'
+          funded.group_by { |e| e[:row][:lender].presence || 'Unspecified' }
+                .map { |lender, es| funded_group(lender, lender, es) }
+        else
+          funded.group_by { |e| e[:vehicle]&.location_id }
+                .map { |loc_id, es| funded_group(loc_id, es.first[:row][:location].presence || 'Unassigned location', es) }
+        end
+
+      { group_by: group_by, groups: groups, count: funded.size }
+    end
+
+    def funded_group(key, label, entries)
+      h = { key: key, label: label, count: entries.size, total_price: entries.sum { |e| e[:row][:price].to_d } }
+      h[:total_gp] = entries.sum { |e| e[:gp].to_d } if @can_view_costs
+      h
     end
 
     # ---- Filters (all off by default) ---------------------------------------
