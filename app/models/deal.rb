@@ -126,6 +126,22 @@ class Deal < ApplicationRecord
               if: -> { will_save_change_to_stage? && stage == 'closed_won' &&
                        company&.deal_desk_writeback_mode == 'on_close' }
 
+  # Freeze the vehicle's then-current structured cost onto the deal at close, so GP/COGS
+  # stop moving (read-through ends) and become auditable. before_save means it persists
+  # in the closing UPDATE and runs BEFORE both the after_save commission generation and
+  # the after_commit GL post — both of which read gross off the now-snapshotted cost.
+  # Registered after apply_selected_scenario_on_close so a deal-desk write-back's
+  # explicit home_cost wins; otherwise capture the live vehicle cost.
+  before_save :snapshot_landed_cost_on_close,
+              if: -> { will_save_change_to_stage? && stage == 'closed_won' }
+
+  def snapshot_landed_cost_on_close
+    return if home_cost.present? && home_cost.to_f > 0 # respect explicit / deal-desk cost
+
+    vc = vehicle&.structured_cost
+    self.home_cost = vc if vc.present?
+  end
+
   # Auto-generate commission payment when deal is marked closed_won
   after_save :generate_commission_payment, if: :just_closed_won?
   # Mirror the deal's lifecycle onto the linked vehicle: close_won → sold,
@@ -249,35 +265,94 @@ class Deal < ApplicationRecord
   # COMMISSION ECONOMICS CALCULATIONS
   # ============================================================================
   
-  # FRONT GROSS (Sale Price - Cost - Trade Difference)
-  def front_gross
-    base_gross = (selling_price || 0) - (unit_cost || 0)
-    trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
-    primary_gross = base_gross - trade_difference
-    products_gross = deal_products.sum(:total)
-    (primary_gross + products_gross).round(2)
+  # ----------------------------------------------------------------------------
+  # COST BASIS — single source of truth, sourced from the vehicle.
+  #
+  # OPEN deals read the vehicle's LIVE structured cost (read-through): editing the
+  # home's cost recomputes GP everywhere with no deal re-save. CLOSED deals
+  # (closed_won / gl_posted) use the cost SNAPSHOTTED onto the deal at close (home_cost),
+  # so GP/COGS freeze and are auditable. 0/blank vehicle cost is treated as MISSING
+  # (returns nil) — we never apply a default margin.
+  # ----------------------------------------------------------------------------
+
+  # True once the deal is closed/posted and its cost is frozen on the deal.
+  def cost_snapshotted?
+    gl_posted? || stage == 'closed_won'
   end
-  
+
+  # The vehicle-cost portion of landed cost. Live from the vehicle while open; the
+  # snapshot (home_cost) once closed. Falls back to home_cost for vehicle-less deals
+  # (e.g. deal-desk write-back). nil when no cost has been entered.
+  def vehicle_landed_cost
+    if cost_snapshotted?
+      hc = home_cost.to_f
+      return hc > 0 ? hc.round(2) : nil
+    end
+
+    live = vehicle&.structured_cost
+    return live unless live.nil?
+
+    hc = home_cost.to_f
+    hc > 0 ? hc.round(2) : nil
+  end
+
+  # Full landed cost used for gross profit: vehicle structured cost plus deal-level
+  # real costs (recon, floor plan interest, delivery/setup). nil (NOT zero) when the
+  # vehicle cost has not been entered, so GP can render "—" and flag it.
+  def landed_cost
+    base = vehicle_landed_cost
+    return nil if base.nil?
+
+    (base +
+      (reconditioning_cost || 0) +
+      (floor_plan_interest || 0) +
+      (delivery_setup_cost || 0)).round(2)
+  end
+
+  # Whether a usable cost basis exists. When false, GP is "—" / "cost not entered".
+  def cost_entered?
+    !landed_cost.nil?
+  end
+
+  # FRONT GROSS — the single canonical accounting gross. PRE-pack (pack is a dealer
+  # holdback, not a cost — folding it in would break GP = revenue − COGS on the GL).
+  # = selling_price − landed_cost − trade_difference. nil when cost not entered.
+  # F&I / back-end products are NOT part of front gross (they belong to back_gross).
+  def front_gross
+    lc = landed_cost
+    return nil if lc.nil?
+
+    trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
+    ((selling_price || 0) - lc - trade_difference).round(2)
+  end
+
   # PACK (dealer holdback/administrative fee)
   def effective_pack_amount
     return pack_amount if pack_amount.present?
     return location.default_pack_amount if location&.default_pack_amount.present?
     company&.default_pack_amount || 0
   end
-  
-  # COMMISSIONABLE FRONT GROSS (what most dealers pay on)
+
+  # COMMISSIONABLE FRONT GROSS (what most dealers pay on) — accounting front gross
+  # MINUS pack. Pack reduces commissionable gross (reps paid after the house takes its
+  # holdback) but NOT accounting front gross. Preserve this distinction. nil when cost
+  # not entered.
   def commissionable_front_gross
-    (front_gross - effective_pack_amount).round(2)
+    fg = front_gross
+    return nil if fg.nil?
+
+    (fg - effective_pack_amount).round(2)
   end
-  
+
   # BACK GROSS (finance & products)
   def back_gross
     ((finance_reserve || 0) + (product_margin || 0)).round(2)
   end
-  
-  # TOTAL GROSS
+
+  # TOTAL GROSS — front_gross is nil when cost not entered; treat as 0 here so the
+  # figure stays computable (the cost flag surfaces the missing-cost condition).
   def total_gross
-    (front_gross + back_gross).round(2)
+    ((front_gross || 0) + back_gross).round(2)
   end
   
   # ADD-ON GROSS (MH dealers pay separately on these)

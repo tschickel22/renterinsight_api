@@ -8,11 +8,12 @@ module Accounting
     end
 
     def calculate_profitability!
-      calculate_front_gross!
-      calculate_back_gross!
-
-      @deal.total_gross = (@deal.front_gross || 0) + (@deal.back_gross || 0)
-      @deal.net_deal_profit = @deal.total_gross - (@deal.commission_amount || 0)
+      # GP figures come from the single canonical method (Deal#front_gross), which sources
+      # cost from the vehicle (live while open, snapshot once closed). We persist only the
+      # derived totals used by raw-column readers; front/total gross themselves are always
+      # recomputed by the model methods.
+      total_gross = @deal.total_gross
+      @deal.net_deal_profit = total_gross - (@deal.commission_amount || 0)
       @deal.save!
 
       profitability_summary
@@ -31,7 +32,10 @@ module Accounting
         deal_location_id = @deal.try(:location_id)
 
         selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
-        home_cost = @deal.home_cost || BigDecimal('0')
+        # COGS basis = the SAME unified vehicle landed cost GP uses (the close-time
+        # snapshot). This ties COGS == GP cost on the GL. Reconditioning posts on its own
+        # line below (scope of the tie-out is vehicle cost + recon).
+        home_cost = (@deal.vehicle_landed_cost || @deal.home_cost || BigDecimal('0')).to_d
 
         if selling_price > 0
           revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
@@ -219,8 +223,12 @@ module Accounting
       vehicle = @deal.try(:vehicle)
       owner = @deal.try(:owner) || @deal.try(:user)
 
-      # ALWAYS recalculate from current data — stored values go stale when costs change
-      front_gross = selling_price - total_front_costs
+      # Delegate to the SINGLE canonical method. Front gross sources cost from the vehicle
+      # (live while open, snapshot once closed) and excludes pack (a holdback, not a cost).
+      # nil when no cost has been entered — surfaced as a flag rather than a guessed margin.
+      landed_cost = @deal.landed_cost
+      cost_entered = !landed_cost.nil?
+      front_gross = @deal.front_gross
 
       # Exclude the home/vehicle line item from back_gross. It's already counted
       # in selling_price (front side), so summing it again double-counts the
@@ -228,10 +236,10 @@ module Accounting
       back_products = (@deal.try(:deal_products) || []).reject { |p| home_line_item?(p) }
       back_gross = back_products.sum { |p| p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0') }
 
-      total_gross = front_gross + back_gross
+      total_gross = cost_entered ? (front_gross + back_gross) : nil
 
       commission = @deal.try(:commission_amount) || BigDecimal('0')
-      net_profit = total_gross - commission
+      net_profit = total_gross.nil? ? nil : (total_gross - commission)
 
       {
         deal_id: @deal.id,
@@ -250,17 +258,21 @@ module Accounting
           name: [owner.try(:first_name), owner.try(:last_name)].compact.join(' ').presence || owner.try(:email)
         } : nil,
         selling_price: selling_price,
+        landed_cost: landed_cost,
+        cost_entered: cost_entered,
+        cost_flag: cost_entered ? nil : 'cost_not_entered',
         front_gross: front_gross,
+        commissionable_front_gross: @deal.commissionable_front_gross,
         back_gross: back_gross,
         total_gross: total_gross,
         commission: commission,
         net_profit: net_profit,
         front_detail: {
-          home_cost: @deal.home_cost || 0,
+          vehicle_cost: @deal.vehicle_landed_cost,
           recon: @deal.reconditioning_cost || 0,
           floor_plan_interest: @deal.floor_plan_interest || 0,
           delivery: @deal.delivery_setup_cost || 0,
-          pack: @deal.pack_amount || 0
+          pack: @deal.effective_pack_amount # separate holdback, NOT part of front cost
         },
         back_detail: back_products.map { |p|
           {
@@ -284,18 +296,6 @@ module Accounting
     end
 
     private
-
-    def calculate_front_gross!
-      selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
-      @deal.front_gross = selling_price - total_front_costs
-    end
-
-    def calculate_back_gross!
-      products = (@deal.try(:deal_products) || []).reject { |p| home_line_item?(p) }
-      @deal.back_gross = products.sum { |p|
-        p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0')
-      }
-    end
 
     # The home/vehicle is stored as a deal_product line in addition to being
     # represented by deal.selling_price. Identify it so back_gross doesn't
@@ -322,14 +322,6 @@ module Accounting
       return nil unless v
       [v.try(:year), v.try(:make), v.try(:model)]
         .compact.map(&:to_s).reject(&:empty?).join(' ').strip.presence
-    end
-
-    def total_front_costs
-      (@deal.home_cost || 0) +
-        (@deal.reconditioning_cost || 0) +
-        (@deal.floor_plan_interest || 0) +
-        (@deal.delivery_setup_cost || 0) +
-        (@deal.pack_amount || 0)
     end
 
     def deal_is_closed?

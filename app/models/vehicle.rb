@@ -204,6 +204,20 @@ class Vehicle < ApplicationRecord
   # Auto-compute discounted sale price when discount fields change
   before_save :compute_discounted_price
 
+  # Structured "landed" cost of the unit — the single source of truth for cost.
+  # `total_cost` is authoritative when maintained; otherwise the sum of its components
+  # (dealer_cost + freight_cost + pdi_cost). It is NOT maintained by any callback, so we
+  # compute it on read. Returns nil when no cost has been entered — 0 is treated as
+  # MISSING, never as free. Callers must flag nil as "cost not entered" rather than
+  # assuming a default margin.
+  def structured_cost
+    tc = total_cost.to_f
+    return tc.round(2) if tc > 0
+
+    components_sum = [dealer_cost, freight_cost, pdi_cost].compact.sum(&:to_f)
+    components_sum > 0 ? components_sum.round(2) : nil
+  end
+
   # Display helpers
   def display_name
     "#{year} #{make} #{model}#{trim.present? ? " #{trim}" : ''}"
