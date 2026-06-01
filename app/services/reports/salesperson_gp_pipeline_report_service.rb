@@ -19,7 +19,7 @@ module Reports
       'GP is pre-commission (front-end gross), read from the unified Deal#front_gross — never recomputed.',
       'Full GP credit goes to the primary salesperson; a secondary salesperson is a split indicator only.',
       'Funded = closing entries posted to the GL this month. Once a deal is approved by the accountant and posted to the GL, it is recorded here as Funded. Closed Not Funded = closed_won but not yet approved/GL-posted.',
-      'Note: "Funded" reflects GL posting (accountant approval), not a confirmed lender disbursement. A future enhancement may add a separate lender-funded flag to distinguish actual lender funding.',
+      'Note: "Funded" reflects GL posting (accountant approval), not a confirmed lender disbursement.',
       'Total Pending = Closed Not Funded + Pending. Funded + Pending = Funded + Total Pending.',
       'COST/GP columns and the GP summary are hidden without deals:read:view_cost_details.',
       'Funded This Month is grouped by location (toggle: lender).'
