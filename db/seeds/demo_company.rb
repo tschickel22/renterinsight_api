@@ -481,9 +481,26 @@ deal_data = [
   { title: "Turner - Skyline Amber Cove",  stage: "closed_lost",   amount: 42500,  contact: "Jason Turner",      account: nil,                            home_cost: 28000, recon: 0,    fp_int: 0,    delivery: 2000, pack: 1000 },
 ]
 
+# FIX A — link each deal to a distinct vehicle and a REAL salesperson so the
+# Inventory Stock List and Salesperson GP Pipeline reports populate. Vehicles
+# idx 10-17 (report_demo_serials) are reserved for the "Report demo data"
+# section below; deals draw from the remaining non-sold vehicles. The primary
+# salesperson rotates across the three sales users — Report 2 groups by
+# primary_salesperson_id, which must be a real User id (not the assigned_to email).
+report_demo_serials = %w[
+  RMN-2025-A-001150 DH-2026-A-005001 DH-2026-A-005002 DH-2026-S-005003
+  DH-2025-A-004990 CLT-2019-T-889900 SKY-2021-A-776600 FLT-2017-B-554400
+]
+deal_vehicle_pool = vehicle_data
+  .reject { |vd| report_demo_serials.include?(vd[:serial]) || vd[:status] == 'sold' }
+  .map { |vd| vehicles[vd[:serial]] }
+deal_reps = [users[:sales1], users[:sales2], users[:manager]]
+
 deal_data.each_with_index do |dd, idx|
   contact = contacts[dd[:contact]]
   account = dd[:account] ? accounts[dd[:account]] : nil
+  assigned_vehicle = deal_vehicle_pool[idx % deal_vehicle_pool.size]
+  rep = deal_reps[idx % deal_reps.size]
 
   # Sales tax (~6% IN state tax, simplified flat for demo)
   tax_amount = (dd[:amount] * 0.06).round(2)
@@ -522,7 +539,11 @@ deal_data.each_with_index do |dd, idx|
     total_tax_amount:    tax_amount,
     state_tax_rate:      6.0,
     net_deal_profit:     net_profit,
-    location_id:         locations["AUB"].id,
+    # FIX A — link to vehicle + real salesperson (owner_id == primary_salesperson_id).
+    vehicle_id:             assigned_vehicle&.id,
+    primary_salesperson_id: rep.id,
+    owner_id:               rep.id,
+    location_id:            assigned_vehicle&.location_id || locations["AUB"].id,
     # Backdate updated_at so the deal profitability report (which falls
     # back to updated_at when closed_at/won_at are missing) finds these
     # deals in the default date range.
@@ -1628,9 +1649,14 @@ if defined?(JournalEntry) && defined?(JournalEntryLine)
     # (which auto-increments based on numeric entries) ignores these seed
     # rows when handing out numbers to user-created entries. Otherwise
     # the "Approve" flow can collide with seeded JEs.
+    # FIX B — fund about half of the closed-won deals THIS month (GL posted in the
+    # current month) so Report 2's "Funded this month" is non-zero; leave the rest
+    # backdated to prior months so they correctly fall out of the current pipeline.
+    funded_this_month = idx.even?
+    je_entry_date = funded_this_month ? (Date.current.beginning_of_month + (idx + 2)) : (35 + idx * 4).days.ago.to_date
     je = company.journal_entries.new(
       memo: je_memo,
-      entry_date: (35 + idx * 4).days.ago.to_date,
+      entry_date: je_entry_date,
       entry_number: "SEED-#{DEMO_PREFIX.upcase}-D#{deal.id}",
       source_type: "deal_closing",
       is_void: false
@@ -2121,6 +2147,121 @@ ca_specs.each do |s|
 end
 puts "  Contact activities: #{ca_count} created"
 
+# ── 41. Report demo data (Inventory Stock List + Salesperson GP Pipeline) ──
+# Idempotent: every record is guarded by find_or_create_by / update_columns, so
+# re-running without RESET re-applies links instead of duplicating. Builds a full
+# GP pipeline (Pending / Closed-Not-Funded / Funded), deal contention, and the two
+# flag cases (missing cost, sold-no-deal) that the reports surface. All gross/cost
+# is consumed from the unified Deal model methods by the reports — nothing here
+# recomputes GP; it just sets the inputs (vehicle link, home_cost, gl_posted, etc.).
+puts "\n41. Report demo data (inventory + GP pipeline)..."
+
+# Two DISTINCT operating locations so the reports' location grouping is visible
+# (the base seed aliases FTW/IND to Auburn). Names avoid the section-2 stale list.
+rpt_ftw = company.locations.find_or_create_by!(name: "Fort Wayne Sales Center") do |l|
+  l.code = "FTWS"; l.city = "Fort Wayne"; l.state = "IN"; l.zip_code = "46802"; l.active = true
+end
+rpt_ind = company.locations.find_or_create_by!(name: "Indianapolis South Lot") do |l|
+  l.code = "INDS"; l.city = "Indianapolis"; l.state = "IN"; l.zip_code = "46225"; l.active = true
+end
+
+vget = ->(serial) { company.vehicles.find_by(serial_number: serial) }
+this_month_date = Date.current.beginning_of_month + 6
+
+# Build (or refresh) a demo deal linked to a vehicle + REAL salesperson. Uses
+# update_columns to set report fields without firing close/GL callbacks.
+build_rpt_deal = lambda do |key, name, vehicle, rep, attrs|
+  deal = company.deals.find_or_create_by!(name: name) do |d|
+    d.stage = attrs[:stage]
+    d.assigned_to = rep.id
+    d.contact_id = company.contacts.first&.id # Deal requires a contact or account
+    d.location_id = vehicle&.location_id || locations["AUB"].id
+    d.value = attrs[:selling_price]
+    d.total_amount = attrs[:selling_price]
+    d.customer_name = attrs[:customer_name]
+    d.deal_number = "#{DEMO_PREFIX.upcase}-RPT-#{key}"
+    d.custom_field_values = {}
+  end
+  cols = {
+    stage:                  attrs[:stage],
+    vehicle_id:             vehicle&.id,
+    primary_salesperson_id: rep.id,
+    owner_id:               rep.id,
+    location_id:            vehicle&.location_id || locations["AUB"].id,
+    selling_price:          attrs[:selling_price],
+    customer_name:          attrs[:customer_name],
+    updated_at:             Time.current
+  }.merge(attrs.except(:stage, :selling_price, :customer_name))
+  deal.update_columns(cols)
+  deals[name] = deal
+  deal
+end
+
+# --- PENDING + CONTENTION: one available vehicle with TWO open deals --------
+contention_vehicle = vget.call("CLT-2019-T-889900")
+if contention_vehicle
+  build_rpt_deal.call("OPEN1", "[RPT] Alvarez — Clayton (open A)", contention_vehicle, users[:sales1],
+    stage: "proposal",    selling_price: 38900, customer_name: "Gloria Alvarez")
+  build_rpt_deal.call("OPEN2", "[RPT] Bennett — Clayton (open B)", contention_vehicle, users[:sales2],
+    stage: "negotiation", selling_price: 39500, customer_name: "Carl Bennett")
+end
+
+# --- CLOSED NOT FUNDED: closed_won, NOT gl_posted (the GL-approval gap) ------
+cnf_v1 = vget.call("DH-2026-S-005003")
+cnf_v2 = vget.call("SKY-2021-A-776600")
+if cnf_v1
+  build_rpt_deal.call("CNF1", "[RPT] Dawson — Dutch 1676S (closed, not funded)", cnf_v1, users[:sales2],
+    stage: "closed_won", selling_price: 64000, customer_name: "Erin Dawson",
+    home_cost: 45000, reconditioning_cost: 0, floor_plan_interest: 0, delivery_setup_cost: 2800,
+    pack_amount: 1500, lender_name: "Triad Financial", gl_posted: false, gl_posted_at: nil,
+    finance_reserve: 1500, product_margin: 800, won_at: this_month_date)
+end
+if cnf_v2
+  build_rpt_deal.call("CNF2", "[RPT] Foster — Skyline (closed, not funded)", cnf_v2, users[:manager],
+    stage: "closed_won", selling_price: 43000, customer_name: "Grant Foster",
+    home_cost: 28000, reconditioning_cost: 0, floor_plan_interest: 0, delivery_setup_cost: 2000,
+    pack_amount: 1000, lender_name: "21st Mortgage", gl_posted: false, gl_posted_at: nil,
+    won_at: this_month_date)
+end
+
+# --- FUNDED THIS MONTH: closed_won, gl_posted this month, distinct locations -
+fund_v1 = vget.call("DH-2026-A-005001")
+fund_v2 = vget.call("DH-2026-A-005002")
+if fund_v1
+  d = build_rpt_deal.call("FUND1", "[RPT] Harmon — Dutch 2872A (funded)", fund_v1, users[:sales1],
+    stage: "closed_won", selling_price: 106000, customer_name: "Nina Harmon",
+    home_cost: 77000, reconditioning_cost: 0, floor_plan_interest: 400, delivery_setup_cost: 4500,
+    pack_amount: 2100, lender_name: "21st Mortgage", gl_posted: true,
+    gl_posted_at: this_month_date.to_time, finance_reserve: 1500, product_margin: 800,
+    won_at: this_month_date)
+  fund_v1.update_columns(location_id: rpt_ftw.id, status: "sold", sold_via_deal_id: d.id)
+end
+if fund_v2
+  d = build_rpt_deal.call("FUND2", "[RPT] Iverson — Dutch 3268A (funded)", fund_v2, users[:manager],
+    stage: "closed_won", selling_price: 119500, customer_name: "Owen Iverson",
+    home_cost: 87000, reconditioning_cost: 0, floor_plan_interest: 350, delivery_setup_cost: 4200,
+    pack_amount: 2200, lender_name: "Vanderbilt Mortgage", gl_posted: true,
+    gl_posted_at: this_month_date.to_time, finance_reserve: 1500, product_margin: 800,
+    won_at: this_month_date)
+  fund_v2.update_columns(location_id: rpt_ind.id, status: "sold", sold_via_deal_id: d.id)
+end
+
+# --- MISSING COST: an available vehicle with NO cost -> Report 1 flags it ----
+missing_v = vget.call("FLT-2017-B-554400")
+missing_v&.update_columns(dealer_cost: nil, freight_cost: nil, pdi_cost: nil, total_cost: nil,
+                          cost: nil, status: "available", sold_via_deal_id: nil)
+
+# --- SOLD-NO-DEAL: a sold vehicle with no linked deal -> Report 1 flags it ---
+sold_no_deal_v = vget.call("DH-2025-A-004990")
+if sold_no_deal_v
+  sold_no_deal_v.update_columns(status: "sold", sold_via_deal_id: nil)
+  # Guard: ensure no deal points at it (the base seed never links it).
+  company.deals.where(vehicle_id: sold_no_deal_v.id).update_all(vehicle_id: nil)
+end
+
+puts "  Report demo: 2 pending (contention), 2 closed-not-funded, 2 funded this month; " \
+     "missing-cost + sold-no-deal flagged; distinct locations #{rpt_ftw.code}/#{rpt_ind.code}"
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
@@ -2184,6 +2325,11 @@ puts "-" * 55
   "Deal Activities"   => DealActivity.joins(:deal).where(deals: { company_id: company.id }).count,
   "Contact Activities" => ContactActivity.joins(:contact).where(contacts: { company_id: company.id }).count,
   "Tickets Scheduled" => company.service_tickets.where.not(scheduled_date: nil).count,
+  "Deals w/ Vehicle"  => company.deals.where.not(vehicle_id: nil).count,
+  "Open (Pending)"    => company.deals.where(stage: Reports::InventoryDealQuery::OPEN_STAGES).count,
+  "Closed Not Funded" => company.deals.where(stage: "closed_won", gl_posted: false).count,
+  "Funded This Month" => company.deals.where(gl_posted: true, gl_posted_at: Date.current.beginning_of_month..Date.current.end_of_month).count,
+  "Contention Vehicles" => company.deals.where(stage: Reports::InventoryDealQuery::OPEN_STAGES).where.not(vehicle_id: nil).group(:vehicle_id).count.count { |_, c| c >= 2 },
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
 end
