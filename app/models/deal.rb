@@ -19,7 +19,6 @@ class Deal < ApplicationRecord
         { key: "stage",               label: "Stage",               type: "enum",    filterable: true,  sortable: true  },
         { key: "value",               label: "Value",               type: "number",  filterable: true,  sortable: true  },
         { key: "selling_price",       label: "Selling Price",       type: "number",  filterable: true,  sortable: true  },
-        { key: "unit_cost",           label: "Unit Cost",           type: "number",  filterable: true,  sortable: true  },
         { key: "probability",         label: "Probability (%)",     type: "number",  filterable: true,  sortable: true  },
         { key: "customer_name",       label: "Customer",            type: "string",  filterable: true,  sortable: true  },
         { key: "owner_id",            label: "Assigned To",         type: "number",  filterable: true,  sortable: true  },
@@ -528,7 +527,10 @@ class Deal < ApplicationRecord
     
     vehicle_price = vehicle.sale_price || vehicle.msrp
     self.selling_price = vehicle_price if selling_price.nil? || selling_price == 0
-    self.unit_cost = vehicle.cost if unit_cost.nil? || unit_cost == 0
+    # unit_cost is now a PASSIVE MIRROR of the canonical landed structured cost (see
+    # vehicle_landed_cost/landed_cost), never an independent cost source. Mirror
+    # structured_cost (not bare vehicle.cost) so it can never diverge from GP/COGS.
+    self.unit_cost = vehicle.structured_cost if unit_cost.nil? || unit_cost == 0
     self.value = vehicle_price if value.nil? || value == 0
     self.quantity ||= 1
     
