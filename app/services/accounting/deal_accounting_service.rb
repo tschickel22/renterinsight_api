@@ -236,13 +236,14 @@ module Accounting
       cost_entered = !landed_cost.nil?
       front_gross = @deal.front_gross
 
-      # Exclude the home/vehicle line item from back_gross. It's already counted
-      # in selling_price (front side), so summing it again double-counts the
-      # entire home as profit. Back-end revenue is only F&I, accessories, fees.
-      back_products = (@deal.try(:deal_products) || []).reject { |p| home_line_item?(p) }
-      back_gross = back_products.sum { |p| p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0') }
+      # Delegate to the canonical model method — back gross is finance_reserve +
+      # product_margin (margin), the SAME definition the commission engine and the deal
+      # serializer use. Do NOT sum deal_products revenue here (that diverged from canonical).
+      back_gross = @deal.back_gross
 
-      total_gross = cost_entered ? (front_gross + back_gross) : nil
+      # Front side stays nil/flagged when cost isn't entered; otherwise total ties to the
+      # canonical Deal#total_gross (= front_gross + back_gross).
+      total_gross = cost_entered ? @deal.total_gross : nil
 
       commission = @deal.try(:commission_amount) || BigDecimal('0')
       net_profit = total_gross.nil? ? nil : (total_gross - commission)
@@ -280,12 +281,11 @@ module Accounting
           delivery: @deal.delivery_setup_cost || 0,
           pack: @deal.effective_pack_amount # separate holdback, NOT part of front cost
         },
-        back_detail: back_products.map { |p|
-          {
-            name: p.try(:name) || p.try(:product_name) || p.try(:product_type),
-            amount: p.try(:price) || p.try(:amount) || p.try(:total) || 0
-          }
-        },
+        # Components of back_gross (reconciles to it): finance reserve + product margin.
+        back_detail: [
+          { name: 'Finance Reserve', amount: @deal.finance_reserve || 0 },
+          { name: 'Product Margin',  amount: @deal.product_margin || 0 }
+        ],
         gl_posted: @deal.gl_posted?,
         tax: tax_summary
       }
@@ -302,33 +302,6 @@ module Accounting
     end
 
     private
-
-    # The home/vehicle is stored as a deal_product line in addition to being
-    # represented by deal.selling_price. Identify it so back_gross doesn't
-    # double-count it. DealProduct has no category/source_type columns, so we
-    # detect it by:
-    #   - product_name matching the linked vehicle's "year make model"
-    #   - or unit_price equal to the deal's selling_price (custom-line fallback)
-    def home_line_item?(product)
-      return false unless product
-
-      pname = product.try(:product_name).to_s.strip
-      vname = deal_vehicle_name
-      return true if vname.present? && pname.casecmp(vname).zero?
-
-      selling = (@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount)).to_f
-      return false unless selling > 0
-
-      unit = product.try(:unit_price).to_f
-      unit > 0 && (unit - selling).abs < 0.01
-    end
-
-    def deal_vehicle_name
-      v = @deal.try(:vehicle)
-      return nil unless v
-      [v.try(:year), v.try(:make), v.try(:model)]
-        .compact.map(&:to_s).reject(&:empty?).join(' ').strip.presence
-    end
 
     def deal_is_closed?
       closed_statuses = %w[closed_won won closed completed]
