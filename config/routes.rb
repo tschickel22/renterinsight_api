@@ -1873,6 +1873,8 @@ Rails.application.routes.draw do
 
       # Inventory Stock List & GP Snapshot (read-only)
       get 'inventory/reports/stock_list', to: 'inventory_reports#stock_list'
+      # Salesperson GP Pipeline "Cheat Sheet" (read-only)
+      get 'inventory/reports/salesperson_gp_pipeline', to: 'inventory_reports#salesperson_gp_pipeline'
 
       resources :deals, only: [] do
         member do
