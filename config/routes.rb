@@ -1871,6 +1871,9 @@ Rails.application.routes.draw do
       get 'accounting/dashboard', to: 'accounting_reports#dashboard'
       get 'accounting/locations', to: 'accounting_reports#accounting_locations'
 
+      # Inventory Stock List & GP Snapshot (read-only)
+      get 'inventory/reports/stock_list', to: 'inventory_reports#stock_list'
+
       resources :deals, only: [] do
         member do
           post :record_payment, to: 'deal_payments#record_payment'
