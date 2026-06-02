@@ -29,7 +29,8 @@ class PlatformModule
     'marketing.website' => { name: 'Website Builder', category: 'Marketing', icon: 'Layout', description: 'Custom website creation and management' },
     'marketing.syndication' => { name: 'Listing Syndication', category: 'Marketing', icon: 'Share2', description: 'Syndicate listings to partner sites' },
     'marketing.social_media' => { name: 'Social Media & Ads', category: 'Marketing', icon: 'Share2', description: 'Social posts, scheduler, attribution, and Facebook ad builder' },
-    
+    'marketing.campaigns' => { name: 'Email Campaigns', category: 'Marketing', icon: 'Mail', description: 'Email campaign creation, sending, and tracking' },
+
     # Finance & Agreements
     'finance.loans' => { name: 'Finance Management', category: 'Finance & Agreements', icon: 'DollarSign', description: 'Loan and payment management' },
     'finance.agreements' => { name: 'Agreement Vault', category: 'Finance & Agreements', icon: 'FileSignature', description: 'Digital contract management' },
