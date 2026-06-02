@@ -272,7 +272,9 @@ module Api
             options: %w[new used rental rent_to_own consignment] },
           { key: 'vertical', label: 'Vertical', type: 'select', source: 'standard', required: false, protected: false,
             options: %w[rv manufactured_home other] },
-          { key: 'lead_source', label: 'Lead Source', type: 'text', source: 'standard', required: false, protected: false },
+          # Source is the company Sources relationship (source_id), edited via the dedicated
+          # SourcePicker on the deal form/detail — not an inline-editable layout field. The old
+          # free-text 'lead_source' field was removed in favor of it.
           { key: 'owner_id', label: 'Owner / Sales Rep', type: 'user', source: 'standard', required: false, protected: false },
           { key: 'created_at', label: 'Date Created', type: 'date', source: 'standard', required: false, protected: true },
           { key: 'quantity', label: 'Quantity', type: 'number', source: 'standard', required: false, protected: false },
