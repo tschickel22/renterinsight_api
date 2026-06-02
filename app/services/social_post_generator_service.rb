@@ -13,10 +13,11 @@ class SocialPostGeneratorService
 
   MODEL      = 'claude-sonnet-4-20250514'
   MAX_TOKENS = 800
+  MAX_IMAGES = 4
   VERSION    = 'spg-2026-04-19'
 
   class << self
-    def generate(company:, intent_category:, post_type:, platform:, vehicle: nil, user: nil, tone: 'friendly', topic_details: nil, intake_form_url: nil)
+    def generate(company:, intent_category:, post_type:, platform:, vehicle: nil, user: nil, tone: 'friendly', topic_details: nil, intake_form_url: nil, image_urls: [], current_draft: nil)
       profile = SocialPostIntentCatalog.for_company(company)
       unless profile.intent_values.include?(intent_category)
         raise Error, "invalid intent_category '#{intent_category}' for this industry. Must be one of: #{profile.intent_values.join(', ')}"
@@ -29,12 +30,21 @@ class SocialPostGeneratorService
                           intent_category: intent_category, post_type: post_type,
                           platform: platform, tone: tone,
                           topic_details: topic_details, intake_form_url: intake_form_url,
+                          image_urls: image_urls, current_draft: current_draft,
                           profile: profile)
 
       prompt        = build_user_prompt(ctx)
       system_prompt = build_system_prompt(ctx)
 
-      response = call_claude(api_key, system_prompt, prompt)
+      response = begin
+        call_claude(api_key, system_prompt, prompt, ctx[:image_urls])
+      rescue Error => e
+        # If the vision call fails (e.g. an image URL Anthropic can't fetch),
+        # don't fail the whole generation — retry text-only.
+        raise e if ctx[:image_urls].blank?
+        Rails.logger.warn "[SocialPostGeneratorService] image-aware generate failed (#{e.message}); retrying text-only"
+        call_claude(api_key, system_prompt, prompt, [])
+      end
       parsed   = parse_model_output(response)
 
       payload = {
@@ -122,9 +132,11 @@ class SocialPostGeneratorService
     # ------------------------------------------------------------------
     # Context
     # ------------------------------------------------------------------
-    def build_context(company:, vehicle:, user:, intent_category:, post_type:, platform:, tone:, topic_details: nil, intake_form_url: nil, profile: nil)
+    def build_context(company:, vehicle:, user:, intent_category:, post_type:, platform:, tone:, topic_details: nil, intake_form_url: nil, image_urls: [], current_draft: nil, profile: nil)
       profile ||= SocialPostIntentCatalog.for_company(company)
       {
+        image_urls:    sanitize_image_urls(image_urls),
+        current_draft: sanitize_current_draft(current_draft),
         company: {
           id:    company&.id,
           name:  company&.name,
@@ -154,6 +166,30 @@ class SocialPostGeneratorService
         length_hint:     platform.to_s == 'instagram' ? 'short (80-120 words)' : 'up to 250 words',
         hashtag_hint:    platform.to_s == 'instagram' ? '8-15 hashtags' : '3-6 hashtags'
       }
+    end
+
+    # Only pass http(s) URLs (Anthropic must be able to fetch them), capped so a
+    # post with many images doesn't blow up the request.
+    def sanitize_image_urls(urls)
+      Array(urls).map { |u| u.to_s.strip }.select { |u| u.match?(%r{\Ahttps?://}i) }.first(MAX_IMAGES)
+    end
+
+    # The fields the user may have already filled in. We feed these back so the
+    # model writes the remaining fields consistently — and the caller fills only
+    # blanks, so nothing the user typed gets overwritten.
+    def sanitize_current_draft(draft)
+      return nil if draft.blank?
+      d = draft.respond_to?(:to_unsafe_h) ? draft.to_unsafe_h : draft
+      d = d.transform_keys(&:to_s)
+      cleaned = {
+        'caption'     => d['caption'].to_s.strip.presence,
+        'headline'    => d['headline'].to_s.strip.presence,
+        'description' => d['description'].to_s.strip.presence,
+        'hashtags'    => Array(d['hashtags']).map { |h| h.to_s.strip }.reject(&:blank?),
+        'cta_type'    => d['cta_type'].to_s.strip.presence
+      }
+      cleaned['hashtags'] = nil if cleaned['hashtags'].blank?
+      cleaned.compact.presence
     end
 
     def vehicle_context(v)
@@ -211,6 +247,12 @@ class SocialPostGeneratorService
       lines << "Voice: #{ctx[:voice] == 'first_person' ? 'first person ("I", "my")' : 'company plural ("we", "our")'}."
       lines << "Tone: #{ctx[:tone]}."
       lines << "Platform: #{ctx[:platform]} — keep caption #{ctx[:length_hint]} and use #{ctx[:hashtag_hint]}."
+      if ctx[:image_urls].present?
+        lines << "One or more images are attached to this post. Look at them and make the caption, headline, description, and hashtags reflect what is actually shown — reference specific visual details where it helps."
+      end
+      if ctx[:current_draft].present?
+        lines << "The user has already written some fields (shown under \"Current draft\"). Treat those as fixed: do not contradict them, and make any fields you generate consistent in subject, tone, and detail with what the user wrote."
+      end
       lines << ctx[:compliance] if ctx[:compliance].present?
       lines << <<~OUT.strip
         Return ONLY valid JSON — no prose, no markdown, no code fences — with keys:
@@ -229,9 +271,23 @@ class SocialPostGeneratorService
       sections << "#{ctx[:subject_label].to_s.capitalize} context:\n#{format_vehicle(ctx[:vehicle])}" if ctx[:vehicle]
       sections << "Person posting:\n#{format_user(ctx[:user])}" if ctx[:user] && ctx[:post_type] == 'rep_personal'
       sections << "Additional context from the user:\n#{ctx[:topic_details]}" if ctx[:topic_details].present?
+      draft = format_current_draft(ctx[:current_draft])
+      sections << "Current draft (already written by the user — keep these consistent and complement them; do not rewrite them):\n#{draft}" if draft.present?
+      sections << "The attached image(s) belong to this post — describe and reference what they show." if ctx[:image_urls].present?
       sections << "Include this lead capture link in the caption (with UTM tracking already applied): #{ctx[:intake_form_url]}" if ctx[:intake_form_url].present?
       sections << "Return JSON only."
       sections.join("\n\n")
+    end
+
+    def format_current_draft(d)
+      return '' if d.blank?
+      parts = []
+      parts << "Caption: #{d['caption']}" if d['caption'].present?
+      parts << "Headline: #{d['headline']}" if d['headline'].present?
+      parts << "Description: #{d['description']}" if d['description'].present?
+      parts << "Hashtags: #{Array(d['hashtags']).map { |h| "##{h}" }.join(' ')}" if d['hashtags'].present?
+      parts << "Call to action: #{d['cta_type']}" if d['cta_type'].present?
+      parts.join("\n")
     end
 
     def intent_instructions(intent, ctx)
@@ -293,12 +349,17 @@ class SocialPostGeneratorService
     # ------------------------------------------------------------------
     # Claude call
     # ------------------------------------------------------------------
-    def call_claude(api_key, system_prompt, user_prompt)
+    def call_claude(api_key, system_prompt, user_prompt, image_urls = [])
       uri = URI('https://api.anthropic.com/v1/messages')
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       http.read_timeout = 30
       http.open_timeout = 10
+
+      content = Array(image_urls).map do |url|
+        { type: 'image', source: { type: 'url', url: url } }
+      end
+      content << { type: 'text', text: user_prompt }
 
       request = Net::HTTP::Post.new(uri)
       request['Content-Type']      = 'application/json'
@@ -308,7 +369,7 @@ class SocialPostGeneratorService
         model:      MODEL,
         max_tokens: MAX_TOKENS,
         system:     system_prompt,
-        messages:   [{ role: 'user', content: user_prompt }]
+        messages:   [{ role: 'user', content: content }]
       }.to_json
 
       response = http.request(request)

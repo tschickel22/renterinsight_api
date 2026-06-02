@@ -233,6 +233,11 @@ class Api::V1::SocialPostsController < ApplicationController
       @company.vehicles.where(is_deleted: false).find_by(id: params[:vehicle_id])
     end
 
+    image_urls = Array(params[:image_urls]).map(&:to_s).select(&:present?)
+    current_draft = if params[:current_draft].respond_to?(:permit)
+      params[:current_draft].permit(:caption, :headline, :description, :cta_type, hashtags: []).to_h
+    end
+
     begin
       result = SocialPostGeneratorService.generate(
         company:         @company,
@@ -243,7 +248,9 @@ class Api::V1::SocialPostsController < ApplicationController
         user:            current_user,
         tone:            tone,
         topic_details:   topic_details,
-        intake_form_url: intake_form_url
+        intake_form_url: intake_form_url,
+        image_urls:      image_urls,
+        current_draft:   current_draft
       )
     rescue SocialPostGeneratorService::Error => e
       return render json: { error: e.message }, status: :unprocessable_entity
