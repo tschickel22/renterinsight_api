@@ -36,6 +36,21 @@ if ENV['RESET'] == 'true'
   existing = Company.find_by(name: DEMO_COMPANY_NAME)
   if existing
     puts "\nResetting existing demo company (ID: #{existing.id})..."
+
+    # Campaign teardown is order-sensitive: Campaign declares `has_many :campaign_steps,
+    # dependent: :destroy` (line 17) BEFORE `has_many :campaign_sends` (line 20), so
+    # campaign.destroy tries to delete steps while campaign_sends still FK-reference them
+    # (fk_rails_...on campaign_sends.campaign_step_id). Company only exposes :campaigns
+    # (not the children), so the loop below can't order around it. Clear the send-side
+    # descendants first — scoped to THIS company's campaigns — so the campaigns.destroy_all
+    # cascade is FK-safe. Delete referents before referenced: link_tokens/events -> sends.
+    campaign_ids = existing.campaigns.pluck(:id)
+    if campaign_ids.any?
+      CampaignLinkToken.where(campaign_send_id: CampaignSend.where(campaign_id: campaign_ids).select(:id)).delete_all if defined?(CampaignLinkToken)
+      CampaignEvent.where(campaign_id: campaign_ids).delete_all if defined?(CampaignEvent)
+      CampaignSend.where(campaign_id: campaign_ids).delete_all if defined?(CampaignSend)
+    end
+
     %i[
       buyer_portal_accesses
       budgets budget_lines
@@ -53,7 +68,8 @@ if ENV['RESET'] == 'true'
       projects project_templates project_phases project_tasks
       project_cost_items project_material_usages project_documents
       purchase_orders purchase_order_lines
-      parts suppliers vendors service_tickets
+      parts suppliers vendors
+      warranty_claims service_tickets
       contacts accounts
       leads vehicles units properties
       nurture_sequences nurture_steps nurture_enrollments
@@ -64,7 +80,7 @@ if ENV['RESET'] == 'true'
       tenant_module_overrides api_keys webhook_endpoints
       brochures listings
       agreements agreement_signers agreement_templates agreement_categories
-      warranty_claims contractor_assignments contractors
+      contractor_assignments contractors
       company_hidden_roles company_manufacturers
       payments payment_methods loans land_parcels invitations templates
       part_categories inventory_transactions stock_balances reorder_rules
@@ -88,9 +104,24 @@ if ENV['RESET'] == 'true'
     existing.roles.destroy_all if existing.respond_to?(:roles)
     existing.tenant_subscription&.destroy if existing.respond_to?(:tenant_subscription)
     existing.twilio_account&.destroy if existing.respond_to?(:twilio_account)
-    # Use delete instead of destroy! to avoid cascade through stale associations
-    # (Site, SiteMedium, WebsiteMedia, etc. - models that no longer exist)
-    existing.delete
+
+    # Final safety net. The association loop above can't reach legacy/unmapped tables —
+    # e.g. the vestigial `suppliers` table (the Supplier model now maps to `vendors`, so
+    # Company#suppliers never clears the old rows) — and any straggler with a company_id
+    # FK to companies will block the delete. Sweep every table that still has a row for
+    # THIS company with referential integrity disabled (cross-table FK order no longer
+    # matters), then delete the company. Strictly scoped to existing.id — never touches
+    # another tenant. Raw deletes (no model callbacks) also sidestep the dependent-destroy
+    # ordering hazards that bite the association loop.
+    cid = existing.id
+    conn = ActiveRecord::Base.connection
+    conn.disable_referential_integrity do
+      conn.tables.each do |t|
+        next unless conn.columns(t).any? { |c| c.name == 'company_id' }
+        conn.exec_delete("DELETE FROM #{conn.quote_table_name(t)} WHERE company_id = #{cid.to_i}", 'SeedReset', [])
+      end
+      conn.exec_delete("DELETE FROM companies WHERE id = #{cid.to_i}", 'SeedReset', [])
+    end
     puts "  Company deleted.\n"
   end
 end
