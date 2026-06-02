@@ -51,6 +51,29 @@ RSpec.describe "Api::V1::Campaigns", type: :request do
       expect(names).to include("A")
       expect(names).not_to include("Z")
     end
+
+    it "excludes archived campaigns from the default view but surfaces them when filtered" do
+      Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: "Active one",
+                       campaign_type: "blast", from_identity_type: "User",
+                       from_identity_id: user.id, throttle_per_day: 100, status: "draft")
+      Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: "Archived one",
+                       campaign_type: "blast", from_identity_type: "User",
+                       from_identity_id: user.id, throttle_per_day: 100, status: "archived")
+
+      get "/api/v1/campaigns", headers: auth_headers
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      names = body["items"].map { |c| c["name"] }
+      expect(names).to include("Active one")
+      expect(names).not_to include("Archived one")
+      # "Total" tile backs the default view, so it also excludes archived.
+      expect(body.dig("meta", "stats", "total")).to eq(1)
+      expect(body.dig("meta", "stats", "archived")).to eq(1)
+
+      get "/api/v1/campaigns", params: { status: "archived" }, headers: auth_headers
+      archived_names = JSON.parse(response.body)["items"].map { |c| c["name"] }
+      expect(archived_names).to eq(["Archived one"])
+    end
   end
 
   describe "POST /api/v1/campaigns" do
