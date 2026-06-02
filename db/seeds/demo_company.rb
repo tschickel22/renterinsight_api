@@ -184,11 +184,32 @@ if stale.any?
   puts "  Removed #{removed} stale locations (Fort Wayne / Indianapolis), reassigned data to Auburn"
 end
 
-# Both FTW and IND are aliased to AUB so prior code that picks AUB/FTW/IND
-# still works without re-routing every reference.
-locations["FTW"] = auburn
-locations["IND"] = auburn
-puts "  Location: #{auburn.name} (#{auburn.code})"
+# THREE DISTINCT operating locations so the reports' location grouping (Report 1
+# rows + Report 2 funded-by-location) shows real groups. Names differ from the
+# section-above stale list ("Fort Wayne Center"/"Indianapolis South") so the
+# cleanup never deletes these on re-run — keeps location_id stable + idempotent.
+fort_wayne = company.locations.find_or_create_by!(name: "Fort Wayne") do |l|
+  l.code = "FTW"
+  l.address_line1 = "1820 Coliseum Blvd"
+  l.city = "Fort Wayne"
+  l.state = "IN"
+  l.zip_code = "46805"
+  l.phone = "(260) 555-0200"
+  l.active = true
+end
+locations["FTW"] = fort_wayne
+
+indianapolis = company.locations.find_or_create_by!(name: "Indianapolis") do |l|
+  l.code = "IND"
+  l.address_line1 = "3400 S Meridian St"
+  l.city = "Indianapolis"
+  l.state = "IN"
+  l.zip_code = "46217"
+  l.phone = "(317) 555-0300"
+  l.active = true
+end
+locations["IND"] = indianapolis
+puts "  Locations: #{auburn.code}, #{fort_wayne.code}, #{indianapolis.code} (3 distinct)"
 
 # ── 3. Users ───────────────────────────────────────────────
 puts "\n3. Creating users..."
@@ -402,7 +423,7 @@ vehicle_data = [
       "#{S3_STAGING}/floor-plans/champion/topeka-in/champion-homes/aspire-2025/aspire-1676h32222/jpgs/112-aspire-1676h32222-bathroom.jpg",
     ],
     floor_plan: "#{S3_FDHC}/floorplans/Dutch%20Aspire%201676H32222.png" },
-  { year: 2026, make: "Champion",      model: "Emerald Sky 4483A",      serial: "112-000-H-A-C412920B", beds: 4, baths: 2, sqft: 1680, price: 124900, cost: 92000, status: "available",  location: "AUB",
+  { year: 2026, make: "Champion",      model: "Emerald Sky 4483A",      serial: "112-000-H-A-C412920B", beds: 4, baths: 2, sqft: 1680, price: 124900, cost: 92000, status: "reserved",  location: "AUB",
     images: [
       "#{S3_STAGING}/floor-plans/champion/topeka-in/champion-homes/genesis/emerald-sky/jpgs/112-emerald-sky-exterior.jpg",
       "#{S3_STAGING}/floor-plans/champion/topeka-in/champion-homes/genesis/emerald-sky/jpgs/112-emerald-sky-kitchen.jpg",
@@ -428,7 +449,18 @@ vehicle_data = [
   { year: 2017, make: "Fleetwood",     model: "Berkshire 3252B",        serial: "FLT-2017-B-554400",    beds: 4, baths: 2, sqft: 1664, price: 38000,  cost: 20000, status: "available",  location: "AUB", images: [], floor_plan: nil },
 ]
 
+# Deterministic days-in-stock spread so the AGE column + aging buckets (0-30 /
+# 31-60 / 61-90 / 90+) all demonstrate. Stable across re-runs (indexed, no random).
+stock_ages = [9, 17, 24, 28, 41, 52, 70, 84, 96, 118, 160, 205, 240, 290, 335, 355, 76, 132]
+
 vehicle_data.each_with_index do |vd, idx|
+  age_days = stock_ages[idx % stock_ages.length]
+  # Single (1) vs double (2) section by size so units classify into the proper
+  # New/Used — Single/Double Section buckets instead of "Section Count Not Entered".
+  veh_sections = (vd[:sqft].to_i >= 1400 || vd[:beds].to_i >= 4) ? 2 : 1
+  # Lowercase new/used so Report 1's section_for matches; older units read as used.
+  veh_condition = vd[:year].to_i >= 2023 ? "new" : "used"
+
   vehicle = company.vehicles.find_or_create_by!(serial_number: vd[:serial]) do |v|
     v.year = vd[:year]
     v.make = vd[:make]
@@ -442,7 +474,9 @@ vehicle_data.each_with_index do |vd, idx|
     v.bedrooms = vd[:beds]
     v.bathrooms = vd[:baths]
     v.square_feet = vd[:sqft]
-    v.condition = vd[:year] >= 2025 ? "New" : "Used"
+    v.condition = veh_condition
+    v.sections = veh_sections
+    v.date_in_stock = age_days.days.ago.to_date
     v.home_type = "Manufactured"
     v.listing_type = "manufactured_home"
     v.is_deleted = false
@@ -460,6 +494,14 @@ vehicle_data.each_with_index do |vd, idx|
       end
     end
   end
+  # Backfill the report-relevant fields on every run (the create block above only
+  # fires for new records) so previously-seeded demo companies populate the reports.
+  vehicle.update_columns(
+    date_in_stock: age_days.days.ago.to_date,
+    sections: veh_sections,
+    condition: veh_condition,
+    location_id: locations[vd[:location]].id
+  )
   vehicles[vd[:serial]] = vehicle
 end
 puts "  Created #{vehicle_data.length} vehicles (#{vehicle_data.count { |v| v[:images].present? }} with photos)"
@@ -488,19 +530,22 @@ deal_data = [
 # salesperson rotates across the three sales users — Report 2 groups by
 # primary_salesperson_id, which must be a real User id (not the assigned_to email).
 report_demo_serials = %w[
-  RMN-2025-A-001150 DH-2026-A-005001 DH-2026-A-005002 DH-2026-S-005003
-  DH-2025-A-004990 CLT-2019-T-889900 SKY-2021-A-776600 FLT-2017-B-554400
+  RMN-2026-A-001240 RMN-2025-A-001150 DH-2026-A-005001 DH-2026-A-005002
+  DH-2026-S-005003 DH-2025-A-004990 CLT-2019-T-889900 SKY-2021-A-776600
+  FLT-2017-B-554400
 ]
 deal_vehicle_pool = vehicle_data
   .reject { |vd| report_demo_serials.include?(vd[:serial]) || vd[:status] == 'sold' }
   .map { |vd| vehicles[vd[:serial]] }
 deal_reps = [users[:sales1], users[:sales2], users[:manager]]
+deal_lenders = ['21st Mortgage', 'Vanderbilt Mortgage', 'Triad Financial', 'Cash']
 
 deal_data.each_with_index do |dd, idx|
   contact = contacts[dd[:contact]]
   account = dd[:account] ? accounts[dd[:account]] : nil
   assigned_vehicle = deal_vehicle_pool[idx % deal_vehicle_pool.size]
   rep = deal_reps[idx % deal_reps.size]
+  lender = deal_lenders[idx % deal_lenders.size]
 
   # Sales tax (~6% IN state tax, simplified flat for demo)
   tax_amount = (dd[:amount] * 0.06).round(2)
@@ -544,6 +589,8 @@ deal_data.each_with_index do |dd, idx|
     primary_salesperson_id: rep.id,
     owner_id:               rep.id,
     location_id:            assigned_vehicle&.location_id || locations["AUB"].id,
+    lender_name:            (lender == "Cash" ? nil : lender),
+    payment_type:           (lender == "Cash" ? "cash" : "finance"),
     # Backdate updated_at so the deal profitability report (which falls
     # back to updated_at when closed_at/won_at are missing) finds these
     # deals in the default date range.
@@ -2156,15 +2203,8 @@ puts "  Contact activities: #{ca_count} created"
 # recomputes GP; it just sets the inputs (vehicle link, home_cost, gl_posted, etc.).
 puts "\n41. Report demo data (inventory + GP pipeline)..."
 
-# Two DISTINCT operating locations so the reports' location grouping is visible
-# (the base seed aliases FTW/IND to Auburn). Names avoid the section-2 stale list.
-rpt_ftw = company.locations.find_or_create_by!(name: "Fort Wayne Sales Center") do |l|
-  l.code = "FTWS"; l.city = "Fort Wayne"; l.state = "IN"; l.zip_code = "46802"; l.active = true
-end
-rpt_ind = company.locations.find_or_create_by!(name: "Indianapolis South Lot") do |l|
-  l.code = "INDS"; l.city = "Indianapolis"; l.state = "IN"; l.zip_code = "46225"; l.active = true
-end
-
+# Uses the three DISTINCT locations created in section 2 (AUB / FTW / IND) so the
+# funded-by-location grouping and Report 1 location column show real groups.
 vget = ->(serial) { company.vehicles.find_by(serial_number: serial) }
 this_month_date = Date.current.beginning_of_month + 6
 
@@ -2206,14 +2246,22 @@ if contention_vehicle
     stage: "negotiation", selling_price: 39500, customer_name: "Carl Bennett")
 end
 
+# --- ON ORDER: open deal on an available_to_order unit -> Report 1 'On Order' -
+order_v = vget.call("RMN-2026-A-001240")
+if order_v
+  build_rpt_deal.call("ORDER1", "[RPT] Castillo — Redman RM4068A (on order)", order_v, users[:sales1],
+    stage: "proposal", selling_price: 142000, customer_name: "Rosa Castillo",
+    lender_name: "Vanderbilt Mortgage", payment_type: "finance")
+end
+
 # --- CLOSED NOT FUNDED: closed_won, NOT gl_posted (the GL-approval gap) ------
-cnf_v1 = vget.call("DH-2026-S-005003")
-cnf_v2 = vget.call("SKY-2021-A-776600")
+cnf_v1 = vget.call("DH-2026-A-005002") # Fort Wayne
+cnf_v2 = vget.call("SKY-2021-A-776600") # Fort Wayne
 if cnf_v1
-  build_rpt_deal.call("CNF1", "[RPT] Dawson — Dutch 1676S (closed, not funded)", cnf_v1, users[:sales2],
-    stage: "closed_won", selling_price: 64000, customer_name: "Erin Dawson",
-    home_cost: 45000, reconditioning_cost: 0, floor_plan_interest: 0, delivery_setup_cost: 2800,
-    pack_amount: 1500, lender_name: "Triad Financial", gl_posted: false, gl_posted_at: nil,
+  build_rpt_deal.call("CNF1", "[RPT] Dawson — Dutch 3268A (closed, not funded)", cnf_v1, users[:sales2],
+    stage: "closed_won", selling_price: 122000, customer_name: "Erin Dawson",
+    home_cost: 87000, reconditioning_cost: 0, floor_plan_interest: 0, delivery_setup_cost: 4200,
+    pack_amount: 2200, lender_name: "Triad Financial", gl_posted: false, gl_posted_at: nil,
     finance_reserve: 1500, product_margin: 800, won_at: this_month_date)
 end
 if cnf_v2
@@ -2224,9 +2272,10 @@ if cnf_v2
     won_at: this_month_date)
 end
 
-# --- FUNDED THIS MONTH: closed_won, gl_posted this month, distinct locations -
-fund_v1 = vget.call("DH-2026-A-005001")
-fund_v2 = vget.call("DH-2026-A-005002")
+# --- FUNDED THIS MONTH: closed_won, gl_posted this month; AUB + IND so the ---
+# funded-by-location grouping spans 3 locations (with the section-10 funded units).
+fund_v1 = vget.call("DH-2026-A-005001") # Auburn
+fund_v2 = vget.call("DH-2026-S-005003") # Indianapolis
 if fund_v1
   d = build_rpt_deal.call("FUND1", "[RPT] Harmon — Dutch 2872A (funded)", fund_v1, users[:sales1],
     stage: "closed_won", selling_price: 106000, customer_name: "Nina Harmon",
@@ -2234,16 +2283,16 @@ if fund_v1
     pack_amount: 2100, lender_name: "21st Mortgage", gl_posted: true,
     gl_posted_at: this_month_date.to_time, finance_reserve: 1500, product_margin: 800,
     won_at: this_month_date)
-  fund_v1.update_columns(location_id: rpt_ftw.id, status: "sold", sold_via_deal_id: d.id)
+  fund_v1.update_columns(status: "sold", sold_via_deal_id: d.id)
 end
 if fund_v2
-  d = build_rpt_deal.call("FUND2", "[RPT] Iverson — Dutch 3268A (funded)", fund_v2, users[:manager],
-    stage: "closed_won", selling_price: 119500, customer_name: "Owen Iverson",
-    home_cost: 87000, reconditioning_cost: 0, floor_plan_interest: 350, delivery_setup_cost: 4200,
-    pack_amount: 2200, lender_name: "Vanderbilt Mortgage", gl_posted: true,
+  d = build_rpt_deal.call("FUND2", "[RPT] Iverson — Dutch 1676S (funded)", fund_v2, users[:manager],
+    stage: "closed_won", selling_price: 63500, customer_name: "Owen Iverson",
+    home_cost: 45000, reconditioning_cost: 0, floor_plan_interest: 350, delivery_setup_cost: 2800,
+    pack_amount: 1500, lender_name: "Vanderbilt Mortgage", gl_posted: true,
     gl_posted_at: this_month_date.to_time, finance_reserve: 1500, product_margin: 800,
     won_at: this_month_date)
-  fund_v2.update_columns(location_id: rpt_ind.id, status: "sold", sold_via_deal_id: d.id)
+  fund_v2.update_columns(status: "sold", sold_via_deal_id: d.id)
 end
 
 # --- MISSING COST: an available vehicle with NO cost -> Report 1 flags it ----
@@ -2251,16 +2300,16 @@ missing_v = vget.call("FLT-2017-B-554400")
 missing_v&.update_columns(dealer_cost: nil, freight_cost: nil, pdi_cost: nil, total_cost: nil,
                           cost: nil, status: "available", sold_via_deal_id: nil)
 
-# --- SOLD-NO-DEAL: a sold vehicle with no linked deal -> Report 1 flags it ---
-sold_no_deal_v = vget.call("DH-2025-A-004990")
-if sold_no_deal_v
-  sold_no_deal_v.update_columns(status: "sold", sold_via_deal_id: nil)
-  # Guard: ensure no deal points at it (the base seed never links it).
-  company.deals.where(vehicle_id: sold_no_deal_v.id).update_all(vehicle_id: nil)
+# --- SOLD-NO-DEAL: sold vehicles with no linked deal -> Report 1 flags them --
+%w[DH-2025-A-004990 RMN-2025-A-001150].each do |serial|
+  v = vget.call(serial)
+  next unless v
+  v.update_columns(status: "sold", sold_via_deal_id: nil)
+  company.deals.where(vehicle_id: v.id).update_all(vehicle_id: nil) # guard: unlink any deal
 end
 
-puts "  Report demo: 2 pending (contention), 2 closed-not-funded, 2 funded this month; " \
-     "missing-cost + sold-no-deal flagged; distinct locations #{rpt_ftw.code}/#{rpt_ind.code}"
+puts "  Report demo: pending+contention (2) & on-order (1); closed-not-funded (2); " \
+     "funded this month (2: #{fund_v1&.location&.code}/#{fund_v2&.location&.code}); missing-cost + sold-no-deal flagged"
 
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
@@ -2333,6 +2382,20 @@ puts "-" * 55
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
 end
+
+# Report breakdowns: vehicles by location and by New/Used × section size.
+puts ""
+puts "Inventory by Location:"
+company.vehicles.where(is_deleted: [false, nil]).includes(:location)
+       .group_by { |v| v.location&.name || "Unassigned" }
+       .sort_by { |name, _| name.to_s }
+       .each { |name, vs| printf "  %-20s %d\n", name, vs.size }
+puts "Inventory by Section:"
+company.vehicles.where(is_deleted: [false, nil])
+       .group_by { |v| size = v.sections.to_i >= 2 ? "Double" : (v.sections.to_i == 1 ? "Single" : "Unspecified"); "#{(v.condition.to_s.capitalize.presence || 'Unspecified')} — #{size}" }
+       .sort_by { |k, _| k }
+       .each { |k, vs| printf "  %-22s %d\n", k, vs.size }
+
 puts ""
 puts "To reset and re-seed:"
 puts "  RESET=true bin/rails runner \"load 'db/seeds/demo_company.rb'\""
