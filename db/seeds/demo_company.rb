@@ -539,7 +539,9 @@ deal_vehicle_pool = vehicle_data
   .reject { |vd| report_demo_serials.include?(vd[:serial]) || vd[:status] == 'sold' }
   .map { |vd| vehicles[vd[:serial]] }
 deal_reps = [users[:sales1], users[:sales2], users[:manager]]
-deal_lenders = ['21st Mortgage', 'Vanderbilt Mortgage', 'Triad Financial', 'Cash']
+deal_lenders = ['21st Mortgage', 'Vanderbilt', 'Triad Financial', 'Cascade', 'Cash']
+# Deposit as a % of selling price; a couple at 0 for variety (fills the Deposit column).
+deposit_pcts = [0.08, 0.05, 0.10, 0.0, 0.07, 0.06, 0.09, 0.0, 0.075, 0.05]
 
 deal_data.each_with_index do |dd, idx|
   contact = contacts[dd[:contact]]
@@ -547,6 +549,13 @@ deal_data.each_with_index do |dd, idx|
   assigned_vehicle = deal_vehicle_pool[idx % deal_vehicle_pool.size]
   rep = deal_reps[idx % deal_reps.size]
   lender = deal_lenders[idx % deal_lenders.size]
+  deposit = (dd[:amount] * deposit_pcts[idx % deposit_pcts.size]).round(-2)
+  # Add-on revenue/margin fields that Deal#addon_gross sums (separate from the
+  # delivery_setup_COST already set above). Deterministic spread; fills Addon GP.
+  delivery_fee     = 2500 + (idx % 5) * 500   # 2,500 .. 4,500
+  setup_fee        = 1500 + (idx % 4) * 500   # 1,500 .. 3,000
+  skirting_fee     = 800  + (idx % 3) * 350   #   800 .. 1,500
+  accessories_amt  = (idx % 3) * 700          #     0 .. 1,400
 
   # Sales tax (~6% IN state tax, simplified flat for demo)
   tax_amount = (dd[:amount] * 0.06).round(2)
@@ -592,6 +601,11 @@ deal_data.each_with_index do |dd, idx|
     location_id:            assigned_vehicle&.location_id || locations["AUB"].id,
     lender_name:            (lender == "Cash" ? nil : lender),
     payment_type:           (lender == "Cash" ? "cash" : "finance"),
+    down_payment:           deposit,
+    delivery_fee:           delivery_fee,
+    setup_fee:              setup_fee,
+    skirting_fee:           skirting_fee,
+    accessories_total:      accessories_amt,
     # Backdate updated_at so the deal profitability report (which falls
     # back to updated_at when closed_at/won_at are missing) finds these
     # deals in the default date range.
@@ -2231,6 +2245,13 @@ build_rpt_deal = lambda do |key, name, vehicle, rep, attrs|
     location_id:            vehicle&.location_id || locations["AUB"].id,
     selling_price:          attrs[:selling_price],
     customer_name:          attrs[:customer_name],
+    # Deposit + add-on revenue defaults so these (open/on-order/funded) rows show a
+    # Deposit, Addon GP in the reports. Per-call attrs override via the merge below.
+    down_payment:           (attrs[:selling_price].to_f * 0.07).round(-2),
+    delivery_fee:           3500,
+    setup_fee:              2000,
+    skirting_fee:           1200,
+    accessories_total:      900,
     updated_at:             Time.current
   }.merge(attrs.except(:stage, :selling_price, :customer_name))
   deal.update_columns(cols)
@@ -2250,9 +2271,10 @@ end
 # --- ON ORDER: open deal on an available_to_order unit -> Report 1 'On Order' -
 order_v = vget.call("RMN-2026-A-001240")
 if order_v
+  # Cash buyer (no lender) so an assigned report row exercises the 'Cash' path.
   build_rpt_deal.call("ORDER1", "[RPT] Castillo — Redman RM4068A (on order)", order_v, users[:sales1],
     stage: "proposal", selling_price: 142000, customer_name: "Rosa Castillo",
-    lender_name: "Vanderbilt Mortgage", payment_type: "finance")
+    lender_name: nil, payment_type: "cash")
 end
 
 # --- CLOSED NOT FUNDED: closed_won, NOT gl_posted (the GL-approval gap) ------
@@ -2290,7 +2312,7 @@ if fund_v2
   d = build_rpt_deal.call("FUND2", "[RPT] Iverson — Dutch 1676S (funded)", fund_v2, users[:manager],
     stage: "closed_won", selling_price: 63500, customer_name: "Owen Iverson",
     home_cost: 45000, reconditioning_cost: 0, floor_plan_interest: 350, delivery_setup_cost: 2800,
-    pack_amount: 1500, lender_name: "Vanderbilt Mortgage", gl_posted: true,
+    pack_amount: 1500, lender_name: "Vanderbilt", gl_posted: true,
     gl_posted_at: this_month_date.to_time, finance_reserve: 1500, product_margin: 800,
     won_at: this_month_date)
   fund_v2.update_columns(status: "sold", sold_via_deal_id: d.id)
@@ -2307,6 +2329,33 @@ missing_v&.update_columns(dealer_cost: nil, freight_cost: nil, pdi_cost: nil, to
   next unless v
   v.update_columns(status: "sold", sold_via_deal_id: nil)
   company.deals.where(vehicle_id: v.id).update_all(vehicle_id: nil) # guard: unlink any deal
+end
+
+# --- FLOOR PLAN: floor a handful of in-stock units so the Floor Plan column and
+# the floorplan summary tile (Principal / Accrued / Avg days) are non-zero. The
+# service computes days_on_plan + monthly interest live from start_date/rate but
+# reads accrued_interest from the stored column, so seed that consistently. Only
+# non-sold units qualify (FloorPlanService excludes sold/delivered/curtailed).
+floor_plan_specs = [
+  { serial: "112-000-H-D-C412913A", amount: 62000, lender: "21st Mortgage",   rate: 8.5,  days_ago: 35 },
+  { serial: "112-000-H-A-C412925C", amount: 70000, lender: "Triad Financial", rate: 9.0,  days_ago: 80 },
+  { serial: "RMN-2026-A-001234",    amount: 58000, lender: "21st Mortgage",   rate: 8.75, days_ago: 130 },
+  { serial: "RMN-2025-A-001100",    amount: 34000, lender: "Cascade",         rate: 9.25, days_ago: 20 },
+  { serial: "RMN-2026-A-001240",    amount: 95000, lender: "Triad Financial", rate: 8.5,  days_ago: 175 }, # available_to_order
+]
+floor_plan_specs.each do |fp|
+  v = vget.call(fp[:serial])
+  next unless v
+  accrued = (fp[:amount] * (fp[:rate] / 100.0 / 365.0) * fp[:days_ago]).round(2)
+  v.update_columns(
+    floor_plan_amount:           fp[:amount],
+    floor_plan_lender:           fp[:lender],
+    floor_plan_rate:             fp[:rate],
+    floor_plan_start_date:       fp[:days_ago].days.ago.to_date,
+    floor_plan_accrued_interest: accrued,
+    days_on_floor_plan:          fp[:days_ago],
+    floor_plan_curtailed_at:     nil
+  )
 end
 
 puts "  Report demo: pending+contention (2) & on-order (1); closed-not-funded (2); " \
