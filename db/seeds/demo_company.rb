@@ -44,7 +44,8 @@ if ENV['RESET'] == 'true'
       bills bill_line_items bill_payments
       journal_entries journal_entry_lines
       bank_reconciliations bank_reconciliation_items bank_transactions
-      chart_of_accounts accounting_settings
+      bank_accounts accounting_settings
+      chart_of_accounts
       campaigns campaign_audiences campaign_enrollments campaign_sends
         campaign_steps campaign_events
       workflow_rules workflow_runs
@@ -59,7 +60,7 @@ if ENV['RESET'] == 'true'
       page_layouts custom_fields
       tasks sources territories
       commission_payments commissions commission_rules commission_plans
-      tags bank_accounts
+      tags
       tenant_module_overrides api_keys webhook_endpoints
       brochures listings
       agreements agreement_signers agreement_templates agreement_categories
