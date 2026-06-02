@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_31_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_02_120100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2554,6 +2554,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_31_120000) do
     t.decimal "financed_amount", precision: 12, scale: 2
     t.date "down_payment_due_date"
     t.integer "deal_invoice_id"
+    t.bigint "lender_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -2574,6 +2575,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_31_120000) do
     t.index ["finance_manager_id"], name: "index_deals_on_finance_manager_id"
     t.index ["gl_journal_entry_id"], name: "index_deals_on_gl_journal_entry_id"
     t.index ["gl_posted"], name: "index_deals_on_gl_posted"
+    t.index ["lender_id"], name: "index_deals_on_lender_id"
     t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["owner_id"], name: "index_deals_on_owner_id"
@@ -3587,6 +3589,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_31_120000) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "active"], name: "index_lender_programs_on_company_id_and_active"
     t.index ["company_id"], name: "index_lender_programs_on_company_id"
+  end
+
+  create_table "lenders", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "contact_name"
+    t.string "phone"
+    t.string "email"
+    t.string "website"
+    t.text "notes"
+    t.boolean "active", default: true, null: false
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "name"], name: "index_lenders_on_company_id_and_name"
+    t.index ["company_id"], name: "index_lenders_on_company_id"
   end
 
   create_table "listings", force: :cascade do |t|
@@ -7193,6 +7211,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_31_120000) do
   add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
+  add_foreign_key "deals", "lenders"
   add_foreign_key "deals", "locations"
   add_foreign_key "deals", "projects"
   add_foreign_key "deals", "sources"
@@ -7280,6 +7299,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_31_120000) do
   add_foreign_key "leads", "vehicles"
   add_foreign_key "lender_program_tiers", "lender_programs"
   add_foreign_key "lender_programs", "companies"
+  add_foreign_key "lenders", "companies"
   add_foreign_key "listings", "companies"
   add_foreign_key "listings", "locations"
   add_foreign_key "listings", "vehicles"

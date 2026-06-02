@@ -579,6 +579,9 @@ module Api
           :finance_reserve, :product_margin,
           :accessories_total, :doc_fee,
           :delivery_fee, :setup_fee, :skirting_fee,
+          # Lender: lender_id references the managed list and denormalizes to lender_name
+          # (see Deal#denormalize_lender_name); lender_name still accepted as a free string.
+          :lender_id, :lender_name, :payment_type,
           :deal_type, :vertical, :quantity,
           # Commission plan
           :commission_plan_id,

@@ -45,6 +45,7 @@ class Deal < ApplicationRecord
   belongs_to :territory, optional: true
   belongs_to :source, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship
+  belongs_to :lender, optional: true  # Managed lender list (denormalized to lender_name below)
   belongs_to :commission_plan, optional: true  # Commission plan for this deal
   belongs_to :deal_invoice, class_name: 'Invoice', optional: true
   
@@ -117,6 +118,16 @@ class Deal < ApplicationRecord
   
   # Sync vehicle pricing when vehicle is assigned
   before_validation :sync_vehicle_pricing, if: :will_save_change_to_vehicle_id?
+
+  # Denormalize the managed lender's name onto lender_name so the reports (which read
+  # lender_name) keep working unchanged. before_save folds it into the same UPDATE — no
+  # nested save / re-entrancy. Only fires when lender_id actually changes. When lender_id
+  # is cleared we intentionally leave lender_name as last set (manual string still allowed).
+  before_save :denormalize_lender_name, if: :will_save_change_to_lender_id?
+
+  def denormalize_lender_name
+    self.lender_name = lender&.name if lender_id.present?
+  end
 
   # Deal Desk: in 'on_close' mode, write the selected scenario's structure back to the deal
   # automatically as part of the close save (before the GL post, an after_commit, reads it).

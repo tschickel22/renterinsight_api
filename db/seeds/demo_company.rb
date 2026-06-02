@@ -543,6 +543,42 @@ deal_lenders = ['21st Mortgage', 'Vanderbilt', 'Triad Financial', 'Cascade', 'Ca
 # Deposit as a % of selling price; a couple at 0 for variety (fills the Deposit column).
 deposit_pcts = [0.08, 0.05, 0.10, 0.0, 0.07, 0.06, 0.09, 0.0, 0.075, 0.05]
 
+# ── 10a. Lenders (managed list) ────────────────────────────
+# A lightweight, company-scoped lender list — managed in Finance settings, surfaced as a
+# quick-add dropdown on deals. Separate from Accounts (CRM) and Vendors (AP). Idempotent
+# via find_or_create_by(name:). Deals below reference these by lender_id; the app's
+# before_save denormalizes lender.name -> deals.lender_name (the seed uses update_columns,
+# so it mirrors that denormalization explicitly to keep lender_name in sync).
+puts "\n10a. Creating lenders..."
+lender_specs = [
+  { name: '21st Mortgage',          contact_name: 'Robert Chen',   phone: '(865) 215-9000', email: 'rchen@21stmortgage.com',     website: 'https://www.21stmortgage.com', notes: 'Primary MH lender; fast approvals' },
+  { name: 'Vanderbilt Mortgage',    contact_name: 'Sandra Mills',  phone: '(800) 970-7283', email: 'smills@vmf.com',              website: 'https://www.vmf.com',          notes: 'Strong on used-home financing' },
+  { name: 'Triad Financial Services', contact_name: 'Greg Patton', phone: '(800) 522-2013', email: 'gpatton@triadfs.com',         website: 'https://www.triadfs.com',      notes: 'Competitive on land-home packages' },
+  { name: 'Cascade Financial',      contact_name: 'Dana Lowe',     phone: '(877) 869-7082', email: 'dlowe@cascadeloans.com',      website: 'https://www.cascadeloans.com', notes: 'Government-backed (FHA/VA) programs' },
+  { name: 'Mountain West Lending' } # quick-add style: name only, other fields blank
+]
+managed_lenders = {}
+lender_specs.each do |spec|
+  l = company.lenders.find_or_create_by!(name: spec[:name]) do |rec|
+    rec.contact_name = spec[:contact_name]
+    rec.phone        = spec[:phone]
+    rec.email        = spec[:email]
+    rec.website      = spec[:website]
+    rec.notes        = spec[:notes]
+    rec.active       = true
+    rec.is_deleted   = false
+  end
+  managed_lenders[spec[:name]] = l
+end
+# Map the short names used in deal_lenders to the managed Lender records (Cash has none).
+deal_lender_records = {
+  '21st Mortgage'    => managed_lenders['21st Mortgage'],
+  'Vanderbilt'       => managed_lenders['Vanderbilt Mortgage'],
+  'Triad Financial'  => managed_lenders['Triad Financial Services'],
+  'Cascade'          => managed_lenders['Cascade Financial']
+}
+puts "  Created/updated #{managed_lenders.size} lenders"
+
 deal_data.each_with_index do |dd, idx|
   contact = contacts[dd[:contact]]
   account = dd[:account] ? accounts[dd[:account]] : nil
@@ -599,7 +635,10 @@ deal_data.each_with_index do |dd, idx|
     primary_salesperson_id: rep.id,
     owner_id:               rep.id,
     location_id:            assigned_vehicle&.location_id || locations["AUB"].id,
-    lender_name:            (lender == "Cash" ? nil : lender),
+    # Reference the managed Lender list; denormalize its name onto lender_name (the
+    # column the reports read), exactly as Deal#denormalize_lender_name does at runtime.
+    lender_id:              (lender == "Cash" ? nil : deal_lender_records[lender]&.id),
+    lender_name:            (lender == "Cash" ? nil : deal_lender_records[lender]&.name),
     payment_type:           (lender == "Cash" ? "cash" : "finance"),
     down_payment:           deposit,
     delivery_fee:           delivery_fee,
@@ -2424,6 +2463,8 @@ puts "-" * 55
   "Deal Activities"   => DealActivity.joins(:deal).where(deals: { company_id: company.id }).count,
   "Contact Activities" => ContactActivity.joins(:contact).where(contacts: { company_id: company.id }).count,
   "Tickets Scheduled" => company.service_tickets.where.not(scheduled_date: nil).count,
+  "Lenders"           => company.lenders.not_deleted.count,
+  "Deals w/ Lender"   => company.deals.where.not(lender_id: nil).count,
   "Deals w/ Vehicle"  => company.deals.where.not(vehicle_id: nil).count,
   "Open (Pending)"    => company.deals.where(stage: Reports::InventoryDealQuery::OPEN_STAGES).count,
   "Closed Not Funded" => company.deals.where(stage: "closed_won", gl_posted: false).count,

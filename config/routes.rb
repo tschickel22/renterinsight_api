@@ -1179,6 +1179,9 @@ Rails.application.routes.draw do
         end
       end
       
+      # Lenders (lightweight managed list for the deal quick-add dropdown + Finance settings)
+      resources :lenders
+
       # Suppliers
       resources :suppliers do
         member do

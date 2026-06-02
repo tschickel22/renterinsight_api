@@ -13,6 +13,7 @@ class Company < ApplicationRecord
   has_many :reports, dependent: :destroy
   has_many :contacts, dependent: :destroy
   has_many :deals, dependent: :destroy
+  has_many :lenders, dependent: :destroy
   has_many :intake_forms, dependent: :destroy
   has_many :custom_fields, dependent: :destroy
   has_many :custom_field_migrations, dependent: :destroy
