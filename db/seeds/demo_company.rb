@@ -2431,6 +2431,16 @@ end
 puts "  Report demo: pending+contention (2) & on-order (1); closed-not-funded (2); " \
      "funded this month (2: #{fund_v1&.location&.code}/#{fund_v2&.location&.code}); missing-cost + sold-no-deal flagged"
 
+# ── Deal Desk reference data (lender programs, fees, F&I) + RBAC ──
+# Reuses db/seeds/deal_desk_seed.rb. Setting $seeding_demo_company makes that file
+# define its methods without running its own standalone (company 47/first) block,
+# so we can target THIS demo company instead.
+puts "\n   Seeding Deal Desk reference data..."
+$seeding_demo_company = true
+load Rails.root.join('db/seeds/deal_desk_seed.rb')
+seed_deal_desk_for(company)
+seed_deal_desk_rbac!
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
@@ -2495,6 +2505,9 @@ puts "-" * 55
   "Contact Activities" => ContactActivity.joins(:contact).where(contacts: { company_id: company.id }).count,
   "Tickets Scheduled" => company.service_tickets.where.not(scheduled_date: nil).count,
   "Lenders"           => company.lenders.not_deleted.count,
+  "Lender Programs"   => company.respond_to?(:lender_programs) ? company.lender_programs.count : 0,
+  "Fee Templates"     => company.respond_to?(:fee_templates)   ? company.fee_templates.count : 0,
+  "F&I Products"      => company.respond_to?(:fni_products)    ? company.fni_products.count : 0,
   "Deals w/ Lender"   => company.deals.where.not(lender_id: nil).count,
   "Deals w/ Vehicle"  => company.deals.where.not(vehicle_id: nil).count,
   "Open (Pending)"    => company.deals.where(stage: Reports::InventoryDealQuery::OPEN_STAGES).count,

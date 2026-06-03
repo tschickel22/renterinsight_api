@@ -4,14 +4,24 @@
 # and F&I products. NO REAL RATE SHEETS EXIST YET: everything here is plausible sample
 # data flagged is_seeded: true so it is obvious and swappable when real sheets arrive.
 #
-# Idempotent: safe to run repeatedly. Seeds the test/demo company (Summit Park, id 47)
-# when present, else the first company.
+# Idempotent: safe to run repeatedly.
+#
+# Two ways to use:
+#   1. Standalone — seeds the test/demo company (Summit Park, id 47) when present, else
+#      the first company:
+#        bin/rails runner "load 'db/seeds/deal_desk_seed.rb'"
+#   2. From another seed (e.g. demo_company.rb) — set $seeding_demo_company = true before
+#      loading so this file only DEFINES the methods, then call seed_deal_desk_for(company)
+#      and seed_deal_desk_rbac! yourself against the resolved company.
 
-company = Company.find_by(id: 47) || Company.first
+# Seed lender programs (with tier matrices), fee templates, and F&I products for a single
+# company. Idempotent: re-runnable; tier matrices are rebuilt each run so edits take effect.
+def seed_deal_desk_for(company)
+  unless company
+    puts '⚠️  Deal Desk seed skipped — no company found.'
+    return
+  end
 
-unless company
-  puts '⚠️  Deal Desk seed skipped — no company found.'
-else
   puts "🧮 Seeding Deal Desk sample data for company ##{company.id} (#{company.name})..."
 
   # Enable the gated module for this demo company (tier assignment stays Tom's call;
@@ -113,4 +123,54 @@ else
        "(#{LenderProgramTier.joins(:lender_program).where(lender_programs: { company_id: company.id }).count} tiers)"
   puts "   ✅ Fee templates:   #{company.fee_templates.seeded.count}"
   puts "   ✅ F&I products:    #{company.fni_products.seeded.count}"
+end
+
+# Deal Desk RBAC backfill. Resource/Action seed_defaults are idempotent and add the new
+# deal_desk resource + write/quote/configure/transfer_unit actions. Existing system roles
+# are NOT re-seeded by Role.seed_defaults (it returns early once roles exist), so this
+# grants the deal_desk permissions to existing roles by key — covering both global system
+# roles (company_id nil) and any company-specific roles sharing those keys.
+#
+# Default config (Section 25): reps build/quote/compare freely; configure + transfer_unit
+# are manager-only. All grants use scope 'all' (the controller authorizes with default
+# scope 'all'; location filtering is applied operationally).
+def seed_deal_desk_rbac!
+  puts '🔐 Backfilling Deal Desk RBAC...'
+
+  Resource.seed_defaults
+  Action.seed_defaults
+
+  deal_desk = Resource.find_by!(key: 'deal_desk')
+  all_scope = Scope.find_by!(key: 'all')
+
+  grant = lambda do |role, action_keys|
+    Action.where(key: action_keys).each do |action|
+      RolePermission.find_or_create_by!(role: role, resource: deal_desk, action: action, scope: all_scope, granted: true)
+    end
+  end
+
+  rep_actions     = %w[read write quote].freeze
+  manager_actions = %w[read write quote configure transfer_unit].freeze
+
+  rep_roles     = %w[sales_rep crm_specialist]
+  manager_roles = %w[company_manager location_manager location_admin company_admin]
+  staff_roles   = %w[company_staff location_staff]
+
+  Role.where(key: rep_roles).find_each     { |r| grant.call(r, rep_actions) }
+  Role.where(key: manager_roles).find_each { |r| grant.call(r, manager_actions) }
+  Role.where(key: staff_roles).find_each   { |r| grant.call(r, %w[read]) }
+
+  puts "   ✅ deal_desk resource position: #{deal_desk.position}"
+  puts "   ✅ reps (#{rep_roles.join(', ')}): #{rep_actions.join('/')}"
+  puts "   ✅ managers (#{manager_roles.join(', ')}): #{manager_actions.join('/')}"
+  puts "   ✅ staff (#{staff_roles.join(', ')}): read"
+end
+
+# ---- Standalone execution --------------------------------------------------
+# When loaded directly (not from demo_company.rb), resolve the company and run.
+# demo_company.rb sets $seeding_demo_company = true so this block is skipped there.
+unless $seeding_demo_company
+  target = Company.find_by(id: 47) || Company.first
+  seed_deal_desk_for(target)
+  seed_deal_desk_rbac!
 end
