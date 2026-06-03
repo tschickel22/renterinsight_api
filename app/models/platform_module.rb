@@ -85,23 +85,23 @@ class PlatformModule
       admin.settings admin.users
     ],
     professional: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
-      marketing.listings marketing.brochures marketing.social_media
+      marketing.listings marketing.brochures marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal
       management.reports management.tags management.tasks management.calendar management.projects
       admin.settings admin.users admin.locations
     ],
     enterprise: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
-      marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media
+      marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 
-      management.calendar management.contractors management.projects management.workflows management.territories
-      admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks
+      management.calendar management.contractors management.projects management.workflows management.territories management_ai_reports
+      admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks admin.platform
     ]
   }.freeze
   
