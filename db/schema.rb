@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_02_120100) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_02_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2429,6 +2429,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_02_120100) do
     t.datetime "updated_at", null: false
     t.string "discount_type", default: "fixed", null: false
     t.string "source_type"
+    t.decimal "cost", precision: 12, scale: 2, default: "0.0"
     t.index ["deal_id", "product_id"], name: "index_deal_products_on_deal_id_and_product_id"
     t.index ["deal_id"], name: "index_deal_products_on_deal_id"
     t.index ["discount_type"], name: "index_deal_products_on_discount_type"

@@ -24,19 +24,40 @@ class DealProduct < ApplicationRecord
     match && match[1].to_i
   end
 
+  # Cost side of this line: per-unit cost * quantity. Mirrors how `total` represents
+  # the revenue/price side. Discounts are price-side concessions and do NOT reduce cost.
+  def line_cost_total
+    (cost.to_f * quantity.to_i).round(2)
+  end
+
+  # Gross profit for this single line: revenue side minus cost side.
+  # Revenue side mirrors calculate_total (price * qty, less the discount), but EXCLUDES tax
+  # (tax is a pass-through, not margin). Cost side is per-unit cost * qty.
+  # Profit = (unit_price - cost) * quantity - discount_amount.
+  def line_profit
+    subtotal = quantity.to_i * unit_price.to_f
+    discount_amount = if discount_type == 'percentage'
+      subtotal * (discount.to_f / 100.0)
+    else
+      discount.to_f
+    end
+
+    ((unit_price.to_f - cost.to_f) * quantity.to_i - discount_amount).round(2)
+  end
+
   private
 
   def calculate_total
     # Calculate subtotal
     subtotal = quantity * unit_price
-    
+
     # Apply discount based on type
     discount_amount = if discount_type == 'percentage'
       subtotal * (discount / 100.0)
     else
       discount
     end
-    
+
     # Calculate final total
     self.total = subtotal - discount_amount + tax
   end

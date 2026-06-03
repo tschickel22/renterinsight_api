@@ -15,11 +15,13 @@ module Api
 
       # GET /api/crm/deals/:deal_id/products
       def index
-        products = @deal.deal_products.order(created_at: :asc)
-        
+        products = @deal.deal_products.order(created_at: :asc).to_a
+
         render json: {
           products: products.map { |p| serialize_deal_product(p) },
-          total: products.sum(:total)
+          total: products.sum { |p| p.total.to_f }.round(2),
+          total_cost: products.sum { |p| p.line_cost_total }.round(2),
+          total_profit: products.sum { |p| p.line_profit }.round(2)
         }
       end
 
@@ -35,6 +37,7 @@ module Api
 
         ActiveRecord::Base.transaction do
           product = @deal.deal_products.build(attrs)
+          apply_vehicle_cost_default!(product, vehicle_id) unless attrs.key?(:cost)
 
           if product.save
             link_vehicle_to_deal(vehicle_id) if vehicle_id
@@ -73,6 +76,7 @@ module Api
             transformed = transform_unified_item(product_params)
             vehicle_id = extract_vehicle_id_from_item(product_params, transformed)
             product = @deal.deal_products.build(transformed)
+            apply_vehicle_cost_default!(product, vehicle_id) unless transformed.key?(:cost)
 
             if product.save
               created_products << serialize_deal_product(product)
@@ -164,6 +168,7 @@ module Api
           :product_sku,
           :quantity,
           :unit_price,
+          :cost,
           :discount,
           :discount_type,
           :tax,
@@ -173,7 +178,7 @@ module Api
 
       # Transform unified item structure to deal_product structure
       def transform_unified_item(item_params)
-        {
+        attrs = {
           product_name: item_params[:description] || item_params[:itemName] || item_params[:product_name],
           product_sku: build_sku(item_params),
           quantity: item_params[:quantity] || 1,
@@ -183,6 +188,35 @@ module Api
           tax: item_params[:taxAmount] || item_params[:tax] || 0,
           notes: build_notes(item_params)
         }
+
+        # Only set :cost when the caller explicitly provides one. Leaving the key absent
+        # lets the column default (0) stand, and lets vehicle line items auto-fill from the
+        # vehicle's structured_cost downstream.
+        explicit_cost = extract_explicit_cost(item_params)
+        attrs[:cost] = explicit_cost unless explicit_cost.nil?
+
+        attrs
+      end
+
+      # Pull an explicitly-provided per-unit cost from a unified item payload, tolerating
+      # the various field names the frontend may send. Returns nil when none is present.
+      def extract_explicit_cost(item_params)
+        raw = item_params[:cost] || item_params[:unitCost] || item_params[:unit_cost] ||
+              item_params[:itemCost] || item_params[:item_cost]
+        raw.nil? || raw.to_s.strip.empty? ? nil : raw
+      end
+
+      # For vehicle line items added from inventory, fill the per-unit cost from the vehicle's
+      # structured_cost when the caller did not supply one. structured_cost returns nil when no
+      # cost has been entered (0 == missing), in which case we leave the column default (0).
+      def apply_vehicle_cost_default!(product, vehicle_id)
+        return unless vehicle_id.present?
+
+        vehicle = @company.vehicles.find_by(id: vehicle_id)
+        return unless vehicle
+
+        structured = vehicle.structured_cost
+        product.cost = structured unless structured.nil?
       end
 
       def build_sku(item_params)
@@ -282,10 +316,13 @@ module Api
           productSku: product.product_sku,
           quantity: product.quantity,
           unitPrice: product.unit_price,
+          cost: product.cost,
+          lineCostTotal: product.line_cost_total,
           discount: product.discount,
           discountType: product.discount_type,
           tax: product.tax,
           total: product.total,
+          lineProfit: product.line_profit,
           notes: product.notes,
           createdAt: product.created_at,
           updatedAt: product.updated_at
