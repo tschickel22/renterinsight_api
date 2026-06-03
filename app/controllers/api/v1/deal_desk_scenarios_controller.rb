@@ -53,6 +53,7 @@ module Api
         scenario.deal = deal
         scenario.created_by = current_user
         scenario.location_id ||= deal.location_id || Current.location_id
+        scenario.vehicle_id ||= deal.vehicle_id
 
         snapshot_unit!(scenario)
         recompute!(scenario)
@@ -395,23 +396,23 @@ module Api
           id: scenario.id, deal_id: scenario.deal_id, vehicle_id: scenario.vehicle_id,
           label: scenario.label, status: scenario.status,
           valid_through: scenario.valid_through, selected_at: scenario.selected_at,
-          trade_allowance: scenario.trade_allowance, trade_payoff: scenario.trade_payoff,
-          cash_down: scenario.cash_down, rebates: scenario.rebates,
+          trade_allowance: scenario.trade_allowance&.to_f, trade_payoff: scenario.trade_payoff&.to_f,
+          cash_down: scenario.cash_down&.to_f, rebates: scenario.rebates&.to_f,
           fees: scenario.fees, fni_products: scenario.fni_products,
           lender_program_id: scenario.lender_program_id, lender_tier: scenario.lender_tier,
-          apr: scenario.apr, rate_source: scenario.rate_source, term_months: scenario.term_months,
-          tax_mode: scenario.tax_mode, tax_rate: scenario.tax_rate,
-          unit_price_snapshot: scenario.unit_price_snapshot, price_changed: scenario.price_changed?,
-          amount_financed: scenario.amount_financed, monthly_payment: scenario.monthly_payment,
-          out_the_door: scenario.out_the_door,
+          apr: scenario.apr&.to_f, rate_source: scenario.rate_source, term_months: scenario.term_months,
+          tax_mode: scenario.tax_mode, tax_rate: scenario.tax_rate&.to_f,
+          unit_price_snapshot: scenario.unit_price_snapshot&.to_f, price_changed: scenario.price_changed?,
+          amount_financed: scenario.amount_financed&.to_f, monthly_payment: scenario.monthly_payment&.to_f,
+          out_the_door: scenario.out_the_door&.to_f,
           unit_location_id: scenario.unit_location_id, unit_days_on_lot: scenario.unit_days_on_lot,
           is_cross_location: scenario.is_cross_location,
           quote_id: scenario.quote_id, created_by_id: scenario.created_by_id,
           created_at: scenario.created_at, updated_at: scenario.updated_at
         }
         if can_view_costs?
-          base.merge!(front_gross: scenario.front_gross, back_gross: scenario.back_gross,
-                      dealer_gross: scenario.dealer_gross, unit_cost_snapshot: scenario.unit_cost_snapshot)
+          base.merge!(front_gross: scenario.front_gross&.to_f, back_gross: scenario.back_gross&.to_f,
+                      dealer_gross: scenario.dealer_gross&.to_f, unit_cost_snapshot: scenario.unit_cost_snapshot&.to_f)
         end
         base
       end
