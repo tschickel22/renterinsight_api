@@ -434,7 +434,10 @@ Rails.application.routes.draw do
           post :unskip_assignment_notification
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
-        resources :phases, only: [:update], controller: 'project_phases' do
+        resources :phases, only: [:create, :update], controller: 'project_phases' do
+          collection do
+            post :reorder
+          end
           resources :tasks, controller: 'project_phase_tasks', only: [:index, :create, :update, :destroy]
           # Phase 2A: Rich project tasks (with checklists, dependencies, etc.)
           resources :project_tasks, controller: 'project_tasks', only: [:index, :create] do
