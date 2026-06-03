@@ -279,7 +279,7 @@ module Api
         params.require(:scenario).permit(
           :deal_id, :vehicle_id, :label, :valid_through,
           :trade_allowance, :trade_payoff, :cash_down, :rebates,
-          :lender_program_id, :lender_tier, :apr, :term_months, :tax_mode, :tax_rate,
+          :lender_program_id, :lender_tier, :apr, :apr_override, :term_months, :tax_mode, :tax_rate,
           fees: {}, fni_products: [%i[name type price cost]]
         )
       end
@@ -299,8 +299,19 @@ module Api
       end
 
       def recompute!(scenario)
+        # Resolve the selected lender tier's rate (precedence: manual_override > tier > company_default,
+        # handled inside RateResolver). nil when no program/tier is selected or the tier can't be found.
+        tier_rate = nil
+        if scenario.lender_program_id.present? && scenario.lender_tier.present?
+          tier = scenario.lender_program&.tiers&.detect { |t| t.tier_label == scenario.lender_tier }
+          tier_rate = tier&.rate
+        end
+
+        # apr_override = the rep-typed manual override (input); apr = the resolved rate (computed output).
+        # Keeping them in separate columns avoids re-reading a resolved rate as a manual override.
         resolved = DealDesk::RateResolver.resolve_with_source(
-          manual_override: scenario.apr,
+          manual_override: scenario.apr_override,
+          tier_rate: tier_rate,
           company_default: @company.default_finance_rate
         )
         scenario.apr = resolved[:rate]
@@ -400,7 +411,8 @@ module Api
           cash_down: scenario.cash_down&.to_f, rebates: scenario.rebates&.to_f,
           fees: scenario.fees, fni_products: scenario.fni_products,
           lender_program_id: scenario.lender_program_id, lender_tier: scenario.lender_tier,
-          apr: scenario.apr&.to_f, rate_source: scenario.rate_source, term_months: scenario.term_months,
+          apr: scenario.apr&.to_f, apr_override: scenario.apr_override&.to_f,
+          rate_source: scenario.rate_source, term_months: scenario.term_months,
           tax_mode: scenario.tax_mode, tax_rate: scenario.tax_rate&.to_f,
           unit_price_snapshot: scenario.unit_price_snapshot&.to_f, price_changed: scenario.price_changed?,
           amount_financed: scenario.amount_financed&.to_f, monthly_payment: scenario.monthly_payment&.to_f,

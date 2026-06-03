@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_02_130000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_03_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2402,6 +2402,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_02_130000) do
     t.bigint "quote_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "apr_override", precision: 6, scale: 3
     t.index ["company_id", "status"], name: "index_deal_desk_scenarios_on_company_id_and_status"
     t.index ["company_id"], name: "index_deal_desk_scenarios_on_company_id"
     t.index ["created_by_id"], name: "index_deal_desk_scenarios_on_created_by_id"
