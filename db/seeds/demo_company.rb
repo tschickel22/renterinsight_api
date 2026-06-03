@@ -925,15 +925,45 @@ if company.respond_to?(:project_templates)
     { name: "Closing & Handoff",       pos: 17, days: 1,  color: "#10B981", icon: "key" },
   ]
 
+  # Sub-tasks per phase. Project management surfaces these as a phase's
+  # checklist, and the contractor-assign control ONLY renders on a phase's
+  # sub-tasks (and only not-done ones) — so every phase needs a few or there is
+  # nothing to assign a contractor to.
+  phase_tasks = {
+    "Contract Signed"         => ["Collect signed purchase agreement", "File buyer disclosures"],
+    "Financing Approved"      => ["Submit application to 21st Mortgage", "Receive approval & lock rate"],
+    "Down Payment Received"   => ["Invoice down payment", "Confirm funds cleared"],
+    "Order Placed w/ Factory" => ["Submit factory order", "Confirm build slot"],
+    "In Production"           => ["Verify build sheet", "Monitor production status"],
+    "Quality Inspection"      => ["Factory QA review", "Resolve punch-list items"],
+    "Ready for Transport"     => ["Schedule transport carrier", "Confirm route & oversize permits"],
+    "Site Preparation"        => ["Clear & grade site", "Mark utility locations", "Pour pad / set piers"],
+    "Permits Obtained"        => ["File setup permit", "Schedule county inspection"],
+    "Home Delivered"          => ["Coordinate delivery window", "On-site delivery acceptance"],
+    "Foundation & Set"        => ["Set home on foundation", "Level & anchor", "Marry-line connection"],
+    "Utility Connections"     => ["Connect water & sewer", "Electrical hookup", "Gas / HVAC connection"],
+    "Skirting & Exterior"     => ["Install skirting", "Exterior trim & finish"],
+    "Interior Finish & Trim"  => ["Interior trim-out", "Touch-up & paint"],
+    "Final Inspection"        => ["County final inspection", "Internal QA walkthrough"],
+    "Walkthrough w/ Buyer"    => ["Schedule buyer walkthrough", "Capture punch list"],
+    "Closing & Handoff"       => ["Final paperwork & keys", "Hand off warranty packet"],
+  }
+
   tp_data.each do |tp|
-    template.project_template_phases.find_or_create_by!(name: tp[:name]) do |p|
+    tphase = template.project_template_phases.find_or_create_by!(name: tp[:name]) do |p|
       p.position = tp[:pos]
       p.estimated_days = tp[:days]
       p.color = tp[:color]
       p.icon = tp[:icon]
     end
+
+    Array(phase_tasks[tp[:name]]).each_with_index do |task_name, i|
+      tphase.project_template_phase_tasks.find_or_create_by!(name: task_name) do |t|
+        t.position = i + 1
+      end
+    end
   end
-  puts "  Template: #{template.name} (#{tp_data.length} phases)"
+  puts "  Template: #{template.name} (#{tp_data.length} phases, #{phase_tasks.values.sum(&:size)} task templates)"
 
   # ── 18. Projects for Won Deals ──────────────────────────
   # One project per closed-won deal at varied progress so the projects
@@ -988,7 +1018,7 @@ if company.respond_to?(:project_templates)
       started = project.started_at + days_offset.days if phase_status != 'not_started'
       completed = started + tp[:days].days if phase_status == 'completed' && started
 
-      project.project_phases.find_or_create_by!(name: tp[:name]) do |ph|
+      phase = project.project_phases.find_or_create_by!(name: tp[:name]) do |ph|
         ph.company_id = company.id
         ph.position = tp[:pos]
         ph.status = phase_status
@@ -997,6 +1027,26 @@ if company.respond_to?(:project_templates)
         ph.estimated_days = tp[:days]
         ph.started_at = started if started
         ph.completed_at = completed if completed
+      end
+
+      # Sub-tasks per phase. completed phase => all tasks done; in_progress =>
+      # first done, the rest open; not_started => all open. This guarantees every
+      # active/upcoming phase has at least one not-done sub-task — which is where
+      # the contractor-assign control renders.
+      task_names = Array(phase_tasks[tp[:name]])
+      task_names = ["Complete phase work", "Review & sign off"] if task_names.empty?
+      task_names.each_with_index do |task_name, i|
+        task_status = case phase_status
+                      when 'completed'   then 'completed'
+                      when 'in_progress' then (i.zero? ? 'completed' : 'pending')
+                      else 'pending'
+                      end
+        phase.project_phase_tasks.find_or_create_by!(name: task_name) do |t|
+          t.company_id  = company.id
+          t.position    = i + 1
+          t.status      = task_status
+          t.completed_at = (phase.completed_at || started || 5.days.ago) if task_status == 'completed'
+        end
       end
     end
 
