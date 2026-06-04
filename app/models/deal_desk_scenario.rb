@@ -64,11 +64,13 @@ class DealDeskScenario < ApplicationRecord
     DealDesk::Engine.compute(engine_inputs)
   end
 
-  # Has the unit's price moved since this scenario was quoted? (snapshot vs. live).
+  # Has the price moved since this scenario was quoted? (snapshot vs. live). The snapshot is
+  # now sourced from the deal (snapshot_unit!), so compare against the deal's current
+  # selling_price — NOT vehicle.sale_price, which can legitimately differ from the quoted price.
   def price_changed?
-    return false if vehicle.nil? || unit_price_snapshot.nil?
+    return false if deal.nil? || unit_price_snapshot.nil?
 
-    current = vehicle.sale_price
+    current = deal.selling_price
     current.present? && current.to_d != unit_price_snapshot.to_d
   end
 
@@ -135,21 +137,24 @@ class DealDeskScenario < ApplicationRecord
     end
   end
 
-  # Snapshot the deal's add-on line items onto this scenario. The home is normally NOT a
-  # product row — it's deal.vehicle_id, priced into unit_price_snapshot — so EVERY product is
-  # a financed add-on. We exclude a product only to avoid double-counting the home if it ever
-  # appears as a line: drop it when it (a) confidently references the deal's linked vehicle
-  # (referenced_vehicle_id == deal.vehicle_id — the reliable signal, since the VEHICLE- SKU tag
-  # is essentially never present in production), or (b) matches the legacy SKU predicate. A
-  # product referencing some OTHER vehicle is correctly kept as an add-on (no special-casing).
+  # Snapshot the deal's add-on line items onto this scenario, EXCLUDING the home line so it
+  # isn't double-counted (the engine already counts the home once via `price`). In real data
+  # the home rides as a deal_product whose unit_price == deal.selling_price and whose name is
+  # the vehicle's year/make/model; it carries NO structured tag (CUSTOM- SKU, nil source_type),
+  # and its line `cost` is unreliable (0/garbage) — which is fine, because we drop it here and
+  # take the reliable cost from the vehicle snapshot instead. Only the HOME line is suspect;
+  # add-on line costs are kept as-is.
+  #
+  # Identification (fail loud, never guess): exclude exactly the ONE product that is either
+  # (a) a properly VEHICLE--tagged home (belt-and-suspenders), or (b) the unique price+name
+  # match. If ZERO or MULTIPLE products match, exclude NONE and log the ambiguity so it's
+  # visible rather than silently dropping the wrong line.
   # String keys to match the JSONB convention (stringify_jsonb enforces it on save anyway).
   def snapshot_line_items_from_deal!(deal = self.deal)
-    products = deal.deal_products.reject do |dp|
-      (dp.referenced_vehicle_id.present? && dp.referenced_vehicle_id == deal.vehicle_id) ||
-        dp.vehicle_line_item?
-    end
+    products = deal.deal_products.to_a
+    home = identify_home_line(deal, products)
 
-    self.line_items = products.map do |dp|
+    self.line_items = (home ? products - [home] : products).map do |dp|
       {
         'description' => dp.product_name,
         'price'       => dp.unit_price.to_f,
@@ -157,6 +162,64 @@ class DealDeskScenario < ApplicationRecord
         'quantity'    => (dp.quantity || 1)
       }
     end
+  end
+
+  # Merge this (selected) scenario's add-ons — line_items AND fni_products — onto the deal as
+  # deal_products. ADD-ONLY with quantity reconciliation: never replaces, never removes, and
+  # never touches the home line or any unmatched existing product. F&I products become
+  # deal_products (sold as lines on the deal). Cost rides as 0 when unknown — the approval
+  # modal lets the approver confirm cost, so we never prompt for it here.
+  #
+  # Matching is by normalized name AND exact price (two items differing in either stay
+  # separate lines), against existing deal_products EXCLUDING the home (A1 heuristic):
+  #   - same name+price, same qty   -> skip (already on the deal)
+  #   - same name+price, diff qty   -> reconcile that line's quantity (no duplicate)
+  #   - no match                    -> create a fresh CUSTOM- line
+  # Idempotent: a second apply with no scenario changes does nothing. Returns a change summary.
+  def merge_line_items_and_fni_to_deal!(deal = self.deal)
+    added = []
+    updated_qty = []
+    skipped = 0
+
+    existing   = deal.deal_products.to_a
+    home       = identify_home_line(deal, existing)
+    candidates = home ? existing - [home] : existing
+
+    scenario_addon_entries.each do |entry|
+      name  = entry[:name].to_s
+      price = entry[:price].to_f
+      qty   = (entry[:quantity] || 1).to_i
+      qty   = 1 if qty <= 0
+
+      match = candidates.find do |dp|
+        normalize_name(dp.product_name) == normalize_name(name) && dp.unit_price.to_f == price
+      end
+
+      if match
+        if match.quantity.to_i == qty
+          skipped += 1
+        else
+          from = match.quantity.to_i
+          match.update!(quantity: qty) # calculate_total recomputes total in before_save
+          updated_qty << { id: match.id, name: match.product_name, from: from, to: qty }
+        end
+      else
+        created = deal.deal_products.create!(
+          product_name: name,
+          product_sku: "CUSTOM-#{SecureRandom.hex(4)}",
+          unit_price: price,
+          cost: entry[:cost].to_f,
+          quantity: qty,
+          discount: 0,
+          discount_type: 'fixed',
+          tax: 0
+        )
+        candidates << created # so a later identical entry reconciles instead of duplicating
+        added << { id: created.id, name: created.product_name, price: price, quantity: qty }
+      end
+    end
+
+    { added: added, updated_qty: updated_qty, skipped: skipped }
   end
 
   # Expire unless permanently kept (selected). Used by the expiry sweep.
@@ -167,6 +230,62 @@ class DealDeskScenario < ApplicationRecord
   end
 
   private
+
+  # Pick the single deal_product that represents the home, or nil if it can't be done
+  # unambiguously. Belt-and-suspenders first: a properly VEHICLE--tagged home (when exactly
+  # one such tag exists). Otherwise the real-data signal: unit_price == deal.selling_price
+  # AND (when a vehicle is linked) product_name matches the vehicle's year/make/model.
+  # Returns nil and warns on 0 or >1 matches so the caller excludes none rather than guessing.
+  def identify_home_line(deal, products)
+    tagged = products.select do |dp|
+      (dp.referenced_vehicle_id.present? && dp.referenced_vehicle_id == deal.vehicle_id) ||
+        dp.vehicle_line_item?
+    end
+    return tagged.first if tagged.size == 1
+
+    selling      = deal.selling_price.to_f
+    vehicle_name = deal.vehicle ? normalize_name(vehicle_display_name(deal.vehicle)) : nil
+
+    candidates = products.select do |dp|
+      price_match = selling.positive? && dp.unit_price.to_f == selling
+      name_match  = vehicle_name.blank? || normalize_name(dp.product_name) == vehicle_name
+      price_match && name_match
+    end
+
+    return candidates.first if candidates.size == 1
+
+    if products.any?
+      Rails.logger.warn(
+        "[DealDeskScenario] snapshot_line_items_from_deal!: ambiguous home line for deal " \
+        "#{deal.id} (selling_price=#{selling}, candidates=#{candidates.size}); excluding none."
+      )
+    end
+    nil
+  end
+
+  # Flatten this scenario's add-ons into a uniform {name, price, cost, quantity} list:
+  # line_items (snapshotted deal add-ons) + fni_products (sold as lines on the deal, qty 1).
+  # Blank-named entries are dropped (nothing to merge).
+  def scenario_addon_entries
+    items = Array(line_items).map do |li|
+      li = li.symbolize_keys
+      { name: li[:description].to_s, price: li[:price].to_f, cost: li[:cost].to_f,
+        quantity: (li[:quantity] || 1) }
+    end
+    fni = Array(fni_products).map do |p|
+      p = p.symbolize_keys
+      { name: p[:name].to_s, price: p[:price].to_f, cost: p[:cost].to_f, quantity: 1 }
+    end
+    (items + fni).reject { |e| e[:name].strip.empty? }
+  end
+
+  def vehicle_display_name(vehicle)
+    [vehicle.try(:year), vehicle.try(:make), vehicle.try(:model)].compact.join(' ')
+  end
+
+  def normalize_name(str)
+    str.to_s.strip.downcase.gsub(/\s+/, ' ')
+  end
 
   def set_validity_window
     days = company&.deal_desk_scenario_validity_days || 30

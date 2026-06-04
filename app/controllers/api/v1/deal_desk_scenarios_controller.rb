@@ -112,7 +112,18 @@ module Api
         return unless authorize_action!(RESOURCE, 'write')
 
         @scenario.write_back_to_deal!
-        render json: { scenario: scenario_json(@scenario), applied: true }
+        # Add-only merge of the scenario's line items + F&I onto the deal as deal_products, so
+        # the edit-deal and approval forms reflect what was sold. Never touches the home line.
+        changes = @scenario.merge_line_items_and_fni_to_deal!
+        render json: {
+          scenario: scenario_json(@scenario),
+          applied: true,
+          added_count: changes[:added].size,
+          updated_count: changes[:updated_qty].size,
+          skipped_count: changes[:skipped],
+          added: changes[:added],
+          updated_qty: changes[:updated_qty]
+        }
       end
 
       # POST /api/v1/deal_desk/scenarios/solve
@@ -290,7 +301,13 @@ module Api
         unit = scenario.vehicle || @company.vehicles.find_by(id: scenario.vehicle_id)
         return unless unit
 
-        scenario.unit_price_snapshot = unit.sale_price
+        # Price is "counted via the line": source it from the deal's selling_price (the home
+        # rides as a deal_product, and selling_price tracks it), falling back to the vehicle's
+        # sale_price only when the deal has no priced home yet. This avoids price drift between
+        # vehicle.sale_price and what was actually quoted on the deal.
+        deal_selling = scenario.deal&.selling_price
+        scenario.unit_price_snapshot = deal_selling.present? && deal_selling.to_f.positive? ? deal_selling : unit.sale_price
+        # Cost stays from the vehicle — the deal/home line cost is unreliable (0/garbage).
         scenario.unit_cost_snapshot  = unit.cost || unit.dealer_cost || unit.total_cost
         scenario.unit_location_id    = unit.location_id
         scenario.unit_days_on_lot    = days_on_lot(unit)
