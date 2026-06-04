@@ -34,7 +34,7 @@ module DealDesk
 
     Result = Struct.new(
       :amount_financed, :monthly_payment, :out_the_door,
-      :taxes, :total_fees, :total_fni, :trade_equity, :total_interest,
+      :taxes, :total_fees, :total_fni, :total_line_items, :trade_equity, :total_interest,
       :apr, :term_months, :gross,
       keyword_init: true
     ) do
@@ -47,6 +47,9 @@ module DealDesk
           taxes: taxes,
           total_fees: total_fees,
           total_fni: total_fni,
+          # Add-on line-item prices are customer-facing (charges, not margin).
+          # line_items_profit is internal margin and is intentionally excluded.
+          total_line_items: total_line_items,
           trade_equity: trade_equity,
           total_interest: total_interest,
           apr: apr,
@@ -66,9 +69,10 @@ module DealDesk
     def compute
       fees   = total_fees
       fni    = total_fni
+      lines  = total_line_items
       equity = trade_equity
       tax    = taxes
-      otd    = round2(@in[:price] + fees + fni + tax - @in[:rebates])
+      otd    = round2(@in[:price] + fees + fni + lines + tax - @in[:rebates])
       financed = round2(otd - equity - @in[:cash_down])
       financed = 0.0 if financed.negative?
 
@@ -83,6 +87,7 @@ module DealDesk
         taxes: tax,
         total_fees: fees,
         total_fni: fni,
+        total_line_items: lines,
         trade_equity: equity,
         total_interest: round2(LoanMath.total_interest(
           monthly_payment: payment, term_months: @in[:term_months], principal: financed
@@ -97,7 +102,9 @@ module DealDesk
     def gross
       return nil if @in[:unit_cost].nil?
 
-      front = round2(@in[:price] - @in[:unit_cost] - @in[:pack_amount])
+      # Line-item margin is front-end gross (an add-on sold above cost), unlike F&I
+      # which is back-end. fni stays in back; line_items_profit goes in front.
+      front = round2(@in[:price] - @in[:unit_cost] - @in[:pack_amount] + line_items_profit)
       back  = round2(fni_profit + @in[:finance_reserve])
       Gross.new(front: front, back: back, total: round2(front + back))
     end
@@ -153,6 +160,16 @@ module DealDesk
       round2(@in[:fni_products].sum { |p| p[:price].to_f - p[:cost].to_f })
     end
 
+    # Add-on deal line items (e.g. inventory packages). Prices are customer-facing
+    # (folded into OTD); profit is internal front-end margin.
+    def total_line_items
+      round2(@in[:line_items].sum { |p| p[:price].to_f })
+    end
+
+    def line_items_profit
+      round2(@in[:line_items].sum { |p| p[:price].to_f - p[:cost].to_f })
+    end
+
     def trade_equity
       round2(@in[:trade_allowance] - @in[:trade_payoff])
     end
@@ -187,6 +204,11 @@ module DealDesk
         { price: p[:price].to_f, cost: p[:cost].to_f }
       end
 
+      line_items = Array(h[:line_items]).map do |p|
+        p = p.transform_keys(&:to_sym)
+        { price: p[:price].to_f, cost: p[:cost].to_f }
+      end
+
       mode = (h[:tax_mode] || :full_price).to_sym
       mode = :full_price unless TAX_MODES.include?(mode)
 
@@ -198,6 +220,7 @@ module DealDesk
         rebates: h[:rebates].to_f,
         fees: fees,
         fni_products: fni,
+        line_items: line_items,
         finance_reserve: h[:finance_reserve].to_f,
         unit_cost: h[:unit_cost].nil? ? nil : h[:unit_cost].to_f,
         pack_amount: h[:pack_amount].to_f,
