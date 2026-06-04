@@ -50,11 +50,14 @@ class DealDeskScenario < ApplicationRecord
       # Snapshotted deal add-ons (non-home deal_products). The engine takes price/cost
       # per line; fold quantity into the engine input here (do NOT mutate the stored
       # snapshot) so a qty>1 line contributes its full line total to OTD/front gross.
-      line_items: Array(line_items).map do |li|
-        li = li.symbolize_keys
-        qty = (li[:quantity] || 1).to_f
-        { price: li[:price].to_f * qty, cost: li[:cost].to_f * qty }
-      end,
+      # DEDUP: drop any line item that collides (normalized name + price) with an
+      # fni_products entry. Round-trip hazard — an F&I product applied to the deal becomes a
+      # deal_product, which a later scenario re-snapshots as a line item; if the working desk
+      # still carries it as F&I, the engine would count it in BOTH total_fni and
+      # total_line_items. fni_products is authoritative (the rep explicitly chose it), so the
+      # re-snapshotted line-item copy is the one dropped. Filtering only the engine input
+      # leaves the stored line_items/fni_products columns untouched.
+      line_items: deduped_line_items_for_engine,
       tax_rate: tax_rate, tax_mode: (tax_mode || 'full_price').to_sym,
       apr: apr, term_months: term_months
     }
@@ -277,6 +280,24 @@ class DealDeskScenario < ApplicationRecord
       { name: p[:name].to_s, price: p[:price].to_f, cost: p[:cost].to_f, quantity: 1 }
     end
     (items + fni).reject { |e| e[:name].strip.empty? }
+  end
+
+  # Engine-bound line items with quantity folded in, minus any entry that collides
+  # (normalized name + price) with an fni_products entry. See engine_inputs for the rationale.
+  def deduped_line_items_for_engine
+    fni_keys = Array(fni_products).map do |p|
+      p = p.symbolize_keys
+      [normalize_name(p[:name]), p[:price].to_f]
+    end.to_set
+
+    Array(line_items).reject do |li|
+      li = li.symbolize_keys
+      fni_keys.include?([normalize_name(li[:description]), li[:price].to_f])
+    end.map do |li|
+      li = li.symbolize_keys
+      qty = (li[:quantity] || 1).to_f
+      { price: li[:price].to_f * qty, cost: li[:cost].to_f * qty }
+    end
   end
 
   def vehicle_display_name(vehicle)
