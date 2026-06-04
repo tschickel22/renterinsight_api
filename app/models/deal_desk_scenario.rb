@@ -47,6 +47,14 @@ class DealDeskScenario < ApplicationRecord
       cash_down: cash_down, rebates: rebates,
       fees: fees || {},
       fni_products: Array(fni_products).map { |p| p = p.symbolize_keys; { price: p[:price], cost: p[:cost] } },
+      # Snapshotted deal add-ons (non-home deal_products). The engine takes price/cost
+      # per line; fold quantity into the engine input here (do NOT mutate the stored
+      # snapshot) so a qty>1 line contributes its full line total to OTD/front gross.
+      line_items: Array(line_items).map do |li|
+        li = li.symbolize_keys
+        qty = (li[:quantity] || 1).to_f
+        { price: li[:price].to_f * qty, cost: li[:cost].to_f * qty }
+      end,
       tax_rate: tax_rate, tax_mode: (tax_mode || 'full_price').to_sym,
       apr: apr, term_months: term_months
     }
@@ -127,6 +135,21 @@ class DealDeskScenario < ApplicationRecord
     end
   end
 
+  # Snapshot the deal's add-on line items onto this scenario. Excludes the home line
+  # (any deal_product whose product_sku starts with 'VEHICLE-' — DealProduct#vehicle_line_item?):
+  # the home is already captured in unit_price_snapshot, so including it would double-count.
+  # String keys to match the JSONB convention (stringify_jsonb enforces it on save anyway).
+  def snapshot_line_items_from_deal!(deal = self.deal)
+    self.line_items = deal.deal_products.reject(&:vehicle_line_item?).map do |dp|
+      {
+        'description' => dp.product_name,
+        'price'       => dp.unit_price.to_f,
+        'cost'        => dp.cost.to_f,
+        'quantity'    => (dp.quantity || 1)
+      }
+    end
+  end
+
   # Expire unless permanently kept (selected). Used by the expiry sweep.
   def expire!
     return if status == 'selected'
@@ -145,5 +168,6 @@ class DealDeskScenario < ApplicationRecord
   def stringify_jsonb
     self.fees = fees.deep_stringify_keys if fees.is_a?(Hash)
     self.fni_products = fni_products.map { |p| p.is_a?(Hash) ? p.deep_stringify_keys : p } if fni_products.is_a?(Array)
+    self.line_items = line_items.map { |li| li.is_a?(Hash) ? li.deep_stringify_keys : li } if line_items.is_a?(Array)
   end
 end

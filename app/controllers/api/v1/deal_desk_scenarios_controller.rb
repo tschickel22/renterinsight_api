@@ -56,6 +56,7 @@ module Api
         scenario.vehicle_id ||= deal.vehicle_id
 
         snapshot_unit!(scenario)
+        scenario.snapshot_line_items_from_deal!(deal)
         recompute!(scenario)
 
         if scenario.save
