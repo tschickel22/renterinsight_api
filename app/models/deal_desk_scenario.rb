@@ -135,12 +135,21 @@ class DealDeskScenario < ApplicationRecord
     end
   end
 
-  # Snapshot the deal's add-on line items onto this scenario. Excludes the home line
-  # (any deal_product whose product_sku starts with 'VEHICLE-' — DealProduct#vehicle_line_item?):
-  # the home is already captured in unit_price_snapshot, so including it would double-count.
+  # Snapshot the deal's add-on line items onto this scenario. The home is normally NOT a
+  # product row — it's deal.vehicle_id, priced into unit_price_snapshot — so EVERY product is
+  # a financed add-on. We exclude a product only to avoid double-counting the home if it ever
+  # appears as a line: drop it when it (a) confidently references the deal's linked vehicle
+  # (referenced_vehicle_id == deal.vehicle_id — the reliable signal, since the VEHICLE- SKU tag
+  # is essentially never present in production), or (b) matches the legacy SKU predicate. A
+  # product referencing some OTHER vehicle is correctly kept as an add-on (no special-casing).
   # String keys to match the JSONB convention (stringify_jsonb enforces it on save anyway).
   def snapshot_line_items_from_deal!(deal = self.deal)
-    self.line_items = deal.deal_products.reject(&:vehicle_line_item?).map do |dp|
+    products = deal.deal_products.reject do |dp|
+      (dp.referenced_vehicle_id.present? && dp.referenced_vehicle_id == deal.vehicle_id) ||
+        dp.vehicle_line_item?
+    end
+
+    self.line_items = products.map do |dp|
       {
         'description' => dp.product_name,
         'price'       => dp.unit_price.to_f,
