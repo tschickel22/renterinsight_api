@@ -411,6 +411,12 @@ module Api
           trade_allowance: scenario.trade_allowance&.to_f, trade_payoff: scenario.trade_payoff&.to_f,
           cash_down: scenario.cash_down&.to_f, rebates: scenario.rebates&.to_f,
           fees: scenario.fees, fni_products: scenario.fni_products,
+          # Price-only for ALL users — cost/margin are gated behind can_view_costs? below
+          # (same treatment as front_gross/dealer_gross). Never ship per-line cost here.
+          line_items: Array(scenario.line_items).map do |li|
+            li = li.symbolize_keys
+            { description: li[:description], price: li[:price].to_f, quantity: (li[:quantity] || 1) }
+          end,
           lender_program_id: scenario.lender_program_id, lender_tier: scenario.lender_tier,
           apr: scenario.apr&.to_f, apr_override: scenario.apr_override&.to_f,
           rate_source: scenario.rate_source, term_months: scenario.term_months,
@@ -426,6 +432,15 @@ module Api
         if can_view_costs?
           base.merge!(front_gross: scenario.front_gross&.to_f, back_gross: scenario.back_gross&.to_f,
                       dealer_gross: scenario.dealer_gross&.to_f, unit_cost_snapshot: scenario.unit_cost_snapshot&.to_f)
+          # Cost-viewers only: overwrite the price-only line_items with per-line cost + margin.
+          base[:line_items] = Array(scenario.line_items).map do |li|
+            li = li.symbolize_keys
+            price = li[:price].to_f
+            cost  = li[:cost].to_f
+            qty   = (li[:quantity] || 1)
+            { description: li[:description], price: price, quantity: qty,
+              cost: cost, margin: ((price - cost) * qty).to_f }
+          end
         end
         base
       end
