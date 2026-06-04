@@ -101,7 +101,22 @@ class DealDeskScenario < ApplicationRecord
       trade_allowance: trade_allowance,
       trade_payoff: trade_payoff,
       down_payment: cash_down,
+      # All structured fees, mapped scenario fee-key -> deal column. Same nil-tolerant
+      # extraction as the original doc_fee line: a missing key digs to nil and is then
+      # compacted out, so the deal's existing value is preserved (no zeroing).
       doc_fee: fees&.dig('doc'),
+      delivery_fee: fees&.dig('delivery'),
+      setup_fee: fees&.dig('setup'),
+      skirting_fee: fees&.dig('skirting'),
+      accessories_total: fees&.dig('accessories'),
+      # Lender: the scenario has no lender_name column — the name lives on the selected
+      # financing program (LenderProgram#lender_name). lender_id is intentionally NOT
+      # written: LenderProgram has no FK to the managed Lender list that Deal#lender_id
+      # references, so there is no clean mapping. Writing lender_name alone is safe — the
+      # deal's denormalize_lender_name callback only fires on lender_id changes.
+      lender_name: lender_program&.lender_name,
+      # Cash vs financed, derived from the engine's financed amount.
+      payment_type: (amount_financed.to_f > 0 ? 'financed' : 'cash'),
       financed_amount: amount_financed
     }.compact
 
