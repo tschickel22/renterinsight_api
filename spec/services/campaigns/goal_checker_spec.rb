@@ -22,19 +22,45 @@ RSpec.describe Campaigns::GoalChecker do
                                email_address_snapshot: lead.email, status: 'active')
   end
 
-  it 'marks goal_met when an opened send exists' do
+  def add_opened_send
     step = campaign.campaign_steps.first
     CampaignSend.create!(company_id: company.id, campaign_id: campaign.id,
                          campaign_step_id: step.id, campaign_enrollment_id: enrollment.id,
                          sent_at: 1.hour.ago, opened_at: 30.minutes.ago)
+  end
+
+  it 'records the conversion but keeps sending when the goal action defaults to track' do
+    add_opened_send
     described_class.new(campaign: campaign).run
-    expect(enrollment.reload.status).to eq('goal_met')
+    enrollment.reload
+    # 'track' (default) records goal_met_at + reason for analytics but leaves the
+    # enrollment in an active status so the campaign keeps sending.
+    expect(enrollment.status).to eq('active')
+    expect(enrollment.goal_met_at).to be_present
     expect(enrollment.goal_met_reason).to eq('opened')
+  end
+
+  it 'stops sending to the contact when the goal action is stop' do
+    campaign.update!(goal_config: { 'primary_goal' => 'opened', 'goal_actions' => { 'opened' => 'stop' } })
+    add_opened_send
+    described_class.new(campaign: campaign).run
+    enrollment.reload
+    expect(enrollment.status).to eq('goal_met')
+    expect(enrollment.goal_met_reason).to eq('opened')
+  end
+
+  it 'does not re-fire on a subsequent run once the conversion is recorded (track)' do
+    add_opened_send
+    described_class.new(campaign: campaign).run
+    # Already converted (goal_met_at set) — a second pass must not create a duplicate event.
+    expect { described_class.new(campaign: campaign).run }
+      .not_to change { CampaignEvent.where(event_type: 'goal_met', campaign_enrollment_id: enrollment.id).count }
   end
 
   it 'does not mark goal_met when no qualifying event exists' do
     described_class.new(campaign: campaign).run
     expect(enrollment.reload.status).to eq('active')
+    expect(enrollment.reload.goal_met_at).to be_nil
   end
 
   it 'returns 0 when goal_config is empty' do

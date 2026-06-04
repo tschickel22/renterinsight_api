@@ -37,7 +37,19 @@ RSpec.describe Campaigns::ReplyHandler do
     expect(result.handled).to be false
   end
 
-  it 'marks enrollment goal_met when replied is the primary goal' do
+  it 'records the conversion but keeps sending when replied goal defaults to track' do
+    cs = campaign_send
+    described_class.process(token: "campaign-#{cs.id}", parsed_email: parsed)
+    enrollment.reload
+    # 'track' (default): conversion recorded, but the contact stays in the campaign.
+    expect(enrollment.status).to eq('active')
+    expect(enrollment.goal_met_at).to be_present
+    expect(enrollment.goal_met_reason).to eq('replied')
+    expect(cs.reload.replied_at).not_to be_nil
+  end
+
+  it 'marks enrollment goal_met when replied goal action is stop' do
+    campaign.update!(goal_config: { 'primary_goal' => 'replied', 'goal_actions' => { 'replied' => 'stop' } })
     cs = campaign_send
     described_class.process(token: "campaign-#{cs.id}", parsed_email: parsed)
     expect(enrollment.reload.status).to eq('goal_met')
