@@ -42,12 +42,15 @@
       <div class="caption"><%= truncate(@post.caption.to_s, length: 500) %></div>
     </div>
 
+    <%# Inline styles (not classes) so Outlook — which ignores <style>-block rules
+        on <a> tags and falls back to its default blue link color — still renders
+        white text on the blue primary button instead of blue-on-blue. %>
     <div class="cta">
-      <a href="<%= @approve_url %>" class="btn btn-primary">Approve &amp; Publish</a>
-      <a href="<%= @edit_url %>" class="btn btn-secondary">Edit Post</a>
-      <a href="<%= @decline_url %>" class="btn btn-secondary" style="background:#fee2e2;color:#dc2626;margin-top:8px;">Decline</a>
+      <a href="<%= @approve_url %>" class="btn btn-primary" style="display:inline-block;padding:12px 22px;margin-right:10px;border-radius:6px;text-decoration:none;font-weight:600;background:#2563eb;color:#ffffff !important;">Approve &amp; Publish</a>
+      <a href="<%= @edit_url %>" class="btn btn-secondary" style="display:inline-block;padding:12px 22px;margin-right:10px;border-radius:6px;text-decoration:none;font-weight:600;background:#e5e7eb;color:#111827 !important;">Edit Post</a>
+      <a href="<%= @decline_url %>" class="btn btn-secondary" style="display:inline-block;padding:12px 22px;margin-right:10px;margin-top:8px;border-radius:6px;text-decoration:none;font-weight:600;background:#fee2e2;color:#dc2626 !important;">Decline</a>
       <br/>
-      <a href="<%= @skip_url %>" class="btn btn-skip">Skip this post</a>
+      <a href="<%= @skip_url %>" class="btn btn-skip" style="display:inline-block;padding:12px 0;margin-top:8px;text-decoration:none;font-weight:600;background:transparent;color:#6b7280 !important;">Skip this post</a>
     </div>
 
     <div class="footer">

@@ -87,7 +87,16 @@ class Api::V1::SocialPostsController < ApplicationController
   def update
     return unless authorize_action!('social_posts', 'update')
 
-    if @post.update(permitted_params)
+    # hashtags has no column — it lives inside generation_context (mirrors #create)
+    @post.assign_attributes(permitted_params.except(:hashtags))
+
+    if params[:social_post].key?(:hashtags)
+      ctx = (@post.generation_context || {}).deep_stringify_keys
+      ctx['hashtags'] = Array(params[:social_post][:hashtags])
+      @post.generation_context = ctx
+    end
+
+    if @post.save
       render json: serialize(@post, detailed: true)
     else
       render json: { errors: @post.errors.full_messages }, status: :unprocessable_entity
