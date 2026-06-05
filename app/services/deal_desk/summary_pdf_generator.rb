@@ -140,9 +140,35 @@ module DealDesk
 
       rows = [['Price Breakdown', '']]
       rows << ['Selling Price', usd(price)]
+
+      # Itemize add-on line items (name + price only — NEVER cost/margin). The home is already
+      # excluded at snapshot; skip defensively if a line still matches the selling price.
+      Array(@scenario.line_items).each do |li|
+        li = li.symbolize_keys
+        desc = li[:description].to_s.strip
+        next if desc.empty?
+
+        qty       = (li[:quantity] || 1).to_i
+        line_price = li[:price].to_f * (qty.positive? ? qty : 1)
+        next if line_price == price # defensive: never re-list the home
+
+        label = qty > 1 ? "#{desc} (x#{qty})" : desc
+        rows << [label, usd(line_price)]
+      end
+
       rows << ['Trade Allowance (less payoff)', usd(trade_net)] unless trade_net.zero?
       rows << ['Fees', usd(r[:total_fees])] if r[:total_fees].to_f.positive?
-      rows << ['F&I Products', usd(r[:total_fni])] if r[:total_fni].to_f.positive?
+
+      # Itemize F&I products one row each (name + price only) instead of a lumped total.
+      Array(@scenario.fni_products).each do |p|
+        p = p.symbolize_keys
+        name = p[:name].to_s.strip
+        amt  = p[:price].to_f
+        next if name.empty? || !amt.positive?
+
+        rows << [name, usd(amt)]
+      end
+
       rows << ['Taxes', usd(r[:taxes])] if r[:taxes].to_f.positive?
       rows << ['Cash Down', usd(@scenario.cash_down)] if @scenario.cash_down.to_f.positive?
       rows << ['Rebates', usd(-@scenario.rebates.to_f)] if @scenario.rebates.to_f.positive?
