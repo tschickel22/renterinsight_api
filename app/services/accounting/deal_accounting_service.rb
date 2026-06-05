@@ -11,9 +11,10 @@ module Accounting
       # GP figures come from the single canonical method (Deal#front_gross), which sources
       # cost from the vehicle (live while open, snapshot once closed). We persist only the
       # derived totals used by raw-column readers; front/total gross themselves are always
-      # recomputed by the model methods.
+      # recomputed by the model methods. Net = total gross − commission − carrying costs
+      # (floor-plan interest + delivery), which are period costs that reduce net, not gross.
       total_gross = @deal.total_gross
-      @deal.net_deal_profit = total_gross - (@deal.commission_amount || 0)
+      @deal.net_deal_profit = total_gross - (@deal.commission_amount || 0) - @deal.carrying_costs
       @deal.save!
 
       profitability_summary
@@ -246,7 +247,11 @@ module Accounting
       total_gross = cost_entered ? @deal.total_gross : nil
 
       commission = @deal.try(:commission_amount) || BigDecimal('0')
-      net_profit = total_gross.nil? ? nil : (total_gross - commission)
+      # Carrying / period costs (floor-plan interest + delivery) reduce NET profit but not
+      # front/total gross — they're costs of holding + delivering the unit, not of selling
+      # it, and the GL books them as period expenses (not COGS).
+      carrying_costs = @deal.carrying_costs
+      net_profit = total_gross.nil? ? nil : (total_gross - commission - carrying_costs)
 
       {
         deal_id: @deal.id,
@@ -273,14 +278,19 @@ module Accounting
         back_gross: back_gross,
         total_gross: total_gross,
         commission: commission,
+        carrying_costs: carrying_costs,
         net_profit: net_profit,
         front_detail: {
           vehicle_cost: @deal.vehicle_landed_cost,
           recon: @deal.reconditioning_cost || 0,
-          floor_plan_interest: @deal.floor_plan_interest || 0,
-          delivery: @deal.delivery_setup_cost || 0,
+          addon_margin: @deal.front_end_addon_margin,
           pack: @deal.effective_pack_amount # separate holdback, NOT part of front cost
         },
+        # Carrying costs detail (reconciles to carrying_costs) — reduces net, not gross.
+        carrying_detail: [
+          { name: 'Floor Plan Interest', amount: @deal.floor_plan_interest || 0 },
+          { name: 'Delivery & Setup',    amount: @deal.delivery_setup_cost || 0 }
+        ],
         # Components of back_gross (reconciles to it): finance reserve + product margin.
         back_detail: [
           { name: 'Finance Reserve', amount: @deal.finance_reserve || 0 },

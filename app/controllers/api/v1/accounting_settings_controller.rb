@@ -7,19 +7,7 @@ class Api::V1::AccountingSettingsController < ApplicationController
     return unless authorize_action!('accounting', 'read')
 
     settings = AccountingSettings.for_company(@company)
-    render json: settings.as_json(
-      include: {
-        retained_earnings_account: { only: [:id, :account_number, :name] },
-        default_ar_account: { only: [:id, :account_number, :name] },
-        default_ap_account: { only: [:id, :account_number, :name] },
-        default_sales_revenue_account: { only: [:id, :account_number, :name] },
-        default_cogs_account: { only: [:id, :account_number, :name] },
-        default_sales_tax_payable_account: { only: [:id, :account_number, :name] },
-        state_tax_account: { only: [:id, :account_number, :name] },
-        county_tax_account: { only: [:id, :account_number, :name] },
-        city_tax_account: { only: [:id, :account_number, :name] }
-      }
-    ).merge(allowed_form_states: @company.allowed_form_states || [])
+    render json: settings_json(settings)
   end
 
   def update
@@ -29,7 +17,10 @@ class Api::V1::AccountingSettingsController < ApplicationController
 
     if settings.update(settings_params)
       sync_allowed_form_states_from_tax_rates!(settings)
-      render json: settings.as_json.merge(allowed_form_states: @company.allowed_form_states || [])
+      # Return the SAME shape as show (with account associations + effective tax accounts)
+      # so the FE re-hydrates every GL-account display. Returning bare as_json here dropped
+      # the nested *_account relations and blanked the account selections after any save.
+      render json: settings_json(settings.reload)
     else
       render json: { errors: settings.errors }, status: :unprocessable_entity
     end
@@ -55,6 +46,40 @@ class Api::V1::AccountingSettingsController < ApplicationController
   end
 
   private
+
+  # Canonical settings serialization — used by BOTH show and update so the FE always
+  # receives the nested GL-account associations and effective tax accounts. Keeping this
+  # in one place prevents update from silently returning a thinner payload that blanks
+  # the account selections in the UI.
+  def settings_json(settings)
+    settings.as_json(
+      include: {
+        retained_earnings_account: { only: [:id, :account_number, :name] },
+        default_ar_account: { only: [:id, :account_number, :name] },
+        default_ap_account: { only: [:id, :account_number, :name] },
+        default_sales_revenue_account: { only: [:id, :account_number, :name] },
+        default_cogs_account: { only: [:id, :account_number, :name] },
+        default_sales_tax_payable_account: { only: [:id, :account_number, :name] },
+        state_tax_account: { only: [:id, :account_number, :name] },
+        county_tax_account: { only: [:id, :account_number, :name] },
+        city_tax_account: { only: [:id, :account_number, :name] }
+      }
+    ).merge(
+      allowed_form_states: @company.allowed_form_states || [],
+      effective_tax_accounts: effective_tax_accounts_payload(settings)
+    )
+  end
+
+  # Per-jurisdiction resolved tax account + whether it's the seeded default.
+  def effective_tax_accounts_payload(settings)
+    %i[state county city].each_with_object({}) do |jur, h|
+      acct = settings.effective_tax_account(jur)
+      h[jur] = {
+        account: acct && { id: acct.id, account_number: acct.account_number, name: acct.name },
+        is_default: settings.tax_account_is_default?(jur)
+      }
+    end
+  end
 
   def sync_allowed_form_states_from_tax_rates!(settings)
     return unless settings.tax_rates_by_state.present?

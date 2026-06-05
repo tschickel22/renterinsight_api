@@ -1473,6 +1473,7 @@ module Api
           pdiCost: :pdi_cost,
           totalCost: :total_cost,
           holdbackAmount: :holdback_amount,
+          reconditioningCost: :reconditioning_cost,
           floorPlanRate: :floor_plan_rate,
           floorPlanAmount: :floor_plan_amount,
           floorPlanLender: :floor_plan_lender,
@@ -1535,9 +1536,10 @@ module Api
           :repo, :sale_pending, :package_type,
           # Cost details
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
-          :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
+          :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
           # Special Discount
           :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
           # RV fields
@@ -1628,9 +1630,10 @@ module Api
           :video_url, :virtual_tour_url, :special_features, :overlay_text,
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
-          :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
+          :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
           # Special Discount
           :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
           # Location ID and address override
@@ -1745,7 +1748,18 @@ module Api
               position: p.position
             }
           },
-          totalHomePrice: vehicle.total_home_price
+          totalHomePrice: vehicle.total_home_price,
+          # Floor plan tracking — surfaced on BOTH list and detail JSON so the inventory
+          # edit form (which hydrates from the list payload, not the detail endpoint) can
+          # re-check the "Floor Plan Tracking" box and repopulate amount/rate/lender/start.
+          # Without these here, MH edits appeared not to persist: the write saved fine, but
+          # the reload read had no floor-plan data, so the section reset to empty.
+          floorPlanAmount: vehicle.floor_plan_amount&.to_f,
+          floorPlanRate: vehicle.floor_plan_rate&.to_f,
+          floorPlanLender: vehicle.floor_plan_lender,
+          floorPlanStartDate: vehicle.floor_plan_start_date,
+          # Reconditioning cost — inventory-level source the deal/approval pulls from.
+          reconditioningCost: (vehicle.respond_to?(:reconditioning_cost) ? vehicle.reconditioning_cost&.to_f : nil)
         }
 
         # Add type-specific fields

@@ -202,7 +202,7 @@ Rails.application.routes.draw do
         # Config dropdowns (read-only) for the desk workspace.
         resources :lender_programs, only: [:index], controller: 'deal_desk_lender_programs'
         resources :fee_templates,   only: [:index], controller: 'deal_desk_fee_templates'
-        resources :fni_products,    only: [:index], controller: 'deal_desk_fni_products'
+        resources :fni_products,    only: [:index, :create, :update, :destroy], controller: 'deal_desk_fni_products'
 
         resources :scenarios, only: %i[index show create update destroy],
                               controller: 'deal_desk_scenarios' do

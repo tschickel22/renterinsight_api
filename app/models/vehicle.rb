@@ -218,6 +218,23 @@ class Vehicle < ApplicationRecord
     components_sum > 0 ? components_sum.round(2) : nil
   end
 
+  # Floor-plan interest accrued to date. Floor-plan rates are quoted ANNUALLY (APR), so
+  # the monthly accrual is amount * (annual_rate% / 12) per month. Counts whole months
+  # from floor_plan_start_date to today (or floor_plan_curtailed_at if curtailed). Returns
+  # 0.0 when floor-plan tracking isn't set up, so a deal can safely auto-populate an
+  # estimate the accountant can override.
+  def floor_plan_interest_to_date(as_of: Date.current)
+    return 0.0 if floor_plan_amount.to_f <= 0 || floor_plan_rate.to_f <= 0 || floor_plan_start_date.blank?
+
+    end_date = (floor_plan_curtailed_at || as_of).to_date
+    start = floor_plan_start_date.to_date
+    months = (end_date.year * 12 + end_date.month) - (start.year * 12 + start.month)
+    months = 0 if months.negative?
+
+    monthly_rate = floor_plan_rate.to_f / 100.0 / 12.0
+    (floor_plan_amount.to_f * monthly_rate * months).round(2)
+  end
+
   # Display helpers
   def display_name
     "#{year} #{make} #{model}#{trim.present? ? " #{trim}" : ''}"
