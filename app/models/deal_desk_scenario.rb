@@ -139,31 +139,52 @@ class DealDeskScenario < ApplicationRecord
     end
   end
 
-  # Snapshot the deal's add-on line items onto this scenario, EXCLUDING the home line so it
-  # isn't double-counted (the engine already counts the home once via `price`). In real data
-  # the home rides as a deal_product whose unit_price == deal.selling_price and whose name is
-  # the vehicle's year/make/model; it carries NO structured tag (CUSTOM- SKU, nil source_type),
-  # and its line `cost` is unreliable (0/garbage) — which is fine, because we drop it here and
-  # take the reliable cost from the vehicle snapshot instead. Only the HOME line is suspect;
-  # add-on line costs are kept as-is.
+  # Snapshot the deal's line items onto this scenario for the INITIAL scenario (the unit is the
+  # deal's home). The list = deal add-ons (non-home, and excluding the home's packages by
+  # match) tagged source 'deal' + the home's packages tagged source 'home'. The home line
+  # itself is excluded — the engine counts it once via `price` (unit_price_snapshot).
   #
-  # Identification (fail loud, never guess): exclude exactly the ONE product that is either
-  # (a) a properly VEHICLE--tagged home (belt-and-suspenders), or (b) the unique price+name
-  # match. If ZERO or MULTIPLE products match, exclude NONE and log the ambiguity so it's
-  # visible rather than silently dropping the wrong line.
-  # String keys to match the JSONB convention (stringify_jsonb enforces it on save anyway).
+  # Home-package source: if the deal carries 'package'-tagged lines, those are authoritative
+  # (the rep may have edited a package's price/cost on the deal). Otherwise (untagged data —
+  # some deals store the home's packages as plain deal_products) fall back to the unit's
+  # inventory_packages so they still appear exactly once. Either way deal_addon_line_entries
+  # excludes the unit's packages by match, so nothing is double-counted.
   def snapshot_line_items_from_deal!(deal = self.deal)
-    products = deal.deal_products.to_a
-    home = identify_home_line(deal, products)
+    tagged_home_packages = deal_home_package_entries(deal)
+    home_packages = tagged_home_packages.any? ? tagged_home_packages : home_package_entries(deal.vehicle)
 
-    self.line_items = (home ? products - [home] : products).map do |dp|
-      {
-        'description' => dp.product_name,
-        'price'       => dp.unit_price.to_f,
-        'cost'        => dp.cost.to_f,
-        'quantity'    => (dp.quantity || 1)
-      }
-    end
+    self.line_items =
+      (deal_addon_line_entries(deal, deal.vehicle) + home_packages).map(&:stringify_keys)
+  end
+
+  # Re-sync line items when the scenario's unit changes (the compare "Use this unit" swap).
+  # Rebuilds the list DETERMINISTICALLY from two clean sources rather than mutating the prior
+  # state — so it also self-heals any stale/mis-tagged home line left by an earlier snapshot:
+  #   - DEAL add-ons: the deal's genuine non-home, non-package line items (manual/template adds
+  #     that ride with the deal regardless of unit) — tagged source 'deal'.
+  #   - HOME packages: the CURRENT scenario unit's inventory packages (included_in_total) —
+  #     tagged source 'home'. The OLD unit's packages simply aren't pulled, so they drop.
+  # Fees + F&I (separate JSONB columns) are untouched and persist across the swap. The caller
+  # (controller #update) runs recompute! afterward so the recap/grid reflect the new set.
+  # The old_vehicle_id arg is retained for signature stability/logging but no longer needed for
+  # filtering (the rebuild makes prior state irrelevant).
+  # NOTE (Phase 5 boundary): this updates the SCENARIO for accurate display + payment math
+  # only. It does NOT push the swapped unit or its lines onto the deal — that write-back is the
+  # deferred Phase 5 unit-swap feature.
+  def resync_line_items_for_unit!(_old_vehicle_id = nil)
+    # Resolve the NEW unit explicitly (don't trust a possibly-cached `vehicle` association
+    # after a vehicle_id reassignment). Reset the association so the next `vehicle` call
+    # re-queries by the CURRENT vehicle_id rather than returning the stale cached record.
+    association(:vehicle).reset
+    new_unit = vehicle_id.present? ? vehicle : nil
+
+    # Deal add-ons exclude packages from BOTH the deal's original home and the new unit
+    # (match-based). That drops the OLD home's packages (even if they ride as untagged deal
+    # lines) and prevents the NEW unit's packages from being counted twice (deal add-on +
+    # inventory package). The unit's packages come solely from home_package_entries below.
+    deal_addons = deal_addon_line_entries(deal, deal.vehicle, new_unit)
+
+    self.line_items = (deal_addons + home_package_entries(new_unit)).map(&:stringify_keys)
   end
 
   # Merge this (selected) scenario's add-ons — line_items, fni_products, AND fees — onto the
@@ -237,17 +258,30 @@ class DealDeskScenario < ApplicationRecord
   private
 
   # Pick the single deal_product that represents the home, or nil if it can't be done
-  # unambiguously. Belt-and-suspenders first: a properly VEHICLE--tagged home (when exactly
-  # one such tag exists). Otherwise the real-data signal: unit_price == deal.selling_price
-  # AND (when a vehicle is linked) product_name matches the vehicle's year/make/model.
-  # Returns nil and warns on 0 or >1 matches so the caller excludes none rather than guessing.
+  # unambiguously. Identification, most-reliable signal first:
+  #   1. source_type == 'home'  — the FE tags the home line this way (DealLineItemsCard); it's
+  #      an indexed column and the authoritative marker. Used when exactly one such line exists.
+  #   2. VEHICLE--<id> SKU tag  — belt-and-suspenders for lines created via the deal-products
+  #      controller path (when exactly one such tag exists).
+  #   3. price+name match       — last-resort heuristic: unit_price == deal.selling_price AND
+  #      (when a vehicle is linked) name matches the vehicle's year/make/model. NOTE this is
+  #      unreliable when the home rides at its BASE price while selling_price is the package-
+  #      inclusive TOTAL — hence steps 1–2 take precedence.
+  # Returns nil and warns on 0 or >1 matches at the heuristic stage so the caller excludes none
+  # rather than guessing.
   def identify_home_line(deal, products)
+    # (1) Authoritative: the FE-tagged home line.
+    typed = products.select { |dp| dp.source_type.to_s == 'home' }
+    return typed.first if typed.size == 1
+
+    # (2) Belt-and-suspenders: a properly VEHICLE--tagged home.
     tagged = products.select do |dp|
       (dp.referenced_vehicle_id.present? && dp.referenced_vehicle_id == deal.vehicle_id) ||
         dp.vehicle_line_item?
     end
     return tagged.first if tagged.size == 1
 
+    # (3) Last-resort price+name heuristic.
     selling      = deal.selling_price.to_f
     vehicle_name = deal.vehicle ? normalize_name(vehicle_display_name(deal.vehicle)) : nil
 
@@ -277,9 +311,14 @@ class DealDeskScenario < ApplicationRecord
   # Flatten this scenario's add-ons into a uniform {name, price, cost, quantity, notes} list:
   # line_items (snapshotted deal add-ons), fni_products (sold as lines, qty 1), and fees (the
   # fees JSONB, emitted as fee line items). Blank-named entries are dropped.
+  #
+  # HOME-sourced line items are EXCLUDED here: they're the swapped/selected unit's own
+  # inventory packages, pulled in for display + payment math. Pushing them onto the deal is
+  # the deferred Phase 5 unit-swap write-back (which also swaps the deal's home line). Until
+  # then, apply must stay home-line-free, so we only merge 'deal'-sourced (and untagged)
+  # add-ons. Untagged lines (source nil) are legacy/deal add-ons and DO merge.
   def scenario_addon_entries
-    items = Array(line_items).map do |li|
-      li = li.symbolize_keys
+    items = Array(line_items).map(&:symbolize_keys).reject { |li| li[:source].to_s == 'home' }.map do |li|
       { name: li[:description].to_s, price: li[:price].to_f, cost: li[:cost].to_f,
         quantity: (li[:quantity] || 1), notes: nil }
     end
@@ -335,6 +374,92 @@ class DealDeskScenario < ApplicationRecord
 
   def vehicle_display_name(vehicle)
     [vehicle.try(:year), vehicle.try(:make), vehicle.try(:model)].compact.join(' ')
+  end
+
+  # Build 'home'-sourced line item entries from a unit's inventory packages (the Premium
+  # Roofing / Porch rows on the inventory record). Only packages flagged include_in_total are
+  # pulled — matching the home's own Total Home Price and the deal-form behavior. Symbol-keyed
+  # here; the caller stringifies. Returns [] for a nil unit or a unit with no packages (the
+  # common MH case where the home is just a price). Used for a SWAPPED-IN unit (no deal values
+  # exist yet, so the inventory record is authoritative).
+  def home_package_entries(unit)
+    return [] unless unit.respond_to?(:inventory_packages)
+
+    unit.inventory_packages.included_in_total.ordered.map do |pkg|
+      {
+        description: pkg.name,
+        price: pkg.price.to_f,
+        cost: pkg.cost.to_f,
+        quantity: 1,
+        source: 'home',
+        source_vehicle_id: unit.id
+      }
+    end
+  end
+
+  # The deal's genuine add-on lines: deal_products that are NEITHER the home line NOR a home
+  # package. These ride with the DEAL regardless of which unit the scenario structures around
+  # (manual items, templates, land, etc.) — tagged source 'deal' so a unit swap keeps them.
+  # Symbol-keyed; caller stringifies.
+  #
+  # IMPORTANT — package exclusion is by MATCH against a set of units, not just by tag. On some
+  # deals the home's packages ride as deal_products WITHOUT source_type 'package' (older data /
+  # lines added before tagging). Tag-only exclusion would then (a) duplicate them on a swap-back
+  # (counted as a deal add-on AND pulled from inventory_packages), and (b) leak the OLD home's
+  # packages forward on a swap to a different unit. So we exclude any deal line whose normalized
+  # name+price matches a package on ANY unit in `package_units` — pass both the deal's original
+  # home and the unit being structured around so neither home's packages survive as add-ons.
+  def deal_addon_line_entries(deal, *package_units)
+    units = package_units.compact
+    units = [deal.vehicle].compact if units.empty?
+    package_keys = units.flat_map { |u| unit_package_keys(u).to_a }.to_set
+
+    products = deal.deal_products.to_a
+    home = identify_home_line(deal, products)
+    candidates = home ? products - [home] : products
+
+    addons = candidates.reject do |dp|
+      dp.source_type.to_s == 'package' ||
+        package_keys.include?([normalize_name(dp.product_name), dp.unit_price.to_f])
+    end
+
+    addons.map do |dp|
+      {
+        description: dp.product_name,
+        price: dp.unit_price.to_f,
+        cost: dp.cost.to_f,
+        quantity: (dp.quantity || 1),
+        source: 'deal',
+        source_vehicle_id: nil
+      }
+    end
+  end
+
+  # (normalized name, price) pairs for a unit's included_in_total inventory packages — used to
+  # match-and-exclude home packages that ride as untagged deal_products. Empty for a nil unit.
+  def unit_package_keys(unit)
+    return [].to_set unless unit.respond_to?(:inventory_packages)
+
+    unit.inventory_packages.included_in_total.map do |pkg|
+      [normalize_name(pkg.name), pkg.price.to_f]
+    end.to_set
+  end
+
+  # The deal home's package lines (source_type 'package' deal_products) as 'home'-sourced
+  # entries tied to the deal's current vehicle. Used at CREATE, where the deal's values are
+  # authoritative (the rep may have edited a package on the deal). Symbol-keyed; caller
+  # stringifies.
+  def deal_home_package_entries(deal)
+    deal.deal_products.select { |dp| dp.source_type.to_s == 'package' }.map do |dp|
+      {
+        description: dp.product_name,
+        price: dp.unit_price.to_f,
+        cost: dp.cost.to_f,
+        quantity: (dp.quantity || 1),
+        source: 'home',
+        source_vehicle_id: deal.vehicle_id
+      }
+    end
   end
 
   def normalize_name(str)

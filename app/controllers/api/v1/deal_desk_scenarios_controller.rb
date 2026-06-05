@@ -72,8 +72,19 @@ module Api
       def update
         return unless authorize_action!(RESOURCE, 'write')
 
+        # Capture the unit BEFORE assignment so a swap can drop the OLD home's packages.
+        old_vehicle_id = @scenario.vehicle_id
         @scenario.assign_attributes(scenario_params)
-        snapshot_unit!(@scenario) if @scenario.vehicle_id_changed? || @scenario.unit_price_snapshot.nil?
+
+        if @scenario.vehicle_id_changed?
+          snapshot_unit!(@scenario)
+          # Unit swap: drop the old home's packages, pull the new unit's (deal add-ons +
+          # fees + F&I persist). Display + payment math only — nothing pushed to the deal
+          # (that's the deferred Phase 5 unit-swap write-back).
+          @scenario.resync_line_items_for_unit!(old_vehicle_id)
+        elsif @scenario.unit_price_snapshot.nil?
+          snapshot_unit!(@scenario)
+        end
         recompute!(@scenario)
 
         if @scenario.save
@@ -301,12 +312,22 @@ module Api
         unit = scenario.vehicle || @company.vehicles.find_by(id: scenario.vehicle_id)
         return unless unit
 
-        # Price is "counted via the line": source it from the deal's selling_price (the home
-        # rides as a deal_product, and selling_price tracks it), falling back to the vehicle's
-        # sale_price only when the deal has no priced home yet. This avoids price drift between
-        # vehicle.sale_price and what was actually quoted on the deal.
-        deal_selling = scenario.deal&.selling_price
-        scenario.unit_price_snapshot = deal_selling.present? && deal_selling.to_f.positive? ? deal_selling : unit.sale_price
+        # Price source depends on whether this scenario's unit is still the DEAL's home or a
+        # swapped-in comparable:
+        #   - Same as the deal's home  -> prefer the deal's selling_price ("counted via the
+        #     line"), so the snapshot tracks what was actually quoted and avoids drift between
+        #     vehicle.sale_price and the deal_product price.
+        #   - A different (swapped) unit -> the deal's selling_price belongs to the OLD home,
+        #     so it must NOT be used. Snapshot the swapped unit's own sale_price instead, or
+        #     the recap/grid would keep computing off the original home's price.
+        is_deal_home  = scenario.deal&.vehicle_id.present? && scenario.vehicle_id == scenario.deal.vehicle_id
+        deal_selling  = scenario.deal&.selling_price
+        scenario.unit_price_snapshot =
+          if is_deal_home && deal_selling.present? && deal_selling.to_f.positive?
+            deal_selling
+          else
+            unit.sale_price
+          end
         # Cost stays from the vehicle — the deal/home line cost is unreliable (0/garbage).
         scenario.unit_cost_snapshot  = unit.cost || unit.dealer_cost || unit.total_cost
         scenario.unit_location_id    = unit.location_id
