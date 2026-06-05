@@ -114,14 +114,13 @@ class DealDeskScenario < ApplicationRecord
       trade_allowance: trade_allowance,
       trade_payoff: trade_payoff,
       down_payment: cash_down,
-      # All structured fees, mapped scenario fee-key -> deal column. Same nil-tolerant
-      # extraction as the original doc_fee line: a missing key digs to nil and is then
-      # compacted out, so the deal's existing value is preserved (no zeroing).
-      doc_fee: fees&.dig('doc'),
-      delivery_fee: fees&.dig('delivery'),
-      setup_fee: fees&.dig('setup'),
-      skirting_fee: fees&.dig('skirting'),
-      accessories_total: fees&.dig('accessories'),
+      # Fees are NO LONGER written to the deprecated fee columns (doc_fee/delivery_fee/
+      # setup_fee/skirting_fee/accessories_total). The FE zeroes those columns on every deal
+      # save (Phase 3: fees moved to line items), so writing them here is dead storage. Fees
+      # are instead merged as 'category:fee' deal_products by merge_line_items_and_fni_to_deal!
+      # (called from #apply). NOTE: backend readers of those columns (Deal#addon_gross ->
+      # commissions, DealInvoiceService, agreement merge-fields) are a separate, deferred
+      # reader-migration (Part c) — intentionally NOT touched here.
       # Lender: the scenario has no lender_name column — the name lives on the selected
       # financing program (LenderProgram#lender_name). lender_id is intentionally NOT
       # written: LenderProgram has no FK to the managed Lender list that Deal#lender_id
@@ -167,11 +166,13 @@ class DealDeskScenario < ApplicationRecord
     end
   end
 
-  # Merge this (selected) scenario's add-ons — line_items AND fni_products — onto the deal as
-  # deal_products. ADD-ONLY with quantity reconciliation: never replaces, never removes, and
-  # never touches the home line or any unmatched existing product. F&I products become
-  # deal_products (sold as lines on the deal). Cost rides as 0 when unknown — the approval
-  # modal lets the approver confirm cost, so we never prompt for it here.
+  # Merge this (selected) scenario's add-ons — line_items, fni_products, AND fees — onto the
+  # deal as deal_products. ADD-ONLY with quantity reconciliation: never replaces, never removes,
+  # and never touches the home line or any unmatched existing product. F&I products become
+  # deal_products (sold as lines on the deal); fees become 'category:fee' line items matching
+  # the FE convention (see fee_addon_entries) — fees no longer ride the deprecated fee columns.
+  # Cost rides as 0 when unknown — the approval modal lets the approver confirm cost, so we
+  # never prompt for it here.
   #
   # Matching is by normalized name AND exact price (two items differing in either stay
   # separate lines), against existing deal_products EXCLUDING the home (A1 heuristic):
@@ -215,7 +216,8 @@ class DealDeskScenario < ApplicationRecord
           quantity: qty,
           discount: 0,
           discount_type: 'fixed',
-          tax: 0
+          tax: 0,
+          notes: entry[:notes]
         )
         candidates << created # so a later identical entry reconciles instead of duplicating
         added << { id: created.id, name: created.product_name, price: price, quantity: qty }
@@ -266,20 +268,51 @@ class DealDeskScenario < ApplicationRecord
     nil
   end
 
-  # Flatten this scenario's add-ons into a uniform {name, price, cost, quantity} list:
-  # line_items (snapshotted deal add-ons) + fni_products (sold as lines on the deal, qty 1).
-  # Blank-named entries are dropped (nothing to merge).
+  # Display names for the fees JSONB keys when merged as fee line items.
+  FEE_LINE_NAMES = {
+    'doc' => 'Doc Fee', 'delivery' => 'Delivery Fee', 'setup' => 'Setup Fee',
+    'skirting' => 'Skirting Fee', 'accessories' => 'Accessories'
+  }.freeze
+
+  # Flatten this scenario's add-ons into a uniform {name, price, cost, quantity, notes} list:
+  # line_items (snapshotted deal add-ons), fni_products (sold as lines, qty 1), and fees (the
+  # fees JSONB, emitted as fee line items). Blank-named entries are dropped.
   def scenario_addon_entries
     items = Array(line_items).map do |li|
       li = li.symbolize_keys
       { name: li[:description].to_s, price: li[:price].to_f, cost: li[:cost].to_f,
-        quantity: (li[:quantity] || 1) }
+        quantity: (li[:quantity] || 1), notes: nil }
     end
     fni = Array(fni_products).map do |p|
       p = p.symbolize_keys
-      { name: p[:name].to_s, price: p[:price].to_f, cost: p[:cost].to_f, quantity: 1 }
+      { name: p[:name].to_s, price: p[:price].to_f, cost: p[:cost].to_f, quantity: 1, notes: nil }
     end
-    (items + fni).reject { |e| e[:name].strip.empty? }
+    (items + fni + fee_addon_entries).reject { |e| e[:name].strip.empty? }
+  end
+
+  # Scenario fees (fees JSONB: doc/delivery/setup/skirting/accessories) as fee line items,
+  # matching the FE convention (DealForm.tsx): notes carry the 'category:fee' tag so
+  # DealLineItemsCard displays/edits them identically to FE-entered fees. Zero/blank fees are
+  # skipped; fees are pure charges (cost 0, qty 1). For a plain fee the FE's notes-join
+  # collapses to exactly 'category:fee' (no notes/source/commissionable tags), so we match that.
+  def fee_addon_entries
+    (fees || {}).filter_map do |key, value|
+      amount = value.to_f
+      next if amount <= 0
+
+      # Only emit known fee keys. The fees JSONB can carry UI artifacts (e.g. a key named
+      # after the amount, "50"=>50); skipping unknown keys keeps junk out of deal_products.
+      name = FEE_LINE_NAMES[key.to_s]
+      if name.nil?
+        Rails.logger.warn(
+          "[DealDeskScenario] fee_addon_entries: skipping unknown fee key #{key.inspect} " \
+          "(scenario #{id || 'new'}, deal #{deal_id}); not a recognized fee."
+        )
+        next
+      end
+
+      { name: name, price: amount, cost: 0.0, quantity: 1, notes: 'category:fee' }
+    end
   end
 
   # Engine-bound line items with quantity folded in, minus any entry that collides
