@@ -683,7 +683,16 @@ module Api
           
           # Commission plan info
           commissionPlanId: deal.commission_plan_id,
-          commissionPlanName: deal.commission_plan&.name
+          commissionPlanName: deal.commission_plan&.name,
+
+          # GL / approval status (public flags — not cost data). gl_posted is set when the
+          # deal is approved + posted to the GL from the Deal Approvals queue; the FE shows an
+          # "Approved by Mgr" badge with the timestamp. commission_posted mirrors the second
+          # accounting gate.
+          glPosted: deal.gl_posted || false,
+          glPostedAt: deal.gl_posted_at&.iso8601,
+          commissionPosted: deal.commission_posted || false,
+          commissionPostedAt: deal.commission_posted_at&.iso8601
         }
         
         # Private economics fields (finance only)

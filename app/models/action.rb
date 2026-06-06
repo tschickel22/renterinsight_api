@@ -33,7 +33,8 @@ class Action < ApplicationRecord
       { key: 'write', name: 'Write/Build', description: 'Build and autosave working structures (Deal Desk)' },
       { key: 'quote', name: 'Quote', description: 'Generate a quote from a structure (Deal Desk)' },
       { key: 'configure', name: 'Configure', description: 'Configure lender programs, fees, F&I, desk settings (Deal Desk)' },
-      { key: 'transfer_unit', name: 'Transfer Unit', description: 'Initiate cross-location unit transfer (Deal Desk — manager)' }
+      { key: 'transfer_unit', name: 'Transfer Unit', description: 'Initiate cross-location unit transfer (Deal Desk — manager)' },
+      { key: 'swap_unit', name: 'Swap Unit', description: 'Apply/revert a unit swap on the deal: repoint the home, replace the home line, sync inventory (Deal Desk — manager)' }
     ].each do |action_data|
       find_or_create_by!(key: action_data[:key]) do |action|
         action.name = action_data[:name]

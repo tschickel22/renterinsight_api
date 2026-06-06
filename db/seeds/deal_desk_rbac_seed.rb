@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 # Deal Desk RBAC backfill. Resource/Action seed_defaults are idempotent and add the new
-# deal_desk resource + write/quote/configure/transfer_unit actions. Existing system roles
+# deal_desk resource + write/quote/configure/transfer_unit/swap_unit actions. Existing system roles
 # are NOT re-seeded by Role.seed_defaults (it returns early once roles exist), so this
 # grants the deal_desk permissions to existing roles by key — covering both global system
 # roles (company_id nil) and any company-specific roles sharing those keys.
 #
-# Default config (Section 25): reps build/quote/compare freely; configure + transfer_unit
-# are manager-only. All grants use scope 'all' (the controller authorizes with default
+# Default config (Section 25): reps build/quote/compare freely; configure + transfer_unit +
+# swap_unit are manager-only. All grants use scope 'all' (the controller authorizes with default
 # scope 'all'; location filtering is applied operationally).
 
 puts '🔐 Backfilling Deal Desk RBAC...'
@@ -25,7 +25,7 @@ grant = lambda do |role, action_keys|
 end
 
 REP_ACTIONS     = %w[read write quote].freeze
-MANAGER_ACTIONS = %w[read write quote configure transfer_unit].freeze
+MANAGER_ACTIONS = %w[read write quote configure transfer_unit swap_unit].freeze
 
 rep_roles     = %w[sales_rep crm_specialist]
 manager_roles = %w[company_manager location_manager location_admin company_admin]

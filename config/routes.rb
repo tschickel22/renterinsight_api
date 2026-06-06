@@ -215,6 +215,8 @@ Rails.application.routes.draw do
           member do
             post :select          # flag selected (single per deal); does NOT mutate the deal
             post :apply           # deliberately write the structure back to the deal
+            post :apply_unit_swap   # MANAGER ONLY: swap this unit onto the deal (captures baseline)
+            post :revert_unit_swap  # MANAGER ONLY: undo a swap, restore the deal's baseline
             post :generate_quote  # turn the selected scenario into a Quote
             post :transfer_unit   # MANAGER ONLY: commit a cross-location unit
             get  :summary, defaults: { format: 'pdf' }  # /scenarios/:id/summary.pdf

@@ -201,7 +201,12 @@ class DealDeskScenario < ApplicationRecord
   #   - same name+price, diff qty   -> reconcile that line's quantity (no duplicate)
   #   - no match                    -> create a fresh CUSTOM- line
   # Idempotent: a second apply with no scenario changes does nothing. Returns a change summary.
-  def merge_line_items_and_fni_to_deal!(deal = self.deal)
+  #
+  # include_home: when true (the Phase 5 unit-swap path only) the scenario's 'home'-sourced
+  # line items — the swapped-in unit's inventory packages — are ALSO merged onto the deal.
+  # Normal #apply leaves include_home false so the home packages stay off the deal (the home
+  # line itself carries the unit; packages ride only on a deliberate swap).
+  def merge_line_items_and_fni_to_deal!(deal = self.deal, include_home: false)
     added = []
     updated_qty = []
     skipped = 0
@@ -210,7 +215,7 @@ class DealDeskScenario < ApplicationRecord
     home       = identify_home_line(deal, existing)
     candidates = home ? existing - [home] : existing
 
-    scenario_addon_entries.each do |entry|
+    scenario_addon_entries(include_home: include_home).each do |entry|
       name  = entry[:name].to_s
       price = entry[:price].to_f
       qty   = (entry[:quantity] || 1).to_i
@@ -248,6 +253,150 @@ class DealDeskScenario < ApplicationRecord
     { added: added, updated_qty: updated_qty, skipped: skipped }
   end
 
+  # ============================================================================
+  # PHASE 5 — Unit swap APPLY / REVERT (the destructive, deal-mutating actions).
+  # Gated by deal_desk:swap_unit and blocked once the deal is GL-posted (the controller
+  # enforces both). These mutate the LIVE deal: repoint vehicle_id, replace the home line,
+  # push the new home's packages, and sync inventory sold-state — all in one transaction.
+  # ============================================================================
+
+  # Apply THIS scenario's unit as the deal's home. Steps (single transaction):
+  #   1. Capture an immutable baseline of the deal's ORIGINAL state on first swap only
+  #      (deal.deal_desk_baseline) so revert is always faithful (single-level revert-to-origin).
+  #   2. Collect the OLD unit's home-bound lines (home line + its inventory packages) before the
+  #      repoint, so they can be removed (they travel WITH the home).
+  #   3. Repoint deal.vehicle_id + write the new unit's price/cost explicitly (sync_vehicle_pricing
+  #      only fills blanks, so an existing selling_price would NOT update — we set it directly).
+  #   4. Remove the old home-bound lines; add the new home line + the new unit's packages.
+  #   5. Merge deal/desk-added add-ons only (line_items/F&I/fees) — these stay with the deal.
+  #   6. Inventory: release the old unit (if this deal owned it) + mark the new unit sold.
+  # Returns a summary hash. Raises on hard failure so the controller rolls back.
+  def apply_unit_swap_to_deal!(deal = self.deal)
+    raise ArgumentError, 'Scenario has no unit to swap in' if vehicle_id.blank?
+
+    old_vehicle_id = deal.vehicle_id
+    if old_vehicle_id == vehicle_id
+      return { swapped: false, reason: 'Scenario unit already matches the deal unit' }
+    end
+
+    # Ensure snapshots reflect THIS unit (price/cost) before we write them to the deal.
+    snapshot_for_swap!
+
+    transaction do
+      old_vehicle = old_vehicle_id.present? ? company.vehicles.find_by(id: old_vehicle_id) : nil
+      new_vehicle = company.vehicles.find_by(id: vehicle_id)
+      raise ActiveRecord::RecordNotFound, "Swap unit #{vehicle_id} not found" unless new_vehicle
+
+      # (1) Capture baseline ONCE — the deal's true original, never overwritten by later swaps.
+      capture_baseline_from_deal!(deal) if deal.deal_desk_baseline.blank?
+
+      # (2) Collect the OLD unit's HOME-BOUND lines NOW, BEFORE repointing — the home line plus
+      # its inventory packages (tagged or legacy-matched). These travel WITH the home, so they
+      # are removed on swap. Deal/desk-added lines are excluded and survive.
+      old_home_bound = home_bound_lines_for(deal, old_vehicle, deal.selling_price)
+
+      # (3) Repoint + explicit price/cost write. Order matters: set vehicle_id last so the deal's
+      # sync_vehicle_pricing (before_validation on vehicle_id change) sees our explicit values
+      # already present and leaves them alone (it only fills blanks). We pass values from this
+      # scenario's snapshot (authoritative for the swapped unit).
+      deal.assign_attributes(
+        selling_price: unit_price_snapshot,
+        unit_cost: unit_cost_snapshot,
+        home_cost: unit_cost_snapshot,
+        value: unit_price_snapshot,
+        vehicle_id: vehicle_id
+      )
+      deal.save!
+
+      # (4) Remove the OLD home-bound lines, add the NEW home line + the NEW unit's packages.
+      removed_ids = old_home_bound.map(&:id)
+      old_home_bound.each(&:destroy!)
+      deal.deal_products.create!(home_line_attrs_for_unit(new_vehicle))
+      added_packages = create_home_packages_for!(deal, new_vehicle)
+
+      # (5) Merge deal/desk add-ons (line_items + F&I + fees). include_home stays FALSE — the
+      # home's packages are created directly from inventory above, not merged from the scenario,
+      # so deal-bound add-ons are the only thing this merges.
+      merge_summary = merge_line_items_and_fni_to_deal!(deal, include_home: false)
+
+      # Keep THIS scenario's display in sync with what we just pushed: ensure it points at the
+      # swapped-in unit and rebuild its line_items from the deal + the new unit's packages.
+      deal.association(:vehicle).reset
+      resync_line_items_for_unit!
+      save! if changed?
+
+      # (6) Inventory sold-state. Release the old unit only if THIS deal owned the sale
+      # (guarded inside .release); mark the new unit sold for this deal.
+      DealVehicleStatusSync.release(deal, old_vehicle) if old_vehicle
+      DealVehicleStatusSync.mark_sold(deal, new_vehicle)
+
+      {
+        swapped: true,
+        from_vehicle_id: old_vehicle_id,
+        to_vehicle_id: vehicle_id,
+        removed_home_bound_ids: removed_ids,
+        added_package_count: added_packages.size,
+        baseline_captured: deal.saved_change_to_deal_desk_baseline?,
+        line_changes: merge_summary
+      }
+    end
+  end
+
+  # Revert a previously-applied swap back to the deal's captured baseline (single-level
+  # revert-to-origin). Restores vehicle_id, the home line, price/cost, trade/down, releases the
+  # swapped-in unit, re-marks the original sold, and CLEARS the baseline so the affordance hides.
+  # No-op (returns reverted:false) when there's no baseline to revert to.
+  def revert_unit_swap_on_deal!(deal = self.deal)
+    baseline = deal.deal_desk_baseline
+    return { reverted: false, reason: 'No baseline to revert to' } if baseline.blank?
+
+    baseline = baseline.deep_symbolize_keys
+    original_vehicle_id = baseline[:vehicle_id]
+
+    transaction do
+      swapped_in_vehicle = deal.vehicle_id.present? ? company.vehicles.find_by(id: deal.vehicle_id) : nil
+      original_vehicle   = original_vehicle_id.present? ? company.vehicles.find_by(id: original_vehicle_id) : nil
+
+      # Collect the CURRENT (swapped-in) home-bound lines BEFORE repointing — home + its
+      # packages — so we remove exactly those and leave deal/desk-added lines alone.
+      current_home_bound = home_bound_lines_for(deal, swapped_in_vehicle, deal.selling_price)
+
+      # Restore the deal's economic columns from the baseline.
+      deal.assign_attributes(
+        selling_price: baseline[:selling_price],
+        unit_cost: baseline[:unit_cost],
+        home_cost: baseline[:home_cost],
+        value: baseline[:value],
+        trade_allowance: baseline[:trade_allowance],
+        trade_payoff: baseline[:trade_payoff],
+        down_payment: baseline[:down_payment],
+        vehicle_id: original_vehicle_id,
+        deal_desk_baseline: nil
+      )
+      deal.save!
+
+      # Remove the swapped-in home-bound lines, then recreate the ORIGINAL home + packages.
+      current_home_bound.each(&:destroy!)
+      restore_home_lines_from_baseline!(deal, baseline[:home_lines])
+
+      # Re-sync THIS scenario to the reverted-to unit so the desk display matches the deal:
+      # repoint to the original unit and rebuild line_items from the (now-restored) deal +
+      # the original unit's inventory packages. Without this the scenario stays stuck on the
+      # swapped-in unit with empty/stale line_items even though the deal is correct.
+      deal.association(:vehicle).reset # deal.vehicle_id just changed; drop the stale cache
+      self.vehicle_id = original_vehicle_id
+      snapshot_for_swap!
+      resync_line_items_for_unit!
+      save!
+
+      # Inventory: release the swapped-in unit (if this deal owned it), re-mark the original.
+      DealVehicleStatusSync.release(deal, swapped_in_vehicle) if swapped_in_vehicle
+      DealVehicleStatusSync.mark_sold(deal, original_vehicle) if original_vehicle
+
+      { reverted: true, restored_vehicle_id: original_vehicle_id, released_vehicle_id: swapped_in_vehicle&.id }
+    end
+  end
+
   # Expire unless permanently kept (selected). Used by the expiry sweep.
   def expire!
     return if status == 'selected'
@@ -273,7 +422,6 @@ class DealDeskScenario < ApplicationRecord
     # (1) Authoritative: the FE-tagged home line.
     typed = products.select { |dp| dp.source_type.to_s == 'home' }
     return typed.first if typed.size == 1
-
     # (2) Belt-and-suspenders: a properly VEHICLE--tagged home.
     tagged = products.select do |dp|
       (dp.referenced_vehicle_id.present? && dp.referenced_vehicle_id == deal.vehicle_id) ||
@@ -302,6 +450,73 @@ class DealDeskScenario < ApplicationRecord
     nil
   end
 
+  # All HOME-BOUND deal_product records for a given unit — the lines that move WITH the home on
+  # a swap/revert (your rule: inventory packages + lines attached to the inventory record travel
+  # with the home; deal/desk-added lines stay). Collected by, in order:
+  #   - the identified home line itself (identify_home_line_for),
+  #   - any line tagged source_type 'home' or 'package',
+  #   - any UNTAGGED line whose normalized name+price matches one of the unit's inventory
+  #     packages (legacy data — deal 791's Premium Roofing/Porch ride untagged but came from
+  #     inventory; matching the unit's inventory_packages recovers them).
+  # Deal/desk-added lines (manual, F&I, fees) are never inventory-matched, so they're excluded
+  # and persist across the swap. Returns a de-duplicated array of deal_product records.
+  def home_bound_lines_for(deal, vehicle, selling_price)
+    products = deal.deal_products.reload.to_a
+    pkg_keys = vehicle ? unit_package_keys(vehicle) : [].to_set
+
+    home_line = identify_home_line_for(deal, vehicle, selling_price)
+
+    bound = products.select do |dp|
+      next true if dp == home_line
+      next true if %w[home package].include?(dp.source_type.to_s)
+      # Untagged legacy line matching one of this unit's inventory packages by name+price.
+      dp.source_type.to_s.empty? &&
+        pkg_keys.include?([normalize_name(dp.product_name), dp.unit_price.to_f])
+    end
+
+    bound.uniq
+  end
+
+  # Vehicle-targeted home-line identification — used by the unit-swap path, which must find the
+  # OLD home line against a KNOWN vehicle + selling price (captured before the deal is repointed),
+  # NOT the deal's live state. Precedence mirrors identify_home_line but every signal is keyed to
+  # the passed `vehicle`/`selling_price` rather than deal.vehicle/deal.selling_price. Returns the
+  # single matching deal_product or nil (ambiguous/none — caller then creates the new line without
+  # destroying anything, surfacing as a dup the rep can fix rather than a wrong deletion).
+  def identify_home_line_for(deal, vehicle, selling_price)
+    products = deal.deal_products.reload.to_a
+
+    # (1) Authoritative FE tag.
+    typed = products.select { |dp| dp.source_type.to_s == 'home' }
+    return typed.first if typed.size == 1
+
+    # (2) VEHICLE-<id> SKU tag for the SPECIFIC old vehicle.
+    if vehicle
+      vid = vehicle.id
+      sku_tagged = products.select { |dp| dp.referenced_vehicle_id == vid || dp.product_sku.to_s.match?(/\AVEHICLE-#{vid}\z/i) }
+      return sku_tagged.first if sku_tagged.size == 1
+    end
+
+    # (3) price+name heuristic against the PASSED vehicle/price (not the deal's live state).
+    sell = selling_price.to_f
+    vname = vehicle ? normalize_name(vehicle_display_name(vehicle)) : nil
+    candidates = products.select do |dp|
+      price_match = sell.positive? && dp.unit_price.to_f == sell
+      name_match  = vname.present? && normalize_name(dp.product_name) == vname
+      # Require BOTH price and name when a vehicle name is available, so packages that share the
+      # home's price (rare) aren't mistaken for the home. Fall back to price-only if no name.
+      vname.present? ? (price_match && name_match) : price_match
+    end
+    return candidates.first if candidates.size == 1
+
+    Rails.logger.warn(
+      "[DealDeskScenario] identify_home_line_for: could not uniquely identify old home line for " \
+      "deal #{deal.id} (vehicle=#{vehicle&.id}, selling_price=#{sell}, candidates=#{candidates.size}); " \
+      "old home line will NOT be removed."
+    )
+    nil
+  end
+
   # Display names for the fees JSONB keys when merged as fee line items.
   FEE_LINE_NAMES = {
     'doc' => 'Doc Fee', 'delivery' => 'Delivery Fee', 'setup' => 'Setup Fee',
@@ -312,13 +527,13 @@ class DealDeskScenario < ApplicationRecord
   # line_items (snapshotted deal add-ons), fni_products (sold as lines, qty 1), and fees (the
   # fees JSONB, emitted as fee line items). Blank-named entries are dropped.
   #
-  # HOME-sourced line items are EXCLUDED here: they're the swapped/selected unit's own
+  # HOME-sourced line items are EXCLUDED by default: they're the swapped/selected unit's own
   # inventory packages, pulled in for display + payment math. Pushing them onto the deal is
-  # the deferred Phase 5 unit-swap write-back (which also swaps the deal's home line). Until
-  # then, apply must stay home-line-free, so we only merge 'deal'-sourced (and untagged)
-  # add-ons. Untagged lines (source nil) are legacy/deal add-ons and DO merge.
-  def scenario_addon_entries
-    items = Array(line_items).map(&:symbolize_keys).reject { |li| li[:source].to_s == 'home' }.map do |li|
+  # the Phase 5 unit-swap write-back (which also swaps the deal's home line), so they merge
+  # ONLY when include_home is true (apply_unit_swap_to_deal!). Untagged lines (source nil) are
+  # legacy/deal add-ons and always merge.
+  def scenario_addon_entries(include_home: false)
+    items = Array(line_items).map(&:symbolize_keys).reject { |li| !include_home && li[:source].to_s == 'home' }.map do |li|
       { name: li[:description].to_s, price: li[:price].to_f, cost: li[:cost].to_f,
         quantity: (li[:quantity] || 1), notes: nil }
     end
@@ -464,6 +679,120 @@ class DealDeskScenario < ApplicationRecord
 
   def normalize_name(str)
     str.to_s.strip.downcase.gsub(/\s+/, ' ')
+  end
+
+  # ---- Phase 5 unit-swap helpers -------------------------------------------
+
+  # Refresh this scenario's price/cost snapshot from its OWN unit (always the swapped-in unit
+  # in the swap path, never the deal's home), so the values written to the deal are the new
+  # unit's. Mirrors the controller's snapshot_unit! for the swapped-unit branch. Persists the
+  # refreshed snapshot so a later revert/compare reads consistent values.
+  def snapshot_for_swap!
+    association(:vehicle).reset
+    unit = vehicle_id.present? ? vehicle : nil
+    return unless unit
+
+    self.unit_price_snapshot = unit.sale_price
+    self.unit_cost_snapshot  = unit.cost || unit.try(:dealer_cost) || unit.try(:total_cost)
+    self.unit_location_id     = unit.location_id
+    save! if changed?
+  end
+
+  # Capture the deal's ORIGINAL economic state as an immutable baseline blob the first time a
+  # swap is applied. Stores enough to fully restore on revert: vehicle_id, ALL home-bound lines
+  # (the home line + its packages, so they can be recreated verbatim), price/cost/value, and
+  # trade/down. Persisted on the deal via the in-flight save in apply_unit_swap_to_deal!
+  # (assign here; caller saves the deal).
+  def capture_baseline_from_deal!(deal)
+    # Home-bound lines for the deal's CURRENT (original) unit — home line + its packages.
+    bound = home_bound_lines_for(deal, deal.vehicle, deal.selling_price)
+    home_lines = bound.map do |dp|
+      {
+        product_name: dp.product_name,
+        product_sku: dp.product_sku,
+        unit_price: dp.unit_price.to_f,
+        cost: dp.cost.to_f,
+        quantity: (dp.quantity || 1),
+        discount: dp.discount.to_f,
+        discount_type: dp.discount_type,
+        tax: dp.tax.to_f,
+        notes: dp.notes,
+        source_type: dp.source_type
+      }
+    end
+
+    deal.deal_desk_baseline = {
+      captured_at: Time.current.iso8601,
+      vehicle_id: deal.vehicle_id,
+      selling_price: deal.selling_price&.to_f,
+      unit_cost: deal.unit_cost&.to_f,
+      home_cost: deal.home_cost&.to_f,
+      value: deal.value&.to_f,
+      trade_allowance: deal.trade_allowance&.to_f,
+      trade_payoff: deal.trade_payoff&.to_f,
+      down_payment: deal.down_payment&.to_f,
+      home_lines: home_lines
+    }.deep_stringify_keys
+  end
+
+  # Build the deal_product attrs for a unit's home line: VEHICLE-<id> SKU + source_type 'home'
+  # so identify_home_line keeps recognizing it. Price = the scenario's snapshot (the quoted
+  # price for the swapped unit); cost = the snapshot cost.
+  def home_line_attrs_for_unit(unit)
+    {
+      product_name: vehicle_display_name(unit).presence || "Unit #{unit.id}",
+      product_sku: "VEHICLE-#{unit.id}",
+      unit_price: unit_price_snapshot.to_f,
+      cost: unit_cost_snapshot.to_f,
+      quantity: 1,
+      discount: 0,
+      discount_type: 'fixed',
+      tax: 0,
+      source_type: 'home'
+    }
+  end
+
+  # Create deal_product lines for a unit's inventory packages (included_in_total), tagged
+  # source_type 'package' so they're recognized as home-bound on a future swap/revert. Mirrors
+  # the home_package_entries shape but persists to the deal. Returns the created records ([] when
+  # the unit has no packages — the common MH case where the home is just a price).
+  def create_home_packages_for!(deal, unit)
+    return [] unless unit.respond_to?(:inventory_packages)
+
+    unit.inventory_packages.included_in_total.ordered.map do |pkg|
+      deal.deal_products.create!(
+        product_name: pkg.name,
+        product_sku: "PKG-#{unit.id}-#{pkg.id}",
+        unit_price: pkg.price.to_f,
+        cost: pkg.cost.to_f,
+        quantity: 1,
+        discount: 0,
+        discount_type: 'fixed',
+        tax: 0,
+        source_type: 'package'
+      )
+    end
+  end
+
+  # Recreate the ORIGINAL home-bound lines (home line + packages) from a baseline blob on
+  # revert. The caller already removed the swapped-in home-bound lines (home_bound_lines_for,
+  # pre-repoint), so this ONLY creates. No-op when the baseline captured no home-bound lines.
+  def restore_home_lines_from_baseline!(deal, home_lines_blob)
+    Array(home_lines_blob).each do |blob|
+      b = blob.deep_symbolize_keys
+      deal.deal_products.create!(
+        product_name: b[:product_name],
+        product_sku: b[:product_sku],
+        unit_price: b[:unit_price].to_f,
+        cost: b[:cost].to_f,
+        quantity: (b[:quantity] || 1),
+        discount: b[:discount].to_f,
+        discount_type: b[:discount_type].presence || 'fixed',
+        tax: b[:tax].to_f,
+        notes: b[:notes],
+        source_type: b[:source_type].presence || 'home'
+      )
+    end
   end
 
   def set_validity_window

@@ -28,10 +28,51 @@ class DealVehicleStatusSync
     return unless @deal.vehicle_id.present?
 
     if transitioned_into_won?
-      mark_sold
+      self.class.mark_sold(@deal, @deal.vehicle)
     elsif transitioned_out_of_won?
-      revert_if_owned
+      self.class.release(@deal, @deal.vehicle)
     end
+  end
+
+  # Mark a vehicle sold on behalf of a deal, OUTSIDE the stage-transition flow (the unit-swap
+  # apply path calls this directly). Same safety as the transition path: never re-attribute a
+  # vehicle already sold via a DIFFERENT deal — log + skip. Idempotent for this deal.
+  def self.mark_sold(deal, vehicle)
+    return unless deal && vehicle
+
+    if vehicle.status == 'sold' && vehicle.sold_via_deal_id.present? && vehicle.sold_via_deal_id != deal.id
+      Rails.logger.warn(
+        "[DealVehicleStatusSync] Deal #{deal.id} mark_sold but vehicle #{vehicle.id} already sold via deal #{vehicle.sold_via_deal_id} — skipping"
+      )
+      return false
+    end
+
+    unless vehicle.update(status: 'sold', sold_at: Time.current, sold_via_deal_id: deal.id)
+      Rails.logger.error("[DealVehicleStatusSync] mark_sold validation failed for deal #{deal.id}: #{vehicle.errors.full_messages.join(', ')}")
+      return false
+    end
+    true
+  rescue => e
+    Rails.logger.error("[DealVehicleStatusSync] mark_sold failed for deal #{deal.id}: #{e.message}")
+    false
+  end
+
+  # Release a vehicle back to available on behalf of a deal, OUTSIDE the stage-transition flow
+  # (the unit-swap apply/revert path calls this when dropping the old/swapped-in unit). The
+  # ownership guard is preserved: only release when THIS deal owns the sale (sold_via_deal_id
+  # == deal.id), so we never free a unit another deal claimed.
+  def self.release(deal, vehicle)
+    return unless deal && vehicle
+    return false unless vehicle.sold_via_deal_id == deal.id
+
+    unless vehicle.update(status: 'available', sold_at: nil, sold_via_deal_id: nil)
+      Rails.logger.error("[DealVehicleStatusSync] release validation failed for deal #{deal.id}: #{vehicle.errors.full_messages.join(', ')}")
+      return false
+    end
+    true
+  rescue => e
+    Rails.logger.error("[DealVehicleStatusSync] release failed for deal #{deal.id}: #{e.message}")
+    false
   end
 
   private
@@ -42,35 +83,5 @@ class DealVehicleStatusSync
 
   def transitioned_out_of_won?
     @previous_stage == 'closed_won' && @new_stage != 'closed_won'
-  end
-
-  def mark_sold
-    vehicle = @deal.vehicle
-    return unless vehicle
-
-    if vehicle.status == 'sold' && vehicle.sold_via_deal_id.present? && vehicle.sold_via_deal_id != @deal.id
-      Rails.logger.warn(
-        "[DealVehicleStatusSync] Deal #{@deal.id} closed_won but vehicle #{vehicle.id} already sold via deal #{vehicle.sold_via_deal_id} — skipping"
-      )
-      return
-    end
-
-    unless vehicle.update(status: 'sold', sold_at: Time.current, sold_via_deal_id: @deal.id)
-      Rails.logger.error("[DealVehicleStatusSync] mark_sold validation failed for deal #{@deal.id}: #{vehicle.errors.full_messages.join(', ')}")
-    end
-  rescue => e
-    Rails.logger.error("[DealVehicleStatusSync] mark_sold failed for deal #{@deal.id}: #{e.message}")
-  end
-
-  def revert_if_owned
-    vehicle = @deal.vehicle
-    return unless vehicle
-    return unless vehicle.sold_via_deal_id == @deal.id
-
-    unless vehicle.update(status: 'available', sold_at: nil, sold_via_deal_id: nil)
-      Rails.logger.error("[DealVehicleStatusSync] revert validation failed for deal #{@deal.id}: #{vehicle.errors.full_messages.join(', ')}")
-    end
-  rescue => e
-    Rails.logger.error("[DealVehicleStatusSync] revert failed for deal #{@deal.id}: #{e.message}")
   end
 end

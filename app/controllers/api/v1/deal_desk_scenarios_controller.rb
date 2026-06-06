@@ -13,7 +13,7 @@ module Api
 
       before_action :set_company_scope
       require_module! 'sales.deal_desk'
-      before_action :set_scenario, only: %i[show update destroy select apply generate_quote transfer_unit summary]
+      before_action :set_scenario, only: %i[show update destroy select apply apply_unit_swap revert_unit_swap generate_quote transfer_unit summary]
 
       RESOURCE = 'deal_desk'
 
@@ -31,7 +31,13 @@ module Api
         # => the rep must explicitly apply.
         render json: {
           scenarios: scenarios.map { |s| scenario_json(s) },
-          deal_desk_writeback_mode: @company.deal_desk_writeback_mode
+          deal_desk_writeback_mode: @company.deal_desk_writeback_mode,
+          # Phase 5 unit-swap affordances: the FE shows "Apply unit swap" when the open
+          # scenario's vehicle differs from the deal's, and "Revert to original unit" when a
+          # baseline exists (a swap was applied). gl_posted disables both (server also guards).
+          deal_vehicle_id: deal.vehicle_id,
+          deal_has_swap_baseline: deal.deal_desk_baseline.present?,
+          deal_gl_posted: deal.gl_posted?
         }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Deal not found' }, status: :not_found
@@ -135,6 +141,48 @@ module Api
           added: changes[:added],
           updated_qty: changes[:updated_qty]
         }
+      end
+
+      # POST /api/v1/deal_desk/scenarios/:id/apply_unit_swap   (MANAGER ONLY)
+      # The destructive, deliberate "swap this unit onto the deal now" action (Phase 5). Distinct
+      # from #apply (which only merges line items/F&I, never the home). Captures an immutable
+      # baseline on first swap so #revert_unit_swap can restore the original. Blocked once the
+      # deal is GL-posted — swapping after the GL post would desync posted COGS/inventory.
+      def apply_unit_swap
+        return unless authorize_action!(RESOURCE, 'swap_unit')
+
+        deal = @scenario.deal
+        if deal.gl_posted?
+          return render json: { error: 'Cannot swap unit: deal is already posted to the GL' }, status: :unprocessable_entity
+        end
+
+        result = @scenario.apply_unit_swap_to_deal!
+        render json: { scenario: scenario_json(@scenario), swap: result }
+      rescue ArgumentError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      rescue ActiveRecord::RecordNotFound => e
+        render json: { error: e.message }, status: :not_found
+      rescue => e
+        Rails.logger.error "[DealDesk swap] #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+        render json: { error: 'Unit swap failed', message: e.message }, status: :internal_server_error
+      end
+
+      # POST /api/v1/deal_desk/scenarios/:id/revert_unit_swap   (MANAGER ONLY)
+      # Undo a previously-applied swap, restoring the deal's captured baseline (single-level
+      # revert-to-origin). Same gate + GL guard as apply_unit_swap.
+      def revert_unit_swap
+        return unless authorize_action!(RESOURCE, 'swap_unit')
+
+        deal = @scenario.deal
+        if deal.gl_posted?
+          return render json: { error: 'Cannot revert swap: deal is already posted to the GL' }, status: :unprocessable_entity
+        end
+
+        result = @scenario.revert_unit_swap_on_deal!
+        render json: { scenario: scenario_json(@scenario), revert: result }
+      rescue => e
+        Rails.logger.error "[DealDesk revert] #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+        render json: { error: 'Unit swap revert failed', message: e.message }, status: :internal_server_error
       end
 
       # POST /api/v1/deal_desk/scenarios/solve
