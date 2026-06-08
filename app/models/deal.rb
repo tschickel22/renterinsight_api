@@ -287,7 +287,42 @@ class Deal < ApplicationRecord
       (selling_price || value || 0).to_f.round(2)
     end
   end
-  
+
+  # ============================================================================
+  # LINE-ITEM AS PRICE SOURCE — derivation methods (Phase 2A groundwork).
+  #
+  # READ-ONLY / ADDITIVE. These expose what the line items say about price and
+  # cost so we can migrate selling_price → home line item later. They are NOT
+  # wired into front_gross/landed_cost/value in this phase — front_gross stays
+  # selling_price-based. The home line is a deal_product whose SKU is VEHICLE-<id>
+  # (DealProduct::VEHICLE_SKU_PATTERN), tagged `category:home` by the backfill.
+  # ============================================================================
+
+  # The single home/unit line item (SKU VEHICLE-<id>), or nil when the home is
+  # not yet a line item (most deals today — the home price lives on selling_price
+  # and deals_controller#deal_json injects a synthetic 'primary-vehicle' line).
+  def home_line_item
+    deal_products.detect(&:vehicle_line_item?)
+  end
+
+  def has_home_line_item?
+    home_line_item.present?
+  end
+
+  # Sum of every line item's PRE-TAX revenue: (unit_price * quantity) less the
+  # discount, summed across ALL deal_products (home + fees + accessories + recon).
+  # Tax is excluded (pass-through). Discount math mirrors DealProduct#line_profit /
+  # calculate_total exactly. READ-ONLY — not yet a price source.
+  def line_items_price
+    deal_products.sum { |dp| line_item_price(dp) }.round(2)
+  end
+
+  # Sum of every line item's cost side: cost * quantity (DealProduct#line_cost_total).
+  # READ-ONLY — not yet wired to landed_cost/COGS.
+  def line_items_cost
+    deal_products.sum { |dp| dp.line_cost_total }.round(2)
+  end
+
   # ============================================================================
   # COMMISSION ECONOMICS CALCULATIONS
   # ============================================================================
@@ -619,6 +654,19 @@ class Deal < ApplicationRecord
 
   def normalize_fee_name(str)
     str.to_s.strip.downcase.gsub(/\s+/, ' ')
+  end
+
+  # Pre-tax revenue of one line item: (unit_price * quantity) less the discount.
+  # Discount math mirrors DealProduct#line_profit / calculate_total. Used by
+  # line_items_price (Phase 2A groundwork).
+  def line_item_price(dp)
+    subtotal = dp.quantity.to_i * dp.unit_price.to_f
+    discount_amount = if dp.discount_type == 'percentage'
+      subtotal * (dp.discount.to_f / 100.0)
+    else
+      dp.discount.to_f
+    end
+    (subtotal - discount_amount).round(2)
   end
 
   # Auto-generate unique deal number per company (e.g. D-000001)
