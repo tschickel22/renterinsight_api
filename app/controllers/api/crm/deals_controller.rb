@@ -574,7 +574,11 @@ module Api
           :win_reason, :loss_reason, :competitor,
           :customer_name, :source_id, :owner_id, :primary_salesperson_id, :delivery_date,
           # Economics fields
-          :selling_price, :unit_cost, :pack_amount,
+          # NOTE: selling_price and unit_cost are DERIVED, not input (Phase 2B).
+          # selling_price mirrors the home line item's price (Deal#mirror_selling_price_from_home_line);
+          # unit_cost is a passive mirror of the home cost (Deal#sync_vehicle_pricing).
+          # Permitting them would let the client overwrite the source of truth.
+          :pack_amount,
           :trade_allowance, :trade_payoff,
           :finance_reserve, :product_margin,
           :accessories_total, :doc_fee,
@@ -715,8 +719,12 @@ module Api
         if detailed
           products_array = []
           
-          # Add primary vehicle from selling_price if present
-          if deal.selling_price.present? && deal.selling_price > 0 && deal.deal_products.empty?
+          # LEGACY FALLBACK ONLY (Phase 2B): the home is a real line item now. Inject
+          # the synthetic 'primary-vehicle' line solely for genuinely legacy deals that
+          # have NO line items AND NO home line — so their home price still renders.
+          # Deals with a home line list it as a real deal_product below; no injection.
+          if deal.deal_products.empty? && !deal.has_home_line_item? &&
+             deal.selling_price.present? && deal.selling_price > 0
             products_array << {
               id: 'primary-vehicle',
               productId: deal.vehicle_id,

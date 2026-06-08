@@ -129,6 +129,27 @@ class Deal < ApplicationRecord
     self.lender_name = lender&.name if lender_id.present?
   end
 
+  # PRICE SOURCE OF TRUTH (Phase 2B): selling_price is a DERIVED MIRROR of the home
+  # line item's price, never a free-typed input. Whenever the deal has a home line
+  # item, selling_price = home_line_item_price (pre-tax: unit_price*qty - discount).
+  # When there is NO home line (legacy/API deals), selling_price is left as-is so
+  # those deals keep computing via the fallback — we never null it.
+  #
+  # selling_price keeps its historical meaning (HOME price only) — fees/accessories
+  # stay separate line items. This is what lets deal_invoice_service /
+  # deal_accounting_service / deal_desk_scenario keep working unchanged (Option B).
+  # The all-lines total lives on line_items_price / the value column, not here.
+  #
+  # FREEZE AT CLOSE: once the deal is closed/posted, the mirror stops so editing a
+  # line post-close does not move the closed deal's frozen home price (and thus its
+  # GP). The closing save itself still mirrors (the deal was open before that save),
+  # freezing the close-time home price into the column.
+  #
+  # Registered BEFORE apply_selected_scenario_on_close (so a Deal Desk on_close
+  # write-back's scenario price still wins at close) and BEFORE
+  # snapshot_landed_cost_on_close + the after_commit GL post, which read off it.
+  before_save :mirror_selling_price_from_home_line
+
   # Deal Desk: in 'on_close' mode, write the selected scenario's structure back to the deal
   # automatically as part of the close save (before the GL post, an after_commit, reads it).
   # before_save so the figures fold into THIS UPDATE; the hook assigns only (no nested save).
@@ -299,8 +320,8 @@ class Deal < ApplicationRecord
   # ============================================================================
 
   # The single home/unit line item (SKU VEHICLE-<id>), or nil when the home is
-  # not yet a line item (most deals today — the home price lives on selling_price
-  # and deals_controller#deal_json injects a synthetic 'primary-vehicle' line).
+  # not yet a line item (legacy deals — the home price lives on selling_price and
+  # deals_controller#deal_json injects a synthetic 'primary-vehicle' line).
   def home_line_item
     deal_products.detect(&:vehicle_line_item?)
   end
@@ -309,10 +330,24 @@ class Deal < ApplicationRecord
     home_line_item.present?
   end
 
-  # Sum of every line item's PRE-TAX revenue: (unit_price * quantity) less the
-  # discount, summed across ALL deal_products (home + fees + accessories + recon).
-  # Tax is excluded (pass-through). Discount math mirrors DealProduct#line_profit /
-  # calculate_total exactly. READ-ONLY — not yet a price source.
+  # PRE-TAX price of the HOME line item only: (unit_price * quantity) less the
+  # line's discount. nil when there is no home line. This is THE home price —
+  # selling_price mirrors it (Phase 2B). It is deliberately NOT line_items_price:
+  # selling_price stays the home price (invoicing/GL/Deal Desk depend on that),
+  # while line_items_price is the all-lines deal total (see below).
+  def home_line_item_price
+    hli = home_line_item
+    hli ? line_item_price(hli) : nil
+  end
+
+  # ALL-LINES TOTAL (the DEAL VALUE): pre-tax SUM of (unit_price*qty - discount)
+  # across every deal_product — home + fees + accessories + recon. Discount math
+  # mirrors DealProduct#line_profit / calculate_total.
+  #
+  # READ-ONLY helper for display (FE Grand Total) and reconciliation against the
+  # `value` column / calculated_value. It is DISTINCT from selling_price (the home
+  # price) and must NOT feed selling_price, invoicing, or GL — doing so would
+  # double-count fees (selling_price is the home portion; fees are separate lines).
   def line_items_price
     deal_products.sum { |dp| line_item_price(dp) }.round(2)
   end
@@ -430,8 +465,23 @@ class Deal < ApplicationRecord
     return nil if lc.nil?
 
     trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
-    home_margin = (selling_price || 0) - lc - trade_difference
+    home_margin = (front_gross_home_price || 0) - lc - trade_difference
     (home_margin + front_end_addon_margin).round(2)
+  end
+
+  # Home PRICE used for front gross's home margin.
+  #   - OPEN deal with a home line: the LIVE home line price (== selling_price,
+  #     which the mirror keeps in sync). Reading the line keeps GP live as the rep
+  #     edits the home line.
+  #   - CLOSED/posted deal: the FROZEN selling_price. The mirror stopped at close,
+  #     so this holds the close-time home price — editing the home line afterward
+  #     does NOT move the closed deal's GP (matches the frozen cost snapshot).
+  #   - Legacy deal with no home line: selling_price (the home price column).
+  # Only the HOME line feeds this; fee/accessory lines are handled by
+  # front_end_addon_margin, so the home is never double-counted.
+  def front_gross_home_price
+    return selling_price.to_f if cost_snapshotted? && selling_price.present?
+    home_line_item_price || selling_price.to_f
   end
 
   # PACK (dealer holdback/administrative fee)
@@ -658,7 +708,7 @@ class Deal < ApplicationRecord
 
   # Pre-tax revenue of one line item: (unit_price * quantity) less the discount.
   # Discount math mirrors DealProduct#line_profit / calculate_total. Used by
-  # line_items_price (Phase 2A groundwork).
+  # home_line_item_price / line_items_price (Phase 2A/2B).
   def line_item_price(dp)
     subtotal = dp.quantity.to_i * dp.unit_price.to_f
     discount_amount = if dp.discount_type == 'percentage'
@@ -667,6 +717,23 @@ class Deal < ApplicationRecord
       dp.discount.to_f
     end
     (subtotal - discount_amount).round(2)
+  end
+
+  # before_save: mirror selling_price from the home line item (Phase 2B). See the
+  # before_save :mirror_selling_price_from_home_line registration above for the full
+  # rationale (home-price meaning, freeze-at-close, callback ordering).
+  def mirror_selling_price_from_home_line
+    return if closed_before_this_save?   # freeze once closed/posted
+    return unless has_home_line_item?    # legacy/API deals: leave selling_price as-is
+    self.selling_price = home_line_item_price
+  end
+
+  # True when the deal was ALREADY closed/posted before the current save — used to
+  # freeze selling_price post-close. The closing save itself returns false (the
+  # deal was open before it), so that save still mirrors the close-time home price.
+  def closed_before_this_save?
+    prior_stage = will_save_change_to_stage? ? stage_was : stage
+    %w[closed_won closed_lost].include?(prior_stage) || gl_posted?
   end
 
   # Auto-generate unique deal number per company (e.g. D-000001)
@@ -753,7 +820,10 @@ class Deal < ApplicationRecord
     return unless vehicle
     
     vehicle_price = vehicle.sale_price || vehicle.msrp
-    self.selling_price = vehicle_price if selling_price.nil? || selling_price == 0
+    # Phase 2B: selling_price is mirrored from the home line item when one exists.
+    # Only bootstrap it from the vehicle on the LEGACY path (no home line yet) so we
+    # never clobber the mirror.
+    self.selling_price = vehicle_price if (selling_price.nil? || selling_price == 0) && !has_home_line_item?
     # unit_cost is now a PASSIVE MIRROR of the canonical landed structured cost (see
     # vehicle_landed_cost/landed_cost), never an independent cost source. Mirror
     # structured_cost (not bare vehicle.cost) so it can never diverge from GP/COGS.
