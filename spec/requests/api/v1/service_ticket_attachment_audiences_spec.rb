@@ -46,14 +46,7 @@ RSpec.describe 'Api service ticket attachment audiences', type: :request do
   end
 
   describe 'warranty claim copy' do
-    # NOTE: Manufacturer.create! is broken in this schema (its normalize_fields
-    # callback references columns that don't exist), so insert the row directly to
-    # bypass callbacks. Unrelated to the feature under test.
-    let(:manufacturer) do
-      Manufacturer.insert!({ name: 'Acme Homes', industry_type: 'manufactured_housing', active: true,
-                             created_at: Time.current, updated_at: Time.current })
-      Manufacturer.order(:id).last
-    end
+    let(:manufacturer) { Manufacturer.create!(name: 'Acme Homes', industry_type: 'manufactured_housing') }
 
     let(:location) { company.locations.create!(name: 'Showroom', timezone: 'America/Denver') }
 
