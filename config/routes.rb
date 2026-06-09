@@ -1189,7 +1189,16 @@ Rails.application.routes.draw do
       end
       
       # Lenders (lightweight managed list for the deal quick-add dropdown + Finance settings)
-      resources :lenders
+      resources :lenders do
+        # Max Advance Phase 2 — per-lender calculation schedule (Finance settings).
+        resources :allowance_items, controller: 'lender_allowance_items',
+                  only: [:index, :show, :create, :update, :destroy]
+        resources :deletion_items, controller: 'lender_deletion_items',
+                  only: [:index, :show, :create, :update, :destroy]
+        # Singular: one markup/VEP config per lender; create/update both upsert.
+        resource :markup_config, controller: 'lender_markup_configs',
+                 only: [:show, :create, :update]
+      end
 
       # Suppliers
       resources :suppliers do

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_09_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_09_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3561,6 +3561,55 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_160000) do
     t.index ["utm_medium"], name: "index_leads_on_utm_medium"
     t.index ["utm_source"], name: "index_leads_on_utm_source"
     t.index ["vehicle_id"], name: "index_leads_on_vehicle_id"
+  end
+
+  create_table "lender_allowance_items", force: :cascade do |t|
+    t.bigint "lender_id", null: false
+    t.bigint "company_id", null: false
+    t.string "category", null: false
+    t.string "name"
+    t.decimal "standard_allowance", precision: 15, scale: 2
+    t.decimal "maximum_allowance", precision: 15, scale: 2
+    t.string "pricing_basis"
+    t.string "material"
+    t.decimal "wind_zone2_adder_per_side", precision: 15, scale: 2
+    t.decimal "wind_zone3_adder_per_side", precision: 15, scale: 2
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_lender_allowance_items_on_company_id"
+    t.index ["lender_id"], name: "index_lender_allowance_items_on_lender_id"
+  end
+
+  create_table "lender_deletion_items", force: :cascade do |t|
+    t.bigint "lender_id", null: false
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.decimal "amount", precision: 15, scale: 2
+    t.string "invoice_reference"
+    t.decimal "single_amount", precision: 15, scale: 2
+    t.decimal "multi_amount", precision: 15, scale: 2
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_lender_deletion_items_on_company_id"
+    t.index ["lender_id"], name: "index_lender_deletion_items_on_lender_id"
+  end
+
+  create_table "lender_markup_configs", force: :cascade do |t|
+    t.bigint "lender_id", null: false
+    t.bigint "company_id", null: false
+    t.decimal "base_markup_pct", precision: 8, scale: 2, default: "145.0"
+    t.integer "max_age_years", default: 4
+    t.decimal "vep0_adj_pct", precision: 8, scale: 2, default: "5.0"
+    t.decimal "vep1_adj_pct", precision: 8, scale: 2, default: "0.0"
+    t.decimal "vep2_adj_pct", precision: 8, scale: 2, default: "-5.0"
+    t.decimal "used_onsite_factor_pct", precision: 8, scale: 2, default: "140.0"
+    t.decimal "used_delivered_factor_pct", precision: 8, scale: 2, default: "130.0"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_lender_markup_configs_on_company_id"
+    t.index ["lender_id"], name: "index_lender_markup_configs_on_lender_id", unique: true
   end
 
   create_table "lender_program_tiers", force: :cascade do |t|
@@ -7331,6 +7380,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_160000) do
   add_foreign_key "leads", "locations"
   add_foreign_key "leads", "sources"
   add_foreign_key "leads", "vehicles"
+  add_foreign_key "lender_allowance_items", "companies"
+  add_foreign_key "lender_allowance_items", "lenders"
+  add_foreign_key "lender_deletion_items", "companies"
+  add_foreign_key "lender_deletion_items", "lenders"
+  add_foreign_key "lender_markup_configs", "companies"
+  add_foreign_key "lender_markup_configs", "lenders"
   add_foreign_key "lender_program_tiers", "lender_programs"
   add_foreign_key "lender_programs", "companies"
   add_foreign_key "lenders", "companies"

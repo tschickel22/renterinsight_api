@@ -10,6 +10,11 @@ class Lender < ApplicationRecord
   belongs_to :company
   has_many :deals, dependent: :nullify
 
+  # Max Advance Phase 2 — per-lender calculation schedule (config only).
+  has_many :allowance_items, class_name: 'LenderAllowanceItem', dependent: :destroy
+  has_many :deletion_items,  class_name: 'LenderDeletionItem',  dependent: :destroy
+  has_one  :markup_config,   class_name: 'LenderMarkupConfig',  dependent: :destroy
+
   validates :name, presence: true
   validates :email, format: { with: URI::MailTo::EMAIL_REGEXP, allow_blank: true }
 
