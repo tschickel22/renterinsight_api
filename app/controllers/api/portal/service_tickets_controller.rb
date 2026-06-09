@@ -163,8 +163,16 @@ module Api
             params[:files].each do |file|
               ticket.attachments.attach(file)
             end
+            # Customer-uploaded files are visible to the customer by default so they
+            # see their own uploads in the portal. Manufacturer stays opt-in (staff).
+            ticket.attachments.reload.each do |att|
+              AttachmentAudience.find_or_create_by(active_storage_attachment_id: att.id) do |a|
+                a.visible_to_customer = true
+                a.visible_to_manufacturer = false
+              end
+            end
           end
-          
+
           render json: {
             success: true,
             data: serialize_ticket(ticket, include_details: true),
@@ -338,16 +346,21 @@ module Api
               }
             end
           
-          # Include attachment URLs for viewing
-          data[:attachments] = ticket.attachments.map do |attachment|
-            {
-              id: attachment.id,
-              filename: attachment.filename.to_s,
-              contentType: attachment.content_type,
-              byteSize: attachment.byte_size,
-              url: Rails.application.routes.url_helpers.rails_blob_url(attachment, only_path: true)
-            }
-          end
+          # Include attachment URLs for viewing — only files tagged customer-visible
+          customer_visible_ids = AttachmentAudience
+            .where(active_storage_attachment_id: ticket.attachments.map(&:id), visible_to_customer: true)
+            .pluck(:active_storage_attachment_id)
+          data[:attachments] = ticket.attachments
+            .select { |attachment| customer_visible_ids.include?(attachment.id) }
+            .map do |attachment|
+              {
+                id: attachment.id,
+                filename: attachment.filename.to_s,
+                contentType: attachment.content_type,
+                byteSize: attachment.byte_size,
+                url: Rails.application.routes.url_helpers.rails_blob_url(attachment, only_path: true)
+              }
+            end
         end
         
         data

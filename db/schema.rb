@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_09_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -676,6 +676,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_190000) do
     t.index ["contractor_assignment_id"], name: "index_assignment_work_logs_on_contractor_assignment_id"
     t.index ["user_id"], name: "index_assignment_work_logs_on_user_id"
     t.index ["vendor_id"], name: "index_assignment_work_logs_on_vendor_id"
+  end
+
+  create_table "attachment_audiences", force: :cascade do |t|
+    t.bigint "active_storage_attachment_id", null: false
+    t.boolean "visible_to_customer", default: false, null: false
+    t.boolean "visible_to_manufacturer", default: false, null: false
+    t.bigint "tagged_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active_storage_attachment_id"], name: "index_attachment_audiences_on_attachment", unique: true
   end
 
   create_table "audience_ai_generations", force: :cascade do |t|
