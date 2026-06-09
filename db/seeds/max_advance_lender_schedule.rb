@@ -32,16 +32,22 @@ ALLOWANCES_21ST = [
 ].freeze
 
 # name, amount, invoice_reference, single_amount, multi_amount
+# Notes (reconciled against the Sunshine worksheets/invoices):
+#  - dealer_rebate has NO invoice_reference: the manufacturer Sales Allowance is already
+#    netted into Total Invoice (= gross_invoice / A), so deleting it again would double-count.
+#  - hud_fees combines hud_fees + state_assoc_fees (the worksheet's single "HUD Dues/Fees"
+#    line is both, e.g. 160+110=270 single / 320+220=540 multi).
+#  - trim_out pulls the manufacturer Trim Out line from the invoice (deleted + added back).
 DELETIONS_21ST = [
-  ['wheels_axles',    nil, nil,                500,  1000],
-  ['factory_freight', nil, 'factory_freight',  nil,  nil],
-  ['dealer_rebate',   nil, 'sales_allowance',  nil,  nil],
-  ['ac',              nil, nil,                nil,  nil],
-  ['tax_from_invoice',nil, 'tax_from_invoice', nil,  nil],
-  ['hud_fees',        nil, 'hud_fees',         nil,  nil],
-  ['packs',           nil, nil,                nil,  nil],
-  ['advertising',     nil, nil,                nil,  nil],
-  ['trim_out',        nil, nil,                nil,  nil]
+  ['wheels_axles',    nil, nil,                         500,  1000],
+  ['factory_freight', nil, 'factory_freight',           nil,  nil],
+  ['dealer_rebate',   nil, nil,                         nil,  nil],
+  ['ac',              nil, nil,                         nil,  nil],
+  ['tax_from_invoice',nil, 'tax_from_invoice',          nil,  nil],
+  ['hud_fees',        nil, 'hud_fees+state_assoc_fees', nil,  nil],
+  ['packs',           nil, nil,                         nil,  nil],
+  ['advertising',     nil, nil,                         nil,  nil],
+  ['trim_out',        nil, 'trim_out',                  nil,  nil]
 ].freeze
 
 MARKUP_21ST = {

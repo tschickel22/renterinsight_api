@@ -18,6 +18,7 @@ class VehicleInvoice < ApplicationRecord
   NUMERIC_FIELDS = %i[
     gross_invoice base_price options_total material_surcharge factory_freight
     sales_allowance hud_fees state_assoc_fees tax_from_invoice total_invoice nada_base
+    trim_out
   ].freeze
 
   # One invoice per vehicle (also enforced by a unique DB index).

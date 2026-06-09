@@ -96,7 +96,7 @@ module Api
         params.require(:invoice).permit(
           :gross_invoice, :base_price, :options_total, :material_surcharge, :factory_freight,
           :sales_allowance, :hud_fees, :state_assoc_fees, :tax_from_invoice, :total_invoice,
-          :nada_base, :vep_code, :wind_zone,
+          :nada_base, :trim_out, :vep_code, :wind_zone,
           :invoice_number, :invoice_date, :manufacturer, :scanned_document_id
           # company_id and vehicle_id intentionally excluded (derived from scope/route).
         )
@@ -117,6 +117,7 @@ module Api
           taxFromInvoice: inv.tax_from_invoice,
           totalInvoice: inv.total_invoice,
           nadaBase: inv.nada_base,
+          trimOut: inv.trim_out,
           vepCode: inv.vep_code,
           windZone: inv.wind_zone,
           invoiceNumber: inv.invoice_number,
