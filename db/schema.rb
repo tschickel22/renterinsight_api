@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_05_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_09_154713) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1916,6 +1916,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_05_120000) do
     t.string "meta_catalog_token"
     t.string "industry", default: "manufactured_housing", null: false
     t.jsonb "deal_desk_settings", default: {}, null: false
+    t.string "account_number"
+    t.index ["account_number"], name: "index_companies_on_account_number", unique: true
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"

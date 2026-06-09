@@ -197,6 +197,7 @@ class Company < ApplicationRecord
     :show_filters                     # boolean - show filter sidebar
   
   # Callbacks
+  after_create :assign_account_number
   after_create :create_default_location
   after_create :ensure_corporate_location
   after_create :seed_default_project_templates
@@ -689,6 +690,16 @@ class Company < ApplicationRecord
     Location.ensure_corporate_for(self)
   rescue => e
     Rails.logger.warn "[Company] Failed to create corporate location for company #{id}: #{e.message}"
+  end
+
+  # Assign account number derived from id (RI-00019). Runs after_create because
+  # id isn't available until the row exists. update_column skips validations and
+  # callbacks so it won't re-trigger this hook.
+  def assign_account_number
+    return if account_number.present?
+    update_column(:account_number, format('RI-%05d', id))
+  rescue => e
+    Rails.logger.error "Failed to assign account_number for Company #{id}: #{e.message}"
   end
 
   def create_default_location
