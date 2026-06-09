@@ -19,6 +19,17 @@ class DealProduct < ApplicationRecord
     product_sku.to_s.match?(VEHICLE_SKU_PATTERN)
   end
 
+  # Is this the home/unit line on the deal? Recognized by EITHER signal:
+  #   - notes tagged `category:home` (Phase 3 FE writes the home line with a
+  #     CUSTOM-<uuid> SKU + this tag — NOT a VEHICLE-<id> SKU), or
+  #   - a VEHICLE-<id> SKU (vehicle_line_item?, e.g. the 2A backfill).
+  # Used by Deal#home_line_item for the selling_price mirror. Note: vehicle_line_item?
+  # stays VEHICLE-SKU-only on purpose — it must extract the numeric vehicle id for
+  # deal.vehicle_id linking; this broader check is detection-only.
+  def home_line_item?
+    notes.to_s.match?(/category:\s*home\b/i) || vehicle_line_item?
+  end
+
   def referenced_vehicle_id
     match = product_sku.to_s.match(VEHICLE_SKU_PATTERN)
     match && match[1].to_i

@@ -39,6 +39,11 @@ namespace :deals do
     skipped_veh  = 0
 
     scope.find_each do |deal|
+      # has_home_line_item? now detects BOTH home-line formats — the Phase 3 FE's
+      # `category:home`-tagged CUSTOM-<uuid> line as well as a VEHICLE-<id> line (see
+      # DealProduct#home_line_item?). So deals that already carry a CUSTOM- home line are
+      # correctly SKIPPED here — fixing the earlier double-add (the old check only saw
+      # VEHICLE-<id> SKUs and re-added a home line to deals that already had one).
       if deal.has_home_line_item?
         skipped_has += 1
         next

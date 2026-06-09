@@ -319,11 +319,22 @@ class Deal < ApplicationRecord
   # (DealProduct::VEHICLE_SKU_PATTERN), tagged `category:home` by the backfill.
   # ============================================================================
 
-  # The single home/unit line item (SKU VEHICLE-<id>), or nil when the home is
-  # not yet a line item (legacy deals — the home price lives on selling_price and
-  # deals_controller#deal_json injects a synthetic 'primary-vehicle' line).
+  # The single home/unit line item, or nil when the home is not yet a line item
+  # (legacy deals — the home price lives on selling_price and deals_controller#deal_json
+  # injects a synthetic 'primary-vehicle' line). Detection spans BOTH home-line formats:
+  # the Phase 3 FE's `category:home`-tagged CUSTOM-<uuid> line and a VEHICLE-<id> line
+  # (see DealProduct#home_line_item?). When more than one home line exists (data anomaly),
+  # prefer a VEHICLE-<id> line if present (it carries the vehicle id) else the first, and
+  # log a warning so the anomaly is visible.
   def home_line_item
-    deal_products.detect(&:vehicle_line_item?)
+    homes = deal_products.select(&:home_line_item?)
+    return homes.first if homes.size <= 1
+
+    Rails.logger.warn(
+      "[Deal] Deal #{id}: #{homes.size} home line items found " \
+      "(ids #{homes.map(&:id).inspect}); using the VEHICLE-SKU line if present, else the first."
+    )
+    homes.detect(&:vehicle_line_item?) || homes.first
   end
 
   def has_home_line_item?
