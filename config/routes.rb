@@ -2740,7 +2740,11 @@ Rails.application.routes.draw do
       end
 
       # Portal Service Tickets
-      resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
+      resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets' do
+        member do
+          post :notes # Customer replies to a customer-facing note thread
+        end
+      end
 
       # Portal Agreements
       resources :agreements, only: [:index, :show] do

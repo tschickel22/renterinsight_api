@@ -4136,7 +4136,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_190000) do
     t.string "created_by_name"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "category", default: "general", null: false
+    t.string "author_type", default: "staff", null: false
     t.index ["created_at"], name: "index_notes_on_created_at"
+    t.index ["entity_type", "entity_id", "category"], name: "index_notes_on_entity_and_category"
     t.index ["entity_type", "entity_id"], name: "index_notes_on_entity_type_and_entity_id"
     t.index ["user_id"], name: "index_notes_on_user_id"
   end
@@ -5436,6 +5439,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_190000) do
     t.boolean "portal_visible", default: true, null: false
     t.string "ticket_number"
     t.bigint "deal_id"
+    t.string "factory_po"
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"

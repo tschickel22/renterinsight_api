@@ -484,6 +484,7 @@ module Api
           :is_portal_created,
           :portal_notes,
           :portal_visible,  # Allow customer to view this ticket in portal
+          :factory_po,
           parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total, :part_id, :partId],
           labor: [:id, :description, :hours, :rate, :total],
           custom_fields: {},
@@ -511,6 +512,7 @@ module Api
           status: ticket.status,
           priority: ticket.priority,
           assignedTo: ticket.assigned_to,
+          factoryPo: ticket.factory_po,
           assignedToUser: ticket.assigned_to.present? ? serialize_assigned_user(ticket.assigned_to) : nil,
           scheduledDate: ticket.scheduled_date,
           notes: ticket.notes,
