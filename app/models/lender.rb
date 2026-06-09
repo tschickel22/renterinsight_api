@@ -24,6 +24,7 @@ class Lender < ApplicationRecord
   scope :by_name,     -> { order(:name) }
 
   before_validation :normalize_fields
+  after_create :seed_allowance_from_defaults
 
   def soft_delete!
     update!(is_deleted: true, active: false)
@@ -39,5 +40,12 @@ class Lender < ApplicationRecord
     self.name  = name&.strip
     self.email = email&.strip&.downcase if email.present?
     self.phone = phone&.strip if phone.present?
+  end
+
+  # Auto-populate this lender's allowance schedule from company defaults.
+  def seed_allowance_from_defaults
+    CompanyAllowanceDefault.populate_lender(self)
+  rescue => e
+    Rails.logger.error "[Lender#seed_allowance_from_defaults] Failed for lender #{id}: #{e.message}"
   end
 end

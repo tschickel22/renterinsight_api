@@ -5,6 +5,7 @@
 class LenderAllowanceItem < ApplicationRecord
   belongs_to :lender
   belongs_to :company
+  belongs_to :company_allowance_default, optional: true  # tracks which default this was seeded from
 
   CATEGORIES = %w[
     options delivery_set trim_out skirting steps_decks footers pad hookups
@@ -17,7 +18,9 @@ class LenderAllowanceItem < ApplicationRecord
   validates :pricing_basis, inclusion: { in: PRICING_BASES }, allow_nil: true
   validates :standard_allowance, :maximum_allowance,
             :wind_zone2_adder_per_side, :wind_zone3_adder_per_side,
+            :dealer_cost, :dealer_price,
             numericality: true, allow_nil: true
 
   scope :active, -> { where(active: true) }
+  scope :ordered, -> { order(:position, :name) }
 end

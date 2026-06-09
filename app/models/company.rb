@@ -56,6 +56,7 @@ class Company < ApplicationRecord
   has_many :lender_programs, dependent: :destroy
   has_many :fee_templates, dependent: :destroy
   has_many :fni_products, dependent: :destroy
+  has_many :company_allowance_defaults, dependent: :destroy
 
   # Email Campaigns
   has_many :campaigns, dependent: :destroy

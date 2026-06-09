@@ -1192,6 +1192,16 @@ Rails.application.routes.draw do
         end
       end
       
+      # Company-level dealer-installed item defaults (Max Advance two-tier system, tier 1).
+      # Seeded from 21st Mortgage; copied to each new lender as its starting schedule.
+      resources :company_allowance_defaults,
+                only: [:index, :show, :create, :update, :destroy] do
+        collection do
+          post :seed          # idempotent (re)seed of 21st defaults
+          post :sync_lenders  # push defaults to lenders missing them (gap-fill only)
+        end
+      end
+
       # Lenders (lightweight managed list for the deal quick-add dropdown + Finance settings)
       resources :lenders do
         # Max Advance Phase 2 — per-lender calculation schedule (Finance settings).
