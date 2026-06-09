@@ -33,7 +33,20 @@ module Api
           # 'finance' and 'all' scopes see everything — no filter needed
         end
 
-        render json: templates.map { |t| template_json(t) }
+        payload = templates.map { |t| template_json(t) }
+
+        # Standard Items (dealer-installed allowance defaults) — opt-in merge.
+        # Line-item pickers (deals/quotes/invoices/inventory) pass
+        # include_standard=true to show these alongside templates. The Item
+        # Templates management page does NOT pass it, so it never renders rows
+        # it can't edit (Standard Items are managed in Finance > Loan Settings).
+        # Negative IDs guarantee no collision with real template IDs; inventory
+        # apply_template resolves negative IDs back to CompanyAllowanceDefault.
+        if params[:include_standard].present?
+          payload += @company.company_allowance_defaults.active.ordered.map { |d| standard_item_json(d) }
+        end
+
+        render json: payload
       end
 
       # POST /api/v1/package_templates
@@ -115,6 +128,35 @@ module Api
           showPriceInMarketing: template.respond_to?(:show_price_in_marketing) ? (template.show_price_in_marketing.nil? ? true : template.show_price_in_marketing) : true,
           createdAt: template.created_at,
           updatedAt: template.updated_at
+        }
+      end
+
+      # CompanyAllowanceDefault shaped as a PackageTemplate for the merged
+      # picker feed. Price/cost are the dealer's company-level numbers;
+      # standard/max allowances ride along so pickers can hint the caps.
+      # The created line item must persist allowanceDefaultId so the Max
+      # Advance calculator and lender-cap flagging can identify it later.
+      def standard_item_json(d)
+        {
+          id: -d.id,                                  # negative = standard item namespace
+          name: d.name,
+          description: d.category.to_s.titleize,
+          defaultPrice: d.dealer_price&.to_f,
+          cost: d.dealer_cost&.to_f,
+          includeInTotal: true,
+          position: 10_000 + d.position.to_i,         # group after real templates
+          isActive: true,
+          applicableTo: 'all',
+          visibilityScope: 'all',
+          taxable: false,
+          taxRate: nil,
+          showPriceInMarketing: true,
+          isStandardItem: true,
+          allowanceDefaultId: d.id,
+          standardAllowance: d.standard_allowance&.to_f,
+          maximumAllowance: d.maximum_allowance&.to_f,
+          createdAt: d.created_at,
+          updatedAt: d.updated_at
         }
       end
     end

@@ -172,7 +172,8 @@ module Api
           :discount,
           :discount_type,
           :tax,
-          :notes
+          :notes,
+          :source_type
         )
       end
 
@@ -188,6 +189,12 @@ module Api
           tax: item_params[:taxAmount] || item_params[:tax] || 0,
           notes: build_notes(item_params)
         }
+
+        # Explicit discriminator (deal_products.source_type) when the FE sends one
+        # (e.g. 'standard_item' for dealer-installed allowance items — the Max
+        # Advance calculator and lender-cap flagging key off this).
+        source_type = item_params[:sourceType] || item_params[:source_type]
+        attrs[:source_type] = source_type if source_type.present?
 
         # Only set :cost when the caller explicitly provides one. Leaving the key absent
         # lets the column default (0) stand, and lets vehicle line items auto-fill from the
@@ -324,6 +331,7 @@ module Api
           total: product.total,
           lineProfit: product.line_profit,
           notes: product.notes,
+          sourceType: product.source_type,
           createdAt: product.created_at,
           updatedAt: product.updated_at
         }
