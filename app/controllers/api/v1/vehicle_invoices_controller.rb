@@ -34,7 +34,80 @@ module Api
         upsert
       end
 
+      # POST /api/v1/vehicles/:vehicle_id/invoice/scan  (Phase 5)
+      # Vision-extract a manufacturer invoice into a DRAFT of the invoice fields. It does
+      # NOT persist — the client reviews/corrects the draft, then PATCHes #update to commit.
+      # Verify-before-commit is mandatory: a wrong scanned figure would skew Max Sales Price.
+      def scan
+        return unless authorize_invoice_access!
+
+        source = scan_source
+        return if performed? # scan_source rendered an error (doc not found / not internal)
+        return render(json: { error: 'Provide a file upload or an internal document_id to scan' },
+                      status: :unprocessable_entity) if source.nil?
+
+        result = MaxAdvanceInvoiceScanService.new(@company, current_user).scan(source)
+
+        render json: {
+          draft: true,
+          persisted: false,                 # nothing written to the vehicle_invoice
+          requiresVerification: true,
+          vehicleId: @vehicle.id,
+          scannedDocumentId: @scanned_document_id, # set when scanning a stored internal doc
+          fields: camelize_scan_fields(result[:fields]),
+          confidence: result[:confidence],
+          fieldConfidence: result[:field_confidence],
+          warnings: result[:warnings],
+          note: 'DRAFT only — not saved. Review/correct, then PATCH this vehicle\'s /invoice to commit.'
+        }
+      rescue MaxAdvanceInvoiceScanService::ScanError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       private
+
+      # Resolve the scan source: a stored INTERNAL-ONLY vehicle document (preferred) or a
+      # transient direct file upload (not stored here; persistence is the documents endpoint).
+      def scan_source
+        if params[:document_id].present?
+          doc = @vehicle.documents.find_by(id: params[:document_id])
+          unless doc
+            render json: { error: 'Document not found' }, status: :not_found
+            return nil
+          end
+          unless doc.visibility == 'internal'
+            render json: { error: 'Invoice scans must use an internal-only document' }, status: :unprocessable_entity
+            return nil
+          end
+          @scanned_document_id = doc.id
+          doc.file_url
+        elsif params[:file].present?
+          params[:file]
+        end
+      end
+
+      def camelize_scan_fields(f)
+        {
+          grossInvoice: f['gross_invoice'],
+          basePrice: f['base_price'],
+          optionsTotal: f['options_total'],
+          materialSurcharge: f['material_surcharge'],
+          factoryFreight: f['factory_freight'],
+          salesAllowance: f['sales_allowance'],
+          hudFees: f['hud_fees'],
+          stateAssocFees: f['state_assoc_fees'],
+          taxFromInvoice: f['tax_from_invoice'],
+          trimOut: f['trim_out'],
+          totalInvoice: f['total_invoice'],
+          vepCode: f['vep_code'],
+          windZone: f['wind_zone'],
+          sections: f['sections'],
+          manufacturer: f['manufacturer'],
+          model: f['model'],
+          invoiceNumber: f['invoice_number'],
+          invoiceDate: f['invoice_date']
+        }
+      end
 
       # Single code path for create + update: there is at most one invoice per vehicle,
       # so we find-or-build and assign. company_id is forced from scope (immutable),

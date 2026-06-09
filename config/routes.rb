@@ -539,6 +539,7 @@ Rails.application.routes.draw do
       resources :service_tickets, path: 'service-tickets' do
         member do
           post :upload_attachments, path: 'upload-attachments'
+          patch 'attachments/:attachment_id/audience', action: :set_attachment_audience
           post :mark_warranty_suspected, path: 'mark-warranty-suspected'
           post :set_line_billing, path: 'set-line-billing'
           post :generate_customer_invoice, path: 'generate-customer-invoice'
@@ -732,7 +733,10 @@ Rails.application.routes.draw do
 
         # Internal-only manufacturer-invoice capture (Max Advance Phase 1).
         # Singular: one invoice per vehicle; create/update both upsert.
-        resource :invoice, controller: 'vehicle_invoices', only: [:show, :create, :update]
+        # scan (Phase 5): vision-extract a DRAFT from a manufacturer invoice — never persists.
+        resource :invoice, controller: 'vehicle_invoices', only: [:show, :create, :update] do
+          post :scan
+        end
 
         # Vehicle packages (Package Builder)
         resources :packages, controller: 'inventory_packages' do
