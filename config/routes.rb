@@ -2379,6 +2379,7 @@ Rails.application.routes.draw do
           post :tags, to: 'deals#add_tags'
           delete 'tags/:tag_name', to: 'deals#remove_tag'
           get :commission_breakdown # Commission economics breakdown
+          get :max_advance # Max Advance (lender cap) for this deal's vehicle (Phase 4a)
           get :financials # NEW: Get deal financials (permission-gated)
           patch :financials, to: 'deals#update_financials' # NEW: Update deal financials (permission-gated)
           get :service_tickets # NEW: Get service tickets for this deal

@@ -2,7 +2,7 @@ module Api
   module Crm
     class DealsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets]
+      before_action :set_deal, only: [:show, :update, :destroy, :move_stage, :tags, :add_tags, :remove_tag, :service_tickets, :max_advance]
 
       # GET /api/crm/deals
       def index
@@ -244,8 +244,43 @@ module Api
       # GET /api/crm/deals/:id
       def show
         return unless authorize_action!('deals', 'read')
-        
+
         render json: deal_json(@deal, detailed: true)
+      end
+
+      # GET /api/crm/deals/:id/max_advance
+      # Lender Max Advance for this deal's vehicle (Phase 4a surfacing), with a status
+      # classifying the deal's home line-item price against the caps. Cost-derived, so it
+      # additionally requires deals:read:view_cost_details (mirrors deal_json cost gating).
+      def max_advance
+        return unless authorize_action!('deals', 'read')
+
+        unless current_user&.has_permission?('deals', 'read', scope: 'view_cost_details')
+          return render json: { error: 'Forbidden - cost details permission required',
+                                required_permission: 'deals:read:view_cost_details' }, status: :forbidden
+        end
+
+        vehicle = @deal.vehicle
+        lender  = @deal.lender
+        # Home line-item price is the figure compared to the caps (Phase 2B: selling_price
+        # mirrors the home line). Falls back to the line-items total for legacy deals.
+        price = @deal.selling_price.to_f.positive? ? @deal.selling_price : @deal.line_items_price
+
+        result = MaxAdvanceSurfacing.evaluate(vehicle: vehicle, lender: lender, deal: @deal, price: price)
+
+        render json: {
+          dealId: @deal.id,
+          vehicleId: vehicle&.id,
+          vehicleName: vehicle&.display_name,
+          lenderName: lender&.name,
+          comparedPrice: price,
+          standardMsp: result[:standard_msp],
+          maximumMsp: result[:maximum_msp],
+          status: result[:status],            # within_standard | within_maximum | over_maximum | null
+          reason: result[:reason],            # null, or why MSP couldn't be computed
+          flag: result[:reason] ? MaxAdvanceSurfacing.flag_for(result[:reason]) : nil,
+          breakdown: result[:breakdown]
+        }
       end
 
       # POST /api/crm/deals
