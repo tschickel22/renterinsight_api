@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_09_154713) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_09_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6336,6 +6336,33 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_154713) do
     t.index ["visibility"], name: "index_vehicle_documents_on_visibility"
   end
 
+  create_table "vehicle_invoices", force: :cascade do |t|
+    t.bigint "vehicle_id", null: false
+    t.bigint "company_id", null: false
+    t.decimal "gross_invoice", precision: 15, scale: 2
+    t.decimal "base_price", precision: 15, scale: 2
+    t.decimal "options_total", precision: 15, scale: 2
+    t.decimal "material_surcharge", precision: 15, scale: 2
+    t.decimal "factory_freight", precision: 15, scale: 2
+    t.decimal "sales_allowance", precision: 15, scale: 2
+    t.decimal "hud_fees", precision: 15, scale: 2
+    t.decimal "state_assoc_fees", precision: 15, scale: 2
+    t.decimal "tax_from_invoice", precision: 15, scale: 2
+    t.decimal "total_invoice", precision: 15, scale: 2
+    t.decimal "nada_base", precision: 15, scale: 2
+    t.integer "vep_code"
+    t.integer "wind_zone"
+    t.string "invoice_number"
+    t.date "invoice_date"
+    t.string "manufacturer"
+    t.bigint "scanned_document_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_vehicle_invoices_on_company_id"
+    t.index ["scanned_document_id"], name: "index_vehicle_invoices_on_scanned_document_id"
+    t.index ["vehicle_id"], name: "index_vehicle_invoices_on_vehicle_id", unique: true
+  end
+
   create_table "vehicles", force: :cascade do |t|
     t.integer "company_id"
     t.string "stock_number"
@@ -7521,6 +7548,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_154713) do
   add_foreign_key "users", "invitations"
   add_foreign_key "vehicle_documents", "users", column: "uploaded_by_user_id"
   add_foreign_key "vehicle_documents", "vehicles"
+  add_foreign_key "vehicle_invoices", "companies"
+  add_foreign_key "vehicle_invoices", "vehicle_documents", column: "scanned_document_id", on_delete: :nullify
+  add_foreign_key "vehicle_invoices", "vehicles"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"

@@ -730,6 +730,10 @@ Rails.application.routes.draw do
         # Vehicle documents (3-tier visibility: internal/customer/public)
         resources :documents, controller: 'vehicle_documents'
 
+        # Internal-only manufacturer-invoice capture (Max Advance Phase 1).
+        # Singular: one invoice per vehicle; create/update both upsert.
+        resource :invoice, controller: 'vehicle_invoices', only: [:show, :create, :update]
+
         # Vehicle packages (Package Builder)
         resources :packages, controller: 'inventory_packages' do
           collection do

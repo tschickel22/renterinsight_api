@@ -50,6 +50,8 @@ class Vehicle < ApplicationRecord
   has_many :inventory_packages, dependent: :destroy
   has_many :tracked_links, dependent: :nullify
   has_many :documents, class_name: 'VehicleDocument', dependent: :destroy
+  # Internal-only manufacturer-invoice capture (Max Advance Phase 1). One per vehicle.
+  has_one :invoice, class_name: 'VehicleInvoice', dependent: :destroy
 
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
