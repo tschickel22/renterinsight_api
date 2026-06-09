@@ -56,7 +56,7 @@ class Manufacturer < ApplicationRecord
   
   def as_json(options = {})
     super(options.merge(
-      only: [:id, :name, :code, :contact_email, :contact_phone, :website,
+      only: [:id, :name, :code, :contact_name, :contact_email, :contact_phone, :website,
              :active, :created_at, :updated_at],
       methods: [:display_name]
     ))
@@ -67,6 +67,7 @@ class Manufacturer < ApplicationRecord
   def normalize_fields
     self.name = name&.strip
     self.code = code&.strip&.upcase if code.present?
+    self.contact_name = contact_name&.strip if contact_name.present?
     self.contact_email = contact_email&.strip&.downcase if contact_email.present?
     self.contact_phone = contact_phone&.strip if contact_phone.present?
   end

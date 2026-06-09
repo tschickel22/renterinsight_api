@@ -23,14 +23,15 @@ RSpec.describe Manufacturer, type: :model do
     expect(m.code).to eq('AH')
   end
 
-  it 'serializes without referencing missing columns' do
-    m = Manufacturer.create!(name: 'Acme Homes', industry_type: 'manufactured_housing', code: 'AH')
+  it 'serializes real columns and omits the ones that never existed' do
+    m = Manufacturer.create!(name: 'Acme Homes', industry_type: 'manufactured_housing',
+                             code: 'AH', contact_name: 'Warranty Dept')
     json = m.as_json
 
     expect(json['display_name']).to eq('Acme Homes (AH)')
-    expect(json).not_to have_key('contact_name')
-    expect(json).not_to have_key('full_address')
-    expect(json).not_to have_key('company_id')
+    expect(json['contact_name']).to eq('Warranty Dept') # real column now
+    expect(json).not_to have_key('full_address')        # removed dead method
+    expect(json).not_to have_key('company_id')          # never a column on this table
   end
 
   it 'enforces code uniqueness via validation' do

@@ -109,6 +109,7 @@ class Api::V1::Admin::ManufacturersController < ApplicationController
     params.require(:manufacturer).permit(
       :name,
       :industry_type,
+      :contact_name,
       :contact_email,
       :contact_phone,
       :website,
@@ -124,6 +125,7 @@ class Api::V1::Admin::ManufacturersController < ApplicationController
       id: manufacturer.id,
       name: manufacturer.name,
       industryType: manufacturer.industry_type,
+      contactName: manufacturer.contact_name,
       contactEmail: manufacturer.contact_email,
       contactPhone: manufacturer.contact_phone,
       website: manufacturer.website,

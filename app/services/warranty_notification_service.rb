@@ -33,16 +33,17 @@ class WarrantyNotificationService
     template = find_template('warranty_submitted_to_manufacturer', warranty_claim.company_id)
     raise TemplateNotFoundError, 'Warranty submission template not found' unless template
     
-    # Ensure manufacturer has email
-    raise MissingRecipientError, 'Manufacturer has no email address' if warranty_claim.manufacturer.contact_email.blank?
-    
+    # Resolve recipient: company's own rep override → global factory contact
+    recipient_email = resolve_manufacturer_email(warranty_claim)
+    raise MissingRecipientError, 'Manufacturer has no email address' if recipient_email.blank?
+
     # Build template context
     context = build_claim_context(warranty_claim)
-    
+
     # Send via existing CommunicationService
     CommunicationService.send_email(
       communicable: warranty_claim,
-      to: warranty_claim.manufacturer.contact_email,
+      to: recipient_email,
       subject: render_template(template.subject, context),
       body: render_template(template.body, context),
       category: 'warranty',
@@ -398,6 +399,16 @@ class WarrantyNotificationService
     "#{base_url}/portal/service-tickets"
   end
   
+  # Resolve where to send a warranty claim: the dealer's per-company rep email
+  # override if set, otherwise the global factory contact email.
+  def self.resolve_manufacturer_email(warranty_claim)
+    company_manufacturer = CompanyManufacturer.find_by(
+      company_id: warranty_claim.company_id,
+      manufacturer_id: warranty_claim.manufacturer_id
+    )
+    company_manufacturer&.contact_email.presence || warranty_claim.manufacturer&.contact_email
+  end
+
   # Get dealer code from location or company manufacturer relationship
   def self.get_dealer_code(warranty_claim)
     manufacturer_id = warranty_claim.manufacturer_id

@@ -30,8 +30,18 @@ class Api::Company::ManufacturersController < ApplicationController
         id: manufacturer.id,
         name: manufacturer.name,
         industryType: manufacturer.industry_type,
-        contactEmail: manufacturer.contact_email,
-        contactPhone: manufacturer.contact_phone,
+        # Effective contact (company override if set, else factory default)
+        contactName: company_manufacturer&.effective_contact_name || manufacturer.contact_name,
+        contactEmail: company_manufacturer&.effective_contact_email || manufacturer.contact_email,
+        contactPhone: company_manufacturer&.effective_contact_phone || manufacturer.contact_phone,
+        # This company's own override (nil = inherit factory default)
+        contactNameOverride: company_manufacturer&.contact_name,
+        contactEmailOverride: company_manufacturer&.contact_email,
+        contactPhoneOverride: company_manufacturer&.contact_phone,
+        # Factory defaults (read-only reference)
+        factoryContactName: manufacturer.contact_name,
+        factoryContactEmail: manufacturer.contact_email,
+        factoryContactPhone: manufacturer.contact_phone,
         website: manufacturer.website,
         active: manufacturer.active,
         selected: selected_ids.include?(manufacturer.id),
@@ -62,6 +72,9 @@ class Api::Company::ManufacturersController < ApplicationController
     company_manufacturer.assign_attributes(
       dealer_code: params[:dealer_code],
       notes: params[:notes],
+      contact_name: params[:contact_name],
+      contact_email: params[:contact_email],
+      contact_phone: params[:contact_phone],
       active: true
     )
     
@@ -110,7 +123,7 @@ class Api::Company::ManufacturersController < ApplicationController
   end
   
   def update_params
-    params.permit(:dealer_code, :notes, :active)
+    params.permit(:dealer_code, :notes, :active, :contact_name, :contact_email, :contact_phone)
   end
   
   def determine_company_industry_types
@@ -121,15 +134,28 @@ class Api::Company::ManufacturersController < ApplicationController
   end
   
   def serialize_company_manufacturer(company_manufacturer)
+    manufacturer = company_manufacturer.manufacturer
     {
       id: company_manufacturer.id,
       companyId: company_manufacturer.company_id,
       manufacturerId: company_manufacturer.manufacturer_id,
-      manufacturerName: company_manufacturer.manufacturer.name,
-      industryType: company_manufacturer.manufacturer.industry_type,
+      manufacturerName: manufacturer.name,
+      industryType: manufacturer.industry_type,
       dealerCode: company_manufacturer.dealer_code,
       active: company_manufacturer.active,
       notes: company_manufacturer.notes,
+      # Effective contact (company override if set, else factory default)
+      contactName: company_manufacturer.effective_contact_name,
+      contactEmail: company_manufacturer.effective_contact_email,
+      contactPhone: company_manufacturer.effective_contact_phone,
+      # This company's own override (nil = inherit factory default)
+      contactNameOverride: company_manufacturer.contact_name,
+      contactEmailOverride: company_manufacturer.contact_email,
+      contactPhoneOverride: company_manufacturer.contact_phone,
+      # Factory defaults (read-only reference)
+      factoryContactName: manufacturer.contact_name,
+      factoryContactEmail: manufacturer.contact_email,
+      factoryContactPhone: manufacturer.contact_phone,
       createdAt: company_manufacturer.created_at,
       updatedAt: company_manufacturer.updated_at
     }

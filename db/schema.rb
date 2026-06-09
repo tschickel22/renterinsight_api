@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_09_210100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1948,6 +1948,27 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
     t.index ["verified_email_domains"], name: "idx_companies_verified_domains", using: :gin
   end
 
+  create_table "company_allowance_defaults", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "category", null: false
+    t.string "name", null: false
+    t.decimal "standard_allowance", precision: 15, scale: 2
+    t.decimal "maximum_allowance", precision: 15, scale: 2
+    t.decimal "dealer_cost", precision: 15, scale: 2
+    t.decimal "dealer_price", precision: 15, scale: 2
+    t.string "pricing_basis"
+    t.string "material"
+    t.decimal "wind_zone2_adder_per_side", precision: 15, scale: 2
+    t.decimal "wind_zone3_adder_per_side", precision: 15, scale: 2
+    t.boolean "is_seeded", default: false, null: false
+    t.boolean "active", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "category", "name"], name: "idx_company_allowance_defaults_uniq", unique: true
+    t.index ["company_id"], name: "index_company_allowance_defaults_on_company_id"
+  end
+
   create_table "company_domains", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "website_id"
@@ -2055,6 +2076,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "contact_name"
+    t.string "contact_email"
+    t.string "contact_phone"
     t.index ["active"], name: "index_company_manufacturers_on_active"
     t.index ["company_id", "manufacturer_id"], name: "index_company_manufacturers_on_company_and_manufacturer", unique: true
     t.index ["company_id"], name: "index_company_manufacturers_on_company_id"
@@ -3587,6 +3611,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.decimal "dealer_cost", precision: 15, scale: 2
+    t.decimal "dealer_price", precision: 15, scale: 2
+    t.integer "position", default: 0
+    t.bigint "company_allowance_default_id"
+    t.index ["company_allowance_default_id"], name: "index_lender_allowance_items_on_company_allowance_default_id"
     t.index ["company_id"], name: "index_lender_allowance_items_on_company_id"
     t.index ["lender_id"], name: "index_lender_allowance_items_on_lender_id"
   end
@@ -4092,6 +4121,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
     t.boolean "scraper_enabled", default: false
     t.jsonb "scraper_config", default: {}
     t.datetime "last_scraped_at"
+    t.string "contact_name"
     t.index ["active", "industry_type"], name: "index_manufacturers_on_active_and_industry_type"
     t.index ["active"], name: "index_manufacturers_on_active"
     t.index ["code"], name: "index_manufacturers_on_code", unique: true, where: "(code IS NOT NULL)"
@@ -7256,6 +7286,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
+  add_foreign_key "company_allowance_defaults", "companies"
   add_foreign_key "company_domains", "companies"
   add_foreign_key "company_domains", "websites"
   add_foreign_key "company_floor_plan_option_overrides", "companies"
@@ -7396,6 +7427,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_200100) do
   add_foreign_key "leads", "sources"
   add_foreign_key "leads", "vehicles"
   add_foreign_key "lender_allowance_items", "companies"
+  add_foreign_key "lender_allowance_items", "company_allowance_defaults"
   add_foreign_key "lender_allowance_items", "lenders"
   add_foreign_key "lender_deletion_items", "companies"
   add_foreign_key "lender_deletion_items", "lenders"
