@@ -26,9 +26,11 @@ class CompanyAllowanceDefault < ApplicationRecord
   def self.seed_defaults(company)
     items = [
       # Options
-      { category: 'ac',          name: 'Air Conditioner',          standard_allowance: 4500, maximum_allowance: 7000,  pricing_basis: 'flat',                position: 10 },
-      { category: 'hookups',     name: 'Electric Hookups',         standard_allowance: 1500, maximum_allowance: 2500,  pricing_basis: 'flat',                position: 20 },
-      { category: 'hookups',     name: 'Water/Sewer/Gas Hookups',  standard_allowance: 500,  maximum_allowance: 1000,  pricing_basis: 'per_each',            position: 30 },
+      { category: 'ac',          name: 'A/C',                      standard_allowance: 4500, maximum_allowance: 7000,  pricing_basis: 'flat',                position: 10 },
+      { category: 'hookups',     name: 'Electric Hookup',          standard_allowance: 1500, maximum_allowance: 2500,  pricing_basis: 'per_each',            position: 20 },
+      { category: 'hookups',     name: 'Water Hookup',             standard_allowance: 500,  maximum_allowance: 1000,  pricing_basis: 'per_each',            position: 30 },
+      { category: 'hookups',     name: 'Sewer Hookup',             standard_allowance: 500,  maximum_allowance: 1000,  pricing_basis: 'per_each',            position: 31 },
+      { category: 'hookups',     name: 'Gas Hookup',               standard_allowance: 500,  maximum_allowance: 1000,  pricing_basis: 'per_each',            position: 32 },
       { category: 'steps_decks', name: 'Steps & Decks',            standard_allowance: 1000, maximum_allowance: 3000,  pricing_basis: 'per_each',            position: 40 },
       { category: 'gutters',     name: 'Gutters & Downspouts',     standard_allowance: 1300, maximum_allowance: 1800,  pricing_basis: 'flat',                position: 50 },
 
@@ -43,18 +45,18 @@ class CompanyAllowanceDefault < ApplicationRecord
       { category: 'trim_out', name: 'Trim Out (Multi)',  standard_allowance: 2000, maximum_allowance: 3000, pricing_basis: 'per_section_multi',  position: 90 },
 
       # Skirting (Underpinning) — one row per material type
-      { category: 'skirting', name: 'Skirting – Vinyl',            standard_allowance: 2000, maximum_allowance: 2000, pricing_basis: 'per_material', material: 'vinyl',   position: 100 },
-      { category: 'skirting', name: 'Skirting – Metal',            standard_allowance: 3000, maximum_allowance: 3000, pricing_basis: 'per_material', material: 'metal',   position: 110 },
-      { category: 'skirting', name: 'Skirting – Hardie/Insulated', standard_allowance: 4000, maximum_allowance: 4000, pricing_basis: 'per_material', material: 'hardie',  position: 120 },
-      { category: 'skirting', name: 'Skirting – Masonry',          standard_allowance: 6000, maximum_allowance: 6000, pricing_basis: 'per_material', material: 'masonry', position: 130 },
+      { category: 'skirting', name: 'Skirting (Vinyl)',   standard_allowance: 2000, maximum_allowance: 2000, pricing_basis: 'per_material', material: 'vinyl',   position: 100 },
+      { category: 'skirting', name: 'Skirting (Metal)',   standard_allowance: 3000, maximum_allowance: 3000, pricing_basis: 'per_material', material: 'metal',   position: 110 },
+      { category: 'skirting', name: 'Skirting (Hardie)',  standard_allowance: 4000, maximum_allowance: 4000, pricing_basis: 'per_material', material: 'hardie',  position: 120 },
+      { category: 'skirting', name: 'Skirting (Masonry)', standard_allowance: 6000, maximum_allowance: 6000, pricing_basis: 'per_material', material: 'masonry', position: 130 },
 
       # Footers
       { category: 'footers', name: 'Footers (Single)', standard_allowance: 2500, maximum_allowance: 4000, pricing_basis: 'per_section_single', position: 140 },
       { category: 'footers', name: 'Footers (Multi)',  standard_allowance: 5000, maximum_allowance: 8000, pricing_basis: 'per_section_multi',  position: 150 },
 
       # Pad (Dirt Pad)
-      { category: 'pad', name: 'Pad / Dirt Pad (Single)', standard_allowance: 2500, maximum_allowance: 4000, pricing_basis: 'per_section_single', position: 160 },
-      { category: 'pad', name: 'Pad / Dirt Pad (Multi)',  standard_allowance: 5000, maximum_allowance: 8000, pricing_basis: 'per_section_multi',  position: 170 },
+      { category: 'pad', name: 'Dirt Pad (Single)', standard_allowance: 2500, maximum_allowance: 4000, pricing_basis: 'per_section_single', position: 160 },
+      { category: 'pad', name: 'Dirt Pad (Multi)',  standard_allowance: 5000, maximum_allowance: 8000, pricing_basis: 'per_section_multi',  position: 170 },
     ]
 
     items.each do |attrs|
@@ -62,6 +64,47 @@ class CompanyAllowanceDefault < ApplicationRecord
         item.assign_attributes(attrs.merge(is_seeded: true, active: true))
       end
     end
+  end
+
+  # Canonical seeded names (must match the names produced by seed_defaults above and the
+  # 21st Mortgage lender-schedule seed). Used by resync_defaults! to retire renamed rows.
+  CANONICAL_SEEDED_NAMES = [
+    'A/C', 'Electric Hookup', 'Water Hookup', 'Sewer Hookup', 'Gas Hookup',
+    'Steps & Decks', 'Gutters & Downspouts',
+    'Delivery & Set (Single)', 'Delivery & Set (Multi)',
+    'Trim Out (Single)', 'Trim Out (Multi)',
+    'Skirting (Vinyl)', 'Skirting (Metal)', 'Skirting (Hardie)', 'Skirting (Masonry)',
+    'Footers (Single)', 'Footers (Multi)',
+    'Dirt Pad (Single)', 'Dirt Pad (Multi)'
+  ].freeze
+
+  # One-time migration helper: bring a company's defaults onto the canonical name set.
+  # Deletes ONLY seeded rows (is_seeded: true) whose names are no longer canonical — i.e.
+  # the pre-alignment names ('Air Conditioner', 'Pad / Dirt Pad (Single)', …). Hand-added
+  # rows (is_seeded: false) and rep-entered dealer_price/cost on surviving rows are left
+  # untouched. Then re-seeds the canonical set. Idempotent.
+  #
+  # Safe because: inventory packages snapshot the name (no FK to defaults), and a renamed
+  # default is only referenced by LenderAllowanceItem via company_allowance_default_id —
+  # which resync handles by leaving lender items alone (re-run the lender schedule seed
+  # after this to realign them).
+  #
+  #   bin/rails runner "CompanyAllowanceDefault.resync_defaults!(Company.find(97))"
+  def self.resync_defaults!(company)
+    stale = company.company_allowance_defaults
+                   .where(is_seeded: true)
+                   .where.not(name: CANONICAL_SEEDED_NAMES)
+    stale_names = stale.pluck(:name)
+    # Null out any lender-item links to rows we're about to delete so the FK doesn't block.
+    LenderAllowanceItem.where(company_allowance_default_id: stale.select(:id))
+                       .update_all(company_allowance_default_id: nil)
+    deleted = stale.delete_all
+    seed_defaults(company)
+    Rails.logger.info(
+      "[CompanyAllowanceDefault.resync_defaults!] company #{company.id}: removed #{deleted} " \
+      "stale (#{stale_names.join(', ')}); canonical set re-seeded."
+    )
+    { removed: deleted, removed_names: stale_names }
   end
 
   # Copy all active defaults into LenderAllowanceItems for a given lender.

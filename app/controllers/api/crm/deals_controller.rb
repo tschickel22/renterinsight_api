@@ -266,7 +266,13 @@ module Api
         # mirrors the home line). Falls back to the line-items total for legacy deals.
         price = @deal.selling_price.to_f.positive? ? @deal.selling_price : @deal.line_items_price
 
-        result = MaxAdvanceSurfacing.evaluate(vehicle: vehicle, lender: lender, deal: @deal, price: price)
+        # Dealer-installed item allowances actually selected on this deal (the standard_item
+        # lines) drive the CONFIGURED max advance; base is computed alongside.
+        adds = max_advance_adds_for(@deal)
+
+        result = MaxAdvanceSurfacing.evaluate(
+          vehicle: vehicle, lender: lender, deal: @deal, price: price, adds: adds
+        )
 
         render json: {
           dealId: @deal.id,
@@ -274,8 +280,11 @@ module Api
           vehicleName: vehicle&.display_name,
           lenderName: lender&.name,
           comparedPrice: price,
-          standardMsp: result[:standard_msp],
+          standardMsp: result[:standard_msp],      # CONFIGURED (base + selected adds)
           maximumMsp: result[:maximum_msp],
+          baseStandardMsp: result[:base_standard_msp],  # bare home, no adds
+          baseMaximumMsp: result[:base_maximum_msp],
+          addsCount: adds.size,
           status: result[:status],            # within_standard | within_maximum | over_maximum | null
           reason: result[:reason],            # null, or why MSP couldn't be computed
           flag: result[:reason] ? MaxAdvanceSurfacing.flag_for(result[:reason]) : nil,
@@ -640,6 +649,31 @@ module Api
         # This should be set by your authentication system
         # For now, returning nil - you'll need to implement this based on your auth
         current_user&.id
+      end
+
+      # Build MaxAdvanceCalculator `adds` selections from this deal's standard_item lines.
+      # Each such line carries source_type: 'standard_item' and an `allowance:<id>` notes tag
+      # pointing at a CompanyAllowanceDefault. We resolve the default to recover the
+      # category/name/material the calculator's find_allowance needs, and pass the line's
+      # quantity through (drives per-each hookups and the steps/decks cap). Lines we can't
+      # resolve are skipped (flag-don't-guess) rather than approximated.
+      def max_advance_adds_for(deal)
+        deal.deal_products.filter_map do |dp|
+          next unless dp.source_type.to_s == 'standard_item'
+
+          allowance_id = dp.notes.to_s[/allowance:(\d+)/, 1]
+          next if allowance_id.blank?
+
+          default = @company.company_allowance_defaults.find_by(id: allowance_id.to_i)
+          next if default.nil?
+
+          {
+            category: default.category,
+            name:     default.name,
+            material: default.material,
+            qty:      dp.quantity.to_i.positive? ? dp.quantity.to_i : 1
+          }
+        end
       end
 
       def deal_json(deal, detailed: false)
