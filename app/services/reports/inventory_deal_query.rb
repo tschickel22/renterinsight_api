@@ -132,6 +132,9 @@ module Reports
       row = {
         vehicle_id: vehicle.id,
         deal_id: assigned ? deal.id : nil,
+        # Customer linkage for report hyperlinks: prefer the contact, else the account.
+        contact_id: assigned ? deal.contact_id : nil,
+        account_id: assigned ? deal.account_id : nil,
         serial_or_stock: vehicle.stock_number.presence || vehicle.serial_number,
         location: vehicle.location&.name || 'Unassigned location',
         age_days: age,
