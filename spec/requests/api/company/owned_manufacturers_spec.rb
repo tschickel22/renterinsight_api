@@ -57,6 +57,21 @@ RSpec.describe 'Company-owned manufacturers', type: :request do
     end
   end
 
+  describe 'claim counts in the list' do
+    it 'returns per-manufacturer submitted/approved/total counts scoped to the company' do
+      owned = Manufacturer.create!(name: 'Counted Co', industry_type: 'manufactured_home', company_id: company.id)
+      ticket = ServiceTicket.create!(company_id: company.id, title: 'T', description: 'D')
+      WarrantyClaim.create!(company: company, service_ticket: ticket, manufacturer: owned, status: 'submitted')
+      WarrantyClaim.create!(company: company, service_ticket: ticket, manufacturer: owned, status: 'approved')
+
+      get '/api/company/manufacturers', headers: headers
+      row = JSON.parse(response.body)['manufacturers'].find { |r| r['id'] == owned.id }
+      expect(row['claims']['submitted']).to eq(1)
+      expect(row['claims']['approved']).to eq(1)
+      expect(row['claims']['total']).to eq(2)
+    end
+  end
+
   describe 'update / destroy isolation' do
     it 'updates an owned manufacturer' do
       m = Manufacturer.create!(name: 'Mine', industry_type: 'rv', company_id: company.id)

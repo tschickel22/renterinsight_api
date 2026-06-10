@@ -19,13 +19,15 @@ class Api::Company::ManufacturersController < ApplicationController
       .where('industry_type IN (?) OR industry_type = ?', industry_types, 'both')
       .alphabetical
     
-    # Get company's selected manufacturers
-    selected_ids = @company.company_manufacturers.pluck(:manufacturer_id)
-    
-    # Build response with selection status and dealer codes
+    # Preload this company's join rows + warranty-claim counts (avoid N+1)
+    company_manufacturers_by_mfr = @company.company_manufacturers.index_by(&:manufacturer_id)
+    selected_ids = company_manufacturers_by_mfr.keys
+    claim_counts = warranty_claim_counts(available_manufacturers.map(&:id))
+
+    # Build response with selection status, contacts, and claim counts
     manufacturers_data = available_manufacturers.map do |manufacturer|
-      company_manufacturer = @company.company_manufacturers.find_by(manufacturer_id: manufacturer.id)
-      
+      company_manufacturer = company_manufacturers_by_mfr[manufacturer.id]
+
       {
         id: manufacturer.id,
         name: manufacturer.name,
@@ -55,7 +57,8 @@ class Api::Company::ManufacturersController < ApplicationController
         selected: selected_ids.include?(manufacturer.id),
         dealerCode: company_manufacturer&.dealer_code,
         companyManufacturerId: company_manufacturer&.id,
-        notes: company_manufacturer&.notes
+        notes: company_manufacturer&.notes,
+        claims: claim_counts[manufacturer.id]
       }
     end
     
@@ -176,6 +179,33 @@ class Api::Company::ManufacturersController < ApplicationController
   end
 
   private
+
+  # One grouped query → { manufacturer_id => { submitted:, pending:, approved:, denied:, total: } }
+  def warranty_claim_counts(manufacturer_ids)
+    return Hash.new { |h, k| h[k] = default_claim_counts } if manufacturer_ids.blank?
+
+    grouped = WarrantyClaim
+      .where(company_id: @company.id, manufacturer_id: manufacturer_ids)
+      .group(:manufacturer_id, :status)
+      .count
+
+    result = Hash.new { |h, k| h[k] = default_claim_counts }
+    grouped.each do |(manufacturer_id, status), count|
+      bucket = result[manufacturer_id]
+      bucket[:total] += count
+      case status
+      when 'submitted', 'resubmitted' then bucket[:submitted] += count
+      when 'under_review'             then bucket[:pending]   += count
+      when 'approved'                 then bucket[:approved]  += count
+      when 'denied', 'short_paid'     then bucket[:denied]    += count
+      end
+    end
+    result
+  end
+
+  def default_claim_counts
+    { submitted: 0, pending: 0, approved: 0, denied: 0, total: 0 }
+  end
 
   def owned_manufacturer_params
     # NOTE: company_id is set server-side, never permitted (tenant isolation).
