@@ -42,6 +42,13 @@ class Api::Company::ManufacturersController < ApplicationController
         factoryContactName: manufacturer.contact_name,
         factoryContactEmail: manufacturer.contact_email,
         factoryContactPhone: manufacturer.contact_phone,
+        # Claim submission target (where warranty claims are sent)
+        claimEmail: company_manufacturer&.effective_claim_email || manufacturer.claim_email || manufacturer.contact_email,
+        claimContactName: company_manufacturer&.effective_claim_contact_name || manufacturer.claim_contact_name,
+        claimEmailOverride: company_manufacturer&.claim_email,
+        claimContactNameOverride: company_manufacturer&.claim_contact_name,
+        factoryClaimEmail: manufacturer.claim_email,
+        factoryClaimContactName: manufacturer.claim_contact_name,
         website: manufacturer.website,
         active: manufacturer.active,
         selected: selected_ids.include?(manufacturer.id),
@@ -75,6 +82,8 @@ class Api::Company::ManufacturersController < ApplicationController
       contact_name: params[:contact_name],
       contact_email: params[:contact_email],
       contact_phone: params[:contact_phone],
+      claim_email: params[:claim_email],
+      claim_contact_name: params[:claim_contact_name],
       active: true
     )
     
@@ -123,7 +132,8 @@ class Api::Company::ManufacturersController < ApplicationController
   end
   
   def update_params
-    params.permit(:dealer_code, :notes, :active, :contact_name, :contact_email, :contact_phone)
+    params.permit(:dealer_code, :notes, :active, :contact_name, :contact_email, :contact_phone,
+                  :claim_email, :claim_contact_name)
   end
   
   def determine_company_industry_types
@@ -156,6 +166,13 @@ class Api::Company::ManufacturersController < ApplicationController
       factoryContactName: manufacturer.contact_name,
       factoryContactEmail: manufacturer.contact_email,
       factoryContactPhone: manufacturer.contact_phone,
+      # Claim submission target (where warranty claims are sent)
+      claimEmail: company_manufacturer.effective_claim_email,
+      claimContactName: company_manufacturer.effective_claim_contact_name,
+      claimEmailOverride: company_manufacturer.claim_email,
+      claimContactNameOverride: company_manufacturer.claim_contact_name,
+      factoryClaimEmail: manufacturer.claim_email,
+      factoryClaimContactName: manufacturer.claim_contact_name,
       createdAt: company_manufacturer.created_at,
       updatedAt: company_manufacturer.updated_at
     }

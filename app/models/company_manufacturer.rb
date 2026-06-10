@@ -59,6 +59,16 @@ class CompanyManufacturer < ApplicationRecord
     contact_phone.presence || manufacturer&.contact_phone
   end
 
+  # Warranty CLAIM destination (distinct from the relationship rep above):
+  # company override → factory claim_email → factory contact_email (legacy).
+  def effective_claim_email
+    claim_email.presence || manufacturer&.claim_email.presence || manufacturer&.contact_email
+  end
+
+  def effective_claim_contact_name
+    claim_contact_name.presence || manufacturer&.claim_contact_name
+  end
+
   def display_name
     manufacturer.name
   end

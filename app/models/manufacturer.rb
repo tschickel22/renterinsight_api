@@ -56,7 +56,8 @@ class Manufacturer < ApplicationRecord
   
   def as_json(options = {})
     super(options.merge(
-      only: [:id, :name, :code, :contact_name, :contact_email, :contact_phone, :website,
+      only: [:id, :name, :code, :contact_name, :contact_email, :contact_phone,
+             :claim_email, :claim_contact_name, :website,
              :active, :created_at, :updated_at],
       methods: [:display_name]
     ))
@@ -70,5 +71,7 @@ class Manufacturer < ApplicationRecord
     self.contact_name = contact_name&.strip if contact_name.present?
     self.contact_email = contact_email&.strip&.downcase if contact_email.present?
     self.contact_phone = contact_phone&.strip if contact_phone.present?
+    self.claim_email = claim_email&.strip&.downcase if claim_email.present?
+    self.claim_contact_name = claim_contact_name&.strip if claim_contact_name.present?
   end
 end

@@ -399,14 +399,17 @@ class WarrantyNotificationService
     "#{base_url}/portal/service-tickets"
   end
   
-  # Resolve where to send a warranty claim: the dealer's per-company rep email
-  # override if set, otherwise the global factory contact email.
+  # Resolve where to send a warranty claim — the claim SUBMISSION target, not the
+  # relationship rep:
+  #   company claim_email override → factory claim_email → factory contact_email (legacy)
   def self.resolve_manufacturer_email(warranty_claim)
     company_manufacturer = CompanyManufacturer.find_by(
       company_id: warranty_claim.company_id,
       manufacturer_id: warranty_claim.manufacturer_id
     )
-    company_manufacturer&.contact_email.presence || warranty_claim.manufacturer&.contact_email
+    company_manufacturer&.claim_email.presence ||
+      warranty_claim.manufacturer&.claim_email.presence ||
+      warranty_claim.manufacturer&.contact_email
   end
 
   # Get dealer code from location or company manufacturer relationship

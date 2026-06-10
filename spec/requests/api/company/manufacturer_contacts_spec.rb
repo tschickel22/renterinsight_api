@@ -55,14 +55,21 @@ RSpec.describe 'Company manufacturer contacts', type: :request do
   describe 'WarrantyNotificationService.resolve_manufacturer_email' do
     let(:claim) { OpenStruct.new(company_id: company.id, manufacturer_id: manufacturer.id, manufacturer: manufacturer) }
 
-    it 'returns the factory contact email when there is no company override' do
+    it 'falls back to the factory contact email when no claim_email is set' do
       expect(WarrantyNotificationService.resolve_manufacturer_email(claim)).to eq('warranty@acme.com')
     end
 
-    it 'prefers the company rep override email' do
+    it 'uses the factory claim_email over the generic contact email' do
+      manufacturer.update!(claim_email: 'claims@acme.com')
+      expect(WarrantyNotificationService.resolve_manufacturer_email(claim)).to eq('claims@acme.com')
+    end
+
+    it 'prefers the company claim_email override, ignoring the rep contact email' do
+      manufacturer.update!(claim_email: 'claims@acme.com')
       CompanyManufacturer.create!(company_id: company.id, manufacturer_id: manufacturer.id,
-                                  contact_email: 'rep@acme.com')
-      expect(WarrantyNotificationService.resolve_manufacturer_email(claim)).to eq('rep@acme.com')
+                                  contact_email: 'rep@acme.com', # rep — must NOT be the destination
+                                  claim_email: 'regional-warranty@acme.com')
+      expect(WarrantyNotificationService.resolve_manufacturer_email(claim)).to eq('regional-warranty@acme.com')
     end
   end
 end
