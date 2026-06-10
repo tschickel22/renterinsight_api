@@ -2539,8 +2539,12 @@ Rails.application.routes.draw do
       end
       
       # Company Manufacturers (Warranty System)
+      # Company-owned manufacturer CRUD (distinct from selecting a global one)
+      post   'manufacturers/owned',     to: 'manufacturers#create_owned'
+      patch  'manufacturers/owned/:id', to: 'manufacturers#update_owned'
+      delete 'manufacturers/owned/:id', to: 'manufacturers#destroy_owned'
       resources :manufacturers, only: [:index, :create, :update, :destroy]
-      
+
       # Company Security Settings
       scope path: ':company_id/security' do
         get 'settings', to: 'security_settings#show'

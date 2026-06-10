@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_09_220000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_09_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4126,9 +4126,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_220000) do
     t.string "contact_name"
     t.string "claim_email"
     t.string "claim_contact_name"
+    t.bigint "company_id"
     t.index ["active", "industry_type"], name: "index_manufacturers_on_active_and_industry_type"
     t.index ["active"], name: "index_manufacturers_on_active"
-    t.index ["code"], name: "index_manufacturers_on_code", unique: true, where: "(code IS NOT NULL)"
+    t.index ["company_id", "code"], name: "index_manufacturers_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
+    t.index ["company_id"], name: "index_manufacturers_on_company_id"
     t.index ["industry_type"], name: "index_manufacturers_on_industry_type"
     t.index ["name"], name: "index_manufacturers_on_name"
     t.index ["scraper_enabled"], name: "index_manufacturers_on_scraper_enabled"

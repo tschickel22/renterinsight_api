@@ -30,8 +30,9 @@ RSpec.describe Manufacturer, type: :model do
 
     expect(json['display_name']).to eq('Acme Homes (AH)')
     expect(json['contact_name']).to eq('Warranty Dept') # real column now
+    expect(json).to have_key('company_id')              # nil = global, set = company-owned
+    expect(json['company_id']).to be_nil
     expect(json).not_to have_key('full_address')        # removed dead method
-    expect(json).not_to have_key('company_id')          # never a column on this table
   end
 
   it 'enforces code uniqueness via validation' do

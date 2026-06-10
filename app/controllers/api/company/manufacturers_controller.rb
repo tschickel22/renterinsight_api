@@ -12,12 +12,12 @@ class Api::Company::ManufacturersController < ApplicationController
     # Get company's industry type from settings or locations
     industry_types = determine_company_industry_types
     
-    # Get all manufacturers that match company's industry
-    available_manufacturers = Manufacturer.active.where(
-      'industry_type IN (?) OR industry_type = ?',
-      industry_types,
-      'both'
-    ).alphabetical
+    # Get all manufacturers the company can see (global set + its own), matching
+    # the company's industry types.
+    available_manufacturers = Manufacturer.active
+      .visible_to_company(@company.id)
+      .where('industry_type IN (?) OR industry_type = ?', industry_types, 'both')
+      .alphabetical
     
     # Get company's selected manufacturers
     selected_ids = @company.company_manufacturers.pluck(:manufacturer_id)
@@ -51,6 +51,7 @@ class Api::Company::ManufacturersController < ApplicationController
         factoryClaimContactName: manufacturer.claim_contact_name,
         website: manufacturer.website,
         active: manufacturer.active,
+        owned: manufacturer.company_id == @company.id,
         selected: selected_ids.include?(manufacturer.id),
         dealerCode: company_manufacturer&.dealer_code,
         companyManufacturerId: company_manufacturer&.id,
@@ -123,8 +124,88 @@ class Api::Company::ManufacturersController < ApplicationController
     end
   end
   
+  # POST /api/company/manufacturers/owned
+  # Create a manufacturer owned by this company (not a global one).
+  def create_owned
+    return unless authorize_action!('company_settings', 'update')
+
+    manufacturer = Manufacturer.new(owned_manufacturer_params)
+    manufacturer.company_id = @company.id # tenant-owned; never from params
+
+    if manufacturer.save
+      # Link it to the company so it behaves like a selected manufacturer.
+      @company.company_manufacturers.find_or_create_by(manufacturer_id: manufacturer.id) do |cm|
+        cm.active = true
+      end
+      Rails.logger.info("[Company Settings] #{current_user.email} created owned manufacturer #{manufacturer.name} for company #{@company.name}")
+      render json: serialize_owned_manufacturer(manufacturer), status: :created
+    else
+      render json: { errors: manufacturer.errors.full_messages }, status: :unprocessable_entity
+    end
+  end
+
+  # PATCH /api/company/manufacturers/owned/:id
+  def update_owned
+    return unless authorize_action!('company_settings', 'update')
+
+    manufacturer = Manufacturer.owned_by(@company.id).find_by(id: params[:id])
+    return render json: { error: 'Manufacturer not found' }, status: :not_found unless manufacturer
+
+    if manufacturer.update(owned_manufacturer_params)
+      render json: serialize_owned_manufacturer(manufacturer)
+    else
+      render json: { errors: manufacturer.errors.full_messages }, status: :unprocessable_entity
+    end
+  end
+
+  # DELETE /api/company/manufacturers/owned/:id
+  def destroy_owned
+    return unless authorize_action!('company_settings', 'update')
+
+    manufacturer = Manufacturer.owned_by(@company.id).find_by(id: params[:id])
+    return render json: { error: 'Manufacturer not found' }, status: :not_found unless manufacturer
+
+    if manufacturer.warranty_claims.exists?
+      return render json: { error: 'Cannot delete a manufacturer with warranty claims; deactivate it instead' },
+                    status: :unprocessable_entity
+    end
+
+    @company.company_manufacturers.where(manufacturer_id: manufacturer.id).destroy_all
+    manufacturer.destroy
+    head :no_content
+  end
+
   private
-  
+
+  def owned_manufacturer_params
+    # NOTE: company_id is set server-side, never permitted (tenant isolation).
+    params.require(:manufacturer).permit(
+      :name, :industry_type, :code, :website, :active,
+      :contact_name, :contact_email, :contact_phone,
+      :claim_email, :claim_contact_name
+    )
+  end
+
+  def serialize_owned_manufacturer(manufacturer)
+    {
+      id: manufacturer.id,
+      manufacturerId: manufacturer.id,
+      name: manufacturer.name,
+      industryType: manufacturer.industry_type,
+      code: manufacturer.code,
+      website: manufacturer.website,
+      active: manufacturer.active,
+      owned: true,
+      contactName: manufacturer.contact_name,
+      contactEmail: manufacturer.contact_email,
+      contactPhone: manufacturer.contact_phone,
+      claimEmail: manufacturer.claim_email,
+      claimContactName: manufacturer.claim_contact_name,
+      createdAt: manufacturer.created_at,
+      updatedAt: manufacturer.updated_at
+    }
+  end
+
   def set_company_manufacturer
     @company_manufacturer = @company.company_manufacturers.find(params[:id])
   rescue ActiveRecord::RecordNotFound

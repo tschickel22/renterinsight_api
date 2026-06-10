@@ -4,8 +4,10 @@ class Manufacturer < ApplicationRecord
   # Note: Removed Customizable concern - not needed for manufacturers yet
   
   # Associations
-  # NOTE: manufacturers is a global table (no company_id column). Per-company
-  # access is modeled through the company_manufacturers join table.
+  # company_id NULL = global/platform-managed; set = company-owned. Companies that
+  # merely *use* a global manufacturer still link via company_manufacturers.
+  belongs_to :company, optional: true
+
   has_many :parts, dependent: :restrict_with_error
   has_many :warranty_claims
   has_many :manufacturer_ar_transactions
@@ -20,11 +22,15 @@ class Manufacturer < ApplicationRecord
   validates :name, presence: true, length: { maximum: 255 }
   validates :contact_email, format: { with: URI::MailTo::EMAIL_REGEXP, allow_blank: true }
   validates :contact_phone, length: { maximum: 20 }, allow_blank: true
-  # code has a partial unique index (where code IS NOT NULL); mirror it here.
-  validates :code, uniqueness: { allow_blank: true }
+  # code is unique per owner scope (global set, or within a company).
+  validates :code, uniqueness: { scope: :company_id, allow_blank: true }
 
   # Scopes
   scope :active, -> { where(active: true) }
+  scope :global, -> { where(company_id: nil) }
+  scope :owned_by, ->(company_id) { where(company_id: company_id) }
+  # Manufacturers a company can see: the global set plus its own.
+  scope :visible_to_company, ->(company_id) { where(company_id: [nil, company_id]) }
   scope :by_name, -> { order(:name) }
   scope :alphabetical, -> { order(:name) }
   scope :scraper_enabled, -> { where(scraper_enabled: true) }
@@ -56,7 +62,7 @@ class Manufacturer < ApplicationRecord
   
   def as_json(options = {})
     super(options.merge(
-      only: [:id, :name, :code, :contact_name, :contact_email, :contact_phone,
+      only: [:id, :name, :code, :company_id, :contact_name, :contact_email, :contact_phone,
              :claim_email, :claim_contact_name, :website,
              :active, :created_at, :updated_at],
       methods: [:display_name]
