@@ -202,10 +202,25 @@ module Reports
       {
         can_view_costs: @can_view_costs,
         scope: @query.scope,
+        # All locations the user is entitled to (for the Location filter), so the
+        # dropdown lists every location even when one has no deals yet. Mirrors the
+        # RBAC scoping in InventoryDealQuery#base_vehicle_scope.
+        locations: entitled_location_names,
         filters: @filters,
         generated_at: Time.current.iso8601,
         footnotes: FOOTNOTES
       }
+    end
+
+    def entitled_location_names
+      if @current_user&.uses_rbac? && !@current_user.effective_admin?
+        ids = PermissionService.new(@current_user).accessible_location_ids
+        return [] if ids.blank?
+
+        @company.locations.where(id: ids).order(:name).pluck(:name)
+      else
+        @company.locations.order(:name).pluck(:name)
+      end
     end
   end
 end
