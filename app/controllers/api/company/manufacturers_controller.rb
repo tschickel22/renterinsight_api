@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'csv'
+
 class Api::Company::ManufacturersController < ApplicationController
   before_action :set_company_scope
   before_action :set_company_manufacturer, only: [:update, :destroy]
@@ -178,7 +180,81 @@ class Api::Company::ManufacturersController < ApplicationController
     head :no_content
   end
 
+  # POST /api/company/manufacturers/import
+  # Bulk-create company-owned manufacturers from a CSV upload.
+  # Recognized headers (case-insensitive): name (required), industry_type|industry,
+  # code, contact_name, contact_email, contact_phone, claim_email,
+  # claim_contact_name, website. Existing company-owned names are skipped.
+  def import
+    return unless authorize_action!('company_settings', 'update')
+
+    csv_text = read_import_csv
+    return render json: { error: 'No CSV provided' }, status: :unprocessable_entity if csv_text.blank?
+
+    created = 0
+    skipped = 0
+    errors = []
+    existing_names = Manufacturer.owned_by(@company.id).pluck(:name).map { |n| n.to_s.downcase.strip }
+
+    begin
+      rows = CSV.parse(csv_text, headers: true)
+    rescue CSV::MalformedCSVError => e
+      return render json: { error: "Could not parse CSV: #{e.message}" }, status: :unprocessable_entity
+    end
+
+    rows.each_with_index do |row, i|
+      attrs = manufacturer_attrs_from_row(row)
+      if attrs[:name].blank?
+        errors << { row: i + 2, message: 'Missing name' }
+        next
+      end
+      if existing_names.include?(attrs[:name].downcase.strip)
+        skipped += 1
+        next
+      end
+
+      manufacturer = Manufacturer.new(attrs.merge(company_id: @company.id))
+      if manufacturer.save
+        @company.company_manufacturers.find_or_create_by(manufacturer_id: manufacturer.id) { |cm| cm.active = true }
+        existing_names << attrs[:name].downcase.strip
+        created += 1
+      else
+        errors << { row: i + 2, message: manufacturer.errors.full_messages.join(', ') }
+      end
+    end
+
+    render json: { created: created, skipped: skipped, errors: errors }
+  end
+
   private
+
+  def read_import_csv
+    if params[:file].respond_to?(:read)
+      params[:file].read
+    else
+      params[:csv].presence
+    end
+  end
+
+  VALID_INDUSTRY_TYPES = %w[rv manufactured_home both].freeze
+
+  def manufacturer_attrs_from_row(row)
+    h = row.to_h.transform_keys { |k| k.to_s.downcase.strip }
+    industry = (h['industry_type'] || h['industry']).to_s.downcase.strip
+    industry = 'both' unless VALID_INDUSTRY_TYPES.include?(industry)
+    {
+      name: h['name'].to_s.strip,
+      industry_type: industry,
+      code: h['code'].presence,
+      website: h['website'].presence,
+      contact_name: h['contact_name'].presence,
+      contact_email: h['contact_email'].presence,
+      contact_phone: h['contact_phone'].presence,
+      claim_email: h['claim_email'].presence,
+      claim_contact_name: h['claim_contact_name'].presence,
+      active: true
+    }
+  end
 
   # One grouped query → { manufacturer_id => { submitted:, pending:, approved:, denied:, total: } }
   def warranty_claim_counts(manufacturer_ids)

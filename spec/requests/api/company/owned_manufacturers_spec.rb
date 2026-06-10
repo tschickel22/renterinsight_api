@@ -72,6 +72,40 @@ RSpec.describe 'Company-owned manufacturers', type: :request do
     end
   end
 
+  describe 'POST /api/company/manufacturers/import' do
+    let(:csv) do
+      <<~CSV
+        name,industry_type,code,claim_email,contact_name
+        Imported One,manufactured_home,IMP1,claims@one.com,Rep One
+        Imported Two,rv,IMP2,claims@two.com,Rep Two
+      CSV
+    end
+
+    it 'creates company-owned manufacturers from CSV text' do
+      expect do
+        post '/api/company/manufacturers/import', params: { csv: csv }, headers: headers
+      end.to change(Manufacturer.owned_by(company.id), :count).by(2)
+
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body['created']).to eq(2)
+      expect(body['skipped']).to eq(0)
+      one = Manufacturer.owned_by(company.id).find_by(name: 'Imported One')
+      expect(one.claim_email).to eq('claims@one.com')
+      expect(company.company_manufacturers.exists?(manufacturer_id: one.id)).to be(true)
+    end
+
+    it 'skips names already owned and reports rows missing a name' do
+      Manufacturer.create!(name: 'Imported One', industry_type: 'manufactured_home', company_id: company.id)
+      bad_csv = "name,industry_type\nImported One,rv\n,rv\n"
+      post '/api/company/manufacturers/import', params: { csv: bad_csv }, headers: headers
+      body = JSON.parse(response.body)
+      expect(body['created']).to eq(0)
+      expect(body['skipped']).to eq(1)
+      expect(body['errors'].first['message']).to match(/Missing name/)
+    end
+  end
+
   describe 'update / destroy isolation' do
     it 'updates an owned manufacturer' do
       m = Manufacturer.create!(name: 'Mine', industry_type: 'rv', company_id: company.id)

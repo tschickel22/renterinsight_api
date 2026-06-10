@@ -2543,6 +2543,7 @@ Rails.application.routes.draw do
       post   'manufacturers/owned',     to: 'manufacturers#create_owned'
       patch  'manufacturers/owned/:id', to: 'manufacturers#update_owned'
       delete 'manufacturers/owned/:id', to: 'manufacturers#destroy_owned'
+      post   'manufacturers/import',    to: 'manufacturers#import'
       resources :manufacturers, only: [:index, :create, :update, :destroy]
 
       # Company Security Settings
