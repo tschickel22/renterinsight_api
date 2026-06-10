@@ -47,7 +47,8 @@ module Api
 
           package = @vehicle.inventory_packages.build(
             name: standard.name,
-            description: "Standard item — #{standard.category.to_s.titleize}",
+            # description deliberately nil — package description surfaces on
+            # client-facing brochures; allowance identity stays internal-only
             price: standard.dealer_price,
             cost: standard.dealer_cost,
             include_in_total: true,
