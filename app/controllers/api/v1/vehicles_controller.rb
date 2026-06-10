@@ -1330,15 +1330,35 @@ module Api
         # structured_cost is the canonical home landed cost (total_cost override OR the sum).
         home_landed   = vehicle.structured_cost.to_f
         addon_costs   = packages.sum { |p| (p.respond_to?(:cost) ? p.cost.to_f : 0.0) }
+
+        # Fallback: if Cost Details are blank but the manufacturer invoice is captured, use the
+        # invoice total (or gross invoice) as the cost basis — for a new home the invoice total
+        # essentially IS your cost. One-source-or-the-other (never added to Cost Details), so no
+        # double-counting. Lets reps see a cost/gross before someone fills in Cost Details.
+        invoice_cost_basis = false
+        if home_landed <= 0
+          inv = vehicle.respond_to?(:invoice) ? vehicle.invoice : nil
+          inv_total = inv ? (inv.total_invoice.to_f.positive? ? inv.total_invoice.to_f : inv.gross_invoice.to_f) : 0.0
+          if inv_total.positive?
+            home_landed = inv_total
+            invoice_cost_basis = true
+          end
+        end
+
         total_cost    = home_landed + addon_costs
 
         cost_rows = []
-        cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Cost</th><td>#{format_currency(home_cost)}</td></tr>" if home_cost.positive?
-        cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Freight Cost</th><td>#{format_currency(freight_cost)}</td></tr>" if freight_cost.positive?
-        cost_rows << "<tr><th style='width:auto;font-weight:normal;'>PDI Cost</th><td>#{format_currency(pdi_cost)}</td></tr>" if pdi_cost.positive?
-        # When total_cost was set as an override (no components), show the landed figure directly.
-        if cost_rows.empty? && home_landed.positive?
-          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Landed Cost</th><td>#{format_currency(home_landed)}</td></tr>"
+        if invoice_cost_basis
+          # Cost Details empty → show the invoice figure as the basis (clearly labeled).
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Cost <span style='color:#999;font-size:9pt;'>(from manufacturer invoice — Cost Details not entered)</span></th><td>#{format_currency(home_landed)}</td></tr>"
+        else
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Cost</th><td>#{format_currency(home_cost)}</td></tr>" if home_cost.positive?
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Freight Cost</th><td>#{format_currency(freight_cost)}</td></tr>" if freight_cost.positive?
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>PDI Cost</th><td>#{format_currency(pdi_cost)}</td></tr>" if pdi_cost.positive?
+          # When total_cost was set as an override (no components), show the landed figure directly.
+          if cost_rows.empty? && home_landed.positive?
+            cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Landed Cost</th><td>#{format_currency(home_landed)}</td></tr>"
+          end
         end
         packages.each do |p|
           c = p.respond_to?(:cost) ? p.cost.to_f : 0.0

@@ -261,14 +261,51 @@ module Api
         end
 
         vehicle = @deal.vehicle
-        lender  = @deal.lender
-        # Home line-item price is the figure compared to the caps (Phase 2B: selling_price
-        # mirrors the home line). Falls back to the line-items total for legacy deals.
-        price = @deal.selling_price.to_f.positive? ? @deal.selling_price : @deal.line_items_price
+        # Lender: explicit ?lender_id= override (live preview from the deal's lender picker)
+        # falls back to the deal's saved lender.
+        lender =
+          if params[:lender_id].present?
+            @company.lenders.active.find_by(id: params[:lender_id]) || @deal.lender
+          else
+            @deal.lender
+          end
 
-        # Dealer-installed item allowances actually selected on this deal (the standard_item
-        # lines) drive the CONFIGURED max advance; base is computed alongside.
-        adds = max_advance_adds_for(@deal)
+        # LIVE PREVIEW: when the client passes the current (possibly unsaved) line items, use
+        # them — so adding a home + packages mid-edit immediately resolves allowances and
+        # recomputes caps WITHOUT requiring a save. Otherwise fall back to the deal's saved
+        # deal_products. Both go through the SAME resolver so behavior is identical.
+        if params[:items].present?
+          home_price, deal_items = items_from_params(params[:items])
+        else
+          home_price = nil
+          deal_items = deal_addon_items_for(@deal)
+        end
+
+        # Home line-item price is the BASE of the financed package. From the passed items when
+        # previewing; otherwise the LIVE home line item price (what the rep currently sees),
+        # falling back to selling_price, then all-lines total, for legacy deals.
+        if home_price.nil? || home_price.to_f <= 0
+          home_price = @deal.home_line_item_price
+          home_price = @deal.selling_price if home_price.nil? || home_price.to_f <= 0
+          home_price = @deal.line_items_price if home_price.nil? || home_price.to_f <= 0
+        end
+        home_price = home_price.to_f
+
+        # Dealer-installed item allowances on the deal drive the CONFIGURED max advance; base
+        # is computed alongside. resolve_items returns BOTH the calculator adds and a display
+        # list flagging each line allowance-backed vs dealer-add-on.
+        resolved = MaxAdvanceSurfacing.resolve_items(company: @company, items: deal_items)
+        adds = resolved[:adds]
+
+        # COMPARED (financed) PRICE = home price + the SELLING PRICES of the qualified
+        # (allowance-backed) add-ons. That's the apples-to-apples figure against the caps,
+        # which themselves are home + those add-ons' allowances. Non-qualified add-ons
+        # (no lender allowance) are EXCLUDED — they sit outside the financed portion (shown
+        # in the worksheet's "not advanced by lender" group). The gap between a qualified
+        # add-on's selling price and its allowance is the unfinanceable overage, which the
+        # GREEN/YELLOW/RED flag surfaces.
+        qualified_addons_price = resolved[:line_items].sum { |li| li[:allowance_backed] ? li[:price].to_f * (li[:qty].to_i.positive? ? li[:qty].to_i : 1) : 0.0 }
+        price = (home_price + qualified_addons_price).round(2)
 
         result = MaxAdvanceSurfacing.evaluate(
           vehicle: vehicle, lender: lender, deal: @deal, price: price, adds: adds
@@ -278,9 +315,12 @@ module Api
           dealId: @deal.id,
           vehicleId: vehicle&.id,
           vehicleName: vehicle&.display_name,
+          lenderId: lender&.id,
           lenderName: lender&.name,
-          comparedPrice: price,
-          standardMsp: result[:standard_msp],      # CONFIGURED (base + selected adds)
+          comparedPrice: price,                 # home + qualified add-on selling prices (financed package)
+          homePrice: home_price,                # home line only
+          qualifiedAddonsPrice: qualified_addons_price.round(2),
+          standardMsp: result[:standard_msp],   # CONFIGURED (base + selected allowances)
           maximumMsp: result[:maximum_msp],
           baseStandardMsp: result[:base_standard_msp],  # bare home, no adds
           baseMaximumMsp: result[:base_maximum_msp],
@@ -288,7 +328,11 @@ module Api
           status: result[:status],            # within_standard | within_maximum | over_maximum | null
           reason: result[:reason],            # null, or why MSP couldn't be computed
           flag: result[:reason] ? MaxAdvanceSurfacing.flag_for(result[:reason]) : nil,
-          breakdown: result[:breakdown]
+          breakdown: result[:breakdown],
+          lineItems: resolved[:line_items],   # deal's add-ons, allowance-flagged (for the worksheet)
+          # Lenders the rep can pick from the deal's Max Advance bar (so they don't have to
+          # leave the deal to set one). hasSchedule flags which have a markup config.
+          availableLenders: @company.lenders.active.by_name.map { |l| { id: l.id, name: l.name, hasSchedule: l.markup_config.present? } }
         }
       end
 
@@ -651,29 +695,65 @@ module Api
         current_user&.id
       end
 
-      # Build MaxAdvanceCalculator `adds` selections from this deal's standard_item lines.
-      # Each such line carries source_type: 'standard_item' and an `allowance:<id>` notes tag
-      # pointing at a CompanyAllowanceDefault. We resolve the default to recover the
-      # category/name/material the calculator's find_allowance needs, and pass the line's
-      # quantity through (drives per-each hookups and the steps/decks cap). Lines we can't
-      # resolve are skipped (flag-don't-guess) rather than approximated.
-      def max_advance_adds_for(deal)
+      # Build the raw add-on item list from this deal's line items, for MaxAdvanceSurfacing
+      # to resolve (-> calculator adds + display list). Both the deal's Max Advance caps and
+      # the deal worksheet use the SAME resolution as the inventory worksheet, so they stay
+      # consistent.
+      #
+      # A deal's add-ons can arrive two ways:
+      #   1. Standard-item lines tagged `allowance:<id>` in notes (exact id match)
+      #   2. Lines applied from an inventory PACKAGE (source:package) whose name matches a
+      #      CompanyAllowanceDefault (e.g. "Air Conditioner", "Steps & Decks") — name match
+      # resolve_items tries the id first, then the name; non-allowance items (Porch, custom)
+      # are returned in the display list but excluded from adds (flag-don't-guess).
+      #
+      # The home line (notes include 'category:home' / 'source:home') is excluded — it's the
+      # base, not an add-on.
+      def deal_addon_items_for(deal)
         deal.deal_products.filter_map do |dp|
-          next unless dp.source_type.to_s == 'standard_item'
+          notes = dp.notes.to_s
+          next if notes.include?('category:home') || notes.include?('source:home')
 
-          allowance_id = dp.notes.to_s[/allowance:(\d+)/, 1]
-          next if allowance_id.blank?
-
-          default = @company.company_allowance_defaults.find_by(id: allowance_id.to_i)
-          next if default.nil?
-
+          allowance_id = notes[/allowance:(\d+)/, 1]
           {
-            category: default.category,
-            name:     default.name,
-            material: default.material,
-            qty:      dp.quantity.to_i.positive? ? dp.quantity.to_i : 1
+            name: dp.product_name.to_s,
+            price: dp.unit_price.to_f,
+            qty: dp.quantity.to_i.positive? ? dp.quantity.to_i : 1,
+            allowance_default_id: allowance_id.presence&.to_i
           }
         end
+      end
+
+      # Parse client-sent CURRENT line items (live, possibly unsaved) for a Max Advance preview.
+      # Returns [home_price, addon_items] where addon_items match the resolve_items shape. The
+      # home line (category:'home') becomes the base price; every other line is an add-on
+      # candidate (resolve_items decides which are allowance-backed). This lets the deal form
+      # reflect a just-added home + its packages WITHOUT a save. Read-only: nothing is written.
+      #
+      # Each item: { name:, price:, qty:, category:, allowanceDefaultId? }.
+      def items_from_params(items)
+        list = items.respond_to?(:values) && !items.is_a?(Array) ? items.values : Array(items)
+        home_price = 0.0
+        addons = []
+        list.each do |raw|
+          it = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+          it = it.with_indifferent_access if it.respond_to?(:with_indifferent_access)
+          name  = it[:name].to_s
+          price = it[:price].to_f
+          qty   = it[:qty].to_i.positive? ? it[:qty].to_i : 1
+          cat   = it[:category].to_s
+          if cat == 'home'
+            home_price += price * qty
+            next
+          end
+          addons << {
+            name: name,
+            price: price,
+            qty: qty,
+            allowance_default_id: it[:allowanceDefaultId].presence&.to_i
+          }
+        end
+        [home_price, addons]
       end
 
       def deal_json(deal, detailed: false)
@@ -757,6 +837,13 @@ module Api
           # Commission plan info
           commissionPlanId: deal.commission_plan_id,
           commissionPlanName: deal.commission_plan&.name,
+
+          # Lender (managed list). Returned so the deal form / Max Advance bar re-hydrate the
+          # saved lender on reload — without these the picker shows blank even though lender_id
+          # is persisted.
+          lenderId: deal.lender_id,
+          lenderName: deal.lender_name,
+          paymentType: deal.payment_type,
 
           # GL / approval status (public flags — not cost data). gl_posted is set when the
           # deal is approved + posted to the GL from the Deal Approvals queue; the FE shows an

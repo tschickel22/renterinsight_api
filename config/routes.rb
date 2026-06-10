@@ -2395,6 +2395,7 @@ Rails.application.routes.draw do
           delete 'tags/:tag_name', to: 'deals#remove_tag'
           get :commission_breakdown # Commission economics breakdown
           get :max_advance # Max Advance (lender cap) for this deal's vehicle (Phase 4a)
+          post :max_advance # Same, but with CURRENT (unsaved) line items in the body for live preview
           get :financials # NEW: Get deal financials (permission-gated)
           patch :financials, to: 'deals#update_financials' # NEW: Update deal financials (permission-gated)
           get :service_tickets # NEW: Get service tickets for this deal
