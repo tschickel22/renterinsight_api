@@ -11,7 +11,7 @@ module Api
         delete_actions: [:destroy, :bulk_delete]
 
       before_action :set_company
-      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting]
+      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :max_advance, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting]
 
       def index
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
@@ -776,6 +776,7 @@ module Api
             
             <h1>#{@vehicle.display_name}</h1>
             <div class="status-badge">#{@vehicle.status.upcase}</div>
+            <span style="display:inline-block;margin-left:8px;padding:5px 12px;background:#b91c1c;color:#fff;border-radius:3px;font-size:10pt;font-weight:bold;text-transform:uppercase;">Internal Only — Not for Customers</span>
             <p style="color: #666; margin-bottom: 20px;">Stock #: #{@vehicle.inventory_id}</p>
             
             #{images_html}
@@ -794,17 +795,17 @@ module Api
             
             #{@vehicle.description.present? ? "<h2>Description</h2><div class='description-box'>#{@vehicle.description}</div>" : ''}
             
-            <h2>Pricing Information</h2>
+            <h2>Pricing &amp; Configuration <span style="font-size:9pt;color:#b91c1c;font-weight:normal;">(Internal — for sales rep use)</span></h2>
             <table>
-              #{@vehicle.sale_price.present? ? "<tr><th>Sale Price</th><td class='price-highlight'>#{format_currency(@vehicle.sale_price)}</td></tr>" : ''}
-              #{@vehicle.msrp.present? ? "<tr><th>MSRP</th><td>#{format_currency(@vehicle.msrp)}</td></tr>" : ''}
-              #{@vehicle.cost.present? ? "<tr><th>Cost</th><td>#{format_currency(@vehicle.cost)}</td></tr>" : ''}
+              #{@vehicle.msrp.present? ? "<tr><th>Base Sale Price</th><td class='price-highlight'>#{format_currency(@vehicle.msrp)}</td></tr>" : ''}
               #{@vehicle.rent_price.present? ? "<tr><th>Monthly Rent</th><td>#{format_currency(@vehicle.rent_price)}/month</td></tr>" : ''}
               #{@vehicle.rent_to_own_price.present? ? "<tr><th>Rent-to-Own</th><td>#{format_currency(@vehicle.rent_to_own_price)}/month</td></tr>" : ''}
               #{@vehicle.deposit_amount.present? ? "<tr><th>Deposit Amount</th><td>#{format_currency(@vehicle.deposit_amount)}</td></tr>" : ''}
               #{@vehicle.lot_rent.present? ? "<tr><th>Lot Rent</th><td>#{format_currency(@vehicle.lot_rent)}/month</td></tr>" : ''}
               #{@vehicle.utilities.present? ? "<tr><th>Utilities</th><td>#{format_currency(@vehicle.utilities)}/month</td></tr>" : ''}
             </table>
+
+            #{build_addons_html(@vehicle)}
             
             #{rv_specs_html}
             #{mh_specs_html}
@@ -815,13 +816,73 @@ module Api
             
             <div class="footer">
               <p><strong>Generated on #{Time.current.strftime('%B %d, %Y at %I:%M %p')}</strong></p>
-              <p>This document is for informational purposes only. All information subject to verification.</p>
+              <p style="color:#b91c1c;font-weight:bold;">INTERNAL ONLY — This is a cost-basis configuration snapshot for sales rep use. Do not share with customers.</p>
+              <p>All information subject to verification.</p>
             </div>
           </body>
           </html>
         HTML
         
         render html: html.html_safe
+      end
+
+      # GET /api/v1/vehicles/:id/max_advance
+      # Max Advance worksheet for this UNIT (not a deal): runs the calculator on the
+      # captured invoice + the lender schedule, with the unit's applied Items & Add-Ons
+      # (inventory_packages) as the allowance adds. Non-allowance items (templates, custom)
+      # are listed but excluded from the ceiling (Option A). Cost-derived, so it requires
+      # the same cost-detail permission as deal_json's cost gating.
+      def max_advance
+        return unless authorize_action!('inventory', 'read')
+
+        unless current_user&.has_permission?('inventory', 'read', scope: 'view_cost_details') ||
+               current_user&.has_permission?('accounting', 'read')
+          return render json: { error: 'Forbidden - cost details permission required',
+                                required_permission: 'inventory:read:view_cost_details' }, status: :forbidden
+        end
+
+        # Lender resolution for a unit on the lot (no deal lender yet):
+        #   explicit ?lender_id= > first lender with a markup config > first active lender.
+        lender =
+          if params[:lender_id].present?
+            @company.lenders.active.find_by(id: params[:lender_id])
+          end
+        lender ||= @company.lenders.active.detect { |l| l.markup_config.present? }
+        lender ||= @company.lenders.active.by_name.first
+
+        # Build the worksheet's add-ons from the unit's applied Items & Add-Ons.
+        # ALL items are passed for display; resolve_items splits allowance-backed (move the
+        # ceiling) from dealer add-ons (shown only). include_in_total mirrors what the unit
+        # actually sells with; credits (negative price) are skipped from adds resolution.
+        packages = @vehicle.inventory_packages.ordered.map do |p|
+          { name: p.name, price: p.price.to_f, qty: 1 }
+        end
+        resolved = MaxAdvanceSurfacing.resolve_items(company: @company, items: packages)
+
+        # Compared price = the unit's home price (msrp is the base home price field).
+        price = @vehicle.msrp.to_f.positive? ? @vehicle.msrp.to_f : @vehicle.sale_price.to_f
+
+        result = MaxAdvanceSurfacing.evaluate(
+          vehicle: @vehicle, lender: lender, price: price, adds: resolved[:adds]
+        )
+
+        render json: {
+          vehicleId: @vehicle.id,
+          vehicleName: @vehicle.display_name,
+          lenderId: lender&.id,
+          lenderName: lender&.name,
+          comparedPrice: price,
+          standardMsp: result[:standard_msp],          # CONFIGURED (base + applied allowances)
+          maximumMsp: result[:maximum_msp],
+          baseStandardMsp: result[:base_standard_msp], # bare home, no adds
+          baseMaximumMsp: result[:base_maximum_msp],
+          status: result[:status],
+          reason: result[:reason],
+          flag: result[:reason] ? MaxAdvanceSurfacing.flag_for(result[:reason]) : nil,
+          breakdown: result[:breakdown],
+          lineItems: resolved[:line_items],            # every applied item, allowance-flagged
+          availableLenders: @company.lenders.active.by_name.map { |l| { id: l.id, name: l.name, hasSchedule: l.markup_config.present? } }
+        }
       end
 
       def stats
@@ -1232,6 +1293,74 @@ module Api
       # Helper method to format currency like the quotes PDF generator
       def format_currency(amount)
         "$#{sprintf('%.2f', amount.to_f)}"
+      end
+
+      # Build the Items & Add-Ons + cost breakdown for the internal print snapshot. These are
+      # the unit's inventory_packages (home-associated add-ons, NOT deal line items). Produces:
+      #  - a sale-side table: Base Sale Price + each add-on price -> Configured Total Sale Price
+      #  - a cost-side table: Home Cost + Freight + PDI + add-on costs -> Total Actual Cost
+      # plus the resulting gross. Returns '' when there are no packages AND no cost components,
+      # so a bare unit with nothing entered shows nothing here.
+      def build_addons_html(vehicle)
+        packages = vehicle.inventory_packages.ordered.to_a
+        base = vehicle.msrp.to_f
+
+        # ── Sale side ──
+        addon_sale_rows = packages.map do |p|
+          included = p.include_in_total
+          note = included ? '' : " <span style='color:#999;font-size:9pt;'>(not in total)</span>"
+          "<tr><th style='width:auto;font-weight:normal;'>#{p.name}#{note}</th><td>#{format_currency(p.price.to_f)}</td></tr>"
+        end.join
+        addons_sale_total = packages.select(&:include_in_total).sum { |p| p.price.to_f }
+        configured_sale_total = base + addons_sale_total
+
+        sale_html = packages.any? ? <<~SALE : ''
+          <h2>Items &amp; Add-Ons <span style="font-size:9pt;color:#666;font-weight:normal;">(associated with this home)</span></h2>
+          <table>
+            <tr><th>Base Sale Price</th><td>#{format_currency(base)}</td></tr>
+            #{addon_sale_rows}
+            <tr style="border-top:2px solid #333;"><th style="font-weight:bold;">Configured Total Sale Price</th><td style="font-weight:bold;">#{format_currency(configured_sale_total)}</td></tr>
+          </table>
+        SALE
+
+        # ── Cost side ── (internal landed cost: home cost components + add-on costs)
+        home_cost     = vehicle.dealer_cost.to_f
+        freight_cost  = vehicle.freight_cost.to_f
+        pdi_cost      = vehicle.pdi_cost.to_f
+        # structured_cost is the canonical home landed cost (total_cost override OR the sum).
+        home_landed   = vehicle.structured_cost.to_f
+        addon_costs   = packages.sum { |p| (p.respond_to?(:cost) ? p.cost.to_f : 0.0) }
+        total_cost    = home_landed + addon_costs
+
+        cost_rows = []
+        cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Cost</th><td>#{format_currency(home_cost)}</td></tr>" if home_cost.positive?
+        cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Freight Cost</th><td>#{format_currency(freight_cost)}</td></tr>" if freight_cost.positive?
+        cost_rows << "<tr><th style='width:auto;font-weight:normal;'>PDI Cost</th><td>#{format_currency(pdi_cost)}</td></tr>" if pdi_cost.positive?
+        # When total_cost was set as an override (no components), show the landed figure directly.
+        if cost_rows.empty? && home_landed.positive?
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Landed Cost</th><td>#{format_currency(home_landed)}</td></tr>"
+        end
+        packages.each do |p|
+          c = p.respond_to?(:cost) ? p.cost.to_f : 0.0
+          next unless c.positive?
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>#{p.name} (cost)</th><td>#{format_currency(c)}</td></tr>"
+        end
+
+        cost_html = ''
+        if total_cost.positive?
+          gross = configured_sale_total - total_cost
+          cost_html = <<~COST
+            <h2>Cost Breakdown <span style="font-size:9pt;color:#b91c1c;font-weight:normal;">(internal — your landed cost)</span></h2>
+            <table>
+              #{cost_rows.join}
+              <tr style="border-top:2px solid #333;"><th style="font-weight:bold;">Total Actual Cost</th><td style="font-weight:bold;">#{format_currency(total_cost)}</td></tr>
+              <tr><th style="font-weight:bold;">Estimated Gross (Sale − Cost)</th><td style="font-weight:bold;color:#15803d;">#{format_currency(gross)}</td></tr>
+            </table>
+            <p style="font-size:9pt;color:#666;margin-top:-8px;">Gross uses the configured sale price (Base Sale Price + add-ons in total) minus total landed cost. Holdback, floor-plan interest, and delivery/setup are not included here.</p>
+          COST
+        end
+
+        sale_html + cost_html
       end
 
       # Create activity record for listing share to contact
@@ -1716,7 +1845,11 @@ module Api
           images: full_image_urls,  # Use full URLs
           videos: vehicle.videos || [],
           msrp: vehicle.msrp&.to_f,
-          cost: vehicle.cost&.to_f,
+          # `cost` now mirrors the canonical landed cost (structured_cost = total_cost or
+          # dealer_cost+freight_cost+pdi_cost). The legacy vehicle.cost column is retired as
+          # an input (Pricing "Invoice Cost" removed); this keeps any cost display showing
+          # the real basis that drives GP. nil when no cost entered.
+          cost: vehicle.structured_cost&.to_f,
           priceCurrency: vehicle.price_currency,
           specialDiscountEnabled: vehicle.respond_to?(:special_discount_enabled) ? vehicle.special_discount_enabled : false,
           discountType: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,

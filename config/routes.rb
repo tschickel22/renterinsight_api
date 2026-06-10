@@ -709,6 +709,7 @@ Rails.application.routes.draw do
       resources :vehicles do
         member do
           get :print
+          get :max_advance  # Max Advance (lender cap) worksheet for this unit (invoice + applied items)
           post :clone
           post :share
           get :tags

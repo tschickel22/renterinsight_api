@@ -76,4 +76,56 @@ module MaxAdvanceSurfacing
     else reason.to_s.presence
     end
   end
+
+  # ── Item resolution (shared by inventory + deal worksheets) ──────────────────
+  #
+  # Given raw line items and the company's allowance defaults, split them into:
+  #   - adds:       calculator selections for items that map to a lender allowance
+  #                 (these contribute their Std/Max allowance to F — Option A).
+  #   - line_items: a display list of EVERY item, each flagged allowance-backed or not,
+  #                 so the worksheet can show the full configured home while only
+  #                 allowance-backed items move the Max Advance ceiling.
+  #
+  # `items` is an array of hashes: { name:, price:, qty:, allowance_default_id: (optional) }.
+  #   - inventory packages: pass name + price + qty:1; allowance_default_id is nil, so we
+  #     resolve by NAME against company_allowance_defaults (matches the inventory hint logic).
+  #   - deal standard_item lines: pass allowance_default_id (from the `allowance:<id>` tag)
+  #     for an exact match; falls back to name if the id doesn't resolve.
+  #
+  # Non-allowance items (templates, custom) are returned in line_items with
+  # allowance_backed: false and DO NOT appear in adds — they're dealer add-ons the lender
+  # won't advance, shown for transparency only.
+  def resolve_items(company:, items:)
+    defaults_by_id   = company.company_allowance_defaults.active.index_by(&:id)
+    defaults_by_name = company.company_allowance_defaults.active.index_by { |d| d.name.to_s.strip.downcase }
+
+    adds = []
+    line_items = Array(items).map do |item|
+      item = item.symbolize_keys if item.respond_to?(:symbolize_keys)
+      name  = item[:name].to_s
+      price = item[:price].to_f
+      qty   = item[:qty].to_i.positive? ? item[:qty].to_i : 1
+
+      default =
+        (defaults_by_id[item[:allowance_default_id].to_i] if item[:allowance_default_id]) ||
+        defaults_by_name[name.strip.downcase]
+
+      if default
+        adds << { category: default.category, name: default.name, material: default.material, qty: qty }
+        {
+          name: name.presence || default.name,
+          price: price,
+          qty: qty,
+          allowance_backed: true,
+          allowance_default_id: default.id,
+          standard_allowance: default.standard_allowance&.to_f,
+          maximum_allowance: default.maximum_allowance&.to_f
+        }
+      else
+        { name: name, price: price, qty: qty, allowance_backed: false }
+      end
+    end
+
+    { adds: adds, line_items: line_items }
+  end
 end

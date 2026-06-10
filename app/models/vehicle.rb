@@ -358,11 +358,6 @@ class Vehicle < ApplicationRecord
     if listing_type == 'manufactured_home' && serial_number.blank? && vin.present?
       self.serial_number = vin
     end
-
-    # Auto-copy dealer_cost to cost if cost is blank (Invoice Cost = Cost in UI)
-    if cost.blank? && dealer_cost.present?
-      self.cost = dealer_cost
-    end
   end
 
   # FIX: New method to handle "4+" bedroom/bathroom values
