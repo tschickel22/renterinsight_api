@@ -397,184 +397,243 @@ class Role < ApplicationRecord
   end
   
   def self.grant_service_tech_permissions!(role)
-    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
-    
-    # Service techs get full access to service tickets
-    service_resource = Resource.find_by(key: 'service')
-    all_actions = Action.all
-    
-    if service_resource
-      all_actions.each do |action|
+    all_scope = Scope.find_by!(key: 'all')
+    operational_actions = Action.where(key: %w[create read update delete export])
+    read_action = Action.find_by!(key: 'read')
+
+    # Full CRUD (company-wide) on service tickets + the field-ops resources a tech actually
+    # touches: parts (pull/consume), vendors, warranty claims, tasks, documents, calendar.
+    %w[
+      service parts vendors warranty_claims
+      tasks documents calendar
+    ].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      next unless resource
+
+      operational_actions.each do |action|
         RolePermission.find_or_create_by!(
           role: role,
-          resource: service_resource,
+          resource: resource,
           action: action,
-          scope: assigned_locations_scope,
+          scope: all_scope,
           granted: true
         )
       end
     end
-    
-    # Read access to inventory and contacts
-    read_action = Action.find_by(key: 'read')
-    %w[inventory crm contacts].each do |resource_key|
+
+    # Read-only (company-wide): inventory + CRM/contacts context for the job.
+    %w[inventory crm contacts manufacturers].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
-      if resource && read_action
-        RolePermission.find_or_create_by!(
-          role: role,
-          resource: resource,
-          action: read_action,
-          scope: assigned_locations_scope,
-          granted: true
-        )
-      end
+      next unless resource && read_action
+
+      RolePermission.find_or_create_by!(
+        role: role,
+        resource: resource,
+        action: read_action,
+        scope: all_scope,
+        granted: true
+      )
     end
   end
   
   def self.grant_sales_rep_permissions!(role)
-    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    all_scope = Scope.find_by!(key: 'all')
     operational_actions = Action.where(key: %w[create read update delete export])
+    read_action = Action.find_by!(key: 'read')
 
-    # Deal Desk: reps build/quote/compare freely (no configure, no transfer_unit).
-    grant_deal_desk!(role, %w[read write quote])
-    
-    # Full access to sales resources
-    %w[quotes deals sales crm contacts leads].each do |resource_key|
+    # Deal Desk: reps get the FULL action set (read/write/quote/configure/transfer_unit/swap_unit),
+    # company-wide. Per product decision, reps own Deal Desk end-to-end (no manager gate here).
+    grant_deal_desk!(role, %w[read write quote configure transfer_unit swap_unit])
+
+    # Full read+write on the core sales set, company-wide ('all' scope). Deals specifically get
+    # full CRUD+export at 'all' per product decision (reps see/work all deals, not just their
+    # location's). The linked sales objects use 'all' too so reps aren't blocked navigating
+    # from a deal to its account/contact/quote.
+    %w[quotes deals sales crm contacts leads accounts].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
       next unless resource
-      
+
       operational_actions.each do |action|
         RolePermission.find_or_create_by!(
           role: role,
           resource: resource,
           action: action,
-          scope: assigned_locations_scope,
+          scope: all_scope,
           granted: true
         )
       end
     end
-    
-    # Read access to inventory and finance
-    read_action = Action.find_by(key: 'read')
-    %w[inventory payments invoices].each do |resource_key|
+
+    # Full CRUD on day-to-day rep workflow resources (company-wide). These were missing from the
+    # original seed, which is why reps couldn't reach features added since.
+    %w[tasks documents communications calendar agreements configurator].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
-      if resource && read_action
+      next unless resource
+
+      operational_actions.each do |action|
         RolePermission.find_or_create_by!(
           role: role,
           resource: resource,
-          action: read_action,
-          scope: assigned_locations_scope,
+          action: action,
+          scope: all_scope,
           granted: true
         )
       end
+    end
+
+    # Read-only access (company-wide): reps can SEE these but not modify. Includes cost/margin
+    # visibility on inventory + deals (read-only — they see margin but can't edit cost details),
+    # plus product catalog, listings, finance docs, and reporting/dashboards.
+    %w[
+      inventory inventory_cost_details deals_cost_details products listings
+      payments invoices loans reports dashboard
+    ].each do |resource_key|
+      resource = Resource.find_by(key: resource_key)
+      next unless resource && read_action
+
+      RolePermission.find_or_create_by!(
+        role: role,
+        resource: resource,
+        action: read_action,
+        scope: all_scope,
+        granted: true
+      )
     end
   end
   
   def self.grant_finance_staff_permissions!(role)
-    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    all_scope = Scope.find_by!(key: 'all')
     operational_actions = Action.where(key: %w[create read update delete export])
-    
-    # Full access to finance resources
-    %w[payments invoices finance].each do |resource_key|
+    read_action = Action.find_by!(key: 'read')
+
+    # Deal Desk: finance gets read/write (they work the financial side of a desk — lender
+    # programs, reserve, F&I — but configure/transfer/swap stay manager/sales-owned).
+    grant_deal_desk!(role, %w[read write quote])
+
+    # Full CRUD (company-wide) on finance + the ENTIRE Accounting module. This was the big gap:
+    # finance staff previously had zero access to Accounting even though it's their core job.
+    %w[
+      finance payments invoices loans
+      accounting chart_of_accounts journal_entries bank_accounts_accounting
+      bank_reconciliation bills financial_reports budgets
+      commissions commission_plans commission_components commission_payments
+    ].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
       next unless resource
-      
+
       operational_actions.each do |action|
         RolePermission.find_or_create_by!(
           role: role,
           resource: resource,
           action: action,
-          scope: assigned_locations_scope,
+          scope: all_scope,
           granted: true
         )
       end
     end
-    
-    # Read access to contacts, deals, and quotes
-    read_action = Action.find_by(key: 'read')
-    %w[contacts deals quotes crm].each do |resource_key|
+
+    # Read-only (company-wide): finance needs to SEE the sales/CRM side + cost details +
+    # reporting/dashboards, but not edit them.
+    %w[
+      crm contacts accounts deals quotes
+      inventory inventory_cost_details deals_cost_details
+      reports dashboard dashboard_finance dashboard_company_wide
+      documents tasks
+    ].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
-      if resource && read_action
-        RolePermission.find_or_create_by!(
-          role: role,
-          resource: resource,
-          action: read_action,
-          scope: assigned_locations_scope,
-          granted: true
-        )
-      end
+      next unless resource && read_action
+
+      RolePermission.find_or_create_by!(
+        role: role,
+        resource: resource,
+        action: read_action,
+        scope: all_scope,
+        granted: true
+      )
     end
   end
   
   def self.grant_crm_specialist_permissions!(role)
-    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    all_scope = Scope.find_by!(key: 'all')
     operational_actions = Action.where(key: %w[create read update delete export])
-    
-    # Full access to CRM resources
-    %w[crm contacts leads accounts].each do |resource_key|
+    read_action = Action.find_by!(key: 'read')
+
+    # Full CRUD (company-wide) on CRM + the rep/marketing workflow resources that were missing.
+    %w[
+      crm contacts leads accounts
+      tasks documents communications calendar campaigns
+    ].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
       next unless resource
-      
+
       operational_actions.each do |action|
         RolePermission.find_or_create_by!(
           role: role,
           resource: resource,
           action: action,
-          scope: assigned_locations_scope,
+          scope: all_scope,
           granted: true
         )
       end
     end
-    
-    # Read access to quotes and deals
-    read_action = Action.find_by(key: 'read')
-    %w[quotes deals sales].each do |resource_key|
+
+    # Read-only (company-wide): sales pipeline + reporting/dashboards.
+    %w[quotes deals sales reports dashboard].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
-      if resource && read_action
-        RolePermission.find_or_create_by!(
-          role: role,
-          resource: resource,
-          action: read_action,
-          scope: assigned_locations_scope,
-          granted: true
-        )
-      end
+      next unless resource && read_action
+
+      RolePermission.find_or_create_by!(
+        role: role,
+        resource: resource,
+        action: read_action,
+        scope: all_scope,
+        granted: true
+      )
     end
   end
   
   def self.grant_inventory_manager_permissions!(role)
-    assigned_locations_scope = Scope.find_by!(key: 'assigned_locations')
+    all_scope = Scope.find_by!(key: 'all')
     operational_actions = Action.where(key: %w[create read update delete export])
-    
-    # Full access to inventory and operations
-    %w[inventory operations vehicles].each do |resource_key|
+    read_action = Action.find_by!(key: 'read')
+
+    # Full CRUD (company-wide) on inventory + the entire Parts/Warehouse module + configurator,
+    # listings, products, vendors. NOTE: the old seed granted 'operations' and 'vehicles', which
+    # are NOT real resource keys (they silently no-op'd) — replaced with the actual keys.
+    %w[
+      inventory listings products configurator
+      parts bins suppliers part_categories purchase_orders vendors
+    ].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
       next unless resource
-      
+
       operational_actions.each do |action|
         RolePermission.find_or_create_by!(
           role: role,
           resource: resource,
           action: action,
-          scope: assigned_locations_scope,
+          scope: all_scope,
           granted: true
         )
       end
     end
-    
-    # Read access to service and contacts
-    read_action = Action.find_by(key: 'read')
-    %w[service contacts crm].each do |resource_key|
+
+    # Read-only (company-wide): cost visibility on inventory, service/CRM context, reporting,
+    # and tasks.
+    %w[
+      inventory_cost_details service contacts crm
+      reports dashboard tasks documents
+    ].each do |resource_key|
       resource = Resource.find_by(key: resource_key)
-      if resource && read_action
-        RolePermission.find_or_create_by!(
-          role: role,
-          resource: resource,
-          action: read_action,
-          scope: assigned_locations_scope,
-          granted: true
-        )
-      end
+      next unless resource && read_action
+
+      RolePermission.find_or_create_by!(
+        role: role,
+        resource: resource,
+        action: read_action,
+        scope: all_scope,
+        granted: true
+      )
     end
   end
 
