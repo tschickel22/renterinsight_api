@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_11_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_11_175129) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4578,6 +4578,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_11_120000) do
     t.index ["status"], name: "index_payments_on_status"
   end
 
+  create_table "pending_import_links", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "entity_type", null: false
+    t.bigint "entity_id", null: false
+    t.string "target_column", null: false
+    t.string "parent_model", null: false
+    t.jsonb "match_fields", default: [], null: false
+    t.string "lookup_value", null: false
+    t.string "lookup_key"
+    t.string "status", default: "pending", null: false
+    t.datetime "resolved_at"
+    t.bigint "resolved_parent_id"
+    t.bigint "import_job_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "parent_model", "status"], name: "idx_pending_links_resolution"
+    t.index ["company_id", "status", "lookup_value"], name: "idx_pending_links_value"
+    t.index ["company_id"], name: "index_pending_import_links_on_company_id"
+    t.index ["entity_type", "entity_id"], name: "idx_pending_links_entity"
+    t.index ["import_job_id"], name: "index_pending_import_links_on_import_job_id"
+  end
+
   create_table "portal_documents", force: :cascade do |t|
     t.string "owner_type", null: false
     t.bigint "owner_id", null: false
@@ -7499,6 +7521,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_11_120000) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "pending_import_links", "companies"
+  add_foreign_key "pending_import_links", "import_jobs"
   add_foreign_key "printed_checks", "bank_accounts"
   add_foreign_key "printed_checks", "bill_payments"
   add_foreign_key "printed_checks", "bills"

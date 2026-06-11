@@ -38,6 +38,11 @@ module ImportExport
       # Whether this module supports tag assignment via the virtual 'tags' column.
       @taggable = ModuleRegistry.taggable?(@job.module_type)
 
+      # Deferred-linking resolver: records unresolved parent lookups as
+      # PendingImportLinks and back-fills foreign keys when the parent later
+      # appears (this import or a future one), making import order-independent.
+      @link_resolver = ImportExport::LinkResolver.new(@company, import_job: @job)
+
       validator = RowValidator.new(fields)
       @match_fields = (@job.duplicate_match_fields.presence || cfg[:match_fields] || []).map(&:to_s)
       detector  = DuplicateDetector.new(scope, @match_fields)
@@ -71,8 +76,12 @@ module ImportExport
 
         # Resolve lookup fields (e.g. "account_name" → account_id) before validation.
         # Unresolvable lookups are warnings, not blocking errors — the deal is still
-        # created without that association.
-        lookup_warnings = resolve_lookups!(row_hash)
+        # created without that association. Deferrable misses (non-auto-create
+        # parents that simply haven't been imported yet) are captured so a
+        # PendingImportLink can be recorded after the child is saved.
+        lookup_result   = resolve_lookups!(row_hash)
+        lookup_warnings = lookup_result[:warnings]
+        lookup_misses   = lookup_result[:misses]
 
         # Fill blank attrs from the per-import default_values bag (any actual CSV
         # value wins; unknown field keys are silently ignored).
@@ -109,6 +118,22 @@ module ImportExport
           # Apply tags to the saved/updated record. Per-tag failures are
           # captured as warnings and never bubble out to roll back the row.
           tag_warnings = saved_record ? assign_tags!(saved_record, tag_names) : []
+
+          if saved_record
+            # (a) Record any deferrable lookup misses so the child re-links when
+            #     its parent is imported later (this run or a future session).
+            lookup_misses.each do |miss|
+              @link_resolver.record_miss!(
+                child_record: saved_record,
+                defn:         miss[:defn],
+                lookup_value: miss[:value]
+              )
+            end
+
+            # (b) This new record may itself be a parent that earlier-imported
+            #     children were waiting on — back-fill their foreign keys now.
+            @link_resolver.resolve_for_parent!(saved_record)
+          end
 
           # Record lookup + tag warnings (non-blocking) so user can see skipped associations
           combined_warnings = lookup_warnings + tag_warnings
@@ -183,9 +208,15 @@ module ImportExport
     # records and replaces it with the real _id column (e.g. "account_id" => 42).
     # Unresolvable lookups are silently skipped (the association is left blank)
     # rather than failing the entire row, since these are optional associations.
-    # Returns an array of warning strings (informational only, never blocks import).
+    #
+    # Returns { warnings: [String], misses: [{ defn:, value: }] }. A "miss" is a
+    # non-auto-create lookup whose parent wasn't found — these are deferrable and
+    # get recorded as PendingImportLinks by the caller so they re-link when the
+    # parent is imported later. Auto-create lookups never defer (they create the
+    # parent inline), and resolved lookups produce neither a warning nor a miss.
     def resolve_lookups!(row_hash)
       warnings = []
+      misses   = []
 
       @lookup_by_key.each do |key, defn|
         raw_value = row_hash.delete(key)
@@ -211,13 +242,16 @@ module ImportExport
             warnings << "#{defn[:label]}: could not find or create '#{value}' (skipped)"
           end
         else
-          # Log warning but don't block the row — association is optional
-          Rails.logger.info "[ImportExport::Importer] Lookup miss: #{defn[:label]} '#{value}' not found, skipping association"
-          warnings << "#{defn[:label]}: could not find '#{value}' (skipped)"
+          # Parent not found and not auto-creatable — defer. Record a miss so a
+          # PendingImportLink is written after the child saves; the child will
+          # re-link automatically when the parent is imported.
+          Rails.logger.info "[ImportExport::Importer] Lookup miss (deferred): #{defn[:label]} '#{value}' — will link when parent appears"
+          warnings << "#{defn[:label]}: '#{value}' not found yet — will link automatically when imported"
+          misses << { defn: defn, value: value }
         end
       end
 
-      warnings
+      { warnings: warnings, misses: misses }
     end
 
     # Searches company-scoped records for a lookup match.
