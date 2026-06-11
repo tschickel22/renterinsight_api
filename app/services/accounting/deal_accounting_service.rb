@@ -8,11 +8,13 @@ module Accounting
     end
 
     def calculate_profitability!
-      calculate_front_gross!
-      calculate_back_gross!
-
-      @deal.total_gross = (@deal.front_gross || 0) + (@deal.back_gross || 0)
-      @deal.net_deal_profit = @deal.total_gross - (@deal.commission_amount || 0)
+      # GP figures come from the single canonical method (Deal#front_gross), which sources
+      # cost from the vehicle (live while open, snapshot once closed). We persist only the
+      # derived totals used by raw-column readers; front/total gross themselves are always
+      # recomputed by the model methods. Net = total gross − commission − carrying costs
+      # (floor-plan interest + delivery), which are period costs that reduce net, not gross.
+      total_gross = @deal.total_gross
+      @deal.net_deal_profit = total_gross - (@deal.commission_amount || 0) - @deal.carrying_costs
       @deal.save!
 
       profitability_summary
@@ -31,7 +33,20 @@ module Accounting
         deal_location_id = @deal.try(:location_id)
 
         selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
-        home_cost = @deal.home_cost || BigDecimal('0')
+        # PRODUCT cost relieved to COGS = vehicle structured cost (close-time snapshot) +
+        # reconditioning, from the SAME snapshot GP uses, so the COGS product cost and GP's
+        # product component can never drift. Floor-plan interest and delivery/setup are
+        # PERIOD costs — included in the GP margin view but NEVER posted to COGS/inventory.
+        home_cost = (@deal.vehicle_landed_cost || @deal.home_cost || BigDecimal('0')).to_d
+        recon_cost = (@deal.reconditioning_cost || BigDecimal('0')).to_d
+        recon_cogs = @company.chart_of_accounts.find_by(account_number: '5110')
+        recon_wip  = @company.chart_of_accounts.find_by(account_number: '1240')
+        # Reconditioning relieves its own WIP account when that pair is configured;
+        # otherwise it was capitalized into the unit's inventory value, so fold it into the
+        # main COGS/inventory relief. Either path keeps the COGS debit == vehicle + recon —
+        # recon is never silently dropped from COGS.
+        recon_dedicated = recon_cost > 0 && recon_cogs && recon_wip
+        folded_recon = recon_dedicated ? BigDecimal('0') : recon_cost
 
         if selling_price > 0
           revenue_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'revenue') ||
@@ -49,35 +64,31 @@ module Accounting
           end
         end
 
-        if home_cost > 0
+        cogs_relief = home_cost + folded_recon
+        if cogs_relief > 0
           cogs_account = AccountLinkResolver.resolve(company: @company, entity: @deal, purpose: 'cogs') ||
                          settings.default_cogs_account
           inventory_account = @company.chart_of_accounts.find_by(account_number: '1210')
 
           if cogs_account && inventory_account
-            lines << { chart_of_account_id: cogs_account.id, debit_amount: home_cost, credit_amount: 0,
+            lines << { chart_of_account_id: cogs_account.id, debit_amount: cogs_relief, credit_amount: 0,
                        memo: "COGS — #{deal_description}", location_id: deal_location_id,
                        department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id) }
-            lines << { chart_of_account_id: inventory_account.id, debit_amount: 0, credit_amount: home_cost,
+            lines << { chart_of_account_id: inventory_account.id, debit_amount: 0, credit_amount: cogs_relief,
                        memo: "Inventory relief — #{deal_description}", location_id: deal_location_id,
                        department: deal_department, deal_id: @deal.id,
                        vehicle_id: @deal.try(:vehicle_id) }
           end
         end
 
-        recon_cost = @deal.reconditioning_cost || BigDecimal('0')
-        if recon_cost > 0
-          recon_cogs = @company.chart_of_accounts.find_by(account_number: '5110')
-          recon_wip = @company.chart_of_accounts.find_by(account_number: '1240')
-          if recon_cogs && recon_wip
-            lines << { chart_of_account_id: recon_cogs.id, debit_amount: recon_cost, credit_amount: 0,
-                       memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id }
-            lines << { chart_of_account_id: recon_wip.id, debit_amount: 0, credit_amount: recon_cost,
-                       memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
-                       department: deal_department, deal_id: @deal.id }
-          end
+        if recon_dedicated
+          lines << { chart_of_account_id: recon_cogs.id, debit_amount: recon_cost, credit_amount: 0,
+                     memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id }
+          lines << { chart_of_account_id: recon_wip.id, debit_amount: 0, credit_amount: recon_cost,
+                     memo: "Reconditioning — #{deal_description}", location_id: deal_location_id,
+                     department: deal_department, deal_id: @deal.id }
         end
 
         fp_amount = @deal.try(:floor_plan_amount) || BigDecimal('0')
@@ -219,19 +230,28 @@ module Accounting
       vehicle = @deal.try(:vehicle)
       owner = @deal.try(:owner) || @deal.try(:user)
 
-      # ALWAYS recalculate from current data — stored values go stale when costs change
-      front_gross = selling_price - total_front_costs
+      # Delegate to the SINGLE canonical method. Front gross sources cost from the vehicle
+      # (live while open, snapshot once closed) and excludes pack (a holdback, not a cost).
+      # nil when no cost has been entered — surfaced as a flag rather than a guessed margin.
+      landed_cost = @deal.landed_cost
+      cost_entered = !landed_cost.nil?
+      front_gross = @deal.front_gross
 
-      # Exclude the home/vehicle line item from back_gross. It's already counted
-      # in selling_price (front side), so summing it again double-counts the
-      # entire home as profit. Back-end revenue is only F&I, accessories, fees.
-      back_products = (@deal.try(:deal_products) || []).reject { |p| home_line_item?(p) }
-      back_gross = back_products.sum { |p| p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0') }
+      # Delegate to the canonical model method — back gross is finance_reserve +
+      # product_margin (margin), the SAME definition the commission engine and the deal
+      # serializer use. Do NOT sum deal_products revenue here (that diverged from canonical).
+      back_gross = @deal.back_gross
 
-      total_gross = front_gross + back_gross
+      # Front side stays nil/flagged when cost isn't entered; otherwise total ties to the
+      # canonical Deal#total_gross (= front_gross + back_gross).
+      total_gross = cost_entered ? @deal.total_gross : nil
 
       commission = @deal.try(:commission_amount) || BigDecimal('0')
-      net_profit = total_gross - commission
+      # Carrying / period costs (floor-plan interest + delivery) reduce NET profit but not
+      # front/total gross — they're costs of holding + delivering the unit, not of selling
+      # it, and the GL books them as period expenses (not COGS).
+      carrying_costs = @deal.carrying_costs
+      net_profit = total_gross.nil? ? nil : (total_gross - commission - carrying_costs)
 
       {
         deal_id: @deal.id,
@@ -250,24 +270,32 @@ module Accounting
           name: [owner.try(:first_name), owner.try(:last_name)].compact.join(' ').presence || owner.try(:email)
         } : nil,
         selling_price: selling_price,
+        landed_cost: landed_cost,
+        cost_entered: cost_entered,
+        cost_flag: cost_entered ? nil : 'cost_not_entered',
         front_gross: front_gross,
+        commissionable_front_gross: @deal.commissionable_front_gross,
         back_gross: back_gross,
         total_gross: total_gross,
         commission: commission,
+        carrying_costs: carrying_costs,
         net_profit: net_profit,
         front_detail: {
-          home_cost: @deal.home_cost || 0,
+          vehicle_cost: @deal.vehicle_landed_cost,
           recon: @deal.reconditioning_cost || 0,
-          floor_plan_interest: @deal.floor_plan_interest || 0,
-          delivery: @deal.delivery_setup_cost || 0,
-          pack: @deal.pack_amount || 0
+          addon_margin: @deal.front_end_addon_margin,
+          pack: @deal.effective_pack_amount # separate holdback, NOT part of front cost
         },
-        back_detail: back_products.map { |p|
-          {
-            name: p.try(:name) || p.try(:product_name) || p.try(:product_type),
-            amount: p.try(:price) || p.try(:amount) || p.try(:total) || 0
-          }
-        },
+        # Carrying costs detail (reconciles to carrying_costs) — reduces net, not gross.
+        carrying_detail: [
+          { name: 'Floor Plan Interest', amount: @deal.floor_plan_interest || 0 },
+          { name: 'Delivery & Setup',    amount: @deal.delivery_setup_cost || 0 }
+        ],
+        # Components of back_gross (reconciles to it): finance reserve + product margin.
+        back_detail: [
+          { name: 'Finance Reserve', amount: @deal.finance_reserve || 0 },
+          { name: 'Product Margin',  amount: @deal.product_margin || 0 }
+        ],
         gl_posted: @deal.gl_posted?,
         tax: tax_summary
       }
@@ -284,53 +312,6 @@ module Accounting
     end
 
     private
-
-    def calculate_front_gross!
-      selling_price = @deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount) || BigDecimal('0')
-      @deal.front_gross = selling_price - total_front_costs
-    end
-
-    def calculate_back_gross!
-      products = (@deal.try(:deal_products) || []).reject { |p| home_line_item?(p) }
-      @deal.back_gross = products.sum { |p|
-        p.try(:price) || p.try(:amount) || p.try(:total) || BigDecimal('0')
-      }
-    end
-
-    # The home/vehicle is stored as a deal_product line in addition to being
-    # represented by deal.selling_price. Identify it so back_gross doesn't
-    # double-count it. DealProduct has no category/source_type columns, so we
-    # detect it by:
-    #   - product_name matching the linked vehicle's "year make model"
-    #   - or unit_price equal to the deal's selling_price (custom-line fallback)
-    def home_line_item?(product)
-      return false unless product
-
-      pname = product.try(:product_name).to_s.strip
-      vname = deal_vehicle_name
-      return true if vname.present? && pname.casecmp(vname).zero?
-
-      selling = (@deal.try(:selling_price) || @deal.try(:amount) || @deal.try(:total_amount)).to_f
-      return false unless selling > 0
-
-      unit = product.try(:unit_price).to_f
-      unit > 0 && (unit - selling).abs < 0.01
-    end
-
-    def deal_vehicle_name
-      v = @deal.try(:vehicle)
-      return nil unless v
-      [v.try(:year), v.try(:make), v.try(:model)]
-        .compact.map(&:to_s).reject(&:empty?).join(' ').strip.presence
-    end
-
-    def total_front_costs
-      (@deal.home_cost || 0) +
-        (@deal.reconditioning_cost || 0) +
-        (@deal.floor_plan_interest || 0) +
-        (@deal.delivery_setup_cost || 0) +
-        (@deal.pack_amount || 0)
-    end
 
     def deal_is_closed?
       closed_statuses = %w[closed_won won closed completed]

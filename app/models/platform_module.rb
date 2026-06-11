@@ -12,6 +12,7 @@ class PlatformModule
     'crm.deals' => { name: 'Sales Pipeline', category: 'CRM & Sales', icon: 'TrendingUp', description: 'Deal tracking and sales process' },
     'crm.quotes' => { name: 'Quote Builder', category: 'CRM & Sales', icon: 'FileText', description: 'Professional quote generation' },
     'sales.configurator' => { name: 'Home Configurator', category: 'CRM & Sales', icon: 'Home', description: 'Configure and quote manufactured homes' },
+    'sales.deal_desk' => { name: 'Deal Desk', category: 'CRM & Sales', icon: 'Calculator', description: 'Point-of-sale deal structuring: solve for payment, compare units, present a pencil' },
     
     # Inventory & Operations
     'inventory.vehicles' => { name: 'Inventory Management', category: 'Inventory & Operations', icon: 'Package', description: 'Vehicle and unit inventory tracking' },
@@ -28,7 +29,8 @@ class PlatformModule
     'marketing.website' => { name: 'Website Builder', category: 'Marketing', icon: 'Layout', description: 'Custom website creation and management' },
     'marketing.syndication' => { name: 'Listing Syndication', category: 'Marketing', icon: 'Share2', description: 'Syndicate listings to partner sites' },
     'marketing.social_media' => { name: 'Social Media & Ads', category: 'Marketing', icon: 'Share2', description: 'Social posts, scheduler, attribution, and Facebook ad builder' },
-    
+    'marketing.campaigns' => { name: 'Email Campaigns', category: 'Marketing', icon: 'Mail', description: 'Email campaign creation, sending, and tracking' },
+
     # Finance & Agreements
     'finance.loans' => { name: 'Finance Management', category: 'Finance & Agreements', icon: 'DollarSign', description: 'Loan and payment management' },
     'finance.agreements' => { name: 'Agreement Vault', category: 'Finance & Agreements', icon: 'FileSignature', description: 'Digital contract management' },
@@ -83,23 +85,23 @@ class PlatformModule
       admin.settings admin.users
     ],
     professional: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
-      marketing.listings marketing.brochures marketing.social_media
+      marketing.listings marketing.brochures marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal
       management.reports management.tags management.tasks management.calendar management.projects
       admin.settings admin.users admin.locations
     ],
     enterprise: %w[
-      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator
+      crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
-      marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media
+      marketing.listings marketing.brochures marketing.website marketing.syndication marketing.social_media marketing.campaigns
       finance.loans finance.agreements finance.invoices finance.documents finance.applications finance.accounting
       service.operations service.portal service.warranty
       management.reports management.commissions management.tags management.tasks 
-      management.calendar management.contractors management.projects management.workflows management.territories
-      admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks
+      management.calendar management.contractors management.projects management.workflows management.territories management_ai_reports
+      admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks admin.platform
     ]
   }.freeze
   

@@ -67,7 +67,6 @@ class PageLayout < ApplicationRecord
             { key: 'value', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'probability', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'deal_type', type: 'standard', visible: true, required: false, width: 1 },
-            { key: 'lead_source', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'owner_id', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'created_at', type: 'standard', visible: true, required: false, width: 1 }
           ]

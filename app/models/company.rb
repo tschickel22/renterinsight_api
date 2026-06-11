@@ -13,6 +13,7 @@ class Company < ApplicationRecord
   has_many :reports, dependent: :destroy
   has_many :contacts, dependent: :destroy
   has_many :deals, dependent: :destroy
+  has_many :lenders, dependent: :destroy
   has_many :intake_forms, dependent: :destroy
   has_many :custom_fields, dependent: :destroy
   has_many :custom_field_migrations, dependent: :destroy
@@ -20,6 +21,7 @@ class Company < ApplicationRecord
   has_many :field_option_overrides, dependent: :destroy
   has_many :leads, dependent: :destroy
   has_many :vehicles, dependent: :destroy
+  has_many :vehicle_invoices, dependent: :destroy
   has_many :package_templates, dependent: :destroy
   has_many :inventory_packages, through: :vehicles
   has_many :listings, dependent: :destroy
@@ -48,6 +50,13 @@ class Company < ApplicationRecord
   has_many :social_post_schedules, dependent: :destroy
   has_many :ad_campaigns, dependent: :destroy
   has_many :social_comments, dependent: :destroy
+
+  # Deal Desk
+  has_many :deal_desk_scenarios, dependent: :destroy
+  has_many :lender_programs, dependent: :destroy
+  has_many :fee_templates, dependent: :destroy
+  has_many :fni_products, dependent: :destroy
+  has_many :company_allowance_defaults, dependent: :destroy
 
   # Email Campaigns
   has_many :campaigns, dependent: :destroy
@@ -190,9 +199,15 @@ class Company < ApplicationRecord
     :show_filters                     # boolean - show filter sidebar
   
   # Callbacks
+  after_create :assign_account_number
   after_create :create_default_location
   after_create :ensure_corporate_location
   after_create :seed_default_project_templates
+  # MH-only: chart of accounts, Deal Desk sample config, and Max Advance allowance
+  # defaults. Gated on industry == 'manufactured_housing' inside the method so RV/other
+  # industries are skipped. Each sub-seed is individually rescued so one failure never
+  # blocks company creation.
+  after_create :seed_mh_finance_defaults
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
   
@@ -486,6 +501,59 @@ class Company < ApplicationRecord
     operational_settings['timezone'].presence || 'America/New_York'
   end
   
+  # --- Deal Desk settings -------------------------------------------------
+  # Tunable per company (no code change). Stored in the deal_desk_settings jsonb column,
+  # merged over these defaults.
+  DEAL_DESK_SETTING_DEFAULTS = {
+    'price_band_mode'   => 'amount',  # 'amount' (±$) or 'percent' (±%)
+    'price_band_amount' => 15_000,    # ±$15k
+    'price_band_pct'    => 10,        # ±10%
+    'validity_days'     => 30,        # scenario validity window
+    'days_on_lot_tiers' => [90, 120, 180]
+  }.freeze
+
+  def deal_desk_settings_resolved
+    DEAL_DESK_SETTING_DEFAULTS.merge((deal_desk_settings || {}).compact)
+  end
+
+  def deal_desk_scenario_validity_days
+    deal_desk_settings_resolved['validity_days'].to_i
+  end
+
+  def deal_desk_price_band
+    s = deal_desk_settings_resolved
+    { mode: s['price_band_mode'], amount: s['price_band_amount'].to_f, pct: s['price_band_pct'].to_f }
+  end
+
+  def deal_desk_days_on_lot_tiers
+    Array(deal_desk_settings_resolved['days_on_lot_tiers']).map(&:to_i).sort
+  end
+
+  # Deal Desk write-back timing.
+  #   'on_close' (default) — the selected scenario is written back to the deal
+  #                          automatically inside the deal-close -> GL-approval pipeline,
+  #                          so the GL post sees the desked figures.
+  #   'on_apply'           — write-back stays manual (the apply endpoint only).
+  # Stored as a Company Setting (mirrors operational_settings/branding), NOT a column. An
+  # unrecognized stored value falls back to the safe 'on_close' default.
+  WRITEBACK_MODES = %w[on_apply on_close].freeze
+
+  def deal_desk_writeback_mode
+    mode = Setting.get('Company', id, 'deal_desk_writeback_mode').presence || 'on_close'
+    WRITEBACK_MODES.include?(mode) ? mode : 'on_close'
+  end
+
+  # Default finance APR (whole-number percent). Single source of truth for the rate
+  # resolver's company-default tier. Reads loan_settings (set by the Company Settings UI),
+  # falling back to the platform default. Replaces the value previously hardcoded in
+  # CompanySettingsController#show_loan.
+  DEFAULT_FINANCE_RATE = 8.0
+
+  def default_finance_rate
+    rate = (loan_settings || {})['default_interest_rate']
+    rate.presence ? rate.to_f : DEFAULT_FINANCE_RATE
+  end
+
   def branding_settings
     @branding_settings ||= Setting.get('Company', id, 'branding') || {}
   end
@@ -625,10 +693,54 @@ class Company < ApplicationRecord
     nil
   end
 
+  # MH-only finance bootstrap (chart of accounts + Max Advance allowance defaults). Runs
+  # automatically for every new manufactured_housing company. Idempotent and each piece is
+  # rescued independently so a failure in one never aborts company creation or the others.
+  #
+  # NOTE: Deal Desk sample config is intentionally NOT seeded here — it's placeholder rate
+  # sheets and flips the gated module on, so it belongs in the demo-company seed only
+  # (db/seeds/demo_company.rb), not on real new companies.
+  #
+  # This seeds ONLY per-company data. The global RBAC catalog (Resource/Action/Role
+  # seed_defaults) is seeded once per environment, not here.
+  def seed_mh_finance_defaults
+    return unless industry == 'manufactured_housing'
+
+    # 1. Chart of Accounts (idempotent MH chart).
+    begin
+      require Rails.root.join('db/seeds/seed_default_chart_of_accounts').to_s
+      DefaultChartOfAccountsSeeder.seed(self)
+      Rails.logger.info "✅ [Company#seed_mh_finance_defaults] COA seeded for Company #{id}"
+    rescue => e
+      Rails.logger.error "❌ [Company#seed_mh_finance_defaults] COA failed for Company #{id}: #{e.message}"
+    end
+
+    # 2. Max Advance company allowance defaults (21st Mortgage-derived). Lenders created
+    #    afterward inherit these via Lender#after_create automatically.
+    begin
+      CompanyAllowanceDefault.seed_defaults(self)
+      Rails.logger.info "✅ [Company#seed_mh_finance_defaults] Allowance defaults seeded for Company #{id}"
+    rescue => e
+      Rails.logger.error "❌ [Company#seed_mh_finance_defaults] Allowance defaults failed for Company #{id}: #{e.message}"
+    end
+
+    nil
+  end
+
   def ensure_corporate_location
     Location.ensure_corporate_for(self)
   rescue => e
     Rails.logger.warn "[Company] Failed to create corporate location for company #{id}: #{e.message}"
+  end
+
+  # Assign account number derived from id (RI-00019). Runs after_create because
+  # id isn't available until the row exists. update_column skips validations and
+  # callbacks so it won't re-trigger this hook.
+  def assign_account_number
+    return if account_number.present?
+    update_column(:account_number, format('RI-%05d', id))
+  rescue => e
+    Rails.logger.error "Failed to assign account_number for Company #{id}: #{e.message}"
   end
 
   def create_default_location

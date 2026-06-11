@@ -36,6 +36,21 @@ if ENV['RESET'] == 'true'
   existing = Company.find_by(name: DEMO_COMPANY_NAME)
   if existing
     puts "\nResetting existing demo company (ID: #{existing.id})..."
+
+    # Campaign teardown is order-sensitive: Campaign declares `has_many :campaign_steps,
+    # dependent: :destroy` (line 17) BEFORE `has_many :campaign_sends` (line 20), so
+    # campaign.destroy tries to delete steps while campaign_sends still FK-reference them
+    # (fk_rails_...on campaign_sends.campaign_step_id). Company only exposes :campaigns
+    # (not the children), so the loop below can't order around it. Clear the send-side
+    # descendants first — scoped to THIS company's campaigns — so the campaigns.destroy_all
+    # cascade is FK-safe. Delete referents before referenced: link_tokens/events -> sends.
+    campaign_ids = existing.campaigns.pluck(:id)
+    if campaign_ids.any?
+      CampaignLinkToken.where(campaign_send_id: CampaignSend.where(campaign_id: campaign_ids).select(:id)).delete_all if defined?(CampaignLinkToken)
+      CampaignEvent.where(campaign_id: campaign_ids).delete_all if defined?(CampaignEvent)
+      CampaignSend.where(campaign_id: campaign_ids).delete_all if defined?(CampaignSend)
+    end
+
     %i[
       buyer_portal_accesses
       budgets budget_lines
@@ -44,7 +59,8 @@ if ENV['RESET'] == 'true'
       bills bill_line_items bill_payments
       journal_entries journal_entry_lines
       bank_reconciliations bank_reconciliation_items bank_transactions
-      chart_of_accounts accounting_settings
+      bank_accounts accounting_settings
+      chart_of_accounts
       campaigns campaign_audiences campaign_enrollments campaign_sends
         campaign_steps campaign_events
       workflow_rules workflow_runs
@@ -52,18 +68,19 @@ if ENV['RESET'] == 'true'
       projects project_templates project_phases project_tasks
       project_cost_items project_material_usages project_documents
       purchase_orders purchase_order_lines
-      parts suppliers vendors service_tickets
+      parts suppliers vendors
+      warranty_claims service_tickets
       contacts accounts
       leads vehicles units properties
       nurture_sequences nurture_steps nurture_enrollments
       page_layouts custom_fields
       tasks sources territories
       commission_payments commissions commission_rules commission_plans
-      tags bank_accounts
+      tags
       tenant_module_overrides api_keys webhook_endpoints
       brochures listings
       agreements agreement_signers agreement_templates agreement_categories
-      warranty_claims contractor_assignments contractors
+      contractor_assignments contractors
       company_hidden_roles company_manufacturers
       payments payment_methods loans land_parcels invitations templates
       part_categories inventory_transactions stock_balances reorder_rules
@@ -87,9 +104,24 @@ if ENV['RESET'] == 'true'
     existing.roles.destroy_all if existing.respond_to?(:roles)
     existing.tenant_subscription&.destroy if existing.respond_to?(:tenant_subscription)
     existing.twilio_account&.destroy if existing.respond_to?(:twilio_account)
-    # Use delete instead of destroy! to avoid cascade through stale associations
-    # (Site, SiteMedium, WebsiteMedia, etc. - models that no longer exist)
-    existing.delete
+
+    # Final safety net. The association loop above can't reach legacy/unmapped tables —
+    # e.g. the vestigial `suppliers` table (the Supplier model now maps to `vendors`, so
+    # Company#suppliers never clears the old rows) — and any straggler with a company_id
+    # FK to companies will block the delete. Sweep every table that still has a row for
+    # THIS company with referential integrity disabled (cross-table FK order no longer
+    # matters), then delete the company. Strictly scoped to existing.id — never touches
+    # another tenant. Raw deletes (no model callbacks) also sidestep the dependent-destroy
+    # ordering hazards that bite the association loop.
+    cid = existing.id
+    conn = ActiveRecord::Base.connection
+    conn.disable_referential_integrity do
+      conn.tables.each do |t|
+        next unless conn.columns(t).any? { |c| c.name == 'company_id' }
+        conn.exec_delete("DELETE FROM #{conn.quote_table_name(t)} WHERE company_id = #{cid.to_i}", 'SeedReset', [])
+      end
+      conn.exec_delete("DELETE FROM companies WHERE id = #{cid.to_i}", 'SeedReset', [])
+    end
     puts "  Company deleted.\n"
   end
 end
@@ -184,11 +216,32 @@ if stale.any?
   puts "  Removed #{removed} stale locations (Fort Wayne / Indianapolis), reassigned data to Auburn"
 end
 
-# Both FTW and IND are aliased to AUB so prior code that picks AUB/FTW/IND
-# still works without re-routing every reference.
-locations["FTW"] = auburn
-locations["IND"] = auburn
-puts "  Location: #{auburn.name} (#{auburn.code})"
+# THREE DISTINCT operating locations so the reports' location grouping (Report 1
+# rows + Report 2 funded-by-location) shows real groups. Names differ from the
+# section-above stale list ("Fort Wayne Center"/"Indianapolis South") so the
+# cleanup never deletes these on re-run — keeps location_id stable + idempotent.
+fort_wayne = company.locations.find_or_create_by!(name: "Fort Wayne") do |l|
+  l.code = "FTW"
+  l.address_line1 = "1820 Coliseum Blvd"
+  l.city = "Fort Wayne"
+  l.state = "IN"
+  l.zip_code = "46805"
+  l.phone = "(260) 555-0200"
+  l.active = true
+end
+locations["FTW"] = fort_wayne
+
+indianapolis = company.locations.find_or_create_by!(name: "Indianapolis") do |l|
+  l.code = "IND"
+  l.address_line1 = "3400 S Meridian St"
+  l.city = "Indianapolis"
+  l.state = "IN"
+  l.zip_code = "46217"
+  l.phone = "(317) 555-0300"
+  l.active = true
+end
+locations["IND"] = indianapolis
+puts "  Locations: #{auburn.code}, #{fort_wayne.code}, #{indianapolis.code} (3 distinct)"
 
 # ── 3. Users ───────────────────────────────────────────────
 puts "\n3. Creating users..."
@@ -402,7 +455,7 @@ vehicle_data = [
       "#{S3_STAGING}/floor-plans/champion/topeka-in/champion-homes/aspire-2025/aspire-1676h32222/jpgs/112-aspire-1676h32222-bathroom.jpg",
     ],
     floor_plan: "#{S3_FDHC}/floorplans/Dutch%20Aspire%201676H32222.png" },
-  { year: 2026, make: "Champion",      model: "Emerald Sky 4483A",      serial: "112-000-H-A-C412920B", beds: 4, baths: 2, sqft: 1680, price: 124900, cost: 92000, status: "available",  location: "AUB",
+  { year: 2026, make: "Champion",      model: "Emerald Sky 4483A",      serial: "112-000-H-A-C412920B", beds: 4, baths: 2, sqft: 1680, price: 124900, cost: 92000, status: "reserved",  location: "AUB",
     images: [
       "#{S3_STAGING}/floor-plans/champion/topeka-in/champion-homes/genesis/emerald-sky/jpgs/112-emerald-sky-exterior.jpg",
       "#{S3_STAGING}/floor-plans/champion/topeka-in/champion-homes/genesis/emerald-sky/jpgs/112-emerald-sky-kitchen.jpg",
@@ -428,7 +481,18 @@ vehicle_data = [
   { year: 2017, make: "Fleetwood",     model: "Berkshire 3252B",        serial: "FLT-2017-B-554400",    beds: 4, baths: 2, sqft: 1664, price: 38000,  cost: 20000, status: "available",  location: "AUB", images: [], floor_plan: nil },
 ]
 
+# Deterministic days-in-stock spread so the AGE column + aging buckets (0-30 /
+# 31-60 / 61-90 / 90+) all demonstrate. Stable across re-runs (indexed, no random).
+stock_ages = [9, 17, 24, 28, 41, 52, 70, 84, 96, 118, 160, 205, 240, 290, 335, 355, 76, 132]
+
 vehicle_data.each_with_index do |vd, idx|
+  age_days = stock_ages[idx % stock_ages.length]
+  # Single (1) vs double (2) section by size so units classify into the proper
+  # New/Used — Single/Double Section buckets instead of "Section Count Not Entered".
+  veh_sections = (vd[:sqft].to_i >= 1400 || vd[:beds].to_i >= 4) ? 2 : 1
+  # Lowercase new/used so Report 1's section_for matches; older units read as used.
+  veh_condition = vd[:year].to_i >= 2023 ? "new" : "used"
+
   vehicle = company.vehicles.find_or_create_by!(serial_number: vd[:serial]) do |v|
     v.year = vd[:year]
     v.make = vd[:make]
@@ -442,7 +506,9 @@ vehicle_data.each_with_index do |vd, idx|
     v.bedrooms = vd[:beds]
     v.bathrooms = vd[:baths]
     v.square_feet = vd[:sqft]
-    v.condition = vd[:year] >= 2025 ? "New" : "Used"
+    v.condition = veh_condition
+    v.sections = veh_sections
+    v.date_in_stock = age_days.days.ago.to_date
     v.home_type = "Manufactured"
     v.listing_type = "manufactured_home"
     v.is_deleted = false
@@ -460,6 +526,14 @@ vehicle_data.each_with_index do |vd, idx|
       end
     end
   end
+  # Backfill the report-relevant fields on every run (the create block above only
+  # fires for new records) so previously-seeded demo companies populate the reports.
+  vehicle.update_columns(
+    date_in_stock: age_days.days.ago.to_date,
+    sections: veh_sections,
+    condition: veh_condition,
+    location_id: locations[vd[:location]].id
+  )
   vehicles[vd[:serial]] = vehicle
 end
 puts "  Created #{vehicle_data.length} vehicles (#{vehicle_data.count { |v| v[:images].present? }} with photos)"
@@ -481,9 +555,80 @@ deal_data = [
   { title: "Turner - Skyline Amber Cove",  stage: "closed_lost",   amount: 42500,  contact: "Jason Turner",      account: nil,                            home_cost: 28000, recon: 0,    fp_int: 0,    delivery: 2000, pack: 1000 },
 ]
 
+# FIX A — link each deal to a distinct vehicle and a REAL salesperson so the
+# Inventory Stock List and Salesperson GP Pipeline reports populate. Vehicles
+# idx 10-17 (report_demo_serials) are reserved for the "Report demo data"
+# section below; deals draw from the remaining non-sold vehicles. The primary
+# salesperson rotates across the three sales users — Report 2 groups by
+# primary_salesperson_id, which must be a real User id (not the assigned_to email).
+report_demo_serials = %w[
+  RMN-2026-A-001240 RMN-2025-A-001150 DH-2026-A-005001 DH-2026-A-005002
+  DH-2026-S-005003 DH-2025-A-004990 CLT-2019-T-889900 SKY-2021-A-776600
+  FLT-2017-B-554400
+]
+deal_vehicle_pool = vehicle_data
+  .reject { |vd| report_demo_serials.include?(vd[:serial]) || vd[:status] == 'sold' }
+  .map { |vd| vehicles[vd[:serial]] }
+deal_reps = [users[:sales1], users[:sales2], users[:manager]]
+deal_lenders = ['21st Mortgage', 'Vanderbilt', 'Triad Financial', 'Cascade', 'Cash']
+# Deposit as a % of selling price; a couple at 0 for variety (fills the Deposit column).
+deposit_pcts = [0.08, 0.05, 0.10, 0.0, 0.07, 0.06, 0.09, 0.0, 0.075, 0.05]
+
+# ── 10a. Lenders (managed list) ────────────────────────────
+# A lightweight, company-scoped lender list — managed in Finance settings, surfaced as a
+# quick-add dropdown on deals. Separate from Accounts (CRM) and Vendors (AP). Idempotent
+# via find_or_create_by(name:). Deals below reference these by lender_id; the app's
+# before_save denormalizes lender.name -> deals.lender_name (the seed uses update_columns,
+# so it mirrors that denormalization explicitly to keep lender_name in sync).
+puts "\n10a. Creating lenders..."
+begin
+  CompanyAllowanceDefault.seed_defaults(company)
+  puts "  Allowance defaults: #{company.company_allowance_defaults.count} items (lenders below inherit these)"
+rescue => e
+  puts "  ⚠ Allowance defaults skipped: #{e.message}"
+end
+lender_specs = [
+  { name: '21st Mortgage',          contact_name: 'Robert Chen',   phone: '(865) 215-9000', email: 'rchen@21stmortgage.com',     website: 'https://www.21stmortgage.com', notes: 'Primary MH lender; fast approvals' },
+  { name: 'Vanderbilt Mortgage',    contact_name: 'Sandra Mills',  phone: '(800) 970-7283', email: 'smills@vmf.com',              website: 'https://www.vmf.com',          notes: 'Strong on used-home financing' },
+  { name: 'Triad Financial Services', contact_name: 'Greg Patton', phone: '(800) 522-2013', email: 'gpatton@triadfs.com',         website: 'https://www.triadfs.com',      notes: 'Competitive on land-home packages' },
+  { name: 'Cascade Financial',      contact_name: 'Dana Lowe',     phone: '(877) 869-7082', email: 'dlowe@cascadeloans.com',      website: 'https://www.cascadeloans.com', notes: 'Government-backed (FHA/VA) programs' },
+  { name: 'Mountain West Lending' } # quick-add style: name only, other fields blank
+]
+managed_lenders = {}
+lender_specs.each do |spec|
+  l = company.lenders.find_or_create_by!(name: spec[:name]) do |rec|
+    rec.contact_name = spec[:contact_name]
+    rec.phone        = spec[:phone]
+    rec.email        = spec[:email]
+    rec.website      = spec[:website]
+    rec.notes        = spec[:notes]
+    rec.active       = true
+    rec.is_deleted   = false
+  end
+  managed_lenders[spec[:name]] = l
+end
+# Map the short names used in deal_lenders to the managed Lender records (Cash has none).
+deal_lender_records = {
+  '21st Mortgage'    => managed_lenders['21st Mortgage'],
+  'Vanderbilt'       => managed_lenders['Vanderbilt Mortgage'],
+  'Triad Financial'  => managed_lenders['Triad Financial Services'],
+  'Cascade'          => managed_lenders['Cascade Financial']
+}
+puts "  Created/updated #{managed_lenders.size} lenders"
+
 deal_data.each_with_index do |dd, idx|
   contact = contacts[dd[:contact]]
   account = dd[:account] ? accounts[dd[:account]] : nil
+  assigned_vehicle = deal_vehicle_pool[idx % deal_vehicle_pool.size]
+  rep = deal_reps[idx % deal_reps.size]
+  lender = deal_lenders[idx % deal_lenders.size]
+  deposit = (dd[:amount] * deposit_pcts[idx % deposit_pcts.size]).round(-2)
+  # Add-on revenue/margin fields that Deal#addon_gross sums (separate from the
+  # delivery_setup_COST already set above). Deterministic spread; fills Addon GP.
+  delivery_fee     = 2500 + (idx % 5) * 500   # 2,500 .. 4,500
+  setup_fee        = 1500 + (idx % 4) * 500   # 1,500 .. 3,000
+  skirting_fee     = 800  + (idx % 3) * 350   #   800 .. 1,500
+  accessories_amt  = (idx % 3) * 700          #     0 .. 1,400
 
   # Sales tax (~6% IN state tax, simplified flat for demo)
   tax_amount = (dd[:amount] * 0.06).round(2)
@@ -522,7 +667,21 @@ deal_data.each_with_index do |dd, idx|
     total_tax_amount:    tax_amount,
     state_tax_rate:      6.0,
     net_deal_profit:     net_profit,
-    location_id:         locations["AUB"].id,
+    # FIX A — link to vehicle + real salesperson (owner_id == primary_salesperson_id).
+    vehicle_id:             assigned_vehicle&.id,
+    primary_salesperson_id: rep.id,
+    owner_id:               rep.id,
+    location_id:            assigned_vehicle&.location_id || locations["AUB"].id,
+    # Reference the managed Lender list; denormalize its name onto lender_name (the
+    # column the reports read), exactly as Deal#denormalize_lender_name does at runtime.
+    lender_id:              (lender == "Cash" ? nil : deal_lender_records[lender]&.id),
+    lender_name:            (lender == "Cash" ? nil : deal_lender_records[lender]&.name),
+    payment_type:           (lender == "Cash" ? "cash" : "finance"),
+    down_payment:           deposit,
+    delivery_fee:           delivery_fee,
+    setup_fee:              setup_fee,
+    skirting_fee:           skirting_fee,
+    accessories_total:      accessories_amt,
     # Backdate updated_at so the deal profitability report (which falls
     # back to updated_at when closed_at/won_at are missing) finds these
     # deals in the default date range.
@@ -772,15 +931,45 @@ if company.respond_to?(:project_templates)
     { name: "Closing & Handoff",       pos: 17, days: 1,  color: "#10B981", icon: "key" },
   ]
 
+  # Sub-tasks per phase. Project management surfaces these as a phase's
+  # checklist, and the contractor-assign control ONLY renders on a phase's
+  # sub-tasks (and only not-done ones) — so every phase needs a few or there is
+  # nothing to assign a contractor to.
+  phase_tasks = {
+    "Contract Signed"         => ["Collect signed purchase agreement", "File buyer disclosures"],
+    "Financing Approved"      => ["Submit application to 21st Mortgage", "Receive approval & lock rate"],
+    "Down Payment Received"   => ["Invoice down payment", "Confirm funds cleared"],
+    "Order Placed w/ Factory" => ["Submit factory order", "Confirm build slot"],
+    "In Production"           => ["Verify build sheet", "Monitor production status"],
+    "Quality Inspection"      => ["Factory QA review", "Resolve punch-list items"],
+    "Ready for Transport"     => ["Schedule transport carrier", "Confirm route & oversize permits"],
+    "Site Preparation"        => ["Clear & grade site", "Mark utility locations", "Pour pad / set piers"],
+    "Permits Obtained"        => ["File setup permit", "Schedule county inspection"],
+    "Home Delivered"          => ["Coordinate delivery window", "On-site delivery acceptance"],
+    "Foundation & Set"        => ["Set home on foundation", "Level & anchor", "Marry-line connection"],
+    "Utility Connections"     => ["Connect water & sewer", "Electrical hookup", "Gas / HVAC connection"],
+    "Skirting & Exterior"     => ["Install skirting", "Exterior trim & finish"],
+    "Interior Finish & Trim"  => ["Interior trim-out", "Touch-up & paint"],
+    "Final Inspection"        => ["County final inspection", "Internal QA walkthrough"],
+    "Walkthrough w/ Buyer"    => ["Schedule buyer walkthrough", "Capture punch list"],
+    "Closing & Handoff"       => ["Final paperwork & keys", "Hand off warranty packet"],
+  }
+
   tp_data.each do |tp|
-    template.project_template_phases.find_or_create_by!(name: tp[:name]) do |p|
+    tphase = template.project_template_phases.find_or_create_by!(name: tp[:name]) do |p|
       p.position = tp[:pos]
       p.estimated_days = tp[:days]
       p.color = tp[:color]
       p.icon = tp[:icon]
     end
+
+    Array(phase_tasks[tp[:name]]).each_with_index do |task_name, i|
+      tphase.project_template_phase_tasks.find_or_create_by!(name: task_name) do |t|
+        t.position = i + 1
+      end
+    end
   end
-  puts "  Template: #{template.name} (#{tp_data.length} phases)"
+  puts "  Template: #{template.name} (#{tp_data.length} phases, #{phase_tasks.values.sum(&:size)} task templates)"
 
   # ── 18. Projects for Won Deals ──────────────────────────
   # One project per closed-won deal at varied progress so the projects
@@ -835,7 +1024,7 @@ if company.respond_to?(:project_templates)
       started = project.started_at + days_offset.days if phase_status != 'not_started'
       completed = started + tp[:days].days if phase_status == 'completed' && started
 
-      project.project_phases.find_or_create_by!(name: tp[:name]) do |ph|
+      phase = project.project_phases.find_or_create_by!(name: tp[:name]) do |ph|
         ph.company_id = company.id
         ph.position = tp[:pos]
         ph.status = phase_status
@@ -844,6 +1033,26 @@ if company.respond_to?(:project_templates)
         ph.estimated_days = tp[:days]
         ph.started_at = started if started
         ph.completed_at = completed if completed
+      end
+
+      # Sub-tasks per phase. completed phase => all tasks done; in_progress =>
+      # first done, the rest open; not_started => all open. This guarantees every
+      # active/upcoming phase has at least one not-done sub-task — which is where
+      # the contractor-assign control renders.
+      task_names = Array(phase_tasks[tp[:name]])
+      task_names = ["Complete phase work", "Review & sign off"] if task_names.empty?
+      task_names.each_with_index do |task_name, i|
+        task_status = case phase_status
+                      when 'completed'   then 'completed'
+                      when 'in_progress' then (i.zero? ? 'completed' : 'pending')
+                      else 'pending'
+                      end
+        phase.project_phase_tasks.find_or_create_by!(name: task_name) do |t|
+          t.company_id  = company.id
+          t.position    = i + 1
+          t.status      = task_status
+          t.completed_at = (phase.completed_at || started || 5.days.ago) if task_status == 'completed'
+        end
       end
     end
 
@@ -1628,9 +1837,14 @@ if defined?(JournalEntry) && defined?(JournalEntryLine)
     # (which auto-increments based on numeric entries) ignores these seed
     # rows when handing out numbers to user-created entries. Otherwise
     # the "Approve" flow can collide with seeded JEs.
+    # FIX B — fund about half of the closed-won deals THIS month (GL posted in the
+    # current month) so Report 2's "Funded this month" is non-zero; leave the rest
+    # backdated to prior months so they correctly fall out of the current pipeline.
+    funded_this_month = idx.even?
+    je_entry_date = funded_this_month ? (Date.current.beginning_of_month + (idx + 2)) : (35 + idx * 4).days.ago.to_date
     je = company.journal_entries.new(
       memo: je_memo,
-      entry_date: (35 + idx * 4).days.ago.to_date,
+      entry_date: je_entry_date,
       entry_number: "SEED-#{DEMO_PREFIX.upcase}-D#{deal.id}",
       source_type: "deal_closing",
       is_void: false
@@ -2121,6 +2335,168 @@ ca_specs.each do |s|
 end
 puts "  Contact activities: #{ca_count} created"
 
+# ── 41. Report demo data (Inventory Stock List + Salesperson GP Pipeline) ──
+# Idempotent: every record is guarded by find_or_create_by / update_columns, so
+# re-running without RESET re-applies links instead of duplicating. Builds a full
+# GP pipeline (Pending / Closed-Not-Funded / Funded), deal contention, and the two
+# flag cases (missing cost, sold-no-deal) that the reports surface. All gross/cost
+# is consumed from the unified Deal model methods by the reports — nothing here
+# recomputes GP; it just sets the inputs (vehicle link, home_cost, gl_posted, etc.).
+puts "\n41. Report demo data (inventory + GP pipeline)..."
+
+# Uses the three DISTINCT locations created in section 2 (AUB / FTW / IND) so the
+# funded-by-location grouping and Report 1 location column show real groups.
+vget = ->(serial) { company.vehicles.find_by(serial_number: serial) }
+this_month_date = Date.current.beginning_of_month + 6
+
+# Build (or refresh) a demo deal linked to a vehicle + REAL salesperson. Uses
+# update_columns to set report fields without firing close/GL callbacks.
+build_rpt_deal = lambda do |key, name, vehicle, rep, attrs|
+  deal = company.deals.find_or_create_by!(name: name) do |d|
+    d.stage = attrs[:stage]
+    d.assigned_to = rep.id
+    d.contact_id = company.contacts.first&.id # Deal requires a contact or account
+    d.location_id = vehicle&.location_id || locations["AUB"].id
+    d.value = attrs[:selling_price]
+    d.total_amount = attrs[:selling_price]
+    d.customer_name = attrs[:customer_name]
+    d.deal_number = "#{DEMO_PREFIX.upcase}-RPT-#{key}"
+    d.custom_field_values = {}
+  end
+  cols = {
+    stage:                  attrs[:stage],
+    vehicle_id:             vehicle&.id,
+    primary_salesperson_id: rep.id,
+    owner_id:               rep.id,
+    location_id:            vehicle&.location_id || locations["AUB"].id,
+    selling_price:          attrs[:selling_price],
+    customer_name:          attrs[:customer_name],
+    # Deposit + add-on revenue defaults so these (open/on-order/funded) rows show a
+    # Deposit, Addon GP in the reports. Per-call attrs override via the merge below.
+    down_payment:           (attrs[:selling_price].to_f * 0.07).round(-2),
+    delivery_fee:           3500,
+    setup_fee:              2000,
+    skirting_fee:           1200,
+    accessories_total:      900,
+    updated_at:             Time.current
+  }.merge(attrs.except(:stage, :selling_price, :customer_name))
+  deal.update_columns(cols)
+  deals[name] = deal
+  deal
+end
+
+# --- PENDING + CONTENTION: one available vehicle with TWO open deals --------
+contention_vehicle = vget.call("CLT-2019-T-889900")
+if contention_vehicle
+  build_rpt_deal.call("OPEN1", "[RPT] Alvarez — Clayton (open A)", contention_vehicle, users[:sales1],
+    stage: "proposal",    selling_price: 38900, customer_name: "Gloria Alvarez")
+  build_rpt_deal.call("OPEN2", "[RPT] Bennett — Clayton (open B)", contention_vehicle, users[:sales2],
+    stage: "negotiation", selling_price: 39500, customer_name: "Carl Bennett")
+end
+
+# --- ON ORDER: open deal on an available_to_order unit -> Report 1 'On Order' -
+order_v = vget.call("RMN-2026-A-001240")
+if order_v
+  # Cash buyer (no lender) so an assigned report row exercises the 'Cash' path.
+  build_rpt_deal.call("ORDER1", "[RPT] Castillo — Redman RM4068A (on order)", order_v, users[:sales1],
+    stage: "proposal", selling_price: 142000, customer_name: "Rosa Castillo",
+    lender_name: nil, payment_type: "cash")
+end
+
+# --- CLOSED NOT FUNDED: closed_won, NOT gl_posted (the GL-approval gap) ------
+cnf_v1 = vget.call("DH-2026-A-005002") # Fort Wayne
+cnf_v2 = vget.call("SKY-2021-A-776600") # Fort Wayne
+if cnf_v1
+  build_rpt_deal.call("CNF1", "[RPT] Dawson — Dutch 3268A (closed, not funded)", cnf_v1, users[:sales2],
+    stage: "closed_won", selling_price: 122000, customer_name: "Erin Dawson",
+    home_cost: 87000, reconditioning_cost: 0, floor_plan_interest: 0, delivery_setup_cost: 4200,
+    pack_amount: 2200, lender_name: "Triad Financial", gl_posted: false, gl_posted_at: nil,
+    finance_reserve: 1500, product_margin: 800, won_at: this_month_date)
+end
+if cnf_v2
+  build_rpt_deal.call("CNF2", "[RPT] Foster — Skyline (closed, not funded)", cnf_v2, users[:manager],
+    stage: "closed_won", selling_price: 43000, customer_name: "Grant Foster",
+    home_cost: 28000, reconditioning_cost: 0, floor_plan_interest: 0, delivery_setup_cost: 2000,
+    pack_amount: 1000, lender_name: "21st Mortgage", gl_posted: false, gl_posted_at: nil,
+    won_at: this_month_date)
+end
+
+# --- FUNDED THIS MONTH: closed_won, gl_posted this month; AUB + IND so the ---
+# funded-by-location grouping spans 3 locations (with the section-10 funded units).
+fund_v1 = vget.call("DH-2026-A-005001") # Auburn
+fund_v2 = vget.call("DH-2026-S-005003") # Indianapolis
+if fund_v1
+  d = build_rpt_deal.call("FUND1", "[RPT] Harmon — Dutch 2872A (funded)", fund_v1, users[:sales1],
+    stage: "closed_won", selling_price: 106000, customer_name: "Nina Harmon",
+    home_cost: 77000, reconditioning_cost: 0, floor_plan_interest: 400, delivery_setup_cost: 4500,
+    pack_amount: 2100, lender_name: "21st Mortgage", gl_posted: true,
+    gl_posted_at: this_month_date.to_time, finance_reserve: 1500, product_margin: 800,
+    won_at: this_month_date)
+  fund_v1.update_columns(status: "sold", sold_via_deal_id: d.id)
+end
+if fund_v2
+  d = build_rpt_deal.call("FUND2", "[RPT] Iverson — Dutch 1676S (funded)", fund_v2, users[:manager],
+    stage: "closed_won", selling_price: 63500, customer_name: "Owen Iverson",
+    home_cost: 45000, reconditioning_cost: 0, floor_plan_interest: 350, delivery_setup_cost: 2800,
+    pack_amount: 1500, lender_name: "Vanderbilt", gl_posted: true,
+    gl_posted_at: this_month_date.to_time, finance_reserve: 1500, product_margin: 800,
+    won_at: this_month_date)
+  fund_v2.update_columns(status: "sold", sold_via_deal_id: d.id)
+end
+
+# --- MISSING COST: an available vehicle with NO cost -> Report 1 flags it ----
+missing_v = vget.call("FLT-2017-B-554400")
+missing_v&.update_columns(dealer_cost: nil, freight_cost: nil, pdi_cost: nil, total_cost: nil,
+                          cost: nil, status: "available", sold_via_deal_id: nil)
+
+# --- SOLD-NO-DEAL: sold vehicles with no linked deal -> Report 1 flags them --
+%w[DH-2025-A-004990 RMN-2025-A-001150].each do |serial|
+  v = vget.call(serial)
+  next unless v
+  v.update_columns(status: "sold", sold_via_deal_id: nil)
+  company.deals.where(vehicle_id: v.id).update_all(vehicle_id: nil) # guard: unlink any deal
+end
+
+# --- FLOOR PLAN: floor a handful of in-stock units so the Floor Plan column and
+# the floorplan summary tile (Principal / Accrued / Avg days) are non-zero. The
+# service computes days_on_plan + monthly interest live from start_date/rate but
+# reads accrued_interest from the stored column, so seed that consistently. Only
+# non-sold units qualify (FloorPlanService excludes sold/delivered/curtailed).
+floor_plan_specs = [
+  { serial: "112-000-H-D-C412913A", amount: 62000, lender: "21st Mortgage",   rate: 8.5,  days_ago: 35 },
+  { serial: "112-000-H-A-C412925C", amount: 70000, lender: "Triad Financial", rate: 9.0,  days_ago: 80 },
+  { serial: "RMN-2026-A-001234",    amount: 58000, lender: "21st Mortgage",   rate: 8.75, days_ago: 130 },
+  { serial: "RMN-2025-A-001100",    amount: 34000, lender: "Cascade",         rate: 9.25, days_ago: 20 },
+  { serial: "RMN-2026-A-001240",    amount: 95000, lender: "Triad Financial", rate: 8.5,  days_ago: 175 }, # available_to_order
+]
+floor_plan_specs.each do |fp|
+  v = vget.call(fp[:serial])
+  next unless v
+  accrued = (fp[:amount] * (fp[:rate] / 100.0 / 365.0) * fp[:days_ago]).round(2)
+  v.update_columns(
+    floor_plan_amount:           fp[:amount],
+    floor_plan_lender:           fp[:lender],
+    floor_plan_rate:             fp[:rate],
+    floor_plan_start_date:       fp[:days_ago].days.ago.to_date,
+    floor_plan_accrued_interest: accrued,
+    days_on_floor_plan:          fp[:days_ago],
+    floor_plan_curtailed_at:     nil
+  )
+end
+
+puts "  Report demo: pending+contention (2) & on-order (1); closed-not-funded (2); " \
+     "funded this month (2: #{fund_v1&.location&.code}/#{fund_v2&.location&.code}); missing-cost + sold-no-deal flagged"
+
+# ── Deal Desk reference data (lender programs, fees, F&I) + RBAC ──
+# Reuses db/seeds/deal_desk_seed.rb. Setting $seeding_demo_company makes that file
+# define its methods without running its own standalone (company 47/first) block,
+# so we can target THIS demo company instead.
+puts "\n   Seeding Deal Desk reference data..."
+$seeding_demo_company = true
+load Rails.root.join('db/seeds/deal_desk_seed.rb')
+seed_deal_desk_for(company)
+seed_deal_desk_rbac!
+
 # ── Summary ────────────────────────────────────────────────
 puts "\n" + "=" * 60
 puts "DEMO COMPANY READY!"
@@ -2184,9 +2560,33 @@ puts "-" * 55
   "Deal Activities"   => DealActivity.joins(:deal).where(deals: { company_id: company.id }).count,
   "Contact Activities" => ContactActivity.joins(:contact).where(contacts: { company_id: company.id }).count,
   "Tickets Scheduled" => company.service_tickets.where.not(scheduled_date: nil).count,
+  "Lenders"           => company.lenders.not_deleted.count,
+  "Lender Programs"   => company.respond_to?(:lender_programs) ? company.lender_programs.count : 0,
+  "Fee Templates"     => company.respond_to?(:fee_templates)   ? company.fee_templates.count : 0,
+  "F&I Products"      => company.respond_to?(:fni_products)    ? company.fni_products.count : 0,
+  "Deals w/ Lender"   => company.deals.where.not(lender_id: nil).count,
+  "Deals w/ Vehicle"  => company.deals.where.not(vehicle_id: nil).count,
+  "Open (Pending)"    => company.deals.where(stage: Reports::InventoryDealQuery::OPEN_STAGES).count,
+  "Closed Not Funded" => company.deals.where(stage: "closed_won", gl_posted: false).count,
+  "Funded This Month" => company.deals.where(gl_posted: true, gl_posted_at: Date.current.beginning_of_month..Date.current.end_of_month).count,
+  "Contention Vehicles" => company.deals.where(stage: Reports::InventoryDealQuery::OPEN_STAGES).where.not(vehicle_id: nil).group(:vehicle_id).count.count { |_, c| c >= 2 },
 }.each do |label, count|
   printf "  %-20s %d\n", label, count
 end
+
+# Report breakdowns: vehicles by location and by New/Used × section size.
+puts ""
+puts "Inventory by Location:"
+company.vehicles.where(is_deleted: [false, nil]).includes(:location)
+       .group_by { |v| v.location&.name || "Unassigned" }
+       .sort_by { |name, _| name.to_s }
+       .each { |name, vs| printf "  %-20s %d\n", name, vs.size }
+puts "Inventory by Section:"
+company.vehicles.where(is_deleted: [false, nil])
+       .group_by { |v| size = v.sections.to_i >= 2 ? "Double" : (v.sections.to_i == 1 ? "Single" : "Unspecified"); "#{(v.condition.to_s.capitalize.presence || 'Unspecified')} — #{size}" }
+       .sort_by { |k, _| k }
+       .each { |k, vs| printf "  %-22s %d\n", k, vs.size }
+
 puts ""
 puts "To reset and re-seed:"
 puts "  RESET=true bin/rails runner \"load 'db/seeds/demo_company.rb'\""

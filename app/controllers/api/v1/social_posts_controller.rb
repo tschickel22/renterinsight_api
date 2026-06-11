@@ -87,7 +87,16 @@ class Api::V1::SocialPostsController < ApplicationController
   def update
     return unless authorize_action!('social_posts', 'update')
 
-    if @post.update(permitted_params)
+    # hashtags has no column — it lives inside generation_context (mirrors #create)
+    @post.assign_attributes(permitted_params.except(:hashtags))
+
+    if params[:social_post].key?(:hashtags)
+      ctx = (@post.generation_context || {}).deep_stringify_keys
+      ctx['hashtags'] = Array(params[:social_post][:hashtags])
+      @post.generation_context = ctx
+    end
+
+    if @post.save
       render json: serialize(@post, detailed: true)
     else
       render json: { errors: @post.errors.full_messages }, status: :unprocessable_entity
@@ -233,6 +242,11 @@ class Api::V1::SocialPostsController < ApplicationController
       @company.vehicles.where(is_deleted: false).find_by(id: params[:vehicle_id])
     end
 
+    image_urls = Array(params[:image_urls]).map(&:to_s).select(&:present?)
+    current_draft = if params[:current_draft].respond_to?(:permit)
+      params[:current_draft].permit(:caption, :headline, :description, :cta_type, hashtags: []).to_h
+    end
+
     begin
       result = SocialPostGeneratorService.generate(
         company:         @company,
@@ -243,7 +257,9 @@ class Api::V1::SocialPostsController < ApplicationController
         user:            current_user,
         tone:            tone,
         topic_details:   topic_details,
-        intake_form_url: intake_form_url
+        intake_form_url: intake_form_url,
+        image_urls:      image_urls,
+        current_draft:   current_draft
       )
     rescue SocialPostGeneratorService::Error => e
       return render json: { error: e.message }, status: :unprocessable_entity

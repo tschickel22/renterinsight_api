@@ -9,6 +9,10 @@ class Api::V1::CampaignsController < ApplicationController
 
     if params[:status].present?
       @campaigns = @campaigns.where(status: params[:status])
+    else
+      # Default view excludes archived to keep the list clean — archived
+      # campaigns are still reachable via the explicit Archived filter.
+      @campaigns = @campaigns.where.not(status: 'archived')
     end
     if params[:campaign_type].present?
       @campaigns = @campaigns.where(campaign_type: params[:campaign_type])
@@ -16,7 +20,8 @@ class Api::V1::CampaignsController < ApplicationController
 
     base_for_stats = @company.campaigns.active
     stats = {
-      total: base_for_stats.count,
+      # "Total" backs the default (non-archived) view, so it excludes archived.
+      total: base_for_stats.where.not(status: 'archived').count,
       draft: base_for_stats.where(status: 'draft').count,
       running: base_for_stats.where(status: 'running').count,
       paused: base_for_stats.where(status: 'paused').count,

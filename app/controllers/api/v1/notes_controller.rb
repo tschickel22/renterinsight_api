@@ -10,10 +10,11 @@ module Api
       before_action :validate_entity_access, only: [:index, :create]
       before_action :set_note, only: [:update, :destroy]
 
-      # GET /api/v1/notes?entity_type=account&entity_id=1
+      # GET /api/v1/notes?entity_type=account&entity_id=1&category=customer
       def index
         @notes = Note.for_entity(params[:entity_type], params[:entity_id]).recent
-        
+        @notes = @notes.where(category: params[:category]) if params[:category].present?
+
         render json: {
           notes: @notes.map { |note| note_json(note) }
         }
@@ -121,7 +122,7 @@ module Api
       end
 
       def note_params
-        params.require(:note).permit(:content, :entity_type, :entity_id)
+        params.require(:note).permit(:content, :entity_type, :entity_id, :category)
       end
 
       def note_json(note)
@@ -130,6 +131,8 @@ module Api
           content: note.content,
           entityType: note.entity_type,
           entityId: note.entity_id,
+          category: note.category,
+          authorType: note.author_type,
           createdAt: note.created_at,
           updatedAt: note.updated_at,
           createdBy: note.user_id,

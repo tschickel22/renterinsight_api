@@ -19,7 +19,6 @@ class Deal < ApplicationRecord
         { key: "stage",               label: "Stage",               type: "enum",    filterable: true,  sortable: true  },
         { key: "value",               label: "Value",               type: "number",  filterable: true,  sortable: true  },
         { key: "selling_price",       label: "Selling Price",       type: "number",  filterable: true,  sortable: true  },
-        { key: "unit_cost",           label: "Unit Cost",           type: "number",  filterable: true,  sortable: true  },
         { key: "probability",         label: "Probability (%)",     type: "number",  filterable: true,  sortable: true  },
         { key: "customer_name",       label: "Customer",            type: "string",  filterable: true,  sortable: true  },
         { key: "owner_id",            label: "Assigned To",         type: "number",  filterable: true,  sortable: true  },
@@ -46,6 +45,7 @@ class Deal < ApplicationRecord
   belongs_to :territory, optional: true
   belongs_to :source, optional: true
   belongs_to :vehicle, optional: true  # Added vehicle relationship
+  belongs_to :lender, optional: true  # Managed lender list (denormalized to lender_name below)
   belongs_to :commission_plan, optional: true  # Commission plan for this deal
   belongs_to :deal_invoice, class_name: 'Invoice', optional: true
   
@@ -57,6 +57,7 @@ class Deal < ApplicationRecord
   belongs_to :secondary_salesperson, class_name: 'User', foreign_key: 'secondary_salesperson_id', optional: true
   
   has_many :deal_products, dependent: :destroy
+  has_many :deal_desk_scenarios, dependent: :destroy
   has_many :invoices, dependent: :nullify
   has_many :deal_stage_histories, dependent: :destroy
   has_many :approval_workflows, dependent: :destroy
@@ -117,9 +118,78 @@ class Deal < ApplicationRecord
   
   # Sync vehicle pricing when vehicle is assigned
   before_validation :sync_vehicle_pricing, if: :will_save_change_to_vehicle_id?
-  
-  # Auto-generate commission payment when deal is marked closed_won
-  after_save :generate_commission_payment, if: :just_closed_won?
+
+  # Denormalize the managed lender's name onto lender_name so the reports (which read
+  # lender_name) keep working unchanged. before_save folds it into the same UPDATE — no
+  # nested save / re-entrancy. Only fires when lender_id actually changes. When lender_id
+  # is cleared we intentionally leave lender_name as last set (manual string still allowed).
+  before_save :denormalize_lender_name, if: :will_save_change_to_lender_id?
+
+  def denormalize_lender_name
+    self.lender_name = lender&.name if lender_id.present?
+  end
+
+  # PRICE SOURCE OF TRUTH (Phase 2B): selling_price is a DERIVED MIRROR of the home
+  # line item's price, never a free-typed input. Whenever the deal has a home line
+  # item, selling_price = home_line_item_price (pre-tax: unit_price*qty - discount).
+  # When there is NO home line (legacy/API deals), selling_price is left as-is so
+  # those deals keep computing via the fallback — we never null it.
+  #
+  # selling_price keeps its historical meaning (HOME price only) — fees/accessories
+  # stay separate line items. This is what lets deal_invoice_service /
+  # deal_accounting_service / deal_desk_scenario keep working unchanged (Option B).
+  # The all-lines total lives on line_items_price / the value column, not here.
+  #
+  # FREEZE AT CLOSE: once the deal is closed/posted, the mirror stops so editing a
+  # line post-close does not move the closed deal's frozen home price (and thus its
+  # GP). The closing save itself still mirrors (the deal was open before that save),
+  # freezing the close-time home price into the column.
+  #
+  # Registered BEFORE apply_selected_scenario_on_close (so a Deal Desk on_close
+  # write-back's scenario price still wins at close) and BEFORE
+  # snapshot_landed_cost_on_close + the after_commit GL post, which read off it.
+  before_save :mirror_selling_price_from_home_line
+
+  # Deal Desk: in 'on_close' mode, write the selected scenario's structure back to the deal
+  # automatically as part of the close save (before the GL post, an after_commit, reads it).
+  # before_save so the figures fold into THIS UPDATE; the hook assigns only (no nested save).
+  before_save :apply_selected_scenario_on_close,
+              if: -> { will_save_change_to_stage? && stage == 'closed_won' &&
+                       company&.deal_desk_writeback_mode == 'on_close' }
+
+  # Freeze the vehicle's then-current structured cost onto the deal at close, so GP/COGS
+  # stop moving (read-through ends) and become auditable. before_save means it persists
+  # in the closing UPDATE and runs BEFORE both the after_save commission generation and
+  # the after_commit GL post — both of which read gross off the now-snapshotted cost.
+  # Registered after apply_selected_scenario_on_close so a deal-desk write-back's
+  # explicit home_cost wins; otherwise capture the live vehicle cost.
+  before_save :snapshot_landed_cost_on_close,
+              if: -> { will_save_change_to_stage? && stage == 'closed_won' }
+
+  def snapshot_landed_cost_on_close
+    return if home_cost.present? && home_cost.to_f > 0 # respect explicit / deal-desk cost
+
+    # Freeze the home LINE ITEM cost (mirrored onto unit_cost by the deal form) first —
+    # that's the cost the rep actually entered for this deal. Only fall back to the
+    # vehicle's structured cost when no line-item cost was provided.
+    uc = unit_cost.to_f
+    if uc > 0
+      self.home_cost = uc
+      return
+    end
+
+    vc = vehicle&.structured_cost
+    self.home_cost = vc if vc.present?
+  end
+
+  # Commission payments are NOT generated at close. They are generated only AFTER the
+  # deal is GL-approved (deal_approvals_controller#approve), so commissions can't become
+  # payable before accounting signs off. Generating here would create pending payments
+  # the moment a deal closes — the bug this gate prevents. See generate_commission_payments!
+  # below, invoked from the approval flow.
+  # Mirror the deal's lifecycle onto the linked vehicle: close_won → sold,
+  # transition back out → revert to available (only if this deal owns the sale).
+  after_save :sync_vehicle_sold_status, if: :saved_change_to_stage?
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_stage?
   # Deals queue for accountant approval by default. Auto-posting only fires when the
   # company opts in via AccountingSettings.auto_post_deals; otherwise the deal sits in
@@ -130,7 +200,12 @@ class Deal < ApplicationRecord
     settings = AccountingSettings.for_company(company)
     return unless settings.try(:auto_post_deals)
 
-    Accounting::DealAccountingService.new(self).post_closing_entries!(user: try(:owner) || try(:user))
+    result = Accounting::DealAccountingService.new(self).post_closing_entries!(user: try(:owner) || try(:user))
+    # When auto-post is enabled the deal is GL-posted without going through the approval
+    # controller, so generate commission payments here too once the post succeeds. Keeps
+    # the gate consistent: commissions are generated on GL post, never merely on close.
+    reload
+    generate_commission_payments! if gl_posted?
   rescue => e
     Rails.logger.error("[AutoPost] Deal #{id} closing entries failed: #{e.message}")
   end
@@ -233,45 +308,310 @@ class Deal < ApplicationRecord
       (selling_price || value || 0).to_f.round(2)
     end
   end
-  
+
+  # ============================================================================
+  # LINE-ITEM AS PRICE SOURCE — derivation methods (Phase 2A groundwork).
+  #
+  # READ-ONLY / ADDITIVE. These expose what the line items say about price and
+  # cost so we can migrate selling_price → home line item later. They are NOT
+  # wired into front_gross/landed_cost/value in this phase — front_gross stays
+  # selling_price-based. The home line is a deal_product whose SKU is VEHICLE-<id>
+  # (DealProduct::VEHICLE_SKU_PATTERN), tagged `category:home` by the backfill.
+  # ============================================================================
+
+  # The single home/unit line item, or nil when the home is not yet a line item
+  # (legacy deals — the home price lives on selling_price and deals_controller#deal_json
+  # injects a synthetic 'primary-vehicle' line). Detection spans BOTH home-line formats:
+  # the Phase 3 FE's `category:home`-tagged CUSTOM-<uuid> line and a VEHICLE-<id> line
+  # (see DealProduct#home_line_item?). When more than one home line exists (data anomaly),
+  # prefer a VEHICLE-<id> line if present (it carries the vehicle id) else the first, and
+  # log a warning so the anomaly is visible.
+  def home_line_item
+    homes = deal_products.select(&:home_line_item?)
+    return homes.first if homes.size <= 1
+
+    Rails.logger.warn(
+      "[Deal] Deal #{id}: #{homes.size} home line items found " \
+      "(ids #{homes.map(&:id).inspect}); using the VEHICLE-SKU line if present, else the first."
+    )
+    homes.detect(&:vehicle_line_item?) || homes.first
+  end
+
+  def has_home_line_item?
+    home_line_item.present?
+  end
+
+  # PRE-TAX price of the HOME line item only: (unit_price * quantity) less the
+  # line's discount. nil when there is no home line. This is THE home price —
+  # selling_price mirrors it (Phase 2B). It is deliberately NOT line_items_price:
+  # selling_price stays the home price (invoicing/GL/Deal Desk depend on that),
+  # while line_items_price is the all-lines deal total (see below).
+  def home_line_item_price
+    hli = home_line_item
+    hli ? line_item_price(hli) : nil
+  end
+
+  # ALL-LINES TOTAL (the DEAL VALUE): pre-tax SUM of (unit_price*qty - discount)
+  # across every deal_product — home + fees + accessories + recon. Discount math
+  # mirrors DealProduct#line_profit / calculate_total.
+  #
+  # READ-ONLY helper for display (FE Grand Total) and reconciliation against the
+  # `value` column / calculated_value. It is DISTINCT from selling_price (the home
+  # price) and must NOT feed selling_price, invoicing, or GL — doing so would
+  # double-count fees (selling_price is the home portion; fees are separate lines).
+  def line_items_price
+    deal_products.sum { |dp| line_item_price(dp) }.round(2)
+  end
+
+  # Sum of every line item's cost side: cost * quantity (DealProduct#line_cost_total).
+  # READ-ONLY — not yet wired to landed_cost/COGS.
+  def line_items_cost
+    deal_products.sum { |dp| dp.line_cost_total }.round(2)
+  end
+
   # ============================================================================
   # COMMISSION ECONOMICS CALCULATIONS
   # ============================================================================
   
-  # FRONT GROSS (Sale Price - Cost - Trade Difference)
-  def front_gross
-    base_gross = (selling_price || 0) - (unit_cost || 0)
-    trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
-    primary_gross = base_gross - trade_difference
-    products_gross = deal_products.sum(:total)
-    (primary_gross + products_gross).round(2)
+  # ----------------------------------------------------------------------------
+  # COST BASIS — single source of truth, sourced from the vehicle.
+  #
+  # OPEN deals read the vehicle's LIVE structured cost (read-through): editing the
+  # home's cost recomputes GP everywhere with no deal re-save. CLOSED deals
+  # (closed_won / gl_posted) use the cost SNAPSHOTTED onto the deal at close (home_cost),
+  # so GP/COGS freeze and are auditable. 0/blank vehicle cost is treated as MISSING
+  # (returns nil) — we never apply a default margin.
+  # ----------------------------------------------------------------------------
+
+  # True once the deal is closed/posted and its cost is frozen on the deal.
+  def cost_snapshotted?
+    gl_posted? || stage == 'closed_won'
   end
-  
+
+  # The vehicle-cost portion of landed cost. Live from the vehicle while open; the
+  # snapshot (home_cost) once closed. Falls back to unit_cost — the passive mirror of the
+  # home LINE ITEM's cost, which is the number reps actually enter on the deal — and then
+  # to the vehicle's live cost, so a closed deal is never stranded with nil cost just
+  # because home_cost wasn't snapshotted (e.g. line items edited after close). nil only
+  # when truly no cost exists anywhere.
+  def vehicle_landed_cost
+    if cost_snapshotted?
+      hc = home_cost.to_f
+      return hc.round(2) if hc > 0
+
+      # home_cost not snapshotted (or zero) — fall back to unit_cost (mirrors the home
+      # line item cost), then to the vehicle's structured cost. Keeps closed deals whose
+      # cost lives on the line item from showing a missing/zero cost basis.
+      uc = unit_cost.to_f
+      return uc.round(2) if uc > 0
+
+      live = vehicle&.structured_cost
+      return live unless live.nil?
+
+      return nil
+    end
+
+    # OPEN deal: prefer the live vehicle cost (read-through), then the home line item
+    # cost mirror (unit_cost), then home_cost. So a deal whose cost was entered on the
+    # line item computes GP even when the vehicle record itself has no cost.
+    live = vehicle&.structured_cost
+    return live unless live.nil?
+
+    uc = unit_cost.to_f
+    return uc.round(2) if uc > 0
+
+    hc = home_cost.to_f
+    hc > 0 ? hc.round(2) : nil
+  end
+
+  # HOME LANDED COST — the true acquisition cost of the unit that flows to COGS:
+  # vehicle structured cost + reconditioning. Floor-plan interest and delivery are NOT
+  # here — they're time/logistics CARRYING costs (see carrying_costs), kept out of front
+  # gross so the margin view reconciles with the GL (which posts only home cost + recon
+  # to COGS). nil (NOT zero) when the vehicle cost has not been entered, so GP can render
+  # "—" and flag it.
+  def landed_cost
+    base = vehicle_landed_cost
+    return nil if base.nil?
+
+    (base + (reconditioning_cost || 0)).round(2)
+  end
+
+  # CARRYING / PERIOD COSTS — costs of owning + delivering the unit that vary with time
+  # and logistics, not with how well the unit was sold: floor-plan interest (inventory
+  # financing while it sat) + delivery/setup. These reduce NET profit, never front gross.
+  # The GL treats them as period expenses (not COGS), so keeping them out of front gross
+  # makes the margin view and the GL agree.
+  def carrying_costs
+    ((floor_plan_interest || 0) + (delivery_setup_cost || 0)).round(2)
+  end
+
+  # Whether a usable cost basis exists. When false, GP is "—" / "cost not entered".
+  def cost_entered?
+    !landed_cost.nil?
+  end
+
+  # FRONT-END ADD-ON MARGIN — the margin (price − cost) on every front-end add-on line
+  # item: accessories and fees (skirting, delivery-as-a-charge, setup, A/C, steps, etc.).
+  # The home's own margin is handled via selling_price − landed_cost; this captures the
+  # margin on everything else the customer buys with the home. Back-end F&I products are
+  # excluded (they belong to back_gross). Uses each line's (unit_price − cost) × quantity.
+  def front_end_addon_margin
+    deal_products.sum do |dp|
+      next 0.0 unless fee_line_item?(dp) || accessory_line_item?(dp)
+      qty = (dp.quantity || 1).to_f
+      ((dp.unit_price.to_f - dp.cost.to_f) * qty)
+    end.round(2)
+  end
+
+  # FRONT GROSS — the single canonical accounting gross. PRE-pack (pack is a dealer
+  # holdback, not a cost — folding it in would break GP = revenue − COGS on the GL).
+  # = (home margin) + (front-end add-on margins) − trade difference, where
+  # home margin = selling_price − landed_cost (home cost + reconditioning).
+  # Floor-plan interest and delivery are carrying costs and are EXCLUDED (they hit net).
+  # Back-end F&I products are NOT part of front gross (they belong to back_gross).
+  # nil when cost not entered.
+  def front_gross
+    lc = landed_cost
+    return nil if lc.nil?
+
+    trade_difference = (trade_payoff || 0) - (trade_allowance || 0)
+    home_margin = (front_gross_home_price || 0) - lc - trade_difference
+    (home_margin + front_end_addon_margin).round(2)
+  end
+
+  # Home PRICE used for front gross's home margin.
+  #   - OPEN deal with a home line: the LIVE home line price (== selling_price,
+  #     which the mirror keeps in sync). Reading the line keeps GP live as the rep
+  #     edits the home line.
+  #   - CLOSED/posted deal: the FROZEN selling_price. The mirror stopped at close,
+  #     so this holds the close-time home price — editing the home line afterward
+  #     does NOT move the closed deal's GP (matches the frozen cost snapshot).
+  #   - Legacy deal with no home line: selling_price (the home price column).
+  # Only the HOME line feeds this; fee/accessory lines are handled by
+  # front_end_addon_margin, so the home is never double-counted.
+  def front_gross_home_price
+    return selling_price.to_f if cost_snapshotted? && selling_price.present?
+    home_line_item_price || selling_price.to_f
+  end
+
   # PACK (dealer holdback/administrative fee)
   def effective_pack_amount
     return pack_amount if pack_amount.present?
     return location.default_pack_amount if location&.default_pack_amount.present?
     company&.default_pack_amount || 0
   end
-  
-  # COMMISSIONABLE FRONT GROSS (what most dealers pay on)
+
+  # COMMISSIONABLE FRONT GROSS (what most dealers pay on) — accounting front gross
+  # MINUS pack. Pack reduces commissionable gross (reps paid after the house takes its
+  # holdback) but NOT accounting front gross. Preserve this distinction. nil when cost
+  # not entered.
   def commissionable_front_gross
-    (front_gross - effective_pack_amount).round(2)
+    fg = front_gross
+    return nil if fg.nil?
+
+    (fg - effective_pack_amount).round(2)
   end
-  
+
   # BACK GROSS (finance & products)
   def back_gross
     ((finance_reserve || 0) + (product_margin || 0)).round(2)
   end
-  
-  # TOTAL GROSS
+
+  # TOTAL GROSS — front_gross is nil when cost not entered; treat as 0 here so the
+  # figure stays computable (the cost flag surfaces the missing-cost condition).
   def total_gross
-    (front_gross + back_gross).round(2)
+    ((front_gross || 0) + back_gross).round(2)
   end
   
-  # ADD-ON GROSS (MH dealers pay separately on these)
+  # ============================================================================
+  # FEES — source of truth migrated from deprecated columns to line items.
+  #
+  # Phase 3 moved fees off the deal columns (doc_fee/delivery_fee/setup_fee/
+  # skirting_fee/accessories_total) and onto deal_products tagged in `notes` with
+  # `category:fee` (DealForm.tsx) — and the FE now ZEROES those columns on every save.
+  # These readers therefore must compute fee figures from the line items, not the
+  # columns, or fees are silently understated in commissions, invoices, and contracts.
+  #
+  # Back-compat: when a deal has NO fee/accessory line items at all (legacy deals, or
+  # records created via API that still populate the columns), fall back to the columns
+  # so historical/integration data keeps reporting. A deal touched by the Phase 3 FE
+  # has line items and zeroed columns, so the line items win — the point of this fix.
+  # ----------------------------------------------------------------------------
+
+  # Map a fee line item's name back to a canonical fee key, matching the Deal Desk +
+  # FE naming convention (FEE_LINE_NAMES / category). nil for unrecognized names.
+  FEE_NAME_TO_KEY = {
+    'doc fee' => :doc, 'document fee' => :doc,
+    'delivery fee' => :delivery, 'delivery / freight' => :delivery, 'freight' => :delivery,
+    'setup fee' => :setup, 'setup charges' => :setup, 'set up fee' => :setup,
+    'skirting fee' => :skirting, 'skirting' => :skirting
+  }.freeze
+
+  # Does this deal carry any fee/accessory line items? Determines whether to read
+  # line items (Phase 3) or fall back to the deprecated columns (legacy/API deals).
+  def has_fee_line_items?
+    deal_products.any? { |dp| fee_line_item?(dp) || accessory_line_item?(dp) }
+  end
+
+  # Per-fee totals computed from line items. Keys: :doc :delivery :setup :skirting
+  # :accessories :other. Uses each line's `total` (price*qty less discount), so qty>1
+  # and discounted fee lines are reflected. An unrecognized fee name lands in :other so
+  # it isn't silently dropped from add-on gross.
+  def fee_totals_from_line_items
+    totals = Hash.new(0.0)
+    deal_products.each do |dp|
+      if accessory_line_item?(dp)
+        totals[:accessories] += dp.total.to_f
+      elsif fee_line_item?(dp)
+        normalized = normalize_fee_name(dp.product_name)
+        key = FEE_NAME_TO_KEY[normalized]
+        if key
+          totals[key] += dp.total.to_f
+        elsif normalized == 'accessories'
+          totals[:accessories] += dp.total.to_f
+        else
+          totals[:other] += dp.total.to_f
+        end
+      end
+    end
+    totals
+  end
+
+  # Effective per-fee accessors: line items when present, else the legacy column.
+  # Used by DealInvoiceService and the agreement merge fields so invoices/contracts
+  # reflect the fees actually on the deal.
+  def effective_doc_fee
+    has_fee_line_items? ? fee_totals_from_line_items[:doc].round(2) : (doc_fee || 0).to_f
+  end
+
+  def effective_delivery_fee
+    has_fee_line_items? ? fee_totals_from_line_items[:delivery].round(2) : (delivery_fee || 0).to_f
+  end
+
+  def effective_setup_fee
+    has_fee_line_items? ? fee_totals_from_line_items[:setup].round(2) : (setup_fee || 0).to_f
+  end
+
+  def effective_skirting_fee
+    has_fee_line_items? ? fee_totals_from_line_items[:skirting].round(2) : (skirting_fee || 0).to_f
+  end
+
+  def effective_accessories_total
+    has_fee_line_items? ? fee_totals_from_line_items[:accessories].round(2) : (accessories_total || 0).to_f
+  end
+
+  # ADD-ON GROSS (MH dealers pay separately on these). Mirrors the historical column
+  # formula (delivery + setup + skirting + accessories; doc fee excluded) but sourced
+  # from line items when present. Unrecognized fee lines (:other) are included so reps
+  # are paid on the full add-on amount rather than silently dropping it.
   def addon_gross
-    ((delivery_fee || 0) + (setup_fee || 0) + (skirting_fee || 0) + (accessories_total || 0)).round(2)
+    if has_fee_line_items?
+      t = fee_totals_from_line_items
+      (t[:delivery] + t[:setup] + t[:skirting] + t[:accessories] + t[:other]).round(2)
+    else
+      ((delivery_fee || 0) + (setup_fee || 0) + (skirting_fee || 0) + (accessories_total || 0)).round(2)
+    end
   end
   
   # Gross per unit (for multi-unit deals)
@@ -346,9 +686,67 @@ class Deal < ApplicationRecord
     
     company.commission_plans.active.current.defaults.first
   end
+
+  # Generate commission payment records for this deal's participants. Called from the GL
+  # approval flow (deal_approvals_controller#approve) — NOT at close — so commissions only
+  # become payable after accounting approves the deal. Idempotent: the generator skips any
+  # participant that already has a payment for this deal, so re-approval won't duplicate.
+  def generate_commission_payments!
+    return unless primary_salesperson_id.present?
+    CommissionPaymentGeneratorService.generate_for_deal(self)
+  rescue StandardError => e
+    Rails.logger.error "[Deal] Failed to generate commission payment for deal #{id}: #{e.message}"
+    nil
+  end
   
   private
   
+  # --- Fee line-item helpers (Phase 3 fee migration; see addon_gross above) -----
+  # A fee line item: deal_product tagged `category:fee` in notes (FE/Deal Desk convention).
+  def fee_line_item?(dp)
+    dp.notes.to_s.match?(/category:\s*fee\b/i)
+  end
+
+  # An accessory line item: deal_product tagged `category:accessory` in notes. The old
+  # accessories_total column maps to these (FE puts accessories under their own category).
+  def accessory_line_item?(dp)
+    dp.notes.to_s.match?(/category:\s*accessory\b/i)
+  end
+
+  def normalize_fee_name(str)
+    str.to_s.strip.downcase.gsub(/\s+/, ' ')
+  end
+
+  # Pre-tax revenue of one line item: (unit_price * quantity) less the discount.
+  # Discount math mirrors DealProduct#line_profit / calculate_total. Used by
+  # home_line_item_price / line_items_price (Phase 2A/2B).
+  def line_item_price(dp)
+    subtotal = dp.quantity.to_i * dp.unit_price.to_f
+    discount_amount = if dp.discount_type == 'percentage'
+      subtotal * (dp.discount.to_f / 100.0)
+    else
+      dp.discount.to_f
+    end
+    (subtotal - discount_amount).round(2)
+  end
+
+  # before_save: mirror selling_price from the home line item (Phase 2B). See the
+  # before_save :mirror_selling_price_from_home_line registration above for the full
+  # rationale (home-price meaning, freeze-at-close, callback ordering).
+  def mirror_selling_price_from_home_line
+    return if closed_before_this_save?   # freeze once closed/posted
+    return unless has_home_line_item?    # legacy/API deals: leave selling_price as-is
+    self.selling_price = home_line_item_price
+  end
+
+  # True when the deal was ALREADY closed/posted before the current save — used to
+  # freeze selling_price post-close. The closing save itself returns false (the
+  # deal was open before it), so that save still mirrors the close-time home price.
+  def closed_before_this_save?
+    prior_stage = will_save_change_to_stage? ? stage_was : stage
+    %w[closed_won closed_lost].include?(prior_stage) || gl_posted?
+  end
+
   # Auto-generate unique deal number per company (e.g. D-000001)
   def generate_deal_number
     return if deal_number.present?
@@ -377,12 +775,11 @@ class Deal < ApplicationRecord
     self.primary_salesperson_id = owner_id
   end
   
-  # Auto-generate commission payment when deal is delivered
-  def generate_commission_payment
-    return unless primary_salesperson_id.present?
-    CommissionPaymentGeneratorService.generate_for_deal(self)
+  def sync_vehicle_sold_status
+    previous_stage, _ = saved_change_to_stage
+    DealVehicleStatusSync.call(self, previous_stage: previous_stage)
   rescue StandardError => e
-    Rails.logger.error "[Deal] Failed to generate commission payment for deal #{id}: #{e.message}"
+    Rails.logger.error "[Deal] sync_vehicle_sold_status failed for deal #{id}: #{e.message}"
   end
   
   # Fire custom lifecycle webhook events on stage transitions
@@ -403,18 +800,62 @@ class Deal < ApplicationRecord
   end
 
   # Sync vehicle pricing data when vehicle is assigned
+  # Deal Desk on_close write-back (see the before_save above). Pulls the deal's single
+  # selected scenario and writes its structure onto the deal via ASSIGNMENT ONLY
+  # (assign_only: true) — folded into this in-flight save, so there's no nested deal.update
+  # and no save re-entrancy. Never raises: a deal with no selected scenario simply closes.
+  # Does NOT touch the close/GL/commission pipeline (commissions stay gated on GL-approval).
+  def apply_selected_scenario_on_close
+    scenario = deal_desk_scenarios.selected.first
+    unless scenario
+      Rails.logger.info("[DealDesk] Deal #{id} closing with no selected scenario; no write-back.")
+      return
+    end
+
+    # Divergence guard: the deal was hand-edited after the scenario was selected. The
+    # scenario is the source of truth at close, but make the silent overwrite visible.
+    if selling_price.present? && scenario.unit_price_snapshot.present? &&
+       selling_price.to_d != scenario.unit_price_snapshot.to_d
+      Rails.logger.warn(
+        "[DealDesk] Deal #{id} selling_price=#{selling_price} diverges from selected scenario " \
+        "#{scenario.id} snapshot=#{scenario.unit_price_snapshot}; applying scenario (source of truth at close)."
+      )
+    end
+
+    scenario.write_back_to_deal!(self, assign_only: true)
+  end
+
   def sync_vehicle_pricing
     return unless vehicle_id.present?
     vehicle = Vehicle.find_by(id: vehicle_id)
     return unless vehicle
     
     vehicle_price = vehicle.sale_price || vehicle.msrp
-    self.selling_price = vehicle_price if selling_price.nil? || selling_price == 0
-    self.unit_cost = vehicle.cost if unit_cost.nil? || unit_cost == 0
+    # Phase 2B: selling_price is mirrored from the home line item when one exists.
+    # Only bootstrap it from the vehicle on the LEGACY path (no home line yet) so we
+    # never clobber the mirror.
+    self.selling_price = vehicle_price if (selling_price.nil? || selling_price == 0) && !has_home_line_item?
+    # unit_cost is now a PASSIVE MIRROR of the canonical landed structured cost (see
+    # vehicle_landed_cost/landed_cost), never an independent cost source. Mirror
+    # structured_cost (not bare vehicle.cost) so it can never diverge from GP/COGS.
+    self.unit_cost = vehicle.structured_cost if unit_cost.nil? || unit_cost == 0
     self.value = vehicle_price if value.nil? || value == 0
     self.quantity ||= 1
+
+    # Auto-populate reconditioning + floor-plan interest ESTIMATES from the home so the
+    # deal/approval starts pre-filled (accountant can override on approval). Only fill
+    # when blank/zero so we never clobber a value already entered on the deal.
+    if vehicle.respond_to?(:reconditioning_cost) && vehicle.reconditioning_cost.present? &&
+       (reconditioning_cost.nil? || reconditioning_cost.zero?)
+      self.reconditioning_cost = vehicle.reconditioning_cost
+    end
+    if vehicle.respond_to?(:floor_plan_interest_to_date) &&
+       (floor_plan_interest.nil? || floor_plan_interest.zero?)
+      fp_interest = vehicle.floor_plan_interest_to_date
+      self.floor_plan_interest = fp_interest if fp_interest.to_f > 0
+    end
     
-    Rails.logger.info "[Deal] Synced pricing from vehicle #{vehicle_id}: selling_price=$#{selling_price}, unit_cost=$#{unit_cost}, value=$#{value}"
+    Rails.logger.info "[Deal] Synced pricing from vehicle #{vehicle_id}: selling_price=$#{selling_price}, unit_cost=$#{unit_cost}, value=$#{value}, recon=$#{reconditioning_cost}, fp_interest=$#{floor_plan_interest}"
   rescue StandardError => e
     Rails.logger.error "[Deal] Failed to sync vehicle pricing: #{e.message}"
   end

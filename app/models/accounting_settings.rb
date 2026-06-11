@@ -43,15 +43,40 @@ class AccountingSettings < ApplicationRecord
     }
   end
 
+  # Tax-payable GL accounts, by jurisdiction. When an account hasn't been explicitly
+  # chosen, fall back to the standard seeded Sales Tax Payable accounts by number
+  # (2210 State / 2220 County / 2230 City) so sales tax still posts out of the box.
+  # The user can override any of these in Accounting Settings → Sales Tax.
+  DEFAULT_TAX_ACCOUNT_NUMBERS = { state: '2210', county: '2220', city: '2230' }.freeze
+
   def tax_accounts
     {
-      state: state_tax_account,
-      county: county_tax_account,
-      city: city_tax_account
+      state:  state_tax_account  || default_tax_account(:state),
+      county: county_tax_account || default_tax_account(:county),
+      city:   city_tax_account   || default_tax_account(:city)
     }
   end
 
+  # The resolved (effective) account for a jurisdiction — explicit choice or the seeded
+  # default. Used by the API so the UI can show what will actually be used.
+  def effective_tax_account(jurisdiction)
+    tax_accounts[jurisdiction.to_sym]
+  end
+
+  # True when the jurisdiction is using the seeded default (not an explicit override).
+  def tax_account_is_default?(jurisdiction)
+    explicit = public_send("#{jurisdiction}_tax_account")
+    explicit.nil? && default_tax_account(jurisdiction).present?
+  end
+
   private
+
+  # Look up the seeded default tax-payable account for a jurisdiction by number.
+  def default_tax_account(jurisdiction)
+    number = DEFAULT_TAX_ACCOUNT_NUMBERS[jurisdiction.to_sym]
+    return nil unless number
+    company&.chart_of_accounts&.find_by(account_number: number)
+  end
 
   def set_auto_post_defaults
     self.auto_post_invoices = true if auto_post_invoices.nil?

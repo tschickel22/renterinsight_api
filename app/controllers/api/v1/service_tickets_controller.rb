@@ -4,7 +4,7 @@ module Api
   module V1
     class ServiceTicketsController < ApplicationController
       before_action :set_company
-      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :mark_warranty_suspected, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both, :assign_contractor, :unassign_contractor]
+      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :set_attachment_audience, :mark_warranty_suspected, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both, :assign_contractor, :unassign_contractor]
       
       # GET /api/v1/service-tickets
       def index
@@ -176,7 +176,26 @@ module Api
           render json: { errors: ['No files provided'] }, status: :unprocessable_entity
         end
       end
-      
+
+      # PATCH /api/v1/service-tickets/:id/attachments/:attachment_id/audience
+      # Tag who an attachment is visible to (customer / manufacturer). Internal
+      # staff always have access regardless of these flags.
+      def set_attachment_audience
+        return unless authorize_action!('service', 'update')
+
+        attachment = @service_ticket.attachments.find_by(id: params[:attachment_id])
+        return render json: { error: 'Attachment not found' }, status: :not_found unless attachment
+
+        audience = AttachmentAudience.find_or_initialize_by(active_storage_attachment_id: attachment.id)
+        bool = ActiveModel::Type::Boolean.new
+        audience.visible_to_customer = bool.cast(params[:visible_to_customer]) unless params[:visible_to_customer].nil?
+        audience.visible_to_manufacturer = bool.cast(params[:visible_to_manufacturer]) unless params[:visible_to_manufacturer].nil?
+        audience.tagged_by_id = current_user&.id
+        audience.save!
+
+        render json: { data: serialize_attachment(attachment) }
+      end
+
       # POST /api/v1/service-tickets/:id/mark-warranty-suspected
       # Client or company marks ticket as potential warranty issue
       def mark_warranty_suspected
@@ -269,13 +288,16 @@ module Api
             submitted_by: current_user.email,
             status: 'draft'
           )
-          
+
+          # Carry manufacturer-tagged ticket files onto the claim
+          copy_manufacturer_attachments_to_claim(@service_ticket, claim)
+
           # Update service ticket
           @service_ticket.update!(
             warranty_claim_id: claim.id,
             is_warranty_confirmed: true
           )
-          
+
           # Generate warranty invoice
           service = ServiceTicketInvoiceService.new(@service_ticket)
           invoice = service.generate_warranty_invoice(claim)
@@ -323,12 +345,15 @@ module Api
               submitted_by: current_user.email,
               status: 'draft'
             )
-            
+
+            # Carry manufacturer-tagged ticket files onto the claim
+            copy_manufacturer_attachments_to_claim(@service_ticket, claim)
+
             @service_ticket.update!(
               warranty_claim_id: claim.id,
               is_warranty_confirmed: true
             )
-            
+
             service = ServiceTicketInvoiceService.new(@service_ticket)
             result[:warranty_invoice] = service.generate_warranty_invoice(claim)
             result[:warranty_claim] = claim
@@ -484,6 +509,7 @@ module Api
           :is_portal_created,
           :portal_notes,
           :portal_visible,  # Allow customer to view this ticket in portal
+          :factory_po,
           parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total, :part_id, :partId],
           labor: [:id, :description, :hours, :rate, :total],
           custom_fields: {},
@@ -511,6 +537,7 @@ module Api
           status: ticket.status,
           priority: ticket.priority,
           assignedTo: ticket.assigned_to,
+          factoryPo: ticket.factory_po,
           assignedToUser: ticket.assigned_to.present? ? serialize_assigned_user(ticket.assigned_to) : nil,
           scheduledDate: ticket.scheduled_date,
           notes: ticket.notes,
@@ -609,13 +636,39 @@ module Api
         }
       end
       
+      # Copy service ticket attachments tagged manufacturer-visible onto a warranty
+      # claim so they flow to the manufacturer. Creates independent blobs (a
+      # self-contained snapshot) rather than sharing the ticket's blobs.
+      def copy_manufacturer_attachments_to_claim(ticket, claim)
+        attachment_ids = ticket.attachments.map(&:id)
+        return if attachment_ids.empty?
+
+        manufacturer_ids = AttachmentAudience
+          .where(active_storage_attachment_id: attachment_ids, visible_to_manufacturer: true)
+          .pluck(:active_storage_attachment_id)
+        return if manufacturer_ids.empty?
+
+        ticket.attachments.each do |att|
+          next unless manufacturer_ids.include?(att.id)
+
+          att.blob.open do |file|
+            claim.attachments.attach(io: file, filename: att.filename.to_s, content_type: att.content_type)
+          end
+        end
+      rescue => e
+        Rails.logger.error "[copy_manufacturer_attachments_to_claim] ticket #{ticket.id} -> claim #{claim.id}: #{e.message}"
+      end
+
       def serialize_attachment(attachment)
+        audience = AttachmentAudience.find_by(active_storage_attachment_id: attachment.id)
         {
           id: attachment.id,
           filename: attachment.filename.to_s,
           contentType: attachment.content_type,
           byteSize: attachment.byte_size,
-          url: rails_blob_url(attachment, only_path: true)
+          url: rails_blob_url(attachment, only_path: true),
+          visibleToCustomer: audience&.visible_to_customer || false,
+          visibleToManufacturer: audience&.visible_to_manufacturer || false
         }
       end
       

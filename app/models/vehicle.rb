@@ -25,8 +25,8 @@ class Vehicle < ApplicationRecord
         { key: "stock_number", label: "Stock Number", type: "string", filterable: true,  sortable: true  },
         { key: "bedrooms",     label: "Bedrooms",     type: "number", filterable: true,  sortable: true  },
         { key: "bathrooms",    label: "Bathrooms",    type: "number", filterable: true,  sortable: true  },
-        { key: "msrp",         label: "MSRP",         type: "number", filterable: true,  sortable: true  },
-        { key: "sale_price",   label: "Sale Price",   type: "number", filterable: true,  sortable: true  },
+        { key: "msrp",         label: "Base Sale Price", type: "number", filterable: true,  sortable: true  },
+        { key: "sale_price",   label: "Special Sale Price", type: "number", filterable: true,  sortable: true  },
         { key: "cost",         label: "Cost",         type: "number", filterable: true,  sortable: true  },
         { key: "color",        label: "Color",        type: "string", filterable: true,  sortable: false },
         { key: "created_at",   label: "Created At",   type: "date",   filterable: true,  sortable: true  },
@@ -44,10 +44,14 @@ class Vehicle < ApplicationRecord
   belongs_to :floor_plan, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  has_many :deal_desk_scenarios, dependent: :nullify
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
   has_many :inventory_packages, dependent: :destroy
   has_many :tracked_links, dependent: :nullify
+  has_many :documents, class_name: 'VehicleDocument', dependent: :destroy
+  # Internal-only manufacturer-invoice capture (Max Advance Phase 1). One per vehicle.
+  has_one :invoice, class_name: 'VehicleInvoice', dependent: :destroy
 
   # Tags (polymorphic association)
   has_many :tag_assignments, as: :entity, dependent: :destroy
@@ -202,6 +206,37 @@ class Vehicle < ApplicationRecord
   # Auto-compute discounted sale price when discount fields change
   before_save :compute_discounted_price
 
+  # Structured "landed" cost of the unit — the single source of truth for cost.
+  # `total_cost` is authoritative when maintained; otherwise the sum of its components
+  # (dealer_cost + freight_cost + pdi_cost). It is NOT maintained by any callback, so we
+  # compute it on read. Returns nil when no cost has been entered — 0 is treated as
+  # MISSING, never as free. Callers must flag nil as "cost not entered" rather than
+  # assuming a default margin.
+  def structured_cost
+    tc = total_cost.to_f
+    return tc.round(2) if tc > 0
+
+    components_sum = [dealer_cost, freight_cost, pdi_cost].compact.sum(&:to_f)
+    components_sum > 0 ? components_sum.round(2) : nil
+  end
+
+  # Floor-plan interest accrued to date. Floor-plan rates are quoted ANNUALLY (APR), so
+  # the monthly accrual is amount * (annual_rate% / 12) per month. Counts whole months
+  # from floor_plan_start_date to today (or floor_plan_curtailed_at if curtailed). Returns
+  # 0.0 when floor-plan tracking isn't set up, so a deal can safely auto-populate an
+  # estimate the accountant can override.
+  def floor_plan_interest_to_date(as_of: Date.current)
+    return 0.0 if floor_plan_amount.to_f <= 0 || floor_plan_rate.to_f <= 0 || floor_plan_start_date.blank?
+
+    end_date = (floor_plan_curtailed_at || as_of).to_date
+    start = floor_plan_start_date.to_date
+    months = (end_date.year * 12 + end_date.month) - (start.year * 12 + start.month)
+    months = 0 if months.negative?
+
+    monthly_rate = floor_plan_rate.to_f / 100.0 / 12.0
+    (floor_plan_amount.to_f * monthly_rate * months).round(2)
+  end
+
   # Display helpers
   def display_name
     "#{year} #{make} #{model}#{trim.present? ? " #{trim}" : ''}"
@@ -322,11 +357,6 @@ class Vehicle < ApplicationRecord
     # MH: Auto-copy vin to serial_number if serial_number is blank
     if listing_type == 'manufactured_home' && serial_number.blank? && vin.present?
       self.serial_number = vin
-    end
-
-    # Auto-copy dealer_cost to cost if cost is blank (Invoice Cost = Cost in UI)
-    if cost.blank? && dealer_cost.present?
-      self.cost = dealer_cost
     end
   end
 

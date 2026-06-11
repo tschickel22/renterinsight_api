@@ -33,9 +33,37 @@ module Api
       end
 
       # POST /api/v1/vehicles/:vehicle_id/packages/apply_template
-      # Snapshot a company template onto this vehicle
+      # Snapshot a company template onto this vehicle.
+      # Negative template_id = Standard Item (CompanyAllowanceDefault) from the
+      # merged picker feed — snapshot it the same way, carrying its identity
+      # via company_allowance_default_id-style description tag is NOT needed:
+      # the inventory snapshot is pricing-only; deal-level lines carry identity.
       def apply_template
-        template = @company.package_templates.find_by(id: params[:template_id])
+        tid = params[:template_id].to_i
+
+        if tid.negative?
+          standard = @company.company_allowance_defaults.active.find_by(id: -tid)
+          return render json: { error: 'Standard item not found' }, status: :not_found unless standard
+
+          package = @vehicle.inventory_packages.build(
+            name: standard.name,
+            # description deliberately nil — package description surfaces on
+            # client-facing brochures; allowance identity stays internal-only
+            price: standard.dealer_price,
+            cost: standard.dealer_cost,
+            include_in_total: true,
+            taxable: false,
+            position: @vehicle.inventory_packages.maximum(:position).to_i + 1
+          )
+
+          if package.save
+            return render json: package_json(package), status: :created
+          else
+            return render json: { errors: package.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
+
+        template = @company.package_templates.find_by(id: tid)
         return render json: { error: 'Template not found' }, status: :not_found unless template
 
         attrs = template.to_inventory_package_attrs

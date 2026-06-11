@@ -40,6 +40,49 @@ module Api
         render json: { error: 'Service ticket not found' }, status: :not_found
       end
       
+      # POST /api/portal/service-tickets/:id/notes
+      # Lets a customer reply to the customer-facing note thread on their ticket.
+      def notes
+        ticket = ServiceTicket
+          .where(company_id: current_portal_user.company_id)
+          .where(portal_visible: true)
+          .where("account_id = ? OR contact_id = ?",
+                 current_portal_user.buyer_id,
+                 current_portal_user.buyer_id)
+          .find(params[:id])
+
+        content = params.dig(:note, :content) || params[:content]
+        if content.blank?
+          return render json: { error: 'Note content is required' }, status: :unprocessable_entity
+        end
+
+        note = Note.new(
+          entity_type: 'service_ticket',
+          entity_id: ticket.id.to_s,
+          category: 'customer',
+          author_type: 'customer',
+          content: content.to_s.strip,
+          created_by_name: portal_user_display_name
+        )
+
+        if note.save
+          render json: {
+            success: true,
+            data: {
+              id: note.id,
+              content: note.content,
+              authorType: note.author_type,
+              createdAt: note.created_at,
+              createdByName: note.created_by_name
+            }
+          }, status: :created
+        else
+          render json: { success: false, errors: note.errors.full_messages }, status: :unprocessable_entity
+        end
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: 'Service ticket not found' }, status: :not_found
+      end
+
       # POST /api/portal/service-tickets
       def create
         # Get account from portal user's buyer relationship
@@ -120,8 +163,16 @@ module Api
             params[:files].each do |file|
               ticket.attachments.attach(file)
             end
+            # Customer-uploaded files are visible to the customer by default so they
+            # see their own uploads in the portal. Manufacturer stays opt-in (staff).
+            ticket.attachments.reload.each do |att|
+              AttachmentAudience.find_or_create_by(active_storage_attachment_id: att.id) do |a|
+                a.visible_to_customer = true
+                a.visible_to_manufacturer = false
+              end
+            end
           end
-          
+
           render json: {
             success: true,
             data: serialize_ticket(ticket, include_details: true),
@@ -161,6 +212,17 @@ module Api
       
       def current_portal_user
         @current_portal_user
+      end
+
+      # Best-effort display name for a portal (customer) author on a note.
+      def portal_user_display_name
+        buyer = current_portal_user.buyer
+        if buyer.respond_to?(:first_name) || buyer.respond_to?(:last_name)
+          name = "#{buyer.try(:first_name)} #{buyer.try(:last_name)}".strip
+          return name if name.present?
+        end
+        return buyer.name if buyer.respond_to?(:name) && buyer.name.present?
+        current_portal_user.try(:email).presence || 'Customer'
       end
       
       def ticket_params
@@ -263,21 +325,42 @@ module Api
         
         if include_details
           data[:assignedTo] = ticket.assigned_to
-          
+
           # Include parts and labor arrays in detail view
           data[:parts] = parts_array
           data[:labor] = labor_array
+
+          # Customer-facing notes (timestamped/user-stamped). Technician notes are
+          # internal and intentionally excluded from the portal.
+          data[:customerNotes] = Note
+            .for_entity('service_ticket', ticket.id.to_s)
+            .where(category: 'customer')
+            .recent
+            .map do |n|
+              {
+                id: n.id,
+                content: n.content,
+                authorType: n.author_type,
+                createdAt: n.created_at,
+                createdByName: n.created_by_name
+              }
+            end
           
-          # Include attachment URLs for viewing
-          data[:attachments] = ticket.attachments.map do |attachment|
-            {
-              id: attachment.id,
-              filename: attachment.filename.to_s,
-              contentType: attachment.content_type,
-              byteSize: attachment.byte_size,
-              url: Rails.application.routes.url_helpers.rails_blob_url(attachment, only_path: true)
-            }
-          end
+          # Include attachment URLs for viewing — only files tagged customer-visible
+          customer_visible_ids = AttachmentAudience
+            .where(active_storage_attachment_id: ticket.attachments.map(&:id), visible_to_customer: true)
+            .pluck(:active_storage_attachment_id)
+          data[:attachments] = ticket.attachments
+            .select { |attachment| customer_visible_ids.include?(attachment.id) }
+            .map do |attachment|
+              {
+                id: attachment.id,
+                filename: attachment.filename.to_s,
+                contentType: attachment.content_type,
+                byteSize: attachment.byte_size,
+                url: Rails.application.routes.url_helpers.rails_blob_url(attachment, only_path: true)
+              }
+            end
         end
         
         data

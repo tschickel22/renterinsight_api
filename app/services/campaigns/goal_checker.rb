@@ -11,7 +11,11 @@ module Campaigns
       return 0 if goals.empty?
 
       total_marked = 0
-      @campaign.campaign_enrollments.where(status: %w[pending active paused]).find_each do |enrollment|
+      # goal_met_at: nil skips contacts already converted on a prior run. 'track' goals leave
+      # the enrollment in an active status, so this guard (not status) prevents re-firing.
+      @campaign.campaign_enrollments
+               .where(status: %w[pending active paused], goal_met_at: nil)
+               .find_each do |enrollment|
         goals.each do |goal|
           if goal_met?(enrollment, goal)
             mark_goal_met(enrollment, goal)
@@ -25,6 +29,14 @@ module Campaigns
     end
 
     private
+
+    # What to do when this goal is met: 'stop' removes the contact from the rest of the
+    # campaign; 'track' (the default) records the conversion but keeps sending.
+    def action_for(goal)
+      actions = @campaign.goal_config['goal_actions']
+      val = actions.is_a?(Hash) ? actions[goal.to_s] : nil
+      %w[track stop].include?(val) ? val : 'track'
+    end
 
     def goal_met?(enrollment, goal)
       case goal.to_s
@@ -105,18 +117,25 @@ module Campaigns
     end
 
     def mark_goal_met(enrollment, goal)
-      return if enrollment.status == 'goal_met'
-      enrollment.update!(status: 'goal_met', goal_met_at: Time.current, goal_met_reason: goal.to_s)
+      return if enrollment.goal_met_at.present?
+
+      action = action_for(goal)
+      attrs = { goal_met_at: Time.current, goal_met_reason: goal.to_s }
+      # Only 'stop' removes the contact from future sends. 'track' records the
+      # conversion (goal_met_at + event) while leaving the enrollment running.
+      attrs[:status] = 'goal_met' if action == 'stop'
+      enrollment.update!(attrs)
+
       CampaignEvent.create!(
         company_id: @campaign.company_id, campaign_id: @campaign.id,
         campaign_enrollment_id: enrollment.id,
         event_type: 'goal_met', occurred_at: Time.current,
-        payload: { reason: goal.to_s }
+        payload: { reason: goal.to_s, action: action }
       )
       if defined?(WebhookService)
         WebhookService.fire(
           company_id: @campaign.company_id, event: 'campaign.goal_met',
-          payload: { campaign_id: @campaign.id, enrollment_id: enrollment.id, goal: goal.to_s }
+          payload: { campaign_id: @campaign.id, enrollment_id: enrollment.id, goal: goal.to_s, action: action }
         )
       end
     end

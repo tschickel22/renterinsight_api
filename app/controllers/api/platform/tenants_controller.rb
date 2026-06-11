@@ -23,8 +23,8 @@ module Api
           if params[:search].present?
             search_term = "%#{params[:search]}%"
             @tenants = @tenants.where(
-              'name ILIKE ? OR subdomain ILIKE ? OR custom_domain ILIKE ?',
-              search_term, search_term, search_term
+              'name ILIKE ? OR subdomain ILIKE ? OR custom_domain ILIKE ? OR account_number ILIKE ?',
+              search_term, search_term, search_term, search_term
             )
           end
           
@@ -773,6 +773,7 @@ module Api
         base = {
           id: tenant.id,
           name: tenant.name,
+          account_number: tenant.account_number,
           subdomain: tenant.subdomain,
           custom_domain: tenant.custom_domain,
           domain_verified: tenant.domain_verified?,

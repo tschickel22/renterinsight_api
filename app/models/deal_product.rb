@@ -9,26 +9,118 @@ class DealProduct < ApplicationRecord
   
   before_save :calculate_total
   after_save :update_deal_value
+  after_save :sync_deal_vehicle_from_line_item
   after_destroy :update_deal_value
-  
+
+  # SKU written by DealProductsController#build_sku for vehicle line items.
+  VEHICLE_SKU_PATTERN = /\AVEHICLE-(\d+)\z/i
+
+  def vehicle_line_item?
+    product_sku.to_s.match?(VEHICLE_SKU_PATTERN)
+  end
+
+  # Is this the home/unit line on the deal? Recognized by EITHER signal:
+  #   - notes tagged `category:home` (Phase 3 FE writes the home line with a
+  #     CUSTOM-<uuid> SKU + this tag — NOT a VEHICLE-<id> SKU), or
+  #   - a VEHICLE-<id> SKU (vehicle_line_item?, e.g. the 2A backfill).
+  # Used by Deal#home_line_item for the selling_price mirror. Note: vehicle_line_item?
+  # stays VEHICLE-SKU-only on purpose — it must extract the numeric vehicle id for
+  # deal.vehicle_id linking; this broader check is detection-only.
+  def home_line_item?
+    notes.to_s.match?(/category:\s*home\b/i) || vehicle_line_item?
+  end
+
+  def referenced_vehicle_id
+    match = product_sku.to_s.match(VEHICLE_SKU_PATTERN)
+    match && match[1].to_i
+  end
+
+  # Cost side of this line: per-unit cost * quantity. Mirrors how `total` represents
+  # the revenue/price side. Discounts are price-side concessions and do NOT reduce cost.
+  def line_cost_total
+    (cost.to_f * quantity.to_i).round(2)
+  end
+
+  # Gross profit for this single line: revenue side minus cost side.
+  # Revenue side mirrors calculate_total (price * qty, less the discount), but EXCLUDES tax
+  # (tax is a pass-through, not margin). Cost side is per-unit cost * qty.
+  # Profit = (unit_price - cost) * quantity - discount_amount.
+  def line_profit
+    subtotal = quantity.to_i * unit_price.to_f
+    discount_amount = if discount_type == 'percentage'
+      subtotal * (discount.to_f / 100.0)
+    else
+      discount.to_f
+    end
+
+    ((unit_price.to_f - cost.to_f) * quantity.to_i - discount_amount).round(2)
+  end
+
   private
-  
+
   def calculate_total
     # Calculate subtotal
     subtotal = quantity * unit_price
-    
+
     # Apply discount based on type
     discount_amount = if discount_type == 'percentage'
       subtotal * (discount / 100.0)
     else
       discount
     end
-    
+
     # Calculate final total
     self.total = subtotal - discount_amount + tax
   end
   
   def update_deal_value
     deal.update(value: deal.deal_products.sum(:total))
+  end
+
+  # Safety net: if the controller path skipped linking deal.vehicle_id (legacy clients,
+  # custom integrations, etc.), recover by linking from the line item itself. Conservative:
+  #   - only fires for SKU-tagged vehicle rows (no name-guessing)
+  #   - only when deal.vehicle_id is currently nil
+  #   - only when exactly one vehicle-tagged row exists on this deal (avoid picking when
+  #     multiple vehicles are present and the "primary" is ambiguous)
+  #   - never overwrites an existing vehicle_id
+  def sync_deal_vehicle_from_line_item
+    return unless vehicle_line_item?
+
+    deal.reload
+    return if deal.vehicle_id.present?
+
+    candidate_ids = deal.deal_products
+      .where('product_sku ~* ?', '^VEHICLE-[0-9]+$')
+      .pluck(:product_sku)
+      .map { |sku| sku.to_s.match(VEHICLE_SKU_PATTERN)&.[](1)&.to_i }
+      .compact
+      .uniq
+
+    if candidate_ids.size != 1
+      Rails.logger.info(
+        "[DealProduct] Deal #{deal_id}: #{candidate_ids.size} vehicle line items present " \
+        "(#{candidate_ids.inspect}); not auto-linking deal.vehicle_id."
+      ) if candidate_ids.size > 1
+      return
+    end
+
+    vehicle_id = candidate_ids.first
+    return unless deal.company_id.present?
+
+    unless Vehicle.where(id: vehicle_id, company_id: deal.company_id).exists?
+      Rails.logger.warn(
+        "[DealProduct] Deal #{deal_id}: vehicle #{vehicle_id} not found in company " \
+        "#{deal.company_id}; not auto-linking."
+      )
+      return
+    end
+
+    # Use update (not update_columns) so sync_vehicle_pricing fills in selling_price/cost
+    # if blank — mirrors what the proper Deal create + vehicle assignment flow does.
+    deal.update(vehicle_id: vehicle_id)
+    Rails.logger.info("[DealProduct] Deal #{deal_id}: auto-linked vehicle_id=#{vehicle_id} from line item.")
+  rescue StandardError => e
+    Rails.logger.error("[DealProduct] sync_deal_vehicle_from_line_item failed for deal #{deal_id}: #{e.message}")
   end
 end

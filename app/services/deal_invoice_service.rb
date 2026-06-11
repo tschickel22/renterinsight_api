@@ -7,7 +7,10 @@
 # the location's (or company's) default DrawScheduleTemplate so the cash flow
 # forecast and portal payment UI can track draws independently.
 class DealInvoiceService
-  ADDON_FIELDS = %i[setup_fee delivery_fee skirting_fee doc_fee].freeze
+  # Effective fee accessors on Deal source from `category:fee` line items when present
+  # (Phase 3), falling back to the deprecated columns for legacy/API deals. Mirrors the
+  # original column set: setup + delivery + skirting + doc (accessories NOT billed here).
+  ADDON_FEE_METHODS = %i[effective_setup_fee effective_delivery_fee effective_skirting_fee effective_doc_fee].freeze
 
   def initialize(deal, user: nil)
     @deal = deal
@@ -115,9 +118,13 @@ class DealInvoiceService
     # line item leave it at 0 even when `value` (line-items total) is non-zero.
     # Fall back to `calculated_value`, which already prefers products → selling_price → value.
     base = (@deal.try(:selling_price) || 0).to_d
-    base = (@deal.try(:calculated_value) || @deal.try(:value) || 0).to_d if base.zero?
+    used_products_total = base.zero?
+    base = (@deal.try(:calculated_value) || @deal.try(:value) || 0).to_d if used_products_total
     tax_amount = (@deal.try(:tax_amount) || @deal.try(:total_tax_amount) || 0).to_d
-    addons = ADDON_FIELDS.sum { |f| (@deal.try(f) || 0).to_d }
+    # Add fees ONLY when base is the home price. When we fell back to calculated_value
+    # (= sum of ALL deal_products, which already includes the category:fee line items),
+    # adding them again would double-count the fees.
+    addons = used_products_total ? 0.to_d : ADDON_FEE_METHODS.sum { |m| (@deal.try(m) || 0).to_d }
     (base + tax_amount + addons).round(2)
   end
 

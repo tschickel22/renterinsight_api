@@ -272,7 +272,9 @@ module Api
             options: %w[new used rental rent_to_own consignment] },
           { key: 'vertical', label: 'Vertical', type: 'select', source: 'standard', required: false, protected: false,
             options: %w[rv manufactured_home other] },
-          { key: 'lead_source', label: 'Lead Source', type: 'text', source: 'standard', required: false, protected: false },
+          # Source is the company Sources relationship (source_id), edited via the dedicated
+          # SourcePicker on the deal form/detail — not an inline-editable layout field. The old
+          # free-text 'lead_source' field was removed in favor of it.
           { key: 'owner_id', label: 'Owner / Sales Rep', type: 'user', source: 'standard', required: false, protected: false },
           { key: 'created_at', label: 'Date Created', type: 'date', source: 'standard', required: false, protected: true },
           { key: 'quantity', label: 'Quantity', type: 'number', source: 'standard', required: false, protected: false },
@@ -457,8 +459,8 @@ module Api
           { key: 'date_sold', label: 'Date Sold', type: 'date', source: 'standard', required: false, protected: false, visibility: 'internal' },
 
           # Pricing (external)
-          { key: 'msrp', label: 'Home Price', type: 'currency', source: 'standard', required: false, protected: true, visibility: 'both', description: 'The base price of the home before packages and add-ons' },
-          { key: 'sale_price', label: 'Sale Price (Legacy)', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Legacy field — use Home Price instead' },
+          { key: 'msrp', label: 'Base Sale Price', type: 'currency', source: 'standard', required: false, protected: true, visibility: 'both', description: 'The home’s selling price before packages and add-ons. This is what the customer pays for the base home — add-ons build on top of it. Not a cost.' },
+          { key: 'sale_price', label: 'Sale Price (Legacy)', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Legacy field — use Base Sale Price instead' },
           { key: 'special_discount_enabled', label: 'Special Discount', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enable a special discounted price for this unit' },
           { key: 'discount_type', label: 'Discount Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both', options: ['% of Home Price', '$ Flat Amount', '% of Total w/ Packages'], description: '% of Home Price, flat $ off, or % of Total (Home Price + packages)' },
           { key: 'discount_value', label: 'Discount Value', type: 'number', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enter percentage or dollar amount' },
@@ -469,16 +471,22 @@ module Api
           { key: 'lot_rent', label: 'Lot Rent', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
           { key: 'utilities', label: 'Utilities', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
 
-          # Cost Details (internal only)
-          { key: 'cost', label: 'Invoice Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'dealer_cost', label: 'Home Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Your cost for the home from the manufacturer' },
-          { key: 'freight_cost', label: 'Freight Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'pdi_cost', label: 'PDI Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'total_cost', label: 'Total Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'holdback_amount', label: 'Holdback Amount', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
+          # Cost Details (internal only) — the dealer's LANDED cost that drives gross profit
+          # and commissions (structured_cost = total_cost OR dealer_cost+freight_cost+pdi_cost).
+          # Distinct from the manufacturer invoice (Invoice / Cost Basis card, lender Max
+          # Advance only) and from any buyer-facing delivery fee (a deal line item).
+          # NOTE: the legacy `cost` field is intentionally NOT exposed here — it was a duplicate
+          # of the landed cost and is retired. The column still exists in the DB (read-only,
+          # mirrored from structured_cost in the serializer) but is no longer an editable field,
+          # so it can't be placed on a layout or dragged in via the Page Layout Editor.
+          { key: 'dealer_cost', label: 'Home Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Your acquisition cost for the home — the cost basis for gross profit and commissions. If a manufacturer invoice is captured and Home Cost is blank, it is seeded from the invoice total as a starting point; OVERRIDE it here if the invoice is not your true cost. The invoice itself (Invoice / Cost Basis card) drives the lender Max Advance separately.' },
+          { key: 'freight_cost', label: 'Freight Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'What YOU pay to deliver the home to the lot. Part of your landed cost for gross profit. Different from the manufacturer freight on the invoice (used for lender Max Advance) and from any delivery fee you charge the buyer (a deal line item).' },
+          { key: 'pdi_cost', label: 'PDI Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Pre-delivery inspection / prep cost. Part of your landed cost for gross profit.' },
+          { key: 'total_cost', label: 'Total Cost', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Overrides the sum of Home + Freight + PDI when set. Leave blank to use the components. This is the cost basis for gross profit and commissions.' },
+          { key: 'holdback_amount', label: 'Holdback Amount', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Dealer holdback. Not a cost — excluded from COGS and gross profit.' },
           { key: 'floor_plan_rate', label: 'Floor Plan Rate', type: 'percent', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'target_gross', label: 'Target Gross', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
-          { key: 'minimum_price', label: 'Minimum Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal' },
+          { key: 'target_gross', label: 'Target Gross', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Your gross-profit goal for this unit. A pricing guardrail — not used in cost or Max Advance calculations.' },
+          { key: 'minimum_price', label: 'Minimum Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Lowest acceptable selling price. A pricing guardrail — not used in cost or Max Advance calculations.' },
 
           # RV Specifications
           { key: 'rv_class', label: 'RV Class', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',

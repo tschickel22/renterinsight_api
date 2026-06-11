@@ -197,6 +197,33 @@ Rails.application.routes.draw do
         get 'modules/:module_type/sample_csv', action: :sample_csv
       end
 
+      # ==================== DEAL DESK ====================
+      scope path: 'deal_desk' do
+        # Config dropdowns (read-only) for the desk workspace.
+        resources :lender_programs, only: [:index], controller: 'deal_desk_lender_programs'
+        resources :fee_templates,   only: [:index], controller: 'deal_desk_fee_templates'
+        resources :fni_products,    only: [:index, :create, :update, :destroy], controller: 'deal_desk_fni_products'
+
+        resources :scenarios, only: %i[index show create update destroy],
+                              controller: 'deal_desk_scenarios' do
+          collection do
+            post :solve     # reverse-solve a lever for a target payment
+            post :compare   # comparable-unit matching + ranking
+            post :grid      # payment matrix: engine-computed cell per (term, cash_down) pair
+            post :ai_solve  # AI interprets intent; engine computes; returns ranked options
+          end
+          member do
+            post :select          # flag selected (single per deal); does NOT mutate the deal
+            post :apply           # deliberately write the structure back to the deal
+            post :apply_unit_swap   # MANAGER ONLY: swap this unit onto the deal (captures baseline)
+            post :revert_unit_swap  # MANAGER ONLY: undo a swap, restore the deal's baseline
+            post :generate_quote  # turn the selected scenario into a Quote
+            post :transfer_unit   # MANAGER ONLY: commit a cross-location unit
+            get  :summary, defaults: { format: 'pdf' }  # /scenarios/:id/summary.pdf
+          end
+        end
+      end
+
       # ==================== AI REPORT QUERY ====================
       scope 'report-ai', as: 'report_ai' do
         post 'ask',               to: 'report_ai#ask'
@@ -409,7 +436,10 @@ Rails.application.routes.draw do
           post :unskip_assignment_notification
         end
         # Nested phase tasks (CRUD only — toggle uses project member action above)
-        resources :phases, only: [:update], controller: 'project_phases' do
+        resources :phases, only: [:create, :update], controller: 'project_phases' do
+          collection do
+            post :reorder
+          end
           resources :tasks, controller: 'project_phase_tasks', only: [:index, :create, :update, :destroy]
           # Phase 2A: Rich project tasks (with checklists, dependencies, etc.)
           resources :project_tasks, controller: 'project_tasks', only: [:index, :create] do
@@ -509,6 +539,7 @@ Rails.application.routes.draw do
       resources :service_tickets, path: 'service-tickets' do
         member do
           post :upload_attachments, path: 'upload-attachments'
+          patch 'attachments/:attachment_id/audience', action: :set_attachment_audience
           post :mark_warranty_suspected, path: 'mark-warranty-suspected'
           post :set_line_billing, path: 'set-line-billing'
           post :generate_customer_invoice, path: 'generate-customer-invoice'
@@ -678,6 +709,7 @@ Rails.application.routes.draw do
       resources :vehicles do
         member do
           get :print
+          get :max_advance  # Max Advance (lender cap) worksheet for this unit (invoice + applied items)
           post :clone
           post :share
           get :tags
@@ -696,7 +728,17 @@ Rails.application.routes.draw do
         
         # Vehicle image uploads
         resources :images, controller: 'vehicle_images', only: [:create, :destroy]
-        
+
+        # Vehicle documents (3-tier visibility: internal/customer/public)
+        resources :documents, controller: 'vehicle_documents'
+
+        # Internal-only manufacturer-invoice capture (Max Advance Phase 1).
+        # Singular: one invoice per vehicle; create/update both upsert.
+        # scan (Phase 5): vision-extract a DRAFT from a manufacturer invoice — never persists.
+        resource :invoice, controller: 'vehicle_invoices', only: [:show, :create, :update] do
+          post :scan
+        end
+
         # Vehicle packages (Package Builder)
         resources :packages, controller: 'inventory_packages' do
           collection do
@@ -1151,6 +1193,28 @@ Rails.application.routes.draw do
         end
       end
       
+      # Company-level dealer-installed item defaults (Max Advance two-tier system, tier 1).
+      # Seeded from 21st Mortgage; copied to each new lender as its starting schedule.
+      resources :company_allowance_defaults,
+                only: [:index, :show, :create, :update, :destroy] do
+        collection do
+          post :seed          # idempotent (re)seed of 21st defaults
+          post :sync_lenders  # push defaults to lenders missing them (gap-fill only)
+        end
+      end
+
+      # Lenders (lightweight managed list for the deal quick-add dropdown + Finance settings)
+      resources :lenders do
+        # Max Advance Phase 2 — per-lender calculation schedule (Finance settings).
+        resources :allowance_items, controller: 'lender_allowance_items',
+                  only: [:index, :show, :create, :update, :destroy]
+        resources :deletion_items, controller: 'lender_deletion_items',
+                  only: [:index, :show, :create, :update, :destroy]
+        # Singular: one markup/VEP config per lender; create/update both upsert.
+        resource :markup_config, controller: 'lender_markup_configs',
+                 only: [:show, :create, :update]
+      end
+
       # Suppliers
       resources :suppliers do
         member do
@@ -1843,6 +1907,11 @@ Rails.application.routes.draw do
       get 'accounting/dashboard', to: 'accounting_reports#dashboard'
       get 'accounting/locations', to: 'accounting_reports#accounting_locations'
 
+      # Inventory Stock List & GP Snapshot (read-only)
+      get 'inventory/reports/stock_list', to: 'inventory_reports#stock_list'
+      # Salesperson GP Pipeline "Cheat Sheet" (read-only)
+      get 'inventory/reports/salesperson_gp_pipeline', to: 'inventory_reports#salesperson_gp_pipeline'
+
       resources :deals, only: [] do
         member do
           post :record_payment, to: 'deal_payments#record_payment'
@@ -2325,6 +2394,8 @@ Rails.application.routes.draw do
           post :tags, to: 'deals#add_tags'
           delete 'tags/:tag_name', to: 'deals#remove_tag'
           get :commission_breakdown # Commission economics breakdown
+          get :max_advance # Max Advance (lender cap) for this deal's vehicle (Phase 4a)
+          post :max_advance # Same, but with CURRENT (unsaved) line items in the body for live preview
           get :financials # NEW: Get deal financials (permission-gated)
           patch :financials, to: 'deals#update_financials' # NEW: Update deal financials (permission-gated)
           get :service_tickets # NEW: Get service tickets for this deal
@@ -2470,8 +2541,13 @@ Rails.application.routes.draw do
       end
       
       # Company Manufacturers (Warranty System)
+      # Company-owned manufacturer CRUD (distinct from selecting a global one)
+      post   'manufacturers/owned',     to: 'manufacturers#create_owned'
+      patch  'manufacturers/owned/:id', to: 'manufacturers#update_owned'
+      delete 'manufacturers/owned/:id', to: 'manufacturers#destroy_owned'
+      post   'manufacturers/import',    to: 'manufacturers#import'
       resources :manufacturers, only: [:index, :create, :update, :destroy]
-      
+
       # Company Security Settings
       scope path: ':company_id/security' do
         get 'settings', to: 'security_settings#show'
@@ -2686,7 +2762,11 @@ Rails.application.routes.draw do
       end
 
       # Portal Service Tickets
-      resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets'
+      resources :service_tickets, only: [:index, :show, :create], path: 'service-tickets' do
+        member do
+          post :notes # Customer replies to a customer-facing note thread
+        end
+      end
 
       # Portal Agreements
       resources :agreements, only: [:index, :show] do

@@ -101,6 +101,7 @@ public
       { key: 'documents', name: 'Documents', category: 'operations', description: 'Manage client documents and file uploads', position: 110 },
       { key: 'invoices', name: 'Invoices', category: 'operations', description: 'Manage invoices and billing', position: 111 },
       { key: 'loans', name: 'Loans', category: 'operations', description: 'Manage loans and financing', position: 112 },
+      { key: 'deal_desk', name: 'Deal Desk', category: 'operations', description: 'Structure deals at point of sale: solve for payment, compare units, present a pencil', position: 114 },
       
       # Commissions (position 120-125)
       { key: 'commissions', name: 'Commissions', category: 'operations', description: 'Manage commission tracking and payments', position: 120 },

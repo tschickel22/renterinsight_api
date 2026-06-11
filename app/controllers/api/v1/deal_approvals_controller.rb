@@ -77,7 +77,20 @@ class Api::V1::DealApprovalsController < ApplicationController
       commission_posted: @deal.try(:commission_posted) || false,
       gl_posted: @deal.try(:gl_posted) || false,
       delivery_state: @deal.try(:delivery_state),
-      total_tax_amount: @deal.try(:total_tax_amount)
+      total_tax_amount: @deal.try(:total_tax_amount),
+      # Top-level editable financials so the modal's fromDeal() hydrates on first open
+      # (it reads these flat, not from `editable`). unit_cost falls back to the home line
+      # item cost mirror so closed deals whose home_cost wasn't snapshotted still show it.
+      selling_price: @deal.try(:selling_price),
+      unit_cost: (@deal.try(:home_cost).presence || @deal.try(:unit_cost)),
+      reconditioning_cost: @deal.try(:reconditioning_cost),
+      floor_plan_interest: @deal.try(:floor_plan_interest),
+      delivery_setup_cost: @deal.try(:delivery_setup_cost),
+      pack_amount: @deal.try(:pack_amount),
+      commission: @deal.try(:commission_amount),
+      state_tax_rate: @deal.try(:state_tax_rate),
+      county_tax_rate: @deal.try(:county_tax_rate),
+      city_tax_rate: @deal.try(:city_tax_rate)
     )
   end
 
@@ -142,6 +155,15 @@ class Api::V1::DealApprovalsController < ApplicationController
       render json: { error: result[:error] }, status: :unprocessable_entity
     else
       @deal.reload
+
+      # Generate commission payment records now that the deal is GL-approved. This is the
+      # single gate: commissions become payable ONLY after approval (the close callback was
+      # removed). Best-effort — a failure here must not revert the successful GL post.
+      begin
+        @deal.generate_commission_payments!
+      rescue => e
+        Rails.logger.error("[DealApprovals] Commission generation failed for deal #{@deal.id}: #{e.message}")
+      end
 
       # Auto-create invoice with draw schedule. GL posting succeeded; treat invoice
       # creation as best-effort so a failure here never reverts the approval.
@@ -443,10 +465,21 @@ class Api::V1::DealApprovalsController < ApplicationController
   end
 
   def product_payload(p)
+    # notes carries the `category:<x>` tag; the modal parses it to split front-end
+    # (home/accessory/fee/land) from back-end F&I, and to compute add-on margins.
+    notes = p.try(:notes).to_s
+    category = notes[/category:\s*(\w+)/i, 1]&.downcase
     {
       id: p.id,
       name: p.try(:name) || p.try(:product_name) || p.try(:product_type),
+      product_name: p.try(:product_name),
       product_type: p.try(:product_type),
+      category: category,
+      notes: notes,
+      quantity: p.try(:quantity) || 1,
+      price: p.try(:unit_price) || p.try(:price),
+      cost: p.try(:cost),
+      total: p.try(:total),
       amount: p.try(:price) || p.try(:amount) || p.try(:total)
     }
   end

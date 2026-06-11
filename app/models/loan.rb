@@ -139,22 +139,16 @@ class Loan < ApplicationRecord
     principal_amount.to_f + calculate_total_interest
   end
   
-  # Calculate monthly payment using standard amortization formula
-  # PMT = P * [r(1 + r)^n] / [(1 + r)^n - 1]
+  # Calculate monthly payment using standard amortization formula.
+  # Delegates to DealDesk::LoanMath — the single shared amortization implementation —
+  # so the loans module and the Deal Desk never drift. Behavior is identical to the
+  # formula previously inlined here.
   def calculate_monthly_payment
-    return 0 if principal_amount.to_f == 0 || term_months.to_i == 0
-    
-    if interest_rate.to_f == 0
-      # No interest - simple division
-      principal_amount.to_f / term_months.to_f
-    else
-      # Monthly interest rate
-      r = (interest_rate.to_f / 100) / 12
-      n = term_months.to_i
-      
-      # Amortization formula
-      (principal_amount.to_f * (r * (1 + r)**n)) / ((1 + r)**n - 1)
-    end
+    DealDesk::LoanMath.monthly_payment(
+      principal: principal_amount,
+      apr: interest_rate,
+      term_months: term_months
+    )
   end
   
   def calculate_total_interest

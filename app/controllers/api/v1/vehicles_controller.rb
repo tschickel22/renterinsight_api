@@ -4,6 +4,17 @@ module Api
   module V1
     class VehiclesController < ApplicationController
       include RbacAuthorization
+
+      # Fields the inline editor (Cost Details, etc.) must be able to CLEAR. For these, an
+      # explicit null in the request persists as NULL instead of being skipped. Everything
+      # else keeps the "skip nil" behavior so partial updates (CSV import, single-field
+      # patches) never wipe untouched columns. Keep this to user-clearable numeric fields.
+      NULLABLE_INLINE_FIELDS = %i[
+        dealer_cost freight_cost pdi_cost total_cost
+        holdback_amount target_gross minimum_price
+        reconditioning_cost
+      ].freeze
+
       rbac_resource :inventory,
         read_actions: [:index, :show, :stats, :export, :print],
         create_actions: [:create, :clone, :import],
@@ -11,7 +22,7 @@ module Api
         delete_actions: [:destroy, :bulk_delete]
 
       before_action :set_company
-      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting]
+      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :max_advance, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting]
 
       def index
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
@@ -91,13 +102,27 @@ module Api
         rv_count = vehicles.rvs.count
         mh_count = vehicles.manufactured_homes.count
         
-        # Apply search filter (searches year, make, model, trim, vin, serial_number, inventory_id, location_city)
+        # Apply search filter (searches year, make, model, trim, vin, serial_number, inventory_id, location_city,
+        # plus linked-deal buyer names — Contact first/last/full or Account name).
+        # The match subquery is built from a clean Vehicle scope, NOT chained off the
+        # `vehicles` variable: that scope carries raw-SQL WHERE clauses with unqualified
+        # `location_id` (and other unqualified columns from `.active` / `.by_*` scopes)
+        # that become ambiguous the moment we LEFT JOIN `deals` and `contacts` — both
+        # of which also have a `location_id`. The outer `vehicles.where(id: ...)`
+        # re-applies tenant/RBAC/location filters with the joins already collapsed.
         if params[:search].present?
           search_term = "%#{params[:search]}%"
-          vehicles = vehicles.where(
-            "CAST(year AS TEXT) ILIKE ? OR make ILIKE ? OR model ILIKE ? OR trim ILIKE ? OR vin ILIKE ? OR serial_number ILIKE ? OR inventory_id ILIKE ? OR location_city ILIKE ?",
-            search_term, search_term, search_term, search_term, search_term, search_term, search_term, search_term
-          )
+          matching_ids = Vehicle
+            .joins("LEFT JOIN deals ON deals.vehicle_id = vehicles.id")
+            .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
+            .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+            .where("vehicles.company_id = ?", @company.id)
+            .where(
+              "CAST(vehicles.year AS TEXT) ILIKE :q OR vehicles.make ILIKE :q OR vehicles.model ILIKE :q OR vehicles.trim ILIKE :q OR vehicles.vin ILIKE :q OR vehicles.serial_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR vehicles.location_city ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
+              q: search_term
+            )
+            .select("vehicles.id")
+          vehicles = vehicles.where(id: matching_ids)
         end
 
         # Sorting
@@ -113,8 +138,17 @@ module Api
         per_page = [params[:per_page]&.to_i || 25, 500].min  # Allow up to 500 for dropdown pickers
         vehicles = vehicles.includes(:location).offset((page - 1) * per_page).limit(per_page)
 
+        # For buyer-name matches we want to tell the FE *which* buyer matched —
+        # otherwise a vehicle appears in results with no obvious reason. Compute
+        # the map only over the paginated slice to keep this cheap.
+        matched_buyers_by_vehicle = matched_buyers_for(vehicles, params[:search])
+
         render json: {
-          vehicles: vehicles.map { |v| vehicle_json(v) },
+          vehicles: vehicles.map { |v|
+            vehicle_json(v).merge(
+              matchedBuyers: matched_buyers_by_vehicle[v.id] || []
+            )
+          },
           meta: {
             current_page: page,
             per_page: per_page,
@@ -753,6 +787,7 @@ module Api
             
             <h1>#{@vehicle.display_name}</h1>
             <div class="status-badge">#{@vehicle.status.upcase}</div>
+            <span style="display:inline-block;margin-left:8px;padding:5px 12px;background:#b91c1c;color:#fff;border-radius:3px;font-size:10pt;font-weight:bold;text-transform:uppercase;">Internal Only — Not for Customers</span>
             <p style="color: #666; margin-bottom: 20px;">Stock #: #{@vehicle.inventory_id}</p>
             
             #{images_html}
@@ -771,17 +806,17 @@ module Api
             
             #{@vehicle.description.present? ? "<h2>Description</h2><div class='description-box'>#{@vehicle.description}</div>" : ''}
             
-            <h2>Pricing Information</h2>
+            <h2>Pricing &amp; Configuration <span style="font-size:9pt;color:#b91c1c;font-weight:normal;">(Internal — for sales rep use)</span></h2>
             <table>
-              #{@vehicle.sale_price.present? ? "<tr><th>Sale Price</th><td class='price-highlight'>#{format_currency(@vehicle.sale_price)}</td></tr>" : ''}
-              #{@vehicle.msrp.present? ? "<tr><th>MSRP</th><td>#{format_currency(@vehicle.msrp)}</td></tr>" : ''}
-              #{@vehicle.cost.present? ? "<tr><th>Cost</th><td>#{format_currency(@vehicle.cost)}</td></tr>" : ''}
+              #{@vehicle.msrp.present? ? "<tr><th>Base Sale Price</th><td class='price-highlight'>#{format_currency(@vehicle.msrp)}</td></tr>" : ''}
               #{@vehicle.rent_price.present? ? "<tr><th>Monthly Rent</th><td>#{format_currency(@vehicle.rent_price)}/month</td></tr>" : ''}
               #{@vehicle.rent_to_own_price.present? ? "<tr><th>Rent-to-Own</th><td>#{format_currency(@vehicle.rent_to_own_price)}/month</td></tr>" : ''}
               #{@vehicle.deposit_amount.present? ? "<tr><th>Deposit Amount</th><td>#{format_currency(@vehicle.deposit_amount)}</td></tr>" : ''}
               #{@vehicle.lot_rent.present? ? "<tr><th>Lot Rent</th><td>#{format_currency(@vehicle.lot_rent)}/month</td></tr>" : ''}
               #{@vehicle.utilities.present? ? "<tr><th>Utilities</th><td>#{format_currency(@vehicle.utilities)}/month</td></tr>" : ''}
             </table>
+
+            #{build_addons_html(@vehicle)}
             
             #{rv_specs_html}
             #{mh_specs_html}
@@ -792,13 +827,73 @@ module Api
             
             <div class="footer">
               <p><strong>Generated on #{Time.current.strftime('%B %d, %Y at %I:%M %p')}</strong></p>
-              <p>This document is for informational purposes only. All information subject to verification.</p>
+              <p style="color:#b91c1c;font-weight:bold;">INTERNAL ONLY — This is a cost-basis configuration snapshot for sales rep use. Do not share with customers.</p>
+              <p>All information subject to verification.</p>
             </div>
           </body>
           </html>
         HTML
         
         render html: html.html_safe
+      end
+
+      # GET /api/v1/vehicles/:id/max_advance
+      # Max Advance worksheet for this UNIT (not a deal): runs the calculator on the
+      # captured invoice + the lender schedule, with the unit's applied Items & Add-Ons
+      # (inventory_packages) as the allowance adds. Non-allowance items (templates, custom)
+      # are listed but excluded from the ceiling (Option A). Cost-derived, so it requires
+      # the same cost-detail permission as deal_json's cost gating.
+      def max_advance
+        return unless authorize_action!('inventory', 'read')
+
+        unless current_user&.has_permission?('inventory', 'read', scope: 'view_cost_details') ||
+               current_user&.has_permission?('accounting', 'read')
+          return render json: { error: 'Forbidden - cost details permission required',
+                                required_permission: 'inventory:read:view_cost_details' }, status: :forbidden
+        end
+
+        # Lender resolution for a unit on the lot (no deal lender yet):
+        #   explicit ?lender_id= > first lender with a markup config > first active lender.
+        lender =
+          if params[:lender_id].present?
+            @company.lenders.active.find_by(id: params[:lender_id])
+          end
+        lender ||= @company.lenders.active.detect { |l| l.markup_config.present? }
+        lender ||= @company.lenders.active.by_name.first
+
+        # Build the worksheet's add-ons from the unit's applied Items & Add-Ons.
+        # ALL items are passed for display; resolve_items splits allowance-backed (move the
+        # ceiling) from dealer add-ons (shown only). include_in_total mirrors what the unit
+        # actually sells with; credits (negative price) are skipped from adds resolution.
+        packages = @vehicle.inventory_packages.ordered.map do |p|
+          { name: p.name, price: p.price.to_f, qty: 1 }
+        end
+        resolved = MaxAdvanceSurfacing.resolve_items(company: @company, items: packages)
+
+        # Compared price = the unit's home price (msrp is the base home price field).
+        price = @vehicle.msrp.to_f.positive? ? @vehicle.msrp.to_f : @vehicle.sale_price.to_f
+
+        result = MaxAdvanceSurfacing.evaluate(
+          vehicle: @vehicle, lender: lender, price: price, adds: resolved[:adds]
+        )
+
+        render json: {
+          vehicleId: @vehicle.id,
+          vehicleName: @vehicle.display_name,
+          lenderId: lender&.id,
+          lenderName: lender&.name,
+          comparedPrice: price,
+          standardMsp: result[:standard_msp],          # CONFIGURED (base + applied allowances)
+          maximumMsp: result[:maximum_msp],
+          baseStandardMsp: result[:base_standard_msp], # bare home, no adds
+          baseMaximumMsp: result[:base_maximum_msp],
+          status: result[:status],
+          reason: result[:reason],
+          flag: result[:reason] ? MaxAdvanceSurfacing.flag_for(result[:reason]) : nil,
+          breakdown: result[:breakdown],
+          lineItems: resolved[:line_items],            # every applied item, allowance-flagged
+          availableLenders: @company.lenders.active.by_name.map { |l| { id: l.id, name: l.name, hasSchedule: l.markup_config.present? } }
+        }
       end
 
       def stats
@@ -1095,6 +1190,38 @@ module Api
 
       private
 
+      # Returns { vehicle_id => [{ name:, deal_id: }, ...] } for any vehicle whose
+      # search hit came via a linked deal's contact/account name. Empty hash when
+      # search is blank or no matches — FE then renders no buyer chip.
+      def matched_buyers_for(vehicles_scope, search)
+        return {} if search.blank?
+
+        vehicle_ids = vehicles_scope.map(&:id)
+        return {} if vehicle_ids.empty?
+
+        search_term = "%#{search}%"
+        deals = @company.deals
+          .where(vehicle_id: vehicle_ids)
+          .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
+          .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
+          .where(
+            "contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
+            q: search_term
+          )
+          .includes(:contact, :account)
+
+        deals.each_with_object({}) do |deal, acc|
+          name = if deal.contact
+                   "#{deal.contact.first_name} #{deal.contact.last_name}".strip
+                 else
+                   deal.account&.name
+                 end
+          next if name.blank?
+          acc[deal.vehicle_id] ||= []
+          acc[deal.vehicle_id] << { name: name, deal_id: deal.id }
+        end
+      end
+
       # Resolve location from import params: locationId > locationName > Current.location_id
       # Returns [location_id, error_message]
       def resolve_import_location_id
@@ -1177,6 +1304,94 @@ module Api
       # Helper method to format currency like the quotes PDF generator
       def format_currency(amount)
         "$#{sprintf('%.2f', amount.to_f)}"
+      end
+
+      # Build the Items & Add-Ons + cost breakdown for the internal print snapshot. These are
+      # the unit's inventory_packages (home-associated add-ons, NOT deal line items). Produces:
+      #  - a sale-side table: Base Sale Price + each add-on price -> Configured Total Sale Price
+      #  - a cost-side table: Home Cost + Freight + PDI + add-on costs -> Total Actual Cost
+      # plus the resulting gross. Returns '' when there are no packages AND no cost components,
+      # so a bare unit with nothing entered shows nothing here.
+      def build_addons_html(vehicle)
+        packages = vehicle.inventory_packages.ordered.to_a
+        base = vehicle.msrp.to_f
+
+        # ── Sale side ──
+        addon_sale_rows = packages.map do |p|
+          included = p.include_in_total
+          note = included ? '' : " <span style='color:#999;font-size:9pt;'>(not in total)</span>"
+          "<tr><th style='width:auto;font-weight:normal;'>#{p.name}#{note}</th><td>#{format_currency(p.price.to_f)}</td></tr>"
+        end.join
+        addons_sale_total = packages.select(&:include_in_total).sum { |p| p.price.to_f }
+        configured_sale_total = base + addons_sale_total
+
+        sale_html = packages.any? ? <<~SALE : ''
+          <h2>Items &amp; Add-Ons <span style="font-size:9pt;color:#666;font-weight:normal;">(associated with this home)</span></h2>
+          <table>
+            <tr><th>Base Sale Price</th><td>#{format_currency(base)}</td></tr>
+            #{addon_sale_rows}
+            <tr style="border-top:2px solid #333;"><th style="font-weight:bold;">Configured Total Sale Price</th><td style="font-weight:bold;">#{format_currency(configured_sale_total)}</td></tr>
+          </table>
+        SALE
+
+        # ── Cost side ── (internal landed cost: home cost components + add-on costs)
+        home_cost     = vehicle.dealer_cost.to_f
+        freight_cost  = vehicle.freight_cost.to_f
+        pdi_cost      = vehicle.pdi_cost.to_f
+        # structured_cost is the canonical home landed cost (total_cost override OR the sum).
+        home_landed   = vehicle.structured_cost.to_f
+        addon_costs   = packages.sum { |p| (p.respond_to?(:cost) ? p.cost.to_f : 0.0) }
+
+        # Fallback: if Cost Details are blank but the manufacturer invoice is captured, use the
+        # invoice total (or gross invoice) as the cost basis — for a new home the invoice total
+        # essentially IS your cost. One-source-or-the-other (never added to Cost Details), so no
+        # double-counting. Lets reps see a cost/gross before someone fills in Cost Details.
+        invoice_cost_basis = false
+        if home_landed <= 0
+          inv = vehicle.respond_to?(:invoice) ? vehicle.invoice : nil
+          inv_total = inv ? (inv.total_invoice.to_f.positive? ? inv.total_invoice.to_f : inv.gross_invoice.to_f) : 0.0
+          if inv_total.positive?
+            home_landed = inv_total
+            invoice_cost_basis = true
+          end
+        end
+
+        total_cost    = home_landed + addon_costs
+
+        cost_rows = []
+        if invoice_cost_basis
+          # Cost Details empty → show the invoice figure as the basis (clearly labeled).
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Cost <span style='color:#999;font-size:9pt;'>(from manufacturer invoice — Cost Details not entered)</span></th><td>#{format_currency(home_landed)}</td></tr>"
+        else
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Cost</th><td>#{format_currency(home_cost)}</td></tr>" if home_cost.positive?
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Freight Cost</th><td>#{format_currency(freight_cost)}</td></tr>" if freight_cost.positive?
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>PDI Cost</th><td>#{format_currency(pdi_cost)}</td></tr>" if pdi_cost.positive?
+          # When total_cost was set as an override (no components), show the landed figure directly.
+          if cost_rows.empty? && home_landed.positive?
+            cost_rows << "<tr><th style='width:auto;font-weight:normal;'>Home Landed Cost</th><td>#{format_currency(home_landed)}</td></tr>"
+          end
+        end
+        packages.each do |p|
+          c = p.respond_to?(:cost) ? p.cost.to_f : 0.0
+          next unless c.positive?
+          cost_rows << "<tr><th style='width:auto;font-weight:normal;'>#{p.name} (cost)</th><td>#{format_currency(c)}</td></tr>"
+        end
+
+        cost_html = ''
+        if total_cost.positive?
+          gross = configured_sale_total - total_cost
+          cost_html = <<~COST
+            <h2>Cost Breakdown <span style="font-size:9pt;color:#b91c1c;font-weight:normal;">(internal — your landed cost)</span></h2>
+            <table>
+              #{cost_rows.join}
+              <tr style="border-top:2px solid #333;"><th style="font-weight:bold;">Total Actual Cost</th><td style="font-weight:bold;">#{format_currency(total_cost)}</td></tr>
+              <tr><th style="font-weight:bold;">Estimated Gross (Sale − Cost)</th><td style="font-weight:bold;color:#15803d;">#{format_currency(gross)}</td></tr>
+            </table>
+            <p style="font-size:9pt;color:#666;margin-top:-8px;">Gross uses the configured sale price (Base Sale Price + add-ons in total) minus total landed cost. Holdback, floor-plan interest, and delivery/setup are not included here.</p>
+          COST
+        end
+
+        sale_html + cost_html
       end
 
       # Create activity record for listing share to contact
@@ -1418,6 +1633,7 @@ module Api
           pdiCost: :pdi_cost,
           totalCost: :total_cost,
           holdbackAmount: :holdback_amount,
+          reconditioningCost: :reconditioning_cost,
           floorPlanRate: :floor_plan_rate,
           floorPlanAmount: :floor_plan_amount,
           floorPlanLender: :floor_plan_lender,
@@ -1480,9 +1696,10 @@ module Api
           :repo, :sale_pending, :package_type,
           # Cost details
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
-          :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
+          :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
           # Special Discount
           :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
           # RV fields
@@ -1523,7 +1740,17 @@ module Api
         
         direct_fields.each do |field|
           # Use key? check instead of present? to handle boolean false and 0 values
-          if raw_params.key?(field) && !raw_params[field].nil?
+          if raw_params.key?(field) && !raw_params[field].nil? && raw_params[field] != ''
+            transformed[field] = raw_params[field]
+          elsif raw_params.key?(field) && (raw_params[field].nil? || raw_params[field] == '') && NULLABLE_INLINE_FIELDS.include?(field)
+            # Inline-clearable fields: an explicit null/blank MUST persist as NULL (so deleting
+            # Home Cost actually clears dealer_cost). Rails typecasts '' -> nil for the decimal
+            # column. Every OTHER field keeps the skip-blank behavior above so partial updates
+            # (CSV import, single-field patches) never wipe untouched columns.
+            transformed[field] = nil
+          elsif raw_params.key?(field) && !raw_params[field].nil?
+            # Non-nullable field with a blank string ('') — preserve prior behavior of passing
+            # it through (Rails handles typecast); only the explicit nil was skipped before.
             transformed[field] = raw_params[field]
           end
         end
@@ -1573,9 +1800,10 @@ module Api
           :video_url, :virtual_tour_url, :special_features, :overlay_text,
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
-          :holdback_amount, :floor_plan_rate, :target_gross, :minimum_price,
+          :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
           # Floor plan tracking
           :floor_plan_amount, :floor_plan_lender, :floor_plan_start_date,
+          :floor_plan_accrued_interest, :days_on_floor_plan, :floor_plan_curtailed_at,
           # Special Discount
           :special_discount_enabled, :discount_type, :discount_value, :discounted_price,
           # Location ID and address override
@@ -1658,7 +1886,11 @@ module Api
           images: full_image_urls,  # Use full URLs
           videos: vehicle.videos || [],
           msrp: vehicle.msrp&.to_f,
-          cost: vehicle.cost&.to_f,
+          # `cost` now mirrors the canonical landed cost (structured_cost = total_cost or
+          # dealer_cost+freight_cost+pdi_cost). The legacy vehicle.cost column is retired as
+          # an input (Pricing "Invoice Cost" removed); this keeps any cost display showing
+          # the real basis that drives GP. nil when no cost entered.
+          cost: vehicle.structured_cost&.to_f,
           priceCurrency: vehicle.price_currency,
           specialDiscountEnabled: vehicle.respond_to?(:special_discount_enabled) ? vehicle.special_discount_enabled : false,
           discountType: vehicle.respond_to?(:discount_type) ? vehicle.discount_type : nil,
@@ -1690,7 +1922,18 @@ module Api
               position: p.position
             }
           },
-          totalHomePrice: vehicle.total_home_price
+          totalHomePrice: vehicle.total_home_price,
+          # Floor plan tracking — surfaced on BOTH list and detail JSON so the inventory
+          # edit form (which hydrates from the list payload, not the detail endpoint) can
+          # re-check the "Floor Plan Tracking" box and repopulate amount/rate/lender/start.
+          # Without these here, MH edits appeared not to persist: the write saved fine, but
+          # the reload read had no floor-plan data, so the section reset to empty.
+          floorPlanAmount: vehicle.floor_plan_amount&.to_f,
+          floorPlanRate: vehicle.floor_plan_rate&.to_f,
+          floorPlanLender: vehicle.floor_plan_lender,
+          floorPlanStartDate: vehicle.floor_plan_start_date,
+          # Reconditioning cost — inventory-level source the deal/approval pulls from.
+          reconditioningCost: (vehicle.respond_to?(:reconditioning_cost) ? vehicle.reconditioning_cost&.to_f : nil)
         }
 
         # Add type-specific fields
@@ -1856,6 +2099,17 @@ module Api
             floorJoistSize: vehicle.floor_joist_size,
             electricalService: vehicle.electrical_service,
             modularConversionCost: vehicle.modular_conversion_cost&.to_f,
+            # RBAC Cost Detail Fields — Cost Details card on the Pricing tab. These were
+            # previously emitted ONLY in the RV branch, so for manufactured homes every
+            # cost field rendered as "—" regardless of the stored value (e.g. a seeded or
+            # invoice-derived dealer_cost). dealerCost is the "Home Cost" field.
+            dealerCost: vehicle.dealer_cost&.to_f,
+            freightCost: vehicle.freight_cost&.to_f,
+            pdiCost: vehicle.pdi_cost&.to_f,
+            totalCost: vehicle.total_cost&.to_f,
+            holdbackAmount: vehicle.holdback_amount&.to_f,
+            targetGross: vehicle.target_gross&.to_f,
+            minimumPrice: vehicle.minimum_price&.to_f,
             # Inventory features (Option B)
             inventoryFeatures: vehicle.inventory_features.order(:name).map { |f|
               { id: f.id, name: f.name, category: f.category, isStandard: f.is_standard }
@@ -1867,6 +2121,27 @@ module Api
         if detailed
           json[:deals] = vehicle.deals.active.map { |d| deal_summary(d) }
           json[:quotes] = vehicle.quotes.active.map { |q| quote_summary(q) }
+
+          # Invoice cost basis: the manufacturer-invoice figure the FE offers as the
+          # one-tap default for an empty Home Cost (Cost Details). Gross invoice is the
+          # cost proxy (fallback total_invoice). nil when no invoice captured -> FE shows
+          # no default affordance. This is a DEFAULT source only; it never overrides an
+          # entered dealer_cost (the guard lives in the invoice controller's seed + the
+          # FE only offers it when dealerCost is blank).
+          inv = vehicle.respond_to?(:invoice) ? vehicle.invoice : nil
+          invoice_basis = if inv
+            inv.gross_invoice.to_f.positive? ? inv.gross_invoice.to_f
+                                             : (inv.total_invoice.to_f.positive? ? inv.total_invoice.to_f : nil)
+          end
+          json[:invoiceCostBasis] = invoice_basis
+
+          # MSRP (manufacturer suggested retail), read-only, DERIVED from the invoice's
+          # base price. Not a stored column — mirrors the invoice live so it can't drift.
+          # We use ONLY base_price (the home's retail base on the manufacturer invoice); we do
+          # NOT fall back to gross_invoice, because gross is the cost basis (it already feeds
+          # Home Cost) — showing it as "MSRP" would misrepresent cost as retail. nil when the
+          # invoice has no base price, so the FE shows MSRP blank rather than a wrong number.
+          json[:manufacturerMsrp] = (inv && inv.base_price.to_f.positive?) ? inv.base_price.to_f : nil
 
           # Floor plan tracking — exposed only on detailed views (typically the
           # vehicle detail page or accounting flows that need accrual context).

@@ -13,7 +13,9 @@ class CampaignStatsRollupJob < ApplicationJob
         'replied'      => sends.where.not(replied_at: nil).count,
         'bounced'      => sends.where.not(bounced_at: nil).count,
         'unsubscribed' => enrollments.where(status: 'unsubscribed').count,
-        'goals_met'    => enrollments.where(status: 'goal_met').count,
+        # Count by goal_met_at, not status: 'track' goals record a conversion while the
+        # enrollment stays active, so status alone would undercount them.
+        'goals_met'    => enrollments.where.not(goal_met_at: nil).count,
         'failed'       => enrollments.where(status: 'failed').count,
         'updated_at'   => Time.current.iso8601
       }

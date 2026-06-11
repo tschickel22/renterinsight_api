@@ -203,7 +203,7 @@ module Api
       private
       
       def set_tenant
-        @tenant = Company.find(params[:tenant_id])
+        @tenant = ::Company.find(params[:tenant_id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Tenant not found' }, status: :not_found
       end

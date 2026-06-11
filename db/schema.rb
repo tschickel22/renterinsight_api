@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_11_175129) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -676,6 +676,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["contractor_assignment_id"], name: "index_assignment_work_logs_on_contractor_assignment_id"
     t.index ["user_id"], name: "index_assignment_work_logs_on_user_id"
     t.index ["vendor_id"], name: "index_assignment_work_logs_on_vendor_id"
+  end
+
+  create_table "attachment_audiences", force: :cascade do |t|
+    t.bigint "active_storage_attachment_id", null: false
+    t.boolean "visible_to_customer", default: false, null: false
+    t.boolean "visible_to_manufacturer", default: false, null: false
+    t.bigint "tagged_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active_storage_attachment_id"], name: "index_attachment_audiences_on_attachment", unique: true
   end
 
   create_table "audience_ai_generations", force: :cascade do |t|
@@ -1915,6 +1925,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.jsonb "state_tax_rates", default: {}, null: false
     t.string "meta_catalog_token"
     t.string "industry", default: "manufactured_housing", null: false
+    t.jsonb "deal_desk_settings", default: {}, null: false
+    t.string "account_number"
+    t.index ["account_number"], name: "index_companies_on_account_number", unique: true
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
     t.index ["default_pack_amount"], name: "index_companies_on_default_pack_amount"
@@ -1933,6 +1946,27 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["subscription_tier"], name: "index_companies_on_subscription_tier"
     t.index ["use_rbac_system"], name: "index_companies_on_use_rbac_system"
     t.index ["verified_email_domains"], name: "idx_companies_verified_domains", using: :gin
+  end
+
+  create_table "company_allowance_defaults", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "category", null: false
+    t.string "name", null: false
+    t.decimal "standard_allowance", precision: 15, scale: 2
+    t.decimal "maximum_allowance", precision: 15, scale: 2
+    t.decimal "dealer_cost", precision: 15, scale: 2
+    t.decimal "dealer_price", precision: 15, scale: 2
+    t.string "pricing_basis"
+    t.string "material"
+    t.decimal "wind_zone2_adder_per_side", precision: 15, scale: 2
+    t.decimal "wind_zone3_adder_per_side", precision: 15, scale: 2
+    t.boolean "is_seeded", default: false, null: false
+    t.boolean "active", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "category", "name"], name: "idx_company_allowance_defaults_uniq", unique: true
+    t.index ["company_id"], name: "index_company_allowance_defaults_on_company_id"
   end
 
   create_table "company_domains", force: :cascade do |t|
@@ -2042,6 +2076,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.jsonb "metadata", default: {}
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "contact_name"
+    t.string "contact_email"
+    t.string "contact_phone"
+    t.string "claim_email"
+    t.string "claim_contact_name"
     t.index ["active"], name: "index_company_manufacturers_on_active"
     t.index ["company_id", "manufacturer_id"], name: "index_company_manufacturers_on_company_and_manufacturer", unique: true
     t.index ["company_id"], name: "index_company_manufacturers_on_company_id"
@@ -2364,6 +2403,57 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["user_id"], name: "index_deal_activities_on_user_id"
   end
 
+  create_table "deal_desk_scenarios", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "deal_id", null: false
+    t.bigint "vehicle_id"
+    t.bigint "created_by_id"
+    t.string "label"
+    t.string "status", default: "active", null: false
+    t.date "valid_through"
+    t.datetime "selected_at"
+    t.decimal "trade_allowance", precision: 15, scale: 2, default: "0.0"
+    t.decimal "trade_payoff", precision: 15, scale: 2, default: "0.0"
+    t.decimal "cash_down", precision: 15, scale: 2, default: "0.0"
+    t.decimal "rebates", precision: 15, scale: 2, default: "0.0"
+    t.jsonb "fees", default: {}, null: false
+    t.jsonb "fni_products", default: [], null: false
+    t.bigint "lender_program_id"
+    t.string "lender_tier"
+    t.decimal "apr", precision: 6, scale: 3
+    t.string "rate_source"
+    t.integer "term_months"
+    t.string "tax_mode", default: "full_price", null: false
+    t.decimal "tax_rate", precision: 8, scale: 5, default: "0.0"
+    t.decimal "unit_price_snapshot", precision: 15, scale: 2
+    t.decimal "unit_cost_snapshot", precision: 15, scale: 2
+    t.decimal "amount_financed", precision: 15, scale: 2
+    t.decimal "monthly_payment", precision: 15, scale: 2
+    t.decimal "out_the_door", precision: 15, scale: 2
+    t.decimal "front_gross", precision: 15, scale: 2
+    t.decimal "back_gross", precision: 15, scale: 2
+    t.decimal "dealer_gross", precision: 15, scale: 2
+    t.bigint "unit_location_id"
+    t.integer "unit_days_on_lot"
+    t.boolean "is_cross_location", default: false, null: false
+    t.bigint "quote_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.decimal "apr_override", precision: 6, scale: 3
+    t.jsonb "line_items", default: []
+    t.index ["company_id", "status"], name: "index_deal_desk_scenarios_on_company_id_and_status"
+    t.index ["company_id"], name: "index_deal_desk_scenarios_on_company_id"
+    t.index ["created_by_id"], name: "index_deal_desk_scenarios_on_created_by_id"
+    t.index ["deal_id", "status"], name: "index_deal_desk_scenarios_on_deal_id_and_status"
+    t.index ["deal_id"], name: "index_deal_desk_scenarios_on_deal_id"
+    t.index ["lender_program_id"], name: "index_deal_desk_scenarios_on_lender_program_id"
+    t.index ["location_id"], name: "index_deal_desk_scenarios_on_location_id"
+    t.index ["quote_id"], name: "index_deal_desk_scenarios_on_quote_id"
+    t.index ["valid_through"], name: "index_deal_desk_scenarios_on_valid_through"
+    t.index ["vehicle_id"], name: "index_deal_desk_scenarios_on_vehicle_id"
+  end
+
   create_table "deal_products", force: :cascade do |t|
     t.integer "deal_id", null: false
     t.integer "product_id"
@@ -2378,10 +2468,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "discount_type", default: "fixed", null: false
+    t.string "source_type"
+    t.decimal "cost", precision: 12, scale: 2, default: "0.0"
     t.index ["deal_id", "product_id"], name: "index_deal_products_on_deal_id_and_product_id"
     t.index ["deal_id"], name: "index_deal_products_on_deal_id"
     t.index ["discount_type"], name: "index_deal_products_on_discount_type"
     t.index ["product_id"], name: "index_deal_products_on_product_id"
+    t.index ["source_type"], name: "index_deal_products_on_source_type"
   end
 
   create_table "deal_stage_histories", force: :cascade do |t|
@@ -2502,6 +2595,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.decimal "financed_amount", precision: 12, scale: 2
     t.date "down_payment_due_date"
     t.integer "deal_invoice_id"
+    t.bigint "lender_id"
+    t.jsonb "deal_desk_baseline"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
@@ -2522,6 +2617,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["finance_manager_id"], name: "index_deals_on_finance_manager_id"
     t.index ["gl_journal_entry_id"], name: "index_deals_on_gl_journal_entry_id"
     t.index ["gl_posted"], name: "index_deals_on_gl_posted"
+    t.index ["lender_id"], name: "index_deals_on_lender_id"
     t.index ["location_id"], name: "index_deals_on_location_id"
     t.index ["lost_at"], name: "index_deals_on_lost_at"
     t.index ["owner_id"], name: "index_deals_on_owner_id"
@@ -2641,6 +2737,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["manufacturer_id"], name: "index_factories_on_manufacturer_id"
   end
 
+  create_table "fee_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "fee_type", default: "other", null: false
+    t.decimal "default_amount", precision: 15, scale: 2, default: "0.0", null: false
+    t.boolean "taxable", default: false, null: false
+    t.string "applies_to", default: "all", null: false
+    t.boolean "active", default: true, null: false
+    t.boolean "is_seeded", default: false, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "active"], name: "index_fee_templates_on_company_id_and_active"
+    t.index ["company_id"], name: "index_fee_templates_on_company_id"
+  end
+
   create_table "field_option_overrides", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "module_name", null: false
@@ -2752,6 +2864,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["manufacturer_id"], name: "index_floor_plans_on_manufacturer_id"
     t.index ["net_price"], name: "index_floor_plans_on_net_price"
     t.index ["series"], name: "index_floor_plans_on_series"
+  end
+
+  create_table "fni_products", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "product_type", default: "other", null: false
+    t.decimal "default_price", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "default_cost", precision: 15, scale: 2, default: "0.0", null: false
+    t.boolean "active", default: true, null: false
+    t.boolean "is_seeded", default: false, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "active"], name: "index_fni_products_on_company_id_and_active"
+    t.index ["company_id"], name: "index_fni_products_on_company_id"
   end
 
   create_table "import_jobs", force: :cascade do |t|
@@ -3472,6 +3599,110 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["vehicle_id"], name: "index_leads_on_vehicle_id"
   end
 
+  create_table "lender_allowance_items", force: :cascade do |t|
+    t.bigint "lender_id", null: false
+    t.bigint "company_id", null: false
+    t.string "category", null: false
+    t.string "name"
+    t.decimal "standard_allowance", precision: 15, scale: 2
+    t.decimal "maximum_allowance", precision: 15, scale: 2
+    t.string "pricing_basis"
+    t.string "material"
+    t.decimal "wind_zone2_adder_per_side", precision: 15, scale: 2
+    t.decimal "wind_zone3_adder_per_side", precision: 15, scale: 2
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.decimal "dealer_cost", precision: 15, scale: 2
+    t.decimal "dealer_price", precision: 15, scale: 2
+    t.integer "position", default: 0
+    t.bigint "company_allowance_default_id"
+    t.index ["company_allowance_default_id"], name: "index_lender_allowance_items_on_company_allowance_default_id"
+    t.index ["company_id"], name: "index_lender_allowance_items_on_company_id"
+    t.index ["lender_id"], name: "index_lender_allowance_items_on_lender_id"
+  end
+
+  create_table "lender_deletion_items", force: :cascade do |t|
+    t.bigint "lender_id", null: false
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.decimal "amount", precision: 15, scale: 2
+    t.string "invoice_reference"
+    t.decimal "single_amount", precision: 15, scale: 2
+    t.decimal "multi_amount", precision: 15, scale: 2
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_lender_deletion_items_on_company_id"
+    t.index ["lender_id"], name: "index_lender_deletion_items_on_lender_id"
+  end
+
+  create_table "lender_markup_configs", force: :cascade do |t|
+    t.bigint "lender_id", null: false
+    t.bigint "company_id", null: false
+    t.decimal "base_markup_pct", precision: 8, scale: 2, default: "145.0"
+    t.integer "max_age_years", default: 4
+    t.decimal "vep0_adj_pct", precision: 8, scale: 2, default: "5.0"
+    t.decimal "vep1_adj_pct", precision: 8, scale: 2, default: "0.0"
+    t.decimal "vep2_adj_pct", precision: 8, scale: 2, default: "-5.0"
+    t.decimal "used_onsite_factor_pct", precision: 8, scale: 2, default: "140.0"
+    t.decimal "used_delivered_factor_pct", precision: 8, scale: 2, default: "130.0"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_lender_markup_configs_on_company_id"
+    t.index ["lender_id"], name: "index_lender_markup_configs_on_lender_id", unique: true
+  end
+
+  create_table "lender_program_tiers", force: :cascade do |t|
+    t.bigint "lender_program_id", null: false
+    t.string "tier_label"
+    t.integer "fico_min"
+    t.integer "fico_max"
+    t.integer "collateral_age_min_years", default: 0
+    t.integer "collateral_age_max_years"
+    t.decimal "loan_amount_min", precision: 15, scale: 2, default: "0.0"
+    t.decimal "loan_amount_max", precision: 15, scale: 2
+    t.decimal "rate", precision: 6, scale: 3, null: false
+    t.integer "max_term_months", null: false
+    t.decimal "max_ltv", precision: 6, scale: 4
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["lender_program_id", "fico_min", "fico_max"], name: "index_lender_tiers_on_program_and_fico"
+    t.index ["lender_program_id"], name: "index_lender_program_tiers_on_lender_program_id"
+  end
+
+  create_table "lender_programs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "lender_name", null: false
+    t.string "program_name", null: false
+    t.string "collateral_type"
+    t.text "notes"
+    t.boolean "active", default: true, null: false
+    t.boolean "is_seeded", default: false, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "active"], name: "index_lender_programs_on_company_id_and_active"
+    t.index ["company_id"], name: "index_lender_programs_on_company_id"
+  end
+
+  create_table "lenders", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "contact_name"
+    t.string "phone"
+    t.string "email"
+    t.string "website"
+    t.text "notes"
+    t.boolean "active", default: true, null: false
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "name"], name: "index_lenders_on_company_id_and_name"
+    t.index ["company_id"], name: "index_lenders_on_company_id"
+  end
+
   create_table "listings", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "vehicle_id", null: false
@@ -3892,9 +4123,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.boolean "scraper_enabled", default: false
     t.jsonb "scraper_config", default: {}
     t.datetime "last_scraped_at"
+    t.string "contact_name"
+    t.string "claim_email"
+    t.string "claim_contact_name"
+    t.bigint "company_id"
     t.index ["active", "industry_type"], name: "index_manufacturers_on_active_and_industry_type"
     t.index ["active"], name: "index_manufacturers_on_active"
-    t.index ["code"], name: "index_manufacturers_on_code", unique: true, where: "(code IS NOT NULL)"
+    t.index ["company_id", "code"], name: "index_manufacturers_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"
+    t.index ["company_id"], name: "index_manufacturers_on_company_id"
     t.index ["industry_type"], name: "index_manufacturers_on_industry_type"
     t.index ["name"], name: "index_manufacturers_on_name"
     t.index ["scraper_enabled"], name: "index_manufacturers_on_scraper_enabled"
@@ -3946,7 +4182,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.string "created_by_name"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "category", default: "general", null: false
+    t.string "author_type", default: "staff", null: false
     t.index ["created_at"], name: "index_notes_on_created_at"
+    t.index ["entity_type", "entity_id", "category"], name: "index_notes_on_entity_and_category"
     t.index ["entity_type", "entity_id"], name: "index_notes_on_entity_type_and_entity_id"
     t.index ["user_id"], name: "index_notes_on_user_id"
   end
@@ -4337,6 +4576,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["quickbooks_id"], name: "index_payments_on_quickbooks_id"
     t.index ["scheduled_at"], name: "index_payments_on_scheduled_at"
     t.index ["status"], name: "index_payments_on_status"
+  end
+
+  create_table "pending_import_links", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "entity_type", null: false
+    t.bigint "entity_id", null: false
+    t.string "target_column", null: false
+    t.string "parent_model", null: false
+    t.jsonb "match_fields", default: [], null: false
+    t.string "lookup_value", null: false
+    t.string "lookup_key"
+    t.string "status", default: "pending", null: false
+    t.datetime "resolved_at"
+    t.bigint "resolved_parent_id"
+    t.bigint "import_job_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "parent_model", "status"], name: "idx_pending_links_resolution"
+    t.index ["company_id", "status", "lookup_value"], name: "idx_pending_links_value"
+    t.index ["company_id"], name: "index_pending_import_links_on_company_id"
+    t.index ["entity_type", "entity_id"], name: "idx_pending_links_entity"
+    t.index ["import_job_id"], name: "index_pending_import_links_on_import_job_id"
   end
 
   create_table "portal_documents", force: :cascade do |t|
@@ -5246,6 +5507,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.boolean "portal_visible", default: true, null: false
     t.string "ticket_number"
     t.bigint "deal_id"
+    t.string "factory_po"
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
@@ -6178,6 +6440,52 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["phone_verified"], name: "index_users_on_phone_verified"
   end
 
+  create_table "vehicle_documents", force: :cascade do |t|
+    t.bigint "vehicle_id", null: false
+    t.string "title", null: false
+    t.string "category", default: "other", null: false
+    t.string "visibility", default: "internal", null: false
+    t.string "file_url"
+    t.string "file_content_type"
+    t.bigint "file_size"
+    t.bigint "uploaded_by_user_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["uploaded_by_user_id"], name: "index_vehicle_documents_on_uploaded_by_user_id"
+    t.index ["vehicle_id", "visibility"], name: "index_vehicle_documents_on_vehicle_id_and_visibility"
+    t.index ["vehicle_id"], name: "index_vehicle_documents_on_vehicle_id"
+    t.index ["visibility"], name: "index_vehicle_documents_on_visibility"
+  end
+
+  create_table "vehicle_invoices", force: :cascade do |t|
+    t.bigint "vehicle_id", null: false
+    t.bigint "company_id", null: false
+    t.decimal "gross_invoice", precision: 15, scale: 2
+    t.decimal "base_price", precision: 15, scale: 2
+    t.decimal "options_total", precision: 15, scale: 2
+    t.decimal "material_surcharge", precision: 15, scale: 2
+    t.decimal "factory_freight", precision: 15, scale: 2
+    t.decimal "sales_allowance", precision: 15, scale: 2
+    t.decimal "hud_fees", precision: 15, scale: 2
+    t.decimal "state_assoc_fees", precision: 15, scale: 2
+    t.decimal "tax_from_invoice", precision: 15, scale: 2
+    t.decimal "total_invoice", precision: 15, scale: 2
+    t.decimal "nada_base", precision: 15, scale: 2
+    t.integer "vep_code"
+    t.integer "wind_zone"
+    t.string "invoice_number"
+    t.date "invoice_date"
+    t.string "manufacturer"
+    t.bigint "scanned_document_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.decimal "trim_out", precision: 15, scale: 2
+    t.decimal "ac_from_invoice", precision: 15, scale: 2
+    t.index ["company_id"], name: "index_vehicle_invoices_on_company_id"
+    t.index ["scanned_document_id"], name: "index_vehicle_invoices_on_scanned_document_id"
+    t.index ["vehicle_id"], name: "index_vehicle_invoices_on_vehicle_id", unique: true
+  end
+
   create_table "vehicles", force: :cascade do |t|
     t.integer "company_id"
     t.string "stock_number"
@@ -6378,6 +6686,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.string "champion_series_name"
     t.string "champion_brand_name"
     t.string "champion_brand_logo_url"
+    t.datetime "sold_at"
+    t.bigint "sold_via_deal_id"
+    t.decimal "reconditioning_cost", precision: 15, scale: 2
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
@@ -6403,6 +6714,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
     t.index ["rv_type"], name: "index_vehicles_on_rv_type"
     t.index ["sleeping_capacity"], name: "index_vehicles_on_sleeping_capacity"
     t.index ["slideouts"], name: "index_vehicles_on_slideouts"
+    t.index ["sold_via_deal_id"], name: "index_vehicles_on_sold_via_deal_id"
     t.index ["source"], name: "index_vehicles_on_source"
     t.index ["status"], name: "index_vehicles_on_status"
     t.index ["total_cost"], name: "index_vehicles_on_total_cost"
@@ -7003,6 +7315,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "communication_events", "communications"
   add_foreign_key "communications", "communication_templates", column: "template_id"
   add_foreign_key "communications", "communication_threads"
+  add_foreign_key "company_allowance_defaults", "companies"
   add_foreign_key "company_domains", "companies"
   add_foreign_key "company_domains", "websites"
   add_foreign_key "company_floor_plan_option_overrides", "companies"
@@ -7042,6 +7355,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "deal_activities", "deals"
   add_foreign_key "deal_activities", "users"
   add_foreign_key "deal_activities", "users", column: "assigned_to_id"
+  add_foreign_key "deal_desk_scenarios", "companies"
+  add_foreign_key "deal_desk_scenarios", "deals"
+  add_foreign_key "deal_desk_scenarios", "lender_programs"
+  add_foreign_key "deal_desk_scenarios", "locations"
+  add_foreign_key "deal_desk_scenarios", "quotes"
+  add_foreign_key "deal_desk_scenarios", "users", column: "created_by_id"
+  add_foreign_key "deal_desk_scenarios", "vehicles"
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
@@ -7049,6 +7369,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
+  add_foreign_key "deals", "lenders"
   add_foreign_key "deals", "locations"
   add_foreign_key "deals", "projects"
   add_foreign_key "deals", "sources"
@@ -7063,6 +7384,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "export_jobs", "companies"
   add_foreign_key "export_jobs", "users"
   add_foreign_key "factories", "manufacturers"
+  add_foreign_key "fee_templates", "companies"
   add_foreign_key "field_option_overrides", "companies"
   add_foreign_key "fiscal_periods", "companies"
   add_foreign_key "fiscal_periods", "users", column: "closed_by_id"
@@ -7072,6 +7394,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "floor_plan_options", "option_categories"
   add_foreign_key "floor_plans", "factories"
   add_foreign_key "floor_plans", "manufacturers"
+  add_foreign_key "fni_products", "companies"
   add_foreign_key "import_jobs", "companies"
   add_foreign_key "import_jobs", "users"
   add_foreign_key "import_templates", "companies"
@@ -7132,6 +7455,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "leads", "locations"
   add_foreign_key "leads", "sources"
   add_foreign_key "leads", "vehicles"
+  add_foreign_key "lender_allowance_items", "companies"
+  add_foreign_key "lender_allowance_items", "company_allowance_defaults"
+  add_foreign_key "lender_allowance_items", "lenders"
+  add_foreign_key "lender_deletion_items", "companies"
+  add_foreign_key "lender_deletion_items", "lenders"
+  add_foreign_key "lender_markup_configs", "companies"
+  add_foreign_key "lender_markup_configs", "lenders"
+  add_foreign_key "lender_program_tiers", "lender_programs"
+  add_foreign_key "lender_programs", "companies"
+  add_foreign_key "lenders", "companies"
   add_foreign_key "listings", "companies"
   add_foreign_key "listings", "locations"
   add_foreign_key "listings", "vehicles"
@@ -7188,6 +7521,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
   add_foreign_key "payments", "payment_methods"
+  add_foreign_key "pending_import_links", "companies"
+  add_foreign_key "pending_import_links", "import_jobs"
   add_foreign_key "printed_checks", "bank_accounts"
   add_foreign_key "printed_checks", "bill_payments"
   add_foreign_key "printed_checks", "bills"
@@ -7344,6 +7679,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_29_204556) do
   add_foreign_key "user_view_preferences", "users"
   add_foreign_key "users", "companies"
   add_foreign_key "users", "invitations"
+  add_foreign_key "vehicle_documents", "users", column: "uploaded_by_user_id"
+  add_foreign_key "vehicle_documents", "vehicles"
+  add_foreign_key "vehicle_invoices", "companies"
+  add_foreign_key "vehicle_invoices", "vehicle_documents", column: "scanned_document_id", on_delete: :nullify
+  add_foreign_key "vehicle_invoices", "vehicles"
   add_foreign_key "vehicles", "companies"
   add_foreign_key "vehicles", "floor_plans"
   add_foreign_key "vehicles", "locations"

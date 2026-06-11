@@ -55,16 +55,24 @@ module Campaigns
 
         goals = Array(campaign.goal_config['additional_goals']) + [campaign.goal_config['primary_goal']]
         if goals.compact.include?('replied')
-          enrollment.update!(status: 'goal_met', goal_met_at: Time.current, goal_met_reason: 'replied')
+          # Honor the per-goal action: 'stop' removes the contact from the campaign;
+          # 'track' (default) records the conversion but lets the sequence continue.
+          actions = campaign.goal_config['goal_actions']
+          raw_action = actions.is_a?(Hash) ? actions['replied'] : nil
+          action = %w[track stop].include?(raw_action) ? raw_action : 'track'
+
+          attrs = { goal_met_at: Time.current, goal_met_reason: 'replied' }
+          attrs[:status] = 'goal_met' if action == 'stop'
+          enrollment.update!(attrs)
           CampaignEvent.create!(
             company_id: send.company_id, campaign_id: campaign.id,
             campaign_enrollment_id: enrollment.id, campaign_send_id: send.id,
-            event_type: 'goal_met', occurred_at: Time.current, payload: { reason: 'replied' }
+            event_type: 'goal_met', occurred_at: Time.current, payload: { reason: 'replied', action: action }
           )
           if defined?(WebhookService)
             WebhookService.fire(
               company_id: send.company_id, event: 'campaign.goal_met',
-              payload: { campaign_id: campaign.id, enrollment_id: enrollment.id, goal: 'replied' }
+              payload: { campaign_id: campaign.id, enrollment_id: enrollment.id, goal: 'replied', action: action }
             )
           end
         else
