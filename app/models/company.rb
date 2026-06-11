@@ -203,6 +203,11 @@ class Company < ApplicationRecord
   after_create :create_default_location
   after_create :ensure_corporate_location
   after_create :seed_default_project_templates
+  # MH-only: chart of accounts, Deal Desk sample config, and Max Advance allowance
+  # defaults. Gated on industry == 'manufactured_housing' inside the method so RV/other
+  # industries are skipped. Each sub-seed is individually rescued so one failure never
+  # blocks company creation.
+  after_create :seed_mh_finance_defaults
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
   
@@ -685,6 +690,40 @@ class Company < ApplicationRecord
     Rails.logger.info "✅ [Company#seed_default_project_templates] Seeded default project templates for Company #{id} (#{name})"
   rescue => e
     Rails.logger.error "❌ [Company#seed_default_project_templates] Failed to seed templates for Company #{id}: #{e.message}"
+    nil
+  end
+
+  # MH-only finance bootstrap (chart of accounts + Max Advance allowance defaults). Runs
+  # automatically for every new manufactured_housing company. Idempotent and each piece is
+  # rescued independently so a failure in one never aborts company creation or the others.
+  #
+  # NOTE: Deal Desk sample config is intentionally NOT seeded here — it's placeholder rate
+  # sheets and flips the gated module on, so it belongs in the demo-company seed only
+  # (db/seeds/demo_company.rb), not on real new companies.
+  #
+  # This seeds ONLY per-company data. The global RBAC catalog (Resource/Action/Role
+  # seed_defaults) is seeded once per environment, not here.
+  def seed_mh_finance_defaults
+    return unless industry == 'manufactured_housing'
+
+    # 1. Chart of Accounts (idempotent MH chart).
+    begin
+      require Rails.root.join('db/seeds/seed_default_chart_of_accounts').to_s
+      DefaultChartOfAccountsSeeder.seed(self)
+      Rails.logger.info "✅ [Company#seed_mh_finance_defaults] COA seeded for Company #{id}"
+    rescue => e
+      Rails.logger.error "❌ [Company#seed_mh_finance_defaults] COA failed for Company #{id}: #{e.message}"
+    end
+
+    # 2. Max Advance company allowance defaults (21st Mortgage-derived). Lenders created
+    #    afterward inherit these via Lender#after_create automatically.
+    begin
+      CompanyAllowanceDefault.seed_defaults(self)
+      Rails.logger.info "✅ [Company#seed_mh_finance_defaults] Allowance defaults seeded for Company #{id}"
+    rescue => e
+      Rails.logger.error "❌ [Company#seed_mh_finance_defaults] Allowance defaults failed for Company #{id}: #{e.message}"
+    end
+
     nil
   end
 

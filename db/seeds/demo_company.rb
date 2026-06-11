@@ -581,6 +581,12 @@ deposit_pcts = [0.08, 0.05, 0.10, 0.0, 0.07, 0.06, 0.09, 0.0, 0.075, 0.05]
 # before_save denormalizes lender.name -> deals.lender_name (the seed uses update_columns,
 # so it mirrors that denormalization explicitly to keep lender_name in sync).
 puts "\n10a. Creating lenders..."
+begin
+  CompanyAllowanceDefault.seed_defaults(company)
+  puts "  Allowance defaults: #{company.company_allowance_defaults.count} items (lenders below inherit these)"
+rescue => e
+  puts "  ⚠ Allowance defaults skipped: #{e.message}"
+end
 lender_specs = [
   { name: '21st Mortgage',          contact_name: 'Robert Chen',   phone: '(865) 215-9000', email: 'rchen@21stmortgage.com',     website: 'https://www.21stmortgage.com', notes: 'Primary MH lender; fast approvals' },
   { name: 'Vanderbilt Mortgage',    contact_name: 'Sandra Mills',  phone: '(800) 970-7283', email: 'smills@vmf.com',              website: 'https://www.vmf.com',          notes: 'Strong on used-home financing' },
