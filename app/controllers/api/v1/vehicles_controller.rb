@@ -4,6 +4,17 @@ module Api
   module V1
     class VehiclesController < ApplicationController
       include RbacAuthorization
+
+      # Fields the inline editor (Cost Details, etc.) must be able to CLEAR. For these, an
+      # explicit null in the request persists as NULL instead of being skipped. Everything
+      # else keeps the "skip nil" behavior so partial updates (CSV import, single-field
+      # patches) never wipe untouched columns. Keep this to user-clearable numeric fields.
+      NULLABLE_INLINE_FIELDS = %i[
+        dealer_cost freight_cost pdi_cost total_cost
+        holdback_amount target_gross minimum_price
+        reconditioning_cost
+      ].freeze
+
       rbac_resource :inventory,
         read_actions: [:index, :show, :stats, :export, :print],
         create_actions: [:create, :clone, :import],
@@ -1729,7 +1740,17 @@ module Api
         
         direct_fields.each do |field|
           # Use key? check instead of present? to handle boolean false and 0 values
-          if raw_params.key?(field) && !raw_params[field].nil?
+          if raw_params.key?(field) && !raw_params[field].nil? && raw_params[field] != ''
+            transformed[field] = raw_params[field]
+          elsif raw_params.key?(field) && (raw_params[field].nil? || raw_params[field] == '') && NULLABLE_INLINE_FIELDS.include?(field)
+            # Inline-clearable fields: an explicit null/blank MUST persist as NULL (so deleting
+            # Home Cost actually clears dealer_cost). Rails typecasts '' -> nil for the decimal
+            # column. Every OTHER field keeps the skip-blank behavior above so partial updates
+            # (CSV import, single-field patches) never wipe untouched columns.
+            transformed[field] = nil
+          elsif raw_params.key?(field) && !raw_params[field].nil?
+            # Non-nullable field with a blank string ('') — preserve prior behavior of passing
+            # it through (Rails handles typecast); only the explicit nil was skipped before.
             transformed[field] = raw_params[field]
           end
         end
@@ -2078,6 +2099,17 @@ module Api
             floorJoistSize: vehicle.floor_joist_size,
             electricalService: vehicle.electrical_service,
             modularConversionCost: vehicle.modular_conversion_cost&.to_f,
+            # RBAC Cost Detail Fields — Cost Details card on the Pricing tab. These were
+            # previously emitted ONLY in the RV branch, so for manufactured homes every
+            # cost field rendered as "—" regardless of the stored value (e.g. a seeded or
+            # invoice-derived dealer_cost). dealerCost is the "Home Cost" field.
+            dealerCost: vehicle.dealer_cost&.to_f,
+            freightCost: vehicle.freight_cost&.to_f,
+            pdiCost: vehicle.pdi_cost&.to_f,
+            totalCost: vehicle.total_cost&.to_f,
+            holdbackAmount: vehicle.holdback_amount&.to_f,
+            targetGross: vehicle.target_gross&.to_f,
+            minimumPrice: vehicle.minimum_price&.to_f,
             # Inventory features (Option B)
             inventoryFeatures: vehicle.inventory_features.order(:name).map { |f|
               { id: f.id, name: f.name, category: f.category, isStandard: f.is_standard }
@@ -2089,6 +2121,27 @@ module Api
         if detailed
           json[:deals] = vehicle.deals.active.map { |d| deal_summary(d) }
           json[:quotes] = vehicle.quotes.active.map { |q| quote_summary(q) }
+
+          # Invoice cost basis: the manufacturer-invoice figure the FE offers as the
+          # one-tap default for an empty Home Cost (Cost Details). Gross invoice is the
+          # cost proxy (fallback total_invoice). nil when no invoice captured -> FE shows
+          # no default affordance. This is a DEFAULT source only; it never overrides an
+          # entered dealer_cost (the guard lives in the invoice controller's seed + the
+          # FE only offers it when dealerCost is blank).
+          inv = vehicle.respond_to?(:invoice) ? vehicle.invoice : nil
+          invoice_basis = if inv
+            inv.gross_invoice.to_f.positive? ? inv.gross_invoice.to_f
+                                             : (inv.total_invoice.to_f.positive? ? inv.total_invoice.to_f : nil)
+          end
+          json[:invoiceCostBasis] = invoice_basis
+
+          # MSRP (manufacturer suggested retail), read-only, DERIVED from the invoice's
+          # base price. Not a stored column — mirrors the invoice live so it can't drift.
+          # We use ONLY base_price (the home's retail base on the manufacturer invoice); we do
+          # NOT fall back to gross_invoice, because gross is the cost basis (it already feeds
+          # Home Cost) — showing it as "MSRP" would misrepresent cost as retail. nil when the
+          # invoice has no base price, so the FE shows MSRP blank rather than a wrong number.
+          json[:manufacturerMsrp] = (inv && inv.base_price.to_f.positive?) ? inv.base_price.to_f : nil
 
           # Floor plan tracking — exposed only on detailed views (typically the
           # vehicle detail page or accounting flows that need accrual context).

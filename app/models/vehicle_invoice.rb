@@ -35,37 +35,12 @@ class VehicleInvoice < ApplicationRecord
   # be internal-only — the invoice scan never rides on a customer/public document tier.
   validate :scanned_document_is_internal_and_owned, if: -> { scanned_document_id.present? }
 
-  # Seed the vehicle's Home Cost (dealer_cost) from this invoice ONLY when the dealer
-  # hasn't entered any Cost Details yet. The invoice total is a reasonable starting cost
-  # basis (for a new home the dealer typically pays the invoice), so this saves re-entry
-  # and lets cost flow to deals/GP. It NEVER overwrites an entered cost — dealer_cost,
-  # freight_cost, pdi_cost, and total_cost are all checked. The seeded value is a normal,
-  # editable dealer_cost the rep can correct if the invoice isn't the true cost (the
-  # Cost Details tooltip says so). This keeps structured_cost (the GP/commission spine)
-  # honest — we populate a real field rather than having the cost method guess from the invoice.
-  after_save :seed_vehicle_cost_from_invoice
+  # NOTE: Home Cost (vehicle.dealer_cost) is seeded from this invoice by the controller
+  # (Api::V1::VehicleInvoicesController#seed_home_cost_from_invoice) on every successful
+  # save — NOT by a model after_save. ActiveRecord skips after_save on a no-op (unchanged)
+  # save, so a model callback misses re-saves; the controller path is the reliable trigger.
 
   private
-
-  def seed_vehicle_cost_from_invoice
-    v = vehicle
-    return unless v
-    # Only seed when NO cost detail exists (flag-don't-guess: never clobber a real entry).
-    return if v.dealer_cost.to_f.positive? || v.freight_cost.to_f.positive? ||
-              v.pdi_cost.to_f.positive? || v.total_cost.to_f.positive?
-
-    # Use the manufacturer's GROSS invoice as the cost basis — it's the top-line invoice
-    # amount (what the dealer is invoiced for the home). total_invoice can be a partial /
-    # net-of-fees figure on some invoices, so gross is the safer cost proxy; fall back to
-    # total_invoice only when gross is blank.
-    basis = gross_invoice.to_f.positive? ? gross_invoice.to_f : total_invoice.to_f
-    return unless basis.positive?
-
-    # update_column: skip validations/callbacks (avoids touching the vehicle's own
-    # normalize/discount callbacks on an invoice save) and don't recurse. Seeds the
-    # dealer_cost (Home Cost) field specifically so it shows in Cost Details and flows to GP.
-    v.update_column(:dealer_cost, basis.round(2))
-  end
 
   def scanned_document_is_internal_and_owned
     doc = scanned_document

@@ -121,10 +121,38 @@ module Api
         invoice.company = @company
 
         if invoice.save
+          # Seed the vehicle's Home Cost (dealer_cost) from the invoice as a starting default.
+          # Done here (not only in the model after_save) so it runs on EVERY successful save —
+          # ActiveRecord skips after_save on a no-op (unchanged) save, so a model callback alone
+          # misses re-saves and is fragile across reloads. Idempotent + override-safe: only seeds
+          # when no Cost Details have been entered. See VehicleInvoice#seed_dealer_cost_basis.
+          seed_home_cost_from_invoice(invoice)
           render json: invoice_json(invoice), status: existing ? :ok : :created
         else
           render json: { errors: invoice.errors.full_messages }, status: :unprocessable_entity
         end
+      end
+
+      # Seed dealer_cost (Home Cost) from the invoice's gross (fallback total) when the
+      # vehicle has NO cost entered yet. Reloads the vehicle so the guard reads true
+      # persisted values, never a stale in-memory copy. update_column avoids recursing
+      # through vehicle callbacks.
+      def seed_home_cost_from_invoice(invoice)
+        v = @vehicle.reload
+        return if v.dealer_cost.to_f.positive? || v.freight_cost.to_f.positive? ||
+                  v.pdi_cost.to_f.positive? || v.total_cost.to_f.positive?
+
+        basis = invoice.gross_invoice.to_f.positive? ? invoice.gross_invoice.to_f
+                                                     : invoice.total_invoice.to_f
+        return unless basis.positive?
+
+        v.update_column(:dealer_cost, basis.round(2))
+        Rails.logger.info(
+          "[VehicleInvoices#seed_home_cost] vehicle ##{v.id}: seeded dealer_cost=#{basis.round(2)} from invoice ##{invoice.id}"
+        )
+      rescue => e
+        # Never fail the invoice save because the cost seed hit a snag.
+        Rails.logger.error("[VehicleInvoices#seed_home_cost] vehicle ##{@vehicle&.id}: #{e.message}")
       end
 
       def set_company
