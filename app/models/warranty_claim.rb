@@ -165,6 +165,17 @@ class WarrantyClaim < ApplicationRecord
   def can_be_submitted?
     draft? && parts.present? && manufacturer_id.present?
   end
+
+  # Human-readable reason a draft can't yet be submitted (for FE badges).
+  # Returns nil when the claim IS submittable. Note: $0 claims are valid
+  # (manufacturer-covered labor/parts), so amount is intentionally not gated.
+  def submission_blocked_reason
+    return nil if can_be_submitted?
+    return 'Already submitted' unless draft?
+    return 'No manufacturer selected' if manufacturer_id.blank?
+    return 'Claim must have parts or labor added to the service ticket to submit' unless parts.present?
+    'Not ready'
+  end
   
   def can_be_resubmitted?
     # Allow resubmission for any submitted claim except draft and closed
@@ -341,6 +352,8 @@ class WarrantyClaim < ApplicationRecord
       partsTotal: parts_total,
       laborTotal: labor_total,
       totalAmount: total_amount,
+      readyToSubmit: can_be_submitted?,
+      submissionBlockedReason: submission_blocked_reason,
       
       # Attachment count
       attachmentsCount: attachments.count
