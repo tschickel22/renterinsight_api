@@ -97,6 +97,7 @@ module Api
           hudFees: f['hud_fees'],
           stateAssocFees: f['state_assoc_fees'],
           taxFromInvoice: f['tax_from_invoice'],
+          acFromInvoice: f['ac_from_invoice'],
           trimOut: f['trim_out'],
           totalInvoice: f['total_invoice'],
           vepCode: f['vep_code'],
@@ -196,8 +197,8 @@ module Api
       def invoice_params
         params.require(:invoice).permit(
           :gross_invoice, :base_price, :options_total, :material_surcharge, :factory_freight,
-          :sales_allowance, :hud_fees, :state_assoc_fees, :tax_from_invoice, :total_invoice,
-          :nada_base, :trim_out, :vep_code, :wind_zone,
+          :sales_allowance, :hud_fees, :state_assoc_fees, :tax_from_invoice, :ac_from_invoice,
+          :total_invoice, :nada_base, :trim_out, :vep_code, :wind_zone,
           :invoice_number, :invoice_date, :manufacturer, :scanned_document_id
           # company_id and vehicle_id intentionally excluded (derived from scope/route).
         )
@@ -216,6 +217,7 @@ module Api
           hudFees: inv.hud_fees,
           stateAssocFees: inv.state_assoc_fees,
           taxFromInvoice: inv.tax_from_invoice,
+          acFromInvoice: inv.ac_from_invoice,
           totalInvoice: inv.total_invoice,
           nadaBase: inv.nada_base,
           trimOut: inv.trim_out,

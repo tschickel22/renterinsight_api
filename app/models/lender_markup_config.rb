@@ -12,4 +12,14 @@ class LenderMarkupConfig < ApplicationRecord
             :used_onsite_factor_pct, :used_delivered_factor_pct,
             numericality: true, allow_nil: true
   validates :max_age_years, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
+
+  # Seed a default markup config for a lender (DB column defaults = the 21st Mortgage
+  # schedule: 145% base, VEP0 +5 / VEP1 0 / VEP2 -5, used 140/130). GAP-FILL ONLY —
+  # no-op when the lender already has a config, so re-running never clobbers edits.
+  # Called from Lender after_create and the backfill runner.
+  def self.seed_default_for(lender)
+    return if lender.markup_config.present?
+
+    create!(lender: lender, company: lender.company) # column defaults supply the values
+  end
 end

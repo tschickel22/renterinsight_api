@@ -24,7 +24,7 @@ class Lender < ApplicationRecord
   scope :by_name,     -> { order(:name) }
 
   before_validation :normalize_fields
-  after_create :seed_allowance_from_defaults
+  after_create :seed_schedule_from_defaults
 
   def soft_delete!
     update!(is_deleted: true, active: false)
@@ -42,10 +42,27 @@ class Lender < ApplicationRecord
     self.phone = phone&.strip if phone.present?
   end
 
-  # Auto-populate this lender's allowance schedule from company defaults.
-  def seed_allowance_from_defaults
+  # Auto-populate this lender's full Max Advance schedule so a brand-new lender is never
+  # in the silent-failure state (no deletions → B=0 → freight/HUD/tax marked up; no markup
+  # config → worksheet unavailable). Each seeder is gap-fill/idempotent on its own:
+  #   - allowances: copied from company defaults (21st rates)
+  #   - deletions:  LenderDeletionItem::DEFAULT_SCHEDULE
+  #   - markup:     DB column defaults (145 base, VEP +5/0/-5, used 140/130)
+  # Failures log but never block lender creation — dealers can finish in Finance settings.
+  def seed_schedule_from_defaults
     CompanyAllowanceDefault.populate_lender(self)
   rescue => e
-    Rails.logger.error "[Lender#seed_allowance_from_defaults] Failed for lender #{id}: #{e.message}"
+    Rails.logger.error "[Lender#seed_schedule_from_defaults] allowances failed for lender #{id}: #{e.message}"
+  ensure
+    begin
+      LenderDeletionItem.seed_defaults_for(self)
+    rescue => e
+      Rails.logger.error "[Lender#seed_schedule_from_defaults] deletions failed for lender #{id}: #{e.message}"
+    end
+    begin
+      LenderMarkupConfig.seed_default_for(self)
+    rescue => e
+      Rails.logger.error "[Lender#seed_schedule_from_defaults] markup config failed for lender #{id}: #{e.message}"
+    end
   end
 end

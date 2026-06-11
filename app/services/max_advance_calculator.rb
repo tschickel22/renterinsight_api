@@ -193,8 +193,22 @@ class MaxAdvanceCalculator
     adds_selections.sum { |sel| allowance_add(sel, tier) }.round(2)
   end
 
+  # Per-home selections (from line items / captured config) — see options[:adds].
+  # IMPLICIT A/C: when the manufacturer invoice carries a factory-installed A/C line
+  # (ac_from_invoice > 0), the 21st worksheet both DELETES that cost from the net AND
+  # claims the A/C allowance in ADDS — even when no dealer A/C line item exists. We
+  # mirror that by appending an implicit { category: 'ac' } selection, but ONLY when the
+  # caller didn't already supply an explicit A/C add (dealer-installed line item), so the
+  # allowance is never double-counted.
   def adds_selections
-    Array(@options[:adds]).map { |s| s.respond_to?(:symbolize_keys) ? s.symbolize_keys : s }
+    @adds_selections ||= begin
+      sels = Array(@options[:adds]).map { |s| s.respond_to?(:symbolize_keys) ? s.symbolize_keys : s }
+      if d(invoice&.ac_from_invoice).positive? && sels.none? { |s| s[:category].to_s == 'ac' }
+        sels + [{ category: 'ac', implicit: true }]
+      else
+        sels
+      end
+    end
   end
 
   def allowance_add(sel, tier)

@@ -1,10 +1,16 @@
 # frozen_string_literal: true
 
-# Max Advance Phase 2 — seed the DEFAULT calculation schedule for the "21st Mortgage"
-# lender (allowances, deletions, markup/VEP config) from the 21st sheet.
+# Max Advance Phase 2 — seed the 21st Mortgage lender + its FULL calculation schedule
+# (allowances, deletions, markup/VEP config) for EVERY manufactured-housing company.
 #
-# Idempotent: find_or_create_by on natural keys, re-runnable. Company-scoped — applies
-# to every company that has a "21st Mortgage" lender (the demo company seeds one).
+# 21st Mortgage is the dominant MH lender, so every MH customer gets it as a working
+# sample (and most will use it directly). For each MH company this seed:
+#   1. Finds an existing 21st lender CASE-INSENSITIVELY ("21st mortgage" counts — never
+#      renames a dealer-created lender), or CREATES a "21st Mortgage" lender.
+#   2. Seeds/refreshes the full 21st schedule onto it (authoritative for 21st rates —
+#      re-running updates rows back to the published schedule).
+#
+# Idempotent: find_or_initialize_by on natural keys, re-runnable.
 #
 #   bin/rails runner db/seeds/max_advance_lender_schedule.rb
 
@@ -38,11 +44,13 @@ ALLOWANCES_21ST = [
 #  - hud_fees combines hud_fees + state_assoc_fees (the worksheet's single "HUD Dues/Fees"
 #    line is both, e.g. 160+110=270 single / 320+220=540 multi).
 #  - trim_out pulls the manufacturer Trim Out line from the invoice (deleted + added back).
+#  - ac pulls the factory-installed A/C line from the invoice (deleted from the markup
+#    base; the calculator implicitly adds the lender's A/C ALLOWANCE in F).
 DELETIONS_21ST = [
   ['wheels_axles',    nil, nil,                         500,  1000],
   ['factory_freight', nil, 'factory_freight',           nil,  nil],
   ['dealer_rebate',   nil, nil,                         nil,  nil],
-  ['ac',              nil, nil,                         nil,  nil],
+  ['ac',              nil, 'ac_from_invoice',           nil,  nil],
   ['tax_from_invoice',nil, 'tax_from_invoice',          nil,  nil],
   ['hud_fees',        nil, 'hud_fees+state_assoc_fees', nil,  nil],
   ['packs',           nil, nil,                         nil,  nil],
@@ -87,15 +95,26 @@ def seed_21st_schedule(lender)
   cfg.assign_attributes(MARKUP_21ST)
   cfg.save!
 
-  puts "  [#{company.name} ##{company.id}] 21st Mortgage: #{lender.allowance_items.count} allowances, " \
+  puts "  [#{company.name} ##{company.id}] #{lender.name}: #{lender.allowance_items.count} allowances, " \
        "#{lender.deletion_items.count} deletions, markup base #{cfg.base_markup_pct}%"
 end
 
-puts "Seeding Max Advance 21st Mortgage schedule..."
-lenders = Lender.where(name: '21st Mortgage', is_deleted: [false, nil])
-if lenders.empty?
-  puts "  (no '21st Mortgage' lender found — run demo_company seed first)"
-else
-  lenders.find_each { |l| seed_21st_schedule(l) }
+# Case-insensitive find so a dealer-typed "21st mortgage" is recognized (never renamed);
+# create the lender when the company doesn't have one yet.
+def find_or_create_21st_lender(company)
+  existing = company.lenders.not_deleted.where('LOWER(name) = ?', '21st mortgage').first
+  return existing if existing
+
+  lender = company.lenders.create!(name: '21st Mortgage', active: true)
+  puts "  [#{company.name} ##{company.id}] created 21st Mortgage lender ##{lender.id}"
+  lender
 end
-puts "Done."
+
+puts 'Seeding 21st Mortgage lender + Max Advance schedule for all MH companies...'
+Company.where(industry: 'manufactured_housing').find_each do |company|
+  lender = find_or_create_21st_lender(company)
+  seed_21st_schedule(lender)
+rescue => e
+  puts "  [#{company.name} ##{company.id}] FAILED: #{e.message}"
+end
+puts 'Done.'

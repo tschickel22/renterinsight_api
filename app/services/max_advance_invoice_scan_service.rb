@@ -25,7 +25,8 @@ class MaxAdvanceInvoiceScanService
   # vehicle_invoice money attributes the scan maps to.
   MONEY_FIELDS = %w[
     gross_invoice base_price options_total material_surcharge factory_freight
-    sales_allowance hud_fees state_assoc_fees tax_from_invoice total_invoice trim_out
+    sales_allowance hud_fees state_assoc_fees tax_from_invoice ac_from_invoice
+    total_invoice trim_out
   ].freeze
 
   def initialize(company, user = nil)
@@ -102,6 +103,7 @@ class MaxAdvanceInvoiceScanService
         "hud_fees": 0.00,
         "state_assoc_fees": 0.00,
         "tax_from_invoice": 0.00,
+        "ac_from_invoice": 0.00,
         "trim_out": 0.00,
         "total_invoice": 0.00,
         "gross_invoice": 0.00,
@@ -118,6 +120,8 @@ class MaxAdvanceInvoiceScanService
       - vep_code: the VEP stamp/code (0, 1, or 2) if present, else null.
       - wind_zone: wind zone (1, 2, or 3) if present, else null.
       - trim_out: a separate Trim Out / Tape & Texture invoice line if present, else null.
+      - ac_from_invoice: a factory-installed Air Conditioner / A/C invoice line (often in the
+        options detail) if present, else null. Do NOT include heat pumps or furnace lines.
       - state_assoc_fees: a State Association fee line if present, else null.
       - confidence is 0.0-1.0 overall; field_confidence is per-field where you can judge it.
       - Output ONLY the JSON object, nothing else.

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_09_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_11_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6458,6 +6458,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_09_230000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.decimal "trim_out", precision: 15, scale: 2
+    t.decimal "ac_from_invoice", precision: 15, scale: 2
     t.index ["company_id"], name: "index_vehicle_invoices_on_company_id"
     t.index ["scanned_document_id"], name: "index_vehicle_invoices_on_scanned_document_id"
     t.index ["vehicle_id"], name: "index_vehicle_invoices_on_vehicle_id", unique: true
