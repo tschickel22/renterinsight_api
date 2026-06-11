@@ -307,6 +307,10 @@ class ServiceTicket < ApplicationRecord
     Rails.logger.info "🛠️ [Model set_line_billing] Final billing_data BEFORE update!: #{billing_data.to_json}"
     
     update!(line_item_billing: billing_data)
+
+    # Keep the draft warranty claim's parts/labor/amount in sync with the
+    # currently warranty-tagged lines (no "Generate" step required).
+    resync_draft_claim!
   end
   
   def get_line_billing(index:, type:)
@@ -424,6 +428,23 @@ class ServiceTicket < ApplicationRecord
   end
   
   private
+  
+  # Re-sync the draft warranty claim's line items + estimate from the ticket's
+  # currently warranty-tagged parts/labor. Draft-only: never mutates a claim that
+  # has been submitted (its contents are locked to what the manufacturer received).
+  # Mirrors what generate_warranty_claim copies so the two stay consistent.
+  def resync_draft_claim!
+    claim = WarrantyClaim.where(service_ticket_id: id, is_deleted: false).first
+    return unless claim&.draft?
+
+    claim.update!(
+      parts: warranty_parts,
+      labor: warranty_labor,
+      estimated_amount: warranty_total
+    )
+  rescue => e
+    Rails.logger.error "[resync_draft_claim!] ticket #{id}: #{e.message}"
+  end
   
   def generate_ticket_number
     return if ticket_number.present?
