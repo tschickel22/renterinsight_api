@@ -4,7 +4,7 @@ module Api
   module V1
     class ServiceTicketsController < ApplicationController
       before_action :set_company
-      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :set_attachment_audience, :mark_warranty_suspected, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both, :assign_contractor, :unassign_contractor]
+      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :set_attachment_audience, :mark_warranty_suspected, :mark_warranty, :unmark_warranty, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both, :assign_contractor, :unassign_contractor]
       
       # GET /api/v1/service-tickets
       def index
@@ -210,6 +210,51 @@ module Api
           render json: { errors: ['Unable to mark ticket'] }, status: :unprocessable_entity
         end
       end
+
+      # POST /api/v1/service-tickets/:id/mark-warranty
+      # Mark ticket as a warranty claim and create (or reuse) its single draft
+      # claim. Manufacturer is required. No invoice is generated here; line items
+      # are tagged afterward and the invoice is generated at submit/generate time.
+      def mark_warranty
+        return unless authorize_action!('service', 'update')
+
+        unless params[:manufacturer_id].present?
+          return render json: { error: 'Manufacturer is required to mark a ticket as warranty' }, status: :unprocessable_entity
+        end
+
+        begin
+          claim = @service_ticket.mark_as_warranty!(
+            manufacturer_id: params[:manufacturer_id],
+            marked_by: current_user.email
+          )
+          render json: {
+            success: true,
+            data: serialize_ticket(@service_ticket.reload),
+            claim: serialize_warranty_claim(claim),
+            message: 'Ticket marked as warranty; draft claim ready'
+          }
+        rescue => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+      end
+
+      # POST /api/v1/service-tickets/:id/unmark-warranty
+      # Gated cascade un-mark (see ServiceTicket#unmark_warranty!). Only allowed
+      # while the claim and its warranty invoice are still draft.
+      def unmark_warranty
+        return unless authorize_action!('service', 'update')
+
+        result, reason = @service_ticket.unmark_warranty!
+        if result == :ok
+          render json: {
+            success: true,
+            data: serialize_ticket(@service_ticket.reload),
+            message: 'Warranty removed from ticket'
+          }
+        else
+          render json: { error: reason }, status: :unprocessable_entity
+        end
+      end
       
       # POST /api/v1/service-tickets/:id/set-line-billing
       # Set billing type (warranty vs customer) for a specific line item
@@ -275,19 +320,33 @@ module Api
         end
         
         begin
-          # Create warranty claim
-          claim = WarrantyClaim.create!(
-            company_id: @service_ticket.company_id,
-            location_id: @service_ticket.location_id,
-            service_ticket_id: @service_ticket.id,
-            manufacturer_id: params[:manufacturer_id],
-            parts: @service_ticket.warranty_parts,
-            labor: @service_ticket.warranty_labor,
-            estimated_amount: @service_ticket.warranty_total,
-            notes_to_manufacturer: params[:notes_to_manufacturer],
-            submitted_by: current_user.email,
-            status: 'draft'
-          )
+          # Reuse existing draft claim if one already exists (idempotent); else
+          # create. The DB unique index also guarantees one active claim/ticket.
+          claim = @service_ticket.warranty_claim_owned
+          if claim
+            if claim.draft?
+              claim.update!(
+                manufacturer_id: params[:manufacturer_id],
+                parts: @service_ticket.warranty_parts,
+                labor: @service_ticket.warranty_labor,
+                estimated_amount: @service_ticket.warranty_total,
+                notes_to_manufacturer: params[:notes_to_manufacturer]
+              )
+            end
+          else
+            claim = WarrantyClaim.create!(
+              company_id: @service_ticket.company_id,
+              location_id: @service_ticket.location_id,
+              service_ticket_id: @service_ticket.id,
+              manufacturer_id: params[:manufacturer_id],
+              parts: @service_ticket.warranty_parts,
+              labor: @service_ticket.warranty_labor,
+              estimated_amount: @service_ticket.warranty_total,
+              notes_to_manufacturer: params[:notes_to_manufacturer],
+              submitted_by: current_user.email,
+              status: 'draft'
+            )
+          end
 
           # Carry manufacturer-tagged ticket files onto the claim
           copy_manufacturer_attachments_to_claim(@service_ticket, claim)
@@ -333,18 +392,31 @@ module Api
               return render json: { error: 'Manufacturer ID required for warranty items' }, status: :unprocessable_entity
             end
             
-            claim = WarrantyClaim.create!(
-              company_id: @service_ticket.company_id,
-              location_id: @service_ticket.location_id,
-              service_ticket_id: @service_ticket.id,
-              manufacturer_id: params[:manufacturer_id],
-              parts: @service_ticket.warranty_parts,
-              labor: @service_ticket.warranty_labor,
-              estimated_amount: @service_ticket.warranty_total,
-              notes_to_manufacturer: params[:notes_to_manufacturer],
-              submitted_by: current_user.email,
-              status: 'draft'
-            )
+            claim = @service_ticket.warranty_claim_owned
+            if claim
+              if claim.draft?
+                claim.update!(
+                  manufacturer_id: params[:manufacturer_id],
+                  parts: @service_ticket.warranty_parts,
+                  labor: @service_ticket.warranty_labor,
+                  estimated_amount: @service_ticket.warranty_total,
+                  notes_to_manufacturer: params[:notes_to_manufacturer]
+                )
+              end
+            else
+              claim = WarrantyClaim.create!(
+                company_id: @service_ticket.company_id,
+                location_id: @service_ticket.location_id,
+                service_ticket_id: @service_ticket.id,
+                manufacturer_id: params[:manufacturer_id],
+                parts: @service_ticket.warranty_parts,
+                labor: @service_ticket.warranty_labor,
+                estimated_amount: @service_ticket.warranty_total,
+                notes_to_manufacturer: params[:notes_to_manufacturer],
+                submitted_by: current_user.email,
+                status: 'draft'
+              )
+            end
 
             # Carry manufacturer-tagged ticket files onto the claim
             copy_manufacturer_attachments_to_claim(@service_ticket, claim)

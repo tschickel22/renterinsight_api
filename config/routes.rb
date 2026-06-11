@@ -541,6 +541,8 @@ Rails.application.routes.draw do
           post :upload_attachments, path: 'upload-attachments'
           patch 'attachments/:attachment_id/audience', action: :set_attachment_audience
           post :mark_warranty_suspected, path: 'mark-warranty-suspected'
+          post :mark_warranty, path: 'mark-warranty'
+          post :unmark_warranty, path: 'unmark-warranty'
           post :set_line_billing, path: 'set-line-billing'
           post :generate_customer_invoice, path: 'generate-customer-invoice'
           post :generate_warranty_claim, path: 'generate-warranty-claim'

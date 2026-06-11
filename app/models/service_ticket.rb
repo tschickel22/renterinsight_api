@@ -89,7 +89,7 @@ class ServiceTicket < ApplicationRecord
   belongs_to :deal, optional: true
   belongs_to :warranty_claim, optional: true
   belongs_to :portal_user, class_name: 'BuyerPortalAccess', optional: true
-  has_one :warranty_claim_owned, class_name: 'WarrantyClaim', foreign_key: :service_ticket_id, dependent: :restrict_with_error
+  has_one :warranty_claim_owned, -> { where(is_deleted: false) }, class_name: 'WarrantyClaim', foreign_key: :service_ticket_id, dependent: :restrict_with_error
   has_many :invoices, as: :source, dependent: :nullify
   has_many :contractor_assignments, as: :assignable, dependent: :destroy
   
@@ -209,6 +209,70 @@ class ServiceTicket < ApplicationRecord
     )
     
     claim
+  end
+
+  # Idempotent: mark this ticket as a warranty claim and ensure a SINGLE draft
+  # WarrantyClaim exists. Requires a manufacturer. Does NOT generate an invoice
+  # and does NOT change ticket status (status flips to waiting_on_manufacturer
+  # only at submit time). Safe to call repeatedly: returns the existing claim if
+  # one is already present (updating its manufacturer while still draft).
+  def mark_as_warranty!(manufacturer_id:, marked_by:)
+    # Fresh query — never trust a cached association (a prior un-mark in the same
+    # instance may have soft-deleted the old claim).
+    existing = WarrantyClaim.where(service_ticket_id: id, is_deleted: false).first
+    if existing
+      if existing.draft? && existing.manufacturer_id != manufacturer_id.to_i
+        existing.update!(manufacturer_id: manufacturer_id)
+      end
+      update!(warranty_claim_id: existing.id, is_warranty_confirmed: true)
+      association(:warranty_claim_owned).reset
+      return existing
+    end
+
+    claim = WarrantyClaim.create!(
+      company_id: company_id,
+      location_id: location_id,
+      service_ticket_id: id,
+      manufacturer_id: manufacturer_id,
+      estimated_amount: 0,
+      parts: [],
+      labor: [],
+      submitted_by: marked_by,
+      status: 'draft'
+    )
+
+    update!(warranty_claim_id: claim.id, is_warranty_confirmed: true)
+    association(:warranty_claim_owned).reset
+    claim
+  end
+
+  # Gated un-mark. Only permitted while the claim is draft AND its warranty
+  # invoice (if any) is still draft. Cascades: destroys the draft warranty
+  # invoice + items, soft-deletes the draft claim, clears the ticket's warranty
+  # flags/link. Returns [:ok] on success or [:blocked, reason] if not permitted.
+  def unmark_warranty!
+    # Fresh query — never trust a cached association.
+    claim = WarrantyClaim.where(service_ticket_id: id, is_deleted: false).first
+    unless claim
+      update!(warranty_claim_id: nil, is_warranty_confirmed: false, is_warranty_suspected: false)
+      association(:warranty_claim_owned).reset
+      return [:ok]
+    end
+
+    return [:blocked, 'Claim has already been submitted to the manufacturer'] unless claim.draft?
+
+    warranty_invoice = Invoice.where(source_type: 'WarrantyClaim', source_id: claim.id).first
+    if warranty_invoice && warranty_invoice.status != 'draft'
+      return [:blocked, 'Warranty invoice has been finalized/sent — remove it explicitly first']
+    end
+
+    transaction do
+      warranty_invoice&.destroy!            # cascades invoice_items via dependent: :destroy
+      claim.soft_delete!                    # is_deleted: true; partial unique index frees the ticket
+      update!(warranty_claim_id: nil, is_warranty_confirmed: false, is_warranty_suspected: false)
+    end
+    association(:warranty_claim_owned).reset
+    [:ok]
   end
   
   # Line Item Billing Methods
