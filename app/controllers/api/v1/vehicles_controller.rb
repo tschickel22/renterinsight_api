@@ -1677,7 +1677,7 @@ module Api
           # Dimensions
           :bedrooms, :bathrooms, :length, :width, :sleeps, :weight, :square_feet,
           :width1, :length1, :width2, :length2, :width3, :length3,
-          :sections,
+          :sections, :wind_zone,
           # MH amenities & construction
           :garage, :carport, :deck, :patio, :fireplace, :central_air,
           :has_storage, :thermopane, :gutters, :shutters, :skylight, :pantry,
@@ -1810,6 +1810,7 @@ module Api
           :location_id,
           :use_location_address,
           :sections,  # NEW: Number of sections for manufactured homes
+          :wind_zone,  # HUD wind zone (1-3); flows to vehicle_invoice
           # MH Standard Columns
           :insulation_r_roof, :insulation_r_wall, :insulation_r_floor,
           :floor_joist_size, :electrical_service, :modular_conversion_cost,
@@ -2024,6 +2025,7 @@ module Api
             width3: vehicle.width3,
             length3: vehicle.length3,
             sections: vehicle.sections,  # Number of sections (1, 2, or 3)
+            windZone: vehicle.wind_zone,  # HUD wind zone (1-3)
           squareFootage: vehicle.square_feet,  # Changed from squareFeet to match frontend
             roofType: vehicle.roof_type,
             sidingType: vehicle.siding_type,
@@ -2213,6 +2215,7 @@ module Api
           bathrooms: row[:bathrooms],
           home_type: row[:home_type] || row[:homeType],
           sections: row[:sections],
+          wind_zone: row[:wind_zone] || row[:windZone],
           dwelling_type: row[:dwelling_type] || row[:dwellingType],
           width: row[:width],
           length: row[:length],
