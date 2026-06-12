@@ -310,7 +310,14 @@ class WarrantyClaim < ApplicationRecord
   # Calculations
   def parts_total
     return 0 unless parts.is_a?(Array)
-    parts.sum { |p| (p['quantity'].to_f * p['cost'].to_f) }
+    parts.sum { |p| p['quantity'].to_f * part_unit_cost(p) }
+  end
+
+  # Service-ticket parts are stored/copied with the key `unitCost` (camelCase),
+  # but older/other shapes may use `cost` or `unit_cost`. Resolve whichever is
+  # present so totals and serialization don't silently read 0.
+  def part_unit_cost(part)
+    (part['cost'] || part['unitCost'] || part['unit_cost']).to_f
   end
   
   def labor_total
@@ -344,7 +351,7 @@ class WarrantyClaim < ApplicationRecord
       estimatedAmount: estimated_amount,
       approvedAmount: approved_amount,
       clientCopayAmount: client_copay_amount,
-      parts: parts,
+      parts: normalized_parts,
       labor: labor,
       status: status,
       submittedAt: submitted_at,
@@ -396,7 +403,26 @@ class WarrantyClaim < ApplicationRecord
   end
   
   private
-  
+
+  # Emit parts with the key names the UI/serializers expect (`cost`,
+  # `part_number`, `total`) regardless of the camelCase shape stored on the
+  # service ticket (`unitCost`, `partNumber`). Original keys are preserved.
+  def normalized_parts
+    return [] unless parts.is_a?(Array)
+
+    parts.map do |p|
+      next p unless p.is_a?(Hash)
+
+      cost = part_unit_cost(p)
+      qty = p['quantity'].to_f
+      p.merge(
+        'part_number' => p['part_number'] || p['partNumber'],
+        'cost' => cost,
+        'total' => p['total'].present? ? p['total'].to_f : (qty * cost)
+      )
+    end
+  end
+
   def set_owner_from_service_ticket
     # Inherit owner from service ticket if not explicitly set
     if service_ticket.present? && owner_id.blank?
