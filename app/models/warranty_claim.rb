@@ -388,8 +388,10 @@ class WarrantyClaim < ApplicationRecord
       readyToSubmit: can_be_submitted?,
       submissionBlockedReason: submission_blocked_reason,
       
-      # Attachment count
-      attachmentsCount: attachments.count
+      # Attachment count — must match the manufacturer-visible set the detail
+      # view renders (own blobs + ticket attachments tagged visible_to_manufacturer),
+      # not just the claim's own blobs, or the tab badge undercounts.
+      attachmentsCount: manufacturer_attachments.count
     }
   end
   
