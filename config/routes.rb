@@ -593,6 +593,7 @@ Rails.application.routes.draw do
           post :reopen
           post :close
           post :record_payment
+          post :add_note, path: 'notes'
           get :public_link
         end
         collection do

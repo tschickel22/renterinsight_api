@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_11_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_12_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6814,6 +6814,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_11_200000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.integer "owner_id"
+    t.jsonb "manufacturer_notes", default: [], null: false
     t.index ["company_id", "claim_number"], name: "index_warranty_claims_on_company_id_and_claim_number", unique: true
     t.index ["company_id", "is_deleted"], name: "index_warranty_claims_on_company_id_and_is_deleted"
     t.index ["company_id", "service_ticket_id"], name: "idx_warranty_claims_one_active_per_ticket", unique: true, where: "(is_deleted = false)"

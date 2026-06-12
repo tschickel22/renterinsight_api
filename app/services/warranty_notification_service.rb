@@ -59,6 +59,58 @@ class WarrantyNotificationService
     raise e
   end
   
+  # Notify manufacturer that a new note was added to the claim thread. Triggered
+  # explicitly by the dealer ("Save & Notify"), so it is NOT gated by the
+  # submission setting. Uses a 'warranty_note_added' template if configured, else
+  # falls back to a plain inline message so the button always works.
+  #
+  # @param warranty_claim [WarrantyClaim]
+  # @param note [Hash] the note entry { 'body', 'authorName', ... }
+  # @return [Communication]
+  #
+  def self.notify_manufacturer_of_note(warranty_claim, note)
+    recipient_email = resolve_manufacturer_email(warranty_claim)
+    raise MissingRecipientError, 'Manufacturer has no email address' if recipient_email.blank?
+
+    note ||= {}
+    template = find_template('warranty_note_added', warranty_claim.company_id)
+    context = build_claim_context(warranty_claim).merge(
+      'note_body' => note['body'].to_s,
+      'note_author' => note['authorName'].to_s
+    )
+
+    subject = template ? render_template(template.subject, context)
+                       : "New note on warranty claim #{warranty_claim.claim_number}"
+    body = if template
+      render_template(template.body, context)
+    else
+      <<~BODY
+        A new note was added to warranty claim #{warranty_claim.claim_number}#{note['authorName'].present? ? " by #{note['authorName']}" : ''}:
+
+        #{note['body']}
+
+        View the claim: #{warranty_claim.public_link}
+      BODY
+    end
+
+    CommunicationService.send_email(
+      communicable: warranty_claim,
+      to: recipient_email,
+      subject: subject,
+      body: body,
+      category: 'warranty',
+      template: template&.id,
+      metadata: {
+        warranty_claim_id: warranty_claim.id,
+        manufacturer_id: warranty_claim.manufacturer_id,
+        notification_type: 'manufacturer_note'
+      }
+    )
+  rescue => e
+    Rails.logger.error("WarrantyNotificationService: Failed to notify manufacturer of note for claim #{warranty_claim.id}: #{e.message}")
+    raise e
+  end
+
   # Notify company when manufacturer responds to warranty claim
   #
   # @param warranty_claim [WarrantyClaim] The warranty claim with response
@@ -369,7 +421,8 @@ class WarrantyNotificationService
     return 'No parts listed' if parts.empty?
     
     parts.map do |part|
-      "- #{part['description'] || part['part_number']}: Qty #{part['quantity']} @ #{format_currency(part['cost'])}"
+      unit_cost = part['cost'] || part['unitCost'] || part['unit_cost']
+      "- #{part['description'] || part['part_number']}: Qty #{part['quantity']} @ #{format_currency(unit_cost)}"
     end.join("\n")
   end
   

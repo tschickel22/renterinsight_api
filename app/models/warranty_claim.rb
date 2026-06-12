@@ -135,6 +135,11 @@ class WarrantyClaim < ApplicationRecord
   # Serialize JSONB columns
   attribute :parts, :json, default: []
   attribute :labor, :json, default: []
+  attribute :manufacturer_notes, :json, default: []
+
+  # Fold an initial notes_to_manufacturer (set by the create/generate flows) into
+  # the append-only thread so the single legacy field and the thread never diverge.
+  before_create :seed_initial_manufacturer_note
   
   # Scopes
   scope :active, -> { where(is_deleted: false) }
@@ -307,6 +312,27 @@ class WarrantyClaim < ApplicationRecord
     manufacturer_claim_views.maximum(:viewed_at)
   end
   
+  # --- Manufacturer notes (append-only, stamped thread) ---
+
+  def manufacturer_notes_list
+    manufacturer_notes.is_a?(Array) ? manufacturer_notes : []
+  end
+
+  # Append a stamped note. Author + timestamp are set server-side so they can't
+  # be spoofed by the client. Returns the created note hash.
+  def add_manufacturer_note!(body:, author: nil)
+    note = {
+      'id' => SecureRandom.uuid,
+      'body' => body.to_s,
+      'authorId' => author&.id,
+      'authorName' => (author&.name.presence || author&.email.presence || 'Dealer'),
+      'authorEmail' => author&.email,
+      'createdAt' => Time.current.utc.iso8601
+    }
+    update!(manufacturer_notes: manufacturer_notes_list + [note])
+    note
+  end
+
   # Calculations
   def parts_total
     return 0 unless parts.is_a?(Array)
@@ -361,6 +387,7 @@ class WarrantyClaim < ApplicationRecord
       closedAt: closed_at,
       notesInternal: notes_internal,
       notesToManufacturer: notes_to_manufacturer,
+      manufacturerNotes: manufacturer_notes_list,
       manufacturerResponse: manufacturer_response,
       denialReason: denial_reason,
       publicToken: public_token,
@@ -403,6 +430,20 @@ class WarrantyClaim < ApplicationRecord
   end
   
   private
+
+  def seed_initial_manufacturer_note
+    return if manufacturer_notes_list.present?
+    return if notes_to_manufacturer.blank?
+
+    self.manufacturer_notes = [{
+      'id' => SecureRandom.uuid,
+      'body' => notes_to_manufacturer.to_s,
+      'authorId' => nil,
+      'authorName' => (submitted_by.presence || 'Dealer'),
+      'authorEmail' => nil,
+      'createdAt' => Time.current.utc.iso8601
+    }]
+  end
 
   # Emit parts with the key names the UI/serializers expect (`cost`,
   # `part_number`, `total`) regardless of the camelCase shape stored on the

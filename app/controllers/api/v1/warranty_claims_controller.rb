@@ -4,7 +4,7 @@ module Api
   module V1
     class WarrantyClaimsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_warranty_claim, only: [:show, :update, :submit, :resubmit, :reopen, :record_payment, :close]
+      before_action :set_warranty_claim, only: [:show, :update, :submit, :resubmit, :reopen, :record_payment, :close, :add_note]
       
       # GET /api/v1/warranty-claims
       def index
@@ -59,11 +59,7 @@ module Api
       def show
         return unless authorize_action!('service', 'read')
         
-        render json: {
-          data: @warranty_claim.as_json.merge(
-            attachments: @warranty_claim.manufacturer_attachments.map { |a| serialize_attachment(a) }
-          )
-        }
+        render json: { data: claim_with_attachments(@warranty_claim) }
       end
       
       # POST /api/v1/warranty-claims
@@ -122,6 +118,40 @@ module Api
         end
       end
       
+      # POST /api/v1/warranty-claims/:id/notes
+      # Append a stamped note to the manufacturer thread. `notify=true` also emails
+      # the manufacturer; otherwise the note is saved silently (they still see it on
+      # the public claim). Lets a dealer log several notes and notify only when ready.
+      def add_note
+        return unless authorize_action!('service', 'update')
+
+        body = params[:note].to_s.strip
+        return render json: { error: 'Note cannot be empty' }, status: :unprocessable_entity if body.blank?
+
+        @warranty_claim.add_manufacturer_note!(body: body, author: current_user)
+
+        notify = ActiveModel::Type::Boolean.new.cast(params[:notify])
+        notified = false
+        warning = nil
+        if notify
+          begin
+            WarrantyNotificationService.notify_manufacturer_of_note(@warranty_claim, @warranty_claim.manufacturer_notes_list.last)
+            notified = true
+          rescue => e
+            warning = "Note saved, but manufacturer notification failed: #{e.message}"
+            Rails.logger.error("[warranty add_note] notify failed for claim #{@warranty_claim.id}: #{e.message}")
+          end
+        end
+
+        payload = {
+          data: claim_with_attachments(@warranty_claim),
+          notified: notified,
+          message: notified ? 'Note saved and manufacturer notified' : 'Note saved'
+        }
+        payload[:warning] = warning if warning
+        render json: payload
+      end
+
       # POST /api/v1/warranty-claims/:id/resubmit
       def resubmit
         return unless authorize_action!('service', 'update')
@@ -307,6 +337,14 @@ module Api
         )
       end
       
+      # Claim payload as the detail page expects it: full as_json plus the
+      # manufacturer-visible attachment list (live from the linked ticket).
+      def claim_with_attachments(claim)
+        claim.as_json.merge(
+          attachments: claim.manufacturer_attachments.map { |a| serialize_attachment(a) }
+        )
+      end
+
       def serialize_attachment(attachment)
         {
           id: attachment.id,
