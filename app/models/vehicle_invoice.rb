@@ -24,6 +24,10 @@ class VehicleInvoice < ApplicationRecord
   # One invoice per vehicle (also enforced by a unique DB index).
   validates :vehicle_id, uniqueness: true
 
+  # Inherit wind_zone from the home when the invoice doesn't specify one, so the
+  # value captured on inventory flows to the cost-basis record automatically.
+  before_validation :inherit_wind_zone_from_vehicle, on: :create
+
   NUMERIC_FIELDS.each do |field|
     validates field, numericality: true, allow_nil: true
   end
@@ -41,6 +45,12 @@ class VehicleInvoice < ApplicationRecord
   # save, so a model callback misses re-saves; the controller path is the reliable trigger.
 
   private
+
+  # Fill wind_zone from the parent vehicle when not explicitly set on the invoice.
+  def inherit_wind_zone_from_vehicle
+    return if wind_zone.present?
+    self.wind_zone = vehicle&.wind_zone
+  end
 
   def scanned_document_is_internal_and_owned
     doc = scanned_document

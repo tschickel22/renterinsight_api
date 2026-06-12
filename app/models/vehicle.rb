@@ -118,6 +118,10 @@ class Vehicle < ApplicationRecord
   validates :year, :make, :model, presence: true
   validates :year, numericality: { only_integer: true, greater_than: 1900, less_than_or_equal_to: -> { Date.current.year + 1 } }
 
+  # Wind zone (coastal exposure) 1-3, optional. Captured on the home and flowed
+  # down to the VehicleInvoice when one is created (allowance zone 2/3 adders).
+  validates :wind_zone, inclusion: { in: 1..3 }, allow_nil: true
+
   # RV-specific validations
   with_options if: -> { listing_type == 'rv' } do
     validates :vin, presence: true, uniqueness: { scope: :company_id }
