@@ -39,6 +39,12 @@ class ServiceTicket < ApplicationRecord
   after_commit :emit_workflow_updated, on: :update
   after_commit :emit_workflow_deleted, on: :destroy
 
+  # Keep a draft warranty claim's line items in sync whenever the ticket's
+  # parts/labor/billing change — not just when billing is tagged — so edits to a
+  # part's description/cost flow through to the claim instead of leaving a stale
+  # snapshot. Draft-only (see resync_draft_claim!).
+  after_update :resync_draft_claim_if_lines_changed
+
   def emit_workflow_created
     WorkflowEngine.emit('service_ticket.created', self, { id: id }) if defined?(WorkflowEngine)
   end
@@ -306,11 +312,10 @@ class ServiceTicket < ApplicationRecord
     
     Rails.logger.info "🛠️ [Model set_line_billing] Final billing_data BEFORE update!: #{billing_data.to_json}"
     
-    update!(line_item_billing: billing_data)
-
     # Keep the draft warranty claim's parts/labor/amount in sync with the
-    # currently warranty-tagged lines (no "Generate" step required).
-    resync_draft_claim!
+    # currently warranty-tagged lines (no "Generate" step required). The
+    # after_update callback handles the resync since line_item_billing changes here.
+    update!(line_item_billing: billing_data)
   end
   
   def get_line_billing(index:, type:)
@@ -428,7 +433,12 @@ class ServiceTicket < ApplicationRecord
   end
   
   private
-  
+
+  def resync_draft_claim_if_lines_changed
+    return unless saved_change_to_parts? || saved_change_to_labor? || saved_change_to_line_item_billing?
+    resync_draft_claim!
+  end
+
   # Re-sync the draft warranty claim's line items + estimate from the ticket's
   # currently warranty-tagged parts/labor. Draft-only: never mutates a claim that
   # has been submitted (its contents are locked to what the manufacturer received).
