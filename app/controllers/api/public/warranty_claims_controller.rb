@@ -244,9 +244,10 @@ module Api
       end
       
       def attachment_info(claim)
-        return [] unless claim.attachments.attached?
-        
-        claim.attachments.map do |attachment|
+        attachments = claim.manufacturer_attachments
+        return [] if attachments.empty?
+
+        attachments.map do |attachment|
           {
             id: attachment.id,
             filename: attachment.filename.to_s,

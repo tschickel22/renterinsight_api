@@ -301,8 +301,9 @@ class WarrantyNotificationService
     # Add parts and labor details
     context['parts_list'] = format_parts_list(warranty_claim)
     context['labor_details'] = format_labor_details(warranty_claim)
-    context['photos_count'] = warranty_claim.attachments.count
-    context['documents_count'] = warranty_claim.attachments.count
+    mfr_attachment_count = warranty_claim.manufacturer_attachments.count
+    context['photos_count'] = mfr_attachment_count
+    context['documents_count'] = mfr_attachment_count
     
     # Conditional sections
     context['approved_amount_section'] = warranty_claim.approved_amount.present? ? 

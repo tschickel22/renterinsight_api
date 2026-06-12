@@ -61,7 +61,7 @@ module Api
         
         render json: {
           data: @warranty_claim.as_json.merge(
-            attachments: @warranty_claim.attachments.map { |a| serialize_attachment(a) }
+            attachments: @warranty_claim.manufacturer_attachments.map { |a| serialize_attachment(a) }
           )
         }
       end

@@ -164,10 +164,22 @@ module Api
         return unless authorize_action!('service', 'update')
         
         if params[:files].present?
+          # Track which attachments are newly created so we can default their
+          # sharing audience to BOTH customer and manufacturer.
+          existing_ids = @service_ticket.attachments.map(&:id)
           params[:files].each do |file|
             @service_ticket.attachments.attach(file)
           end
-          
+
+          new_attachments = @service_ticket.attachments.reject { |a| existing_ids.include?(a.id) }
+          new_attachments.each do |attachment|
+            AttachmentAudience.find_or_create_by(active_storage_attachment_id: attachment.id) do |a|
+              a.visible_to_customer = true
+              a.visible_to_manufacturer = true
+              a.tagged_by_id = current_user&.id
+            end
+          end
+
           render json: {
             data: serialize_ticket(@service_ticket, include_attachments: true),
             message: 'Files uploaded successfully'
@@ -348,8 +360,8 @@ module Api
             )
           end
 
-          # Carry manufacturer-tagged ticket files onto the claim
-          copy_manufacturer_attachments_to_claim(@service_ticket, claim)
+          # Manufacturer-tagged ticket files flow to the claim live via
+          # WarrantyClaim#manufacturer_attachments — no copy/snapshot needed.
 
           # Update service ticket
           @service_ticket.update!(
@@ -418,8 +430,8 @@ module Api
               )
             end
 
-            # Carry manufacturer-tagged ticket files onto the claim
-            copy_manufacturer_attachments_to_claim(@service_ticket, claim)
+            # Manufacturer-tagged ticket files flow to the claim live via
+            # WarrantyClaim#manufacturer_attachments — no copy/snapshot needed.
 
             @service_ticket.update!(
               warranty_claim_id: claim.id,
@@ -708,29 +720,6 @@ module Api
         }
       end
       
-      # Copy service ticket attachments tagged manufacturer-visible onto a warranty
-      # claim so they flow to the manufacturer. Creates independent blobs (a
-      # self-contained snapshot) rather than sharing the ticket's blobs.
-      def copy_manufacturer_attachments_to_claim(ticket, claim)
-        attachment_ids = ticket.attachments.map(&:id)
-        return if attachment_ids.empty?
-
-        manufacturer_ids = AttachmentAudience
-          .where(active_storage_attachment_id: attachment_ids, visible_to_manufacturer: true)
-          .pluck(:active_storage_attachment_id)
-        return if manufacturer_ids.empty?
-
-        ticket.attachments.each do |att|
-          next unless manufacturer_ids.include?(att.id)
-
-          att.blob.open do |file|
-            claim.attachments.attach(io: file, filename: att.filename.to_s, content_type: att.content_type)
-          end
-        end
-      rescue => e
-        Rails.logger.error "[copy_manufacturer_attachments_to_claim] ticket #{ticket.id} -> claim #{claim.id}: #{e.message}"
-      end
-
       def serialize_attachment(attachment)
         audience = AttachmentAudience.find_by(active_storage_attachment_id: attachment.id)
         {

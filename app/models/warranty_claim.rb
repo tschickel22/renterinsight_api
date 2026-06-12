@@ -90,7 +90,40 @@ class WarrantyClaim < ApplicationRecord
   
   # Active Storage for attachments (photos, docs, remittance)
   has_many_attached :attachments
-  
+
+  # Attachments the manufacturer should see for this claim. Read LIVE from the
+  # linked service ticket so toggling an attachment's manufacturer visibility on
+  # the ticket is reflected immediately (no stale one-time snapshot). Includes
+  # the claim's own uploaded blobs plus any ticket attachment tagged
+  # visible_to_manufacturer. Deduped by filename + size to avoid showing both a
+  # legacy copied blob and its still-tagged source twice.
+  def manufacturer_attachments
+    result = attachments.to_a
+    seen = result.map { |a| [a.filename.to_s, a.byte_size] }
+
+    ticket = service_ticket
+    return result unless ticket
+
+    ticket_atts = ticket.attachments.to_a
+    return result if ticket_atts.empty?
+
+    visible_ids = AttachmentAudience
+      .where(active_storage_attachment_id: ticket_atts.map(&:id), visible_to_manufacturer: true)
+      .pluck(:active_storage_attachment_id)
+
+    ticket_atts.each do |att|
+      next unless visible_ids.include?(att.id)
+
+      key = [att.filename.to_s, att.byte_size]
+      next if seen.include?(key)
+
+      seen << key
+      result << att
+    end
+
+    result
+  end
+
   # Validations
   validates :claim_number, presence: true, uniqueness: { scope: :company_id }
   validates :status, presence: true, inclusion: { in: STATUSES }
