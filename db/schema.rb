@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_12_130000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_12_174014) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6689,6 +6689,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_12_130000) do
     t.datetime "sold_at"
     t.bigint "sold_via_deal_id"
     t.decimal "reconditioning_cost", precision: 15, scale: 2
+    t.integer "wind_zone"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
