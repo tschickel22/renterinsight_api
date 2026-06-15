@@ -107,6 +107,69 @@ namespace :evangeline do
     Date.parse(v.to_s) rescue nil
   end
 
+  # Fetch the first present value among several possible column names. Lets the
+  # loader accept both v2 (corrected) and v1 (legacy) CSV headers without
+  # silently writing blanks when a header name shifts.
+  def col(row, *names)
+    names.each do |nm|
+      v = row[nm]
+      return v if v.to_s.strip != ''
+    end
+    nil
+  end
+
+  # Flip a raw "Last, First[, Suffix]" buyer string into a display "First Last
+  # [Suffix]" household name, preserving "&"-joined multi-buyer households:
+  #   "Hoss, Joshua"                              -> "Joshua Hoss"
+  #   "Davis, Nathaniel, Jr. & Davis, Lindsay"    -> "Nathaniel Davis Jr. & Lindsay Davis"
+  #   "Lejeune, Nathaniel & , Jasmine"            -> "Nathaniel Lejeune & Jasmine"
+  def flip_household_name(raw)
+    return nil if raw.blank?
+    flipped = raw.to_s.split('&').map do |part|
+      bits = part.split(',').map(&:strip).reject(&:blank?)
+      next nil if bits.empty?
+      next bits.join(' ') if bits.size == 1          # single token, nothing to flip
+      last = bits.shift
+      [bits.shift, last, *bits].reject(&:blank?).join(' ')  # first, last, suffix(es)
+    end.compact.reject(&:blank?)
+    flipped.empty? ? nil : flipped.join(' & ')
+  end
+
+  # Return the email only if it passes the same format check the models enforce;
+  # otherwise nil. Prevents one malformed source email from aborting a whole task.
+  def clean_email(v)
+    e = v.to_s.strip.downcase
+    return nil if e.blank?
+    e =~ URI::MailTo::EMAIL_REGEXP ? e : nil
+  end
+
+  # Split an already-flipped display name ("First Last" or "First Last & First2
+  # Last2") into [first, last] for the primary person. Used when a CSV provides
+  # a single `name` column instead of discrete first/last columns.
+  def split_name(full)
+    primary = full.to_s.split('&').first.to_s.strip   # first buyer only
+    return ['', ''] if primary.blank?
+    parts = primary.split(/\s+/)
+    return [parts.first, ''] if parts.size == 1
+    [parts.first, parts[1..].join(' ')]
+  end
+
+  # Create a record with all side-effect callbacks suppressed. The bulk-import
+  # flags (defined on ApplicationRecord) turn off webhooks, notifications,
+  # per-row activity logging, and workflow emits. Without this, every single
+  # create fires WebhookNotifiable -> as_json -> open_deals_count (extra
+  # queries) plus workflow/notification callbacks — which is what made earlier
+  # runs take hours over the remote DB connection. Returns the saved record.
+  def make!(relation, attrs)
+    rec = relation.new(attrs)
+    rec.skip_webhooks = true
+    rec.skip_notifications = true
+    rec.skip_activity_tracking = true
+    rec.skip_workflows = true
+    rec.save!
+    rec
+  end
+
   # ===========================================================================
   # BOOTSTRAP
   # ===========================================================================
@@ -178,10 +241,20 @@ namespace :evangeline do
         { name: 'finance_method', label: 'Finance Method', field_type: 'text', section: 'Details' },
         { name: 'date_sold',      label: 'Date Sold',      field_type: 'date', section: 'Details' },
         { name: 'ehc_serial',     label: 'Home Serial #',  field_type: 'text', section: 'Details' },
+        { name: 'ehc_full_serial', label: 'Full Serial #', field_type: 'text', section: 'Home' },
+        { name: 'series',         label: 'Series',         field_type: 'text', section: 'Home' },
+        { name: 'model',          label: 'Model',          field_type: 'text', section: 'Home' },
+        { name: 'model_year',     label: 'Model Year',     field_type: 'text', section: 'Home' },
+        { name: 'size',           label: 'Size',           field_type: 'text', section: 'Home' },
+        { name: 'building_code',  label: 'Building Code',  field_type: 'text', section: 'Home' },
+        { name: 'hud_number',     label: 'HUD Number',     field_type: 'text', section: 'Home' },
+        { name: 'county',         label: 'County',         field_type: 'text', section: 'Details' },
       ],
       'leads' => [
         { name: 'rating',     label: 'Rating (legacy)',  field_type: 'text', section: 'Details' },
         { name: 'wd_serial',  label: 'Working Home Serial', field_type: 'text', section: 'Details' },
+        { name: 'home_interest', label: 'Home Interest',  field_type: 'text', section: 'Details' },
+        { name: 'ordered_model', label: 'Ordered Model',  field_type: 'text', section: 'Details' },
       ],
       'deals' => [
         { name: 'close_reason',      label: 'Close Reason',      field_type: 'text', section: 'Details' },
@@ -261,9 +334,9 @@ namespace :evangeline do
 
       next if DRY || user.nil?
 
-      role = Role.find_by(role_key: row['role_key'], is_system_role: true)
+      role = Role.find_by(key: row['role_key'], is_system_role: true)
       unless role
-        log("  ⚠️  role_key '#{row['role_key']}' not found — skipping assignment for #{email}"); next
+        log("  ⚠️  role key '#{row['role_key']}' not found — skipping assignment for #{email}"); next
       end
 
       if row['access_tier'] == 'location' && row['location_scope'].present?
@@ -302,7 +375,7 @@ namespace :evangeline do
         company_id: company.id, name: name, code: row['factory_code'].presence,
         active: row['active'] != 'false', industry_type: 'manufactured_housing',
         contact_email: row['service_mgr_email'].presence,
-        contact_phone: row['service_mgr_phone'].presence,
+        contact_phone: row['service_mgr_phone'].to_s.strip.slice(0, 20).presence,
         contact_name:  row['service_mgr_name'].presence,
         claim_email:   row['service_mgr_email'].presence
       )
@@ -391,24 +464,30 @@ namespace :evangeline do
     log("== Accounts ==#{dry_note}")
     n = 0
     read_csv('accounts').each do |row|
-      name = row['name'].to_s.strip
+      raw_name = col(row, 'household_flipped').presence || flip_household_name(row['name']).presence || row['name'].to_s.strip
+      name = raw_name.to_s.strip
       next if name.blank? || company.accounts.where('name ILIKE ?', name).exists?
       if DRY then log("  would create account: #{name}"); next end
-      company.accounts.create!(
+      make!(company.accounts, {
         name: name, account_type: 'customer', status: 'active',
-        email: row['email'].presence,
-        location_id: location_id_for(company, row['location_name']),
-        source_id: source_id_for(company, row['source_name']),
-        owner_id: user_id_for(company, row['salesperson']),
-        billing_street: row['address1'].presence, billing_city: row['city'].presence,
-        billing_state: row['state'].presence, billing_postal_code: row['zip'].presence,
-        notes: row['notes'].presence,
+        email: clean_email(col(row, 'email', 'email_1', 'email_2')),
+        location_id: location_id_for(company, col(row, 'location_name', 'location_code')),
+        source_id: source_id_for(company, col(row, 'source', 'source_name')),
+        owner_id: user_id_for(company, col(row, 'salesperson')),
+        billing_street: col(row, 'billing_street', 'address1'), billing_city: col(row, 'billing_city', 'city'),
+        billing_state: col(row, 'billing_state', 'state'), billing_postal_code: col(row, 'billing_postal_code', 'zip'),
+        notes: col(row, 'notes'),
         custom_field_values: {
           'file_number' => row['file_number'], 'finance_method' => row['finance_method'],
-          'date_sold' => row['date_sold'], 'ehc_serial' => row['serial_number'],
+          'date_sold' => row['date_sold'],
+          'ehc_serial' => col(row, 'ehc_serial', 'serial_number'),
+          'ehc_full_serial' => row['ehc_full_serial'],
+          'series' => row['series'], 'model' => row['model'], 'model_year' => row['model_year'],
+          'size' => row['size'], 'building_code' => row['building_code'], 'hud_number' => row['hud_number'],
+          'county' => row['county'],
           'import_batch' => BATCH
         }.compact
-      )
+      })
       n += 1
     end
     log("  Created #{n} accounts.#{dry_note}")
@@ -430,13 +509,13 @@ namespace :evangeline do
         next
       end
       if DRY then log("  would create contact: #{first} #{last} -> #{row['account_name']}"); next end
-      company.contacts.create!(
+      make!(company.contacts, {
         first_name: first, last_name: last,
-        email: row['email'].presence, phone: row['phone'].presence,
+        email: clean_email(row['email']), phone: row['phone'].presence,
         is_primary: row['is_primary'] == 'true', account_id: acct&.id,
         location_id: location_id_for(company, row['location_name']),
         custom_field_values: { 'import_batch' => BATCH }
-      )
+      })
       n += 1
     end
     log("  Created #{n} contacts.#{dry_note}")
@@ -444,58 +523,198 @@ namespace :evangeline do
 
   # ===========================================================================
   # LEADS  (rating -> custom_field_values; no rating column)
+  # Fast path: in-memory dedup (one query up front), cached lookups, batched
+  # inserts in a single transaction. Avoids ~10k cross-country round-trips.
   # ===========================================================================
   desc 'Import leads'
   task leads: :environment do
     company = require_company!
     log("== Leads ==#{dry_note}")
-    n = 0
-    read_csv('leads').each do |row|
-      first = row['first_name'].to_s.strip; last = row['last_name'].to_s.strip
-      next if first.blank? && last.blank?
-      if company.leads.where("first_name ILIKE ? AND last_name ILIKE ? AND COALESCE(email,'') = ?", first, last, row['email'].to_s).exists?
-        next
-      end
-      next if DRY
-      company.leads.create!(
-        first_name: first, last_name: last,
-        email: row['email'].presence, phone: row['phone'].presence,
-        status: row['status'].presence || 'open',
-        source_id: source_id_for(company, row['source_name']),
-        owner_id: user_id_for(company, row['owner']),
-        location_id: location_id_for(company, row['location_name']),
-        notes: row['notes'].presence,
-        custom_field_values: {
-          'rating'       => row['rating'].presence,
-          'wd_serial'    => row['wd_serial'].presence,
-          'import_batch' => BATCH
-        }.compact
-      )
-      n += 1
+
+    rows = read_csv('leads')
+    log("  #{rows.size} rows in CSV")
+
+    # Build the existing-key set ONCE (first+last+email, downcased) instead of
+    # querying per row. Pluck is a single round trip.
+    existing = {}
+    company.leads.pluck(:first_name, :last_name, :email).each do |f, l, e|
+      existing["#{f.to_s.strip.downcase}|#{l.to_s.strip.downcase}|#{e.to_s.strip.downcase}"] = true
     end
-    log("  Created #{n} leads.#{dry_note}")
+    log("  #{existing.size} leads already present")
+
+    # Warm the lookup caches once (source / owner / location) so per-row calls
+    # are pure hash hits, not queries.
+    company.sources.pluck(:name, :id).each { |nm, id| (@source_cache ||= {})[nm] = id }
+    company.users.pluck(Arel.sql("LOWER(first_name || ' ' || last_name)"), :id).each { |nm, id| (@user_cache ||= {})[nm] = id }
+    company.locations.pluck(:name, :id).each { |nm, id| (@loc_cache ||= {})[nm] = id }
+    company.locations.pluck(:code, :id).each { |cd, id| (@loc_cache ||= {})[cd] = id if cd.present? }
+
+    # Serial -> vehicle_id cache for working-deal lead links (single round trip).
+    veh_by_serial = {}
+    company.vehicles.where(is_deleted: [false, nil]).pluck(:serial_number, :stock_number, :id).each do |sn, st, id|
+      veh_by_serial[sn.to_s.strip] = id if sn.present?
+      veh_by_serial[st.to_s.strip] = id if st.present?
+    end
+    log("  #{veh_by_serial.size} vehicle serial/stock keys cached for linking")
+
+    n = 0; skipped = 0; failed = 0
+    sample_errors = []
+    now = Time.current
+    pending = []   # plain attribute hashes for bulk insert_all
+
+    flush = lambda do
+      return if pending.empty? || DRY
+      # insert_all skips validations/callbacks (fine for import) and sends the
+      # whole chunk in ONE round trip instead of one-per-row.
+      company.leads.insert_all(pending)
+      n += pending.size
+      pending = []
+      print "\r  inserted #{n}..."
+    end
+
+    rows.each do |row|
+      first = col(row, 'first_name').to_s.strip; last = col(row, 'last_name').to_s.strip
+      if first.blank? && last.blank?
+        first, last = split_name(col(row, 'name'))   # v2 CSV provides a single flipped `name`
+      end
+      next if first.blank? && last.blank?
+
+      em = clean_email(row['email'])
+      key = "#{first.downcase}|#{last.downcase}|#{em.to_s.downcase}"
+      if existing[key]
+        skipped += 1; next
+      end
+      existing[key] = true # guard against in-file dupes
+
+      next if DRY
+
+      wd_serial = col(row, 'link_inventory_serial', 'wd_serial').to_s.strip
+      vehicle_id = veh_by_serial[wd_serial]
+
+      pending << {
+        company_id: company.id,
+        first_name: first, last_name: last,
+        email: em, phone: row['phone'].presence,
+        status: row['status'].presence || 'open',
+        source_id: (@source_cache || {})[col(row, 'source', 'source_name')],
+        owner_id: (@user_cache || {})[col(row, 'salesperson', 'owner').to_s.strip.downcase],
+        location_id: (@loc_cache || {})[col(row, 'location_name', 'location_code')],
+        notes: col(row, 'notes'),
+        vehicle_id: vehicle_id,
+        interests_requirements: col(row, 'home_interest'),
+        custom_field_values: {
+          'rating' => row['rating'].presence,
+          'home_interest' => row['home_interest'].presence,
+          'wd_serial' => wd_serial.presence,
+          'ordered_model' => row['ordered_model'].presence,
+          'import_batch' => BATCH
+        }.compact,
+        created_at: now, updated_at: now
+      }
+      flush.call if pending.size >= 1000
+    end
+    flush.call
+    puts ''
+    log("  Created #{n} leads, skipped #{skipped} (dupes/existing), failed #{failed}.#{dry_note}")
+    if sample_errors.any?
+      log("  First failures:")
+      sample_errors.each { |m| log("    - #{m}") }
+    end
   end
 
   # ===========================================================================
   # DEALS  (no status column — uses stage; owner_id + user_id; value)
+  # Match on the clean contact_first/contact_last (account_name in this CSV is
+  # raw "Last, First" and won't match flipped account names). Account comes via
+  # the matched contact. Stage mapped to a valid pipeline stage.
   # ===========================================================================
+  VALID_DEAL_STAGES = %w[prospecting qualification needs_analysis proposal negotiation closed_won closed_lost].freeze
+
   desc 'Import deals'
   task deals: :environment do
     company = require_company!
     log("== Deals ==#{dry_note}")
-    n = 0
+    n = 0; skipped = 0; orphan = 0; created_acct = 0; created_contact = 0
+    orphan_names = []
+
     read_csv('deals').each do |row|
       name = row['name'].to_s.strip
-      next if name.blank? || company.deals.where('name ILIKE ?', name).exists?
+      if name.blank? || company.deals.where('name ILIKE ?', name).exists?
+        skipped += 1; next
+      end
 
-      acct = company.accounts.where('name ILIKE ?', row['account_name'].to_s.strip).first
-      contact = row['contact_first'].present? ? company.contacts.where('first_name ILIKE ? AND last_name ILIKE ?', row['contact_first'], row['contact_last']).first : nil
-      vehicle_id = vehicle_id_for_serial(company, row['vehicle_serial'].presence || row['vehicle_stock'])
+      # Match the contact by the CLEAN first/last fields (not the raw account_name).
+      cf = row['contact_first'].to_s.strip
+      cl = row['contact_last'].to_s.strip
+      contact = nil
+      if cf.present? || cl.present?
+        contact = company.contacts.where('first_name ILIKE ? AND last_name ILIKE ?', cf, cl).first
+      end
+      # Account comes through the contact; fall back to a direct name match just in case.
+      acct = contact&.account_id ? Account.find_by(id: contact.account_id) : nil
+      acct ||= company.accounts.where('name ILIKE ?', row['account_name'].to_s.strip).first
+
       owner_id = user_id_for(company, row['owner'])
 
-      if DRY then log("  would create deal: #{name} (acct=#{acct&.id} contact=#{contact&.id} vehicle=#{vehicle_id})"); next end
-      company.deals.create!(
-        name: name, stage: (row['stage'].presence || 'working'),
+      # The model requires an account OR a contact. Evangeline's active-deal buyers
+      # are NOT in the accounts/contacts import (those are the sold-customer sets),
+      # so most rows resolve nothing. Create the household account + primary contact
+      # inline from the deal row rather than orphaning the deal. Idempotent: re-find
+      # by the flipped name / (first,last,account) before creating in case a prior
+      # run already made them.
+      if acct.nil? && contact.nil?
+        acct_name = flip_household_name(row['account_name']).presence ||
+                    [cf, cl].reject(&:blank?).join(' ').presence || name
+        acct = company.accounts.where('name ILIKE ?', acct_name).first
+        if acct.nil? && !DRY
+          acct = make!(company.accounts, {
+            name: acct_name, account_type: 'customer', status: 'active',
+            email: clean_email(row['email']), phone: row['phone'].presence,
+            location_id: location_id_for(company, row['location_name']),
+            source_id: source_id_for(company, row['source_name']),
+            owner_id: owner_id,
+            custom_field_values: { 'import_batch' => BATCH }
+          })
+          created_acct += 1
+        end
+
+        if (cf.present? || cl.present?) && acct
+          contact = company.contacts
+            .where('first_name ILIKE ? AND last_name ILIKE ? AND account_id = ?', cf, cl, acct.id).first
+          if contact.nil? && !DRY
+            contact = make!(company.contacts, {
+              first_name: cf, last_name: cl,
+              email: clean_email(row['email']), phone: row['phone'].presence,
+              is_primary: true, account_id: acct.id,
+              location_id: location_id_for(company, row['location_name']),
+              custom_field_values: { 'import_batch' => BATCH }
+            })
+            created_contact += 1
+          end
+        end
+
+        # Still nothing to attach to (only possible in DRY, or a blank-name row) —
+        # record it and skip rather than abort.
+        if acct.nil? && contact.nil?
+          orphan += 1
+          orphan_names << name if orphan_names.size < 15
+          next unless DRY
+        end
+      end
+
+      # Map source stage -> valid pipeline stage. All Evangeline deals are active
+      # 'Working Deal'/'working' rows -> 'negotiation'.
+      raw_stage = row['stage'].to_s.strip.downcase
+      stage = VALID_DEAL_STAGES.include?(raw_stage) ? raw_stage : 'negotiation'
+
+      vehicle_id = vehicle_id_for_serial(company, row['vehicle_serial'].presence || row['vehicle_stock'])
+
+      if DRY
+        log("  would create deal: #{name} (acct=#{acct&.id || 'NEW'} contact=#{contact&.id || 'NEW'} vehicle=#{vehicle_id} stage=#{stage})"); next
+      end
+
+      make!(company.deals, {
+        name: name, stage: stage,
         account_id: acct&.id, contact_id: contact&.id, vehicle_id: vehicle_id,
         owner_id: owner_id, user_id: owner_id,
         source_id: source_id_for(company, row['source_name']),
@@ -507,10 +726,15 @@ namespace :evangeline do
           'close_reason' => row['close_reason'], 'file_number' => row['file_number'],
           'default_surcharge' => row['default_surcharge'], 'import_batch' => BATCH
         }.compact
-      )
+      })
       n += 1
     end
-    log("  Created #{n} deals.#{dry_note}")
+    log("  Created #{n} deals, skipped #{skipped} (existing), orphaned #{orphan} (unresolvable).#{dry_note}")
+    log("  Inline-created #{created_acct} buyer accounts + #{created_contact} contacts from deal rows.#{dry_note}")
+    if orphan_names.any?
+      log("  Orphaned deals (no matching account or contact):")
+      orphan_names.each { |nm| log("    - #{nm}") }
+    end
   end
 
   # ===========================================================================
@@ -523,42 +747,50 @@ namespace :evangeline do
     log("== Service tickets ==#{dry_note}")
     n = 0; claims = 0
     read_csv('service_tickets').each do |row|
-      title = row['title'].to_s.strip.presence || 'Imported service ticket'
-      desc  = row['description'].to_s.strip.presence || title
-      ticket_no = "EHC-#{row['source_ticket_id']}"   # stable, unique, indexed dedup key
+      title = col(row, 'title', 'description').to_s.strip.presence || 'Imported warranty service ticket'
+      desc  = col(row, 'description').to_s.strip.presence || title
+      ticket_no = "EHC-#{col(row, 'source_id', 'source_ticket_id')}"   # stable, unique, indexed dedup key
 
       next if company.service_tickets.where(ticket_number: ticket_no).exists?
 
-      acct = row['account_name'].present? ? company.accounts.where('name ILIKE ?', row['account_name'].to_s.strip).first : nil
-      vehicle_id = vehicle_id_for_serial(company, row['vehicle_serial'])
-      mfr_id = manufacturer_id_for(company, row['factory_name'])
+      acct_name = col(row, 'account_name', 'customer')
+      acct = acct_name.present? ? company.accounts.where('name ILIKE ?', acct_name.to_s.strip).first : nil
+      vehicle_id = vehicle_id_for_serial(company, col(row, 'vehicle_serial', 'serial'))
+      mfr_id = manufacturer_id_for(company, col(row, 'factory_name', 'factory'))
+      claim_status = col(row, 'claim_status')
+      is_warranty = col(row, 'is_warranty').to_s == 'true' || claim_status.present? || col(row, 'factory').present?
 
-      if DRY then log("  would create ticket: #{ticket_no} status=#{row['status']} warranty=#{row['is_warranty']} claim=#{row['claim_status']}"); next end
+      if DRY then log("  would create ticket: #{ticket_no} status=#{col(row,'ticket_status','status')} warranty=#{is_warranty} claim=#{claim_status}"); next end
 
-      ticket = company.service_tickets.create!(
+      ticket = make!(company.service_tickets, {
         ticket_number: ticket_no, title: title, description: desc,
-        status: row['status'].presence || 'open', priority: row['priority'].presence || 'medium',
+        status: col(row, 'ticket_status', 'status').presence || 'open', priority: row['priority'].presence || 'medium',
         account_id: acct&.id, vehicle_id: vehicle_id,
-        location_id: location_id_for(company, row['location_name']),
-        is_warranty_suspected: row['is_warranty'] == 'true',
-        is_warranty_confirmed: row['is_warranty'] == 'true' && row['claim_status'].present?,
+        location_id: location_id_for(company, col(row, 'location_name', 'location_code')),
+        is_warranty_suspected: is_warranty,
+        is_warranty_confirmed: is_warranty && claim_status.present?,
         custom_fields: {
           'warranty_start_date' => row['warranty_start_date'], 'building_code' => row['building_code'],
           'hud_number' => row['hud_number'], 'import_batch' => BATCH
         }.compact
-      )
+      })
       n += 1
 
-      if row['claim_status'].present? && mfr_id
-        claim = WarrantyClaim.create!(
+      if claim_status.present? && mfr_id
+        summary = col(row, 'notes_internal', 'description').to_s.strip.presence ||
+                  "Imported warranty claim (batch #{BATCH})"
+        claim = WarrantyClaim.new(
           company_id: company.id, location_id: ticket.location_id,
           service_ticket_id: ticket.id, manufacturer_id: mfr_id,
           estimated_amount: 0, parts: [], labor: [],
-          status: row['claim_status'],
+          status: claim_status,
           submitted_at: (parse_date(row['warranty_start_date']) || Time.current),
-          closed_at: (row['claim_status'] == 'closed' ? Time.current : nil),
-          submitted_by: 'Import', notes_internal: "Imported warranty claim (batch #{BATCH})"
+          closed_at: (claim_status == 'closed' ? Time.current : nil),
+          submitted_by: 'Import', notes_internal: summary
         )
+        claim.skip_webhooks = true; claim.skip_notifications = true
+        claim.skip_activity_tracking = true; claim.skip_workflows = true
+        claim.save!
         ticket.update_columns(warranty_claim_id: claim.id, is_warranty_confirmed: true)
         claims += 1
       end
@@ -605,9 +837,12 @@ namespace :evangeline do
   end
 
   # ===========================================================================
-  # ROLLBACK  (TEST company: delete the company; cascades all children)
+  # ROLLBACK  (TEST company: delete all data in FK-safe order, then the company)
+  # The model-level cascade is incomplete (service_tickets.account_id has a
+  # non-cascading FK), so company.destroy! fails. Delete children before
+  # parents explicitly, scoped to this company, inside one transaction.
   # ===========================================================================
-  desc 'Delete the Evangeline TEST company and ALL its data (cascade)'
+  desc 'Delete the Evangeline TEST company and ALL its data (FK-safe)'
   task rollback: :environment do
     company = require_company!
     if company.subdomain != COMPANY_SUBDOMAIN
@@ -616,8 +851,95 @@ namespace :evangeline do
     unless ENV['CONFIRM'] == 'yes'
       abort("This DELETES company #{company.id} (#{company.name}) and every record under it. Re-run with CONFIRM=yes.")
     end
-    log("== Deleting company #{company.id} (#{company.name}) and all children ==")
-    company.destroy!
+    cid = company.id
+    log("== Deleting company #{cid} (#{company.name}) and all children (FK-safe, multi-pass) ==")
+
+    # No privilege to disable FK triggers on managed Postgres, so we can't just
+    # SET session_replication_role. Instead: gather every table with a
+    # company_id, then delete in repeated passes. Each pass deletes from every
+    # remaining table inside its OWN savepoint; a table that still has children
+    # (FK violation) is rolled back to the savepoint and retried next pass,
+    # after its children have been cleared. Loop until everything is gone or a
+    # full pass makes zero progress (then report what's stuck).
+    conn = ActiveRecord::Base.connection
+
+    # Pre-clear known company-less descendant tables that the company_id sweep
+    # can't reach. These hold FKs up a chain to a company-scoped ancestor but
+    # carry no company_id of their own, so we delete them via subquery on the
+    # ancestor's company_id. Order: deepest descendant first.
+    #   project_template_phase_tasks -> project_template_phases -> project_templates(company_id)
+    company_less_deletes = [
+      ["project_template_phase_tasks",
+       "DELETE FROM project_template_phase_tasks WHERE project_template_phase_id IN (" \
+       "SELECT ptp.id FROM project_template_phases ptp " \
+       "JOIN project_templates pt ON pt.id = ptp.project_template_id " \
+       "WHERE pt.company_id = #{cid.to_i})"],
+      ["project_template_phases",
+       "DELETE FROM project_template_phases WHERE project_template_id IN (" \
+       "SELECT id FROM project_templates WHERE company_id = #{cid.to_i})"],
+      # Tables that FK into locations but carry no company_id of their own.
+      ["location_activities",
+       "DELETE FROM location_activities WHERE location_id IN (" \
+       "SELECT id FROM locations WHERE company_id = #{cid.to_i})"],
+      ["location_manufacturers",
+       "DELETE FROM location_manufacturers WHERE location_id IN (" \
+       "SELECT id FROM locations WHERE company_id = #{cid.to_i})"],
+    ]
+    company_less_deletes.each do |label, sql|
+      begin
+        ActiveRecord::Base.transaction(requires_new: true) do
+          n = conn.delete(sql)
+          log("  [pre] deleted #{n} from #{label}") if n && n > 0
+        end
+      rescue ActiveRecord::InvalidForeignKey
+        log("  [pre] #{label} still blocked — will rely on main loop")
+      end
+    end
+
+    remaining = conn.tables.select do |t|
+      (conn.column_exists?(t, :company_id) rescue false)
+    end
+    # locations + companies handled explicitly at the very end.
+    remaining -= %w[companies]
+
+    pass = 0
+    loop do
+      pass += 1
+      progressed = false
+      stuck = []
+      remaining.dup.each do |table|
+        begin
+          n = nil
+          ActiveRecord::Base.transaction(requires_new: true) do
+            n = conn.delete("DELETE FROM #{conn.quote_table_name(table)} WHERE company_id = #{cid.to_i}")
+          end
+          # table fully cleared for this company
+          remaining.delete(table)
+          if n && n > 0
+            progressed = true
+            log("  [pass #{pass}] deleted #{n} from #{table}")
+          else
+            # nothing to delete; drop it from the worklist silently
+          end
+        rescue ActiveRecord::InvalidForeignKey
+          stuck << table   # has children still; retry next pass
+        end
+      end
+      break if remaining.empty?
+      unless progressed
+        abort("Rollback stalled — these tables still have undeletable rows (unmapped FK chain): #{stuck.join(', ')}. Aborting with NOTHING further deleted; tell Claude which tables are listed.")
+      end
+    end
+
+    # locations last (it has company_id but other rows FK into it), then company.
+    ActiveRecord::Base.transaction do
+      if conn.column_exists?(:locations, :company_id)
+        ln = conn.delete("DELETE FROM locations WHERE company_id = #{cid.to_i}")
+        log("  deleted #{ln} from locations")
+      end
+      conn.delete("DELETE FROM companies WHERE id = #{cid.to_i}")
+      log("  deleted company #{cid}")
+    end
     log('  ✅ Company and all associated records removed.')
   end
 end
