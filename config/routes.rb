@@ -2154,6 +2154,8 @@ Rails.application.routes.draw do
       resources :users, controller: 'companies/users' do
         collection do
           get :available_roles, path: 'available-roles'
+          get :pending_invitations, path: 'pending-invitations'
+          post :resend_all_invitations, path: 'resend-all-invitations'
         end
         
         member do

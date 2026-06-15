@@ -253,7 +253,114 @@ module Api
         }, status: :internal_server_error
       end
       
+      # GET /api/companies/:company_id/users/pending-invitations
+      # Returns the users who have not yet accepted/logged in — i.e. who would
+      # receive an invite from the "resend all" action. Covers imported users
+      # (status 'active' but Never logged in) and genuinely invited users.
+      def pending_invitations
+        targets = pending_invitation_users
+        render json: {
+          success: true,
+          count: targets.size,
+          users: targets.map { |u| serialize_user(u) }
+        }
+      end
+      
+      # POST /api/companies/:company_id/users/resend-all-invitations
+      # Sends (or resends) the standard email invitation to every user who has
+      # not yet logged in. Uses the SAME InvitationService path as the initial
+      # invite, so the email is identical. Idempotent and safe to press again.
+      def resend_all_invitations
+        targets = pending_invitation_users
+        
+        if targets.empty?
+          return render json: {
+            success: true,
+            message: 'No pending users to invite.',
+            sent: 0,
+            failed: 0,
+            results: []
+          }
+        end
+        
+        service = InvitationService.new(invited_by: current_user, company: @company)
+        sent = 0
+        failed = 0
+        results = []
+        
+        targets.each do |user|
+          begin
+            location_ids = user.user_locations.where(active: true).pluck(:location_id)
+            location_role = user.user_locations.where(active: true).first&.location_role
+            recipient_name = user.name.presence || [user.first_name, user.last_name].compact.join(' ')
+            
+            result = service.create_invitation(
+              invitation_type: 'company_user',
+              email: user.email,
+              phone: user.phone,
+              recipient_name: recipient_name,
+              role: user.role,
+              permissions: user.permissions || [],
+              delivery_method: 'email',
+              location_ids: location_ids,
+              location_role: location_role
+            )
+            
+            if result[:success]
+              sent += 1
+              results << { email: user.email, success: true }
+            else
+              failed += 1
+              results << { email: user.email, success: false, error: result[:error] }
+            end
+          rescue => e
+            failed += 1
+            results << { email: user.email, success: false, error: e.message }
+            Rails.logger.error "[resend_all_invitations] #{user.email}: #{e.message}"
+          end
+        end
+        
+        render json: {
+          success: true,
+          message: "Sent #{sent} invitation#{'s' unless sent == 1}" + (failed.positive? ? ", #{failed} failed" : ''),
+          sent: sent,
+          failed: failed,
+          results: results
+        }
+      rescue => e
+        Rails.logger.error "Error in resend_all_invitations: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: {
+          success: false,
+          error: 'Failed to send invitations',
+          details: e.message
+        }, status: :internal_server_error
+      end
+      
       private
+      
+      # Users who have NOT completed onboarding (never logged in) OR are flagged
+      # 'invited'. Excludes the current user, platform/super admins, and deleted
+      # users. This is the "pending" population for bulk invite — for imported
+      # tenants every user is status 'active' with no login yet, so we key off
+      # "has never logged in" rather than status alone.
+      #
+      # "Never logged in" must agree with how serialize_user computes last login:
+      # it prefers a login_activities row, falling back to last_sign_in_at. So a
+      # user counts as logged-in if EITHER exists; we exclude those here.
+      def pending_invitation_users
+        logged_in_user_ids = LoginActivity
+                               .where(user_type: 'User', user_id: @company.users.select(:id))
+                               .distinct
+                               .pluck(:user_id)
+
+        scope = @company.users.where(deleted_at: nil)
+        scope = scope.where("status = 'invited' OR (last_sign_in_at IS NULL AND id NOT IN (?))",
+                            logged_in_user_ids.presence || [0])
+        scope.reject do |u|
+          u.id == current_user.id || u.platform_admin? || u.super_admin?
+        end
+      end
       
       def set_company_and_verify_access
         requested_company_id = params[:company_id]
