@@ -97,6 +97,43 @@ namespace :evangeline do
            .where('serial_number = ? OR stock_number = ?', serial.strip, serial.strip).first&.id
   end
 
+  # Create the deal's HOME line item from the linked vehicle. Post Phase 2B/3 the home is
+  # a real deal_product tagged `category:home` — that line (not deals.vehicle_id alone) is
+  # what drives the deal form's Home/Product dropdown, the Products tab, and the DERIVED
+  # selling_price / front_gross. The import set vehicle_id but created no line item, so those
+  # deals showed a blank dropdown + empty Products tab + cost-only (negative) GP. This adds
+  # the missing home line.
+  #
+  # Price/cost mapping (verified against EHC data + the loaded Vehicle):
+  #   cost  = vehicle.structured_cost   (the MH Manager Invoice Price the inventory task
+  #                                       stored as dealer_cost — always populated)
+  #   price = vehicle.msrp if > 0        (MH Manager Selling Price; ZERO for on-deal homes)
+  #           else fall back to cost     (so price is never a fake 0 → GP = 0, not negative;
+  #                                       the dealer enters the real sell price when desking)
+  #
+  # SKU is CUSTOM-<uuid> (NOT VEHICLE-<id>) so DealProduct#sync_deal_vehicle_from_line_item
+  # (which only acts on VEHICLE- SKUs) does not interfere with the already-correct vehicle_id.
+  # Idempotent: skips if the deal already carries a category:home line.
+  def create_home_line_item!(deal, vehicle)
+    return if vehicle.nil?
+    return if deal.deal_products.any? { |dp| dp.notes.to_s.match?(/category:\s*home\b/i) }
+
+    cost  = vehicle.structured_cost.to_f
+    price = vehicle.msrp.to_f > 0 ? vehicle.msrp.to_f : cost
+
+    make!(deal.deal_products, {
+      product_name:  vehicle.display_name,
+      product_sku:   "CUSTOM-#{SecureRandom.uuid}",
+      quantity:      1,
+      unit_price:    price,
+      cost:          cost,
+      discount:      0,
+      discount_type: 'fixed',
+      tax:           0,
+      notes:         'category:home, source:home'
+    })
+  end
+
   def manufacturer_id_for(company, factory_name)
     return nil if factory_name.blank?
     (@mfr_cache ||= {})[factory_name] ||= company.manufacturers.where('name ILIKE ?', factory_name.strip).first&.id
@@ -634,7 +671,7 @@ namespace :evangeline do
   task deals: :environment do
     company = require_company!
     log("== Deals ==#{dry_note}")
-    n = 0; skipped = 0; orphan = 0; created_acct = 0; created_contact = 0
+    n = 0; skipped = 0; orphan = 0; created_acct = 0; created_contact = 0; home_lines = 0
     orphan_names = []
 
     read_csv('deals').each do |row|
@@ -713,7 +750,7 @@ namespace :evangeline do
         log("  would create deal: #{name} (acct=#{acct&.id || 'NEW'} contact=#{contact&.id || 'NEW'} vehicle=#{vehicle_id} stage=#{stage})"); next
       end
 
-      make!(company.deals, {
+      deal = make!(company.deals, {
         name: name, stage: stage,
         account_id: acct&.id, contact_id: contact&.id, vehicle_id: vehicle_id,
         owner_id: owner_id, user_id: owner_id,
@@ -728,8 +765,18 @@ namespace :evangeline do
         }.compact
       })
       n += 1
+
+      # Create the HOME line item so the deal form's Home/Product dropdown hydrates,
+      # the Products tab renders the home, and selling_price / front_gross derive.
+      # (deals.vehicle_id alone is treated as legacy by the form post Phase 2B/3.)
+      if vehicle_id
+        vehicle = company.vehicles.find_by(id: vehicle_id)
+        if create_home_line_item!(deal, vehicle)
+          home_lines += 1
+        end
+      end
     end
-    log("  Created #{n} deals, skipped #{skipped} (existing), orphaned #{orphan} (unresolvable).#{dry_note}")
+    log("  Created #{n} deals (#{home_lines} with home line items), skipped #{skipped} (existing), orphaned #{orphan} (unresolvable).#{dry_note}")
     log("  Inline-created #{created_acct} buyer accounts + #{created_contact} contacts from deal rows.#{dry_note}")
     if orphan_names.any?
       log("  Orphaned deals (no matching account or contact):")
