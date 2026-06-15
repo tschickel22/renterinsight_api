@@ -31,11 +31,15 @@ module Api
           @warranty_claims = @warranty_claims.where(location_id: Current.location_id)
         end
         
-        @warranty_claims = @warranty_claims.includes(:manufacturer, :service_ticket).recent
-        
+        @warranty_claims = @warranty_claims.includes(:manufacturer, :service_ticket)
+
         # Apply filters
         @warranty_claims = @warranty_claims.by_status(params[:status]) if params[:status].present?
         @warranty_claims = @warranty_claims.by_manufacturer(params[:manufacturer_id]) if params[:manufacturer_id].present?
+
+        # Apply sort across the full result set (before pagination) so sorting
+        # spans all pages, not just the current page.
+        @warranty_claims = apply_sort(@warranty_claims)
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -278,7 +282,22 @@ module Api
       end
       
       private
-      
+
+      # Columns the client is allowed to sort by. Maps to real DB columns so
+      # arbitrary/unsafe sort_by values can never reach the SQL ORDER BY.
+      SORTABLE_COLUMNS = %w[
+        claim_number status estimated_amount approved_amount submitted_at created_at
+      ].freeze
+
+      def apply_sort(scope)
+        sort_by = params[:sort_by].to_s
+        return scope.recent unless SORTABLE_COLUMNS.include?(sort_by)
+
+        direction = params[:sort_order].to_s.downcase == 'asc' ? :asc : :desc
+        # Secondary order by id keeps paging deterministic when sort values tie.
+        scope.order(sort_by => direction, id: direction)
+      end
+
       def set_warranty_claim
         @warranty_claim = if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
