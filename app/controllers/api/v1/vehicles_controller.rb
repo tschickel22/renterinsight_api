@@ -46,12 +46,21 @@ module Api
         # Apply location filter - skip if 'all_locations' param sent
         # Champion IMS catalog rows with location_id IS NULL (apply_to_all_locations=true)
         # are visible under EVERY location's view, regardless of selector.
+        # Location-less CATALOG homes are company-wide and must show under EVERY location's
+        # view, regardless of the selector:
+        #   - Champion IMS catalog rows (location_id IS NULL, source 'champion_ims'), and
+        #   - any `available_to_order` home with no location (imported/manual orderable
+        #     catalog — a factory model isn't physically at any single lot, so it's
+        #     orderable from all of them). Without this, orderable homes vanish from the
+        #     home picker on deals/leads/quotes and from a location-scoped inventory list.
+        # Physical inventory (available/reserved/sold/pending) stays strictly location-scoped.
+        catalog_passthrough = "(location_id IS NULL AND (source = 'champion_ims' OR status = 'available_to_order'))"
         if params[:all_locations].present? && params[:all_locations] == 'true'
           # Show all locations - no location filter applied
         elsif params[:location_id].present? && params[:location_id] != 'all'
-          vehicles = vehicles.where('location_id = ? OR (location_id IS NULL AND source = ?)', params[:location_id], 'champion_ims')
+          vehicles = vehicles.where("location_id = ? OR #{catalog_passthrough}", params[:location_id])
         elsif Current.location_filtered?
-          vehicles = vehicles.where('location_id = ? OR (location_id IS NULL AND source = ?)', Current.location_id, 'champion_ims')
+          vehicles = vehicles.where("location_id = ? OR #{catalog_passthrough}", Current.location_id)
         end
         
         # Apply non-search filters
