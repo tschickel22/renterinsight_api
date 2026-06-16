@@ -153,8 +153,8 @@ class Company < ApplicationRecord
 
   # Website Builder Associations
   has_many :websites, dependent: :destroy
-  has_many :sites, dependent: :destroy
-  has_many :site_media, dependent: :destroy
+  # NOTE: :sites and :site_media associations removed — no Site/SiteMedia model
+  # or table exists; they were dead declarations that aborted company.destroy.
   has_many :website_media, class_name: 'WebsiteMedia', dependent: :destroy  # Media for websites
   has_many :company_domains, dependent: :destroy
   # Partner API Associations
@@ -210,6 +210,14 @@ class Company < ApplicationRecord
   after_create :seed_mh_finance_defaults
   before_create :generate_public_inventory_token
   before_create :set_default_public_inventory_settings
+  # The accounting subsystem is a web of cross-referencing FKs (and a circular
+  # chart_of_accounts <-> bank_accounts link, plus journal_entry_lines ->
+  # chart_of_accounts marked restrict_with_error). The default
+  # association-declaration order cannot satisfy those constraints, so tenant
+  # deletion fails with a PG::ForeignKeyViolation. Tear the accounting tables
+  # down explicitly, in FK-safe order, BEFORE the rest of the dependent: :destroy
+  # cascade runs. prepend: true guarantees this fires first.
+  before_destroy :purge_accounting_subsystem!, prepend: true
   
   # Validations for tenant fields
   validates :subdomain, 
@@ -736,6 +744,48 @@ class Company < ApplicationRecord
   # Assign account number derived from id (RI-00019). Runs after_create because
   # id isn't available until the row exists. update_column skips validations and
   # callbacks so it won't re-trigger this hook.
+  # Deletes every accounting-module record for this company in dependency order
+  # (leaf referencers first, core tables last) so a tenant can be destroyed
+  # without tripping a foreign-key constraint. Uses delete_all for speed; the
+  # whole thing runs inside the destroy transaction, so it is atomic with the
+  # rest of the cascade. Line tables (no company_id) are scoped via their parent.
+  def purge_accounting_subsystem!
+    cid          = id
+    bill_ids     = Bill.where(company_id: cid).select(:id)
+    budget_ids   = Budget.where(company_id: cid).select(:id)
+    je_ids       = JournalEntry.where(company_id: cid).select(:id)
+    recon_ids    = BankReconciliation.where(company_id: cid).select(:id)
+
+    # 1. Outermost referencers (point at bills / journal_entries / bank_accounts).
+    PrintedCheck.where(company_id: cid).delete_all
+    CashReceipt.where(company_id: cid).delete_all   # cash_receipt_applications cascade
+    BillPayment.where(company_id: cid).delete_all
+    BillLineItem.where(bill_id: bill_ids).delete_all
+    Bill.where(company_id: cid).delete_all
+    RecurringBill.where(company_id: cid).delete_all
+    BankTransaction.where(company_id: cid).delete_all
+    BankRule.where(company_id: cid).delete_all
+    BankReconciliationItem.where(bank_reconciliation_id: recon_ids).delete_all
+    BankReconciliation.where(company_id: cid).delete_all
+    BudgetLine.where(budget_id: budget_ids).delete_all
+    Budget.where(company_id: cid).delete_all
+    JournalEntryLine.where(journal_entry_id: je_ids).delete_all
+    JournalEntry.where(company_id: cid).delete_all
+    AccountLink.where(company_id: cid).delete_all
+    AccountingSettings.where(company_id: cid).delete_all
+    RecurringJournalEntry.where(company_id: cid).delete_all
+    FiscalPeriod.where(company_id: cid).delete_all
+    AccountingImport.where(company_id: cid).delete_all
+
+    # 2. Break the circular chart_of_accounts <-> bank_accounts reference, then
+    #    drop both. Self-referential parent_id is satisfied because each table is
+    #    cleared in a single statement (NO ACTION is checked at statement end).
+    BankAccount.where(company_id: cid).update_all(chart_of_account_id: nil)
+    ChartOfAccount.where(company_id: cid).update_all(bank_account_id: nil)
+    BankAccount.where(company_id: cid).delete_all
+    ChartOfAccount.where(company_id: cid).delete_all
+  end
+
   def assign_account_number
     return if account_number.present?
     update_column(:account_number, format('RI-%05d', id))
