@@ -179,12 +179,21 @@ module Api
         record.respond_to?(attr) ? record.send(attr) : nil
       end
 
+      # Boolean reader that preserves an explicit `false`.
+      # NOTE: `safe_read(x) || default` is a bug for booleans — `false || true`
+      # is `true`, so a toggled-off flag would always report as on. Use this
+      # for is_active / click_required / input_required etc.
+      def safe_bool(record, attr, default: false)
+        val = safe_read(record, attr)
+        val.nil? ? default : (val == true)
+      end
+
       # ─── Payloads ──────────────────────────────────────────
 
       def module_payload(mod, include_features: false)
         p = { id: mod.id, key: mod.key, name: mod.name, icon: safe_read(mod, :icon), route: safe_read(mod, :route),
               description: safe_read(mod, :description), position: mod.position,
-              is_active: safe_read(mod, :is_active) || true,
+              is_active: safe_bool(mod, :is_active, default: true),
               features_count: mod.features.count }
         p[:features] = mod.features.order(:position, :name).map { |f| feature_payload(f) } if include_features
         p
@@ -218,7 +227,7 @@ module Api
               trigger_type: safe_read(t, :trigger_type),
               start_url: safe_read(t, :start_url),
               position: safe_read(t, :position) || 0,
-              is_active: safe_read(t, :is_active) || true,
+              is_active: safe_bool(t, :is_active, default: true),
               module_key: safe_read(t, :knowledge_module)&.key,
               steps_count: t.steps.count,
               completion_count: 0 }
@@ -231,14 +240,14 @@ module Api
           content: safe_read(s, :content),
           placement: safe_read(s, :placement) || 'bottom',
           highlight_type: safe_read(s, :highlight_type),
-          click_required: safe_read(s, :click_required) || false,
-          input_required: safe_read(s, :input_required) || false,
+          click_required: safe_bool(s, :click_required),
+          input_required: safe_bool(s, :input_required),
           position: s.position }
       end
 
       def pattern_payload(p)
         { id: p.id, pattern: p.pattern, intent_type: p.intent_type, entity_key: p.entity_key,
-          priority: p.priority, is_active: safe_read(p, :is_active) || true }
+          priority: p.priority, is_active: safe_bool(p, :is_active, default: true) }
       end
 
       def alias_payload(a)
