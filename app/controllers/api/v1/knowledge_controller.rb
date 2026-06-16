@@ -252,7 +252,11 @@ module Api
         user_prompt = "Write a help article about: #{topic}"
         user_prompt += "\n\nAdditional context: #{context}" if context.present?
 
-        api_key = Rails.application.credentials.dig(:anthropic, :api_key)
+        # Match the key resolution used everywhere else in the app (e.g.
+        # ReportAiController): prefer the ENV var, fall back to credentials.
+        # Production sets ANTHROPIC_API_KEY as an env var, not in credentials —
+        # reading credentials alone made this silently fall back to the stub.
+        api_key = ENV['ANTHROPIC_API_KEY'] || Rails.application.credentials.dig(:anthropic, :api_key)
 
         if api_key.blank?
           render json: template_article_response(topic)
