@@ -50,13 +50,10 @@ module Api
         # Log impersonation start
         Rails.logger.info "🎭 [IMPERSONATION] Platform admin #{admin.email} (ID: #{admin.id}) is impersonating #{target_user.email} (ID: #{target_user.id})"
 
-        # Track login activity
-        LoginActivity.record_login(
-          user_id: target_user.id,
-          user_type: 'User',
-          ip_address: request.remote_ip,
-          user_agent: request.user_agent
-        )
+        # NOTE: Do NOT record a LoginActivity / sign-in for the target user here.
+        # Impersonation is an admin action, not a real login by the target user.
+        # Recording it makes never-logged-in users look "logged in", which removes
+        # them from the pending-invitation population and blocks invites/resends.
 
         # Generate impersonation token — authenticates as target user with audit trail
         impersonation_token = JsonWebToken.generate_impersonation_token(target_user, admin)
