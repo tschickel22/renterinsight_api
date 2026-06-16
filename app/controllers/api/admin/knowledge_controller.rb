@@ -61,7 +61,9 @@ module Api
         if params[:resource] == 'intent_patterns' && params[:test].present?
           return test_intent_pattern
         end
-        record = klass.new(permitted_params_for(params[:resource]))
+        attrs = permitted_params_for(params[:resource])
+        normalize_article_attrs!(attrs) if params[:resource] == 'articles'
+        record = klass.new(attrs)
         if record.save
           render json: build_payload(params[:resource], record), status: :created
         else
@@ -73,7 +75,9 @@ module Api
         klass = resolve_resource!
         return unless klass
         record = klass.find(params[:id])
-        if record.update(permitted_params_for(params[:resource]))
+        attrs = permitted_params_for(params[:resource])
+        normalize_article_attrs!(attrs) if params[:resource] == 'articles'
+        if record.update(attrs)
           render json: build_payload(params[:resource], record)
         else
           render json: { errors: record.errors.full_messages }, status: :unprocessable_entity
@@ -168,13 +172,49 @@ module Api
         case resource
         when 'modules'         then source.permit(:key, :name, :icon, :route, :description, :position, :is_active)
         when 'features'        then source.permit(:knowledge_module_id, :key, :name, :route, :ui_selector, :permission_key, :position)
-        when 'articles'        then source.permit(:knowledge_module_id, :knowledge_feature_id, :slug, :title, :excerpt, :content, :content_html, :article_type, :is_published, :position)
+        when 'articles'        then source.permit(:knowledge_module_id, :knowledge_feature_id, :module_key, :feature_key, :slug, :title, :excerpt, :content, :content_html, :article_type, :is_published, :status, :position)
         when 'tours'           then source.permit(:name, :description, :trigger_type, :start_url, :position, :is_active)
         when 'tour_steps'      then source.permit(:tour_id, :selector, :title, :content, :placement, :highlight_type, :click_required, :input_required, :position)
         when 'intent_patterns' then source.permit(:pattern, :intent_type, :entity_key, :priority, :is_active)
         when 'entity_aliases'  then source.permit(:alias_name, :canonical_key)
         else {}
         end
+      end
+
+      # Article params arrive from two different frontends with different field
+      # names. The admin ArticlesManager sends `module_key` + `status`
+      # ('published'/'draft'); other callers send `knowledge_module_id` +
+      # `is_published`. Normalize both to the columns the model actually has
+      # (`knowledge_module_id`, `is_published`) so saves persist. Mutates and
+      # returns the attrs hash. Unknown module keys are dropped rather than
+      # nulling an existing association.
+      def normalize_article_attrs!(attrs)
+        # status: 'published'|'draft' -> is_published boolean (only if the
+        # caller didn't already send an explicit is_published).
+        if attrs.key?(:status) && !attrs.key?(:is_published)
+          attrs[:is_published] = attrs[:status].to_s == 'published'
+        end
+        attrs.delete(:status)
+
+        # module_key -> knowledge_module_id
+        if attrs.key?(:module_key)
+          key = attrs.delete(:module_key)
+          if key.present?
+            mod = Knowledge::Module.find_by(key: key)
+            attrs[:knowledge_module_id] = mod.id if mod
+          end
+        end
+
+        # feature_key -> knowledge_feature_id (scoped to the resolved module)
+        if attrs.key?(:feature_key)
+          fkey = attrs.delete(:feature_key)
+          if fkey.present? && attrs[:knowledge_module_id].present?
+            feat = Knowledge::Feature.find_by(knowledge_module_id: attrs[:knowledge_module_id], key: fkey)
+            attrs[:knowledge_feature_id] = feat.id if feat
+          end
+        end
+
+        attrs
       end
 
       # ─── Safe attribute reader ──────────────────────────────
