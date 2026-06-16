@@ -1748,6 +1748,10 @@ Rails.application.routes.draw do
 
       # Interactive guided tours (list/start/complete/step tracking).
       resources :tours, only: %i[index show create update destroy] do
+        collection do
+          get   :pause_state
+          patch :pause_state, action: :set_pause_state
+        end
         member do
           post :start
           post :complete

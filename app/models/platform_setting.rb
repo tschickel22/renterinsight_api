@@ -37,6 +37,18 @@ class PlatformSetting
       Setting.set('Platform', PLATFORM_SCOPE_ID, 'branding', value)
     end
 
+    # Global master switch for guided tours. When true, no tours are served to
+    # end users (regardless of each tour's individual is_active flag) and the
+    # admin Tours tab is hidden. Individual tour states are left untouched so
+    # toggling this back off restores exactly the prior configuration.
+    def tours_paused?
+      Setting.get('Platform', PLATFORM_SCOPE_ID, 'tours_paused') == true
+    end
+
+    def tours_paused=(value)
+      Setting.set('Platform', PLATFORM_SCOPE_ID, 'tours_paused', value == true)
+    end
+
     private
 
     def default_communications

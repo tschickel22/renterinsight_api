@@ -11,6 +11,9 @@ module Api
       # GET /api/v1/tours
       # Lists active tours the current user hasn't completed yet.
       def index
+        # Global master switch: when paused, serve no tours to end users.
+        return render(json: { tours: [], tours_paused: true }) if PlatformSetting.tours_paused?
+
         completed_ids = current_user.user_tour_completions
                                     .where.not(completed_at: nil)
                                     .pluck(:tour_id)
@@ -22,6 +25,21 @@ module Api
         render json: { tours: tours }
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'module not found' }, status: :not_found
+      end
+
+      # GET /api/v1/tours/pause_state
+      # Returns whether tours are globally paused. Any authenticated user may read.
+      def pause_state
+        render json: { tours_paused: PlatformSetting.tours_paused? }
+      end
+
+      # PATCH /api/v1/tours/pause_state  body: { paused: true|false }
+      # Master switch — platform admin only.
+      def set_pause_state
+        return unless require_platform_admin!
+
+        PlatformSetting.tours_paused = ActiveModel::Type::Boolean.new.cast(params[:paused])
+        render json: { ok: true, tours_paused: PlatformSetting.tours_paused? }
       end
 
       # GET /api/v1/tours/:id
