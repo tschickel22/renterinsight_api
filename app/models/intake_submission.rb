@@ -33,18 +33,35 @@ class IntakeSubmission < ApplicationRecord
     # Use explicit field mappings if available
     field_mappings = form.field_mappings || {}
     
-    # Get or create default "Web Form" source if form doesn't have one
-    source_id = form.source_id
-    if source_id.nil?
-      default_source = Source.find_or_create_by(
+    # Determine the lead source.
+    # Priority: utm_source param (e.g. "google_business") > form.source_id > default "Web Form".
+    # A utm_source lets one form attribute leads to the channel that sent them.
+    utm_source_raw = submission_data['utm_source'] || submission_data['utmSource']
+    if utm_source_raw.present?
+      pretty_name = utm_source_raw.to_s.tr('_', ' ').split.map(&:capitalize).join(' ')
+      utm_source = Source.find_or_create_by(
         company_id: form.company_id,
-        name: 'Web Form'
+        name: pretty_name
       ) do |s|
         s.is_active = true
-        s.description = 'Leads captured via intake forms'
+        s.description = "Leads captured via #{pretty_name}"
       end
-      source_id = default_source.id
-      Rails.logger.info "[IntakeSubmission] Using default Web Form source: #{source_id}"
+      source_id = utm_source.id
+      Rails.logger.info "[IntakeSubmission] Using UTM source '#{pretty_name}': #{source_id}"
+    else
+      # Get or create default "Web Form" source if form doesn't have one
+      source_id = form.source_id
+      if source_id.nil?
+        default_source = Source.find_or_create_by(
+          company_id: form.company_id,
+          name: 'Web Form'
+        ) do |s|
+          s.is_active = true
+          s.description = 'Leads captured via intake forms'
+        end
+        source_id = default_source.id
+        Rails.logger.info "[IntakeSubmission] Using default Web Form source: #{source_id}"
+      end
     end
     
     lead_data = { 
@@ -53,14 +70,29 @@ class IntakeSubmission < ApplicationRecord
       status: 'new'
     }
     
-    # Extract location_id from submission data
-    # Priority: explicit location_id (from location picker) > vehicle_location_id (from inventory embed)
+    # Resolve location so a lead is NEVER orphaned (location-null leads are
+    # invisible to location-scoped users). Priority:
+    #   1. explicit location_id from the form's location picker
+    #   2. location bound to the form itself (one-form-per-location setups)
+    #   3. vehicle_location_id from an inventory embed
+    #   4. company default location (safety net) so the lead stays visible
     if submission_data['location_id'].present?
       lead_data[:location_id] = submission_data['location_id'].to_i
       Rails.logger.info "[IntakeSubmission] Assigning location_id from form picker: #{lead_data[:location_id]}"
+    elsif form.respond_to?(:location_id) && form.location_id.present?
+      lead_data[:location_id] = form.location_id
+      Rails.logger.info "[IntakeSubmission] Assigning location_id from form binding: #{lead_data[:location_id]}"
     elsif submission_data['vehicle_location_id'].present?
       lead_data[:location_id] = submission_data['vehicle_location_id'].to_i
       Rails.logger.info "[IntakeSubmission] Assigning location_id from vehicle: #{lead_data[:location_id]}"
+    else
+      fallback_location_id = company_default_location_id(form.company_id)
+      if fallback_location_id.present?
+        lead_data[:location_id] = fallback_location_id
+        Rails.logger.info "[IntakeSubmission] No location resolved; using company default: #{fallback_location_id}"
+      else
+        Rails.logger.warn "[IntakeSubmission] No location resolved and no company default available; lead will be company-scoped only"
+      end
     end
     
     # Only set owner_id if notified_user exists
@@ -275,6 +307,22 @@ class IntakeSubmission < ApplicationRecord
   
   private
   
+  # Deterministic fallback location for a company so intake leads are never
+  # orphaned (a null location_id hides the lead from location-scoped users).
+  # Prefers the Corporate location, then the first active location by id.
+  def company_default_location_id(company_id)
+    company = Company.find_by(id: company_id)
+    return nil unless company
+    
+    corporate = company.locations.corporate.active.order(:id).first
+    return corporate.id if corporate
+    
+    company.locations.active.order(:id).first&.id
+  rescue => e
+    Rails.logger.error "[IntakeSubmission] company_default_location_id failed: #{e.message}"
+    nil
+  end
+  
   def broadcast_new_lead_notification(lead, form)
     # Get all active users in the company who should receive notifications
     company = Company.find(form.company_id)
@@ -366,7 +414,7 @@ class IntakeSubmission < ApplicationRecord
         # Skip vehicle fields (already shown above)
         next if vehicle_keys.include?(key.to_s)
         # Skip internal/metadata fields
-        next if %w[location_id source vehicle_location_id].include?(key.to_s)
+        next if %w[location_id source utm_source utmSource vehicle_location_id].include?(key.to_s)
         # Skip notes field (already shown above)
         next if key.to_s.downcase == 'notes' || key.to_s.downcase == 'comments' || key.to_s.downcase == 'message'
         
