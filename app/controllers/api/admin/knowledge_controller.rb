@@ -161,14 +161,18 @@ module Api
       end
 
       def permitted_params_for(resource)
+        # Frontend wraps create/update payloads as { item: {...} }, but older
+        # callers post fields at the top level. Accept both: prefer :item when
+        # present, else fall back to the raw params.
+        source = params[:item].present? ? params.require(:item) : params
         case resource
-        when 'modules'         then params.permit(:key, :name, :icon, :route, :description, :position, :is_active)
-        when 'features'        then params.permit(:knowledge_module_id, :key, :name, :route, :ui_selector, :permission_key, :position)
-        when 'articles'        then params.permit(:knowledge_module_id, :knowledge_feature_id, :slug, :title, :excerpt, :content, :content_html, :article_type, :is_published, :position)
-        when 'tours'           then params.permit(:name, :description, :trigger_type, :start_url, :position, :is_active)
-        when 'tour_steps'      then params.permit(:tour_id, :selector, :title, :content, :placement, :highlight_type, :click_required, :input_required, :position)
-        when 'intent_patterns' then params.permit(:pattern, :intent_type, :entity_key, :priority, :is_active)
-        when 'entity_aliases'  then params.permit(:alias_name, :canonical_key)
+        when 'modules'         then source.permit(:key, :name, :icon, :route, :description, :position, :is_active)
+        when 'features'        then source.permit(:knowledge_module_id, :key, :name, :route, :ui_selector, :permission_key, :position)
+        when 'articles'        then source.permit(:knowledge_module_id, :knowledge_feature_id, :slug, :title, :excerpt, :content, :content_html, :article_type, :is_published, :position)
+        when 'tours'           then source.permit(:name, :description, :trigger_type, :start_url, :position, :is_active)
+        when 'tour_steps'      then source.permit(:tour_id, :selector, :title, :content, :placement, :highlight_type, :click_required, :input_required, :position)
+        when 'intent_patterns' then source.permit(:pattern, :intent_type, :entity_key, :priority, :is_active)
+        when 'entity_aliases'  then source.permit(:alias_name, :canonical_key)
         else {}
         end
       end
