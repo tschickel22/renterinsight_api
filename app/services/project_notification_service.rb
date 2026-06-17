@@ -299,6 +299,35 @@ class ProjectNotificationService
 
     # Use the first assignment as the `communicable` for threading
     send_contractor_review_email(contractor, company, subject, body, assignments.first)
+
+    # Also text the contractor when they've opted in and have a number on file
+    # (email + SMS). Opt-in is set on the Contractor Portal profile page (TCPA).
+    # Isolated in its own rescue so an SMS/Twilio failure never blocks the email
+    # that already sent, nor the notified_at stamping the caller does next.
+    # SMS provider resolves Location -> Company -> Platform (most-specific wins).
+    if contractor.sms_opt_in && contractor.phone.present?
+      begin
+        sms_body = if count == 1
+          "New assignment from #{company.name}: #{resolve_task_name(assignments.first)}. " \
+            "Log in to the Contractor Portal to accept."
+        else
+          "#{count} new assignments from #{company.name}. " \
+            "Log in to the Contractor Portal to accept."
+        end
+
+        CommunicationService.send_sms(
+          company: company,
+          location: resolve_project(assignments.first)&.deal&.location,
+          to: contractor.phone,
+          body: sms_body,
+          category: 'project_notification',
+          communicable: assignments.first
+        )
+        Rails.logger.info("[ProjectNotificationService] Assignment SMS sent to contractor #{contractor.id}")
+      rescue => e
+        Rails.logger.error("[ProjectNotificationService] Contractor assignment SMS failed: #{e.message}")
+      end
+    end
   rescue => e
     Rails.logger.error("[ProjectNotificationService] Error notifying contractor batch: #{e.message}")
   end

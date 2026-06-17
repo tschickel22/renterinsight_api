@@ -69,7 +69,7 @@ module Api
 
       def profile_params
         params.require(:contractor).permit(
-          :contact_name, :email, :phone, :trade_type, :notes,
+          :contact_name, :email, :phone, :trade_type, :notes, :sms_opt_in,
           :license_number, :license_state, :license_expiry,
           :insurance_provider, :insurance_policy_number, :insurance_expiry,
           :bond_amount, :bond_expiry
@@ -84,6 +84,7 @@ module Api
           contact_name: contractor.contact_name,
           email: contractor.email,
           phone: contractor.phone,
+          sms_opt_in: contractor.sms_opt_in,
           trade_type: contractor.trade_type,
           license_number: contractor.license_number,
           license_state: contractor.license_state,
