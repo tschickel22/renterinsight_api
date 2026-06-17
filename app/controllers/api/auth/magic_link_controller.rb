@@ -158,7 +158,16 @@ module Api
         user_type = user_data[:type]
 
         if user_type == 'User'
-          record.update!(magic_link_token: nil, magic_link_expires_at: nil)
+          record.update!(magic_link_token: nil, magic_link_expires_at: nil, last_sign_in_at: Time.current)
+          # Track login activity so staff magic-link logins appear in Company > Users
+          # "Last Login" (mirrors login_controller / mfa_controller). Without this,
+          # a real magic-link login was recorded nowhere and the user showed "never".
+          LoginActivity.record_login(
+            user_id: record.id,
+            user_type: 'User',
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent
+          )
         else
           # Record login for portal users
           record.record_login!(request.remote_ip) if record.respond_to?(:record_login!)
