@@ -50,6 +50,21 @@ module Reports
       end
     end
 
+    # ALL active deals per vehicle, any stage (incl. closed_won/closed_lost) — mirrors the
+    # inventory detail "Related Deals" panel (vehicle.deals.active). Drives the report's
+    # deal-preview popover so it shows every associated deal, not just open ones. The
+    # contention count (open_deal_count) and resolved deal_id still come from open deals.
+    def all_deals_by_vehicle
+      @all_deals_by_vehicle ||= begin
+        return {} if vehicle_ids.empty?
+
+        @company.deals
+                .where(vehicle_id: vehicle_ids, deleted_at: nil)
+                .includes(:primary_salesperson, :secondary_salesperson, :account, :contact, :owner)
+                .group_by(&:vehicle_id)
+      end
+    end
+
     # Deals on in-scope vehicles in the given stages (e.g. closed_won) — used for the
     # salesperson report's closed/funded pipeline buckets.
     def deals_for_vehicles(stages:)
@@ -93,7 +108,9 @@ module Reports
 
     # deal: the assigned deal (resolved open deal, or an explicit closed/funded deal).
     # open_deal_count: number of open deals on the vehicle (contention indicator).
-    def build_row(vehicle, deal: nil, open_deal_count: 0)
+    # deals: the deals to surface in the report's hover/click preview (all open deals on
+    #   the unit, or the single funded deal). Already eager-loaded by the caller.
+    def build_row(vehicle, deal: nil, open_deal_count: 0, deals: [])
       assigned = deal.present?
       status = vehicle.status
       flags = []
@@ -168,7 +185,10 @@ module Reports
           days_on_plan: fp[:days_on_plan],
           accrued_interest: fp[:accrued_interest],
           monthly_interest_estimate: fp[:monthly_interest_estimate]
-        }
+        },
+        # Compact previews for the report's deal hover/click popover. Sorted so the
+        # resolved (most advanced) deal — the one `deal_id` points at — is listed first.
+        deals: deal_previews(deals)
       }
 
       # Cost/GP columns are omitted entirely when the user lacks view_cost_details.
@@ -193,6 +213,23 @@ module Reports
       end
 
       row
+    end
+
+    # Compact deal records for the report preview popover (deal details + rep + value).
+    # selling_price is price-tier data (already shown ungated), so this is not cost-gated.
+    def deal_previews(deals)
+      Array(deals)
+        .sort_by { |d| [-stage_rank(d.stage), -(d.created_at || Time.at(0)).to_i] }
+        .map do |d|
+          {
+            id: d.id,
+            customer: d.customer_display_name,
+            salesperson: salesperson_name(d.primary_salesperson),
+            stage: d.stage,
+            status: d.stage.to_s.titleize,
+            value: d.selling_price
+          }
+        end
     end
 
     def salesperson_name(user)

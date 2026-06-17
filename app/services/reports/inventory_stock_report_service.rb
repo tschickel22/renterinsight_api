@@ -67,7 +67,9 @@ module Reports
 
     def inventory_row(vehicle, open_deals)
       deal = @query.resolve_open_deal(open_deals)
-      row = @query.build_row(vehicle, deal: deal, open_deal_count: open_deals.size)
+      # Preview shows ALL associated deals (any stage); contention count stays open-only.
+      all_deals = @query.all_deals_by_vehicle[vehicle.id] || open_deals
+      row = @query.build_row(vehicle, deal: deal, open_deal_count: open_deals.size, deals: all_deals)
       row[:section] = section_for(vehicle)
       row
     end
@@ -142,7 +144,7 @@ module Reports
                             (d.stage == 'closed_won' && d.won_at && range.cover?(d.won_at))
         next unless funded_this_month
 
-        @query.build_row(v, deal: d, open_deal_count: 0)
+        @query.build_row(v, deal: d, open_deal_count: 0, deals: @query.all_deals_by_vehicle[v.id] || [d])
       end
 
       { rows: rows, lender_subtotals: lender_subtotals(rows), subtotal: subtotal(rows) }

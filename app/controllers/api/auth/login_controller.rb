@@ -6,6 +6,26 @@ module Api
       skip_before_action :authenticate, only: [:create, :refresh]
       before_action :authenticate_user_from_token!, only: [:verify, :me]
 
+      # POST /api/auth/verify_password
+      # Confirms the password of the REAL person at the keyboard. Used by the Deal Desk
+      # "Employee View" reveal: leaving customer-facing view re-verifies the rep so a
+      # customer can't flip the screen back to dealer gross.
+      #
+      # NOTE: this controller shadows #current_user (attr_reader, set only for verify/me),
+      # so we can't use current_user/original_user here. ApplicationController#authenticate
+      # still ran as a before_action and populated the ivars: @original_user is the platform
+      # admin during impersonation, otherwise the token's user is @current_user_id. That's
+      # the person whose password must match.
+      def verify_password
+        user = @original_user || User.find_by(id: @current_user_id)
+        password = params[:password].to_s
+        if password.present? && user&.authenticate(password)
+          render json: { valid: true }, status: :ok
+        else
+          render json: { valid: false, error: 'Incorrect password' }, status: :unprocessable_entity
+        end
+      end
+
       # POST /api/auth/login
       def create
         user = User.find_by(email: params[:email]&.downcase)

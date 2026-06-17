@@ -52,6 +52,7 @@ class Notification < ApplicationRecord
     deal_stage_changed: { category: 'sales', priority: 'normal', title: 'Deal Stage Changed' },
     deal_won: { category: 'sales', priority: 'high', title: 'Deal Won!' },
     deal_lost: { category: 'sales', priority: 'normal', title: 'Deal Lost' },
+    home_sold_choose_new_home: { category: 'sales', priority: 'high', title: 'Home Sold — Choose a New Home' },
     
     # Finance notifications
     payment_received: { category: 'finance', priority: 'normal', title: 'Payment Received' },

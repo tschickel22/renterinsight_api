@@ -145,6 +145,33 @@ module Api
           return
         end
 
+        # HARD BLOCK on duplicate email (create only). Phone duplicates are a
+        # soft warning surfaced by the frontend and are NOT blocked here.
+        # The frontend also blocks before submit, but enforce server-side too
+        # since the form check can be bypassed.
+        dup_email = lead_params[:email].to_s.strip.downcase
+        if dup_email.present?
+          existing = @company.leads
+                             .where(is_converted: [false, nil])
+                             .where('LOWER(email) = ?', dup_email)
+                             .first
+          if existing
+            render json: {
+              error: 'A lead with this email already exists.',
+              duplicate: {
+                field: 'email',
+                id: existing.id,
+                firstName: existing.first_name,
+                lastName: existing.last_name,
+                email: existing.email,
+                phone: existing.phone,
+                status: existing.status
+              }
+            }, status: :conflict
+            return
+          end
+        end
+
         # STRICT TENANT ISOLATION: Create lead within current company
         l = @company.leads.new(lead_params)
         l.custom_field_values = custom_field_values_param if custom_field_values_param.present?
@@ -499,7 +526,99 @@ module Api
         render json: { gaps: gaps }
       end
 
+      # POST /api/crm/leads/check_duplicates
+      # Soft duplicate lookup used by the New Lead form. Searches existing leads
+      # in the current company for a matching email or phone and returns any
+      # matches (non-blocking — the UI shows a warning, never prevents save).
+      def check_duplicates
+        return unless authorize_action!('leads', 'read')
+
+        email = params[:email].to_s.strip.downcase
+        phone = normalize_phone(params[:phone])
+
+        if email.blank? && phone.blank?
+          render json: { duplicates: [] }
+          return
+        end
+
+        # STRICT TENANT ISOLATION: only this company's leads.
+        scope = @company.leads.where(is_converted: [false, nil])
+
+        conditions = []
+        values     = []
+        if email.present?
+          conditions << 'LOWER(email) = ?'
+          values << email
+        end
+        if phone.present?
+          # Compare on digits only so (303) 555-1212 matches 3035551212.
+          conditions << "regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = ?"
+          values << phone
+        end
+
+        matches = scope.where(conditions.join(' OR '), *values).limit(5)
+
+        same_type = matches.map { |l| duplicate_match_json(l, email, phone) }
+
+        # Cross-entity awareness: also surface contacts/accounts that share this
+        # email/phone so the user knows the person already exists elsewhere.
+        # These are WARNINGS only (never block). Tagged with entityType so the
+        # frontend can label and link them correctly.
+        cross = IdentityResolver.new(@company, email: email, phone: phone)
+                                .all(exclude: nil)
+                                .reject { |m| m.type == :lead }
+                                .map { |m| cross_entity_json(m) }
+
+        render json: { duplicates: same_type + cross }
+      rescue => e
+        Rails.logger.error "[LeadsController#check_duplicates] #{e.class}: #{e.message}"
+        render json: { duplicates: [] }
+      end
+
       private
+
+      # Shape a cross-entity IdentityResolver match for the dedupe UI. entityType
+      # tells the frontend it's a different object type (contact/account) so it
+      # can label it "exists as a Contact" and link to the right detail page.
+      def cross_entity_json(match)
+        {
+          id: match.record.id,
+          firstName: match.record.try(:first_name),
+          lastName: match.record.try(:last_name),
+          name: match.name.presence,
+          email: match.record.try(:email),
+          phone: match.record.try(:phone),
+          matchedField: match.matched,
+          entityType: match.type.to_s,
+          converted: match.converted
+        }
+      end
+
+      # Strip everything but digits for forgiving phone comparison.
+      def normalize_phone(raw)
+        raw.to_s.gsub(/[^0-9]/, '')
+      end
+
+      # Minimal match payload for the dedupe warning UI.
+      def duplicate_match_json(lead, email, phone)
+        lead_phone_digits = normalize_phone(lead.phone)
+        matched = if email.present? && lead.email.to_s.downcase == email
+                    'email'
+                  elsif phone.present? && lead_phone_digits == phone
+                    'phone'
+                  else
+                    'email'
+                  end
+        {
+          id: lead.id,
+          firstName: lead.first_name,
+          lastName: lead.last_name,
+          email: lead.email,
+          phone: lead.phone,
+          status: lead.status,
+          matchedField: matched
+        }
+      end
 
       def set_company_scope
         unless current_user

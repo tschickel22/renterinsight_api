@@ -91,6 +91,31 @@ module Api
       def create
         return unless authorize_action!('crm', 'create')
         
+        # HARD BLOCK on exact duplicate name (create only). Email/phone
+        # duplicates are soft warnings surfaced by the frontend, not blocked.
+        dup_name = account_params['name'].to_s.strip
+        if dup_name.present?
+          existing = @company.accounts
+                             .where(is_deleted: [false, nil])
+                             .where('LOWER(name) = ?', dup_name.downcase)
+                             .first
+          if existing
+            render json: {
+              error: 'An account with this name already exists.',
+              duplicate: {
+                field: 'name',
+                id: existing.id,
+                name: existing.name,
+                email: existing.email,
+                phone: existing.phone,
+                accountType: existing.account_type,
+                status: existing.status
+              }
+            }, status: :conflict
+            return
+          end
+        end
+
         # STRICT TENANT ISOLATION: Create account within current company
         @account = @company.accounts.new(account_params)
         
@@ -733,6 +758,94 @@ module Api
             total_pages: (total_count.to_f / per_page).ceil
           }
         }
+      end
+
+      # POST /api/v1/accounts/check_duplicates
+      # Soft duplicate lookup used by the New Account form. Searches existing
+      # accounts in the current company for a matching name, email, or phone
+      # and returns any matches (non-blocking — the UI shows a warning).
+      def check_duplicates
+        return unless authorize_action!('crm', 'read')
+
+        name  = params[:name].to_s.strip
+        email = params[:email].to_s.strip.downcase
+        phone = params[:phone].to_s.gsub(/[^0-9]/, '')
+
+        if name.blank? && email.blank? && phone.blank?
+          render json: { duplicates: [] }
+          return
+        end
+
+        # STRICT TENANT ISOLATION: only this company's (non-deleted) accounts.
+        scope = @company.accounts.where(is_deleted: [false, nil])
+
+        conditions = []
+        values     = []
+        if name.present?
+          conditions << 'LOWER(name) = ?'
+          values << name.downcase
+        end
+        if email.present?
+          conditions << 'LOWER(email) = ?'
+          values << email
+        end
+        if phone.present?
+          conditions << "regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = ?"
+          values << phone
+        end
+
+        matches = scope.where(conditions.join(' OR '), *values).limit(5)
+
+        same_type = matches.map { |a|
+          acct_phone = a.phone.to_s.gsub(/[^0-9]/, '')
+          matched = if name.present? && a.name.to_s.downcase == name.downcase
+                      'name'
+                    elsif email.present? && a.email.to_s.downcase == email
+                      'email'
+                    elsif phone.present? && acct_phone == phone
+                      'phone'
+                    else
+                      'name'
+                    end
+          {
+            id: a.id,
+            name: a.name,
+            email: a.email,
+            phone: a.phone,
+            accountType: a.account_type,
+            status: a.status,
+            matchedField: matched
+          }
+        }
+
+        # Cross-entity awareness: surface leads/contacts that share this
+        # email/phone (warnings only, never block). Name matches are
+        # account-specific so cross-entity only applies to email/phone.
+        cross = if email.present? || phone.present?
+                  IdentityResolver.new(@company, email: email, phone: phone)
+                                  .all(exclude: nil)
+                                  .reject { |m| m.type == :account }
+                                  .map { |m|
+                    {
+                      id: m.record.id,
+                      firstName: m.record.try(:first_name),
+                      lastName: m.record.try(:last_name),
+                      name: m.name.presence,
+                      email: m.record.try(:email),
+                      phone: m.record.try(:phone),
+                      matchedField: m.matched,
+                      entityType: m.type.to_s,
+                      converted: m.converted
+                    }
+                  }
+                else
+                  []
+                end
+
+        render json: { duplicates: same_type + cross }
+      rescue => e
+        Rails.logger.error "[AccountsController#check_duplicates] #{e.class}: #{e.message}"
+        render json: { duplicates: [] }
       end
 
       private

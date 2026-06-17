@@ -119,6 +119,27 @@ module Api
         # Extract tags from the contact params before creating
         tag_names = contact_params_with_extra[:tags] || []
         
+        # HARD BLOCK on duplicate email (create only). Phone duplicates are a
+        # soft warning surfaced by the frontend and are NOT blocked here.
+        dup_email = contact_params[:email].to_s.strip.downcase
+        if dup_email.present?
+          existing = @company.contacts.where('LOWER(email) = ?', dup_email).first
+          if existing
+            render json: {
+              error: 'A contact with this email already exists.',
+              duplicate: {
+                field: 'email',
+                id: existing.id,
+                firstName: existing.first_name,
+                lastName: existing.last_name,
+                email: existing.email,
+                phone: existing.phone
+              }
+            }, status: :conflict
+            return
+          end
+        end
+
         # STRICT TENANT ISOLATION: Create contact within current company
         @contact = @company.contacts.new(contact_params)
         
@@ -302,6 +323,83 @@ module Api
       rescue => e
         Rails.logger.error "Error in contacts#check_duplicate: #{e.message}\n#{e.backtrace.join("\n")}"
         render json: { error: e.message }, status: :internal_server_error
+      end
+
+      # POST /api/v1/contacts/check_duplicates
+      # Plural duplicate lookup used by the New Contact form (matches the
+      # leads/accounts shape). Returns an array of matches with matchedField
+      # so the UI can hard-block email and soft-warn phone. Phone comparison
+      # is digit-only so (303) 555-1212 matches 3035551212.
+      def check_duplicates
+        return unless authorize_action!('crm', 'read')
+
+        email = params[:email].to_s.strip.downcase
+        phone = params[:phone].to_s.gsub(/[^0-9]/, '')
+
+        if email.blank? && phone.blank?
+          render json: { duplicates: [] }
+          return
+        end
+
+        # STRICT TENANT ISOLATION: only this company's contacts.
+        scope = @company.contacts
+
+        conditions = []
+        values     = []
+        if email.present?
+          conditions << 'LOWER(email) = ?'
+          values << email
+        end
+        if phone.present?
+          conditions << "regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = ?"
+          values << phone
+        end
+
+        matches = scope.where(conditions.join(' OR '), *values).limit(5)
+
+        same_type = matches.map { |c|
+          c_phone = c.phone.to_s.gsub(/[^0-9]/, '')
+          matched = if email.present? && c.email.to_s.downcase == email
+                      'email'
+                    elsif phone.present? && c_phone == phone
+                      'phone'
+                    else
+                      'email'
+                    end
+          {
+            id: c.id,
+            firstName: c.first_name,
+            lastName: c.last_name,
+            email: c.email,
+            phone: c.phone,
+            matchedField: matched
+          }
+        }
+
+        # Cross-entity awareness: surface leads/accounts that share this
+        # email/phone (warnings only, never block). entityType lets the UI
+        # label and link them correctly.
+        cross = IdentityResolver.new(@company, email: email, phone: phone)
+                                .all(exclude: nil)
+                                .reject { |m| m.type == :contact }
+                                .map { |m|
+          {
+            id: m.record.id,
+            firstName: m.record.try(:first_name),
+            lastName: m.record.try(:last_name),
+            name: m.name.presence,
+            email: m.record.try(:email),
+            phone: m.record.try(:phone),
+            matchedField: m.matched,
+            entityType: m.type.to_s,
+            converted: m.converted
+          }
+        }
+
+        render json: { duplicates: same_type + cross }
+      rescue => e
+        Rails.logger.error "[ContactsController#check_duplicates] #{e.class}: #{e.message}"
+        render json: { duplicates: [] }
       end
 
       # POST /api/v1/contacts/quick_create

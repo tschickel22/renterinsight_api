@@ -195,6 +195,11 @@ class Deal < ApplicationRecord
   # company opts in via AccountingSettings.auto_post_deals; otherwise the deal sits in
   # the Deal Approvals queue until reviewed.
   after_commit :auto_post_closing_to_accounting, on: [:create, :update], if: -> { saved_change_to_stage? && stage == 'closed_won' && !gl_posted? }
+  # When this deal closes won on a vehicle, every OTHER open deal on that same
+  # vehicle just lost the home — notify each of those reps to choose a new one.
+  # Fires on the closed_won transition whether closed via mark_as_won or a direct
+  # stage update (just_closed_won? keys off saved_change_to_stage?).
+  after_commit :notify_home_sold_other_deals, if: -> { just_closed_won? && vehicle_id.present? }
 
   def auto_post_closing_to_accounting
     settings = AccountingSettings.for_company(company)
@@ -781,7 +786,13 @@ class Deal < ApplicationRecord
   rescue StandardError => e
     Rails.logger.error "[Deal] sync_vehicle_sold_status failed for deal #{id}: #{e.message}"
   end
-  
+
+  def notify_home_sold_other_deals
+    NotifyHomeSoldOtherDealsService.call(self)
+  rescue StandardError => e
+    Rails.logger.error "[Deal] notify_home_sold_other_deals failed for deal #{id}: #{e.message}"
+  end
+
   # Fire custom lifecycle webhook events on stage transitions
   def fire_lifecycle_webhooks
     event = case stage

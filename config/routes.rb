@@ -1311,6 +1311,7 @@ Rails.application.routes.draw do
           get :stats
           post :bulk_create
           post :check_duplicate
+          post :check_duplicates
           post :quick_create
         end
         
@@ -1374,6 +1375,8 @@ Rails.application.routes.draw do
           get :export
           post :convert_lead
           post :bulk_update
+          # Soft duplicate lookup for the New Account form (name/email/phone match).
+          post :check_duplicates
         end
         
         # Nested resources for accounts
@@ -2078,7 +2081,9 @@ Rails.application.routes.draw do
       post 'refresh', to: 'login#refresh'
       get 'verify', to: 'login#verify'
       get 'me', to: 'login#me'
-      
+      # Re-verify the signed-in user's own password (e.g. Deal Desk "Employee View" reveal).
+      post 'verify_password', to: 'login#verify_password'
+
       # Password Reset
       post 'request_password_reset', to: 'password_reset#request_reset'
       post 'verify_reset_token', to: 'password_reset#verify_token'
@@ -2258,6 +2263,11 @@ Rails.application.routes.draw do
 
       # ==================== LEADS ====================
       resources :leads, only: %i[index show create update destroy] do
+        collection do
+          # Soft duplicate lookup for the New Lead form (email/phone match).
+          post :check_duplicates
+        end
+
         # Member routes (actions on specific lead)
         member do
           # Notes

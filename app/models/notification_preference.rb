@@ -31,6 +31,7 @@ class NotificationPreference < ApplicationRecord
     deal_stage_changed: { in_app: true, email: false, sms: false },
     deal_won: { in_app: true, email: true, sms: false },
     deal_lost: { in_app: true, email: false, sms: false },
+    home_sold_choose_new_home: { in_app: true, email: false, sms: false },
     
     # Finance notifications
     payment_received: { in_app: true, email: false, sms: false },

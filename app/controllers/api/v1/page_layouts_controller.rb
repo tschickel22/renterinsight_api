@@ -135,6 +135,19 @@ module Api
 
       private
 
+      # Industry label resolver — pulls the company's resolved labels (per-industry
+      # defaults merged with company overrides) so field labels follow the same
+      # vocabulary as the rest of the app. MH => "Home", RV => "Unit", etc.
+      def industry_labels
+        @industry_labels ||= (@company.respond_to?(:resolved_labels) ? @company.resolved_labels : {}) || {}
+      end
+
+      # Look up a single label key with a fallback. Title-cases nothing — the
+      # stored label values are already display-ready (e.g. "Home", "Unit").
+      def ilabel(key, fallback)
+        industry_labels[key.to_s].presence || fallback
+      end
+
       # Merge company-specific option overrides into standard field definitions
       def apply_option_overrides(fields, module_name)
         # Fetch all overrides for this module in one query
@@ -383,7 +396,7 @@ module Api
             options: ['manufactured', 'rv', 'tiny_home', 'modular'] },
           { key: 'budget_range', label: 'Budget Range', type: 'select', source: 'standard', required: false, protected: false,
             options: ['Under $50k', '$50k-$100k', '$100k-$150k', '$150k-$200k', '$200k-$300k', '$300k+'] },
-          { key: 'preferred_vehicle_id', label: 'Interested Home', type: 'vehicle', source: 'standard', required: false, protected: false },
+          { key: 'preferred_vehicle_id', label: "Interested #{ilabel('vehicle', 'Home')}", type: 'vehicle', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
         ]
       end
@@ -417,7 +430,7 @@ module Api
             options: ['Immediate', '1-3 months', '3-6 months', '6-12 months', '12+ months'] },
           { key: 'rv_experience', label: 'RV Experience', type: 'select', source: 'standard', required: false, protected: false,
             options: ['First Time Buyer', 'Some Experience', 'Experienced', 'Very Experienced'] },
-          { key: 'vehicle_id', label: 'Interested Home', type: 'vehicle_picker', source: 'standard', required: false, protected: false },
+          { key: 'vehicle_id', label: "Interested #{ilabel('vehicle', 'Home')}", type: 'vehicle_picker', source: 'standard', required: false, protected: false },
           { key: 'preferred_bedrooms', label: 'Preferred Bedrooms', type: 'select', source: 'standard', required: false, protected: false,
             options: ['1', '2', '3', '4', '5', '6+'] },
           { key: 'preferred_bathrooms', label: 'Preferred Bathrooms', type: 'select', source: 'standard', required: false, protected: false,
