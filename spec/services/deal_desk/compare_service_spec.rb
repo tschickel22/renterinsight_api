@@ -109,4 +109,56 @@ RSpec.describe DealDesk::CompareService do
     expect { described_class.new(company: company, deal: dealless).call }
       .to raise_error(ArgumentError, /no anchor unit/)
   end
+
+  describe 'price resolution (msrp vs sale_price)' do
+    # Regression: a candidate priced via msrp with NO sale_price (the common case —
+    # sale_price is only populated when a special discount is enabled) was previously
+    # read as $0, yielding a $0/mo payment and a negative gross equal to its cost.
+    let!(:msrp_only) do
+      company.vehicles.create!(
+        listing_type: 'manufactured_home', status: 'available',
+        year: 2026, make: 'Kabco', model: 'Madison', serial_number: 'MSRP1',
+        bedrooms: 3, bathrooms: 2.0,
+        msrp: 72_000, sale_price: nil, dealer_cost: 52_000,
+        location_id: home_loc.id, date_in_stock: 40.days.ago
+      )
+    end
+
+    it 'resolves a candidate price from msrp when sale_price is blank' do
+      result = described_class.new(company: company, deal: deal).call
+      row = result[:candidates].find { |c| c[:vehicle_id] == msrp_only.id }
+
+      expect(row).not_to be_nil
+      expect(row[:sale_price]).to eq(72_000.0)
+      expect(row[:monthly_payment]).to be > 0
+      expect(row[:dealer_gross]).to eq(20_000.0) # 72,000 - 52,000, never negative-cost
+    end
+  end
+
+  describe 'anchor uses the deal negotiated price/cost' do
+    # The anchor is this customer's real deal; its payment must match the deal, not raw
+    # inventory. Persist a deal whose selling_price/unit_cost diverge from the unit.
+    let(:negotiated_deal) do
+      company.deals.create!(
+        name: 'Negotiated', stage: 'negotiation', vehicle: anchor, location_id: home_loc.id,
+        contact: company.contacts.create!(first_name: 'Pat', last_name: 'Buyer'),
+        selling_price: 64_000, unit_cost: 51_000
+      )
+    end
+
+    it 'centers the price band on the deal selling_price, not inventory sale_price' do
+      band = described_class.new(company: company, deal: negotiated_deal).call[:price_band]
+      expect(band[:center]).to eq(64_000.0)      # deal price, not the 70,000 inventory price
+      expect(band[:min]).to eq(49_000.0)
+      expect(band[:max]).to eq(79_000.0)
+    end
+
+    it 'computes the anchor row from the deal price/cost' do
+      anchor_row = described_class.new(company: company, deal: negotiated_deal).call[:anchor]
+      expect(anchor_row[:sale_price]).to eq(64_000.0)
+      # Open deal => vehicle_landed_cost reads the LIVE vehicle structured_cost (dealer_cost
+      # 50,000), which takes precedence over the unit_cost mirror. Gross = 64,000 - 50,000.
+      expect(anchor_row[:dealer_gross]).to eq(14_000.0)
+    end
+  end
 end

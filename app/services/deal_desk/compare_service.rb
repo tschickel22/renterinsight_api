@@ -70,20 +70,28 @@ module DealDesk
                       .where(status: candidate_statuses)
                       .where.not(id: @anchor.id)
 
-      band = price_band
-      scope = if band[:min] && band[:max]
-                scope.where(sale_price: band[:min]..band[:max])
-              else
-                scope.where.not(sale_price: nil)
-              end
-
       # Location scoping. Default: deal's location only. Widened: all @company locations
       # (the deliberate cross-location exception — still @company-isolated).
       unless @include_other_locations
         scope = scope.where(location_id: @anchor_location_id) if @anchor_location_id
       end
 
-      scope.to_a
+      # Price-band filter is applied IN RUBY (not SQL) against the RESOLVED price
+      # (Vehicle#total_home_price — honors msrp + packages + discount), because the raw
+      # sale_price column is only populated for units with a special discount. Filtering
+      # on the column alone silently dropped (or zero-financed) every list-priced unit.
+      units = scope.to_a
+      band = price_band
+      if band[:min] && band[:max]
+        units.select! do |v|
+          p = resolved_price(v)
+          p.positive? && p >= band[:min] && p <= band[:max]
+        end
+      else
+        units.select! { |v| resolved_price(v).positive? }
+      end
+
+      units
     end
 
     def candidate_statuses
@@ -99,7 +107,7 @@ module DealDesk
     # --- Solve + decorate -------------------------------------------------------
     def decorate_and_solve(units)
       inputs = units.map do |v|
-        { vehicle_id: v.id, price: v.sale_price.to_f, unit_cost: unit_cost_for(v), pack_amount: pack_amount }
+        { vehicle_id: v.id, price: resolved_price(v), unit_cost: unit_cost_for(v), pack_amount: pack_amount }
       end
       solved = Solver.new(@base).batch_solve(inputs, target_payment: @target)
 
@@ -108,11 +116,25 @@ module DealDesk
       end
     end
 
-    # Dealer cost for gross. Vehicles populate cost via `dealer_cost`/`total_cost`; `cost`
-    # is often nil. Returns nil only when no cost is known — so the engine reports gross as
-    # indeterminate (nil) rather than treating missing cost as $0.
+    # Candidate price = the resolved list price the rest of the app shows
+    # (Vehicle#total_home_price: msrp + included packages, honoring special discount),
+    # NOT the raw sale_price column (only set when a special discount is enabled). The
+    # anchor uses the deal's negotiated price instead — see resolved_anchor_price.
+    def resolved_price(vehicle)
+      p = vehicle.respond_to?(:total_home_price) ? vehicle.total_home_price.to_f : 0.0
+      return p if p.positive?
+
+      # Fallbacks if total_home_price is unavailable/zero: msrp, then sale_price.
+      [vehicle.msrp.to_f, vehicle.sale_price.to_f].find(&:positive?) || 0.0
+    end
+
+    # Dealer cost for gross. Uses Vehicle#structured_cost (total_cost, else dealer_cost +
+    # freight + pdi), the SAME basis the deal/GP/COGS use. Returns nil when no cost is
+    # known — so the engine reports gross as indeterminate (nil) rather than treating
+    # missing cost as $0.
     def unit_cost_for(vehicle)
-      cost = vehicle.cost || vehicle.dealer_cost || vehicle.total_cost
+      cost = vehicle.respond_to?(:structured_cost) ? vehicle.structured_cost : nil
+      cost ||= vehicle.cost || vehicle.dealer_cost || vehicle.total_cost
       cost&.to_f
     end
 
@@ -130,7 +152,7 @@ module DealDesk
         name: [vehicle.year, vehicle.make, vehicle.model].compact.join(' '),
         bedrooms: vehicle.bedrooms,
         bathrooms: vehicle.bathrooms.to_f,
-        sale_price: vehicle.sale_price.to_f,
+        sale_price: resolved_price(vehicle),
         status: vehicle.status,
         location_id: vehicle.location_id,
         location_name: location_name(vehicle.location_id),
@@ -147,8 +169,8 @@ module DealDesk
     end
 
     def anchor_row
-      r = Engine.compute(@base.merge(price: @anchor.sale_price.to_f,
-                                     unit_cost: unit_cost_for(@anchor), pack_amount: pack_amount))
+      r = Engine.compute(@base.merge(price: resolved_anchor_price,
+                                     unit_cost: resolved_anchor_cost, pack_amount: pack_amount))
       days = days_on_lot(@anchor)
       tier = aged_tier(days)
       {
@@ -156,12 +178,33 @@ module DealDesk
         stock_number: @anchor.stock_number, inventory_id: @anchor.inventory_id,
         name: [@anchor.year, @anchor.make, @anchor.model].compact.join(' '),
         bedrooms: @anchor.bedrooms, bathrooms: @anchor.bathrooms.to_f,
-        sale_price: @anchor.sale_price.to_f, status: @anchor.status,
+        sale_price: resolved_anchor_price, status: @anchor.status,
         location_id: @anchor.location_id, location_name: location_name(@anchor.location_id),
         days_on_lot: days, aged_tier: tier, is_aged: !tier.nil?, is_cross_location: false,
         monthly_payment: r.monthly_payment, amount_financed: r.amount_financed,
         out_the_door: r.out_the_door, dealer_gross: r.gross&.total
       }
+    end
+
+    # Anchor PRICE = the deal's NEGOTIATED home price, not raw inventory. The anchor is
+    # this customer's actual deal, so its payment must match the deal: use the home line
+    # item price (== selling_price via the mirror), falling back to selling_price, then to
+    # the resolved inventory price for legacy deals that carry neither.
+    def resolved_anchor_price
+      deal_price = @deal.home_line_item_price || @deal.selling_price
+      dp = deal_price.to_f
+      dp.positive? ? dp : resolved_price(@anchor)
+    end
+
+    # Anchor COST = the deal's unit cost basis (Deal#vehicle_landed_cost: live vehicle
+    # structured cost while open, snapshot once closed, line-item mirror fallback) — the
+    # SAME basis GP/COGS use. Unit-only (no reconditioning) so the anchor's gross compares
+    # apples-to-apples with candidates, which can only offer unit cost. Falls back to the
+    # vehicle's structured cost; nil when no cost exists anywhere (gross indeterminate).
+    def resolved_anchor_cost
+      ac = @deal.respond_to?(:vehicle_landed_cost) ? @deal.vehicle_landed_cost : nil
+      ac ||= unit_cost_for(@anchor)
+      ac&.to_f
     end
 
     # --- Ranking ----------------------------------------------------------------
@@ -220,9 +263,11 @@ module DealDesk
     end
 
     # Soft price window around the anchor's price, from the company setting (±$ or ±%).
+    # Centers on the anchor's RESOLVED price (deal-negotiated price, falling back to
+    # inventory) so the candidate window matches the price the desk is actually working.
     def price_band
       @price_band ||= begin
-        anchor_price = (@anchor.sale_price || @anchor.msrp)&.to_f
+        anchor_price = resolved_anchor_price
         if anchor_price.nil? || anchor_price.zero?
           { center: nil, min: nil, max: nil }
         else
