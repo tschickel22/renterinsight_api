@@ -6,7 +6,7 @@ module WorkflowEngine
   module StepExecutors
     class ClassifyReply < Base
       ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'.freeze
-      MODEL = 'claude-sonnet-4-20250514'.freeze
+      MODEL = 'claude-sonnet-4-6'.freeze
 
       def call
         cfg = @step['config'] || {}

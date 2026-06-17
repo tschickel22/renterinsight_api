@@ -11,7 +11,7 @@ require 'json'
 class SocialPostGeneratorService
   class Error < StandardError; end
 
-  MODEL      = 'claude-sonnet-4-20250514'
+  MODEL      = 'claude-sonnet-4-6'
   MAX_TOKENS = 800
   MAX_IMAGES = 4
   VERSION    = 'spg-2026-04-19'

@@ -4,7 +4,7 @@ require 'json'
 class AiDigestService
   class DigestError < StandardError; end
 
-  MODEL = 'claude-sonnet-4-20250514'
+  MODEL = 'claude-sonnet-4-6'
   MAX_TOKENS = 600
 
   def initialize(api_key)

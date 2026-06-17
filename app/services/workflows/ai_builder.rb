@@ -4,7 +4,7 @@ module Workflows
     class CreditLimitError < StandardError; end
 
     CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages'
-    GENERATE_MODEL = 'claude-sonnet-4-20250514'
+    GENERATE_MODEL = 'claude-sonnet-4-6'
     REFINE_MODEL = 'claude-haiku-4-5-20251001'
     GENERATE_MAX_TOKENS = 4096
     REFINE_MAX_TOKENS = 2048

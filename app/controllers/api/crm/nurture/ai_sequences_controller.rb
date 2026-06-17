@@ -442,7 +442,7 @@ module Api
           request['x-api-key'] = api_key
           request['anthropic-version'] = '2023-06-01'
           request.body = {
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-6',
             max_tokens: 4000,
             system: system_prompt,
             messages: [{ role: 'user', content: user_prompt }]

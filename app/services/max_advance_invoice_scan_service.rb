@@ -19,7 +19,7 @@ class MaxAdvanceInvoiceScanService
   class ScanError < StandardError; end
 
   CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages'
-  CLAUDE_MODEL   = 'claude-sonnet-4-20250514'
+  CLAUDE_MODEL   = 'claude-sonnet-4-6'
   MAX_SIZE       = 25_000_000
 
   # vehicle_invoice money attributes the scan maps to.
