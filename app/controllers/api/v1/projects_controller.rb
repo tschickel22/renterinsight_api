@@ -120,7 +120,7 @@ module Api
                     only: %i[id first_name last_name email]
                   },
                   contractor_assignments: {
-                    only: %i[id status assigned_at notified_at notification_paused_at notification_skipped_at review_status submitted_for_review_at review_notified_at],
+                    only: %i[id status assigned_at notified_at notification_paused_at notification_skipped_at review_status submitted_for_review_at review_notified_at client_review_required client_review_status],
                     include: {
                       contractor: {
                         only: %i[id name contact_name trade_type phone email]
