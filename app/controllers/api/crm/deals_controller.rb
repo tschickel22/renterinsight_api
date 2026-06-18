@@ -151,10 +151,16 @@ module Api
         
         unless current_user.effective_admin? || view_scope == 'all'
           # Default to "My Deals" for non-admin users
-          company_deals = company_deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?', 
+          company_deals = company_deals.where('deals.user_id = ? OR deals.primary_salesperson_id = ? OR deals.assigned_to = ?',
                                              current_user.id, current_user.id, current_user.email)
         end
-        
+
+        # Filter by deal owner (owner_id), matching the index/list Owner filter.
+        # 'null' = unassigned.
+        if params[:owner_id].present?
+          company_deals = params[:owner_id] == 'null' ? company_deals.where(owner_id: nil) : company_deals.where(owner_id: params[:owner_id])
+        end
+
         # Overall metrics
         total_value = company_deals.open.sum(:value)
         total_count = company_deals.open.count
