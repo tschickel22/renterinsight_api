@@ -13,13 +13,13 @@ module Api
       # embed/portal endpoints effectively ungated.)
       before_action :authorize_settings_read!, only: [
         :show_operational, :show_communication, :show_company_profile,
-        :show_embed_inventory_config, :show_form_states
+        :show_embed_inventory_config, :show_form_states, :show_project_management
       ]
       before_action :authorize_settings_update!, only: [
         :update_operational, :update_communication, :update_rbac,
         :save_communication_settings, :clear_communication_settings, :update_company_profile,
         :update_embed_inventory_config, :show_portal_modules, :update_portal_modules,
-        :update_form_states
+        :update_form_states, :update_project_management
       ]
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
@@ -128,6 +128,52 @@ module Api
         render json: {
           errors: [e.message]
         }, status: :unprocessable_entity
+      end
+
+      # GET /api/v1/company_settings/project_management
+      # Project Management module settings (e.g. require_client_approval gate).
+      #
+      # IMPORTANT: this reads/writes the setting under the LOWERCASE 'company' scope_type
+      # to match the model reader ContractorAssignment#client_approval_enabled?, which calls
+      # Setting.get('company', company_id, 'project_management'). The generic /api/settings
+      # controller writes capitalized 'Company', so it must NOT be used for this key — the
+      # casing would not match and the gate would silently never engage.
+      def show_project_management
+        settings = Setting.get('company', @company.id, 'project_management') || {}
+        settings = settings.stringify_keys if settings.respond_to?(:stringify_keys)
+
+        render json: {
+          project_management: {
+            'require_client_approval' => settings['require_client_approval'] == true
+          }
+        }
+      end
+
+      # PATCH /api/v1/company_settings/project_management
+      def update_project_management
+        raw = params[:project_management] || {}
+        raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+        raw = raw.stringify_keys if raw.respond_to?(:stringify_keys)
+
+        require_client_approval = ActiveModel::Type::Boolean.new.cast(raw['require_client_approval'])
+
+        # Merge onto any existing project_management settings so future keys aren't wiped.
+        existing = Setting.get('company', @company.id, 'project_management') || {}
+        existing = existing.stringify_keys if existing.respond_to?(:stringify_keys)
+        merged = existing.merge('require_client_approval' => require_client_approval == true)
+
+        Setting.set('company', @company.id, 'project_management', merged)
+
+        render json: {
+          project_management: {
+            'require_client_approval' => require_client_approval == true
+          },
+          message: 'Project management settings updated successfully'
+        }
+      rescue => e
+        Rails.logger.error "❌ [CompanySettings#update_project_management] Error: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: { errors: [e.message] }, status: :unprocessable_entity
       end
 
       # GET /api/v1/company_settings/branding

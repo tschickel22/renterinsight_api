@@ -498,6 +498,171 @@ class ProjectNotificationService
     Rails.logger.error("[ProjectNotificationService] Error notifying review rejected: #{e.message}")
   end
 
+  # ── CUSTOMER APPROVAL FLOW (only when company setting require_client_approval is on)
+  #
+  # Contractor submitted work AND customer approval is required → email the customer
+  # asking them to review/approve on the public progress page or logged-in portal.
+  def self.notify_client_review_requested(assignment)
+    project = resolve_project(assignment)
+    return unless project
+
+    client_email = resolve_client_email(project)
+    unless client_email.present?
+      Rails.logger.info("[ProjectNotificationService] client review requested: no client email for project #{project.id}")
+      return
+    end
+
+    company = project.company
+    task_name = resolve_task_name(assignment)
+    client_name = resolve_client_name(project) || 'there'
+    summary = assignment.completion_summary.present? ? "<p><em>What was done:</em> #{assignment.completion_summary.to_s.truncate(300)}</p>" : ''
+
+    subject = "#{project.name} — Please review completed work: #{task_name}"
+
+    portal_link = if project.client_access_token.present?
+      url = "#{frontend_base_url}/p/#{project.client_access_token}"
+      <<~CTA
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="#{url}"
+             style="display: inline-block; background-color: #2563eb; color: #ffffff !important;
+                    text-decoration: none; font-weight: 600; padding: 12px 28px; border-radius: 6px;
+                    font-size: 14px;">
+            Review the Work
+          </a>
+        </div>
+        <p style="font-size: 12px; color: #888; text-align: center; margin-top: 8px;">
+          Or copy and paste this URL into your browser:<br>
+          <a href="#{url}" style="color: #2563eb;">#{url}</a>
+        </p>
+      CTA
+    else
+      ''
+    end
+
+    body = <<~HTML
+      <p>Hi #{client_name},</p>
+      <p>A contractor has completed work on <strong>#{task_name}</strong> for your project, and it's ready for your review.</p>
+      #{summary}
+      <p>Since you're on-site, please take a look and let us know whether the work is approved or needs attention.</p>
+      #{portal_link}
+      <p>Thank you,<br>#{company.name}</p>
+    HTML
+
+    CommunicationService.send_email(
+      company: company,
+      to: client_email,
+      subject: subject,
+      body: wrap_html_minimal(body, subject),
+      category: 'project_notification',
+      communicable: project
+    )
+    Rails.logger.info("[ProjectNotificationService] client review request email sent to #{client_email} for assignment #{assignment.id}")
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] Error notifying client review requested: #{e.message}")
+  end
+
+  # Customer approved the work (gate 1) → bell + toast + email to dealer prompting the
+  # final confirm that actually closes the task.
+  def self.notify_client_approved(assignment)
+    company = assignment.company
+    project = resolve_project(assignment)
+    task_name = resolve_task_name(assignment)
+    on_behalf = assignment.acted_on_behalf_by_id.present?
+    actor_label = on_behalf ? 'on the customer\'s behalf' : 'by the customer'
+
+    primary_recipient = resolve_primary_recipient(assignment)
+    admins = company.users.active.where(role: %w[admin company_admin platform_admin manager super_admin])
+    recipients = ([primary_recipient] + admins.to_a).compact.uniq
+
+    recipients.each do |user|
+      create_bell_notification(
+        recipient: user,
+        company: company,
+        type: :contractor_review_submitted,
+        title: "Customer Approved: #{task_name}",
+        message: "#{task_name} was approved #{actor_label} — ready for your final confirmation.",
+        notifiable: assignment
+      )
+
+      broadcast_review_toast(user, {
+        type: 'contractor_review',
+        title: 'Customer Approved',
+        description: "#{task_name} approved #{actor_label} — confirm to close",
+        entityType: 'contractor_review',
+        entityId: assignment.id,
+        link: '/projects/reviews',
+        linkText: 'Confirm Now'
+      })
+    end
+
+    if primary_recipient&.email.present?
+      notes = assignment.client_review_notes.present? ? "<p><em>Customer notes:</em> #{assignment.client_review_notes}</p>" : ''
+      subject = "Customer approved #{task_name} — confirm to close"
+      body = <<~HTML
+        <p>Hello #{primary_recipient.full_name},</p>
+        <p>The customer has approved the completed work on <strong>#{task_name}</strong>#{on_behalf ? ' (recorded on their behalf)' : ''} for <strong>#{project&.name}</strong>.</p>
+        #{notes}
+        <p>Please log in to give the final confirmation, which will close out the task.</p>
+        <p>Thank you,<br>#{company.name}</p>
+      HTML
+      send_dealer_review_email(primary_recipient, company, subject, body, assignment)
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] Error notifying client approved: #{e.message}")
+  end
+
+  # Customer rejected or requested a revision (gate 1) → notify the contractor to redo
+  # the work AND notify the dealer that the customer pushed back.
+  def self.notify_client_rejected(assignment)
+    company = assignment.company
+    contractor = assignment.contractor
+    project = resolve_project(assignment)
+    task_name = resolve_task_name(assignment)
+    rejected = assignment.client_review_status == ContractorAssignment::CLIENT_REVIEW_REJECTED
+    on_behalf = assignment.acted_on_behalf_by_id.present?
+
+    # 1) Contractor: redo the work
+    if contractor&.email.present?
+      subject = "#{rejected ? 'Work Rejected' : 'Revision Requested'} by Customer: #{task_name}"
+      body = <<~HTML
+        <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
+        <p>The customer has #{rejected ? 'rejected' : 'requested a revision on'} your work for <strong>#{task_name}</strong>.</p>
+        #{assignment.client_review_notes.present? ? "<blockquote style=\"border-left: 3px solid #f59e0b; padding-left: 12px; margin: 12px 0; color: #92400e;\">#{assignment.client_review_notes}</blockquote>" : ''}
+        <p>Please log in to the Contractor Portal, make the requested changes, and resubmit for review.</p>
+        <p>Thank you,<br>#{company.name}</p>
+      HTML
+      send_contractor_review_email(contractor, company, subject, body, assignment)
+    end
+
+    # 2) Dealer: bell + toast for visibility
+    primary_recipient = resolve_primary_recipient(assignment)
+    admins = company.users.active.where(role: %w[admin company_admin platform_admin manager super_admin])
+    recipients = ([primary_recipient] + admins.to_a).compact.uniq
+
+    recipients.each do |user|
+      create_bell_notification(
+        recipient: user,
+        company: company,
+        type: :contractor_review_submitted,
+        title: "Customer #{rejected ? 'Rejected' : 'Requested Revision'}: #{task_name}",
+        message: "The customer #{rejected ? 'rejected' : 'requested a revision on'} #{task_name}#{on_behalf ? ' (recorded on their behalf)' : ''}. The contractor has been asked to redo it.",
+        notifiable: assignment
+      )
+
+      broadcast_review_toast(user, {
+        type: 'contractor_review',
+        title: rejected ? 'Customer Rejected Work' : 'Customer Requested Revision',
+        description: "#{task_name} sent back to the contractor",
+        entityType: 'contractor_review',
+        entityId: assignment.id,
+        link: '/projects/reviews',
+        linkText: 'View'
+      })
+    end
+  rescue => e
+    Rails.logger.error("[ProjectNotificationService] Error notifying client rejected: #{e.message}")
+  end
+
   # ── Work log added → bell notification for dealer users ──────────
   def self.notify_work_log_added(work_log, assignment)
     return unless work_log.author_type == 'contractor'

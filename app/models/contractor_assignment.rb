@@ -8,6 +8,20 @@ class ContractorAssignment < ApplicationRecord
 
   REVIEWABLE_STATUSES = [REVIEW_STATUS_PENDING, REVIEW_STATUS_APPROVED, REVIEW_STATUS_REVISION_REQUESTED, REVIEW_STATUS_REJECTED].freeze
 
+  # Customer-facing approval gate (separate from the dealer review_status above).
+  # Only populated when the company setting project_management.require_client_approval
+  # is enabled AND the assignable is a ProjectPhaseTask. When enabled the customer is
+  # gate 1 (approve / reject / revise) and the dealer remains the closing gate 2.
+  CLIENT_REVIEW_PENDING = 'pending'
+  CLIENT_REVIEW_APPROVED = 'approved'
+  CLIENT_REVIEW_REVISION_REQUESTED = 'revision_requested'
+  CLIENT_REVIEW_REJECTED = 'rejected'
+
+  CLIENT_REVIEW_STATUSES = [
+    CLIENT_REVIEW_PENDING, CLIENT_REVIEW_APPROVED,
+    CLIENT_REVIEW_REVISION_REQUESTED, CLIENT_REVIEW_REJECTED
+  ].freeze
+
   # FK column was renamed contractor_id -> vendor_id in the unify-vendors migration.
   # Existing callers reference contractor_id; alias keeps them working.
   alias_attribute :contractor_id, :vendor_id
@@ -17,6 +31,7 @@ class ContractorAssignment < ApplicationRecord
   belongs_to :company
   belongs_to :assigned_by, class_name: 'User', optional: true
   belongs_to :reviewed_by, class_name: 'User', optional: true
+  belongs_to :acted_on_behalf_by, class_name: 'User', optional: true
 
   has_many :work_logs, class_name: 'AssignmentWorkLog', dependent: :destroy
 
@@ -24,11 +39,16 @@ class ContractorAssignment < ApplicationRecord
 
   after_commit :notify_on_assignment, on: :create
   after_commit :notify_on_review_changes, on: :update
+  after_commit :notify_on_client_review_changes, on: :update
 
   def submit_for_review!(summary: nil, photos: [])
     unless status.in?(%w[in_progress completed]) || review_status == REVIEW_STATUS_REVISION_REQUESTED
       raise StandardError, "Cannot submit for review from current status: #{status} / review: #{review_status}"
     end
+
+    # Determine whether the customer must approve this work before the dealer closes it.
+    # Decided at submit time so later changes to the company setting don't rewrite history.
+    requires_client = client_approval_enabled?
 
     update!(
       review_status: REVIEW_STATUS_PENDING,
@@ -37,8 +57,83 @@ class ContractorAssignment < ApplicationRecord
       completion_photos: photos.present? ? photos : completion_photos,
       status: 'completed',
       completed_at: completed_at || Time.current,
-      revision_count: review_status == REVIEW_STATUS_REVISION_REQUESTED ? (revision_count || 0) + 1 : (revision_count || 0)
+      revision_count: review_status == REVIEW_STATUS_REVISION_REQUESTED ? (revision_count || 0) + 1 : (revision_count || 0),
+      client_review_required: requires_client,
+      client_review_status: requires_client ? CLIENT_REVIEW_PENDING : nil,
+      client_reviewed_at: nil,
+      client_review_notes: nil,
+      acted_on_behalf_by_id: nil
     )
+  end
+
+  # Customer approves the work (gate 1). Does NOT close the task — the dealer still
+  # does the final confirm via approve_review!. Notification to the dealer fires from
+  # the after_commit hook below.
+  def client_approve!(notes: nil, acting_dealer: nil)
+    raise StandardError, "Customer approval is not required for this assignment" unless client_review_required?
+    raise StandardError, "Can only approve while customer review is pending" unless client_review_status == CLIENT_REVIEW_PENDING
+
+    update!(
+      client_review_status: CLIENT_REVIEW_APPROVED,
+      client_reviewed_at: Time.current,
+      client_review_notes: notes.presence || client_review_notes,
+      acted_on_behalf_by_id: acting_dealer&.id
+    )
+  end
+
+  # Customer requests a revision (gate 1). Reopens the task so the contractor can redo it,
+  # mirroring the dealer revision path but without a User reviewer.
+  def client_request_revision!(notes:, acting_dealer: nil)
+    raise StandardError, "Customer approval is not required for this assignment" unless client_review_required?
+    raise StandardError, "Can only request revision while customer review is pending" unless client_review_status == CLIENT_REVIEW_PENDING
+    raise StandardError, "Revision notes are required" if notes.blank?
+
+    update!(
+      client_review_status: CLIENT_REVIEW_REVISION_REQUESTED,
+      client_reviewed_at: Time.current,
+      client_review_notes: notes,
+      acted_on_behalf_by_id: acting_dealer&.id,
+      review_status: REVIEW_STATUS_REVISION_REQUESTED,
+      revision_notes: notes,
+      status: 'in_progress'
+    )
+  end
+
+  # Customer rejects the work (gate 1). Like a revision it reopens the task, but is recorded
+  # as a rejection rather than a revision request.
+  def client_reject!(notes: nil, acting_dealer: nil)
+    raise StandardError, "Customer approval is not required for this assignment" unless client_review_required?
+    raise StandardError, "Can only reject while customer review is pending" unless client_review_status == CLIENT_REVIEW_PENDING
+
+    update!(
+      client_review_status: CLIENT_REVIEW_REJECTED,
+      client_reviewed_at: Time.current,
+      client_review_notes: notes.presence || client_review_notes,
+      acted_on_behalf_by_id: acting_dealer&.id,
+      review_status: REVIEW_STATUS_REVISION_REQUESTED,
+      revision_notes: notes.presence || 'Rejected by customer',
+      status: 'in_progress'
+    )
+  end
+
+  # Dealer acts on the customer's behalf (e.g. customer approved verbally / in person, or
+  # never responds). Allowed any time while the customer gate is still pending. A note is
+  # REQUIRED so there's a record of why the dealer overrode the customer step.
+  def act_on_behalf!(dealer:, decision:, note:)
+    raise StandardError, "Customer approval is not required for this assignment" unless client_review_required?
+    raise StandardError, "Customer review is no longer pending" unless client_review_status == CLIENT_REVIEW_PENDING
+    raise StandardError, "A note is required when acting on the customer's behalf" if note.blank?
+
+    case decision.to_s
+    when 'approve'
+      client_approve!(notes: note, acting_dealer: dealer)
+    when 'request_revision'
+      client_request_revision!(notes: note, acting_dealer: dealer)
+    when 'reject'
+      client_reject!(notes: note, acting_dealer: dealer)
+    else
+      raise StandardError, "Unknown decision: #{decision.inspect} (expected approve, request_revision, or reject)"
+    end
   end
 
   def approve_review!(reviewer:, notes: nil)
@@ -89,7 +184,44 @@ class ContractorAssignment < ApplicationRecord
     review_status.present?
   end
 
+  def client_review_pending?
+    client_review_required? && client_review_status == CLIENT_REVIEW_PENDING
+  end
+
+  def client_review_approved?
+    client_review_status == CLIENT_REVIEW_APPROVED
+  end
+
+  # True when the dealer should be prompted to do the final confirm: customer has
+  # approved (gate 1 cleared) but the dealer review is still pending (gate 2 open).
+  def awaiting_dealer_final_confirm?
+    client_review_approved? && review_status == REVIEW_STATUS_PENDING
+  end
+
   private
+
+  # Reads the company-level toggle Setting.get('company', company_id, 'project_management')
+  # => { 'require_client_approval' => true/false }. Only ProjectPhaseTask assignments are
+  # ever gated; service tickets and other assignables stay dealer-only.
+  #
+  # A task that is NOT visible_to_client can never be customer-approved: the customer
+  # cannot see it on the public progress page, so a customer gate would be a dead end
+  # (stuck "awaiting customer" forever). For hidden tasks we skip the gate entirely and
+  # fall back to the dealer-only flow, regardless of the company setting.
+  def client_approval_enabled?
+    return false unless assignable_type == 'ProjectPhaseTask'
+    return false unless assignable&.visible_to_client
+
+    cfg = Setting.get('company', company_id, 'project_management')
+    return false if cfg.blank?
+
+    # Setting values are JSON-deserialized; tolerate string or symbol keys.
+    flag = cfg.is_a?(Hash) ? (cfg['require_client_approval'] || cfg[:require_client_approval]) : false
+    ActiveModel::Type::Boolean.new.cast(flag) || false
+  rescue => e
+    Rails.logger.error("[ContractorAssignment] Failed to read project_management setting: #{e.message}")
+    false
+  end
 
   def sync_phase_task_completed!
     return unless assignable.present?
@@ -156,6 +288,12 @@ class ContractorAssignment < ApplicationRecord
 
     case review_status
     when REVIEW_STATUS_PENDING
+      # When the customer is gate 1, the contractor's submission goes to the
+      # CUSTOMER first, not the dealer. notify_on_client_review_changes handles
+      # that path. Skip the dealer review-submitted announcement/email here so
+      # the dealer isn't prompted to confirm before the customer has weighed in.
+      return if client_review_required? && client_review_status == CLIENT_REVIEW_PENDING
+
       # Immediate: bell + ActionCable toast for dealers
       ProjectNotificationService.announce_review_submitted(self)
       # Batched email:
@@ -184,6 +322,30 @@ class ContractorAssignment < ApplicationRecord
     end
   rescue => e
     Rails.logger.error("[ContractorAssignment] Notification error on review change: #{e.message}")
+  end
+
+  # Fires when the customer-approval gate changes state. Separate from
+  # notify_on_review_changes (which watches the dealer review_status) so the two
+  # gates notify independently and cleanly.
+  #
+  #   nil -> pending              : contractor submitted; ask the CUSTOMER to review
+  #   pending -> approved         : customer (or dealer on their behalf) approved;
+  #                                 prompt the dealer to do the final confirm
+  #   pending -> revision/rejected: customer pushed back; tell the contractor to redo
+  #                                 and notify the dealer
+  def notify_on_client_review_changes
+    return unless saved_change_to_client_review_status?
+
+    case client_review_status
+    when CLIENT_REVIEW_PENDING
+      ProjectNotificationService.notify_client_review_requested(self)
+    when CLIENT_REVIEW_APPROVED
+      ProjectNotificationService.notify_client_approved(self)
+    when CLIENT_REVIEW_REVISION_REQUESTED, CLIENT_REVIEW_REJECTED
+      ProjectNotificationService.notify_client_rejected(self)
+    end
+  rescue => e
+    Rails.logger.error("[ContractorAssignment] Notification error on client review change: #{e.message}")
   end
 
   def resolve_project_id

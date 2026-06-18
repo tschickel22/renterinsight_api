@@ -4,7 +4,7 @@ module Api
   module V1
     class ContractorReviewsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_assignment, only: [:show, :approve, :request_revision, :reject]
+      before_action :set_assignment, only: [:show, :approve, :request_revision, :reject, :act_on_behalf]
 
       # GET /api/v1/contractor-reviews
       def index
@@ -12,7 +12,7 @@ module Api
 
         assignments = ContractorAssignment.where(company_id: @company.id)
           .where.not(review_status: nil)
-          .includes(:contractor, :reviewed_by, :assignable)
+          .includes(:contractor, :reviewed_by, :acted_on_behalf_by, :assignable)
 
         # Filter by review_status
         if params[:review_status].present?
@@ -21,6 +21,14 @@ module Api
           else
             assignments = assignments.where(review_status: params[:review_status])
           end
+        end
+
+        # Filter by customer-approval gate (e.g. 'pending' = awaiting the customer)
+        if params[:client_review_status].present?
+          assignments = assignments.where(
+            client_review_required: true,
+            client_review_status: params[:client_review_status]
+          )
         end
 
         # Filter by assignable_type
@@ -44,7 +52,8 @@ module Api
           pending: base_scope.where(review_status: 'pending_review').count,
           approved: base_scope.where(review_status: 'approved').count,
           revision_requested: base_scope.where(review_status: 'revision_requested').count,
-          rejected: base_scope.where(review_status: 'rejected').count
+          rejected: base_scope.where(review_status: 'rejected').count,
+          awaiting_customer: base_scope.where(client_review_required: true, client_review_status: 'pending').count
         }
 
         # Sort
@@ -149,6 +158,35 @@ module Api
         render json: { error: e.message }, status: :unprocessable_entity
       end
 
+      # POST /api/v1/contractor-reviews/:id/act_on_behalf
+      # Dealer records the customer's decision on their behalf (verbal/in-person
+      # approval, or the customer never responded). A note is required.
+      # body: { decision: 'approve' | 'request_revision' | 'reject', note: '...' }
+      def act_on_behalf
+        return unless authorize_action!('projects', 'update')
+
+        decision = params[:decision].to_s
+        @assignment.act_on_behalf!(
+          dealer: current_user,
+          decision: decision,
+          note: params[:note]
+        )
+
+        AssignmentWorkLog.create!(
+          contractor_assignment: @assignment,
+          user_id: current_user.id,
+          author_type: 'dealer',
+          author_name: current_user.full_name,
+          note: "Recorded customer #{decision.tr('_', ' ')} on their behalf: #{params[:note]}",
+          log_type: 'status_change',
+          logged_at: Time.current
+        )
+
+        render json: { success: true, message: 'Customer decision recorded', assignment: review_json(@assignment) }
+      rescue StandardError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       private
 
       def set_assignment
@@ -174,6 +212,17 @@ module Api
           review_notes: assignment.review_notes,
           revision_notes: assignment.revision_notes,
           revision_count: assignment.revision_count || 0,
+          # Customer-approval gate (gate 1). null client_review_status = the customer
+          # gate isn't in play for this assignment.
+          client_review_required: assignment.client_review_required,
+          client_review_status: assignment.client_review_status,
+          client_reviewed_at: assignment.client_reviewed_at,
+          client_review_notes: assignment.client_review_notes,
+          acted_on_behalf_by: assignment.acted_on_behalf_by ? {
+            id: assignment.acted_on_behalf_by.id,
+            name: assignment.acted_on_behalf_by.full_name
+          } : nil,
+          awaiting_dealer_final_confirm: assignment.awaiting_dealer_final_confirm?,
           assigned_at: assignment.assigned_at || assignment.created_at,
           completed_at: assignment.completed_at,
           contractor: {

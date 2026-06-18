@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_17_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_18_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2246,8 +2246,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_17_180000) do
     t.datetime "review_notified_at"
     t.datetime "notification_paused_at"
     t.datetime "notification_skipped_at"
+    t.boolean "client_review_required", default: false, null: false
+    t.string "client_review_status"
+    t.datetime "client_reviewed_at"
+    t.text "client_review_notes"
+    t.bigint "acted_on_behalf_by_id"
+    t.index ["acted_on_behalf_by_id"], name: "index_contractor_assignments_on_acted_on_behalf_by_id"
     t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
     t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
+    t.index ["client_review_status"], name: "index_contractor_assignments_on_client_review_status"
     t.index ["company_id"], name: "index_contractor_assignments_on_company_id"
     t.index ["notification_paused_at"], name: "index_contractor_assignments_on_notification_paused_at"
     t.index ["notification_skipped_at"], name: "index_contractor_assignments_on_notification_skipped_at"
