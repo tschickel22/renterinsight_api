@@ -212,6 +212,13 @@ class ContractorAssignment < ApplicationRecord
     return false unless assignable_type == 'ProjectPhaseTask'
     return false unless assignable&.visible_to_client
 
+    # The task's PHASE must also be client-visible. A visible task inside a hidden
+    # phase never renders on the client's progress view, so a customer gate there
+    # would email the customer yet leave them with nothing to approve (stuck
+    # "awaiting customer"). Hidden phase => skip the gate, dealer-only flow.
+    phase = assignable.project_phase rescue nil
+    return false unless phase&.visible_to_client
+
     cfg = Setting.get('company', company_id, 'project_management')
     return false if cfg.blank?
 

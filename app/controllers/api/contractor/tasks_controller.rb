@@ -92,15 +92,15 @@ module Api
             logged_at: Time.current
           )
 
-          # Sync status to the ProjectPhaseTask so project progress updates
+          # Sync status to the ProjectPhaseTask so project progress reflects active work.
+          # NOTE: a contractor marking their assignment 'completed' does NOT complete the
+          # project task — the line item stays open until the work is approved
+          # (customer/dealer) or manually closed in Projects. The task is completed by
+          # ContractorAssignment#approve_review! (dealer's final confirm). Crossing it off
+          # here would bypass the review gate.
           task = @assignment.assignable
-          if task.present?
-            case params[:status]
-            when 'in_progress'
-              task.update(status: 'in_progress') unless task.status == 'completed'
-            when 'completed'
-              task.update(status: 'completed')
-            end
+          if task.present? && params[:status] == 'in_progress' && task.status != 'completed'
+            task.update(status: 'in_progress')
           end
 
           render json: task_assignment_json(@assignment)
