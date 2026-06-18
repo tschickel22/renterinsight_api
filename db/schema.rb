@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_18_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5515,6 +5515,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_210000) do
     t.string "ticket_number"
     t.bigint "deal_id"
     t.string "factory_po"
+    t.boolean "dealer_only", default: false, null: false
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
@@ -5524,6 +5525,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_210000) do
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deal_id"], name: "index_service_tickets_on_deal_id"
+    t.index ["dealer_only"], name: "index_service_tickets_on_dealer_only"
     t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
     t.index ["is_portal_created"], name: "index_service_tickets_on_is_portal_created"
     t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"

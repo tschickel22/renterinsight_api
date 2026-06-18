@@ -16,13 +16,13 @@ module Api
       ].freeze
 
       rbac_resource :inventory,
-        read_actions: [:index, :show, :stats, :export, :print],
+        read_actions: [:index, :show, :stats, :export, :print, :service_tickets],
         create_actions: [:create, :clone, :import],
         update_actions: [:update, :bulk_update],
         delete_actions: [:destroy, :bulk_delete]
 
       before_action :set_company
-      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :max_advance, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting]
+      before_action :set_vehicle, only: [:show, :update, :destroy, :print, :max_advance, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting, :service_tickets]
 
       def index
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
@@ -174,6 +174,28 @@ module Api
 
       def show
         render json: { vehicle: vehicle_json(@vehicle, detailed: true) }
+      end
+
+      # GET /api/v1/vehicles/:id/service_tickets
+      # Service history for this home — every ticket attached to the unit, incl.
+      # dealer-only (pre-sale) tickets. Requires the `service` read permission in
+      # addition to inventory:read so a user who can't see service tickets
+      # elsewhere can't see them here either.
+      def service_tickets
+        return unless authorize_action!('service', 'read')
+
+        tickets = @vehicle.service_tickets.order(created_at: :desc)
+        tickets = tickets.dealer_only       if params[:dealer_only] == 'true'
+        tickets = tickets.customer_facing    if params[:dealer_only] == 'false'
+
+        render json: {
+          data: tickets.map { |t| service_ticket_summary(t) },
+          meta: {
+            total: tickets.size,
+            dealer_only: tickets.count(&:dealer_only),
+            customer_facing: tickets.count { |t| !t.dealer_only }
+          }
+        }
       end
 
       def create
@@ -2186,6 +2208,27 @@ module Api
           quoteNumber: quote.quote_number,
           status: quote.status,
           total: quote.total.to_f
+        }
+      end
+
+      # Lightweight service-ticket row for the home's Service History tab.
+      def service_ticket_summary(ticket)
+        {
+          id: ticket.id,
+          ticketNumber: ticket.ticket_number,
+          title: ticket.title,
+          status: ticket.status,
+          priority: ticket.priority,
+          dealerOnly: ticket.dealer_only,
+          portalVisible: ticket.portal_visible,
+          assignedTo: ticket.assigned_to,
+          assignedToName: ticket.assigned_to_user&.name,
+          scheduledDate: ticket.scheduled_date,
+          factoryPo: ticket.factory_po,
+          totalCost: ticket.total_cost,
+          warrantyConfirmed: ticket.is_warranty_confirmed,
+          createdAt: ticket.created_at,
+          updatedAt: ticket.updated_at
         }
       end
 

@@ -92,6 +92,11 @@ class ServiceTicket < ApplicationRecord
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
   belongs_to :vehicle, optional: true
+  # `home` is a domain-friendly alias for the linked inventory unit. In MH/RV the
+  # vehicle record IS the home; service history is anchored here so it stays with
+  # the home across its lifecycle (incl. before any sale).
+  alias_method :home, :vehicle
+  alias_method :home=, :vehicle=
   belongs_to :deal, optional: true
   belongs_to :warranty_claim, optional: true
   belongs_to :portal_user, class_name: 'BuyerPortalAccess', optional: true
@@ -149,6 +154,9 @@ class ServiceTicket < ApplicationRecord
   scope :warranty_confirmed, -> { where(is_warranty_confirmed: true) }
   scope :with_warranty_claims, -> { where.not(warranty_claim_id: nil) }
   scope :portal_created, -> { where(is_portal_created: true) }
+  # Dealer-only (internal, pre-sale) tickets vs customer-facing tickets.
+  scope :dealer_only, -> { where(dealer_only: true) }
+  scope :customer_facing, -> { where(dealer_only: false) }
   
   # Callbacks
   before_validation :generate_ticket_number, on: :create
@@ -485,6 +493,12 @@ class ServiceTicket < ApplicationRecord
     self.labor ||= []
     self.custom_fields ||= {}
     self.line_item_billing ||= []
+
+    # Dealer-only (internal, pre-sale) tickets are never customer-visible by
+    # default. The dealer must explicitly opt in later (e.g. after the home
+    # sells) by unchecking dealer_only or toggling portal_visible on.
+    self.portal_visible = false if dealer_only? && portal_visible.nil?
+    self.portal_visible = false if new_record? && dealer_only?
   end
   
   def normalize_assigned_to

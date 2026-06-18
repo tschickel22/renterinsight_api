@@ -39,6 +39,9 @@ module Api
         @service_tickets = @service_tickets.assigned_to(params[:assigned_to]) if params[:assigned_to].present?
         @service_tickets = @service_tickets.where(account_id: params[:account_id]) if params[:account_id].present?
         @service_tickets = @service_tickets.where(contact_id: params[:contact_id]) if params[:contact_id].present?
+        @service_tickets = @service_tickets.where(vehicle_id: params[:vehicle_id]) if params[:vehicle_id].present?
+        @service_tickets = @service_tickets.dealer_only if params[:dealer_only] == 'true'
+        @service_tickets = @service_tickets.customer_facing if params[:dealer_only] == 'false'
         @service_tickets = @service_tickets.warranty_suspected if params[:warranty_suspected] == 'true'
         @service_tickets = @service_tickets.warranty_confirmed if params[:warranty_confirmed] == 'true'
         
@@ -593,6 +596,7 @@ module Api
           :is_portal_created,
           :portal_notes,
           :portal_visible,  # Allow customer to view this ticket in portal
+          :dealer_only,     # Internal pre-sale ticket (no customer); hidden from portal
           :factory_po,
           parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total, :part_id, :partId],
           labor: [:id, :description, :hours, :rate, :total],
@@ -633,6 +637,7 @@ module Api
           isPortalCreated: ticket.is_portal_created,
           portalNotes: ticket.portal_notes,
           portalVisible: ticket.portal_visible,  # Allow customer to view checkbox
+          dealerOnly: ticket.dealer_only,
           warrantySuspected: ticket.is_warranty_suspected,
           warrantyConfirmed: ticket.is_warranty_confirmed,
           warrantyClaimId: ticket.warranty_claim_id,

@@ -44,6 +44,10 @@ class Vehicle < ApplicationRecord
   belongs_to :floor_plan, optional: true
   has_many :deals, dependent: :nullify
   has_many :quotes, dependent: :nullify
+  # Service tickets attached to this home. Includes dealer-only (pre-sale)
+  # tickets so the full service history stays with the home even before a sale.
+  # Nullify on delete so removing a home doesn't cascade-delete its history.
+  has_many :service_tickets, dependent: :nullify
   has_many :deal_desk_scenarios, dependent: :nullify
   has_many :listings, dependent: :destroy
   has_many :note_records, as: :entity, class_name: 'Note', dependent: :destroy
