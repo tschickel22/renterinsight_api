@@ -720,6 +720,7 @@ Rails.application.routes.draw do
         member do
           get :print
           get :max_advance  # Max Advance (lender cap) worksheet for this unit (invoice + applied items)
+          get :service_tickets, path: 'service-tickets'  # Service history for this home (incl. dealer-only)
           post :clone
           post :share
           get :tags
@@ -2783,8 +2784,16 @@ Rails.application.routes.draw do
       
       # Portal Project Progress
       resources :projects, only: [:index, :show] do
+        collection do
+          get :pending_approvals  # Cross-project list of work awaiting buyer review (dashboard tile)
+        end
         member do
           post :acknowledge_task  # POST body: { phase_id:, task_id: }
+          # Client review actions on a completed contractor assignment.
+          # POST body: { notes: } (required for request_revision)
+          post 'reviews/:assignment_id/approve',          action: :approve
+          post 'reviews/:assignment_id/request_revision', action: :request_revision
+          post 'reviews/:assignment_id/reject',           action: :reject
         end
       end
 

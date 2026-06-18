@@ -8,26 +8,82 @@ module Api
 
       # GET /api/portal/projects
       def index
-        contact = current_portal_buyer&.buyer
-        return render(json: { success: true, data: [] }) unless contact
+        return render(json: { success: true, data: [] }) unless current_portal_buyer&.buyer
 
-        # Find deals for this contact (by contact_id or account_id)
-        contact_id = contact.id if contact.is_a?(Contact)
-        account = contact.is_a?(Account) ? contact : (contact.respond_to?(:account) ? contact.account : nil)
-
-        deal_ids = Deal.where(company_id: current_portal_buyer.company_id)
-                       .where("contact_id = ? OR account_id = ?",
-                              contact_id || 0,
-                              account&.id || 0)
-                       .pluck(:id)
-
-        projects = Project.where(deal_id: deal_ids, client_visible: true, is_deleted: [false, nil])
-                          .order(created_at: :desc)
+        projects = buyer_projects.order(created_at: :desc)
 
         render json: {
           success: true,
           data: projects.map { |project| serialize_project(project) }
         }
+      end
+
+      # GET /api/portal/projects/pending_approvals
+      # Cross-project list of completed contractor work awaiting THIS buyer's
+      # review, for the dashboard tile + count. Mirrors the public progress
+      # page's pending_reviews, but scoped to the logged-in buyer's projects.
+      def pending_approvals
+        return render(json: { success: true, count: 0, data: [] }) unless current_portal_buyer&.buyer
+
+        projects = buyer_projects.index_by(&:id)
+        return render(json: { success: true, count: 0, data: [] }) if projects.empty?
+
+        phases = ProjectPhase.where(project_id: projects.keys, visible_to_client: true).index_by(&:id)
+        tasks  = ProjectPhaseTask.where(project_phase_id: phases.keys, visible_to_client: true).index_by(&:id)
+        return render(json: { success: true, count: 0, data: [] }) if tasks.empty?
+
+        assignments = ContractorAssignment
+                        .where(assignable_type: 'ProjectPhaseTask', assignable_id: tasks.keys)
+                        .where(client_review_required: true,
+                               client_review_status: ContractorAssignment::CLIENT_REVIEW_PENDING)
+                        .includes(:contractor)
+                        .order(submitted_for_review_at: :desc)
+
+        data = assignments.map do |assignment|
+          task    = tasks[assignment.assignable_id]
+          phase   = phases[task.project_phase_id]
+          project = projects[phase.project_id]
+          serialize_pending_approval(assignment, task, phase, project)
+        end
+
+        render json: { success: true, count: data.size, data: data }
+      end
+
+      # POST /api/portal/projects/:id/reviews/:assignment_id/approve
+      def approve
+        assignment = load_buyer_review_assignment
+        return unless assignment
+
+        assignment.client_approve!(notes: params[:notes])
+        render json: { success: true, message: 'Thank you — your approval has been recorded.' }
+      rescue StandardError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # POST /api/portal/projects/:id/reviews/:assignment_id/request_revision
+      def request_revision
+        assignment = load_buyer_review_assignment
+        return unless assignment
+
+        if params[:notes].blank?
+          return render json: { error: 'Please tell us what needs to change.' }, status: :unprocessable_entity
+        end
+
+        assignment.client_request_revision!(notes: params[:notes])
+        render json: { success: true, message: 'Thanks — we have asked the contractor to make the changes.' }
+      rescue StandardError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # POST /api/portal/projects/:id/reviews/:assignment_id/reject
+      def reject
+        assignment = load_buyer_review_assignment
+        return unless assignment
+
+        assignment.client_reject!(notes: params[:notes])
+        render json: { success: true, message: 'Thanks — we have let the team know.' }
+      rescue StandardError => e
+        render json: { error: e.message }, status: :unprocessable_entity
       end
 
       # GET /api/portal/projects/:id
@@ -81,20 +137,62 @@ module Api
 
       private
 
-      def find_portal_project(id)
+      # Deal ids belonging to the logged-in buyer (by contact_id or account_id).
+      def buyer_deal_ids
         contact = current_portal_buyer&.buyer
-        return nil unless contact
+        return [] unless contact
 
         contact_id = contact.id if contact.is_a?(Contact)
         account = contact.is_a?(Account) ? contact : (contact.respond_to?(:account) ? contact.account : nil)
 
-        deal_ids = Deal.where(company_id: current_portal_buyer.company_id)
-                       .where("contact_id = ? OR account_id = ?",
-                              contact_id || 0,
-                              account&.id || 0)
-                       .pluck(:id)
+        Deal.where(company_id: current_portal_buyer.company_id)
+            .where("contact_id = ? OR account_id = ?", contact_id || 0, account&.id || 0)
+            .pluck(:id)
+      end
 
-        Project.where(id: id, deal_id: deal_ids, client_visible: true, is_deleted: [false, nil]).first
+      # Client-visible projects for the logged-in buyer. The single tenant +
+      # ownership boundary reused by every action in this controller.
+      def buyer_projects
+        Project.where(deal_id: buyer_deal_ids, client_visible: true, is_deleted: [false, nil])
+      end
+
+      def find_portal_project(id)
+        buyer_projects.find_by(id: id)
+      end
+
+      # Load + validate the assignment for an approve/revision/reject action,
+      # scoped to a project the buyer owns and confirmed still pending. Mirrors
+      # the public controller's guard so a buyer can't act on another project's
+      # work or re-act on something already decided.
+      def load_buyer_review_assignment
+        project = find_portal_project(params[:id])
+        unless project
+          render json: { error: 'Project not found' }, status: :not_found
+          return nil
+        end
+
+        assignment = ContractorAssignment
+                       .where(assignable_type: 'ProjectPhaseTask', client_review_required: true)
+                       .find_by(id: params[:assignment_id])
+
+        unless assignment && assignment_in_project?(assignment, project)
+          render json: { error: 'Review item not found' }, status: :not_found
+          return nil
+        end
+
+        unless assignment.client_review_status == ContractorAssignment::CLIENT_REVIEW_PENDING
+          render json: { error: 'This item is no longer awaiting your review.' }, status: :unprocessable_entity
+          return nil
+        end
+
+        assignment
+      end
+
+      def assignment_in_project?(assignment, project)
+        task = assignment.assignable
+        task&.project_phase&.project_id == project.id
+      rescue StandardError
+        false
       end
 
       def serialize_project(project)
@@ -139,6 +237,23 @@ module Api
           isCurrent: phase.id == project.current_phase_id,
           overdue: phase.overdue?,
           tasks: client_tasks
+        }
+      end
+
+      def serialize_pending_approval(assignment, task, phase, project)
+        {
+          assignmentId: assignment.id,
+          projectId: project.id,
+          projectName: project.name,
+          projectNumber: project.project_number,
+          phaseId: phase.id,
+          phaseName: phase.name,
+          taskId: task.id,
+          taskName: task.name,
+          contractorName: assignment.contractor&.name || assignment.contractor&.contact_name,
+          completionSummary: assignment.completion_summary,
+          completionPhotos: assignment.completion_photos || [],
+          submittedAt: assignment.submitted_for_review_at
         }
       end
 
