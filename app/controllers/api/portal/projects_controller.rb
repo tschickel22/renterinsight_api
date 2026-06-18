@@ -92,11 +92,12 @@ module Api
         return render(json: { error: 'Project not found' }, status: :not_found) unless project
 
         phases = project.project_phases.where(visible_to_client: true).order(:position)
+        pending_by_task = pending_reviews_by_task(phases)   # task_id => ContractorAssignment
 
         render json: {
           success: true,
           data: serialize_project(project),
-          phases: phases.map { |phase| serialize_phase(phase, project) }
+          phases: phases.map { |phase| serialize_phase(phase, project, pending_by_task) }
         }
       end
 
@@ -195,6 +196,21 @@ module Api
         false
       end
 
+      # task_id => ContractorAssignment for client-visible tasks in these phases that
+      # are awaiting the customer's approval. One query, keyed for O(1) lookup in
+      # serialize_phase. Mirrors the pending_approvals scoping.
+      def pending_reviews_by_task(phases)
+        task_ids = ProjectPhaseTask.where(project_phase_id: phases.map(&:id), visible_to_client: true).pluck(:id)
+        return {} if task_ids.empty?
+
+        ContractorAssignment
+          .where(assignable_type: 'ProjectPhaseTask', assignable_id: task_ids)
+          .where(client_review_required: true,
+                 client_review_status: ContractorAssignment::CLIENT_REVIEW_PENDING)
+          .includes(:contractor)
+          .index_by(&:assignable_id)
+      end
+
       def serialize_project(project)
         {
           id: project.id,
@@ -215,11 +231,12 @@ module Api
         }
       end
 
-      def serialize_phase(phase, project)
+      def serialize_phase(phase, project, pending_by_task = {})
+        # Load tasks once; reuse for both the task list and the pending-review panel.
         client_tasks = phase.project_phase_tasks
                             .where(visible_to_client: true)
                             .order(:position)
-                            .map { |task| serialize_client_task(task) }
+                            .to_a
 
         {
           id: phase.id,
@@ -236,7 +253,14 @@ module Api
           color: phase.color,
           isCurrent: phase.id == project.current_phase_id,
           overdue: phase.overdue?,
-          tasks: client_tasks
+          tasks: client_tasks.map { |task| serialize_client_task(task) },
+          # Completed contractor work on this phase awaiting THIS buyer's approval.
+          # Same shape as the pending_approvals tile rows (extra project context is
+          # harmless inline). Drives the inline approve/request-changes/reject panel.
+          pendingReviews: client_tasks.filter_map { |task|
+            assignment = pending_by_task[task.id]
+            assignment ? serialize_pending_approval(assignment, task, phase, project) : nil
+          }
         }
       end
 
