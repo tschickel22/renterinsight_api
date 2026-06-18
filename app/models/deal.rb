@@ -88,15 +88,10 @@ class Deal < ApplicationRecord
 
   def stage_is_valid
     return if stage.blank?
-    normalized = stage.downcase
-    # Check against company pipeline stages if configured
-    saved_stages = company ? Setting.get('Company', company_id, 'pipeline_stages', nil) : nil
-    allowed = if saved_stages.is_a?(Array) && saved_stages.any?
-      saved_stages.map { |s| (s['key'] || s[:key]).to_s.downcase }
-    else
-      %w[prospecting qualification needs_analysis proposal negotiation closing closed_won closed_lost]
-    end
-    unless allowed.include?(normalized)
+    # Company is the single source of truth for valid stages (saved override
+    # or system default). Without a company we can't validate, so allow it.
+    return unless company
+    unless company.valid_pipeline_stage?(stage)
       errors.add(:stage, "#{stage} is not a valid stage")
     end
   end

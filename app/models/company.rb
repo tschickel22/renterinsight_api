@@ -508,7 +508,47 @@ class Company < ApplicationRecord
   def time_zone
     operational_settings['timezone'].presence || 'America/New_York'
   end
-  
+
+  # --- Pipeline stages ----------------------------------------------------
+  # Single source of truth for deal pipeline stages. Used by Deal stage
+  # validation and lead conversion so they never diverge from what the
+  # company actually configured in Settings.
+  DEFAULT_PIPELINE_STAGES = [
+    { 'key' => 'prospecting',    'name' => 'Prospecting',    'order' => 0 },
+    { 'key' => 'qualification',  'name' => 'Qualification',  'order' => 1 },
+    { 'key' => 'needs_analysis', 'name' => 'Needs Analysis', 'order' => 2 },
+    { 'key' => 'proposal',       'name' => 'Proposal',       'order' => 3 },
+    { 'key' => 'negotiation',    'name' => 'Negotiation',    'order' => 4 },
+    { 'key' => 'closed_won',     'name' => 'Closed Won',     'order' => 5 },
+    { 'key' => 'closed_lost',    'name' => 'Closed Lost',    'order' => 6 }
+  ].freeze
+
+  # Resolved stages: the company's saved override, else the system default.
+  def pipeline_stages
+    saved = Setting.get('Company', id, 'pipeline_stages', nil)
+    saved.is_a?(Array) && saved.any? ? saved : DEFAULT_PIPELINE_STAGES
+  end
+
+  # All defined stage keys (downcased). These are the only valid Deal stages.
+  def pipeline_stage_keys
+    pipeline_stages.map { |s| (s['key'] || s[:key]).to_s.downcase }.reject(&:blank?)
+  end
+
+  def valid_pipeline_stage?(stage)
+    stage.present? && pipeline_stage_keys.include?(stage.to_s.downcase)
+  end
+
+  # Stage a freshly-converted deal should land in: the first stage explicitly
+  # marked active (by order), falling back to the first defined stage when no
+  # stage carries an active flag (legacy/default configs). Always returns a
+  # key that passes Deal stage validation.
+  def default_deal_stage
+    ordered = pipeline_stages.sort_by { |s| (s['order'] || s[:order] || 0).to_i }
+    active = ordered.find { |s| [true, 'true'].include?(s['active'] || s[:active]) }
+    chosen = active || ordered.first
+    chosen && (chosen['key'] || chosen[:key]).to_s.downcase
+  end
+
   # --- Deal Desk settings -------------------------------------------------
   # Tunable per company (no code change). Stored in the deal_desk_settings jsonb column,
   # merged over these defaults.

@@ -387,18 +387,27 @@ module Api
             
             # 3. CREATE DEAL (if requested)
             deal = nil
+            deal_error = nil
             if params[:create_deal].present? && params[:create_deal].is_a?(ActionController::Parameters)
               deal_params = params[:create_deal]
-              
+
               Rails.logger.info "✅ [ConvertLead] Creating deal with params: #{deal_params.inspect}"
-              
+
+              # Stage must be one the company actually configured, otherwise the
+              # Deal stage validation rejects it and the deal is silently dropped.
+              # Honor a valid requested stage; fall back to the company default.
+              requested_stage = deal_params[:stage].to_s.strip
+              stage = @company.valid_pipeline_stage?(requested_stage) ?
+                requested_stage.downcase : @company.default_deal_stage
+              Rails.logger.info "✅ [ConvertLead] Resolved deal stage: #{stage} (requested: #{requested_stage.presence || 'none'})"
+
               deal = Deal.new(
-                name: deal_params[:name] || "#{account_name} Opportunity",
+                name: deal_params[:name].presence || "#{account_name} Opportunity",
                 account_id: account.id,
                 contact_id: contact&.id,
                 company_id: @lead.company_id,
                 location_id: location_id,
-                stage: deal_params[:stage] || 'prospecting',
+                stage: stage,
                 value: 0, # Will be updated when products/pricing added to deal
                 expected_close_date: deal_params[:close_date] || deal_params[:expected_close],
                 owner_id: current_user&.id,
@@ -412,11 +421,12 @@ module Api
                 billing_zip: @lead.zip,
                 billing_country: @lead.country
               )
-              
+
               if deal.save
                 Rails.logger.info "✅ [ConvertLead] Deal created: #{deal.id}"
               else
-                Rails.logger.warn "⚠️  [ConvertLead] Deal creation failed: #{deal.errors.full_messages}"
+                deal_error = deal.errors.full_messages.join(', ')
+                Rails.logger.warn "⚠️  [ConvertLead] Deal creation failed: #{deal_error}"
                 deal = nil
               end
             else
@@ -507,6 +517,10 @@ module Api
                 accountId: deal.account_id,
                 contactId: deal.contact_id
               } : nil,
+              # Non-fatal: account/contact still converted, but the requested
+              # deal could not be created. Surface so the UI stops reporting a
+              # clean success when a deal was expected.
+              dealError: deal_error,
               customFieldGaps: cf_result[:gaps]
             }, status: :ok
           end
