@@ -159,6 +159,10 @@ Rails.application.routes.draw do
     namespace :v1 do
       namespace :public do
         get 'project-progress/:token', to: 'project_progress#show', as: :public_project_progress
+        # Customer approval gate actions (token-scoped, no auth)
+        post 'project-progress/:token/reviews/:assignment_id/approve',          to: 'project_progress#approve'
+        post 'project-progress/:token/reviews/:assignment_id/request_revision', to: 'project_progress#request_revision'
+        post 'project-progress/:token/reviews/:assignment_id/reject',           to: 'project_progress#reject'
       end
     end
 
@@ -246,6 +250,8 @@ Rails.application.routes.draw do
         patch 'operational', action: :update_operational
         get 'company_profile', action: :show_company_profile
         patch 'company_profile', action: :update_company_profile
+        get 'project_management', action: :show_project_management
+        patch 'project_management', action: :update_project_management
         get 'branding', action: :show_branding
         patch 'branding', action: :update_branding
         get 'communication', action: :show_communication
@@ -575,6 +581,7 @@ Rails.application.routes.draw do
           post :approve
           post :request_revision
           post :reject
+          post :act_on_behalf  # Dealer records the customer's decision on their behalf
         end
       end
 
@@ -2405,6 +2412,7 @@ Rails.application.routes.draw do
           get :metrics
           get :forecast
           get :by_stage
+          get :owners
         end
         
         member do

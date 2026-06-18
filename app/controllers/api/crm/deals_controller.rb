@@ -8,26 +8,10 @@ module Api
       def index
         return unless authorize_action!('deals', 'read')
         
-        # STRICT TENANT ISOLATION: Only show deals from current company
-        # RBAC: Location-tier users only see their assigned locations
-        deals = if current_user.uses_rbac?
-          if current_user.effective_admin?  # Use RBAC-aware admin check
-            @company.deals
-          else
-            location_ids = permission_service.accessible_location_ids
-            if location_ids.any?
-              @company.deals.where(location_id: location_ids)
-            else
-              @company.deals
-            end
-          end
-        else
-          @company.deals
-        end
-        
-        # Apply location selector filter (if user selected a specific location)
-        deals = deals.for_current_location
-        
+        # Company deals narrowed by RBAC location access + the active location
+        # filter (shared with #owners so the Owner dropdown matches the list).
+        deals = deals_in_location_scope
+
         # DEFAULT VIEW SCOPING: Sales reps see only their own deals unless explicitly requesting broader view
         # Admins and users with 'read_all' permission can expand to see all deals
         view_scope = params[:view] # 'my', 'team', 'all'
@@ -38,7 +22,7 @@ module Api
                              current_user.id, current_user.id, current_user.email)
         end
         
-        deals = deals.includes(:account, :contact, :territory, :user, :deal_products, :commission_plan)
+        deals = deals.includes(:account, :contact, :territory, :user, :location, :deal_products, :commission_plan)
                     .order(created_at: :desc)
         
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
@@ -60,7 +44,13 @@ module Api
         
         # Filter by owner if provided
         deals = deals.where(user_id: params[:user_id]) if params[:user_id].present?
-        
+
+        # Filter by deal owner (owner_id), matching the frontend's Owner filter.
+        # 'null' = unassigned.
+        if params[:owner_id].present?
+          deals = params[:owner_id] == 'null' ? deals.where(owner_id: nil) : deals.where(owner_id: params[:owner_id])
+        end
+
         # Filter by status
         case params[:status]
         when 'open'
@@ -100,6 +90,26 @@ module Api
         }
       end
 
+      # GET /api/crm/deals/owners
+      # Distinct deal owners within the caller's scope, so the Owner filter only
+      # lists users who actually own deals (not every company user). Honors the
+      # same RBAC + location scoping as the list, so the options match what's
+      # visible. Includes a hasUnassigned flag for the "Unassigned" option.
+      def owners
+        return unless authorize_action!('deals', 'read')
+
+        deals = deals_in_location_scope
+
+        owner_ids      = deals.where.not(owner_id: nil).distinct.pluck(:owner_id)
+        has_unassigned = deals.where(owner_id: nil).exists?
+
+        owners = @company.users.where(id: owner_ids).map do |u|
+          { id: u.id, name: u.name, email: u.email }
+        end.sort_by { |o| o[:name].to_s.downcase }
+
+        render json: { owners: owners, hasUnassigned: has_unassigned }
+      end
+
       # GET /api/crm/deals/by_stage
       def by_stage
         return unless authorize_action!('deals', 'read')
@@ -112,13 +122,13 @@ module Api
         
         # STRICT TENANT ISOLATION: Only show deals from current company
         deals = @company.deals.where(stage: stage)
-        
-        # Apply strict location filter - only deals explicitly assigned to selected location
-        if Current.location_filtered?
-          deals = deals.where(location_id: Current.location_id)
+
+        # Location filter (param overrides header; legacy = strict header narrowing)
+        deals = filter_deals_by_location(deals) do |scope|
+          Current.location_filtered? ? scope.where(location_id: Current.location_id) : scope
         end
-        
-        deals = deals.includes(:account, :contact, :territory, :user, :deal_products)
+
+        deals = deals.includes(:account, :contact, :territory, :user, :location, :deal_products)
                     .order(created_at: :desc)
         
         render json: deals.map { |d| deal_json(d) }
@@ -130,12 +140,12 @@ module Api
         
         # STRICT TENANT ISOLATION: Only metrics for current company
         company_deals = @company.deals
-        
-        # Apply strict location filter - only deals explicitly assigned to selected location
-        if Current.location_filtered?
-          company_deals = company_deals.where(location_id: Current.location_id)
+
+        # Location filter (param overrides header; legacy = strict header narrowing)
+        company_deals = filter_deals_by_location(company_deals) do |scope|
+          Current.location_filtered? ? scope.where(location_id: Current.location_id) : scope
         end
-        
+
         # DEFAULT VIEW SCOPING: Apply same scoping as index action
         view_scope = params[:view] # 'my', 'team', 'all'
         
@@ -213,11 +223,11 @@ module Api
                             .where('expected_close_date <= ?', date_field.to_s.split.first.to_i.send(date_field.split.last).from_now)
                             .where(stage: ['proposal', 'negotiation', 'closing'])
         
-        # Apply strict location filter - only deals explicitly assigned to selected location
-        if Current.location_filtered?
-          forecast_deals = forecast_deals.where(location_id: Current.location_id)
+        # Location filter (param overrides header; legacy = strict header narrowing)
+        forecast_deals = filter_deals_by_location(forecast_deals) do |scope|
+          Current.location_filtered? ? scope.where(location_id: Current.location_id) : scope
         end
-        
+
         total_forecast = forecast_deals.sum(:value)
         weighted_forecast = forecast_deals.sum('value * probability / 100')
         
@@ -587,6 +597,41 @@ module Api
 
       private
 
+      # Company deals narrowed by RBAC location access + the active location
+      # filter, WITHOUT the my/all owner scoping. Shared by #index and #owners
+      # so the Owner dropdown only lists owners of deals the caller can see.
+      def deals_in_location_scope
+        base = if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          location_ids.any? ? @company.deals.where(location_id: location_ids) : @company.deals
+        else
+          @company.deals
+        end
+
+        filter_deals_by_location(base) { |scope| scope.for_current_location }
+      end
+
+      # Shared location filtering for the deals list and its tile/metric actions
+      # so they always agree. An explicit location_id param overrides the
+      # X-Location-ID selector header:
+      #   'all'  => no header narrowing (every location already in scope)
+      #   <id>   => that single location, access-checked against RBAC + company
+      #   absent => the action's legacy header behavior, supplied as a block
+      def filter_deals_by_location(scope)
+        location_param = params[:location_id].to_s
+        return scope if location_param == 'all'
+
+        if location_param.present?
+          loc_id  = location_param.to_i
+          allowed = current_user.effective_admin? ||
+                    !current_user.uses_rbac? ||
+                    permission_service.accessible_location_ids.include?(loc_id)
+          return (allowed && @company.locations.exists?(id: loc_id)) ? scope.where(location_id: loc_id) : scope.none
+        end
+
+        block_given? ? yield(scope) : scope
+      end
+
       def serialize_service_ticket(ticket)
         {
           id: ticket.id,
@@ -795,6 +840,8 @@ module Api
           assignedTo: deal.assigned_to,
           territoryId: deal.territory_id,
           territoryName: deal.territory&.name,
+          locationId: deal.location_id,
+          locationName: deal.location&.name,
           leadSource: deal.lead_source,
           sourceId: deal.source_id,
           sourceName: deal.source&.name,
