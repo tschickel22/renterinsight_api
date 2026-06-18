@@ -335,6 +335,11 @@ module Api
       end
 
       Setting.set('Company', @company.id, 'pipeline_stages', stages)
+      # tenant_basic (which carries pipeline_stages to the deal board / convert
+      # modal) is cached on a key built from @company.updated_at. Saving a Setting
+      # doesn't touch the company, so without this the cached payload keeps the
+      # old stages for up to 5 minutes. Touch to invalidate immediately.
+      @company.touch
       render json: { stages: stages, message: 'Pipeline stages saved successfully' }
     rescue => e
       render json: { error: e.message }, status: :internal_server_error
