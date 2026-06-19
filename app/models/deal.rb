@@ -104,6 +104,17 @@ class Deal < ApplicationRecord
 
   # Normalize stage to lowercase before validation
   before_validation :normalize_stage
+
+  # Probability is derived from the stage (the configured stage's win-%), never
+  # user-entered. Mirror it whenever the stage is set/changed so every path —
+  # inline edit, deal form, board drag, convert, import — stays consistent.
+  before_validation :sync_probability_from_stage, if: -> { new_record? || stage_changed? }
+
+  def sync_probability_from_stage
+    return unless company
+    prob = company.pipeline_stage_probability(stage)
+    self.probability = prob unless prob.nil?
+  end
   
   # Sync primary_salesperson_id with owner_id for commission system
   before_validation :sync_primary_salesperson

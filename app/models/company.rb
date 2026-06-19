@@ -538,6 +538,27 @@ class Company < ApplicationRecord
     stage.present? && pipeline_stage_keys.include?(stage.to_s.downcase)
   end
 
+  # Fallback win-probabilities for the system default stages (custom stages
+  # carry their own 'probability' in the saved config).
+  DEFAULT_STAGE_PROBABILITIES = {
+    'prospecting' => 20, 'qualification' => 30, 'needs_analysis' => 40,
+    'proposal' => 60, 'negotiation' => 80, 'closed_won' => 100, 'closed_lost' => 0
+  }.freeze
+
+  # Configured win-probability for a stage key, or nil if it can't be resolved.
+  # Probability is derived from the stage (never user-entered), so Deal mirrors
+  # this whenever its stage changes.
+  def pipeline_stage_probability(stage_key)
+    return nil if stage_key.blank?
+    key = stage_key.to_s.downcase
+    stage = pipeline_stages.find { |s| (s['key'] || s[:key]).to_s.downcase == key }
+    if stage
+      prob = stage['probability'] || stage[:probability]
+      return prob.to_i unless prob.nil?
+    end
+    DEFAULT_STAGE_PROBABILITIES[key]
+  end
+
   # Stage a freshly-converted deal should land in: the first stage explicitly
   # marked active (by order), falling back to the first defined stage when no
   # stage carries an active flag (legacy/default configs). Always returns a
