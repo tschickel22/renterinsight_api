@@ -26,7 +26,13 @@ module Api
       else
         0
       end
-      cache_key = "tenant_basic/#{@company.id}/#{@company.updated_at.to_i}/#{sub_updated}/#{override_updated}/#{plan_updated}/#{plan_modules_updated}"
+      # Branding lives in the Setting table (Company override + Platform default) and is
+      # included in the serialized payload. Setting.set doesn't touch the company record,
+      # so without these the cache would serve stale branding for up to 5 minutes after a
+      # branding change (colors, font, section shading, etc.).
+      branding_updated = Setting.where(scope_type: 'Company', scope_id: @company.id, key: 'branding').maximum(:updated_at)&.to_i || 0
+      platform_branding_updated = Setting.where(scope_type: 'Platform', scope_id: 0, key: 'branding').maximum(:updated_at)&.to_i || 0
+      cache_key = "tenant_basic/#{@company.id}/#{@company.updated_at.to_i}/#{sub_updated}/#{override_updated}/#{plan_updated}/#{plan_modules_updated}/#{branding_updated}/#{platform_branding_updated}"
       result = Rails.cache.fetch(cache_key, expires_in: 5.minutes) do
         serialize_tenant_basic
       end
