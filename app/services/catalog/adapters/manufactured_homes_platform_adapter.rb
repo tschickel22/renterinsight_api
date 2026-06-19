@@ -24,8 +24,11 @@ module Catalog
       MATTERPORT_RE    = %r{https?://(?:my\.)?matterport\.com/show/\?[^\s"'<>)]*m=[A-Za-z0-9]+[^\s"'<>)]*}i
       MAX_PAGES        = 25
 
+      # Sequential, single-threaded crawl, so 2s between requests is plenty polite
+      # for a commercial site — 5s made a ~97-home run take ~10 min in-Puma.
+      # Override per source via config { "crawl_delay": N }.
       def crawl_delay
-        Integer(source.config['crawl_delay'] || 5)
+        Integer(source.config['crawl_delay'] || 2)
       end
 
       # Walk the paginated grid (or sitemap, if cleaner) collecting floorplanIds.

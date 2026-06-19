@@ -5,6 +5,10 @@
 # sources are platform-level config, so there is no set_company_scope and
 # company_id is never permitted in params.
 class Api::Admin::CatalogSourcesController < ApplicationController
+  # A run still "running" after this long is presumed dead (the in-Puma worker
+  # was killed mid-crawl) — it no longer blocks new runs and gets reaped.
+  RUN_STALE_AFTER = 30.minutes
+
   before_action :require_platform_admin
   before_action :set_source, only: %i[show update destroy test run_now runs]
 
@@ -105,8 +109,17 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     render json: { error: "Test failed: #{e.message}" }, status: :unprocessable_entity
   end
 
-  # POST /api/v1/admin/catalog_sources/:id/run_now
+  # POST /api/admin/catalog_sources/:id/run_now
   def run_now
+    reap_stale_runs!
+
+    # Don't stack crawls — one run per source at a time. A run still marked
+    # "running" after RUN_STALE_AFTER is treated as dead (the in-Puma worker can
+    # be killed by a deploy/restart mid-crawl) and does not block a new run.
+    if @source.scrape_runs.where(status: 'running').exists?
+      return render json: { message: 'A run is already in progress for this source' }, status: :conflict
+    end
+
     CatalogSourceRunJob.perform_later(@source.id, trigger: 'manual')
     render json: { message: 'Run queued' }, status: :accepted
   end
@@ -123,6 +136,20 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     return if current_user&.role == 'platform_admin' || current_user&.super_admin?
 
     render json: { error: 'Unauthorized - Platform admin access required' }, status: :forbidden
+  end
+
+  # Mark long-stuck "running" runs as failed so they don't block new runs or show
+  # as perpetually running. (A crawl runs in-Puma and can be killed mid-flight by
+  # a deploy/restart, leaving the row never finalized.)
+  def reap_stale_runs!
+    stale = @source.scrape_runs.where(status: 'running').where(started_at: ..RUN_STALE_AFTER.ago).to_a
+    return if stale.empty?
+
+    stale.each do |run|
+      run.update!(status: 'failed', finished_at: Time.current,
+                  error_log: [{ 'message' => 'Run did not finish (worker stopped) — marked stale' }])
+    end
+    @source.update_columns(last_run_status: 'failed') if @source.last_run_status == 'running'
   end
 
   def set_source

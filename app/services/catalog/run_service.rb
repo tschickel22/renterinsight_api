@@ -19,6 +19,10 @@ module Catalog
 
     def call
       run = @source.scrape_runs.create!(status: 'running', trigger: @trigger, started_at: Time.current)
+      # Reflect "running" on the source immediately so the list badge updates the
+      # moment the job starts, instead of showing the previous status for the
+      # whole (multi-minute) crawl.
+      @source.update_columns(last_run_status: 'running', last_run_at: run.started_at)
       adapter = @source.adapter
 
       return fail_run(run, 'No matching adapter for adapter_type') if adapter.nil?
