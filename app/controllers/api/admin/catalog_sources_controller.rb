@@ -90,8 +90,14 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     }
     # On zero discovery, attach what the SERVER actually saw (status, link
     # counts, block-page detection) so the failure is diagnosable from the env
-    # it runs in — local vs Render can differ (WAF, geo, egress).
-    payload[:diagnostics] = (adapter.diagnostics rescue { error: 'diagnostics failed' }) if homes.empty?
+    # it runs in — local vs Render can differ (WAF, geo, egress). Also log it,
+    # since the response isn't always surfaced in the UI.
+    if homes.empty?
+      diag = (adapter.diagnostics rescue { error: 'diagnostics failed' })
+      payload[:diagnostics] = diag
+      Rails.logger.warn "[CatalogSources#test] zero-discovery source=#{@source.id} " \
+                        "adapter=#{@source.adapter_type} base_url=#{@source.base_url} diagnostics=#{diag.inspect}"
+    end
 
     render json: payload
   rescue StandardError => e

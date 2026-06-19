@@ -15,8 +15,11 @@ FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 WORKDIR /rails
 
 # Install base packages
+# ca-certificates is REQUIRED for outbound HTTPS (catalog scrapers, AWS SES/S3,
+# QuickBooks, etc.) — ruby:slim ships without a CA bundle, so OpenSSL cert
+# verification fails with "unable to get local issuer certificate".
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y curl libjemalloc2 libvips sqlite3 qpdf && \
+    apt-get install --no-install-recommends -y ca-certificates curl libjemalloc2 libvips sqlite3 qpdf && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Set production environment
