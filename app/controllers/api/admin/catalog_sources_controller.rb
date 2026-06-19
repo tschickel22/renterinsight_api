@@ -201,9 +201,12 @@ class Api::Admin::CatalogSourcesController < ApplicationController
       modelName:   home.model_name,
       modelId:     home.model_id,
       series:      home.series,
-      bedrooms:    home.bedrooms,
-      bathrooms:   home.bathrooms,
-      squareFeet:  home.square_feet,
+      # Keys MUST match the FE sample table (beds/baths/sqft), not the model
+      # attribute names — otherwise the columns render blank ("—").
+      beds:        home.bedrooms,
+      baths:       home.bathrooms,
+      sqft:        home.square_feet,
+      dimensions:  home.dimensions,
       imageCount:  home.images.size,
       validSmoke:  home.valid_smoke?
     }
