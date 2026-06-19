@@ -240,7 +240,7 @@ module Api
         return render json: { error: 'AI not configured' }, status: :service_unavailable unless api_key.present?
 
         sources = @company.sources.order(:name).map { |s| { id: s.id, name: s.name } } rescue []
-        users   = @company.users.where(is_active: true).order(:first_name).map { |u|
+        users   = @company.users.where(status: 'active').order(:first_name).map { |u|
           { id: u.id, name: "#{u.first_name} #{u.last_name}".strip }
         } rescue []
 
@@ -449,7 +449,7 @@ module Api
         context_record = load_context_record(context_type, context_id)
 
         sources = @company.sources.order(:name).map { |s| { id: s.id, name: s.name } } rescue []
-        users   = @company.users.where(is_active: true).order(:first_name).map { |u|
+        users   = @company.users.where(status: 'active').order(:first_name).map { |u|
           { id: u.id, name: "#{u.first_name} #{u.last_name}".strip }
         } rescue []
 

@@ -251,7 +251,7 @@ class ProcessNurtureStepJob < ApplicationJob
 
   def create_lead_call_activity(lead, step)
     # Assign to lead owner or first active user
-    user = lead.owner || lead.company.users.where(is_active: true).first
+    user = lead.owner || lead.company.users.where(status: 'active').first
     return unless user
 
     # Calculate due date based on wait_days
@@ -287,7 +287,7 @@ class ProcessNurtureStepJob < ApplicationJob
 
   def create_contact_call_activity(contact, step)
     # Assign to contact owner or first active user
-    user = contact.owner || contact.company.users.where(is_active: true).first
+    user = contact.owner || contact.company.users.where(status: 'active').first
     return unless user
 
     # Calculate due date based on wait_days
@@ -326,7 +326,7 @@ class ProcessNurtureStepJob < ApplicationJob
   def create_task_activity(entity, step)
     entity_type = entity.class.name
     user = entity.respond_to?(:owner) ? entity.owner : nil
-    user ||= entity.company.users.where(is_active: true).first if entity.respond_to?(:company)
+    user ||= entity.company.users.where(status: 'active').first if entity.respond_to?(:company)
     unless user
       Rails.logger.warn "[Nurture] No user found for task assignment on #{entity_type} #{entity.id}"
       return

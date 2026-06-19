@@ -966,7 +966,7 @@ class ProjectNotificationService
     end
 
     def find_sending_user(project)
-      project.deal&.user || project.company.users.where(is_active: true, role: 'admin').first
+      project.deal&.user || project.company.users.where(status: 'active', role: 'admin').first
     end
 
     def recipient_display_name(pref)

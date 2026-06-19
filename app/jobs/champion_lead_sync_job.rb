@@ -249,12 +249,12 @@ class ChampionLeadSyncJob < ApplicationJob
       else
         # Fall back to first admin-level user, then any active user
         admin = config.company.users
-                      .where(is_active: true)
+                      .where(status: 'active')
                       .where(role: %w[company_admin admin platform_admin])
                       .order(:created_at)
                       .first
         admin&.id || config.company.users
-                          .where(is_active: true)
+                          .where(status: 'active')
                           .order(:created_at)
                           .first&.id
       end
@@ -265,7 +265,7 @@ class ChampionLeadSyncJob < ApplicationJob
   def broadcast_new_leads(company, count)
     label = count == 1 ? '1 New Champion Lead' : "#{count} New Champion Leads"
 
-    company.users.where(is_active: true).find_each do |user|
+    company.users.where(status: 'active').find_each do |user|
       ActionCable.server.broadcast(
         "user_notifications_#{user.id}",
         {

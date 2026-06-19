@@ -272,7 +272,7 @@ module Api
         fp = config.floor_plan
 
         # Find user to notify — first active admin
-        notified_user = @company.users.where(is_active: true)
+        notified_user = @company.users.where(status: 'active')
                                       .where(role: ['admin', 'company_admin', 'platform_admin'])
                                       .first
 
