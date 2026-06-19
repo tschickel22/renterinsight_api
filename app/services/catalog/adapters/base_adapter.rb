@@ -68,6 +68,7 @@ module Catalog
         http.use_ssl      = (uri.scheme == 'https')
         http.open_timeout = REQUEST_TIMEOUT
         http.read_timeout = REQUEST_TIMEOUT
+        configure_ssl(http) if http.use_ssl?
 
         request = Net::HTTP::Get.new(uri.request_uri)
         request['User-Agent'] = USER_AGENT
@@ -84,9 +85,32 @@ module Catalog
           Rails.logger.error "[#{self.class.name}] HTTP #{response.code} for #{url}"
           nil
         end
-      rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, Errno::ECONNREFUSED => e
+      rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, Errno::ECONNREFUSED,
+             OpenSSL::SSL::SSLError => e
         Rails.logger.error "[#{self.class.name}] HTTP error for #{url}: #{e.class}: #{e.message}"
         nil
+      end
+
+      # Load the system CA bundle explicitly. Ruby's default cert store isn't
+      # always populated in the Render runtime (-> "unable to get local issuer
+      # certificate"), even though the OS ships ca-certificates. set_default_paths
+      # picks up SSL_CERT_FILE / SSL_CERT_DIR / the OpenSSL defaults.
+      #
+      # A source may opt out of verification (config { "ssl_verify": false }) for
+      # a site that serves an incomplete chain — read-only public scraping only.
+      def configure_ssl(http)
+        if source.respond_to?(:config) && source.config.is_a?(Hash) &&
+           source.config['ssl_verify'] == false
+          http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+          return
+        end
+
+        http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+        store = OpenSSL::X509::Store.new
+        store.set_default_paths
+        http.cert_store = store
+      rescue StandardError => e
+        Rails.logger.warn "[#{self.class.name}] SSL store setup failed: #{e.message}"
       end
 
       def doc_for(url)
