@@ -45,6 +45,9 @@ module Api
           }, status: :forbidden
         end
         
+        # Keep "Last Login" current for active sessions (throttled).
+        user.touch_sign_in!
+
         # Generate new token pair
         tokens = JsonWebToken.generate_token_pair(user)
         

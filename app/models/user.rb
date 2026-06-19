@@ -68,7 +68,19 @@ class User < ApplicationRecord
   def active?
     status == 'active'
   end
-  
+
+  # Record sign-in activity for "Last Login" reporting. Token refresh keeps a
+  # session alive without a fresh login, so active users on long-lived sessions
+  # would otherwise show as "never logged in". Throttled so we don't write on
+  # every refresh; update_column skips validations/callbacks and updated_at.
+  def touch_sign_in!(throttle: 10.minutes)
+    return if last_sign_in_at.present? && last_sign_in_at > throttle.ago
+    update_column(:last_sign_in_at, Time.current)
+  rescue => e
+    Rails.logger.warn("[touch_sign_in!] user #{id}: #{e.message}")
+    nil
+  end
+
   # Legacy Role helpers (kept for backward compatibility)
   def admin?
     role == 'admin' || role == 'super_admin' || role == 'platform_admin'

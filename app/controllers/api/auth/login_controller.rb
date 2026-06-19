@@ -156,6 +156,9 @@ module Api
             return
           end
 
+          # Keep "Last Login" current for active sessions (throttled).
+          user.touch_sign_in!
+
           # Generate new access token
           new_access_token = JsonWebToken.generate_access_token(user)
 

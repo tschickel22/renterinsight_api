@@ -525,8 +525,10 @@ module Api
           mfa_status = 'totp'
         end
         
-        # Prefer login_activities over last_sign_in_at for accuracy
-        last_login_time = last_login&.logged_in_at || user.last_sign_in_at
+        # Use the most recent of the two signals. last_sign_in_at is refreshed
+        # on token refresh (active sessions), so it can be newer than the last
+        # explicit login_activities row.
+        last_login_time = [last_login&.logged_in_at, user.last_sign_in_at].compact.max
         
         result = {
           id: user.id,
