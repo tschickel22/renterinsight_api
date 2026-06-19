@@ -355,7 +355,7 @@ class Vehicle < ApplicationRecord
     # data — titleizing them breaks part numbers (DAP1676H32222 → "Dap 1676 H 32222")
     # and re-spaces model names ("Skyliner 6380P" → "Skyliner 6380 P"), causing
     # an infinite update loop on every sync.
-    if source != 'champion_ims'
+    unless %w[champion_ims catalog_import].include?(source)
       self.make = make&.titleize
       self.model = model&.titleize
     end

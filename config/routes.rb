@@ -176,6 +176,9 @@ Rails.application.routes.draw do
       # Lightweight auth/token health check
       get 'health/ping', to: 'health#ping'
 
+      # ==================== CATALOG SUBSCRIPTIONS (Surface A — dealer opt-in) ====================
+      resources :catalog_subscriptions, only: %i[index create destroy]
+
       # ==================== TRACKED LINKS (Attachment Engagement) ====================
       resources :tracked_links, only: %i[index show] do
         collection do
@@ -2600,6 +2603,15 @@ Rails.application.routes.draw do
         member do
           post :activate
           post :deactivate
+        end
+      end
+
+      # ==================== CATALOG SOURCES (Surface B — Platform Admin Only) ====================
+      resources :catalog_sources do
+        member do
+          post :test     # dry-run discover+parse, inline extraction rates (no ingest)
+          post :run_now  # enqueue an immediate run
+          get  :runs     # scrape_runs history for this source
         end
       end
 
