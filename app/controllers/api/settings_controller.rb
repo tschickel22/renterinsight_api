@@ -322,10 +322,18 @@ module Api
         ]
       end
 
-      render json: { stages: stages }
+      # deal_counts lets the settings UI warn before deleting a stage that still
+      # holds deals (and prompt to remap them). Keyed by the deal's stage value.
+      render json: { stages: stages, deal_counts: deal_counts_by_stage }
     end
 
     # PATCH /api/settings/pipeline_stages
+    #
+    # Body: { stages: [...], stage_remap: { "<old_key>" => "<new_key>" } }
+    # stage_remap is optional — when a stage that holds deals is removed, the UI
+    # sends a mapping so those deals move to a surviving stage instead of being
+    # orphaned off the board. Remap + save run in one transaction so the stored
+    # stages and the deals' stage values can never drift.
     def update_pipeline_stages
       stages = params[:stages]
 
@@ -334,15 +342,45 @@ module Api
         return
       end
 
-      Setting.set('Company', @company.id, 'pipeline_stages', stages)
-      # tenant_basic (which carries pipeline_stages to the deal board / convert
-      # modal) is cached on a key built from @company.updated_at. Saving a Setting
-      # doesn't touch the company, so without this the cached payload keeps the
-      # old stages for up to 5 minutes. Touch to invalidate immediately.
-      @company.touch
-      render json: { stages: stages, message: 'Pipeline stages saved successfully' }
+      remap = params[:stage_remap]
+      remap = remap.respond_to?(:to_unsafe_h) ? remap.to_unsafe_h : remap
+      remap = {} unless remap.is_a?(Hash)
+
+      # Only remap into a stage that actually exists in the payload being saved.
+      valid_keys = stages.map { |s| (s[:key] || s['key']).to_s }.reject(&:blank?)
+      remap.each do |old_key, new_key|
+        unless valid_keys.include?(new_key.to_s)
+          render json: { error: "Cannot move deals to '#{new_key}': not a saved stage" }, status: :unprocessable_entity
+          return
+        end
+      end
+
+      ActiveRecord::Base.transaction do
+        remap.each do |old_key, new_key|
+          next if old_key.to_s == new_key.to_s
+          @company.deals.where(stage: old_key.to_s)
+                  .update_all(stage: new_key.to_s, updated_at: Time.current)
+        end
+
+        Setting.set('Company', @company.id, 'pipeline_stages', stages)
+        # tenant_basic (which carries pipeline_stages to the deal board / convert
+        # modal) is cached on a key built from @company.updated_at. Saving a Setting
+        # doesn't touch the company, so without this the cached payload keeps the
+        # old stages for up to 5 minutes. Touch to invalidate immediately.
+        @company.touch
+      end
+
+      render json: { stages: stages, deal_counts: deal_counts_by_stage, message: 'Pipeline stages saved successfully' }
     rescue => e
       render json: { error: e.message }, status: :internal_server_error
+    end
+
+    # Live (non-deleted) deal count per stage value for this company.
+    def deal_counts_by_stage
+      @company.deals.active.group(:stage).count
+    rescue => e
+      Rails.logger.warn "[deal_counts_by_stage] #{e.message}"
+      {}
     end
 
     # GET /api/settings/custom_fields
