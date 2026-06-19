@@ -29,23 +29,29 @@ module Catalog
       end
 
       # Walk the paginated grid (or sitemap, if cleaner) collecting floorplanIds.
-      # Grid cards are cached so parse() can merge grid fields with detail fields
-      # without a second grid fetch.
+      # The full slugged detail URL is cached per key so fetch() can hit the
+      # canonical page directly (the URL carries dealer/city/series/name slugs we
+      # can't reconstruct from the id alone). Grid cards are cached too, so
+      # parse() can fall back to grid-derived fields.
       def discover(limit: nil)
-        @cards ||= {}
+        @cards       ||= {}
+        @detail_urls ||= {}
         keys = discover_via_sitemap
         keys = discover_via_grid(limit: limit) if keys.blank?
         limit ? keys.first(limit) : keys
       end
 
       def fetch(key)
-        url  = detail_url(key)
+        url  = (@detail_urls || {})[key.to_s] || detail_url(key)
         html = http_get(url)
         { key: key.to_s, url: url, html: html, card: (@cards || {})[key.to_s] || {} }
       end
 
       def parse(raw)
         doc  = raw[:html].present? ? Nokogiri::HTML(raw[:html]) : nil
+        # Drop <script>/<style> so inline CSS (e.g. "3000px 1500px") can't poison
+        # the number/dimension regexes that scan doc.text.
+        doc&.css('script, style, noscript')&.remove
         card = raw[:card] || {}
         html = raw[:html].to_s
 
@@ -56,10 +62,10 @@ module Catalog
           model_id:         extract_model_id(doc, card),
           series:           extract_series(doc, card),
           property_type:    extract_property_type(doc, card),
-          bedrooms:         to_int(extract_spec(doc, card, %w[bedroom bedrooms beds bed])),
-          bathrooms:        to_decimal(extract_spec(doc, card, %w[bathroom bathrooms baths bath])),
-          dimensions:       extract_spec(doc, card, %w[dimensions size]),
-          square_feet:      to_int(extract_spec(doc, card, ['square feet', 'sq ft', 'sqft', 'square footage'])),
+          bedrooms:         to_int(extract_beds(doc, card)),
+          bathrooms:        to_decimal(extract_baths(doc, card)),
+          dimensions:       extract_dimensions(doc, card),
+          square_feet:      to_int(extract_sqft(doc, card)),
           description:      extract_description(doc, card),
           features:         extract_features(doc),
           images:           extract_images(doc, html, card),
@@ -76,15 +82,26 @@ module Catalog
 
       # --- Discovery -------------------------------------------------------
 
+      # Best-effort: most ManufacturedHomes.com detail pages are platform-
+      # generated and absent from the WordPress sitemap, so this usually returns
+      # [] for these sites and discovery falls through to the grid. Kept because
+      # some sites DO surface /floor-plan-detail/ URLs here (one cheap request).
       def discover_via_sitemap
-        url  = "#{base_url}/sitemap.xml"
-        body = http_get(url, accept: 'application/xml,text/xml')
-        return [] if body.blank?
+        %w[/sitemap.xml /sitemap_index.xml /wp-sitemap.xml].each do |path|
+          body = http_get("#{site_root}#{path}", accept: 'application/xml,text/xml')
+          next if body.blank?
 
-        Nokogiri::XML(body).remove_namespaces!.css('url > loc, sitemap > loc')
-                .map(&:text)
-                .filter_map { |loc| loc[DETAIL_PATH_RE, 1] }
-                .uniq
+          locs = Nokogiri::XML(body).remove_namespaces!.css('loc').map(&:text)
+          keys = locs.filter_map do |loc|
+            key = loc[DETAIL_PATH_RE, 1]
+            next if key.blank?
+
+            @detail_urls[key] = loc
+            key
+          end.uniq
+          return keys if keys.any?
+        end
+        []
       rescue StandardError => e
         Rails.logger.warn "[#{self.class.name}] sitemap discovery failed: #{e.message}"
         []
@@ -96,19 +113,20 @@ module Catalog
           doc = doc_for(grid_url(page))
           break if doc.nil?
 
-          found = harvest_grid_cards(doc)
-          break if found.empty?
+          found    = harvest_grid_cards(doc)
+          new_keys = found - keys
+          break if new_keys.empty? # empty page, or a site that clamps ?pg to the last page
 
-          keys.concat(found)
+          keys.concat(new_keys)
           break if limit && keys.size >= limit
 
           sleep(crawl_delay) unless Rails.env.test?
         end
-        keys.uniq
+        keys
       end
 
-      # Pulls floorplanIds out of a grid page and caches each card's parsed
-      # quick-fields (name/series/beds/baths/sqft/dimensions/floorplan image).
+      # Pulls floorplanIds + full detail URLs off a grid page and caches each
+      # card's quick-fields (name/series/beds/baths/sqft/dimensions/image).
       def harvest_grid_cards(doc)
         keys = []
         doc.css('a[href*="/floor-plan-detail/"]').each do |link|
@@ -117,8 +135,9 @@ module Catalog
           next if key.blank? || keys.include?(key)
 
           keys << key
+          @detail_urls[key] ||= absolute_url(href, URI.parse(site_root))
           card_root = link.ancestors('article, li, div').first || link
-          @cards[key] = parse_grid_card(card_root)
+          @cards[key] ||= parse_grid_card(card_root)
         end
         keys
       end
@@ -131,7 +150,7 @@ module Catalog
           'beds'        => text[/(\d+(?:\.\d+)?)\s*(?:bed|bd)/i, 1],
           'baths'       => text[/(\d+(?:\.\d+)?)\s*(?:bath|ba)/i, 1],
           'sqft'        => text[/([\d,]{3,})\s*(?:sq\.?\s*ft|sqft)/i, 1],
-          'dimensions'  => text[/(\d+'?\s*\d*"?\s*[xX×]\s*\d+'?\s*\d*"?)/, 1],
+          'dimensions'  => text[/\d+[’'′]\s*\d*[″"]?\s*[xX×]\s*\d+[’'′]\s*\d*[″"]?/],
           'image'       => node.css('img').map { |i| first_attr(i, %w[data-src data-lazy-src src]) }
                                .compact.find { |u| u.include?(CLOUDFRONT_HOST) }
         }.compact
@@ -139,28 +158,80 @@ module Catalog
 
       # --- Field extractors (anchor on meta/labels, fall back to grid card) --
 
+      MODEL_ID_RE = /\b([A-Z]{2,4}\d{3,4}(?:-\d+)?)\b/
+
+      # The H1 ("Prime / The Show Stopper PRI3284-2058") is the clean, reliable
+      # source for name/series/model_id. og:title on this platform is a generic
+      # "Floor Plan Detail", so we deliberately ignore it; the <title>
+      # ("<Series> <Name> <ModelId> - Sunshine Homes") is the fallback.
+      def heading(doc)
+        return '' if doc.nil?
+
+        h1 = doc.at_css('h1')&.text&.gsub(/\s+/, ' ')&.strip
+        return h1 if h1.present?
+
+        clean_title(doc.at_css('title')&.text).to_s
+      end
+
       def extract_name(doc, card)
-        og = doc&.at_css('meta[property="og:title"]')&.[]('content')
-        clean_title(og) || doc&.at_css('h1')&.text&.strip.presence || card['name']
+        h = heading(doc)
+        return card['name'] if h.blank?
+
+        h.sub(%r{\A[A-Za-z]+\s*/\s*}, '')                     # "Prime / X" -> "X"
+         .sub(/\A(?:Prime|ARC|Velocity|Innovation)\s+/i, '')  # "Prime X"   -> "X"
+         .sub(/\s*#{MODEL_ID_RE}\s*\z/, '')                   # drop trailing model id
+         .strip.presence || card['name']
       end
 
       def extract_model_id(doc, card)
-        spec = extract_spec(doc, card, %w[model id model])
-        return spec if spec.present?
-
-        # Fallback: model id often embedded in og:title or URL slug as e.g. PRI3284-2073
-        title = doc&.at_css('meta[property="og:title"]')&.[]('content').to_s
-        title[/\b([A-Z]{2,4}\d{3,4}(?:-\d+)?)\b/, 1]
+        heading(doc)[MODEL_ID_RE, 1] || card['model_id']
       end
 
       def extract_series(doc, card)
-        card['series'].presence || extract_spec(doc, card, %w[series collection])
+        h = heading(doc)
+        # "Prime / The Show Stopper" (slug) or "Prime The Show Stopper …" (title).
+        series = h[%r{\A([A-Za-z]+)\s*/}, 1] ||
+                 h[/\A(Prime|ARC|Velocity|Innovation)\b/i, 1]
+        series.presence || card['series'] || extract_spec(doc, card, %w[series collection])
       end
 
-      def extract_property_type(doc, card)
-        raw = extract_spec(doc, card, %w[property type construction])
-        types = raw.to_s.scan(/manufactured|modular/i).map(&:capitalize).uniq
-        types.presence || []
+      def extract_property_type(doc, _card)
+        return [] if doc.nil?
+
+        doc.text.scan(/\b(manufactured|modular)\b/i).flatten.map(&:capitalize).uniq
+      end
+
+      # Specs render as value-then-label on this platform ("4 Beds", "2.00 Baths",
+      # "2400 Sq. Ft.") — number precedes the label — so anchor on that shape
+      # first, then fall back to the grid card, then the generic label scan.
+      def extract_beds(doc, card)
+        text_number(doc, /([\d.]+)\s*beds?\b/i) || card['beds'] ||
+          extract_spec(doc, card, %w[bedroom bedrooms beds bed])
+      end
+
+      def extract_baths(doc, card)
+        text_number(doc, /([\d.]+)\s*baths?\b/i) || card['baths'] ||
+          extract_spec(doc, card, %w[bathroom bathrooms baths bath])
+      end
+
+      def extract_sqft(doc, card)
+        text_number(doc, /([\d,]{3,})\s*sq\.?\s*ft/i) || card['sqft'] ||
+          extract_spec(doc, card, ['square feet', 'sq ft', 'sqft', 'square footage'])
+      end
+
+      # Dimensions render with curly typography: 32’0″ x 84’0″ — the foot mark is
+      # ’ (U+2019), the inch mark ″ (U+2033), NOT plain ' and ".
+      DIMENSIONS_RE = /\d+[’'′]\s*\d*[″"]?\s*[xX×]\s*\d+[’'′]\s*\d*[″"]?/
+
+      def extract_dimensions(doc, card)
+        dims = doc && doc.text[DIMENSIONS_RE]
+        dims.presence || card['dimensions'] || extract_spec(doc, card, %w[dimensions size])
+      end
+
+      def text_number(doc, regex)
+        return nil if doc.nil?
+
+        doc.text[regex, 1]
       end
 
       # Reads a labeled spec value from the detail page. ManufacturedHomes.com
@@ -269,27 +340,47 @@ module Catalog
         seen.values
       end
 
+      # Tag floorplans by the image FILENAME / alt only — never the URL path. The
+      # CloudFront path always contains ".../floorplan/{id}/...", so matching the
+      # full URL would mistag the entire gallery as floor plans.
       def floorplan?(url, alt)
-        "#{url} #{alt}".downcase.match?(/floor[\s_-]?plan/)
+        basename = File.basename(url.to_s.split('?').first.to_s)
+        "#{basename} #{alt}".downcase.match?(/floor[\s_-]?plan/)
       end
 
       def clean_title(title)
         return nil if title.blank?
 
-        title.to_s.split(%r{\s+[|•\-–]\s+}).first&.strip.presence
+        title.to_s.split(%r{\s+[|•–]\s+|\s+-\s+}).first&.strip.presence
       end
 
+      # The source base_url IS the floor-plan listing page (it already includes
+      # the listing path), so page 1 is the listing itself and later pages add
+      # ?pg=N — do NOT append a second listing path segment.
       def grid_url(page)
-        "#{base_url}#{GRID_PATH}?pg=#{page}"
+        page.to_i <= 1 ? listing_url : "#{listing_url}?pg=#{page}"
       end
 
+      # Fallback only — discovery normally caches the full slugged URL from the
+      # grid. The id-and-dealer form 301s to the canonical, which http_get follows.
       def detail_url(key)
-        # If discover cached a full URL we'd use it; otherwise reconstruct the
-        # canonical detail path. ManufacturedHomes.com tolerates the id-only
-        # form and 301s to the slugged canonical, which http_get follows.
-        dealer = source.config['dealer_id']
+        dealer = source.config['dealer_id'] || source.manufacturer_id
         suffix = dealer.present? ? "#{key}-#{dealer}" : key.to_s
-        "#{base_url}/floor-plan-detail/#{suffix}/"
+        "#{site_root}/floor-plan-detail/#{suffix}/"
+      end
+
+      # The listing page URL (base_url, normalized to a single trailing slash).
+      def listing_url
+        "#{source.base_url.to_s.strip.sub(%r{/+\z}, '')}/"
+      end
+
+      # Scheme + host of the source, for absolutizing relative detail hrefs and
+      # locating sitemaps.
+      def site_root
+        uri = URI.parse(source.base_url.to_s)
+        "#{uri.scheme}://#{uri.host}"
+      rescue StandardError
+        source.base_url.to_s
       end
 
       def to_int(value)

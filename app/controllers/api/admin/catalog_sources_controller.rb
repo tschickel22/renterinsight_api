@@ -60,7 +60,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     head :no_content
   end
 
-  # POST /api/v1/admin/catalog_sources/:id/test
+  # POST /api/admin/catalog_sources/:id/test
   # Dry-run: discover + parse the first page, return extraction rates inline.
   # Never ingests. This IS the onboarding flow for a known platform.
   def test
@@ -68,14 +68,23 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     return render(json: { error: 'no matching adapter — needs build', adapter_type: @source.adapter_type },
                   status: :unprocessable_entity) if adapter.nil?
 
-    limit  = (params[:limit] || 5).to_i.clamp(1, 20)
-    homes  = adapter.sample(limit: limit)
-    rates  = Catalog::ExtractionStats.rates(homes)
+    limit    = (params[:limit] || 5).to_i.clamp(1, 20)
+    homes    = adapter.sample(limit: limit)
+    rates    = Catalog::ExtractionStats.rates(homes)
+    degraded = Catalog::ExtractionStats.degraded?(rates, @source.extraction_threshold)
+
+    # Discovery guard: zero discovered homes is a failed test, not a pass — the
+    # base_url / selectors don't match. Surface it explicitly so the FE (and the
+    # enable gate) treat it as a problem even though no error was raised.
+    warnings = []
+    warnings << 'Discovery returned 0 homes — check base_url and adapter selectors.' if homes.empty?
 
     render json: {
       discovered:             homes.size,
+      passed:                 homes.any? && !degraded,
+      warnings:               warnings,
       field_extraction_rates: rates,
-      degraded:               Catalog::ExtractionStats.degraded?(rates, @source.extraction_threshold),
+      degraded:               degraded,
       threshold:              @source.extraction_threshold.to_f,
       sample:                 homes.map { |h| sample_home(h) }
     }

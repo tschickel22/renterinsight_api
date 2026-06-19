@@ -44,13 +44,17 @@ module Catalog
       end
 
       def fetch(key)
-        url  = (@urls || {})[key] || "#{base_url}/homes/#{key}/"
+        # Discovery caches the full sitemap URL; the fallback is the canonical
+        # /home-details/{slug}/ path.
+        url  = (@urls || {})[key] || "#{base_url}/home-details/#{key}/"
         html = http_get(url)
         { key: key.to_s, url: url, html: html }
       end
 
       def parse(raw)
         doc  = raw[:html].present? ? Nokogiri::HTML(raw[:html]) : nil
+        # Drop scripts/styles so inline CSS can't poison text/number scans.
+        doc&.css('script, style, noscript')&.remove
         html = raw[:html].to_s
 
         NormalizedHome.new(
@@ -80,51 +84,81 @@ module Catalog
         og.to_s.sub(TITLE_SUFFIX_RE, '').strip.presence
       end
 
-      # Avada counter boxes: a label node and a value node within the same box.
+      # Avada renders each spec as a column whose text is "<value><label>"
+      # concatenated, e.g. "4Bed(s)", "2280Square Feet", "Double WideProperty
+      # Type", "MD-66-32ID". We locate the LABEL element (an exact-text node),
+      # walk up to its layout column, and strip the trailing label to get the
+      # value.
       def counter_box(doc, labels)
         return nil if doc.nil?
 
-        box = doc.css('.fusion-counter-box, .counter-box, [class*="counter"]').find do |b|
-          labels.any? { |l| b.text.to_s.downcase.include?(l.downcase) }
+        wanted     = labels.map { |l| l.downcase.strip }
+        label_node = doc.css('p, span, h3, h4, h5').find do |n|
+          t = n.text.strip
+          t.length < 20 && wanted.include?(t.downcase)
         end
-        if box
-          value = box.at_css('.counter-value, [class*="value"], .fusion-counter-box-content')&.text&.strip
+
+        if label_node
+          column = label_node.ancestors.find { |a| a['class'].to_s =~ /fusion-layout-column|fusion_builder_column/ } ||
+                   label_node.parent
+          full  = column.text.gsub(/\s+/, ' ').strip
+          value = full.sub(/#{Regexp.escape(label_node.text.strip)}\s*\z/i, '').strip
           return value if value.present?
-
-          digits = box.text[/[\d'".,xX×\s]{1,}/]
-          return digits.strip if digits.present?
         end
 
+        # Fallback: value-before-label run anywhere in the page text.
         labels.each do |l|
-          m = doc.text.match(/#{Regexp.escape(l)}\s*[:\-]?\s*([0-9][0-9'".,xX×\s]*)/i)
-          return m[1].strip if m
+          m = doc.text.match(/([A-Za-z0-9][\w'".,xX×\s-]{0,18}?)\s*#{Regexp.escape(l)}/i)
+          return m[1].strip if m && m[1].strip.present?
         end
         nil
       end
 
+      # Property type is a free-text counter-box value (e.g. "Double Wide",
+      # "Single Wide", "Manufactured") — return it verbatim as a 1-element array.
       def extract_property_type(doc)
-        raw = counter_box(doc, %w[property type])
-        raw.to_s.scan(/manufactured|modular/i).map(&:capitalize).uniq
+        value = counter_box(doc, ['property type'])
+        value.present? ? [value] : []
       end
 
+      # og/meta description first; these Avada pages often have neither, so fall
+      # back to the longest real on-page paragraph (the home's descriptive copy).
+      # If markup breaks and paragraphs vanish, this correctly goes blank rather
+      # than masking the break with synthesized text.
       def extract_description(doc)
-        doc&.at_css('meta[name="description"], meta[property="og:description"]')&.[]('content')&.strip
+        meta = doc&.at_css('meta[name="description"], meta[property="og:description"]')&.[]('content').to_s.strip
+        return meta if meta.present?
+
+        longest = doc&.css('p')&.map { |p| p.text.gsub(/\s+/, ' ').strip }
+                     &.select { |t| t.length >= 60 }&.max_by(&:length)
+        longest.presence
       end
 
-      # 4–5 accordion feature sections; de-dupe doubled headings.
+      # 4–5 accordion feature sections. Bodies are <br>-separated text (not <li>),
+      # so split on line breaks. De-dupe doubled headings.
       def extract_features(doc)
         return {} if doc.nil?
 
         features = {}
-        doc.css('.fusion-accordian .panel-title, .accordion-title, .fusion-toggle-heading').each do |heading|
+        doc.css('.fusion-toggle-heading, .fusion-accordian .panel-title, .accordion-title').each do |heading|
           title = heading.text.to_s.strip
           next if title.blank? || features.key?(title)
 
           body = heading.ancestors('.fusion-panel, .panel').first
-          items = body&.css('li')&.map { |li| li.text.strip }&.reject(&:blank?)&.uniq || []
-          features[title] = items if items.any?
+          next unless body
+
+          items = body.css('li').map { |li| li.text.strip }.reject(&:blank?)
+          items = panel_lines(body) if items.empty?
+          features[title] = items.uniq if items.any?
         end
         features
+      end
+
+      # Split an accordion body that uses <br> separators into individual items.
+      def panel_lines(body)
+        content = body.at_css('.panel-body, .fusion-panel-body, .toggle-content') || body
+        html = content.inner_html.gsub(%r{<br\s*/?>}i, "\n")
+        Nokogiri::HTML.fragment(html).text.split("\n").map(&:strip).reject(&:blank?)
       end
 
       # Gallery: prefer data-orig-src over src (lazyauto), keep /wp-content/uploads/,
