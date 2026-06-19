@@ -70,6 +70,7 @@ module Catalog
           features:         extract_features(doc),
           images:           extract_images(doc, html, card),
           virtual_tour_url: scan_regex(html, MATTERPORT_RE),
+          video_url:        extract_video(html),
           price_quote_url:  extract_quote_url(doc, raw[:url]),
           raw: {
             'manufacturer_id' => source.manufacturer_id,
@@ -162,23 +163,30 @@ module Catalog
 
           keys << key
           @detail_urls[key] ||= absolute_url(href, URI.parse(site_root))
-          card_root = link.ancestors('article, li, div').first || link
+          card_root = link.ancestors('.fp-card-container').first ||
+                      link.ancestors('article, li, div').first || link
           @cards[key] ||= parse_grid_card(card_root)
         end
         keys
       end
 
+      # The grid card (.fp-card-container) carries the specs as an ICON row that
+      # renders to a number-only run in text order beds / baths / sqft / dims,
+      # e.g. "… Lifeway Homes of Tulsa 4 2.00 2400 ft² 32'0\" x 84'0\" The Show…".
+      # This is the RELIABLE spec source — it's in the discovery HTML (which works
+      # everywhere), whereas the detail-page spec summary is location-aware and
+      # gets stripped for some server IPs.
       def parse_grid_card(node)
-        text = node.text.to_s
+        text  = node.text.gsub(/\s+/, ' ').strip
+        specs = text.match(/(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([\d,]{3,6})\s*ft/i)
         {
-          'name'        => node.at_css('h2, h3, .home-title, [class*="title"]')&.text&.strip,
-          'series'      => text[/\b(Prime|ARC|Velocity|Innovation)\b/i, 1],
-          'beds'        => text[/(\d+(?:\.\d+)?)\s*(?:bed|bd)/i, 1],
-          'baths'       => text[/(\d+(?:\.\d+)?)\s*(?:bath|ba)/i, 1],
-          'sqft'        => text[/([\d,]{3,})\s*(?:sq\.?\s*ft|sqft)/i, 1],
-          'dimensions'  => text[/\d+[’'′]\s*\d*[″"]?\s*[xX×]\s*\d+[’'′]\s*\d*[″"]?/],
-          'image'       => node.css('img').map { |i| first_attr(i, %w[data-src data-lazy-src src]) }
-                               .compact.find { |u| u.include?(CLOUDFRONT_HOST) }
+          'series'     => text[/\b(Prime|ARC|Velocity|Innovation)\b/i, 1],
+          'beds'       => specs && specs[1],
+          'baths'      => specs && specs[2],
+          'sqft'       => specs && specs[3],
+          'dimensions' => text[DIMENSIONS_RE],
+          'image'      => node.css('img').map { |i| first_attr(i, %w[data-src data-lazy-src src]) }
+                              .compact.find { |u| u.to_s.include?(CLOUDFRONT_HOST) }
         }.compact
       end
 
@@ -230,18 +238,19 @@ module Catalog
       # Specs render as value-then-label on this platform ("4 Beds", "2.00 Baths",
       # "2400 Sq. Ft.") — number precedes the label — so anchor on that shape
       # first, then fall back to the grid card, then the generic label scan.
+      # Grid card FIRST (reliable everywhere), detail-page text as fallback.
       def extract_beds(doc, card)
-        text_number(doc, /([\d.]+)\s*beds?\b/i) || card['beds'] ||
+        card['beds'] || text_number(doc, /([\d.]+)\s*beds?\b/i) ||
           extract_spec(doc, card, %w[bedroom bedrooms beds bed])
       end
 
       def extract_baths(doc, card)
-        text_number(doc, /([\d.]+)\s*baths?\b/i) || card['baths'] ||
+        card['baths'] || text_number(doc, /([\d.]+)\s*baths?\b/i) ||
           extract_spec(doc, card, %w[bathroom bathrooms baths bath])
       end
 
       def extract_sqft(doc, card)
-        text_number(doc, /([\d,]{3,})\s*sq\.?\s*ft/i) || card['sqft'] ||
+        card['sqft'] || text_number(doc, /([\d,]{3,})\s*sq\.?\s*ft/i) ||
           extract_spec(doc, card, ['square feet', 'sq ft', 'sqft', 'square footage'])
       end
 
@@ -250,8 +259,8 @@ module Catalog
       DIMENSIONS_RE = /\d+[’'′]\s*\d*[″"]?\s*[xX×]\s*\d+[’'′]\s*\d*[″"]?/
 
       def extract_dimensions(doc, card)
-        dims = doc && doc.text[DIMENSIONS_RE]
-        dims.presence || card['dimensions'] || extract_spec(doc, card, %w[dimensions size])
+        card['dimensions'] || (doc && doc.text[DIMENSIONS_RE]).presence ||
+          extract_spec(doc, card, %w[dimensions size])
       end
 
       def text_number(doc, regex)
@@ -298,9 +307,15 @@ module Catalog
           card['description']
       end
 
-      # Detail-page feature lists, grouped by their section heading.
+      # Detail-page "Specifications" tabs (Construction / Exterior / Interior /
+      # Baths / Kitchen). Each is a Bootstrap nav-tab whose panel (.tab-pane) holds
+      # the spec lines as <span>s separated by <br>. Falls back to a generic
+      # heading→list scan for sites that don't use the tab layout.
       def extract_features(doc)
         return {} if doc.nil?
+
+        tabs = tab_features(doc)
+        return tabs if tabs.any?
 
         features = {}
         doc.css('h2, h3, h4').each do |heading|
@@ -314,6 +329,34 @@ module Catalog
           features[title] = items if items.any?
         end
         features
+      end
+
+      def tab_features(doc)
+        labels = doc.css('.nav-tabs li, li.nav-item').map { |n| n.text.strip }.reject(&:blank?)
+        panes  = doc.css('.tab-content .tab-pane')
+        out = {}
+        panes.each_with_index do |pane, i|
+          title = labels[i].presence || pane['id'].to_s.sub(/\Atab[_-]?/i, '').tr('_-', ' ').strip.titleize
+          next if title.blank?
+
+          # Each spec line is "<span>Label:</span> value" separated by <br>, so
+          # split on <br> to keep label AND value together on one line.
+          html  = pane.inner_html.gsub(%r{<br\s*/?>}i, "\n")
+          items = Nokogiri::HTML.fragment(html).text.split("\n")
+                          .map { |l| l.gsub(/\s+/, ' ').strip }.reject(&:blank?).uniq
+          out[title] = items if items.any?
+        end
+        out
+      end
+
+      # Walkthrough video (YouTube/Vimeo) — NOT social channel links. Matterport
+      # is captured separately as virtual_tour_url.
+      def extract_video(html)
+        return nil if html.blank?
+
+        (html[%r{https?://(?:www\.)?youtube\.com/(?:watch\?v=|embed/)[A-Za-z0-9_-]{6,}}i] ||
+         html[%r{https?://youtu\.be/[A-Za-z0-9_-]{6,}}i] ||
+         html[%r{https?://(?:www\.|player\.)?vimeo\.com/(?:video/)?\d{5,}}i])
       end
 
       # Full gallery from the detail page plus the grid floorplan image. Prefer

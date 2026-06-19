@@ -18,7 +18,7 @@ module Catalog
     ATTRS = %i[
       source_key source_url model_name model_id series property_type
       bedrooms bathrooms dimensions square_feet description features
-      images virtual_tour_url price_quote_url raw
+      images virtual_tour_url video_url price_quote_url raw
     ].freeze
 
     attr_accessor(*ATTRS)
