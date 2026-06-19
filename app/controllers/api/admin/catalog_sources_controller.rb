@@ -79,7 +79,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     warnings = []
     warnings << 'Discovery returned 0 homes — check base_url and adapter selectors.' if homes.empty?
 
-    render json: {
+    payload = {
       discovered:             homes.size,
       passed:                 homes.any? && !degraded,
       warnings:               warnings,
@@ -88,6 +88,12 @@ class Api::Admin::CatalogSourcesController < ApplicationController
       threshold:              @source.extraction_threshold.to_f,
       sample:                 homes.map { |h| sample_home(h) }
     }
+    # On zero discovery, attach what the SERVER actually saw (status, link
+    # counts, block-page detection) so the failure is diagnosable from the env
+    # it runs in — local vs Render can differ (WAF, geo, egress).
+    payload[:diagnostics] = (adapter.diagnostics rescue { error: 'diagnostics failed' }) if homes.empty?
+
+    render json: payload
   rescue StandardError => e
     Rails.logger.error "[CatalogSources#test] #{e.class}: #{e.message}"
     render json: { error: "Test failed: #{e.message}" }, status: :unprocessable_entity

@@ -118,6 +118,40 @@ module Catalog
         body && Nokogiri::HTML(body)
       end
 
+      # Structured probe used by diagnostics — unlike http_get it does NOT
+      # follow redirects or swallow non-2xx, so the caller sees the real status
+      # code, redirect location, body size, and TLS/network errors.
+      def http_probe(url, accept: 'text/html,application/xhtml+xml')
+        uri  = URI.parse(url)
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl      = (uri.scheme == 'https')
+        http.open_timeout = REQUEST_TIMEOUT
+        http.read_timeout = REQUEST_TIMEOUT
+        configure_ssl(http) if http.use_ssl?
+
+        req = Net::HTTP::Get.new(uri.request_uri)
+        req['User-Agent'] = USER_AGENT
+        req['Accept']     = accept
+        res = http.request(req)
+        { url: url, status: res.code.to_i, bytes: res.body.to_s.bytesize,
+          location: res['location'], body: res.body.to_s }
+      rescue StandardError => e
+        { url: url, status: nil, error: "#{e.class}: #{e.message}" }
+      end
+
+      # Adapters override to explain a zero-discovery result (URLs hit, HTTP
+      # status, link counts, block-page detection). Surfaced by the admin Test
+      # action when discovered == 0.
+      def diagnostics
+        { note: 'no diagnostics implemented for this adapter' }
+      end
+
+      # Heuristic: does this body look like a bot-block / challenge page rather
+      # than the real content?
+      def looks_blocked?(body)
+        body.to_s[0, 4000].match?(/captcha|access denied|are you (a )?human|just a moment|cloudflare|cf-browser-verification|request unsuccessful/i)
+      end
+
       def absolute_url(href, base_uri)
         URI.join("#{base_uri.scheme}://#{base_uri.host}", href).to_s
       rescue StandardError

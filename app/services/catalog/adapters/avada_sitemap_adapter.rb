@@ -77,6 +77,27 @@ module Catalog
         )
       end
 
+      # Explains a zero-discovery result: did the sitemap fetch, what status, how
+      # many <loc> / home-details URLs did the server actually see?
+      def diagnostics
+        url = source.config['sitemap_url'].presence || "#{base_url}/home-details-sitemap.xml"
+        probe = http_probe(url, accept: 'application/xml,text/xml')
+        out = {
+          adapter:        'avada_sitemap',
+          sitemap_url:    url,
+          sitemap_status: probe[:status],
+          bytes:          probe[:bytes],
+          redirect:       probe[:location]
+        }
+        out[:error] = probe[:error] if probe[:error]
+        if probe[:body].present?
+          out[:loc_count]          = probe[:body].scan(%r{<loc>}).size
+          out[:home_detail_count]  = probe[:body].scan('/home-details/').size
+          out[:looks_blocked]      = looks_blocked?(probe[:body])
+        end
+        out
+      end
+
       private
 
       def extract_name(doc)

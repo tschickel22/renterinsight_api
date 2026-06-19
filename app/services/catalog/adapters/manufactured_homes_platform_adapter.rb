@@ -78,6 +78,32 @@ module Catalog
         )
       end
 
+      # Explains a zero-discovery result: did the grid fetch, what status, how
+      # many detail links / cloudfront images did the server actually see, and
+      # does it look like a block page or a location-empty grid?
+      def diagnostics
+        out = { adapter: 'manufacturedhomes_platform' }
+        probe = http_probe(grid_url(1))
+        out[:grid_url]        = grid_url(1)
+        out[:grid_status]     = probe[:status]
+        out[:grid_redirect]   = probe[:location]
+        out[:grid_bytes]      = probe[:bytes]
+        out[:error]           = probe[:error] if probe[:error]
+
+        if probe[:body].present?
+          doc = Nokogiri::HTML(probe[:body])
+          out[:detail_links]   = doc.css('a[href*="/floor-plan-detail/"]').size
+          out[:cloudfront_imgs] = probe[:body].scan(CLOUDFRONT_HOST).size
+          out[:page_title]     = doc.at_css('title')&.text.to_s.strip[0, 80]
+          out[:looks_blocked]  = looks_blocked?(probe[:body])
+          out[:near_text]      = probe[:body][/near\s+[A-Z][A-Za-z .,]{0,30}/i]
+        end
+
+        sm = http_probe("#{site_root}/sitemap.xml", accept: 'application/xml')
+        out[:sitemap_status] = sm[:status]
+        out
+      end
+
       private
 
       # --- Discovery -------------------------------------------------------
