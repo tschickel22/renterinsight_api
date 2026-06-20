@@ -57,10 +57,25 @@ class CatalogSource < ApplicationRecord
     latest_run&.degraded == true
   end
 
-  # A source has passed validation when its latest run succeeded cleanly. This
-  # gates ENABLING (you can't enable until you've proven extraction works).
+  # A source has passed validation when its latest run succeeded cleanly.
   def passed_clean_run?
     !is_deleted && last_run_status == 'success' && !degraded?
+  end
+
+  # A passing dry-run Test (discovered > 0, not degraded) is recorded here so it
+  # can satisfy the ENABLE gate without forcing a full run first.
+  def test_passed?
+    config.is_a?(Hash) && config['test_passed_at'].present?
+  end
+
+  # Gate for ENABLING: a clean full run OR a passing Test proves extraction works.
+  # (Dealer-selectability is stricter — see selectable_for_dealers?.)
+  def enableable?
+    !is_deleted && (passed_clean_run? || test_passed?)
+  end
+
+  def record_test_pass!
+    update_column(:config, (config || {}).merge('test_passed_at' => Time.current.utc.iso8601))
   end
 
   # Dealers may only subscribe to a source that is BOTH enabled and validated.

@@ -45,9 +45,10 @@ class Api::Admin::CatalogSourcesController < ApplicationController
 
   # PATCH /api/v1/admin/catalog_sources/:id
   def update
-    # Only allow enabling a source after a successful, non-degraded run.
-    if enabling?(source_params) && !@source.passed_clean_run? && !force_enable?
-      return render json: { error: 'Source must pass a non-degraded test run before it can be enabled' },
+    # Only allow enabling after a non-degraded Test or a clean run proved
+    # extraction works.
+    if enabling?(source_params) && !@source.enableable? && !force_enable?
+      return render json: { error: 'Run a Test (or a full run) that passes before enabling this source' },
                     status: :unprocessable_entity
     end
 
@@ -76,6 +77,10 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     homes    = adapter.sample(limit: limit)
     rates    = Catalog::ExtractionStats.rates(homes)
     degraded = Catalog::ExtractionStats.degraded?(rates, @source.extraction_threshold)
+    passed   = homes.any? && !degraded
+
+    # Record a passing Test so it satisfies the enable gate (no full run needed).
+    @source.record_test_pass! if passed
 
     # Discovery guard: zero discovered homes is a failed test, not a pass — the
     # base_url / selectors don't match. Surface it explicitly so the FE (and the
@@ -85,7 +90,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
 
     payload = {
       discovered:             homes.size,
-      passed:                 homes.any? && !degraded,
+      passed:                 passed,
       warnings:               warnings,
       field_extraction_rates: rates,
       degraded:               degraded,
