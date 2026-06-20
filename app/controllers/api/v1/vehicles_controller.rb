@@ -306,6 +306,16 @@ module Api
           clone_status   = requested_status.presence || 'available'
           override_attrs = params_to_update.to_h.except('status', :status)
 
+          # The clone always inherits the catalog row's media verbatim. The edit
+          # form round-trips images as relative paths, which would clobber the
+          # catalog's full-URL images on the clone — so drop media overrides
+          # entirely here. The dealer can edit images on the clone afterward.
+          %w[images floor_plan_images photo_url champion_images
+             virtual_tour_url matterport_url video_url].each do |k|
+            override_attrs.delete(k)
+            override_attrs.delete(k.to_sym)
+          end
+
           # Default the clone's location to the user's current location context
           # if the dealer didn't explicitly set one. Catalog rows have
           # location_id=NULL (apply_to_all_locations); the clone needs a real
@@ -328,7 +338,7 @@ module Api
               clone_id:       clone.id,
               source_id:      @vehicle.id,
               source_inventory_id: @vehicle.inventory_id,
-              message:        "Created a working copy from the Champion catalog. The original stays available to order for other customers."
+              message:        "Created a working copy from the manufacturer catalog. The original stays available to order for other customers."
             }, status: :created
           else
             render json: { errors: service.errors.full_messages }, status: :unprocessable_entity
@@ -1656,6 +1666,7 @@ module Api
           generatorFuelType: :generator_fuel_type,
           videoUrl: :video_url,
           virtualTourUrl: :virtual_tour_url,
+          matterportUrl: :matterport_url,
           specialFeatures: :special_features,
           overlayText: :overlay_text,
           # RBAC Cost Detail Fields - NEW
@@ -1751,7 +1762,7 @@ module Api
           :seller_address_city, :seller_address_state, :seller_address_zip,
           # Media
           :photo_url, :virtual_tour, :sales_photo, :listing_url,
-          :video_url, :virtual_tour_url,
+          :video_url, :virtual_tour_url, :matterport_url,
           :features, :images, :videos, :appliances, :floor_plan_images,
           # Location
           :location_id, :use_location_address,
@@ -1828,7 +1839,7 @@ module Api
           :propane_capacity, :dry_weight, :gross_weight, :hitch_weight, :cargo_capacity,
           :leveling_jacks, :self_contained, :solar_panels, :backup_camera, :satellite_tv,
           :generator_make, :generator_hours, :generator_fuel_type,
-          :video_url, :virtual_tour_url, :special_features, :overlay_text,
+          :video_url, :virtual_tour_url, :matterport_url, :special_features, :overlay_text,
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
           :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
@@ -1912,8 +1923,9 @@ module Api
           # Champion IMS lineage — used by FE to render Source badges and -C1 tooltips
           source: vehicle.source,
           clonedFromId: vehicle.cloned_from_id,
-          isCatalog: vehicle.respond_to?(:catalog?) ? vehicle.catalog? : false,
-          isClone:   vehicle.respond_to?(:champion_clone?) ? vehicle.champion_clone? : false,
+          isCatalog: vehicle.respond_to?(:catalog_row?) ? vehicle.catalog_row? : false,
+          isClone:   (vehicle.respond_to?(:champion_clone?) && vehicle.champion_clone?) ||
+                     (vehicle.respond_to?(:catalog_import_clone?) && vehicle.catalog_import_clone?),
           features: vehicle.features || [],
           images: full_image_urls,  # Use full URLs
           videos: vehicle.videos || [],
@@ -2024,6 +2036,7 @@ module Api
             generatorFuelType: vehicle.generator_fuel_type,
             videoUrl: vehicle.video_url,
             virtualTourUrl: vehicle.virtual_tour_url,
+            matterportUrl: vehicle.matterport_url,
             specialFeatures: vehicle.special_features,
             overlayText: vehicle.overlay_text,
             floorPlanImages: (vehicle.floor_plan_images || []).map { |u| raw = u.is_a?(Hash) ? (u['url'] || u[:url]) : u; raw.blank? ? nil : (raw.start_with?('http') ? raw : "#{base_url}#{raw}") }.compact,
@@ -2089,6 +2102,7 @@ module Api
             photoURL: vehicle.photo_url,
             videoUrl: vehicle.video_url,
             virtualTourUrl: vehicle.virtual_tour_url,
+            matterportUrl: vehicle.matterport_url,
             salesPhoto: vehicle.sales_photo,
             floorPlanImages: (vehicle.floor_plan_images || []).map { |u| raw = u.is_a?(Hash) ? (u['url'] || u[:url]) : u; raw.blank? ? nil : (raw.start_with?('http') ? raw : "#{base_url}#{raw}") }.compact,
             # Pricing & terms

@@ -176,6 +176,9 @@ Rails.application.routes.draw do
       # Lightweight auth/token health check
       get 'health/ping', to: 'health#ping'
 
+      # ==================== CATALOG SUBSCRIPTIONS (Surface A — dealer opt-in) ====================
+      resources :catalog_subscriptions, only: %i[index create destroy]
+
       # ==================== TRACKED LINKS (Attachment Engagement) ====================
       resources :tracked_links, only: %i[index show] do
         collection do
@@ -737,8 +740,11 @@ Rails.application.routes.draw do
           post :import
         end
         
-        # Vehicle image uploads
-        resources :images, controller: 'vehicle_images', only: [:create, :destroy]
+        # Vehicle image uploads. DELETE is collection-level (no :id) because images
+        # live as URLs in the vehicles.images jsonb array — vehicle_images#destroy
+        # removes by params[:url], not an attachment id.
+        post   'images', to: 'vehicle_images#create'
+        delete 'images', to: 'vehicle_images#destroy'
 
         # Vehicle documents (3-tier visibility: internal/customer/public)
         resources :documents, controller: 'vehicle_documents'
@@ -2600,6 +2606,15 @@ Rails.application.routes.draw do
         member do
           post :activate
           post :deactivate
+        end
+      end
+
+      # ==================== CATALOG SOURCES (Surface B — Platform Admin Only) ====================
+      resources :catalog_sources do
+        member do
+          post :test     # dry-run discover+parse, inline extraction rates (no ingest)
+          post :run_now  # enqueue an immediate run
+          get  :runs     # scrape_runs history for this source
         end
       end
 

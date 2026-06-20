@@ -38,7 +38,25 @@ class VehicleCloneFromCatalogService
     champion_last_seen_at
     serial_number
     vin
+    catalog_source_id
+    catalog_source_key
+    catalog_content_hash
+    catalog_last_seen_at
   ].freeze
+
+  # Identity / uniqueness fields the clone GENERATES itself — never overridable
+  # from the edit payload. The inventory edit form pre-fills the catalog's own
+  # serial_number, which would collide with the catalog row on insert; the dealer
+  # sets a real serial later by editing the clone in place.
+  PROTECTED_OVERRIDE_FIELDS = %w[
+    serial_number vin inventory_id id source cloned_from_id
+    catalog_source_id catalog_source_key catalog_content_hash catalog_last_seen_at
+  ].freeze
+
+  # Let errors.full_messages work (the controller renders them on failure).
+  def self.human_attribute_name(attribute, _options = {})
+    attribute.to_s.humanize
+  end
 
   attr_reader :catalog_vehicle, :requested_status, :attribute_overrides, :errors
 
@@ -52,8 +70,8 @@ class VehicleCloneFromCatalogService
   # Returns the newly-created clone Vehicle on success, nil on failure.
   # Inspect `service.errors` after call to see what went wrong.
   def call
-    unless catalog_vehicle.is_a?(Vehicle) && catalog_vehicle.catalog?
-      errors.add(:base, 'Source vehicle is not a Champion IMS catalog row')
+    unless catalog_vehicle.is_a?(Vehicle) && catalog_vehicle.cloneable?
+      errors.add(:base, 'Source vehicle is not a catalog row')
       return nil
     end
 
@@ -92,7 +110,8 @@ class VehicleCloneFromCatalogService
     copyable_attrs = catalog_vehicle.attributes.except(*NON_COPYABLE_FIELDS)
 
     clone = catalog_vehicle.company.vehicles.build(copyable_attrs)
-    clone.source           = 'champion_ims_clone'
+    # Clone source mirrors the catalog kind (champion_ims_clone / catalog_import_clone).
+    clone.source           = catalog_vehicle.clone_source
     clone.cloned_from_id   = catalog_vehicle.id
     clone.status           = requested_status
     clone.is_deleted       = false
@@ -114,8 +133,12 @@ class VehicleCloneFromCatalogService
       clone.vin = "#{base_vin}#{suffix}"
     end
 
-    # Apply dealer-provided overrides AFTER copy + defaults
+    # Apply dealer-provided overrides AFTER copy + defaults — but never let them
+    # clobber the auto-generated identity fields (serial/vin/inventory_id), or the
+    # clone collides with the catalog row's unique serial.
     attribute_overrides.each do |key, value|
+      next if PROTECTED_OVERRIDE_FIELDS.include?(key.to_s)
+
       clone.public_send("#{key}=", value) if clone.respond_to?("#{key}=")
     end
 

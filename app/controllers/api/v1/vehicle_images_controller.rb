@@ -80,10 +80,15 @@ module Api
         image_url = params[:url]
         return render json: { error: 'No URL provided' }, status: :bad_request unless image_url
 
-        # Remove from vehicle's images array
-        current_images = vehicle.images || []
-        current_images.delete(image_url)
-        vehicle.update!(images: current_images)
+        # Remove from BOTH images and floor_plan_images, matching whether entries
+        # are plain URL strings or { "url", "alt" } objects (catalog imports store
+        # objects; FE-saved arrays store strings).
+        url_of = ->(img) { img.is_a?(Hash) ? (img['url'] || img[:url]) : img }
+        without = ->(arr) { Array(arr).reject { |img| url_of.call(img) == image_url } }
+        vehicle.update!(
+          images: without.call(vehicle.images),
+          floor_plan_images: without.call(vehicle.floor_plan_images)
+        )
 
         # Delete from S3 if it's an S3 URL for our bucket
         if image_url.include?('amazonaws.com') || image_url.include?('renterinsight')

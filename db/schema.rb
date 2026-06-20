@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_19_234500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1451,6 +1451,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
     t.index ["receipt_date"], name: "index_cash_receipts_on_receipt_date"
   end
 
+  create_table "catalog_sources", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "adapter_type", null: false
+    t.string "base_url"
+    t.string "manufacturer_id"
+    t.jsonb "config", default: {}, null: false
+    t.boolean "enabled", default: false, null: false
+    t.string "schedule", default: "weekly", null: false
+    t.decimal "extraction_threshold", precision: 4, scale: 2, default: "0.8", null: false
+    t.datetime "last_run_at"
+    t.string "last_run_status", default: "never_run", null: false
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["adapter_type"], name: "index_catalog_sources_on_adapter_type"
+    t.index ["enabled", "is_deleted"], name: "index_catalog_sources_on_enabled_and_is_deleted"
+  end
+
   create_table "champion_ims_retailers", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -2497,6 +2516,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
     t.index ["deal_id", "created_at"], name: "index_deal_stage_histories_on_deal_id_and_created_at"
     t.index ["deal_id"], name: "index_deal_stage_histories_on_deal_id"
     t.index ["stage"], name: "index_deal_stage_histories_on_stage"
+  end
+
+  create_table "dealer_catalog_subscriptions", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "catalog_source_id", null: false
+    t.boolean "enabled", default: true, null: false
+    t.bigint "location_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "location_ids", default: [], null: false
+    t.index ["catalog_source_id"], name: "index_dealer_catalog_subscriptions_on_catalog_source_id"
+    t.index ["company_id", "catalog_source_id"], name: "idx_dealer_catalog_subs_unique", unique: true
+    t.index ["company_id"], name: "index_dealer_catalog_subscriptions_on_company_id"
   end
 
   create_table "deals", force: :cascade do |t|
@@ -5481,6 +5513,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
     t.index ["key"], name: "index_scopes_on_key", unique: true
   end
 
+  create_table "scrape_runs", force: :cascade do |t|
+    t.bigint "catalog_source_id", null: false
+    t.string "status", default: "running", null: false
+    t.string "trigger", default: "manual", null: false
+    t.datetime "started_at"
+    t.datetime "finished_at"
+    t.integer "homes_discovered", default: 0, null: false
+    t.integer "homes_parsed_ok", default: 0, null: false
+    t.integer "homes_failed", default: 0, null: false
+    t.integer "added_count", default: 0, null: false
+    t.integer "updated_count", default: 0, null: false
+    t.integer "removed_count", default: 0, null: false
+    t.integer "inactivated_count", default: 0, null: false
+    t.jsonb "field_extraction_rates", default: {}, null: false
+    t.boolean "degraded", default: false, null: false
+    t.jsonb "error_log", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["catalog_source_id", "created_at"], name: "index_scrape_runs_on_catalog_source_id_and_created_at"
+    t.index ["catalog_source_id"], name: "index_scrape_runs_on_catalog_source_id"
+  end
+
   create_table "service_tickets", force: :cascade do |t|
     t.integer "company_id", null: false
     t.integer "account_id"
@@ -6699,7 +6753,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
     t.bigint "sold_via_deal_id"
     t.decimal "reconditioning_cost", precision: 15, scale: 2
     t.integer "wind_zone"
+    t.bigint "catalog_source_id"
+    t.string "catalog_source_key"
+    t.string "catalog_content_hash"
+    t.datetime "catalog_last_seen_at"
     t.index ["body_style"], name: "index_vehicles_on_body_style"
+    t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
     t.index ["champion_model_id"], name: "index_vehicles_on_champion_model_id"
     t.index ["cloned_from_id"], name: "index_vehicles_on_cloned_from_id"
@@ -7378,6 +7437,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
+  add_foreign_key "dealer_catalog_subscriptions", "catalog_sources"
+  add_foreign_key "dealer_catalog_subscriptions", "companies"
   add_foreign_key "deals", "accounts"
   add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"
@@ -7631,6 +7692,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_18_220000) do
   add_foreign_key "role_permissions", "roles", on_delete: :cascade
   add_foreign_key "role_permissions", "scopes", on_delete: :cascade
   add_foreign_key "roles", "companies", on_delete: :cascade
+  add_foreign_key "scrape_runs", "catalog_sources"
   add_foreign_key "service_tickets", "accounts"
   add_foreign_key "service_tickets", "companies"
   add_foreign_key "service_tickets", "contacts"

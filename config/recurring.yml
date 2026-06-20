@@ -25,6 +25,10 @@ default: &default
   champion_ims_weekly_sync:
     class: ChampionImsWeeklySyncJob
     schedule: every sunday at 2am
+  catalog_nightly_sync:
+    class: CatalogNightlySyncJob
+    queue: default
+    schedule: every day at 1am
   champion_lead_sync:
     class: ChampionLeadSyncJob
     queue: default
