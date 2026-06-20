@@ -1656,6 +1656,7 @@ module Api
           generatorFuelType: :generator_fuel_type,
           videoUrl: :video_url,
           virtualTourUrl: :virtual_tour_url,
+          matterportUrl: :matterport_url,
           specialFeatures: :special_features,
           overlayText: :overlay_text,
           # RBAC Cost Detail Fields - NEW
@@ -1751,7 +1752,7 @@ module Api
           :seller_address_city, :seller_address_state, :seller_address_zip,
           # Media
           :photo_url, :virtual_tour, :sales_photo, :listing_url,
-          :video_url, :virtual_tour_url,
+          :video_url, :virtual_tour_url, :matterport_url,
           :features, :images, :videos, :appliances, :floor_plan_images,
           # Location
           :location_id, :use_location_address,
@@ -1828,7 +1829,7 @@ module Api
           :propane_capacity, :dry_weight, :gross_weight, :hitch_weight, :cargo_capacity,
           :leveling_jacks, :self_contained, :solar_panels, :backup_camera, :satellite_tv,
           :generator_make, :generator_hours, :generator_fuel_type,
-          :video_url, :virtual_tour_url, :special_features, :overlay_text,
+          :video_url, :virtual_tour_url, :matterport_url, :special_features, :overlay_text,
           # RBAC Cost Detail Fields - NEW
           :dealer_cost, :freight_cost, :pdi_cost, :total_cost,
           :holdback_amount, :reconditioning_cost, :floor_plan_rate, :target_gross, :minimum_price,
@@ -2024,6 +2025,7 @@ module Api
             generatorFuelType: vehicle.generator_fuel_type,
             videoUrl: vehicle.video_url,
             virtualTourUrl: vehicle.virtual_tour_url,
+            matterportUrl: vehicle.matterport_url,
             specialFeatures: vehicle.special_features,
             overlayText: vehicle.overlay_text,
             floorPlanImages: (vehicle.floor_plan_images || []).map { |u| raw = u.is_a?(Hash) ? (u['url'] || u[:url]) : u; raw.blank? ? nil : (raw.start_with?('http') ? raw : "#{base_url}#{raw}") }.compact,
@@ -2089,6 +2091,7 @@ module Api
             photoURL: vehicle.photo_url,
             videoUrl: vehicle.video_url,
             virtualTourUrl: vehicle.virtual_tour_url,
+            matterportUrl: vehicle.matterport_url,
             salesPhoto: vehicle.sales_photo,
             floorPlanImages: (vehicle.floor_plan_images || []).map { |u| raw = u.is_a?(Hash) ? (u['url'] || u[:url]) : u; raw.blank? ? nil : (raw.start_with?('http') ? raw : "#{base_url}#{raw}") }.compact,
             # Pricing & terms
