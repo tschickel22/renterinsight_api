@@ -11,17 +11,37 @@
 class CatalogSource < ApplicationRecord
   ADAPTER_TYPES   = %w[champion_feed manufacturedhomes_platform avada_sitemap].freeze
   RUN_STATUSES    = %w[never_run success partial failed].freeze
+  SCHEDULES       = %w[daily weekly manual].freeze
 
   has_many :scrape_runs, dependent: :destroy
   has_many :dealer_catalog_subscriptions, dependent: :destroy
 
+  before_validation :normalize_schedule
+
   validates :name, presence: true
   validates :adapter_type, presence: true, inclusion: { in: ADAPTER_TYPES }
+  validates :schedule, inclusion: { in: SCHEDULES }
   validates :extraction_threshold,
             numericality: { greater_than: 0, less_than_or_equal_to: 1 }
 
   scope :active,  -> { where(is_deleted: [false, nil]) }
   scope :enabled, -> { active.where(enabled: true) }
+
+  # Is this enabled source due for an automatic run, given its cadence? The
+  # nightly dispatcher wakes at 1am and runs only sources that return true here.
+  # Thresholds carry slack so a daily check never skips a cycle on timing jitter.
+  #   daily  -> last run > 20h ago
+  #   weekly -> last run > 6 days ago
+  #   manual -> never (Run Now only)
+  def due?(now = Time.current)
+    return false unless enabled && !is_deleted
+
+    case schedule
+    when 'manual' then false
+    when 'weekly' then last_run_at.nil? || last_run_at < now - 6.days
+    else               last_run_at.nil? || last_run_at < now - 20.hours
+    end
+  end
 
   # Resolve the adapter instance for this source (nil if adapter_type unknown).
   def adapter
@@ -56,5 +76,15 @@ class CatalogSource < ApplicationRecord
 
   def soft_delete!
     update!(is_deleted: true, deleted_at: Time.current)
+  end
+
+  private
+
+  # Accept legacy / free-text values and coerce to the enum: blank or unknown
+  # defaults to weekly; the old "nightly" maps to daily.
+  def normalize_schedule
+    value = schedule.to_s.strip.downcase
+    value = 'daily' if value == 'nightly'
+    self.schedule = SCHEDULES.include?(value) ? value : 'weekly'
   end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_19_000004) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_19_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1458,7 +1458,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_19_000004) do
     t.string "manufacturer_id"
     t.jsonb "config", default: {}, null: false
     t.boolean "enabled", default: false, null: false
-    t.string "schedule", default: "nightly", null: false
+    t.string "schedule", default: "weekly", null: false
     t.decimal "extraction_threshold", precision: 4, scale: 2, default: "0.8", null: false
     t.datetime "last_run_at"
     t.string "last_run_status", default: "never_run", null: false
