@@ -14,7 +14,9 @@ module Catalog
 
     # Bump when the column MAPPING below changes (not the scraper) so existing
     # rows re-ingest on the next run even though the scraped content is identical.
-    INGESTION_VERSION = 2
+    # v3: heal catalog rows whose media was damaged by a pre-clone-on-edit direct
+    # edit (re-ingest restores the correct {url} image objects).
+    INGESTION_VERSION = 3
 
     Result = Struct.new(:added, :updated, :unchanged, :inactivated, keyword_init: true)
 
