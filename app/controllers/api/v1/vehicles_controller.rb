@@ -306,6 +306,13 @@ module Api
           clone_status   = requested_status.presence || 'available'
           override_attrs = params_to_update.to_h.except('status', :status)
 
+          # Don't let a blank media payload in the edit wipe the catalog's images
+          # on the clone — keep the copied media unless the edit supplies real values.
+          %w[images floor_plan_images photo_url champion_images].each do |k|
+            v = override_attrs[k]
+            override_attrs.delete(k) if v.nil? || (v.respond_to?(:empty?) && v.empty?)
+          end
+
           # Default the clone's location to the user's current location context
           # if the dealer didn't explicitly set one. Catalog rows have
           # location_id=NULL (apply_to_all_locations); the clone needs a real
