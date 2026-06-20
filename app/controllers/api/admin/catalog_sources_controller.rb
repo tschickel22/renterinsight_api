@@ -195,6 +195,9 @@ class Api::Admin::CatalogSourcesController < ApplicationController
       lastRunStatus:       source.last_run_status,
       degraded:            source.degraded?,
       worstFieldRate:      source.worst_field_rate,
+      # Latest run's parsed count for the list column (nil when never run).
+      homesParsedOk:       latest&.homes_parsed_ok,
+      homesDiscovered:     latest&.homes_discovered,
       selectableForDealers: source.selectable_for_dealers?,
       createdAt:           source.created_at,
       updatedAt:           source.updated_at
