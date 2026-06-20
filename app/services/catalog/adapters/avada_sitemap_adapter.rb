@@ -23,13 +23,11 @@ module Catalog
 
       def discover(limit: nil)
         @urls ||= {}
-        sitemap_url = source.config['sitemap_url'].presence ||
-                      "#{base_url}/home-details-sitemap.xml"
-        body = http_get(sitemap_url, accept: 'application/xml,text/xml')
+        body = fetch_sitemap
         return [] if body.blank?
 
         keys = Nokogiri::XML(body).remove_namespaces!.css('url > loc').map(&:text)
-                       .reject { |loc| loc.match?(%r{/homes/?\z}) } # drop the index page
+                       .select { |loc| loc.include?('/home-details/') } # detail pages only
                        .filter_map do |loc|
                          slug = slug_for(loc)
                          next if slug.blank?
@@ -43,10 +41,30 @@ module Catalog
         []
       end
 
+      # The home-details sitemap lives at the site ROOT, not under base_url's path
+      # (base_url may be a listing page like /find-a-home/). Try the configured
+      # URL, then the canonical root path, then the sitemap index for a child
+      # whose name mentions home-details.
+      def fetch_sitemap
+        candidates = [source.config['sitemap_url'].presence,
+                      "#{site_root}/home-details-sitemap.xml"].compact
+        candidates.each do |url|
+          body = http_get(url, accept: 'application/xml,text/xml')
+          return body if body.present? && body.include?('/home-details/')
+        end
+
+        index = http_get("#{site_root}/sitemap.xml", accept: 'application/xml,text/xml')
+        return nil if index.blank?
+
+        child = Nokogiri::XML(index).remove_namespaces!.css('sitemap > loc, loc').map(&:text)
+                       .find { |u| u.match?(/home.?detail/i) }
+        child ? http_get(child, accept: 'application/xml,text/xml') : nil
+      end
+
       def fetch(key)
         # Discovery caches the full sitemap URL; the fallback is the canonical
-        # /home-details/{slug}/ path.
-        url  = (@urls || {})[key] || "#{base_url}/home-details/#{key}/"
+        # /home-details/{slug}/ path at the site root.
+        url  = (@urls || {})[key] || "#{site_root}/home-details/#{key}/"
         html = http_get(url)
         { key: key.to_s, url: url, html: html }
       end
@@ -80,7 +98,7 @@ module Catalog
       # Explains a zero-discovery result: did the sitemap fetch, what status, how
       # many <loc> / home-details URLs did the server actually see?
       def diagnostics
-        url = source.config['sitemap_url'].presence || "#{base_url}/home-details-sitemap.xml"
+        url = source.config['sitemap_url'].presence || "#{site_root}/home-details-sitemap.xml"
         probe = http_probe(url, accept: 'application/xml,text/xml')
         out = {
           adapter:        'avada_sitemap',
@@ -212,6 +230,15 @@ module Catalog
         URI.parse(loc).path.split('/').reject(&:blank?).last
       rescue StandardError
         nil
+      end
+
+      # Scheme + host of the source — the sitemap and /home-details/ pages live at
+      # the root, even when base_url points at a listing path (e.g. /find-a-home/).
+      def site_root
+        uri = URI.parse(source.base_url.to_s)
+        "#{uri.scheme}://#{uri.host}"
+      rescue StandardError
+        source.base_url.to_s.sub(%r{/+\z}, '')
       end
 
       def to_int(value)
