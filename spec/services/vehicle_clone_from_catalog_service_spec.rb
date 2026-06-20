@@ -39,6 +39,20 @@ RSpec.describe VehicleCloneFromCatalogService do
     expect(clone.catalog_source_key).to be_nil
   end
 
+  it 'keeps its auto-generated serial even when the edit sends the catalog serial' do
+    # The edit form pre-fills the catalog's own serial — it must NOT clobber the
+    # generated unique one (that caused "serial number already taken").
+    clone = described_class.new(
+      catalog,
+      status: 'available',
+      attributes: { 'serial_number' => catalog.serial_number, 'sale_price' => 50_000 }
+    ).call
+
+    expect(clone).to be_present
+    expect(clone.serial_number).to eq("#{catalog.serial_number}-C1")
+    expect(clone.serial_number).not_to eq(catalog.serial_number)
+  end
+
   it 'leaves the catalog row untouched' do
     described_class.new(catalog, status: 'available', attributes: { 'sale_price' => 89_999 }).call
     catalog.reload
