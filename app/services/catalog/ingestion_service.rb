@@ -67,9 +67,13 @@ module Catalog
     end
 
     def assign_attributes!(vehicle, home, is_new:)
-      gallery   = home.images
-      floor_pl  = home.floorplan_images
-      primary   = gallery.find { |i| !i['is_floorplan'] } || gallery.first
+      # Vehicle/inventory UI reads images as [{ "url", "alt" }] (the Champion
+      # shape) — NOT the NormalizedHome internal {source_url,...} shape, or the
+      # gallery renders empty.
+      gallery_imgs = home.images.reject { |i| truthy(i['is_floorplan']) }
+      gallery_imgs = home.images if gallery_imgs.empty?
+      gallery      = to_url_images(gallery_imgs)
+      floor_pl     = to_url_images(home.floorplan_images)
 
       attrs = {
         listing_type:         'manufactured_home',
@@ -84,7 +88,7 @@ module Catalog
         description:          home.description,
         images:               gallery,
         floor_plan_images:    floor_pl,
-        photo_url:            primary && (primary['source_url'] || primary['local_url']),
+        photo_url:            gallery.first&.dig('url'),
         features:             features_array(home),
         virtual_tour_url:     home.virtual_tour_url,
         matterport_url:       (home.virtual_tour_url if home.virtual_tour_url.to_s.include?('matterport')),
@@ -133,6 +137,21 @@ module Catalog
 
     def features_array(home)
       home.features.flat_map { |section, items| Array(items).map { |i| "#{section}: #{i}" } }
+    end
+
+    # Convert NormalizedHome image records to the vehicle/UI shape: { url, alt }.
+    # Prefer the archived local_url when present, else the source URL.
+    def to_url_images(images)
+      Array(images).filter_map do |img|
+        url = img['local_url'].presence || img['source_url'] || img['url']
+        next if url.blank?
+
+        { 'url' => url, 'alt' => img['alt'].to_s }
+      end
+    end
+
+    def truthy(value)
+      value == true || value.to_s == 'true'
     end
 
     def manufacturer_name

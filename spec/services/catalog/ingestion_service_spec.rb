@@ -20,6 +20,11 @@ RSpec.describe Catalog::IngestionService do
     expect(vehicle.listing_type).to eq('manufactured_home')
     expect(vehicle.status).to eq('available_to_order')
     expect(vehicle.model).to eq('PRI3284H') # catalog_import is exempt from titleize
+    # Images MUST be stored in the {url, alt} shape the UI reads (the Champion
+    # shape), not the NormalizedHome internal {source_url,...} shape.
+    expect(vehicle.images.first).to include('url')
+    expect(vehicle.images.first['url']).to start_with('http')
+    expect(vehicle.photo_url).to eq(vehicle.images.first['url'])
   end
 
   it 'is idempotent — re-ingesting unchanged homes reports unchanged' do
