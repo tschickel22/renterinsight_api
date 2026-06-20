@@ -80,18 +80,35 @@ module Catalog
       @source.dealer_catalog_subscriptions.enabled.includes(:company).find_each do |sub|
         next if sub.company.nil?
 
-        result = IngestionService.new(
-          company:        sub.company,
-          source:         @source,
-          location_id:    sub.location_id,
-          protect_blanks: degraded
-        ).call(homes)
+        target_locations = sub.ingest_location_ids # [nil] for company-wide, else [ids]
+        target_locations.each do |loc|
+          result = IngestionService.new(
+            company:        sub.company,
+            source:         @source,
+            location_id:    loc,
+            protect_blanks: degraded
+          ).call(homes)
 
-        totals[:added]       += result.added
-        totals[:updated]     += result.updated
-        totals[:inactivated] += result.inactivated
+          totals[:added]       += result.added
+          totals[:updated]     += result.updated
+          totals[:inactivated] += result.inactivated
+        end
+
+        totals[:inactivated] += inactivate_deselected_locations(sub.company, target_locations)
       end
       totals
+    end
+
+    # Soft-delete catalog copies at locations the subscription no longer targets
+    # (e.g. dealer switched from all -> specific, or removed a location).
+    def inactivate_deselected_locations(company, target_locations)
+      scope = company.vehicles.where(catalog_source_id: @source.id, is_deleted: [false, nil])
+      scope = if target_locations == [nil]
+                scope.where.not(location_id: nil)            # company-wide: drop pinned copies
+              else
+                scope.where('location_id IS NULL OR location_id NOT IN (?)', target_locations.compact)
+              end
+      scope.update_all(is_deleted: true, deleted_at: Time.current)
     end
 
     def run_status(homes:, errors:, degraded:)

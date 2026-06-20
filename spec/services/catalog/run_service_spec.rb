@@ -55,14 +55,48 @@ RSpec.describe Catalog::RunService do
   describe 'ingestion into subscribers' do
     let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
 
-    it 'upserts homes into each enabled subscription company' do
-      create(:dealer_catalog_subscription, company: company, catalog_source: source, enabled: true)
+    it 'upserts homes company-wide (nil location) when no locations selected' do
+      create(:dealer_catalog_subscription, company: company, catalog_source: source, enabled: true, location_ids: [])
       homes = %w[201 202].map { |k| FakeCatalogAdapter.home(k) }
 
       run = run_with(homes)
 
       expect(run.added_count).to eq(2)
-      expect(company.vehicles.where(catalog_source_id: source.id).count).to eq(2)
+      vehicles = company.vehicles.where(catalog_source_id: source.id)
+      expect(vehicles.count).to eq(2)
+      expect(vehicles.pluck(:location_id).uniq).to eq([nil])
+    end
+
+    it 'creates one copy per selected location' do
+      loc_a = company.locations.create!(name: 'A', timezone: 'UTC')
+      loc_b = company.locations.create!(name: 'B', timezone: 'UTC')
+      create(:dealer_catalog_subscription, company: company, catalog_source: source,
+                                           enabled: true, location_ids: [loc_a.id, loc_b.id])
+      homes = %w[201 202].map { |k| FakeCatalogAdapter.home(k) }
+
+      run = run_with(homes)
+
+      # 2 homes × 2 locations = 4 copies; 2 per location.
+      expect(company.vehicles.where(catalog_source_id: source.id).count).to eq(4)
+      expect(company.vehicles.where(catalog_source_id: source.id, location_id: loc_a.id).count).to eq(2)
+      expect(company.vehicles.where(catalog_source_id: source.id, location_id: loc_b.id).count).to eq(2)
+      expect(run.added_count).to eq(4)
+    end
+
+    it 'inactivates copies at a location the dealer deselected' do
+      loc_a = company.locations.create!(name: 'A', timezone: 'UTC')
+      loc_b = company.locations.create!(name: 'B', timezone: 'UTC')
+      sub = create(:dealer_catalog_subscription, company: company, catalog_source: source,
+                                                 enabled: true, location_ids: [loc_a.id, loc_b.id])
+      homes = [FakeCatalogAdapter.home('201')]
+      run_with(homes)
+      expect(company.vehicles.where(catalog_source_id: source.id, is_deleted: false).count).to eq(2)
+
+      # Dealer drops location B → only A's copy should remain active.
+      sub.update!(location_ids: [loc_a.id])
+      run_with(homes)
+      active = company.vehicles.where(catalog_source_id: source.id, is_deleted: false)
+      expect(active.pluck(:location_id)).to eq([loc_a.id])
     end
   end
 end

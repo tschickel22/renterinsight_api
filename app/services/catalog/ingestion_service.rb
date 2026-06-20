@@ -47,9 +47,12 @@ module Catalog
     private
 
     def upsert(home)
+      # Dedup per (source, source_key, location) so each subscribed location gets
+      # its own Vehicle copy (a Vehicle has a single location_id).
       vehicle = @company.vehicles.find_or_initialize_by(
         catalog_source_id:  @source.id,
-        catalog_source_key: home.source_key.to_s
+        catalog_source_key: home.source_key.to_s,
+        location_id:        @location_id
       )
       is_new = vehicle.new_record?
 
@@ -114,8 +117,9 @@ module Catalog
 
       # Required-on-create fields the feed doesn't carry.
       vehicle.year          ||= Date.current.year
-      vehicle.serial_number ||= "CAT-#{@source.id}-#{home.source_key}"
-      vehicle.location_id     = @location_id if @location_id.present?
+      # Per-location serial keeps the MH uniqueness constraint happy across copies.
+      vehicle.serial_number ||= "CAT-#{@source.id}-#{home.source_key}#{@location_id ? "-L#{@location_id}" : ''}"
+      vehicle.location_id     = @location_id
       vehicle.catalog_source_id  = @source.id
       vehicle.catalog_source_key = home.source_key.to_s
     end
@@ -133,8 +137,10 @@ module Catalog
     end
 
     def inactivate_missing(seen_keys)
+      # Scoped to THIS location so ingesting one location doesn't tombstone
+      # another location's copies.
       scope = @company.vehicles
-                      .where(catalog_source_id: @source.id, is_deleted: [false, nil])
+                      .where(catalog_source_id: @source.id, location_id: @location_id, is_deleted: [false, nil])
       scope = scope.where.not(catalog_source_key: seen_keys) if seen_keys.any?
 
       count = 0

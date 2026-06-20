@@ -73,6 +73,20 @@ RSpec.describe 'Api::V1::CatalogSubscriptions', type: :request do
       expect(response).to have_http_status(:ok)
     end
 
+    it 'stores only the company\'s own locations and ignores foreign ones' do
+      source  = selectable_source('Sunshine')
+      mine    = company.locations.create!(name: 'Mine', timezone: 'UTC')
+      foreign = other_company.locations.create!(name: 'Theirs', timezone: 'UTC')
+
+      post '/api/v1/catalog_subscriptions',
+           params: { catalog_subscription: { catalog_source_id: source.id,
+                                             location_ids: [mine.id, foreign.id] } }.to_json,
+           headers: headers
+      expect(response).to have_http_status(:created)
+      sub = DealerCatalogSubscription.find(JSON.parse(response.body)['subscription']['id'])
+      expect(sub.location_ids).to eq([mine.id])
+    end
+
     it 'rejects a non-selectable source with 422' do
       source = create(:catalog_source, name: 'Off', enabled: false, last_run_status: 'success')
       post '/api/v1/catalog_subscriptions',

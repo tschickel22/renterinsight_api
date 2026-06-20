@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_19_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_19_234500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2525,6 +2525,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_19_230000) do
     t.bigint "location_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "location_ids", default: [], null: false
     t.index ["catalog_source_id"], name: "index_dealer_catalog_subscriptions_on_catalog_source_id"
     t.index ["company_id", "catalog_source_id"], name: "idx_dealer_catalog_subs_unique", unique: true
     t.index ["company_id"], name: "index_dealer_catalog_subscriptions_on_company_id"
