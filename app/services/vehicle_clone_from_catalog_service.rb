@@ -38,6 +38,10 @@ class VehicleCloneFromCatalogService
     champion_last_seen_at
     serial_number
     vin
+    catalog_source_id
+    catalog_source_key
+    catalog_content_hash
+    catalog_last_seen_at
   ].freeze
 
   attr_reader :catalog_vehicle, :requested_status, :attribute_overrides, :errors
@@ -52,8 +56,8 @@ class VehicleCloneFromCatalogService
   # Returns the newly-created clone Vehicle on success, nil on failure.
   # Inspect `service.errors` after call to see what went wrong.
   def call
-    unless catalog_vehicle.is_a?(Vehicle) && catalog_vehicle.catalog?
-      errors.add(:base, 'Source vehicle is not a Champion IMS catalog row')
+    unless catalog_vehicle.is_a?(Vehicle) && catalog_vehicle.cloneable?
+      errors.add(:base, 'Source vehicle is not a catalog row')
       return nil
     end
 
@@ -92,7 +96,8 @@ class VehicleCloneFromCatalogService
     copyable_attrs = catalog_vehicle.attributes.except(*NON_COPYABLE_FIELDS)
 
     clone = catalog_vehicle.company.vehicles.build(copyable_attrs)
-    clone.source           = 'champion_ims_clone'
+    # Clone source mirrors the catalog kind (champion_ims_clone / catalog_import_clone).
+    clone.source           = catalog_vehicle.clone_source
     clone.cloned_from_id   = catalog_vehicle.id
     clone.status           = requested_status
     clone.is_deleted       = false

@@ -302,29 +302,49 @@ class Vehicle < ApplicationRecord
   end
   alias_method :catalog?, :champion_sourced?
 
+  # True when this vehicle is a manufacturer-catalog row imported by the generic
+  # scraper pipeline (Sunshine, Kabco, …) — the analogue of a Champion catalog row.
+  def catalog_import?
+    source == 'catalog_import'
+  end
+
+  # Any immutable catalog row (Champion or generic import) — these clone-on-edit.
+  def catalog_row?
+    champion_sourced? || catalog_import?
+  end
+
   # True when this vehicle is a dealer-owned clone of a Champion catalog row.
   def champion_clone?
     source == 'champion_ims_clone'
   end
   alias_method :clone?, :champion_clone?
 
+  def catalog_import_clone?
+    source == 'catalog_import_clone'
+  end
+
+  # The source value a clone of THIS catalog row should carry.
+  def clone_source
+    catalog_import? ? 'catalog_import_clone' : 'champion_ims_clone'
+  end
+
   # True if any version of this row should NOT be cloned again on edit.
   # Clones-of-clones are not allowed: editing a clone updates it in place.
   def cloneable?
-    catalog?
+    catalog_row?
   end
 
   # True when status change should trigger a clone instead of an in-place update.
   # Catalog rows must stay at `available_to_order`; any other status means the
   # dealer is taking action on a specific home and needs their own working copy.
   def requires_clone_on_status_change?(new_status)
-    catalog? && new_status.to_s != 'available_to_order'
+    catalog_row? && new_status.to_s != 'available_to_order'
   end
 
   # True when this catalog row has any associated dealer activity that should
   # prevent it from being tombstoned even if Champion drops it from the feed.
   def has_dealer_activity?
-    return false unless catalog?
+    return false unless catalog_row?
     clones.any? || deals.any? || quotes.any? || listings.any? || inventory_packages.any?
   end
   
@@ -355,7 +375,7 @@ class Vehicle < ApplicationRecord
     # data — titleizing them breaks part numbers (DAP1676H32222 → "Dap 1676 H 32222")
     # and re-spaces model names ("Skyliner 6380P" → "Skyliner 6380 P"), causing
     # an infinite update loop on every sync.
-    unless %w[champion_ims catalog_import].include?(source)
+    unless %w[champion_ims catalog_import catalog_import_clone].include?(source)
       self.make = make&.titleize
       self.model = model&.titleize
     end

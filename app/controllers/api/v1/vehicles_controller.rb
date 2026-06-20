@@ -328,7 +328,7 @@ module Api
               clone_id:       clone.id,
               source_id:      @vehicle.id,
               source_inventory_id: @vehicle.inventory_id,
-              message:        "Created a working copy from the Champion catalog. The original stays available to order for other customers."
+              message:        "Created a working copy from the manufacturer catalog. The original stays available to order for other customers."
             }, status: :created
           else
             render json: { errors: service.errors.full_messages }, status: :unprocessable_entity
@@ -1913,8 +1913,9 @@ module Api
           # Champion IMS lineage — used by FE to render Source badges and -C1 tooltips
           source: vehicle.source,
           clonedFromId: vehicle.cloned_from_id,
-          isCatalog: vehicle.respond_to?(:catalog?) ? vehicle.catalog? : false,
-          isClone:   vehicle.respond_to?(:champion_clone?) ? vehicle.champion_clone? : false,
+          isCatalog: vehicle.respond_to?(:catalog_row?) ? vehicle.catalog_row? : false,
+          isClone:   (vehicle.respond_to?(:champion_clone?) && vehicle.champion_clone?) ||
+                     (vehicle.respond_to?(:catalog_import_clone?) && vehicle.catalog_import_clone?),
           features: vehicle.features || [],
           images: full_image_urls,  # Use full URLs
           videos: vehicle.videos || [],
