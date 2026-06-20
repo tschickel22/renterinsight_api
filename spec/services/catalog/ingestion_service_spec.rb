@@ -25,6 +25,9 @@ RSpec.describe Catalog::IngestionService do
     expect(vehicle.images.first).to include('url')
     expect(vehicle.images.first['url']).to start_with('http')
     expect(vehicle.photo_url).to eq(vehicle.images.first['url'])
+    # Dimensions ("30'0\" x 80'0\"") parse into width/length feet for the UI.
+    expect(vehicle.width).to eq(30)
+    expect(vehicle.length).to eq(80)
   end
 
   it 'is idempotent — re-ingesting unchanged homes reports unchanged' do

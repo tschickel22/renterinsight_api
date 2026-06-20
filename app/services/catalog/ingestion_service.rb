@@ -12,6 +12,10 @@ module Catalog
   class IngestionService
     VEHICLE_SOURCE = 'catalog_import'
 
+    # Bump when the column MAPPING below changes (not the scraper) so existing
+    # rows re-ingest on the next run even though the scraped content is identical.
+    INGESTION_VERSION = 2
+
     Result = Struct.new(:added, :updated, :unchanged, :inactivated, keyword_init: true)
 
     def initialize(company:, source:, location_id: nil, protect_blanks: false)
@@ -49,8 +53,11 @@ module Catalog
       )
       is_new = vehicle.new_record?
 
-      # Unchanged: same content hash on an existing row → just refresh last-seen.
-      if !is_new && vehicle.catalog_content_hash == home.content_hash
+      # Unchanged: same content signature on an existing row → just refresh
+      # last-seen. The signature includes INGESTION_VERSION, so bumping that
+      # forces every row to re-ingest when the column MAPPING changes (even
+      # though the scraped content didn't).
+      if !is_new && vehicle.catalog_content_hash == content_signature(home)
         vehicle.update_columns(catalog_last_seen_at: Time.current, is_deleted: false, deleted_at: nil)
         return :unchanged
       end
@@ -70,10 +77,11 @@ module Catalog
       # Vehicle/inventory UI reads images as [{ "url", "alt" }] (the Champion
       # shape) — NOT the NormalizedHome internal {source_url,...} shape, or the
       # gallery renders empty.
-      gallery_imgs = home.images.reject { |i| truthy(i['is_floorplan']) }
-      gallery_imgs = home.images if gallery_imgs.empty?
-      gallery      = to_url_images(gallery_imgs)
-      floor_pl     = to_url_images(home.floorplan_images)
+      gallery_imgs  = home.images.reject { |i| truthy(i['is_floorplan']) }
+      gallery_imgs  = home.images if gallery_imgs.empty?
+      gallery       = to_url_images(gallery_imgs)
+      floor_pl      = to_url_images(home.floorplan_images)
+      width, length = parse_width_length(home.dimensions)
 
       attrs = {
         listing_type:         'manufactured_home',
@@ -85,6 +93,8 @@ module Catalog
         bedrooms:             home.bedrooms,
         bathrooms:            home.bathrooms,
         square_feet:          home.square_feet,
+        width:                width,
+        length:               length,
         description:          home.description,
         images:               gallery,
         floor_plan_images:    floor_pl,
@@ -93,7 +103,7 @@ module Catalog
         virtual_tour_url:     home.virtual_tour_url,
         matterport_url:       (home.virtual_tour_url if home.virtual_tour_url.to_s.include?('matterport')),
         video_url:            home.video_url,
-        catalog_content_hash: home.content_hash,
+        catalog_content_hash: content_signature(home),
         catalog_last_seen_at: Time.current,
         is_deleted:           false,
         deleted_at:           nil
@@ -152,6 +162,18 @@ module Catalog
 
     def truthy(value)
       value == true || value.to_s == 'true'
+    end
+
+    def content_signature(home)
+      "v#{INGESTION_VERSION}:#{home.content_hash}"
+    end
+
+    # "32'0\" x 84'0\"" -> [32, 84] (feet). Leading integer on each side of the x.
+    def parse_width_length(dims)
+      return [nil, nil] if dims.blank?
+
+      parts = dims.to_s.split(/[xX×]/, 2)
+      [parts[0].to_s[/\d+/]&.to_i, parts[1].to_s[/\d+/]&.to_i]
     end
 
     def manufacturer_name
