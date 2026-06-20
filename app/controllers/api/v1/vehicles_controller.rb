@@ -306,11 +306,14 @@ module Api
           clone_status   = requested_status.presence || 'available'
           override_attrs = params_to_update.to_h.except('status', :status)
 
-          # Don't let a blank media payload in the edit wipe the catalog's images
-          # on the clone — keep the copied media unless the edit supplies real values.
-          %w[images floor_plan_images photo_url champion_images].each do |k|
-            v = override_attrs[k]
-            override_attrs.delete(k) if v.nil? || (v.respond_to?(:empty?) && v.empty?)
+          # The clone always inherits the catalog row's media verbatim. The edit
+          # form round-trips images as relative paths, which would clobber the
+          # catalog's full-URL images on the clone — so drop media overrides
+          # entirely here. The dealer can edit images on the clone afterward.
+          %w[images floor_plan_images photo_url champion_images
+             virtual_tour_url matterport_url video_url].each do |k|
+            override_attrs.delete(k)
+            override_attrs.delete(k.to_sym)
           end
 
           # Default the clone's location to the user's current location context
