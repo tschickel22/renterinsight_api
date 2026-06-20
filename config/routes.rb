@@ -740,8 +740,11 @@ Rails.application.routes.draw do
           post :import
         end
         
-        # Vehicle image uploads
-        resources :images, controller: 'vehicle_images', only: [:create, :destroy]
+        # Vehicle image uploads. DELETE is collection-level (no :id) because images
+        # live as URLs in the vehicles.images jsonb array — vehicle_images#destroy
+        # removes by params[:url], not an attachment id.
+        post   'images', to: 'vehicle_images#create'
+        delete 'images', to: 'vehicle_images#destroy'
 
         # Vehicle documents (3-tier visibility: internal/customer/public)
         resources :documents, controller: 'vehicle_documents'
