@@ -345,7 +345,27 @@ module Api
             end
 
             Rails.logger.info "✅ [ConvertLead] Account #{account.previously_new_record? ? 'created' : 'reused'}: #{account.id}"
-            
+
+            # 1b. BACKFILL EXISTING ACCOUNT
+            # find_or_create_by! only sets email/phone/address on CREATE. When we
+            # match a pre-existing account (e.g. an imported one), fill in any
+            # contact fields it's missing from the lead — without overwriting data
+            # the account already has.
+            unless account.previously_new_record?
+              backfill = {}
+              backfill[:email]               = @lead.email   if account.email.blank?               && @lead.email.present?
+              backfill[:phone]               = @lead.phone   if account.phone.blank?               && @lead.phone.present?
+              backfill[:billing_street]      = @lead.street  if account.billing_street.blank?      && @lead.street.present?
+              backfill[:billing_city]        = @lead.city    if account.billing_city.blank?        && @lead.city.present?
+              backfill[:billing_state]       = @lead.state   if account.billing_state.blank?       && @lead.state.present?
+              backfill[:billing_postal_code] = @lead.zip     if account.billing_postal_code.blank? && @lead.zip.present?
+              backfill[:billing_country]     = @lead.country if account.billing_country.blank?     && @lead.country.present?
+              if backfill.any?
+                account.update!(backfill)
+                Rails.logger.info "✅ [ConvertLead] Backfilled existing account #{account.id}: #{backfill.keys.join(', ')}"
+              end
+            end
+
             # 2. CREATE CONTACT (if requested or if we have name data)
             contact = nil
             create_contact = params[:create_contact].present? ? 
@@ -445,7 +465,11 @@ module Api
                   assigned_to_id: la.assigned_to_id,
                   activity_type: la.activity_type,
                   subject: la.subject,
-                  description: la.description,
+                  # account_activities.description is NOT NULL but lead_activities
+                  # allows null — copying a null straight over aborts the whole
+                  # conversion transaction. Fall back to the subject/type so the
+                  # activity migrates instead of killing the conversion.
+                  description: la.description.presence || la.subject.presence || la.activity_type.to_s.humanize.presence || 'Activity',
                   status: la.status,
                   priority: la.priority,
                   due_date: la.due_date,
