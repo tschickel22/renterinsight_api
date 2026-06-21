@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_19_234500) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_21_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -19,7 +19,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_19_234500) do
     t.integer "account_id", null: false
     t.integer "user_id"
     t.string "activity_type", null: false
-    t.text "description", null: false
+    t.text "description"
     t.string "outcome"
     t.integer "duration"
     t.datetime "scheduled_date"
