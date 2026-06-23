@@ -408,6 +408,11 @@ module Api
           { key: 'last_name', label: 'Last Name', type: 'text', source: 'standard', required: true, protected: true },
           { key: 'email', label: 'Email', type: 'email', source: 'standard', required: true, protected: true },
           { key: 'phone', label: 'Phone', type: 'phone', source: 'standard', required: true, protected: true },
+          # Co-applicant (co-borrower) — becomes a second contact on conversion
+          { key: 'co_applicant_first_name', label: 'Co-Applicant First Name', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'co_applicant_last_name', label: 'Co-Applicant Last Name', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'co_applicant_email', label: 'Co-Applicant Email', type: 'email', source: 'standard', required: false, protected: false },
+          { key: 'co_applicant_phone', label: 'Co-Applicant Phone', type: 'phone', source: 'standard', required: false, protected: false },
           { key: 'company_name', label: 'Company Name', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'title', label: 'Job Title', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'created_at', label: 'Lead Created', type: 'datetime', source: 'standard', required: false, protected: false },
