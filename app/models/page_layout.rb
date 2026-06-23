@@ -1177,6 +1177,9 @@ class PageLayout < ApplicationRecord
             { key: 'status', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'owner_id', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'source_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'company_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'title', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'created_at', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'purchase_timeframe', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'rv_experience', type: 'standard', visible: true, required: false, width: 1 }
           ]
