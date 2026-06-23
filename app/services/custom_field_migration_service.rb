@@ -25,27 +25,38 @@ class CustomFieldMigrationService
 
         case migration_type
         when 'create_new'
-          # Eagerly create a matching custom field on the target module
-          target_field = company.custom_fields.create!(
-            name: source_custom_field.name,
-            label: source_custom_field.label,
-            field_type: source_custom_field.field_type,
-            module: target_module,
-            options: source_custom_field.options,
-            validation_rules: source_custom_field.validation_rules,
-            required: false,
-            is_active: true,
-            is_system_field: false,
-            section: source_custom_field.section,
-            description: source_custom_field.description,
-            placeholder: source_custom_field.placeholder,
-            display_order: source_custom_field.display_order,
-            visibility: source_custom_field.visibility
-          )
-          Rails.logger.info "[CustomFieldMigrationService] Created target field #{target_field.id} (#{target_field.field_key}) on #{target_module}"
+          # If a field with the same name already exists on the target module, reuse
+          # it instead of creating a duplicate. custom_fields has a unique index on
+          # [company_id, module, name]; blindly creating would raise RecordNotUnique
+          # (an uncaught PG::UniqueViolation → HTTP 500). This commonly happens when
+          # the target field was already created (e.g. a prior conversion-mapping run
+          # or a manually-added field of the same name).
+          target_field = company.custom_fields.find_by(module: target_module, name: source_custom_field.name)
 
-          # Add the new field to the target module's page layout so it's visible in the UI
-          add_field_to_page_layout(company, target_module, target_field)
+          if target_field
+            Rails.logger.info "[CustomFieldMigrationService] Reusing existing target field #{target_field.id} (#{target_field.field_key}) on #{target_module}"
+          else
+            target_field = company.custom_fields.create!(
+              name: source_custom_field.name,
+              label: source_custom_field.label,
+              field_type: source_custom_field.field_type,
+              module: target_module,
+              options: source_custom_field.options,
+              validation_rules: source_custom_field.validation_rules,
+              required: false,
+              is_active: true,
+              is_system_field: false,
+              section: source_custom_field.section,
+              description: source_custom_field.description,
+              placeholder: source_custom_field.placeholder,
+              display_order: source_custom_field.display_order,
+              visibility: source_custom_field.visibility
+            )
+            Rails.logger.info "[CustomFieldMigrationService] Created target field #{target_field.id} (#{target_field.field_key}) on #{target_module}"
+
+            # Add the new field to the target module's page layout so it's visible in the UI
+            add_field_to_page_layout(company, target_module, target_field)
+          end
 
         when 'map_to_existing'
           target_field_id = mapping[:target_custom_field_id]
@@ -86,6 +97,9 @@ class CustomFieldMigrationService
   rescue ActiveRecord::RecordInvalid => e
     Rails.logger.error "[CustomFieldMigrationService] Validation error: #{e.message}"
     { success: false, errors: [e.message] }
+  rescue ActiveRecord::RecordNotUnique => e
+    Rails.logger.error "[CustomFieldMigrationService] Uniqueness error: #{e.message}"
+    { success: false, errors: ['A field with this name already exists on the target module.'] }
   end
 
   # Copies custom field values from a lead to its converted entities.
