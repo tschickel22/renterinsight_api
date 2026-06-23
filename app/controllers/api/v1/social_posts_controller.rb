@@ -129,8 +129,14 @@ class Api::V1::SocialPostsController < ApplicationController
   end
 
   # POST /api/v1/social-posts/:id/publish
+  # Doubles as "repost" for a previously failed post — re-running this on a
+  # `failed` post retries the publish and clears the stored failure on success.
   def publish
     return unless authorize_action!('social_posts', 'update')
+
+    if @post.status == 'published'
+      return render json: { error: 'This post has already been published.' }, status: :unprocessable_entity
+    end
 
     integration = @company.facebook_integrations.active.order(:id).first
     unless integration
@@ -163,18 +169,22 @@ class Api::V1::SocialPostsController < ApplicationController
         end
     rescue MetaGraphApi::ExpiredTokenError => _e
       integration.update(status: 'expired')
-      return render json: { error: 'Facebook token expired. Please reconnect in Settings > Integrations.' }, status: :unprocessable_entity
+      msg = 'Facebook token expired. Please reconnect in Settings > Integrations.'
+      mark_publish_failed(@post, reason: 'expired_token', error: msg)
+      return render json: { error: msg, failure_reason: msg }, status: :unprocessable_entity
     rescue MetaGraphApi::Error => e
-      @post.update(status: 'failed')
-      return render json: { error: "Facebook API error: #{e.message}" }, status: :unprocessable_entity
+      msg = "Facebook API error: #{e.message}"
+      mark_publish_failed(@post, reason: 'meta_api_error', error: msg)
+      return render json: { error: msg, failure_reason: msg }, status: :unprocessable_entity
     end
 
     external_id = result.is_a?(Hash) ? (result['id'] || result['post_id']) : nil
 
     @post.update!(
-      status:           'published',
-      published_at:     Time.current,
-      external_post_id: external_id
+      status:             'published',
+      published_at:       Time.current,
+      external_post_id:   external_id,
+      generation_context: clear_publish_failure(@post)
     )
 
     fire_published_webhook(@post)
@@ -469,6 +479,36 @@ class Api::V1::SocialPostsController < ApplicationController
     }
   end
 
+  # Persist a publish failure (status + human-readable reason) so the UI can
+  # show why it failed and offer a repost. Mirrors PublishSocialPostJob#mark_failed.
+  def mark_publish_failed(post, reason:, error:)
+    ctx = post.generation_context.is_a?(Hash) ? post.generation_context.deep_stringify_keys : {}
+    post.update!(
+      status:             'failed',
+      generation_context: ctx.merge(
+        'publish_failure' => {
+          'reason'    => reason,
+          'error'     => error,
+          'failed_at' => Time.current.iso8601
+        }
+      )
+    )
+  end
+
+  # Return generation_context with any stale publish_failure removed (used after
+  # a successful repost so the old error doesn't linger on a now-published post).
+  def clear_publish_failure(post)
+    ctx = post.generation_context.is_a?(Hash) ? post.generation_context.deep_stringify_keys : {}
+    ctx.except('publish_failure')
+  end
+
+  def publish_failure_for(post)
+    ctx = post.generation_context
+    return nil unless ctx.is_a?(Hash)
+    pf = ctx.deep_stringify_keys['publish_failure']
+    pf.is_a?(Hash) ? pf : nil
+  end
+
   def fire_published_webhook(post)
     return unless defined?(WebhookService)
 
@@ -517,6 +557,14 @@ class Api::V1::SocialPostsController < ApplicationController
       created_at:         p.created_at,
       updated_at:         p.updated_at
     }
+
+    # Surface publish-failure details on every view (list + detail) so the UI can
+    # show the reason and offer a repost on failed posts.
+    if (pf = publish_failure_for(p))
+      base[:failure_reason]   = pf['error']
+      base[:failure_category] = pf['reason']
+      base[:failed_at]        = pf['failed_at']
+    end
 
     if detailed
       base.merge!(
