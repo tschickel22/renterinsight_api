@@ -56,7 +56,7 @@ class IntakeForm < ApplicationRecord
     end
   end
   
-  def public_url(base_url = ENV['APP_URL'] || 'http://localhost:3000')
+  def public_url(base_url = ENV['APP_URL'] || ENV['FRONTEND_URL'] || 'http://localhost:3000')
     "#{base_url}/f/#{public_id}"
   end
   
