@@ -383,6 +383,7 @@ module Api
                 account_id: account.id,
                 company_id: @lead.company_id,
                 location_id: location_id,
+                is_primary: true,
                 notes: "Converted from lead ##{@lead.id}",
                 # Copy lead address → contact billing address
                 street: @lead.street,
@@ -404,7 +405,37 @@ module Api
             else
               Rails.logger.info "⏭️  [ConvertLead] Skipping contact creation (not requested)"
             end
-            
+
+            # 2b. CREATE CO-APPLICANT CONTACT (co-borrower) — a second contact on
+            # the same account. Only when the lead captured co-applicant identity.
+            co_applicant = nil
+            if @lead.respond_to?(:co_applicant_first_name) &&
+               (@lead.co_applicant_first_name.present? || @lead.co_applicant_last_name.present?)
+              Rails.logger.info "✅ [ConvertLead] Creating co-applicant contact"
+
+              co_applicant = Contact.new(
+                first_name: @lead.co_applicant_first_name.presence || 'Co-Applicant',
+                last_name:  @lead.co_applicant_last_name,
+                email:      @lead.co_applicant_email,
+                phone:      @lead.co_applicant_phone,
+                account_id: account.id,
+                company_id: @lead.company_id,
+                location_id: location_id,
+                is_primary: false,
+                notes: "Co-applicant converted from lead ##{@lead.id}",
+                # Share the household address with the primary applicant
+                street: @lead.street, city: @lead.city, state: @lead.state,
+                zip: @lead.zip, country: @lead.country
+              )
+
+              if co_applicant.save
+                Rails.logger.info "✅ [ConvertLead] Co-applicant contact created: #{co_applicant.id}"
+              else
+                Rails.logger.warn "⚠️  [ConvertLead] Co-applicant creation failed: #{co_applicant.errors.full_messages}"
+                co_applicant = nil
+              end
+            end
+
             # 3. CREATE DEAL (if requested)
             deal = nil
             deal_error = nil
@@ -531,6 +562,14 @@ module Api
                 email: contact.email,
                 phone: contact.phone,
                 accountId: contact.account_id
+              } : nil,
+              coApplicant: co_applicant ? {
+                id: co_applicant.id,
+                firstName: co_applicant.first_name,
+                lastName: co_applicant.last_name,
+                email: co_applicant.email,
+                phone: co_applicant.phone,
+                accountId: co_applicant.account_id
               } : nil,
               deal: deal ? {
                 id: deal.id,
@@ -733,6 +772,11 @@ module Api
                    :preferred_home_type, :preferredHomeType,
                    # Company/title (org context for B2B-style leads)
                    :company_name, :companyName, :title,
+                   # Co-applicant (co-borrower) identity → becomes a 2nd contact on conversion
+                   :co_applicant_first_name, :coApplicantFirstName,
+                   :co_applicant_last_name,  :coApplicantLastName,
+                   :co_applicant_email,      :coApplicantEmail,
+                   :co_applicant_phone,      :coApplicantPhone,
                    # Address fields
                    :street, :city, :state, :zip, :country]
 
@@ -767,6 +811,11 @@ module Api
           # Company / job title (free-text, distinct from the tenant company_id)
           company_name: raw['company_name'] || raw['companyName'],
           title:        raw['title'],
+          # Co-applicant identity
+          co_applicant_first_name: raw['co_applicant_first_name'] || raw['coApplicantFirstName'],
+          co_applicant_last_name:  raw['co_applicant_last_name']  || raw['coApplicantLastName'],
+          co_applicant_email:      raw['co_applicant_email']      || raw['coApplicantEmail'],
+          co_applicant_phone:      raw['co_applicant_phone']      || raw['coApplicantPhone'],
           # Address
           street:  raw['street'],
           city:    raw['city'],
@@ -874,6 +923,11 @@ module Api
           state: l.state,
           zip: l.zip,
           country: l.country,
+          # Co-applicant (co-borrower) identity
+          coApplicantFirstName: l.respond_to?(:co_applicant_first_name) ? l.co_applicant_first_name : nil,
+          coApplicantLastName:  l.respond_to?(:co_applicant_last_name)  ? l.co_applicant_last_name  : nil,
+          coApplicantEmail:     l.respond_to?(:co_applicant_email)      ? l.co_applicant_email      : nil,
+          coApplicantPhone:     l.respond_to?(:co_applicant_phone)      ? l.co_applicant_phone      : nil,
           customFieldValues: l.respond_to?(:custom_field_values) ? l.custom_field_values : {},
           # Champion Leads API fields
           champion_salesforce_id: l.champion_salesforce_id,

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_21_000000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_23_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3616,6 +3616,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_21_000000) do
     t.integer "preferred_max_sqft"
     t.string "preferred_home_type"
     t.datetime "source_created_at"
+    t.string "co_applicant_first_name"
+    t.string "co_applicant_last_name"
+    t.string "co_applicant_email"
+    t.string "co_applicant_phone"
     t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"

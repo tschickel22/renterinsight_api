@@ -109,7 +109,11 @@ module Api
             migrations: result[:migrations].map { |m| migration_json(m) }
           }, status: :created
         else
-          render json: { success: false, errors: result[:errors] }, status: :unprocessable_entity
+          render json: {
+            success: false,
+            error: Array(result[:errors]).join(', '),
+            errors: result[:errors]
+          }, status: :unprocessable_entity
         end
       end
 

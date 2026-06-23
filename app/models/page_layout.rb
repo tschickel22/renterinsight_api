@@ -1160,7 +1160,12 @@ class PageLayout < ApplicationRecord
             { key: 'first_name', type: 'standard', visible: true, required: true, width: 1 },
             { key: 'last_name', type: 'standard', visible: true, required: true, width: 1 },
             { key: 'email', type: 'standard', visible: true, required: true, width: 1 },
-            { key: 'phone', type: 'standard', visible: true, required: true, width: 1 }
+            { key: 'phone', type: 'standard', visible: true, required: true, width: 1 },
+            # Co-applicant (co-borrower) — optional; converts to a 2nd contact
+            { key: 'co_applicant_first_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'co_applicant_last_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'co_applicant_email', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'co_applicant_phone', type: 'standard', visible: true, required: false, width: 1 }
           ]
         },
         {
@@ -1172,6 +1177,9 @@ class PageLayout < ApplicationRecord
             { key: 'status', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'owner_id', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'source_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'company_name', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'title', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'created_at', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'purchase_timeframe', type: 'standard', visible: true, required: false, width: 1 },
             { key: 'rv_experience', type: 'standard', visible: true, required: false, width: 1 }
           ]
