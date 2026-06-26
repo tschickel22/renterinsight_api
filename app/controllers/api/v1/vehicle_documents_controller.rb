@@ -121,7 +121,11 @@ module Api
       end
 
       def document_params
-        params.require(:document).permit(:title, :category, :visibility, :file_url, :file_content_type, :file_size)
+        # The create flow posts multipart/form-data with fields at the top level
+        # (file, title, category, visibility); the update flow nests them under
+        # `document`. Multipart params are never auto-wrapped, so accept both shapes.
+        source = params[:document].present? ? params.require(:document) : params
+        source.permit(:title, :category, :visibility, :file_url, :file_content_type, :file_size)
       end
 
       def document_json(doc)
