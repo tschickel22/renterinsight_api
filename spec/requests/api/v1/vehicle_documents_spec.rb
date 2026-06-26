@@ -86,6 +86,22 @@ RSpec.describe 'Api::V1::VehicleDocuments', type: :request do
       post "/api/v1/vehicles/#{vehicle.id}/documents", params: payload, headers: auth_headers
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    # Regression: the real frontend posts multipart/form-data with the metadata
+    # fields at the TOP level (not nested under `document`). Earlier the
+    # controller called params.require(:document), which raised ParameterMissing
+    # on this shape and surfaced as a generic "Upload failed" toast.
+    it 'creates a document from top-level (unwrapped) multipart fields' do
+      multipart_headers = { 'Authorization' => "Bearer #{token}" }
+      post "/api/v1/vehicles/#{vehicle.id}/documents",
+           params: { title: 'Data Plate', category: 'other', visibility: 'internal' },
+           headers: multipart_headers
+      expect(response).to have_http_status(:created)
+      body = JSON.parse(response.body)
+      expect(body['document']['title']).to eq('Data Plate')
+      expect(body['document']['category']).to eq('other')
+      expect(body['document']['visibility']).to eq('internal')
+    end
   end
 
   describe 'PATCH /api/v1/vehicles/:vehicle_id/documents/:id' do
