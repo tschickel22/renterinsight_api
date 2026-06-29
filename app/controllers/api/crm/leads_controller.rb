@@ -734,6 +734,16 @@ module Api
         scope.order(Arel.sql("#{column_sql} #{direction} NULLS LAST"))
       end
 
+      # Health band thresholds — must match bandFromScore() in
+      # LeadHealthBadge.tsx so the dropdown labels and the server filter agree.
+      HEALTH_BAND_RANGES = {
+        'hot'      => (80..),
+        'warm'     => (60..79),
+        'lukewarm' => (40..59),
+        'cold'     => (20..39),
+        'dead'     => (0..19),
+      }.freeze
+
       def apply_index_filters(scope, filters)
         if filters[:status_category].to_s == 'active'
           scope = scope.where.not(status: EXCLUDED_STATUSES)
@@ -750,6 +760,10 @@ module Api
         if filters[:owner_id].present?
           # 'unassigned' sentinel matches leads with no owner; numeric ids filter to that owner.
           scope = filters[:owner_id].to_s == 'unassigned' ? scope.where(owner_id: nil) : scope.where(owner_id: filters[:owner_id])
+        end
+
+        if (range = HEALTH_BAND_RANGES[filters[:health_band].to_s])
+          scope = scope.where(health_score: range)
         end
 
         scope
@@ -1040,6 +1054,10 @@ module Api
           champion_action_token: l.champion_action_token,
           champion_action_token_expires_at: l.champion_action_token_expires_at,
           score: l.lead_scores.max_by(&:updated_at)&.score,
+          # Lead health (hot/warm/lukewarm/cold/dead). Frontend computes the band
+          # label from healthScore via bandFromScore() — same thresholds we use
+          # server-side in apply_index_filters for the health_band filter.
+          healthScore: l.health_score,
           tags: l.tags.map { |t| { id: t.id, name: t.name, color: t.respond_to?(:color) ? t.color : nil } },
           createdAt: l.created_at,
           sourceCreatedAt: l.source_created_at,
