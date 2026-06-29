@@ -24,7 +24,15 @@ module Catalog
       'triple' => 3, 'tw' => 3
     }.freeze
 
-    NOISE_TOKENS = (SIZE_WORD_TO_SECTIONS.keys + %w[home homes manufactured mobile new used]).freeze
+    # Stop words: English articles/conjunctions that show up in marketing names
+    # ("The Genesis", "Pride of the Plains") and product noise. Without these the
+    # word "the" alone caused Sunshine catalog entries to match unrelated
+    # Champion vehicles whose model started with "The".
+    NOISE_TOKENS = (
+      SIZE_WORD_TO_SECTIONS.keys +
+      %w[home homes manufactured mobile new used] +
+      %w[the a an of and or]
+    ).freeze
 
     def initialize(company:, source:)
       @company = company
@@ -93,10 +101,12 @@ module Catalog
         # Series/alpha tokens must overlap — same product family.
         next if (home_alpha & v_alpha).empty?
 
-        # Model-number disambiguation: if BOTH sides carry numeric tokens, at
-        # least one has to match. Otherwise `md-04` would happily map to `md-26`
-        # just because they share the "md" series token.
-        if home_nums.any? && v_nums.any?
+        # Model-number disambiguation. If the catalog entry has a model number,
+        # the vehicle MUST have a matching one — picking a random same-series
+        # vehicle when there's no number to confirm is the bug that produced
+        # "md-04 matches Md20" and "md-46 matches Md (Double) Md20".
+        if home_nums.any?
+          next if v_nums.empty?
           next if (home_nums & v_nums).empty?
         end
 
@@ -150,6 +160,11 @@ module Catalog
       str.to_s
          .downcase
          .gsub(/[^a-z0-9 ]/, ' ')
+         # Split letter↔digit boundaries so "Md20" → "md 20" and "Pri3284" →
+         # "pri 3284". Otherwise the model number stays glued to the series and
+         # we lose the disambiguating numeric token.
+         .gsub(/([a-z])(\d)/, '\1 \2')
+         .gsub(/(\d)([a-z])/, '\1 \2')
          .split
          .reject { |t| NOISE_TOKENS.include?(t) }
     end

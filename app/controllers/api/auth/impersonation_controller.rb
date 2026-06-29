@@ -200,8 +200,10 @@ module Api
             assigned_locations: assigned_locations
           }
         else
-          is_company_tier = user.company_admin? || 
-                            user.roles_for_company(company&.id).any? { |r| r.tier == 'company' }
+          # Honor the assignment's tier, not just the role's intrinsic tier —
+          # a location-tier role assigned at tier=company grants all-locations access.
+          is_company_tier = user.company_admin? ||
+                            user.has_company_tier_role_for?(company&.id)
           
           {
             user_tier: is_company_tier ? 'company' : 'location',

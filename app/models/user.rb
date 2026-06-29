@@ -279,6 +279,18 @@ class User < ApplicationRecord
       .select(&:active)
   end
 
+  # True if the user has any active role assignment at company tier for this
+  # company. Distinct from the role's *intrinsic* tier — a role defined as
+  # tier='location' can still be assigned at tier='company' on the assignment
+  # row, which grants access to all locations. Used by build_location_data in
+  # the auth controllers (login/impersonation/MFA/invitation accept).
+  def has_company_tier_role_for?(company_id)
+    user_role_assignments
+      .where(company_id: company_id, tier: 'company')
+      .active
+      .exists?
+  end
+
   # Assign an RBAC role to this user
   # @param role_identifier [String, Integer] - Role key, name, or ID
   # @param company_id [Integer] - Company to assign role for (defaults to user's company)

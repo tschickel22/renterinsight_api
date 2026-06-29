@@ -69,6 +69,13 @@ class Lead < ApplicationRecord
   after_commit :emit_workflow_updated, on: :update
   after_commit :emit_workflow_deleted, on: :destroy
 
+  # Bump last_activity_at whenever the lead is edited. LeadActivity already
+  # bumps it via update_columns when an activity is logged (call/email/etc.) —
+  # update_columns skips this callback so we don't double-set in that path.
+  # Internal/system updates that should NOT count (e.g. score recompute jobs)
+  # should also use update_columns.
+  before_save :touch_last_activity_at
+
   # Scopes for filtering converted leads
   scope :active, -> { where(is_converted: [false, nil]) }
   scope :converted, -> { where(is_converted: true) }
@@ -95,6 +102,15 @@ class Lead < ApplicationRecord
   end
 
   private
+
+  def touch_last_activity_at
+    # On create: stamp it so new leads have a non-null sortable value.
+    # On update: only bump if a tracked attribute actually changed — skip
+    # otherwise so re-saving the same record doesn't fake activity.
+    return if persisted? && (changes.keys - %w[last_activity_at updated_at]).empty?
+
+    self.last_activity_at = Time.current
+  end
 
   def emit_workflow_created
     WorkflowEngine.emit('lead.created', self, { id: id })
