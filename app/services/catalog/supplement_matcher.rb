@@ -70,23 +70,49 @@ module Catalog
     end
 
     def match(home, candidates)
-      home_make_tokens  = tokenize(manufacturer_name)
-      home_model_tokens = tokenize(home.model_name)
-      home_sections     = home.property_type == 'double' ? 2 : home.property_type == 'single' ? 1 : derive_sections(home)
+      # Source key is often the cleanest model identifier (URL slug like
+      # "md-26-rawhide"); pull tokens from it AND from the parsed model_name
+      # so we get the model number even when adapters truncate names.
+      home_tokens = tokens_for(home.model_name) | tokens_for(home.source_key)
+      home_alpha  = alpha(home_tokens)
+      home_nums   = numeric(home_tokens)
+      home_sections =
+        case home.property_type
+        when 'double' then 2
+        when 'single' then 1
+        else derive_sections(home)
+        end
 
-      # Score each candidate; pick the best.
       scored = candidates.filter_map do |c|
-        next unless make_match?(home_make_tokens, c[:make_tokens])
-        next unless model_match?(home_model_tokens, c[:model_tokens])
+        # Combine make+model tokens because dealers commonly shove the model
+        # number into either field, and the duplication is harmless.
+        v_tokens = c[:make_tokens] | c[:model_tokens]
+        v_alpha  = alpha(v_tokens)
+        v_nums   = numeric(v_tokens)
+
+        # Series/alpha tokens must overlap — same product family.
+        next if (home_alpha & v_alpha).empty?
+
+        # Model-number disambiguation: if BOTH sides carry numeric tokens, at
+        # least one has to match. Otherwise `md-04` would happily map to `md-26`
+        # just because they share the "md" series token.
+        if home_nums.any? && v_nums.any?
+          next if (home_nums & v_nums).empty?
+        end
 
         sections_match = sections_compatible?(home_sections, c[:sections])
         confidence =
-          if sections_match == :exact then :high
-          elsif sections_match == :unspecified then :medium
-          else :low
+          if home_nums.any? && v_nums.any? && (home_nums & v_nums).any? && sections_match != :mismatch
+            :high
+          elsif (home_alpha & v_alpha).size >= 2 || (home_nums.any? && v_nums.any? && (home_nums & v_nums).any?)
+            :medium
+          else
+            :low
           end
 
-        score = confidence_score(confidence) + (exact_model_token_match?(home_model_tokens, c[:model_tokens]) ? 1 : 0)
+        score = confidence_score(confidence) +
+                (home_nums & v_nums).size * 5 +
+                (home_alpha & v_alpha).size
         { candidate: c, confidence: confidence, score: score }
       end
 
@@ -94,10 +120,22 @@ module Catalog
       if best
         Match.new(home: home, vehicle: best[:candidate][:vehicle],
                   confidence: best[:confidence],
-                  reason: "make+model match, sections=#{best[:candidate][:sections] || 'unspecified'}")
+                  reason: "alpha=#{(home_alpha & alpha(best[:candidate][:make_tokens] | best[:candidate][:model_tokens])).to_a.join(',')} num=#{(home_nums & numeric(best[:candidate][:make_tokens] | best[:candidate][:model_tokens])).to_a.join(',')} sections=#{best[:candidate][:sections] || 'unspec'}")
       else
         Match.new(home: home, vehicle: nil, confidence: nil, reason: 'no candidate')
       end
+    end
+
+    def tokens_for(str)
+      tokenize(str).to_set
+    end
+
+    def alpha(tokens)
+      tokens.reject { |t| t.match?(/\A\d+\z/) }.to_set
+    end
+
+    def numeric(tokens)
+      tokens.select { |t| t.match?(/\A\d+\z/) }.to_set
     end
 
     # Catalog source name OR config.manufacturer_name — same fallback the
@@ -114,24 +152,6 @@ module Catalog
          .gsub(/[^a-z0-9 ]/, ' ')
          .split
          .reject { |t| NOISE_TOKENS.include?(t) }
-    end
-
-    def make_match?(home_tokens, vehicle_tokens)
-      return false if home_tokens.empty? || vehicle_tokens.empty?
-      # A vehicle make of "Sunshine Arc (Single)" tokenizes to [sunshine, arc].
-      # We accept ANY shared token because dealers vary the make field heavily.
-      (home_tokens & vehicle_tokens).any?
-    end
-
-    def model_match?(home_tokens, vehicle_tokens)
-      return false if home_tokens.empty?
-      # Any catalog model token appears in the vehicle's model tokens (or even
-      # its make tokens — many dealers shove the model into the make field).
-      home_tokens.any? { |t| vehicle_tokens.include?(t) }
-    end
-
-    def exact_model_token_match?(home_tokens, vehicle_tokens)
-      home_tokens.any? && (home_tokens - vehicle_tokens).empty?
     end
 
     # :exact, :unspecified, or :mismatch
