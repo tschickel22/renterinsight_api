@@ -715,6 +715,7 @@ module Api
         'status'       => 'status',
         'health_score' => 'health_score',
         'createdAt'    => 'COALESCE(source_created_at, created_at)',
+        'lastActivity' => 'last_activity_at',
         # owner sorts on the joined users row (see left_outer_joins below);
         # first_name is enough — ties break naturally on the next column we apply.
         'owner'        => 'users.first_name',
@@ -1061,7 +1062,8 @@ module Api
           tags: l.tags.map { |t| { id: t.id, name: t.name, color: t.respond_to?(:color) ? t.color : nil } },
           createdAt: l.created_at,
           sourceCreatedAt: l.source_created_at,
-          updatedAt: l.updated_at
+          updatedAt: l.updated_at,
+          lastActivityAt: l.last_activity_at,
         }
       end
     end
