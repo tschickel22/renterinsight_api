@@ -16,9 +16,67 @@ module Catalog
     # rows re-ingest on the next run even though the scraped content is identical.
     # v3: heal catalog rows whose media was damaged by a pre-clone-on-edit direct
     # edit (re-ingest restores the correct {url} image objects).
-    INGESTION_VERSION = 3
+    # v4: smart re-sync — only refresh a catalog-managed field when the dealer
+    # hasn't touched it (current value == previously-synced catalog value).
+    INGESTION_VERSION = 4
+
+    # Vehicle fields the catalog owns. On re-sync each is updated ONLY when the
+    # current value matches catalog_last_synced_values[field] (i.e. dealer hasn't
+    # edited it since last sync). Everything else on the vehicle (stock_number,
+    # status, price, custom_field_values, owner, location-specific data) is
+    # dealer-owned and never touched by re-sync.
+    MANAGED_FIELDS = %i[
+      model bedrooms bathrooms square_feet width length description
+      images floor_plan_images photo_url features
+      virtual_tour_url matterport_url video_url
+    ].freeze
 
     Result = Struct.new(:added, :updated, :unchanged, :inactivated, keyword_init: true)
+
+    # Maps a NormalizedHome → the hash of catalog-managed attributes a vehicle
+    # would receive. Pulled out of #assign_attributes! so the SupplementApplier
+    # can build the same payload without duplicating the field map.
+    def self.catalog_attrs_from(home, source:)
+      gallery_imgs = home.images.reject { |i| (i['is_floorplan'] == true) || (i['is_floorplan'].to_s == 'true') }
+      gallery_imgs = home.images if gallery_imgs.empty?
+      gallery      = url_images(gallery_imgs)
+      floor_pl     = url_images(home.floorplan_images)
+      w, l         = parse_dimensions(home.dimensions)
+      virtual_tour = home.virtual_tour_url
+
+      {
+        model:             home.model_name,
+        bedrooms:          home.bedrooms,
+        bathrooms:         home.bathrooms,
+        square_feet:       home.square_feet,
+        width:             w,
+        length:            l,
+        description:       home.description,
+        images:            gallery,
+        floor_plan_images: floor_pl,
+        photo_url:         gallery.first&.dig('url'),
+        features:          home.features.flat_map { |section, items| Array(items).map { |i| "#{section}: #{i}" } },
+        virtual_tour_url:  virtual_tour,
+        matterport_url:    (virtual_tour if virtual_tour.to_s.include?('matterport')),
+        video_url:         home.video_url
+      }
+    end
+
+    def self.url_images(images)
+      Array(images).filter_map do |img|
+        url = img['local_url'].presence || img['source_url'] || img['url']
+        next if url.blank?
+
+        { 'url' => url, 'alt' => img['alt'].to_s }
+      end
+    end
+
+    def self.parse_dimensions(dims)
+      return [nil, nil] if dims.blank?
+
+      parts = dims.to_s.split(/[xX×]/, 2)
+      [parts[0].to_s[/\d+/]&.to_i, parts[1].to_s[/\d+/]&.to_i]
+    end
 
     def initialize(company:, source:, location_id: nil, protect_blanks: false)
       @company        = company
@@ -79,43 +137,40 @@ module Catalog
     end
 
     def assign_attributes!(vehicle, home, is_new:)
-      # Vehicle/inventory UI reads images as [{ "url", "alt" }] (the Champion
-      # shape) — NOT the NormalizedHome internal {source_url,...} shape, or the
-      # gallery renders empty.
-      gallery_imgs  = home.images.reject { |i| truthy(i['is_floorplan']) }
-      gallery_imgs  = home.images if gallery_imgs.empty?
-      gallery       = to_url_images(gallery_imgs)
-      floor_pl      = to_url_images(home.floorplan_images)
-      width, length = parse_width_length(home.dimensions)
+      catalog_values = self.class.catalog_attrs_from(home, source: @source)
 
-      attrs = {
-        listing_type:         'manufactured_home',
-        source:               VEHICLE_SOURCE,
-        status:               'available_to_order',
-        condition:            'new',
-        make:                 manufacturer_name,
-        model:                home.model_name,
-        bedrooms:             home.bedrooms,
-        bathrooms:            home.bathrooms,
-        square_feet:          home.square_feet,
-        width:                width,
-        length:               length,
-        description:          home.description,
-        images:               gallery,
-        floor_plan_images:    floor_pl,
-        photo_url:            gallery.first&.dig('url'),
-        features:             features_array(home),
-        virtual_tour_url:     home.virtual_tour_url,
-        matterport_url:       (home.virtual_tour_url if home.virtual_tour_url.to_s.include?('matterport')),
-        video_url:            home.video_url,
-        catalog_content_hash: content_signature(home),
-        catalog_last_seen_at: Time.current,
-        is_deleted:           false,
-        deleted_at:           nil
-      }
-      attrs = guard_blanks(vehicle, attrs) if @protect_blanks && !is_new
+      # Smart write for managed fields: on a NEW catalog row, write everything;
+      # on an existing row, only overwrite a field when the dealer hasn't touched
+      # it since the last sync (current value matches what catalog last produced).
+      last_synced = (vehicle.catalog_last_synced_values || {}).dup
+      MANAGED_FIELDS.each do |field|
+        new_value = catalog_values[field]
 
-      vehicle.assign_attributes(attrs)
+        if @protect_blanks && !is_new && blank_incoming?(new_value) && vehicle.public_send(field).present?
+          # Degraded-run safeguard: never wipe populated data with a blank.
+          last_synced[field.to_s] = serialize_for_compare(new_value)
+          next
+        end
+
+        if is_new || dealer_untouched?(vehicle, field, last_synced)
+          vehicle.public_send("#{field}=", new_value)
+        end
+        # Always record what the catalog produced this time — that's what the
+        # next sync compares against to decide "has the dealer touched it?"
+        last_synced[field.to_s] = serialize_for_compare(new_value)
+      end
+
+      # Non-managed bookkeeping (always overwritten by catalog).
+      vehicle.listing_type         = 'manufactured_home'
+      vehicle.source               = VEHICLE_SOURCE
+      vehicle.condition            = 'new'
+      vehicle.make                 = manufacturer_name
+      vehicle.status               = 'available_to_order' if is_new
+      vehicle.catalog_content_hash = content_signature(home)
+      vehicle.catalog_last_seen_at = Time.current
+      vehicle.catalog_last_synced_values = last_synced
+      vehicle.is_deleted           = false
+      vehicle.deleted_at           = nil
 
       # Required-on-create fields the feed doesn't carry.
       vehicle.year          ||= Date.current.year
@@ -126,11 +181,25 @@ module Catalog
       vehicle.catalog_source_key = home.source_key.to_s
     end
 
-    # Drop keys whose new value is blank when the existing row already has a
-    # populated value (degraded-run safeguard).
-    def guard_blanks(vehicle, attrs)
-      attrs.reject do |key, value|
-        blank_incoming?(value) && vehicle.respond_to?(key) && vehicle.public_send(key).present?
+    # True when the dealer hasn't edited this field since the last sync:
+    # either it's still blank, or its current value matches what catalog had
+    # last time. Either case is safe to refresh with the new catalog value.
+    def dealer_untouched?(vehicle, field, last_synced)
+      current = vehicle.public_send(field)
+      prev    = last_synced[field.to_s]
+      return true if current.blank? && prev.nil?
+
+      serialize_for_compare(current) == prev
+    end
+
+    # JSONB-safe comparable form. JSONB returns hashes/arrays with string keys,
+    # so normalize both sides before comparing.
+    def serialize_for_compare(value)
+      case value
+      when nil      then nil
+      when Array    then value.map { |v| v.is_a?(Hash) ? v.deep_stringify_keys : v }
+      when Hash     then value.deep_stringify_keys
+      else value
       end
     end
 
@@ -153,35 +222,8 @@ module Catalog
       count
     end
 
-    def features_array(home)
-      home.features.flat_map { |section, items| Array(items).map { |i| "#{section}: #{i}" } }
-    end
-
-    # Convert NormalizedHome image records to the vehicle/UI shape: { url, alt }.
-    # Prefer the archived local_url when present, else the source URL.
-    def to_url_images(images)
-      Array(images).filter_map do |img|
-        url = img['local_url'].presence || img['source_url'] || img['url']
-        next if url.blank?
-
-        { 'url' => url, 'alt' => img['alt'].to_s }
-      end
-    end
-
-    def truthy(value)
-      value == true || value.to_s == 'true'
-    end
-
     def content_signature(home)
       "v#{INGESTION_VERSION}:#{home.content_hash}"
-    end
-
-    # "32'0\" x 84'0\"" -> [32, 84] (feet). Leading integer on each side of the x.
-    def parse_width_length(dims)
-      return [nil, nil] if dims.blank?
-
-      parts = dims.to_s.split(/[xX×]/, 2)
-      [parts[0].to_s[/\d+/]&.to_i, parts[1].to_s[/\d+/]&.to_i]
     end
 
     def manufacturer_name
