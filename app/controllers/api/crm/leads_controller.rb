@@ -65,7 +65,7 @@ module Api
         filtered_count = leads.count
         
         leads = leads.includes(:source, :owner, :vehicle, :lead_scores, :tags)
-                     .order(Arel.sql('COALESCE(source_created_at, created_at) DESC'))
+        leads = apply_index_sort(leads, params[:sort], params[:order])
         
         # Pagination
         page = (params[:page] || 1).to_i
@@ -702,6 +702,38 @@ module Api
 
       # Apply the same filters #index uses so #bulk_reassign's "select all matching"
       # path acts on exactly the visible set.
+      # Whitelist of sortable columns from the leads table header. Maps the
+      # frontend column id to a SQL expression so we can sort across the
+      # full filtered set (not just the current page). Anything not in this
+      # map falls back to the default created-at order.
+      SORTABLE_COLUMNS = {
+        'firstName'    => 'first_name',
+        'lastName'     => 'last_name',
+        'companyName'  => 'company_name',
+        'email'        => 'email',
+        'phone'        => 'phone',
+        'status'       => 'status',
+        'health_score' => 'health_score',
+        'createdAt'    => 'COALESCE(source_created_at, created_at)',
+        # owner sorts on the joined users row (see left_outer_joins below);
+        # first_name is enough — ties break naturally on the next column we apply.
+        'owner'        => 'users.first_name',
+      }.freeze
+
+      DEFAULT_SORT_SQL = 'COALESCE(source_created_at, created_at) DESC'
+
+      def apply_index_sort(scope, sort_key, order)
+        column_sql = SORTABLE_COLUMNS[sort_key.to_s]
+        return scope.order(Arel.sql(DEFAULT_SORT_SQL)) unless column_sql
+
+        direction = order.to_s.downcase == 'desc' ? 'DESC' : 'ASC'
+        scope = scope.left_outer_joins(:owner) if sort_key.to_s == 'owner'
+
+        # NULLS LAST for both directions so empty values sink to the bottom
+        # regardless of asc/desc — matches what users expect from spreadsheets.
+        scope.order(Arel.sql("#{column_sql} #{direction} NULLS LAST"))
+      end
+
       def apply_index_filters(scope, filters)
         if filters[:status_category].to_s == 'active'
           scope = scope.where.not(status: EXCLUDED_STATUSES)
