@@ -162,12 +162,23 @@ module Api
         
         if result[:success]
           user = result[:user]
-          
+
           # CRITICAL DEBUG: Log what we're encoding in JWT
           Rails.logger.info "🔐 [JWT GENERATION] User ID: #{user.id}, Email: #{user.email}"
           Rails.logger.info "🔐 [JWT GENERATION] Company ID: #{user.company_id}, Role: #{user.role}"
           Rails.logger.info "🔐 [JWT GENERATION] Company Name: #{user.company&.name}"
-          
+
+          # Record the auto-login that follows invitation acceptance, same as
+          # the standard login flow. Without this, newly-invited users show
+          # "Last Login: never" until they sign in via the regular login form.
+          user.update(last_sign_in_at: Time.current)
+          LoginActivity.record_login(
+            user_id: user.id,
+            user_type: 'User',
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent
+          )
+
           # Generate JWT token for immediate login
           jwt_token = JsonWebToken.encode(
             user_id: user.id,
@@ -328,8 +339,10 @@ module Api
             assigned_locations: assigned_locations
           }
         else
-          is_company_tier = user.company_admin? || 
-                            user.roles_for_company(company&.id).any? { |r| r.tier == 'company' }
+          # Honor the assignment's tier, not just the role's intrinsic tier —
+          # a location-tier role assigned at tier=company grants all-locations access.
+          is_company_tier = user.company_admin? ||
+                            user.has_company_tier_role_for?(company&.id)
           
           {
             user_tier: is_company_tier ? 'company' : 'location',
