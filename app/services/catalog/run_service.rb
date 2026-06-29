@@ -17,6 +17,17 @@ module Catalog
       @trigger = trigger
     end
 
+    # Parse a source without ingesting or recording a ScrapeRun. Used by the
+    # supplement preview/apply rake tasks so we can match catalog homes against
+    # existing dealer inventory before any writes happen.
+    # Returns [Array<NormalizedHome>, errors].
+    def self.parse_only(source)
+      adapter = source.adapter
+      raise ArgumentError, "No matching adapter for #{source.adapter_type}" if adapter.nil?
+
+      new(source).send(:collect_homes, adapter)
+    end
+
     def call
       run = @source.scrape_runs.create!(status: 'running', trigger: @trigger, started_at: Time.current)
       # Reflect "running" on the source immediately so the list badge updates the

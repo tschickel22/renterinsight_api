@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_23_000000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_29_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6761,6 +6761,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_23_000000) do
     t.string "catalog_source_key"
     t.string "catalog_content_hash"
     t.datetime "catalog_last_seen_at"
+    t.jsonb "catalog_last_synced_values", default: {}, null: false
     t.index ["body_style"], name: "index_vehicles_on_body_style"
     t.index ["catalog_source_id", "catalog_source_key"], name: "idx_vehicles_catalog_dedup"
     t.index ["champion_last_seen_at"], name: "index_vehicles_on_champion_last_seen_at"
