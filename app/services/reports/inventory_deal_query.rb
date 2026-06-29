@@ -97,6 +97,14 @@ module Reports
       pipeline_stages.index(stage.to_s) || -1
     end
 
+    # "Closed" identified by probability=100 rather than stage name, so the Closed/Funded
+    # section keeps working when a company renames the won stage (custom pipeline configs).
+    def closed_won_stage_keys
+      @closed_won_stage_keys ||= @company.pipeline_stage_keys.select do |key|
+        @company.pipeline_stage_probability(key).to_i == 100
+      end
+    end
+
     # Most advanced open deal wins; tie-break on most recent.
     def resolve_open_deal(open_deals)
       return nil if open_deals.blank?
@@ -152,7 +160,10 @@ module Reports
         # Customer linkage for report hyperlinks: prefer the contact, else the account.
         contact_id: assigned ? deal.contact_id : nil,
         account_id: assigned ? deal.account_id : nil,
-        serial_or_stock: vehicle.stock_number.presence || vehicle.serial_number,
+        stock_number: vehicle.stock_number.presence,
+        # Vehicle#identifier returns VIN for RV, serial_number for MH (auto-copied from VIN
+        # when blank) — so this is the right canonical "serial" field across listing types.
+        serial_number: vehicle.identifier.presence,
         location: vehicle.location&.name || 'Unassigned location',
         age_days: age,
         offline: assigned ? deal.delivery_date : nil, # 'Not Ord' applied by callers without a deal
@@ -177,6 +188,11 @@ module Reports
         sections: vehicle.sections,
         bedrooms: vehicle.bedrooms,
         bathrooms: vehicle.bathrooms,
+        # Box dimensions for the "Size" column (e.g., 16 × 76). The per-section
+        # variants (width1/length1, …) aren't used here — Vehicle#length/width are
+        # the canonical scalar dimensions surfaced everywhere else.
+        length: vehicle.length,
+        width: vehicle.width,
         condition: vehicle.condition,
         flags: flags,
         floorplan: fp && {
@@ -241,7 +257,9 @@ module Reports
     # ---- Floor plan ----------------------------------------------------------
 
     def floor_plan_report
-      @floor_plan_report ||= Accounting::FloorPlanService.new(@company).report(location_id: @filters[:location_id].presence)
+      loc = @filters[:location_id].presence
+      loc = nil if loc.to_s == 'all'
+      @floor_plan_report ||= Accounting::FloorPlanService.new(@company).report(location_id: loc)
     end
 
     def floor_plan_index
@@ -308,8 +326,9 @@ module Reports
       scope = @company.vehicles.where(is_deleted: [false, nil])
 
       # scope param: inventory honours the current location selector; accounting spans
-      # all company locations.
-      scope = scope.for_current_location if @scope == 'inventory'
+      # all company locations. An explicit location_id filter (incl. 'all') overrides
+      # the picker so the report's Location filter can actually escape it.
+      scope = scope.for_current_location if @scope == 'inventory' && @filters[:location_id].blank?
 
       # ALWAYS enforce RBAC location filtering: company-tier admins see all; location-tier
       # users are restricted to their accessible locations.
@@ -318,8 +337,11 @@ module Reports
         scope = ids.any? ? scope.where(location_id: ids) : scope.none
       end
 
-      # Explicit location filter applies within the RBAC boundary above.
-      scope = scope.for_location(@filters[:location_id]) if @filters[:location_id].present?
+      # Explicit location filter applies within the RBAC boundary above. 'all' is a
+      # sentinel meaning "override the picker, no specific location" — no narrowing.
+      if @filters[:location_id].present? && @filters[:location_id].to_s != 'all'
+        scope = scope.for_location(@filters[:location_id])
+      end
 
       scope.includes(:location).to_a
     end
