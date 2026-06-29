@@ -80,7 +80,8 @@ module Reports
     def make_entry(vehicle, deal, state, open_deal_count)
       row = @query.build_row(vehicle, deal: deal, open_deal_count: open_deal_count)
       row[:offline] = row[:offline] || 'Not Ord' # deal exists but not yet scheduled/ordered
-      row[:serial_last5] = row[:serial_or_stock].to_s.last(5).presence
+      # Match the salesperson "cheat sheet" identifier: stock# preferred, else serial/VIN.
+      row[:serial_last5] = (row[:stock_number].presence || row[:serial_number]).to_s.last(5).presence
       row[:pipeline_state] = state.to_s
       row[:split] = deal.secondary_salesperson_id.present?
       { deal: deal, vehicle: vehicle, state: state, row: row, gp: deal.front_gross }

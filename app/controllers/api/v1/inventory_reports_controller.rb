@@ -42,7 +42,8 @@ class Api::V1::InventoryReportsController < ApplicationController
 
   def report_filters
     params.permit(
-      :location_id, :section, :status, :salesperson_id, :lender, :aging_bucket, :search, :funded_group_by
+      :location_id, :section, :status, :salesperson_id, :lender, :aging_bucket, :search,
+      :funded_group_by, :closed_from, :closed_to
     ).to_h.symbolize_keys
   end
 end

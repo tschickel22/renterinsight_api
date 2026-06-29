@@ -27,8 +27,11 @@ module Reports
       'COST is the unified landed cost (vehicle structured cost + deal-level costs). Shown as "—" when cost has not been entered.',
       'When a unit has multiple open deals, the most advanced deal (by pipeline stage, then most recent) is shown; open_deal_count reflects the total.',
       'Location reflects the current selector unless an explicit location filter is applied.',
-      'Floor-plan interest and delivery/setup are period costs included in the GP margin view but not in COGS.'
+      'Floor-plan interest and delivery/setup are period costs included in the GP margin view but not in COGS.',
+      'Closed / Funded includes deals at 100% probability (closed-won, by configured stage) or with a GL-posted date in the active range; defaults to the last 30 days.'
     ].freeze
+
+    CLOSED_RANGE_DEFAULT_DAYS = 30
 
     def initialize(company, current_user: nil)
       @company = company
@@ -52,12 +55,12 @@ module Reports
       body_rows = apply_filters(body_rows)
 
       sections = sectionize(body_rows)
-      funded = build_funded_section
+      closed_funded = build_closed_funded_section
 
       {
-        meta: build_meta(sections, funded),
+        meta: build_meta(sections, closed_funded),
         sections: sections,
-        funded_this_month: funded
+        closed_funded: closed_funded
       }
     end
 
@@ -124,13 +127,19 @@ module Reports
       totals
     end
 
-    # ---- Funded this month ---------------------------------------------------
+    # ---- Closed / Funded -----------------------------------------------------
 
-    def build_funded_section
+    # Closed-won OR funded (gl_posted) within the active range. "Closed" is identified by
+    # probability=100 against the company's pipeline_stages config so a renamed won stage
+    # doesn't break the section. Defaults to the trailing 30 days when no range is sent.
+    def build_closed_funded_section
       deal_ids = @query.vehicles.map(&:sold_via_deal_id).compact.uniq
-      return { rows: [], lender_subtotals: [], subtotal: subtotal([]) } if deal_ids.empty?
+      empty = { rows: [], lender_subtotals: [], subtotal: subtotal([]), range: closed_range_iso }
+      return empty if deal_ids.empty?
 
-      range = Time.current.beginning_of_month..Time.current.end_of_month
+      range = closed_range
+      won_keys = @query.closed_won_stage_keys
+
       deals = @company.deals
                       .where(id: deal_ids)
                       .includes(:primary_salesperson, :secondary_salesperson, :account, :contact, :owner)
@@ -140,14 +149,36 @@ module Reports
         d = deals[v.sold_via_deal_id]
         next unless d
 
-        funded_this_month = (d.gl_posted? && d.gl_posted_at && range.cover?(d.gl_posted_at)) ||
-                            (d.stage == 'closed_won' && d.won_at && range.cover?(d.won_at))
-        next unless funded_this_month
+        in_range = (d.gl_posted? && d.gl_posted_at && range.cover?(d.gl_posted_at)) ||
+                   (won_keys.include?(d.stage.to_s.downcase) && d.won_at && range.cover?(d.won_at))
+        next unless in_range
 
         @query.build_row(v, deal: d, open_deal_count: 0, deals: @query.all_deals_by_vehicle[v.id] || [d])
       end
 
-      { rows: rows, lender_subtotals: lender_subtotals(rows), subtotal: subtotal(rows) }
+      { rows: rows, lender_subtotals: lender_subtotals(rows), subtotal: subtotal(rows), range: closed_range_iso }
+    end
+
+    # Active closed/funded window. Inputs accept Date or ISO8601 strings; bounds extend to
+    # full-day inclusivity. Falls back to last 30 days (inclusive of today) when unspecified.
+    def closed_range
+      @closed_range ||= begin
+        from = parse_date(@filters[:closed_from]) || (Date.current - CLOSED_RANGE_DEFAULT_DAYS.days)
+        to   = parse_date(@filters[:closed_to])   || Date.current
+        from.beginning_of_day..to.end_of_day
+      end
+    end
+
+    def closed_range_iso
+      { from: closed_range.begin.to_date.iso8601, to: closed_range.end.to_date.iso8601 }
+    end
+
+    def parse_date(value)
+      return nil if value.blank?
+      return value.to_date if value.respond_to?(:to_date)
+      Date.parse(value.to_s)
+    rescue ArgumentError
+      nil
     end
 
     def lender_subtotals(rows)
@@ -171,7 +202,7 @@ module Reports
       if @filters[:search].present?
         q = @filters[:search].to_s.downcase
         rows = rows.select do |r|
-          [r[:serial_or_stock], r[:manufacturer], r[:model], r[:customer]]
+          [r[:stock_number], r[:serial_number], r[:manufacturer], r[:model], r[:customer]]
             .compact.any? { |v| v.to_s.downcase.include?(q) }
         end
       end
@@ -181,15 +212,16 @@ module Reports
 
     # ---- Meta ----------------------------------------------------------------
 
-    def build_meta(sections, funded)
+    def build_meta(sections, closed_funded)
       {
         can_view_costs: @can_view_costs,
         scope: @query.scope,
         filters: @filters,
         generated_at: Time.current.iso8601,
         section_subtotals: sections.map { |s| { key: s[:key], label: s[:label], **s[:subtotal] } },
-        funded_lender_subtotals: funded[:lender_subtotals],
-        funded_subtotal: funded[:subtotal],
+        closed_funded_lender_subtotals: closed_funded[:lender_subtotals],
+        closed_funded_subtotal: closed_funded[:subtotal],
+        closed_range: closed_funded[:range],
         floorplan_summary: @query.floor_plan_summary,
         footnotes: FOOTNOTES
       }

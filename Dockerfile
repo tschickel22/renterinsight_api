@@ -66,6 +66,7 @@ RUN groupadd --system --gid 1000 rails && \
     chown -R rails:rails db log storage tmp public/uploads
 USER 1000:1000
 
-# Run database migrations and start server directly (no entrypoint needed for Render)
+# Migrations run via Render's preDeployCommand (`rails db:migrate`), once per
+# rollout instead of once per container start.
 EXPOSE 3000
-CMD ["sh", "-c", "bundle exec rails db:prepare && bundle exec rails server -b 0.0.0.0"]
+CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0"]
