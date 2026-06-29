@@ -12,38 +12,8 @@ module Api
 
       def index
         return unless authorize_action!('leads', 'read')
-        
-        # STRICT TENANT ISOLATION: Only show non-converted leads from current company
-        # RBAC: Location-tier users only see their assigned locations
-        # BUT: Users with :all scope see ALL locations (company-wide)
-        leads = if current_user.uses_rbac?
-          if current_user.effective_admin?  # Use RBAC-aware admin check
-            @company.leads.where(is_converted: [false, nil])
-          else
-            # Check if user has company-wide scope (:all) for leads
-            has_all_scope = permission_service.can?('leads', 'read', 'all')
-            
-            if has_all_scope
-              # User has company-wide access - show all leads
-              Rails.logger.info "[LeadsController#index] User has leads:read:all - showing all company leads"
-              @company.leads.where(is_converted: [false, nil])
-            else
-              # User is location-restricted - filter by accessible locations
-              location_ids = permission_service.accessible_location_ids
-              Rails.logger.info "[LeadsController#index] User has location scope - accessible_location_ids: #{location_ids.inspect}"
-              if location_ids.any?
-                @company.leads.where(is_converted: [false, nil], location_id: location_ids)
-              else
-                @company.leads.where(is_converted: [false, nil])
-              end
-            end
-          end
-        else
-          @company.leads.where(is_converted: [false, nil])
-        end
-        
-        # Apply location selector filter (if user selected a specific location)
-        leads = leads.for_current_location
+
+        leads = base_leads_scope
         
         # Count stats BEFORE any filtering (stats tiles show global counts)
         all_leads_count = leads.count
@@ -80,21 +50,12 @@ module Api
         
         contacted_subtitle = 'In progress'
         
-        # Apply status category filter (active = exclude dead-ends, includes custom statuses)
-        if params[:status_category] == 'active'
-          leads = leads.where.not(status: EXCLUDED_STATUSES)
-        end
+        # Server-side filters: status_category, search, owner_id. owner_id was added so a
+        # "bulk reassign all matching" action (e.g. when a rep quits) can target the full
+        # filtered set, not just the current page — see bulk_reassign below.
+        leads = apply_index_filters(leads, params)
 
-        # Apply search filter (includes status for custom status search)
-        if params[:search].present?
-          search_term = "%#{params[:search]}%"
-          leads = leads.where(
-            "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR status ILIKE ?",
-            search_term, search_term, search_term, search_term, search_term
-          )
-        end
-        
-        # Count AFTER search filter (for pagination)
+        # Count AFTER filters (for pagination)
         filtered_count = leads.count
         
         leads = leads.includes(:source, :owner, :vehicle, :lead_scores, :tags)
@@ -272,9 +233,55 @@ module Api
 
       def destroy
         return unless authorize_action!('leads', 'delete')
-        
+
         @lead.destroy!
         head :no_content
+      end
+
+      # POST /api/crm/leads/bulk_reassign
+      # Reassigns a set of leads to a new owner in one query — the path that handles
+      # "rep quits, move all 500 of their leads to someone else" without the per-row
+      # PATCH fan-out the existing bulkUpdateLeads loop does.
+      #
+      # Accepts EITHER:
+      #   lead_ids: [int]         — explicit selection (small batch from the visible page)
+      # OR
+      #   filter:   { status_category, search, owner_id }
+      #                           — "select all matching" mode; backend re-runs the same
+      #                             scoping the index used so the user can't extend their
+      #                             reach beyond what they can see.
+      # PLUS:
+      #   assign_to_user_id: int  — new owner (must belong to the same company)
+      def bulk_reassign
+        return unless authorize_action!('leads', 'update')
+
+        new_owner_id = params[:assign_to_user_id].presence
+        return render(json: { error: 'assign_to_user_id required' }, status: :bad_request) if new_owner_id.blank?
+
+        # Owner must belong to the same company — prevents reassigning across tenants.
+        new_owner = @company.users.find_by(id: new_owner_id)
+        return render(json: { error: 'Invalid assignee' }, status: :unprocessable_entity) unless new_owner
+
+        scope = base_leads_scope
+
+        if params[:filter].present?
+          # "Select all matching" path — re-apply the same server-side filters as #index.
+          scope = apply_index_filters(scope, params[:filter])
+        elsif params[:lead_ids].is_a?(Array) && params[:lead_ids].any?
+          # Explicit-selection path — still scoped to base_leads_scope so a user can't
+          # reassign a lead they don't have access to by passing its id.
+          scope = scope.where(id: params[:lead_ids])
+        else
+          return render(json: { error: 'lead_ids or filter required' }, status: :bad_request)
+        end
+
+        # update_all skips callbacks (notifications, scoring) — exactly what we want for
+        # a bulk reassign: a single SQL UPDATE, no 500-row notification storm.
+        updated_count = scope.update_all(owner_id: new_owner.id, updated_at: Time.current)
+
+        Rails.logger.info "[LeadsController#bulk_reassign] user=#{current_user.email} reassigned #{updated_count} leads to user_id=#{new_owner.id}"
+
+        render json: { updated_count: updated_count, assigned_to: { id: new_owner.id, name: new_owner.try(:full_name) || new_owner.email } }
       end
 
       def notes
@@ -653,6 +660,52 @@ module Api
       end
 
       private
+
+      # Tenant + RBAC + location-selector scoped lead set, BEFORE per-request filters
+      # (status_category / search / owner_id). Shared by #index and #bulk_reassign so a
+      # user can't bulk-reassign a lead they wouldn't see in the list.
+      def base_leads_scope
+        leads = if current_user.uses_rbac?
+                  if current_user.effective_admin?
+                    @company.leads.where(is_converted: [false, nil])
+                  elsif permission_service.can?('leads', 'read', 'all')
+                    @company.leads.where(is_converted: [false, nil])
+                  else
+                    location_ids = permission_service.accessible_location_ids
+                    if location_ids.any?
+                      @company.leads.where(is_converted: [false, nil], location_id: location_ids)
+                    else
+                      @company.leads.where(is_converted: [false, nil])
+                    end
+                  end
+                else
+                  @company.leads.where(is_converted: [false, nil])
+                end
+        leads.for_current_location
+      end
+
+      # Apply the same filters #index uses so #bulk_reassign's "select all matching"
+      # path acts on exactly the visible set.
+      def apply_index_filters(scope, filters)
+        if filters[:status_category].to_s == 'active'
+          scope = scope.where.not(status: EXCLUDED_STATUSES)
+        end
+
+        if filters[:search].present?
+          q = "%#{filters[:search]}%"
+          scope = scope.where(
+            'first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR status ILIKE ?',
+            q, q, q, q, q
+          )
+        end
+
+        if filters[:owner_id].present?
+          # 'unassigned' sentinel matches leads with no owner; numeric ids filter to that owner.
+          scope = filters[:owner_id].to_s == 'unassigned' ? scope.where(owner_id: nil) : scope.where(owner_id: filters[:owner_id])
+        end
+
+        scope
+      end
 
       # Shape a cross-entity IdentityResolver match for the dedupe UI. entityType
       # tells the frontend it's a different object type (contact/account) so it

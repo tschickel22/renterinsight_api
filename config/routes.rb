@@ -2280,6 +2280,10 @@ Rails.application.routes.draw do
         collection do
           # Soft duplicate lookup for the New Lead form (email/phone match).
           post :check_duplicates
+
+          # Bulk reassign — handles the "rep quit, move all of their leads" case in
+          # one query. Accepts lead_ids OR filter (status_category/search/owner_id).
+          post :bulk_reassign
         end
 
         # Member routes (actions on specific lead)
