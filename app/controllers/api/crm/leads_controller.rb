@@ -325,6 +325,10 @@ module Api
           ActiveRecord::Base.transaction do
             # Inherit location from lead, fall back to current location selector
             location_id = @lead.location_id || Current.location_id
+            # The rep working the lead keeps continuity into the converted records.
+            # Falls back to the converter so manager-driven or unowned-lead conversions
+            # still produce assigned records.
+            inherited_owner_id = @lead.owner_id || current_user&.id
 
             # 1. FIND OR CREATE ACCOUNT
             # Priority: explicit param > lead.company_name > person name fallback.
@@ -342,6 +346,7 @@ module Api
               a.source_id = @lead.source_id
               a.notes = @lead.notes
               a.location_id = location_id
+              a.owner_id = inherited_owner_id
               a.account_type = 'converted_lead' if a.respond_to?(:account_type=)
               # Copy lead address → account billing address
               a.billing_street      = @lead.street
@@ -367,6 +372,9 @@ module Api
               backfill[:billing_state]       = @lead.state   if account.billing_state.blank?       && @lead.state.present?
               backfill[:billing_postal_code] = @lead.zip     if account.billing_postal_code.blank? && @lead.zip.present?
               backfill[:billing_country]     = @lead.country if account.billing_country.blank?     && @lead.country.present?
+              # Only fill the owner when the existing account is unassigned — never steal
+              # ownership from a rep who already owns the account.
+              backfill[:owner_id]            = inherited_owner_id if account.owner_id.blank? && inherited_owner_id.present?
               if backfill.any?
                 account.update!(backfill)
                 Rails.logger.info "✅ [ConvertLead] Backfilled existing account #{account.id}: #{backfill.keys.join(', ')}"
@@ -390,6 +398,7 @@ module Api
                 account_id: account.id,
                 company_id: @lead.company_id,
                 location_id: location_id,
+                owner_id: inherited_owner_id,
                 is_primary: true,
                 notes: "Converted from lead ##{@lead.id}",
                 # Copy lead address → contact billing address
@@ -428,6 +437,7 @@ module Api
                 account_id: account.id,
                 company_id: @lead.company_id,
                 location_id: location_id,
+                owner_id:   inherited_owner_id,
                 is_primary: false,
                 notes: "Co-applicant converted from lead ##{@lead.id}",
                 # Share the household address with the primary applicant
@@ -468,8 +478,8 @@ module Api
                 stage: stage,
                 value: 0, # Will be updated when products/pricing added to deal
                 expected_close_date: deal_params[:close_date] || deal_params[:expected_close],
-                owner_id: current_user&.id,
-                user_id: current_user&.id,
+                owner_id: inherited_owner_id,
+                user_id: inherited_owner_id,
                 description: deal_params[:description] || "Converted from lead ##{@lead.id}",
                 vehicle_id: @lead.vehicle_id,  # Carry over vehicle from lead
                 # Copy lead address → deal billing address
