@@ -2,11 +2,14 @@
 
 class Api::V1::OauthEmailController < ApplicationController
   REDIRECT_URI = "#{ENV.fetch('RAILS_API_URL', ENV.fetch('RAILS_BASE_URL', 'https://localhost:3001'))}/api/v1/oauth-email/callback"
-  FRONTEND_URL = if Rails.env.production?
-                   ENV.fetch('FRONTEND_URL')
-                 else
-                   ENV.fetch('FRONTEND_URL', 'https://localhost:5173')
-                 end
+  # Resolved at class-load (eager-loaded by `rails runner`, etc.) — must never raise,
+  # or the cron jobs / boot itself dies. Falls back through APP_URL to a sane prod
+  # default before localhost so a missing env var doesn't take down the app.
+  FRONTEND_URL = ENV.fetch('FRONTEND_URL') do
+    ENV.fetch('APP_URL') do
+      Rails.env.production? ? 'https://dms.renterinsight.com' : 'https://localhost:5173'
+    end
+  end
 
   skip_before_action :authenticate, only: [:callback]
   before_action :set_company_scope, except: [:callback]
