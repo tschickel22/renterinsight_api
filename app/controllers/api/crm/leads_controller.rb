@@ -19,17 +19,23 @@ module Api
         all_leads_count = leads.count
         active_count = leads.where.not(status: EXCLUDED_STATUSES).count
         inactive_count = leads.where(status: EXCLUDED_STATUSES).count
+        # by_status: every status actually present in this tenant's data, with counts.
+        # Lets the frontend build the status filter dropdown from real data instead of
+        # a hardcoded enum (which misses imported/legacy statuses and shows zero-count
+        # options that no lead actually has).
+        by_status = leads.where.not(status: nil).group(:status).count
         status_counts = {
           total: all_leads_count,
           active: active_count,
           inactive: inactive_count,
-          new: leads.where(status: 'new').count,
-          qualified: leads.where(status: 'qualified').count,
-          contacted: leads.where(status: 'contacted').count,
-          proposal: leads.where(status: 'proposal').count,
-          engaged: leads.where(status: 'engaged').count,
-          showing_scheduled: leads.where(status: 'showing_scheduled').count,
-          application_submitted: leads.where(status: 'application_submitted').count,
+          new: by_status['new'] || 0,
+          qualified: by_status['qualified'] || 0,
+          contacted: by_status['contacted'] || 0,
+          proposal: by_status['proposal'] || 0,
+          engaged: by_status['engaged'] || 0,
+          showing_scheduled: by_status['showing_scheduled'] || 0,
+          application_submitted: by_status['application_submitted'] || 0,
+          by_status: by_status,
         }
         
         # Calculate percentage changes
