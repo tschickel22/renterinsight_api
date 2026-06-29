@@ -160,7 +160,10 @@ module Reports
         # Customer linkage for report hyperlinks: prefer the contact, else the account.
         contact_id: assigned ? deal.contact_id : nil,
         account_id: assigned ? deal.account_id : nil,
-        stock_number: vehicle.stock_number.presence,
+        # "Stock #" matches the inventory detail page: the system-generated
+        # Vehicle#inventory_id (e.g. "MH-20260523-3E5324"), NOT the dealer-entered
+        # `stock_number` column (often blank or used for an internal alias).
+        stock_number: vehicle.inventory_id.presence,
         # Vehicle#identifier returns VIN for RV, serial_number for MH (auto-copied from VIN
         # when blank) — so this is the right canonical "serial" field across listing types.
         serial_number: vehicle.identifier.presence,
