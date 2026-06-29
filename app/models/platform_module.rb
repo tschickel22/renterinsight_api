@@ -22,6 +22,7 @@ class PlatformModule
     'inventory.pdi' => { name: 'PDI Checklist', category: 'Inventory & Operations', icon: 'ClipboardCheck', description: 'Pre-delivery inspection management' },
     'inventory.delivery' => { name: 'Delivery Tracker', category: 'Inventory & Operations', icon: 'Truck', description: 'Delivery scheduling and tracking' },
     'inventory.champion_ims' => { name: 'Champion IMS Feed', category: 'Inventory & Operations', icon: 'Rss', description: 'Sync manufactured home catalog from Champion Homes IMS feeds' },
+    'inventory.manufacturer_catalog' => { name: 'Manufacturer Catalog', category: 'Inventory & Operations', icon: 'Boxes', description: 'Subscribe to vetted manufacturer catalogs to pull homes into inventory (Surface A)' },
     
     # Marketing
     'marketing.listings' => { name: 'Property Listings', category: 'Marketing', icon: 'Globe', description: 'Public property listing management' },
