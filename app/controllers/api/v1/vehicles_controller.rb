@@ -25,16 +25,32 @@ module Api
       before_action :set_vehicle, only: [:show, :update, :destroy, :print, :max_advance, :clone, :tags, :add_tags, :remove_tag, :share, :post_to_accounting, :service_tickets]
 
       def index
+        # Location-less CATALOG homes are company-wide and must show under EVERY
+        # location-scoped view (both RBAC location-tier users and the
+        # company-wide location selector). Two classes:
+        #   - Champion IMS catalog rows (location_id IS NULL, source 'champion_ims')
+        #   - any `available_to_order` home with no location (imported/manual
+        #     orderable catalog — a factory model isn't physically at any single
+        #     lot, so it's orderable from all of them).
+        # Physical inventory (available/reserved/sold/pending) stays strictly
+        # location-scoped. Defined up here so the RBAC base scope below can
+        # reference it — without that, a location-tier user's
+        # `where(location_id: assigned_ids)` AND-out the location_id IS NULL
+        # rows before the location selector ever gets a chance to OR them back.
+        catalog_passthrough = "(location_id IS NULL AND (source = 'champion_ims' OR status = 'available_to_order'))"
+
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
-        # RBAC: Location-tier users only see their assigned locations
+        # RBAC: Location-tier users only see their assigned locations + catalog passthroughs
         vehicles = if current_user.uses_rbac?
           if current_user.effective_admin?  # Use RBAC-aware admin check
             @company.vehicles.active
           else
             location_ids = permission_service.accessible_location_ids
             if location_ids.any?
-              # Strict location filtering - only assigned locations
-              @company.vehicles.active.where(location_id: location_ids)
+              # Strict location filtering - only assigned locations, plus
+              # location-less catalog rows (orderable factory models / Champion
+              # IMS) that any user in the company should be able to see.
+              @company.vehicles.active.where("location_id IN (?) OR #{catalog_passthrough}", location_ids)
             else
               @company.vehicles.active
             end
@@ -42,19 +58,10 @@ module Api
         else
           @company.vehicles.active
         end
-        
-        # Apply location filter - skip if 'all_locations' param sent
-        # Champion IMS catalog rows with location_id IS NULL (apply_to_all_locations=true)
-        # are visible under EVERY location's view, regardless of selector.
-        # Location-less CATALOG homes are company-wide and must show under EVERY location's
-        # view, regardless of the selector:
-        #   - Champion IMS catalog rows (location_id IS NULL, source 'champion_ims'), and
-        #   - any `available_to_order` home with no location (imported/manual orderable
-        #     catalog — a factory model isn't physically at any single lot, so it's
-        #     orderable from all of them). Without this, orderable homes vanish from the
-        #     home picker on deals/leads/quotes and from a location-scoped inventory list.
-        # Physical inventory (available/reserved/sold/pending) stays strictly location-scoped.
-        catalog_passthrough = "(location_id IS NULL AND (source = 'champion_ims' OR status = 'available_to_order'))"
+
+        # Apply location filter - skip if 'all_locations' param sent.
+        # catalog_passthrough is OR'd in again here so the location-selector
+        # narrows to the picked location *plus* the same catalog rows.
         if params[:all_locations].present? && params[:all_locations] == 'true'
           # Show all locations - no location filter applied
         elsif params[:location_id].present? && params[:location_id] != 'all'
