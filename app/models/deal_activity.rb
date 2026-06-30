@@ -114,7 +114,8 @@ class DealActivity < ApplicationRecord
       errors.add(:start_time, 'is required for meetings') if start_time.blank?
       errors.add(:end_time, 'is required for meetings') if end_time.blank?
     when 'call'
-      errors.add(:phone_number, 'is required for calls') if phone_number.blank?
+      # phone_number intentionally NOT required — quick-log lets reps record a
+      # call against a deal even when the contact's phone isn't stored.
       errors.add(:call_direction, 'is required for calls') if call_direction.blank?
     when 'reminder'
       errors.add(:reminder_time, 'is required for reminders') if reminder_time.blank?

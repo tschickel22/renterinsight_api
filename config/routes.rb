@@ -734,6 +734,7 @@ Rails.application.routes.draw do
         
         collection do
           get :stats
+          get :facets     # Distinct makes/years for the filter dropdowns
           get :export     # Add export route
           post :bulk_update
           post :bulk_delete

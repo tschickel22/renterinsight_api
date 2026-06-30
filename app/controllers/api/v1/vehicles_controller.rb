@@ -40,16 +40,19 @@ module Api
         catalog_passthrough = "(location_id IS NULL AND (source = 'champion_ims' OR status = 'available_to_order'))"
 
         # STRICT TENANT ISOLATION: Only return vehicles from current user's company
-        # RBAC: Location-tier users only see their assigned locations + catalog passthroughs
+        # RBAC: Location-tier users only see their assigned locations + catalog passthroughs.
+        # The RBAC scope is expanded with sharing-group peers so a sales rep
+        # assigned to Evangeline still sees Homes To Geaux inventory when
+        # those two locations share a lot (see Company#expand_with_inventory_peers).
         vehicles = if current_user.uses_rbac?
           if current_user.effective_admin?  # Use RBAC-aware admin check
             @company.vehicles.active
           else
-            location_ids = permission_service.accessible_location_ids
+            location_ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
             if location_ids.any?
-              # Strict location filtering - only assigned locations, plus
-              # location-less catalog rows (orderable factory models / Champion
-              # IMS) that any user in the company should be able to see.
+              # Strict location filtering - assigned locations + sharing-group
+              # peers, plus location-less catalog rows (orderable factory
+              # models / Champion IMS) that any user in the company should see.
               @company.vehicles.active.where("location_id IN (?) OR #{catalog_passthrough}", location_ids)
             else
               @company.vehicles.active
@@ -60,14 +63,17 @@ module Api
         end
 
         # Apply location filter - skip if 'all_locations' param sent.
-        # catalog_passthrough is OR'd in again here so the location-selector
-        # narrows to the picked location *plus* the same catalog rows.
+        # The selected location is expanded with sharing-group peers (cross-sell
+        # inventory visibility) and OR'd with catalog_passthrough so the picked
+        # location yields its own + peers + location-less catalog rows.
         if params[:all_locations].present? && params[:all_locations] == 'true'
           # Show all locations - no location filter applied
         elsif params[:location_id].present? && params[:location_id] != 'all'
-          vehicles = vehicles.where("location_id = ? OR #{catalog_passthrough}", params[:location_id])
+          visible_ids = @company.inventory_visible_location_ids(params[:location_id])
+          vehicles = vehicles.where("location_id IN (?) OR #{catalog_passthrough}", visible_ids)
         elsif Current.location_filtered?
-          vehicles = vehicles.where("location_id = ? OR #{catalog_passthrough}", Current.location_id)
+          visible_ids = @company.inventory_visible_location_ids(Current.location_id)
+          vehicles = vehicles.where("location_id IN (?) OR #{catalog_passthrough}", visible_ids)
         end
         
         # Apply non-search filters
@@ -944,13 +950,40 @@ module Api
         }
       end
 
+      # GET /api/v1/vehicles/facets
+      # Distinct makes/years for filter dropdowns. The inventory list dropdowns
+      # were deriving their options from the currently-displayed page, so after
+      # a catalog sync that surfaced 500+ orderable rows the Make filter often
+      # collapsed to whichever brand dominated page 1 (e.g. "Kabco" only),
+      # leaving no way to widen back without a full Clear. Scope mirrors the
+      # `stats` endpoint: location-visible inventory + company-wide catalog.
+      def facets
+        vehicles = @company.vehicles.active
+
+        if Current.location_filtered?
+          visible_ids = @company.inventory_visible_location_ids(Current.location_id)
+          location_scoped = vehicles.where(location_id: visible_ids)
+          catalog_items   = vehicles.where(location_id: nil, status: 'available_to_order')
+          scope = vehicles.where(id: location_scoped.select(:id)).or(vehicles.where(id: catalog_items.select(:id)))
+        else
+          scope = vehicles
+        end
+
+        makes = scope.where.not(make: [nil, '']).distinct.pluck(:make).sort_by { |m| m.to_s.downcase }
+        years = scope.where.not(year: nil).distinct.pluck(:year).sort.reverse
+
+        render json: { makes: makes, years: years }
+      end
+
       def stats
         vehicles = @company.vehicles.active
-        
-        # Apply strict location filter - only vehicles explicitly assigned to selected location
-        # But for available_to_order, also include Champion catalog items with location_id IS NULL
+
+        # Apply location filter - selected location is expanded with sharing-group
+        # peers so the tiles match what shows in the inventory list. For
+        # available_to_order, also include Champion catalog items (location_id IS NULL).
         if Current.location_filtered?
-          location_scoped = vehicles.where(location_id: Current.location_id)
+          visible_ids = @company.inventory_visible_location_ids(Current.location_id)
+          location_scoped = vehicles.where(location_id: visible_ids)
           catalog_items = vehicles.where(location_id: nil, status: 'available_to_order')
         else
           location_scoped = vehicles
@@ -979,10 +1012,12 @@ module Api
       # GET /api/v1/vehicles/export
       def export
         vehicles = @company.vehicles.active
-        
-        # Apply strict location filter - only vehicles explicitly assigned to selected location
+
+        # Apply location filter - selected location is expanded with sharing-group
+        # peers so the export matches what the user sees in the inventory list.
         if Current.location_filtered?
-          vehicles = vehicles.where(location_id: Current.location_id)
+          visible_ids = @company.inventory_visible_location_ids(Current.location_id)
+          vehicles = vehicles.where(location_id: visible_ids)
         end
         
         # Apply same filters as index
@@ -1333,11 +1368,11 @@ module Api
 
       def set_vehicle
         # STRICT TENANT ISOLATION: Only find vehicles within company
-        # RBAC: Location-tier users only access their assigned locations
+        # RBAC: Location-tier users access their assigned locations plus
+        # any sharing-group peers (cross-sell inventory visibility).
         @vehicle = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
-          location_ids = permission_service.accessible_location_ids
+          location_ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
           if location_ids.any?
-            # Strict location filtering - only assigned locations
             @company.vehicles.active.where(location_id: location_ids).find(params[:id])
           else
             @company.vehicles.active.find(params[:id])

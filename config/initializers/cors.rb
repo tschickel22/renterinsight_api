@@ -28,7 +28,10 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
       'https://staging.crm.landlordinsight.com',
       'https://staging-dms.renterinsight.com',
       'https://renterinsight-api-staging.onrender.com',
-      'https://renterinsight-api-prod.onrender.com'
+      'https://renterinsight-api-prod.onrender.com',
+      'https://dealertide.com',
+      'https://www.dealertide.com',
+      'https://staging.dealertide.com'
     ]
 
     # Combine all origins
