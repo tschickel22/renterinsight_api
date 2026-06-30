@@ -21,14 +21,14 @@ module Api
         Rails.logger.info "[Listings#index] vehicle_type param: '#{params[:vehicle_type]}'"
         
         # STRICT TENANT ISOLATION: Only return listings from current user's company
-        # RBAC: Location-tier users only see listings for vehicles in their assigned locations
+        # RBAC: Location-tier users see listings for vehicles in their assigned
+        # locations + sharing-group peers (cross-sell inventory visibility).
         listings = if current_user.uses_rbac?
           if current_user.effective_admin?  # Use RBAC-aware admin check
             @company.listings.active
           else
-            location_ids = permission_service.accessible_location_ids
+            location_ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
             if location_ids.any?
-              # Strict location filtering - only assigned locations
               @company.listings.active.joins(:vehicle)
                       .where(vehicles: { location_id: location_ids })
             else
@@ -38,10 +38,11 @@ module Api
         else
           @company.listings.active
         end
-        
-        # Apply strict location filter - only listings for vehicles explicitly assigned to selected location
+
+        # Apply location filter - selected location is expanded with sharing-group peers.
         if Current.location_filtered?
-          listings = listings.joins(:vehicle).where(vehicles: { location_id: Current.location_id })
+          visible_ids = @company.inventory_visible_location_ids(Current.location_id)
+          listings = listings.joins(:vehicle).where(vehicles: { location_id: visible_ids })
         end
         
         Rails.logger.info "[Listings#index] Initial count: #{listings.count}"
@@ -200,10 +201,11 @@ module Api
       # GET /api/v1/listings/stats
       def stats
         listings = @company.listings.active
-        
-        # Apply strict location filter - only listings for vehicles explicitly assigned to selected location
+
+        # Apply location filter - selected location is expanded with sharing-group peers.
         if Current.location_filtered?
-          listings = listings.joins(:vehicle).where(vehicles: { location_id: Current.location_id })
+          visible_ids = @company.inventory_visible_location_ids(Current.location_id)
+          listings = listings.joins(:vehicle).where(vehicles: { location_id: visible_ids })
         end
         
         # Count by vehicle type
@@ -253,11 +255,11 @@ module Api
 
       def set_listing
         # STRICT TENANT ISOLATION: Only find listings within company
-        # RBAC: Location-tier users only access listings for vehicles in their assigned locations
+        # RBAC: Location-tier users access listings for vehicles in their
+        # assigned locations + sharing-group peers (cross-sell visibility).
         @listing = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
-          location_ids = permission_service.accessible_location_ids
+          location_ids = @company.expand_with_inventory_peers(permission_service.accessible_location_ids)
           if location_ids.any?
-            # Strict location filtering - only assigned locations
             @company.listings.active.joins(:vehicle)
                     .where(vehicles: { location_id: location_ids })
                     .find(params[:id])

@@ -511,6 +511,84 @@ class Company < ApplicationRecord
     operational_settings['timezone'].presence || 'America/New_York'
   end
 
+  # --- Inventory sharing groups -------------------------------------------
+  # Two locations under the same dealer can share a physical lot and sell
+  # each other's inventory. A "sharing group" is the unit of cross-location
+  # visibility — any location in a group sees inventory from every other
+  # location in that group, in dropdowns, lists, stats, exports, and
+  # single-vehicle fetches.
+  #
+  # Stored as one Setting key on the Company so a single read serves every
+  # vehicle query in the request:
+  #   [{ "id" => "grp_<rand>", "name" => "Lafayette Lots",
+  #      "location_ids" => [77, 92] }, ...]
+  def inventory_sharing_groups
+    @inventory_sharing_groups ||= begin
+      raw = Setting.get('Company', id, 'inventory_sharing_groups')
+      raw.is_a?(Array) ? raw.map(&:deep_stringify_keys) : []
+    end
+  end
+
+  # Expanded set of location IDs whose inventory is visible when the user has
+  # `location_id` selected. Includes the location itself plus every peer in
+  # any group containing it. Returns `[]` for a blank input so callers can
+  # safely chain into a WHERE.
+  def inventory_visible_location_ids(location_id)
+    return [] if location_id.blank?
+    loc_id = location_id.to_i
+    peers = inventory_sharing_groups.flat_map do |g|
+      ids = Array(g['location_ids']).map(&:to_i)
+      ids.include?(loc_id) ? ids : []
+    end
+    ([loc_id] + peers).uniq
+  end
+
+  # Expand an array of location IDs into the union of every sharing-group
+  # peer for each one. Used to extend RBAC's accessible_location_ids so a
+  # location-tier user assigned to Evangeline can still see Homes To Geaux
+  # inventory through the sharing group.
+  def expand_with_inventory_peers(location_ids)
+    return [] if location_ids.blank?
+    base = Array(location_ids).map(&:to_i)
+    (base + base.flat_map { |id| inventory_visible_location_ids(id) }).uniq
+  end
+
+  # Rewrite the sharing-group setting so `location_id` ends up grouped with
+  # exactly `peer_ids` (symmetric — editing either side produces the same
+  # final group). Removes the location from any pre-existing group; deletes
+  # groups left with fewer than two members.
+  def set_inventory_sharing_for_location!(location_id, peer_ids)
+    loc_id = location_id.to_i
+    peers = Array(peer_ids).map(&:to_i).reject { |id| id == loc_id || id <= 0 }.uniq
+
+    # Remove this location from any group it currently belongs to, preserving
+    # the other members. (We don't want to delete the whole group out from
+    # under its other members when this location moves to a different group.)
+    groups = inventory_sharing_groups.map do |g|
+      members = Array(g['location_ids']).map(&:to_i) - [loc_id]
+      g.merge('location_ids' => members)
+    end
+
+    if peers.any?
+      members = ([loc_id] + peers).uniq
+      existing = groups.find { |g| (Array(g['location_ids']).map(&:to_i) & peers).any? }
+      if existing
+        existing['location_ids'] = (Array(existing['location_ids']).map(&:to_i) + members).uniq
+      else
+        groups << {
+          'id' => "grp_#{SecureRandom.hex(4)}",
+          'name' => nil,
+          'location_ids' => members
+        }
+      end
+    end
+
+    groups = groups.reject { |g| Array(g['location_ids']).map(&:to_i).uniq.size < 2 }
+    Setting.set('Company', id, 'inventory_sharing_groups', groups)
+    @inventory_sharing_groups = nil
+    groups
+  end
+
   # --- Pipeline stages ----------------------------------------------------
   # Single source of truth for deal pipeline stages. Used by Deal stage
   # validation and lead conversion so they never diverge from what the

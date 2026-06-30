@@ -115,9 +115,19 @@ module Api
       def update
         @location.updated_by = current_user.id.to_s
 
+        # linked_inventory_location_ids lives in the Location form but persists
+        # on the Company's inventory_sharing_groups Setting (symmetric — editing
+        # either side produces the same group). Pull it out before the AR
+        # update since it isn't a column on Location.
+        peer_ids_param = params.dig(:location, :linked_inventory_location_ids)
+
         if @location.update(location_params)
+          if !peer_ids_param.nil?
+            @location.company.set_inventory_sharing_for_location!(@location.id, Array(peer_ids_param))
+          end
+
           render json: {
-            location: location_json(@location),
+            location: location_json(@location, include_settings: params[:include_settings] == 'true'),
             message: 'Location updated successfully'
           }
         else
@@ -573,6 +583,9 @@ module Api
       end
 
       def location_json(location, include_settings: false)
+        # Peers of this location from any inventory sharing group (excludes self).
+        linked_peer_ids = location.company.inventory_visible_location_ids(location.id) - [location.id]
+
         json = {
           id: location.id,
           company_id: location.company_id,
@@ -594,6 +607,7 @@ module Api
           business_hours: location.business_hours,
           active: location.active,
           allowed_form_states: location.respond_to?(:allowed_form_states) ? (location.allowed_form_states || []) : [],
+          linked_inventory_location_ids: linked_peer_ids,
           created_at: location.created_at,
           updated_at: location.updated_at,
           created_by: location.created_by,
