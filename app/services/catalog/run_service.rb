@@ -112,6 +112,7 @@ module Catalog
 
     # Soft-delete catalog copies at locations the subscription no longer targets
     # (e.g. dealer switched from all -> specific, or removed a location).
+    # Supplemented vehicles are never tombstoned — they're dealer-originals.
     def inactivate_deselected_locations(company, target_locations)
       scope = company.vehicles.where(catalog_source_id: @source.id, is_deleted: [false, nil])
       scope = if target_locations == [nil]
@@ -119,6 +120,9 @@ module Catalog
               else
                 scope.where('location_id IS NULL OR location_id NOT IN (?)', target_locations.compact)
               end
+      # Exclude supplement-stamped vehicles. JSONB `->>` returns TEXT, so we
+      # compare against the literal 'true' string.
+      scope = scope.where("(catalog_last_synced_values->>'__supplemented__') IS DISTINCT FROM 'true'")
       scope.update_all(is_deleted: true, deleted_at: Time.current)
     end
 

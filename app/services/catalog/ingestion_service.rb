@@ -31,6 +31,17 @@ module Catalog
       virtual_tour_url matterport_url video_url
     ].freeze
 
+    # Sentinel key inside catalog_last_synced_values marking a vehicle that was
+    # stamped by SupplementApplier (was a pre-existing dealer row, not created by
+    # ingestion). Lets re-sync preserve `source` and lets unsubscribe un-stamp
+    # instead of soft-deleting alongside pure catalog rows. Double-underscore so
+    # it can never collide with a real vehicle attribute name.
+    SUPPLEMENT_MARK = '__supplemented__'
+
+    def self.supplemented?(vehicle)
+      vehicle.catalog_last_synced_values&.[](SUPPLEMENT_MARK) == true
+    end
+
     Result = Struct.new(:added, :updated, :unchanged, :inactivated, keyword_init: true)
 
     # Maps a NormalizedHome → the hash of catalog-managed attributes a vehicle
@@ -160,14 +171,18 @@ module Catalog
         last_synced[field.to_s] = serialize_for_compare(new_value)
       end
 
-      # Non-managed bookkeeping (always overwritten by catalog).
+      # Non-managed bookkeeping. `source` is preserved for supplemented vehicles
+      # (they were dealer-created — overwriting source = 'catalog_import' would
+      # erase the only marker that distinguishes them from pure imports).
       vehicle.listing_type         = 'manufactured_home'
-      vehicle.source               = VEHICLE_SOURCE
+      vehicle.source               = VEHICLE_SOURCE unless self.class.supplemented?(vehicle)
       vehicle.condition            = 'new'
       vehicle.make                 = manufacturer_name
       vehicle.status               = 'available_to_order' if is_new
       vehicle.catalog_content_hash = content_signature(home)
       vehicle.catalog_last_seen_at = Time.current
+      # Preserve the supplement sentinel through subsequent re-syncs.
+      last_synced[SUPPLEMENT_MARK] = true if self.class.supplemented?(vehicle)
       vehicle.catalog_last_synced_values = last_synced
       vehicle.is_deleted           = false
       vehicle.deleted_at           = nil
@@ -216,6 +231,11 @@ module Catalog
 
       count = 0
       scope.find_each do |vehicle|
+        # Never tombstone a supplemented vehicle — it's a dealer-original row
+        # that we attached catalog data to. Catalog dropping the model just
+        # means the dealer keeps it as-is.
+        next if self.class.supplemented?(vehicle)
+
         vehicle.update_columns(is_deleted: true, deleted_at: Time.current)
         count += 1
       end
