@@ -387,6 +387,14 @@ module Api
           result[:crm_leads_view_mode] = mode if %w[table cards kanban].include?(mode)
         end
 
+        # Per-user list of column keys hidden from the Inventory Stock List
+        # report. Column keys are stable, defined in StockListReport.tsx; not
+        # allowlisted because the set may grow over time.
+        if raw.key?(:stock_list_hidden_columns)
+          arr = Array(raw[:stock_list_hidden_columns]).map(&:to_s)
+          result[:stock_list_hidden_columns] = arr.first(100)
+        end
+
         result
       end
 
