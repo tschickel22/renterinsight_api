@@ -11,6 +11,10 @@ class Note < ApplicationRecord
   scope :recent, -> { order(created_at: :desc) }
 
   before_save :set_created_by_name
+  # A note is a real customer-facing touch — same as a logged call/email/text —
+  # so it should bump the parent lead/deal's last_activity_at. Without this,
+  # the quick-log "Note" tab silently leaves the "Last Activity" column stale.
+  after_commit :touch_parent_last_activity, on: :create
 
   # ActivityTrackable overrides
   def activity_display_name
@@ -60,5 +64,16 @@ class Note < ApplicationRecord
   def set_created_by_name
     # Only set from user if created_by_name isn't already set
     self.created_by_name = user&.name || 'Unknown User' if created_by_name.blank?
+  end
+
+  def touch_parent_last_activity
+    parent = case entity_type&.downcase
+             when 'lead' then Lead.find_by(id: entity_id)
+             when 'deal' then Deal.find_by(id: entity_id)
+             end
+    return unless parent && parent.respond_to?(:last_activity_at)
+    parent.update_columns(last_activity_at: created_at || Time.current)
+  rescue => e
+    Rails.logger.warn "[Note] touch_parent_last_activity failed: #{e.message}"
   end
 end
