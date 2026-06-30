@@ -2230,6 +2230,13 @@ Rails.application.routes.draw do
         collection { get :stats }
       end
 
+      # ==================== LEAD STATUSES ====================
+      # Tenant-configurable lead status list (parallel to sources). Backs the
+      # status dropdown on the lead form and the status filter on the lead list.
+      resources :lead_statuses, only: %i[index create update destroy] do
+        collection { post :reorder }
+      end
+
       # ==================== TAGS ====================
       resources :tags, only: %i[index create update destroy] do
         member do
