@@ -158,8 +158,25 @@ module Api
             {}
           end
 
+          # Same DISTINCT ON batched last-note query used in #index, scoped to
+          # this column's cards so the kanban can show a sticky-note hover
+          # preview without N+1.
+          card_ids = card_leads.map(&:id).map(&:to_s)
+          last_notes = if card_ids.any?
+            Note.where(entity_type: 'lead', entity_id: card_ids)
+                .order(Arel.sql('entity_id, created_at DESC'))
+                .select('DISTINCT ON (entity_id) entity_id, content, created_at, created_by_name')
+                .each_with_object({}) { |n, acc2| acc2[n.entity_id.to_i] = n }
+          else
+            {}
+          end
+
           cards = card_leads.map do |l|
-            lead_json(l).merge(openTaskCount: task_counts[l.id] || 0)
+            n = last_notes[l.id]
+            lead_json(l).merge(
+              openTaskCount: task_counts[l.id] || 0,
+              lastNote: n ? { content: n.content, createdAt: n.created_at, createdByName: n.created_by_name } : nil
+            )
           end
 
           acc[status_key] = { leads: cards, total: total }
