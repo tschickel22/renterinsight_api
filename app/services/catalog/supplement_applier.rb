@@ -63,13 +63,22 @@ module Catalog
         last_synced[field.to_s] = serialize(new_value)
       end
 
+      # Mark this vehicle as supplement-stamped (vs. catalog-created). Lets the
+      # ingestion service preserve its original `source`, and lets unsubscribe
+      # un-stamp it instead of soft-deleting alongside pure catalog rows.
+      # Stored inside the existing catalog_last_synced_values JSONB to avoid
+      # another migration; '__supplemented__' is a sentinel key.
+      last_synced[Catalog::IngestionService::SUPPLEMENT_MARK] = true
+
       unless @dry_run
         vehicle.catalog_source_id          = @source.id
         vehicle.catalog_source_key         = home.source_key.to_s
         vehicle.catalog_content_hash       = "v#{Catalog::IngestionService::INGESTION_VERSION}:#{home.content_hash}"
         vehicle.catalog_last_seen_at       = Time.current
         vehicle.catalog_last_synced_values = last_synced
-        vehicle.source ||= Catalog::IngestionService::VEHICLE_SOURCE
+        # Preserve whatever source the dealer-original vehicle already has; if
+        # it's blank, fall back to catalog_import.
+        vehicle.source = Catalog::IngestionService::VEHICLE_SOURCE if vehicle.source.blank?
         vehicle.save!
       end
 

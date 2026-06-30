@@ -50,12 +50,37 @@ module Api
         render json: { subscription: subscription_json(existing) }, status: :ok
       end
 
-      # DELETE /api/v1/catalog_subscriptions/:id — unsubscribe. Removes the join AND
-      # soft-deletes this company's imported copies for that source.
+      # DELETE /api/v1/catalog_subscriptions/:id — unsubscribe.
+      # Removes the join. Pure catalog-imported vehicles get soft-deleted.
+      # Supplement-stamped vehicles (dealer-originals we attached catalog data
+      # to) are NOT deleted — they're un-stamped instead so they revert to
+      # plain dealer rows. The catalog-filled values (images/specs) stay; the
+      # dealer keeps the data they got from the catalog.
       def destroy
         sub = @company.dealer_catalog_subscriptions.find(params[:id])
-        @company.vehicles.where(catalog_source_id: sub.catalog_source_id, is_deleted: [false, nil])
+        source_id = sub.catalog_source_id
+
+        # 1) Soft-delete pure catalog imports for this source.
+        @company.vehicles
+                .where(catalog_source_id: source_id, is_deleted: [false, nil])
+                .where("(catalog_last_synced_values->>'__supplemented__') IS DISTINCT FROM 'true'")
                 .update_all(is_deleted: true, deleted_at: Time.current)
+
+        # 2) Unstamp supplemented dealer vehicles for this source so a future
+        # re-subscribe won't smart-update them as if they were never disconnected
+        # (and so the destroy is reversible in a clean way — re-running supplement
+        # picks them up by name match again).
+        @company.vehicles
+                .where(catalog_source_id: source_id, is_deleted: [false, nil])
+                .where("(catalog_last_synced_values->>'__supplemented__') = 'true'")
+                .update_all(
+                  catalog_source_id: nil,
+                  catalog_source_key: nil,
+                  catalog_content_hash: nil,
+                  catalog_last_synced_values: {},
+                  catalog_last_seen_at: nil
+                )
+
         sub.destroy!
         head :no_content
       rescue ActiveRecord::RecordNotFound
