@@ -2291,6 +2291,9 @@ Rails.application.routes.draw do
           # Bulk reassign — handles the "rep quit, move all of their leads" case in
           # one query. Accepts lead_ids OR filter (status_category/search/owner_id).
           post :bulk_reassign
+
+          # Kanban view: leads grouped by status, capped per column.
+          get :kanban
         end
 
         # Member routes (actions on specific lead)

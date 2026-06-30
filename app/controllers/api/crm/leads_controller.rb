@@ -96,6 +96,59 @@ module Api
         }
       end
 
+      # GET /api/crm/leads/kanban
+      # Returns leads grouped by status for the Kanban view. Each column is
+      # capped at per_column (default 50) cards sorted by last_activity_at desc
+      # so a tenant with 9k leads doesn't render every card. The total count
+      # per column reflects the FULL filtered set (used by the column header
+      # and the "load more" link).
+      def kanban
+        return unless authorize_action!('leads', 'read')
+
+        leads = apply_index_filters(base_leads_scope, params)
+        per_column = (params[:per_column].presence || 50).to_i.clamp(1, 200)
+
+        # Statuses to render = tenant's configured + any in-use status not in
+        # the configured list (defensive: don't drop a column if data drifts).
+        configured_keys = @company.lead_statuses.active.ordered.pluck(:key)
+        in_use_keys = leads.where.not(status: nil).distinct.pluck(:status)
+        status_keys = (configured_keys + in_use_keys).uniq
+
+        columns = status_keys.each_with_object({}) do |status_key, acc|
+          scope = leads.where(status: status_key)
+          total = scope.count
+          # Skip empty columns unless the admin explicitly configured this
+          # status (we still want to show those so users can drop cards in).
+          next if total.zero? && !configured_keys.include?(status_key)
+
+          card_leads = scope.includes(:source, :owner, :vehicle, :lead_scores, :tags)
+                            .order(Arel.sql('last_activity_at DESC NULLS LAST'))
+                            .limit(per_column)
+                            .to_a
+
+          # Batch the open-task count per lead so the kanban card can show a
+          # "has tasks" indicator. One GROUP BY for all cards in this column
+          # vs N+1 queries through lead_json.
+          task_counts = if card_leads.any?
+            Activity.where(
+              lead_id: card_leads.map(&:id),
+              activity_type: 'lead_activity_task',
+              completed_date: nil
+            ).group(:lead_id).count
+          else
+            {}
+          end
+
+          cards = card_leads.map do |l|
+            lead_json(l).merge(openTaskCount: task_counts[l.id] || 0)
+          end
+
+          acc[status_key] = { leads: cards, total: total }
+        end
+
+        render json: { columns: columns, per_column: per_column }
+      end
+
       def show
         return unless authorize_action!('leads', 'read')
         
@@ -222,8 +275,13 @@ module Api
         # Apply attributes to lead
         @lead.assign_attributes(update_attrs)
 
-        # Validate only required fields that are visible in active layout
-        layout_errors = validate_visible_required_fields('leads', @lead)
+        # Validate only required fields that are visible in active layout AND
+        # that were submitted in this update. A status-only PATCH (e.g. Kanban
+        # drag-drop) shouldn't fail because of a pre-existing missing email on
+        # the lead — we're not touching email in this request.
+        layout_errors = validate_visible_required_fields(
+          'leads', @lead, submitted_keys: lead_params.keys
+        )
         if layout_errors.any?
           Rails.logger.error "[LeadsController#update] Layout validation failed: #{layout_errors.join(', ')}"
           render json: {

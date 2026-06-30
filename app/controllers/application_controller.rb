@@ -609,31 +609,41 @@ class ApplicationController < ActionController::API
   # @param module_name [String] Module name (e.g., 'leads', 'contacts')
   # @param record [ActiveRecord::Base] Record to validate
   # @return [Array<String>] Error messages for missing fields
-  def validate_visible_required_fields(module_name, record)
+  # If submitted_keys is provided (Array of strings), only required fields
+  # that appear in that list are validated. Used by partial updates (e.g.
+  # Kanban drag-drop sends only {status: 'x'}) so a stale missing field on
+  # an existing record doesn't fail a one-field change. Nil = validate all
+  # required fields (the previous behavior, still used by create).
+  def validate_visible_required_fields(module_name, record, submitted_keys: nil)
     visible_keys = visible_layout_fields(module_name)
     errors = []
-    
+
     # If no layout or no visible fields, skip validation (fail open)
     return errors if visible_keys.empty?
-    
+
     # Get field definitions for this module
     field_definitions = get_standard_field_definitions(module_name)
-    
+
+    submitted_set = submitted_keys ? submitted_keys.map(&:to_s).to_set : nil
+
     field_definitions.each do |field_def|
       key = field_def[:key]
-      
+
       # Only validate if: 1) field is required AND 2) field is visible in layout
       next unless field_def[:required] && visible_keys.include?(key)
-      
+
+      # Partial update: skip required fields the caller didn't touch.
+      next if submitted_set && !submitted_set.include?(key.to_s)
+
       # Check if value is present in the record
       value = record.send(key) rescue nil
-      
+
       if value.blank?
         label = field_def[:label] || key.titleize
         errors << "#{label} is required"
       end
     end
-    
+
     errors
   end
 

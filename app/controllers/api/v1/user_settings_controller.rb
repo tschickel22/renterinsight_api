@@ -69,7 +69,11 @@ module Api
             if params.key?(:workqueue_preferences) && @user.respond_to?(:workqueue_preferences)
               raw = profile_params[:workqueue_preferences] || {}
               sanitized = sanitize_workqueue_preferences(raw)
-              updates[:workqueue_preferences] = sanitized
+              # Merge into existing prefs — a PATCH that touches just
+              # lead_kanban_hidden_columns shouldn't wipe out the user's
+              # numeric workqueue settings or hidden_queues.
+              existing = (@user.workqueue_preferences || {}).symbolize_keys
+              updates[:workqueue_preferences] = existing.merge(sanitized)
             end
 
             @user.update!(updates) if updates.any?
@@ -366,6 +370,29 @@ module Api
         if raw.key?(:hidden_queues)
           hidden = Array(raw[:hidden_queues]).map(&:to_s)
           result[:hidden_queues] = hidden & valid_queue_ids
+        end
+
+        # Per-user list of lead_status keys hidden from the leads Kanban view.
+        # Values aren't allowlisted because lead_statuses are tenant-configurable;
+        # cap length and string-coerce to prevent abuse.
+        if raw.key?(:lead_kanban_hidden_columns)
+          arr = Array(raw[:lead_kanban_hidden_columns]).map(&:to_s)
+          result[:lead_kanban_hidden_columns] = arr.first(200)
+        end
+
+        # Last-picked view mode on the leads page. Restored on next visit so a
+        # rep who prefers Kanban doesn't have to switch every time they log in.
+        if raw.key?(:crm_leads_view_mode)
+          mode = raw[:crm_leads_view_mode].to_s
+          result[:crm_leads_view_mode] = mode if %w[table cards kanban].include?(mode)
+        end
+
+        # Per-user list of column keys hidden from the Inventory Stock List
+        # report. Column keys are stable, defined in StockListReport.tsx; not
+        # allowlisted because the set may grow over time.
+        if raw.key?(:stock_list_hidden_columns)
+          arr = Array(raw[:stock_list_hidden_columns]).map(&:to_s)
+          result[:stock_list_hidden_columns] = arr.first(100)
         end
 
         result
