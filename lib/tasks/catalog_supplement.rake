@@ -74,7 +74,8 @@ namespace :catalog do
 
     candidates = company.vehicles
                         .where(catalog_source_id: source.id, is_deleted: [false, nil])
-                        .where('created_at < catalog_last_seen_at - INTERVAL ?', '1 minute')
+                        # INTERVAL can't take a bind param in Postgres; literal is safe (no user input).
+                        .where("created_at < catalog_last_seen_at - INTERVAL '1 minute'")
 
     marked = 0
     skipped_already_marked = 0
