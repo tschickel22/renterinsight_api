@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_29_010000) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_29_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3546,6 +3546,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_29_010000) do
     t.jsonb "breakdown", default: {}
     t.index ["lead_id", "score"], name: "index_lead_scores_on_lead_id_and_score"
     t.index ["lead_id"], name: "index_lead_scores_on_lead_id"
+  end
+
+  create_table "lead_statuses", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "key", null: false
+    t.string "label", null: false
+    t.string "color"
+    t.integer "sort_order", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.boolean "is_excluded", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "is_active"], name: "index_lead_statuses_on_company_id_and_is_active"
+    t.index ["company_id", "key"], name: "index_lead_statuses_on_company_id_and_key", unique: true
+    t.index ["company_id"], name: "index_lead_statuses_on_company_id"
   end
 
   create_table "lead_tasks", force: :cascade do |t|
@@ -7528,6 +7543,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_29_010000) do
   add_foreign_key "lead_activities", "users"
   add_foreign_key "lead_activities", "users", column: "assigned_to_id"
   add_foreign_key "lead_scores", "leads"
+  add_foreign_key "lead_statuses", "companies"
   add_foreign_key "lead_tasks", "leads"
   add_foreign_key "leads", "accounts", column: "converted_account_id"
   add_foreign_key "leads", "companies"
