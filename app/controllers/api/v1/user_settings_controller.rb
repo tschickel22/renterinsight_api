@@ -380,6 +380,29 @@ module Api
           result[:lead_kanban_hidden_columns] = arr.first(200)
         end
 
+        # Per-user hidden-columns list for the leads list (table) view and
+        # hidden-fields list for the leads tile/cards view. Column/field ids
+        # are stable, defined in CRMProspecting.tsx; cap length to prevent abuse.
+        if raw.key?(:lead_table_hidden_columns)
+          arr = Array(raw[:lead_table_hidden_columns]).map(&:to_s)
+          result[:lead_table_hidden_columns] = arr.first(100)
+        end
+        if raw.key?(:lead_cards_hidden_fields)
+          arr = Array(raw[:lead_cards_hidden_fields]).map(&:to_s)
+          result[:lead_cards_hidden_fields] = arr.first(100)
+        end
+
+        # Same pattern for the deals list (table) and cards view. Ids defined
+        # in CRMSalesDeal.tsx.
+        if raw.key?(:deal_table_hidden_columns)
+          arr = Array(raw[:deal_table_hidden_columns]).map(&:to_s)
+          result[:deal_table_hidden_columns] = arr.first(100)
+        end
+        if raw.key?(:deal_cards_hidden_fields)
+          arr = Array(raw[:deal_cards_hidden_fields]).map(&:to_s)
+          result[:deal_cards_hidden_fields] = arr.first(100)
+        end
+
         # Last-picked view mode on the leads page. Restored on next visit so a
         # rep who prefers Kanban doesn't have to switch every time they log in.
         if raw.key?(:crm_leads_view_mode)

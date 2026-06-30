@@ -76,9 +76,28 @@ module Api
         per_page = [per_page, 200].min # Max 200 per page
         
         leads = leads.offset((page - 1) * per_page).limit(per_page)
-        
+
+        # Batch-load the most recent polymorphic Note per lead so the list view
+        # can show a Notes column with hover preview without N+1 queries.
+        # Postgres DISTINCT ON keeps just the first row per entity_id; the inner
+        # ORDER BY (entity_id, created_at DESC) makes "first" mean "most recent".
+        page_ids = leads.map(&:id).map(&:to_s)
+        last_notes_by_lead = if page_ids.any?
+          Note.where(entity_type: 'lead', entity_id: page_ids)
+              .order(Arel.sql('entity_id, created_at DESC'))
+              .select('DISTINCT ON (entity_id) entity_id, content, created_at, created_by_name')
+              .each_with_object({}) { |n, acc| acc[n.entity_id.to_i] = n }
+        else
+          {}
+        end
+
         render json: {
-          leads: leads.map { |l| lead_json(l) },
+          leads: leads.map { |l|
+            n = last_notes_by_lead[l.id]
+            lead_json(l).merge(
+              lastNote: n ? { content: n.content, createdAt: n.created_at, createdByName: n.created_by_name } : nil
+            )
+          },
           meta: {
             total: filtered_count,  # For pagination (filtered results)
             page: page,

@@ -78,9 +78,28 @@ module Api
         per_page = (params[:per_page] || 50).to_i
         per_page = [per_page, 200].min  # Cap at 200
         deals = deals.offset((page - 1) * per_page).limit(per_page)
-        
+
+        # Batch-load the most recent polymorphic Note per deal so the list/cards/
+        # kanban views can show a Notes preview with hover details — without N+1
+        # queries. Postgres DISTINCT ON keeps just the first row per entity_id;
+        # the inner ORDER BY makes "first" mean "most recent".
+        page_ids = deals.map(&:id).map(&:to_s)
+        last_notes_by_deal = if page_ids.any?
+          Note.where(entity_type: 'deal', entity_id: page_ids)
+              .order(Arel.sql('entity_id, created_at DESC'))
+              .select('DISTINCT ON (entity_id) entity_id, content, created_at, created_by_name')
+              .each_with_object({}) { |n, acc| acc[n.entity_id.to_i] = n }
+        else
+          {}
+        end
+
         render json: {
-          deals: deals.map { |d| deal_json(d) },
+          deals: deals.map { |d|
+            n = last_notes_by_deal[d.id]
+            deal_json(d).merge(
+              lastNote: n ? { content: n.content, createdAt: n.created_at, createdByName: n.created_by_name } : nil
+            )
+          },
           meta: {
             total: total_count,
             page: page,
