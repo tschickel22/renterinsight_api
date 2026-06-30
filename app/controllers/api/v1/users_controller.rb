@@ -125,9 +125,12 @@ module Api
             Rails.logger.info "✅ [V1::UsersController] Updated RBAC role to '#{new_role}' for user #{@user.id}"
           end
           
-          # Handle location assignments if provided (only if user has manage permission)
-          if params[:location_ids].present? && can?('users', 'manage')
-            sync_user_locations(@user, params[:location_ids], params[:location_role])
+          # Handle location assignments if provided (only if user has manage permission).
+          # Use key? not present? so an empty array means "clear all assignments"
+          # (admin switched user from SCOPED back to ALL). Omitting the key entirely
+          # leaves existing user_locations untouched.
+          if params.key?(:location_ids) && can?('users', 'manage')
+            sync_user_locations(@user, params[:location_ids] || [], params[:location_role])
           end
 
           # Log the update

@@ -31,7 +31,9 @@ module Api
     # POST /api/companies/:company_id/invitations
     def create
       verify_company_access!
-      
+      return unless authorize_action!('users', 'create')
+
+
       # Log incoming params for debugging
       received_location_ids = params[:location_ids] || params[:locationIds] || []
       received_location_role = params[:location_role] || params[:locationRole]
@@ -88,6 +90,8 @@ module Api
     
     # POST /api/invitations/:id/resend
     def resend
+      return unless authorize_action!('users', 'update')
+
       service = InvitationService.new(
         invited_by: current_user,
         company: @invitation.company
@@ -111,11 +115,13 @@ module Api
     
     # DELETE /api/invitations/:id (revoke)
     def destroy
+      return unless authorize_action!('users', 'delete')
+
       service = InvitationService.new(
         invited_by: current_user,
         company: @invitation.company
       )
-      
+
       result = service.revoke_invitation(
         @invitation.id,
         reason: params[:reason]

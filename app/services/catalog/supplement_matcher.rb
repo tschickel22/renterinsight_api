@@ -31,7 +31,8 @@ module Catalog
     NOISE_TOKENS = (
       SIZE_WORD_TO_SECTIONS.keys +
       %w[home homes manufactured mobile new used] +
-      %w[the a an of and or]
+      %w[the a an of and or] +
+      %w[model floorplan floor plan series]
     ).freeze
 
     def initialize(company:, source:)
@@ -58,10 +59,16 @@ module Catalog
     def build_candidates
       vehicles = @company.vehicles.where(is_deleted: [false, nil]).to_a
       vehicles.map do |v|
+        # ORDERED tokens (make + model, deduped, order preserved) so we can pick
+        # the first numeric token as the model number. Width tokens come later
+        # in the sequence and don't get confused with it.
+        ordered = (tokenize(v.make) + tokenize(v.model)).uniq
         {
           vehicle: v,
           make_tokens:  tokenize(v.make),
           model_tokens: tokenize(v.model),
+          ordered:      ordered,
+          model_number: first_numeric(ordered),
           # Vehicle.sections is integer; nil means "unspecified".
           sections: v.sections.to_i.positive? ? v.sections.to_i : derive_sections_from_name(v)
         }
@@ -78,12 +85,22 @@ module Catalog
     end
 
     def match(home, candidates)
-      # Source key is often the cleanest model identifier (URL slug like
-      # "md-26-rawhide"); pull tokens from it AND from the parsed model_name
-      # so we get the model number even when adapters truncate names.
-      home_tokens = tokens_for(home.model_name) | tokens_for(home.source_key)
-      home_alpha  = alpha(home_tokens)
-      home_nums   = numeric(home_tokens)
+      # Pick the primary token sequence for model-number extraction:
+      # - URL-slug source_key like "md-26-rawhide" carries the model directly
+      #   (model = "26", "32" is width). Use it when it has alpha tokens.
+      # - Purely numeric source_keys (Sunshine: "225015") are platform IDs, not
+      #   model identifiers; fall back to model_name in that case.
+      key_tokens   = tokenize(home.source_key)
+      name_tokens  = tokenize(home.model_name)
+      primary      = alpha(key_tokens).any? ? key_tokens : name_tokens
+      home_ordered = (key_tokens + name_tokens).uniq
+      home_alpha   = alpha(home_ordered).to_set
+      home_nums    = numeric(home_ordered).to_set
+      # Model number = first numeric in the primary sequence. This is the
+      # critical disambiguator: in `md-50-32`, `50` is the model and `32` is
+      # the width — matching on `32` alone would collapse every 32-foot-wide
+      # variant onto the same vehicle.
+      home_model_number = first_numeric(primary) || first_numeric(home_ordered)
       home_sections =
         case home.property_type
         when 'double' then 2
@@ -92,60 +109,68 @@ module Catalog
         end
 
       scored = candidates.filter_map do |c|
-        # Combine make+model tokens because dealers commonly shove the model
-        # number into either field, and the duplication is harmless.
-        v_tokens = c[:make_tokens] | c[:model_tokens]
-        v_alpha  = alpha(v_tokens)
-        v_nums   = numeric(v_tokens)
+        v_alpha = alpha(c[:ordered]).to_set
+        v_nums  = numeric(c[:ordered]).to_set
 
         # Series/alpha tokens must overlap — same product family.
         next if (home_alpha & v_alpha).empty?
 
-        # Model-number disambiguation. If the catalog entry has a model number,
-        # the vehicle MUST have a matching one — picking a random same-series
-        # vehicle when there's no number to confirm is the bug that produced
-        # "md-04 matches Md20" and "md-46 matches Md (Double) Md20".
-        if home_nums.any?
-          next if v_nums.empty?
-          next if (home_nums & v_nums).empty?
+        # Primary key: model number. If the catalog entry has one, the vehicle
+        # MUST have a matching one. If the catalog has no model number we fall
+        # back to alpha-only matching (low confidence).
+        if home_model_number
+          next if c[:model_number].nil?
+          next unless normalize_num(home_model_number) == normalize_num(c[:model_number])
         end
 
         sections_match = sections_compatible?(home_sections, c[:sections])
         confidence =
-          if home_nums.any? && v_nums.any? && (home_nums & v_nums).any? && sections_match != :mismatch
+          if home_model_number && c[:model_number] && sections_match != :mismatch
             :high
-          elsif (home_alpha & v_alpha).size >= 2 || (home_nums.any? && v_nums.any? && (home_nums & v_nums).any?)
-            :medium
+          elsif home_model_number && c[:model_number]
+            :medium # model match but sections disagree
           else
-            :low
+            :low    # no model number on either side — alpha only
           end
 
+        # Score boosts confidence: matching extra numeric tokens (e.g. width)
+        # is a tiebreaker when multiple candidates share the same model number.
         score = confidence_score(confidence) +
-                (home_nums & v_nums).size * 5 +
+                (home_nums & v_nums).size * 3 +
                 (home_alpha & v_alpha).size
         { candidate: c, confidence: confidence, score: score }
       end
 
       best = scored.max_by { |s| s[:score] }
       if best
-        Match.new(home: home, vehicle: best[:candidate][:vehicle],
-                  confidence: best[:confidence],
-                  reason: "alpha=#{(home_alpha & alpha(best[:candidate][:make_tokens] | best[:candidate][:model_tokens])).to_a.join(',')} num=#{(home_nums & numeric(best[:candidate][:make_tokens] | best[:candidate][:model_tokens])).to_a.join(',')} sections=#{best[:candidate][:sections] || 'unspec'}")
+        c = best[:candidate]
+        Match.new(home: home, vehicle: c[:vehicle], confidence: best[:confidence],
+                  reason: "model=#{home_model_number || '—'}↔#{c[:model_number] || '—'} alpha=#{(home_alpha & alpha(c[:ordered]).to_set).to_a.join(',')} sections=#{c[:sections] || 'unspec'}")
       else
         Match.new(home: home, vehicle: nil, confidence: nil, reason: 'no candidate')
       end
     end
 
-    def tokens_for(str)
-      tokenize(str).to_set
-    end
-
+    # Returns alpha-only tokens in their original order (caller .to_set's when needed).
     def alpha(tokens)
-      tokens.reject { |t| t.match?(/\A\d+\z/) }.to_set
+      tokens.reject { |t| t.match?(/\A\d+\z/) }
     end
 
+    # Returns numeric-only tokens in their original order (caller .to_set's when needed).
     def numeric(tokens)
-      tokens.select { |t| t.match?(/\A\d+\z/) }.to_set
+      tokens.select { |t| t.match?(/\A\d+\z/) }
+    end
+
+    # First numeric token (in given order). The model number is the first
+    # numeric to appear in the source-key/name sequence.
+    def first_numeric(tokens)
+      tokens.find { |t| t.match?(/\A\d+\z/) }
+    end
+
+    # Normalize for model-number comparison: strip leading zeros so "04" and "4"
+    # are treated the same.
+    def normalize_num(n)
+      n.to_s.sub(/\A0+(?=\d)/, '')
     end
 
     # Catalog source name OR config.manufacturer_name — same fallback the
