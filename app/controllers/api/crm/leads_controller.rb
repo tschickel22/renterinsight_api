@@ -121,10 +121,27 @@ module Api
           # status (we still want to show those so users can drop cards in).
           next if total.zero? && !configured_keys.include?(status_key)
 
-          cards = scope.includes(:source, :owner, :vehicle, :lead_scores, :tags)
-                       .order(Arel.sql('last_activity_at DESC NULLS LAST'))
-                       .limit(per_column)
-                       .map { |l| lead_json(l) }
+          card_leads = scope.includes(:source, :owner, :vehicle, :lead_scores, :tags)
+                            .order(Arel.sql('last_activity_at DESC NULLS LAST'))
+                            .limit(per_column)
+                            .to_a
+
+          # Batch the open-task count per lead so the kanban card can show a
+          # "has tasks" indicator. One GROUP BY for all cards in this column
+          # vs N+1 queries through lead_json.
+          task_counts = if card_leads.any?
+            Activity.where(
+              lead_id: card_leads.map(&:id),
+              activity_type: 'lead_activity_task',
+              completed_date: nil
+            ).group(:lead_id).count
+          else
+            {}
+          end
+
+          cards = card_leads.map do |l|
+            lead_json(l).merge(openTaskCount: task_counts[l.id] || 0)
+          end
 
           acc[status_key] = { leads: cards, total: total }
         end
