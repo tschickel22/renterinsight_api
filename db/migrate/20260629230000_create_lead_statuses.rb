@@ -51,35 +51,46 @@ class CreateLeadStatuses < ActiveRecord::Migration[8.0]
 
   private
 
+  # Every row in an insert_all batch must have the same keys. Build a complete
+  # hash with all columns explicitly so the defaults block + the per-company
+  # extras block produce identically-shaped rows.
+  def build_row(company_id, now, key:, label:, sort_order:, is_excluded:, color: nil, is_active: true)
+    {
+      company_id: company_id,
+      key: key,
+      label: label,
+      color: color,
+      sort_order: sort_order,
+      is_active: is_active,
+      is_excluded: is_excluded,
+      created_at: now,
+      updated_at: now,
+    }
+  end
+
   def seed_existing_companies
     say_with_time 'Seeding lead_statuses for existing companies' do
       now = Time.current
+      default_keys = DEFAULT_STATUSES.map { |s| s[:key] }
+
       Company.find_each do |company|
-        # Start from the defaults.
         rows = DEFAULT_STATUSES.map do |s|
-          s.merge(company_id: company.id, created_at: now, updated_at: now)
+          build_row(company.id, now, **s)
         end
 
         # Add any extra status strings that already exist on this company's
         # leads but aren't in the defaults — humanize the key for the label.
-        default_keys = DEFAULT_STATUSES.map { |s| s[:key] }
         extra_keys = company.leads
                             .where.not(status: [nil, ''])
                             .where.not(status: default_keys)
                             .distinct
                             .pluck(:status)
         extra_keys.each_with_index do |key, idx|
-          rows << {
-            key: key,
-            label: key.to_s.humanize,
-            color: nil,
-            sort_order: 500 + idx, # between active and excluded blocks
-            is_active: true,
-            is_excluded: false,
-            company_id: company.id,
-            created_at: now,
-            updated_at: now,
-          }
+          rows << build_row(company.id, now,
+                            key: key,
+                            label: key.to_s.humanize,
+                            sort_order: 500 + idx, # between active and excluded blocks
+                            is_excluded: false)
         end
 
         LeadStatus.insert_all(rows) if rows.any?
