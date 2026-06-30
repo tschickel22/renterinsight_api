@@ -380,6 +380,13 @@ module Api
           result[:lead_kanban_hidden_columns] = arr.first(200)
         end
 
+        # Last-picked view mode on the leads page. Restored on next visit so a
+        # rep who prefers Kanban doesn't have to switch every time they log in.
+        if raw.key?(:crm_leads_view_mode)
+          mode = raw[:crm_leads_view_mode].to_s
+          result[:crm_leads_view_mode] = mode if %w[table cards kanban].include?(mode)
+        end
+
         result
       end
 
