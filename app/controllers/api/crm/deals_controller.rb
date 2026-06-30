@@ -880,6 +880,11 @@ module Api
           customFieldValues: deal.custom_field_values || {},
           createdAt: deal.created_at&.iso8601,
           updatedAt: deal.updated_at&.iso8601,
+          # Most recent activity timestamp on the deal — bumped by the
+          # DealActivity callback whenever a call/email/task/etc. is logged,
+          # and by Note when a quick-log note is added. Powers the Last
+          # Activity column on the deals list & kanban.
+          lastActivityAt: deal.last_activity_at&.iso8601,
           
           # Public economics fields (everyone can see)
           sellingPrice: deal.selling_price,
