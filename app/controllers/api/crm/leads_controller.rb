@@ -4,9 +4,11 @@ module Api
       before_action :set_company_scope
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check]
 
-      # Dead-end statuses excluded from "All Active" view.
-      # Any status NOT in this list (including custom statuses) is considered active.
-      EXCLUDED_STATUSES = %w[
+      # Legacy default — kept ONLY as a fallback if a company somehow has no
+      # lead_statuses rows yet (shouldn't happen post-migration). The real
+      # excluded list comes from each tenant's lead_statuses table now, so
+      # admins can mark custom statuses as dead-end via the Lead Statuses tab.
+      DEFAULT_EXCLUDED_STATUSES = %w[
         closed_lost lost_lead not_qualified junk_lead
       ].freeze
 
@@ -14,11 +16,12 @@ module Api
         return unless authorize_action!('leads', 'read')
 
         leads = base_leads_scope
-        
+
         # Count stats BEFORE any filtering (stats tiles show global counts)
         all_leads_count = leads.count
-        active_count = leads.where.not(status: EXCLUDED_STATUSES).count
-        inactive_count = leads.where(status: EXCLUDED_STATUSES).count
+        excluded = excluded_status_keys
+        active_count = leads.where.not(status: excluded).count
+        inactive_count = leads.where(status: excluded).count
         # by_status: every status actually present in this tenant's data, with counts.
         # Lets the frontend build the status filter dropdown from real data instead of
         # a hardcoded enum (which misses imported/legacy statuses and shows zero-count
@@ -677,6 +680,17 @@ module Api
 
       private
 
+      # Per-tenant list of status keys flagged as dead-end (is_excluded=true on
+      # lead_statuses). Admins manage this via the Lead Statuses tab — adding a
+      # custom "Cold Storage" status with is_excluded=true here flows through to
+      # the leads filter automatically. Memoized per-request.
+      def excluded_status_keys
+        @excluded_status_keys ||= begin
+          keys = @company.lead_statuses.excluded.pluck(:key)
+          keys.presence || DEFAULT_EXCLUDED_STATUSES
+        end
+      end
+
       # Tenant + RBAC + location-selector scoped lead set, BEFORE per-request filters
       # (status_category / search / owner_id). Shared by #index and #bulk_reassign so a
       # user can't bulk-reassign a lead they wouldn't see in the list.
@@ -747,7 +761,7 @@ module Api
 
       def apply_index_filters(scope, filters)
         if filters[:status_category].to_s == 'active'
-          scope = scope.where.not(status: EXCLUDED_STATUSES)
+          scope = scope.where.not(status: excluded_status_keys)
         end
 
         if filters[:search].present?
