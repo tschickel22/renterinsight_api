@@ -258,8 +258,13 @@ module Api
         # Apply attributes to lead
         @lead.assign_attributes(update_attrs)
 
-        # Validate only required fields that are visible in active layout
-        layout_errors = validate_visible_required_fields('leads', @lead)
+        # Validate only required fields that are visible in active layout AND
+        # that were submitted in this update. A status-only PATCH (e.g. Kanban
+        # drag-drop) shouldn't fail because of a pre-existing missing email on
+        # the lead — we're not touching email in this request.
+        layout_errors = validate_visible_required_fields(
+          'leads', @lead, submitted_keys: lead_params.keys
+        )
         if layout_errors.any?
           Rails.logger.error "[LeadsController#update] Layout validation failed: #{layout_errors.join(', ')}"
           render json: {
