@@ -261,6 +261,11 @@ class AgreementPdfService
     values['agreement.created_at'] = @agreement.created_at&.strftime('%m/%d/%Y').to_s
     values['agreement.completed_at'] = @agreement.completed_at&.strftime('%m/%d/%Y').to_s
 
+    # 1b. Flatten deal line items into indexed keys (deal.line_items[i].field)
+    #     so bulk-dropped table rows on the template resolve to the actual items
+    #     on the selected deal_desk_scenario. See LineItemValuesFlattener.
+    ::Agreements::LineItemValuesFlattener.apply!(values, deal) if deal
+
     # 2. Merge stored merge_field_values — these OVERRIDE live-resolved values
     #    because they include signer-entered text inputs and preparer-set values
     #    which should take precedence over auto-resolved entity data.

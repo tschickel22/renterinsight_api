@@ -139,7 +139,12 @@ module DealDesk
       trade_net = r[:trade_equity].to_f
 
       rows = [['Price Breakdown', '']]
-      rows << ['Selling Price', usd(price)]
+      # Only render "Selling Price" when a positive unit price was captured. When
+      # the snapshot is 0 (deal had no sale_price at snapshot time, or the home
+      # is being sold entirely as a line item) rendering a $0.00 row next to a
+      # line item for the same home reads as a mistake. Let the line item stand
+      # in as the home's price.
+      rows << ['Selling Price', usd(price)] if price.positive?
 
       # Itemize add-on line items (name + price only — NEVER cost/margin). The home is already
       # excluded at snapshot; skip defensively if a line still matches the selling price.
@@ -150,7 +155,7 @@ module DealDesk
 
         qty       = (li[:quantity] || 1).to_i
         line_price = li[:price].to_f * (qty.positive? ? qty : 1)
-        next if line_price == price # defensive: never re-list the home
+        next if price.positive? && line_price == price # don't double-list the home
 
         label = qty > 1 ? "#{desc} (x#{qty})" : desc
         rows << [label, usd(line_price)]

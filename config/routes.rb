@@ -229,6 +229,17 @@ Rails.application.routes.draw do
             get  :summary, defaults: { format: 'pdf' }  # /scenarios/:id/summary.pdf
           end
         end
+
+        # Public-token scenario shares (customer-facing SMS/email leave-behind).
+        # Authenticated create; the show endpoint is public (skip_before_action in
+        # DealDeskSharesController) so the customer can hit it from an SMS link
+        # without an account. The `:token` constraint allows base64url characters.
+        resources :shares, only: [:create], controller: 'deal_desk_shares' do
+          collection do
+            post :preview  # dry-run: build the same customer payload without persisting
+          end
+        end
+        get 'shares/:token', to: 'deal_desk_shares#show', constraints: { token: /[A-Za-z0-9_\-]+/ }
       end
 
       # ==================== AI REPORT QUERY ====================
@@ -2626,6 +2637,9 @@ Rails.application.routes.draw do
 
       # ==================== CATALOG SOURCES (Surface B — Platform Admin Only) ====================
       resources :catalog_sources do
+        collection do
+          get :adapter_options  # per-adapter form metadata (e.g. Clayton Epic regions)
+        end
         member do
           post :test     # dry-run discover+parse, inline extraction rates (no ingest)
           post :run_now  # enqueue an immediate run

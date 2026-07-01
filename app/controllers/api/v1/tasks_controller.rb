@@ -14,13 +14,20 @@ module Api
         tasks = @company.tasks
           .includes(:assigned_to, :taskable)
           .for_current_location
-        
+
         # Apply RBAC location filtering for location-tier users
         if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           tasks = location_ids.any? ? tasks.where(location_id: location_ids) : tasks.none
         end
-        
+
+        # DEFAULT VIEW SCOPING: non-admins see only tasks assigned to them
+        # unless they explicitly ask for a broader view (params[:view] == 'all').
+        # Mirrors the Deals#index pattern so a rep doesn't see other reps' tasks.
+        unless current_user.effective_admin? || params[:view] == 'all'
+          tasks = tasks.where(assigned_to_id: current_user.id)
+        end
+
         # Optional filters from query params
         tasks = tasks.where(status: params[:status]) if params[:status].present?
         tasks = tasks.where(priority: params[:priority]) if params[:priority].present?
@@ -141,11 +148,17 @@ module Api
         return unless authorize_action!('tasks', 'read')
         
         base_tasks = @company.tasks.for_current_location
-        
+
         # Apply RBAC location filtering
         if current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           base_tasks = location_ids.any? ? base_tasks.where(location_id: location_ids) : base_tasks.none
+        end
+
+        # Match #index scoping: non-admin stats reflect only the user's own tasks
+        # unless view=all is requested, so tile counts don't leak other reps' work.
+        unless current_user.effective_admin? || params[:view] == 'all'
+          base_tasks = base_tasks.where(assigned_to_id: current_user.id)
         end
         
         render json: {

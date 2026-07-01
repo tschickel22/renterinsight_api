@@ -65,6 +65,22 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     head :no_content
   end
 
+  # GET /api/admin/catalog_sources/adapter_options
+  # Adapter-specific form metadata for the Add Source dialog. Frontend calls
+  # this when the admin picks an adapter type that needs extra config (e.g.
+  # Clayton Epic's region selector) so the option list stays authoritative
+  # on the backend.
+  def adapter_options
+    render json: {
+      clayton_epic_region: {
+        base_url_template: 'https://claytonepicexperience.com/homes/?region={region_id}',
+        regions: Catalog::Adapters::ClaytonEpicRegionAdapter::REGIONS.map do |id, label|
+          { id: id, label: label }
+        end
+      }
+    }
+  end
+
   # POST /api/admin/catalog_sources/:id/test
   # Dry-run: discover + parse the first page, return extraction rates inline.
   # Never ingests. This IS the onboarding flow for a known platform.
@@ -76,7 +92,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     limit    = (params[:limit] || 5).to_i.clamp(1, 20)
     homes    = adapter.sample(limit: limit)
     rates    = Catalog::ExtractionStats.rates(homes)
-    degraded = Catalog::ExtractionStats.degraded?(rates, @source.extraction_threshold)
+    degraded = Catalog::ExtractionStats.degraded?(rates, @source.extraction_threshold, untracked: @source.untracked_fields)
     passed   = homes.any? && !degraded
 
     # Record a passing Test so it satisfies the enable gate (no full run needed).

@@ -11,7 +11,9 @@ module Catalog
     ADAPTERS = {
       'champion_feed'              => 'Catalog::Adapters::ChampionFeedAdapter',
       'manufacturedhomes_platform' => 'Catalog::Adapters::ManufacturedHomesPlatformAdapter',
-      'avada_sitemap'             => 'Catalog::Adapters::AvadaSitemapAdapter'
+      'avada_sitemap'              => 'Catalog::Adapters::AvadaSitemapAdapter',
+      'tru_model_line'             => 'Catalog::Adapters::TruModelLineAdapter',
+      'clayton_epic_region'        => 'Catalog::Adapters::ClaytonEpicRegionAdapter'
     }.freeze
 
     module_function

@@ -281,6 +281,11 @@ module Public
       combined['date.today'] = Date.today.strftime('%m/%d/%Y')
       combined['date.current_year'] = Date.today.year.to_s
 
+      # 1b. Flatten deal line items into indexed keys (deal.line_items[i].field)
+      #     so bulk-dropped table rows on the template resolve to real items.
+      #     See Agreements::LineItemValuesFlattener.
+      ::Agreements::LineItemValuesFlattener.apply!(combined, deal) if deal
+
       # 2. Merge stored values — OVERRIDE live-resolved values because these
       #    include signer-entered text inputs and preparer-set values which
       #    should take precedence over auto-resolved entity data.

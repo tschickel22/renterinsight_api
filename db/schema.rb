@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_29_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_02_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2478,6 +2478,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_29_230000) do
     t.index ["quote_id"], name: "index_deal_desk_scenarios_on_quote_id"
     t.index ["valid_through"], name: "index_deal_desk_scenarios_on_valid_through"
     t.index ["vehicle_id"], name: "index_deal_desk_scenarios_on_vehicle_id"
+  end
+
+  create_table "deal_desk_shares", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "deal_id", null: false
+    t.bigint "shared_by_id"
+    t.string "public_token", limit: 24, null: false
+    t.jsonb "scenario_ids", default: [], null: false
+    t.jsonb "snapshot", default: {}, null: false
+    t.string "channels", default: [], null: false, array: true
+    t.string "to_email"
+    t.string "to_phone"
+    t.text "custom_message"
+    t.datetime "sent_at"
+    t.datetime "first_viewed_at"
+    t.datetime "last_viewed_at"
+    t.datetime "expires_at"
+    t.integer "view_count", default: 0, null: false
+    t.jsonb "send_results", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_deal_desk_shares_on_company_id"
+    t.index ["deal_id"], name: "index_deal_desk_shares_on_deal_id"
+    t.index ["expires_at"], name: "index_deal_desk_shares_on_expires_at"
+    t.index ["public_token"], name: "index_deal_desk_shares_on_public_token", unique: true
+    t.index ["shared_by_id"], name: "index_deal_desk_shares_on_shared_by_id"
   end
 
   create_table "deal_products", force: :cascade do |t|
@@ -7454,6 +7480,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_29_230000) do
   add_foreign_key "deal_desk_scenarios", "quotes"
   add_foreign_key "deal_desk_scenarios", "users", column: "created_by_id"
   add_foreign_key "deal_desk_scenarios", "vehicles"
+  add_foreign_key "deal_desk_shares", "companies"
+  add_foreign_key "deal_desk_shares", "deals"
+  add_foreign_key "deal_desk_shares", "users", column: "shared_by_id"
   add_foreign_key "deal_products", "deals"
   add_foreign_key "deal_stage_histories", "deals"
   add_foreign_key "deal_stage_histories", "users", column: "changed_by_id"
