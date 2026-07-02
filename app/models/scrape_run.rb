@@ -20,14 +20,28 @@ class ScrapeRun < ApplicationRecord
     (finished_at - started_at).round
   end
 
-  # Lowest per-field extraction rate this run (nil when no fields were tracked).
+  # Lowest per-field extraction rate this run, EXCLUDING any fields the source
+  # marks as untracked (e.g. TRU / Clayton Epic pages don't publish descriptions,
+  # so a 0.0 on `description` shouldn't drag the health score for those sources).
+  # Kept in sync with Catalog::ExtractionStats.degraded?, which uses the same
+  # exclusion when computing the `degraded` flag stored on this row.
+  # Returns nil when no fields were tracked.
   def worst_field_rate
-    rates = field_extraction_rates.values.map(&:to_f)
-    rates.min
+    tracked_rates.values.map(&:to_f).min
   end
 
-  # Fields that fell below the source threshold, with their rates.
+  # Fields that fell below the source threshold, with their rates. Same
+  # untracked-field exclusion as worst_field_rate so an "always empty" field
+  # never shows up as a health regression.
   def degraded_fields(threshold)
-    field_extraction_rates.select { |_, rate| rate.to_f < threshold.to_f }
+    tracked_rates.select { |_, rate| rate.to_f < threshold.to_f }
+  end
+
+  private
+
+  # field_extraction_rates minus the source's untracked_fields set.
+  def tracked_rates
+    skip = Array(catalog_source&.untracked_fields).map(&:to_s).to_set
+    field_extraction_rates.reject { |field, _| skip.include?(field.to_s) }
   end
 end
