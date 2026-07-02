@@ -422,22 +422,41 @@ class ProcessNurtureStepJob < ApplicationJob
   end
 
   # Render content with template or merge fields
+  # Template types that are system-transactional (invitations, warranty
+  # status alerts, etc.) and must NEVER render inside a nurture sequence.
+  # Guardrail against a misconfigured step referencing an unrelated template
+  # from the general template picker — that's exactly how a nurture step
+  # ended up sending a "You're Invited to Join…" portal invitation email.
+  FORBIDDEN_TEMPLATE_TYPES = %w[
+    company_user_invitation
+    portal_user_invitation
+    tenant_invitation
+    warranty_approved_client
+    warranty_denied_client
+    warranty_submitted_to_manufacturer
+    warranty_manufacturer_responded
+  ].freeze
+
   def render_content(step, context, entity)
     if step.template_id.present?
       template = CommunicationTemplate.find_by(id: step.template_id)
-      if template
+      if template && FORBIDDEN_TEMPLATE_TYPES.include?(template.template_type.to_s)
+        Rails.logger.warn "[Nurture] Refusing to render forbidden template " \
+                          "#{template.id} (type=#{template.template_type}) in nurture step " \
+                          "#{step.id}; falling back to step content"
+      elsif template
         rendered = template.render(context)
         return [rendered[:subject], rendered[:body]]
       else
         Rails.logger.warn "[Nurture] Template #{step.template_id} not found, using step content"
       end
     end
-    
+
     # Fallback to step content with merge fields
     company_name = entity.respond_to?(:company) ? entity.company&.name : 'us'
     subject = render_merge_fields(step.subject.presence || "Follow-up from #{company_name || 'us'}", context)
     body = render_merge_fields(step.body.presence || "This is an automated follow-up message.", context)
-    
+
     [subject, body]
   end
 
