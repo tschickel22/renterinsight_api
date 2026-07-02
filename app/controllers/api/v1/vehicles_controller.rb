@@ -15,6 +15,17 @@ module Api
         reconditioning_cost
       ].freeze
 
+      # Media-only edits on a catalog row don't fork the row into a clone.
+      # Dealers routinely add lot photos, reorder them, or pick a cover — that
+      # doesn't mean they're diverging from the catalog spec (which is what the
+      # clone captures). Every other field-edit still clones because it means
+      # the dealer is taking ownership of the home's data. Keep in sync with
+      # the strip list further down in #update.
+      CATALOG_MEDIA_ONLY_FIELDS = %w[
+        images floor_plan_images photo_url champion_images
+        virtual_tour_url matterport_url video_url
+      ].freeze
+
       rbac_resource :inventory,
         read_actions: [:index, :show, :stats, :export, :print, :service_tickets],
         create_actions: [:create, :clone, :import],
@@ -300,9 +311,16 @@ module Api
         end
 
         # CHAMPION IMS CATALOG AUTO-CLONE
-        # Catalog rows are sync-owned and immutable to dealers. ANY edit (status
-        # change, field edit, inline tweak) triggers a clone so the dealer's work
+        # Catalog rows are sync-owned and immutable to dealers. Most edits (status
+        # change, field edit, inline tweak) trigger a clone so the dealer's work
         # is preserved and the catalog row stays pristine for the next sync.
+        #
+        # EXCEPTION — media-only edits: adding, reordering, or picking a cover
+        # image doesn't mean the dealer is diverging from the catalog spec.
+        # Dealers routinely add lot photos to a catalog home while it's still
+        # "available to order". Update the catalog row in place in that case so
+        # the FE doesn't unexpectedly hand back a working-copy row when all the
+        # dealer did was drag a photo.
         #
         # Status edit: clone status = the new status (existing behavior).
         # Field edit (no status): clone status defaults to 'available' so the
@@ -310,7 +328,9 @@ module Api
         #
         # NOTE: Only catalog rows clone. Clones themselves are edited in place
         # (no clones-of-clones — `cloneable?` returns true only for catalog rows).
-        if @vehicle.cloneable?
+        if @vehicle.cloneable? && media_only_edit?(params_to_update)
+          # Fall through to the in-place update at the bottom of this action.
+        elsif @vehicle.cloneable?
           requested_status = params_to_update[:status] || params_to_update['status']
           # If the dealer explicitly tried to set status='available_to_order' on
           # a catalog row, that's a no-op (it's already that). Treat as no change.
@@ -1272,6 +1292,22 @@ module Api
       end
 
       private
+
+      # Every key in the update payload is a media field (images / floorplans /
+      # tour URLs) — with an optional explicit status='available_to_order' that
+      # would be a no-op on a catalog row. Callers use this to bypass the
+      # auto-clone path so lot photos and cover-image changes update the
+      # catalog row in place.
+      def media_only_edit?(attrs)
+        keys = attrs.to_h.keys.map(&:to_s)
+        return false if keys.empty?
+
+        requested_status = (attrs[:status] || attrs['status']).to_s
+        status_ok = requested_status.empty? || requested_status == 'available_to_order'
+        return false unless status_ok
+
+        (keys - CATALOG_MEDIA_ONLY_FIELDS - %w[status]).empty?
+      end
 
       # Returns { vehicle_id => [{ name:, deal_id: }, ...] } for any vehicle whose
       # search hit came via a linked deal's contact/account name. Empty hash when

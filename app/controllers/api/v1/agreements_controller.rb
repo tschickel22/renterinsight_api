@@ -1245,22 +1245,14 @@ module Api
         end
       end
 
+      # Snapshots the deal's line items for a newly-created agreement. Delegates to
+      # Agreements::DealLineItemsResolver so this path stays in sync with
+      # Agreement#snapshot_deal_equipment! (called on refresh/refetch).
       def build_equipment_snapshot(deal_id)
         deal = @company.deals.find_by(id: deal_id)
         return [] unless deal
 
-        items = deal.deal_products.order(:created_at)
-        items.map do |item|
-          {
-            description: item.product_name || item.notes,
-            amount: item.unit_price.to_f,
-            discount: item.discount.to_f,
-            tax: item.tax.to_f,
-            total: item.total.to_f,
-            quantity: item.quantity || 1,
-            line_total: item.total.to_f
-          }
-        end
+        Agreements::DealLineItemsResolver.call(deal)
       rescue => e
         Rails.logger.error("Failed to snapshot deal equipment: #{e.message}")
         []

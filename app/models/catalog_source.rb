@@ -9,7 +9,7 @@
 #
 # Dealer opt-in (Surface A) is a separate join — see DealerCatalogSubscription.
 class CatalogSource < ApplicationRecord
-  ADAPTER_TYPES   = %w[champion_feed manufacturedhomes_platform avada_sitemap].freeze
+  ADAPTER_TYPES   = %w[champion_feed manufacturedhomes_platform avada_sitemap tru_model_line clayton_epic_region].freeze
   RUN_STATUSES    = %w[never_run success partial failed].freeze
   SCHEDULES       = %w[daily weekly manual].freeze
 
@@ -55,6 +55,14 @@ class CatalogSource < ApplicationRecord
   # Latest run dropped a tracked field below threshold.
   def degraded?
     latest_run&.degraded == true
+  end
+
+  # Fields the health monitor should ignore for THIS source. The site may
+  # genuinely not publish some fields (e.g. Tru has no on-page description),
+  # so an admin can list them here and the source can still reach a clean
+  # "success" run — dealer subscription requires that.
+  def untracked_fields
+    Array(config.is_a?(Hash) ? config['untracked_fields'] : nil).map(&:to_s)
   end
 
   # A source has passed validation when its latest run succeeded cleanly.

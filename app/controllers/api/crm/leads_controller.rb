@@ -127,18 +127,24 @@ module Api
         leads = apply_index_filters(base_leads_scope, params)
         per_column = (params[:per_column].presence || 50).to_i.clamp(1, 200)
 
-        # Statuses to render = tenant's configured + any in-use status not in
-        # the configured list (defensive: don't drop a column if data drifts).
-        configured_keys = @company.lead_statuses.active.ordered.pluck(:key)
-        in_use_keys = leads.where.not(status: nil).distinct.pluck(:status)
-        status_keys = (configured_keys + in_use_keys).uniq
+        # Column order comes from ALL configured statuses in sort_order — even
+        # inactive ones — so a status the admin deactivated but that still
+        # holds leads keeps its configured slot on the kanban instead of
+        # getting pushed to the tail. Truly-orphan in-use statuses (no
+        # lead_statuses row at all) get appended with a deterministic sort
+        # so their position doesn't jitter between requests.
+        configured = @company.lead_statuses.ordered.pluck(:key, :is_active).to_h
+        active_configured_keys = configured.select { |_k, active| active }.keys
+        in_use_keys = leads.where.not(status: nil).distinct.order(:status).pluck(:status)
+        status_keys = (configured.keys + in_use_keys).uniq
 
         columns = status_keys.each_with_object({}) do |status_key, acc|
           scope = leads.where(status: status_key)
           total = scope.count
-          # Skip empty columns unless the admin explicitly configured this
-          # status (we still want to show those so users can drop cards in).
-          next if total.zero? && !configured_keys.include?(status_key)
+          # Render empty columns only for active-configured statuses so admins
+          # still have a drop target. Inactive configured statuses and orphan
+          # in-use statuses only appear when they actually hold leads.
+          next if total.zero? && !active_configured_keys.include?(status_key)
 
           card_leads = scope.includes(:source, :owner, :vehicle, :lead_scores, :tags)
                             .order(Arel.sql('last_activity_at DESC NULLS LAST'))

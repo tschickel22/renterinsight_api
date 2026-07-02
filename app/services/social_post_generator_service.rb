@@ -11,10 +11,11 @@ require 'json'
 class SocialPostGeneratorService
   class Error < StandardError; end
 
-  MODEL      = 'claude-sonnet-4-6'
-  MAX_TOKENS = 800
-  MAX_IMAGES = 4
-  VERSION    = 'spg-2026-04-19'
+  MODEL             = 'claude-sonnet-4-6'
+  MAX_TOKENS        = 800
+  MAX_IMAGES        = 4
+  MAX_PAST_EXAMPLES = 5
+  VERSION           = 'spg-2026-07-01'
 
   class << self
     def generate(company:, intent_category:, post_type:, platform:, vehicle: nil, user: nil, tone: 'friendly', topic_details: nil, intake_form_url: nil, image_urls: [], current_draft: nil)
@@ -164,8 +165,72 @@ class SocialPostGeneratorService
         intake_form_url: intake_form_url,
         voice:           post_type == 'rep_personal' ? 'first_person' : 'company_plural',
         length_hint:     platform.to_s == 'instagram' ? 'short (80-120 words)' : 'up to 250 words',
-        hashtag_hint:    platform.to_s == 'instagram' ? '8-15 hashtags' : '3-6 hashtags'
+        hashtag_hint:    platform.to_s == 'instagram' ? '8-15 hashtags' : '3-6 hashtags',
+        past_examples:   past_examples(company: company, intent_category: intent_category, platform: platform)
       }
+    end
+
+    # Pulls the company's best-performing published posts as few-shot style
+    # examples so the model can match this specific dealership's voice, cadence,
+    # and hashtag habits — not just the generic intent instructions.
+    #
+    # Ranking prefers same intent + same platform, then same intent (any
+    # platform), then any recent published post from the company. Engagement
+    # score weights link_clicks and engagement_count more heavily than raw
+    # impressions since they signal audience response, not just reach.
+    def past_examples(company:, intent_category:, platform:, limit: MAX_PAST_EXAMPLES)
+      return [] unless company&.id
+
+      base = SocialPost
+        .where(company_id: company.id, status: 'published')
+        .where(is_deleted: [false, nil])
+        .where.not(caption: [nil, ''])
+
+      primary = ranked_examples(base.where(intent_category: intent_category, platform: platform), limit)
+      collected_ids = primary.map(&:id)
+
+      if primary.size < limit
+        same_intent = ranked_examples(
+          base.where(intent_category: intent_category).where.not(id: collected_ids),
+          limit - primary.size
+        )
+        primary += same_intent
+        collected_ids = primary.map(&:id)
+      end
+
+      if primary.size < limit
+        fallback = ranked_examples(base.where.not(id: collected_ids), limit - primary.size)
+        primary += fallback
+      end
+
+      primary.map { |p| example_payload(p) }
+    rescue => e
+      Rails.logger.warn "[SocialPostGeneratorService] past_examples failed: #{e.message}"
+      []
+    end
+
+    def ranked_examples(scope, limit)
+      return [] if limit <= 0
+      order_sql = Arel.sql(
+        'COALESCE(impressions,0) + COALESCE(link_clicks,0) * 5 + COALESCE(engagement_count,0) * 3 DESC, ' \
+        'published_at DESC NULLS LAST, id DESC'
+      )
+      scope.order(order_sql).limit(limit).to_a
+    end
+
+    def example_payload(post)
+      {
+        intent_category: post.intent_category,
+        platform:        post.platform,
+        caption:         post.caption.to_s.truncate(400),
+        headline:        post.headline.presence,
+        description:     post.description.to_s.truncate(200).presence,
+        engagement: {
+          impressions:      post.impressions.to_i,
+          link_clicks:      post.link_clicks.to_i,
+          engagement_count: post.engagement_count.to_i
+        }
+      }.compact
     end
 
     # Only pass http(s) URLs (Anthropic must be able to fetch them), capped so a
@@ -253,6 +318,9 @@ class SocialPostGeneratorService
       if ctx[:current_draft].present?
         lines << "The user has already written some fields (shown under \"Current draft\"). Treat those as fixed: do not contradict them, and make any fields you generate consistent in subject, tone, and detail with what the user wrote."
       end
+      if ctx[:past_examples].present?
+        lines << "You will see past posts from this business under \"Past posts from this business\". Match their voice, cadence, sentence length, emoji usage, and hashtag style. Do NOT copy their content — write something new for the current subject."
+      end
       lines << ctx[:compliance] if ctx[:compliance].present?
       lines << <<~OUT.strip
         Return ONLY valid JSON — no prose, no markdown, no code fences — with keys:
@@ -273,10 +341,25 @@ class SocialPostGeneratorService
       sections << "Additional context from the user:\n#{ctx[:topic_details]}" if ctx[:topic_details].present?
       draft = format_current_draft(ctx[:current_draft])
       sections << "Current draft (already written by the user — keep these consistent and complement them; do not rewrite them):\n#{draft}" if draft.present?
+      examples = format_past_examples(ctx[:past_examples])
+      sections << "Past posts from this business (style reference only — match the voice, not the content):\n#{examples}" if examples.present?
       sections << "The attached image(s) belong to this post — describe and reference what they show." if ctx[:image_urls].present?
       sections << "Include this lead capture link in the caption (with UTM tracking already applied): #{ctx[:intake_form_url]}" if ctx[:intake_form_url].present?
       sections << "Return JSON only."
       sections.join("\n\n")
+    end
+
+    def format_past_examples(examples)
+      return '' if examples.blank?
+      examples.each_with_index.map do |ex, i|
+        parts = []
+        tag = [ex[:intent_category], ex[:platform]].compact.join(' · ')
+        parts << "#{i + 1}. [#{tag}]"
+        parts << "   Caption: #{ex[:caption]}" if ex[:caption].present?
+        parts << "   Headline: #{ex[:headline]}" if ex[:headline].present?
+        parts << "   Description: #{ex[:description]}" if ex[:description].present?
+        parts.join("\n")
+      end.join("\n\n")
     end
 
     def format_current_draft(d)

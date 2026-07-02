@@ -25,9 +25,15 @@ module Catalog
       end
     end
 
-    # @return [Boolean] any tracked field below the source threshold
-    def degraded?(rates, threshold)
-      rates.values.any? { |rate| rate.to_f < threshold.to_f }
+    # @param rates [Hash{String=>Float}] output of #rates
+    # @param threshold [Numeric]
+    # @param untracked [Array<String>] field names to exclude from the check
+    #   (per-source escape hatch for fields the site genuinely does not
+    #   publish — e.g. Tru has no on-page description).
+    # @return [Boolean] any *tracked* field below the source threshold
+    def degraded?(rates, threshold, untracked: [])
+      skip = Array(untracked).map(&:to_s).to_set
+      rates.any? { |field, rate| !skip.include?(field.to_s) && rate.to_f < threshold.to_f }
     end
   end
 end

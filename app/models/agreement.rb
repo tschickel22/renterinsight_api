@@ -231,25 +231,17 @@ class Agreement < ApplicationRecord
     new_agreement
   end
 
+  # Snapshots the deal's line items onto this agreement so they're preserved even if
+  # the underlying deal changes later. Reads from the selected deal_desk_scenario's
+  # line_items JSONB (falling back to deal_products for legacy deals). See
+  # Agreements::DealLineItemsResolver for the priority order and shape.
   def snapshot_deal_equipment!
     return unless deal_id.present?
 
     deal = company.deals.find_by(id: deal_id)
     return unless deal
 
-    line_items = deal.deal_line_items&.where(is_deleted: [false, nil])&.order(:position) || []
-
-    snapshot = line_items.map do |item|
-      {
-        description: item.description || item.name,
-        amount: item.price.to_f,
-        cost: item.cost.to_f,
-        taxable: item.taxable || false,
-        category: item.category,
-        quantity: item.quantity || 1,
-        line_total: (item.price.to_f * (item.quantity || 1)).round(2)
-      }
-    end
+    snapshot = Agreements::DealLineItemsResolver.call(deal)
 
     update_column(:optional_equipment_snapshot, snapshot)
     snapshot

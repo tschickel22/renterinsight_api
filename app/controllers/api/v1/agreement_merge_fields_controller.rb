@@ -8,7 +8,7 @@ module Api
       def index
         return unless authorize_action!('agreements', 'read')
 
-        render json: { merge_fields: merge_field_definitions }
+        render json: { merge_fields: decorate_with_source_metadata(merge_field_definitions) }
       end
 
       private
@@ -140,13 +140,9 @@ module Api
               { key: 'deal.unit_cost', label: 'Unit Cost', type: 'currency', value: @deal&.unit_cost },
               { key: 'deal.trade_allowance', label: 'Trade-In Allowance', type: 'currency', value: @deal&.trade_allowance },
               { key: 'deal.trade_payoff', label: 'Trade Payoff', type: 'currency', value: @deal&.trade_payoff },
-              { key: 'deal.doc_fee', label: 'Document Fee', type: 'currency', value: @deal&.effective_doc_fee },
-              { key: 'deal.delivery_fee', label: 'Delivery / Freight', type: 'currency', value: @deal&.effective_delivery_fee },
-              { key: 'deal.setup_fee', label: 'Setup Charges', type: 'currency', value: @deal&.effective_setup_fee },
-              { key: 'deal.skirting_fee', label: 'Skirting Fee', type: 'currency', value: @deal&.effective_skirting_fee },
-              { key: 'deal.accessories_total', label: 'Accessories Total', type: 'currency', value: @deal&.effective_accessories_total },
-              { key: 'deal.pack_amount', label: 'Pack Amount', type: 'currency', value: @deal&.pack_amount },
-              { key: 'deal.finance_reserve', label: 'Finance Reserve', type: 'currency', value: @deal&.finance_reserve },
+              # Phase 3 removed standalone fee columns from the Deal UI — fees now live
+              # as line items (category:'fee'). Use deal.fee_total or the deal.line_items_fee
+              # array below to surface them. `deal.stage` follows.
               { key: 'deal.stage', label: 'Deal Stage', type: 'text', value: @deal.respond_to?(:stage) ? @deal.stage : nil },
               { key: 'deal.close_date', label: 'Expected Close Date', type: 'date', value: @deal ? (@deal.respond_to?(:expected_close_date) ? @deal.expected_close_date : @deal.try(:close_date)) : nil },
               { key: 'deal.delivery_date', label: 'Delivery Date', type: 'date', value: @deal&.delivery_date },
@@ -167,15 +163,44 @@ module Api
               { key: 'deal.manager_discount', label: 'Manager Discount', type: 'currency', value: @deal.try(:manager_discount) },
               { key: 'deal.preferred_payment_discount', label: 'Preferred Payment Discount', type: 'currency', value: @deal.try(:preferred_payment_discount) },
               { key: 'deal.multi_unit_discount', label: 'Multi-Unit Discount', type: 'currency', value: @deal.try(:multi_unit_discount) },
-              { key: 'deal.subtotal_1', label: 'Subtotal 1', type: 'currency', value: @deal.try(:subtotal_1) },
-              { key: 'deal.subtotal_2', label: 'Subtotal 2', type: 'currency', value: @deal.try(:subtotal_2) },
+              # deal.subtotal_1 / subtotal_2 removed — no longer on the DealForm.
               { key: 'deal.tax_amount', label: 'Tax Amount', type: 'currency', value: @deal.try(:tax_amount) },
               { key: 'deal.total_amount', label: 'Total Amount', type: 'currency', value: @deal.try(:total_amount) },
               { key: 'deal.down_payment', label: 'Down Payment', type: 'currency', value: @deal.try(:down_payment) },
               { key: 'deal.additional_payment', label: 'Additional Payment', type: 'currency', value: @deal.try(:additional_payment) },
               { key: 'deal.unpaid_balance', label: 'Unpaid Balance', type: 'currency', value: @deal.try(:unpaid_balance) },
-              { key: 'deal.addendum_items', label: 'Addendum Line Items', type: 'line_items', value: @deal ? build_addendum_items(@deal) : nil },
-              { key: 'deal.addendum_total', label: 'Addendum Total', type: 'currency', value: @deal ? @deal.deal_products.sum(:total).to_f : nil },
+              # deal.addendum_items / deal.addendum_total removed — superseded by
+              # deal.line_items and deal.line_items_total below.
+
+              # ── Deal line items (from the selected desk scenario) ────────────────
+              # These read from deal_desk_scenarios.line_items JSONB — the same rows the
+              # rep sees in the Deal Edit UI's Line Items card. See
+              # Agreements::DealLineItemsResolver for shape + home-identification rules.
+              { key: 'deal.line_items', label: 'All Line Items (repeating)', type: 'line_items', value: deal_line_items_data },
+              { key: 'deal.home_line_item', label: 'Home Line Item', type: 'line_item', value: home_line_item_data },
+              { key: 'deal.non_home_line_items', label: 'Non-Home Line Items (repeating)', type: 'line_items', value: non_home_line_items_data },
+              { key: 'deal.line_items_home', label: 'Home-Tagged Line Items (repeating)', type: 'line_items', value: line_items_by_category('home') },
+              { key: 'deal.line_items_land', label: 'Land / Site Improvement Line Items (repeating)', type: 'line_items', value: line_items_by_category('land') },
+              { key: 'deal.line_items_fee', label: 'Fee Line Items (repeating)', type: 'line_items', value: line_items_by_category('fee') },
+              { key: 'deal.line_items_accessory', label: 'Accessory Line Items (repeating)', type: 'line_items', value: line_items_by_category('accessory') },
+              { key: 'deal.line_items_service', label: 'Service Line Items (repeating)', type: 'line_items', value: line_items_by_category('service') },
+              { key: 'deal.line_items_product', label: 'Product Line Items (repeating)', type: 'line_items', value: line_items_by_category('product') },
+              { key: 'deal.line_items_other', label: 'Other Line Items (repeating)', type: 'line_items', value: line_items_by_category('other') },
+
+              # ── Per-category subtotals ────────────────────────────────────────────
+              { key: 'deal.home_total', label: 'Home Line Total', type: 'currency', value: line_items_subtotal { |li| li[:is_home] } },
+              { key: 'deal.non_home_line_items_total', label: 'Non-Home Line Items Subtotal', type: 'currency', value: line_items_subtotal { |li| !li[:is_home] } },
+              { key: 'deal.line_items_total', label: 'All Line Items Subtotal', type: 'currency', value: line_items_subtotal { |_li| true } },
+              { key: 'deal.land_total', label: 'Land / Site Improvements Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'land' } },
+              { key: 'deal.fee_total', label: 'Fees Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'fee' } },
+              { key: 'deal.accessory_total_from_lines', label: 'Accessories Subtotal (from line items)', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'accessory' } },
+              { key: 'deal.service_total', label: 'Services Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'service' } },
+              { key: 'deal.product_total', label: 'Products Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'product' } },
+              { key: 'deal.other_total', label: 'Other Subtotal', type: 'currency', value: line_items_subtotal { |li| li[:category] == 'other' } },
+
+              # ── Derived totals commonly needed on PAs ─────────────────────────────
+              { key: 'deal.discounted_price', label: 'Discounted Price (Selling − Discounts)', type: 'currency', value: derived_discounted_price },
+              { key: 'deal.total_home_price', label: 'Total Home Price (Home + Admin/Doc Fee)', type: 'currency', value: derived_total_home_price },
             ] + build_entity_custom_fields(@deal, 'deal')
           },
           vehicle: {
@@ -319,6 +344,79 @@ module Api
             ]
           }
         }
+      end
+
+      # Memoized normalized line items for @deal (from the selected desk scenario,
+      # falling back to deal_products). Returns [] when there is no deal.
+      def deal_line_items_data
+        return [] unless @deal
+        @deal_line_items_data ||= ::Agreements::DealLineItemsResolver.call(@deal)
+      end
+
+      # THE home row (source-authoritative). Returns nil when there is no clear home.
+      def home_line_item_data
+        deal_line_items_data.find { |li| li[:is_home] }
+      end
+
+      # Everything but the home row, in position order.
+      def non_home_line_items_data
+        deal_line_items_data.reject { |li| li[:is_home] }
+      end
+
+      # Line items whose `category` field equals the given value. Category alone is
+      # user-tagged in the UI and NOT the same as the home identification rule —
+      # a row tagged category:'home' without a matching vehicle_id/source is treated
+      # as an add-on by the home helpers above, but still appears here.
+      def line_items_by_category(cat)
+        deal_line_items_data.select { |li| li[:category].to_s == cat.to_s }
+      end
+
+      # Subtotal of matching line items (uses line_total = amount * quantity).
+      def line_items_subtotal
+        return nil unless @deal
+        deal_line_items_data.select { |li| yield(li) }.sum { |li| li[:line_total].to_f }.round(2)
+      end
+
+      # Selling price minus every discount column the deal exposes.
+      def derived_discounted_price
+        return nil unless @deal
+        base = @deal.selling_price.to_f
+        discounts = %i[dealer_discount sales_event_discount manager_discount preferred_payment_discount multi_unit_discount]
+                    .sum { |m| @deal.try(m).to_f }
+        (base - discounts).round(2)
+      end
+
+      # Home price + admin/doc fee — common "Total Home Price" box on purchase agreements.
+      # Uses the identified home row's line_total when available, else selling_price.
+      def derived_total_home_price
+        return nil unless @deal
+        home = home_line_item_data
+        home_amount = home ? home[:line_total].to_f : @deal.selling_price.to_f
+        admin = @deal.try(:effective_doc_fee).to_f
+        (home_amount + admin).round(2)
+      end
+
+      # Attaches source_section / source_field_id / source_path to every field so the
+      # frontend reverse-preview drawer can open to the right place. Unknown keys
+      # (dynamic custom fields) get a generic path derived from the entity prefix.
+      def decorate_with_source_metadata(groups)
+        groups.each do |_group_key, group|
+          Array(group[:fields]).each do |field|
+            meta = ::Agreements::MergeFieldSourceMetadata.for(field[:key])
+            if meta
+              field[:source_section]  = meta[:section]
+              field[:source_field_id] = meta[:field_id]
+              field[:source_path]     = meta[:path]
+            else
+              # Dynamic custom field (e.g. 'deal.custom.<key>'). Infer a sensible path.
+              entity, _rest = field[:key].to_s.split('.', 2)
+              field[:source_section]  = "#{entity}_custom_fields"
+              field[:source_field_id] = field[:key].to_s.split('.').last
+              field[:source_path]     = [entity.to_s.titleize, 'Custom Fields', field[:label].to_s]
+            end
+          end
+        end
+        groups
       end
 
       def build_addendum_items(deal)

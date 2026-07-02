@@ -40,7 +40,7 @@ module Catalog
 
       homes, errors = collect_homes(adapter)
       rates    = ExtractionStats.rates(homes)
-      degraded = ExtractionStats.degraded?(rates, @source.extraction_threshold)
+      degraded = ExtractionStats.degraded?(rates, @source.extraction_threshold, untracked: @source.untracked_fields)
 
       ingest = ingest_into_subscribers(homes, degraded: degraded)
 
