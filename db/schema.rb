@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_02_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_02_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4361,7 +4361,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_02_180000) do
     t.string "step_type", null: false
     t.string "subject"
     t.text "body"
-    t.integer "wait_days"
+    t.decimal "wait_days", precision: 6, scale: 3, default: "0.0", null: false
     t.integer "position", default: 1, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
