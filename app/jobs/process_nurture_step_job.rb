@@ -135,16 +135,26 @@ class ProcessNurtureStepJob < ApplicationJob
     metadata_hash.merge!(inventory_meta) if inventory_meta
 
     # Use CommunicationService - it handles:
+    # - User-level Outlook/Gmail OAuth (if the sending user has a verified
+    #   connection, this wins over location/company/platform config)
     # - Waterfall settings (Location → Company → Platform)
     # - Provider selection (SMTP/SendGrid)
     # - Actual sending via configured provider
     # - Communication record creation with proper metadata
+    #
+    # Sending user resolution: prefer the lead/contact owner so the email
+    # comes from the rep who owns the relationship (their Outlook connection
+    # if set up, otherwise their address at the company sender). Falls back
+    # to nil (platform waterfall) when the entity has no owner.
+    sending_user = entity.respond_to?(:owner) ? entity.owner : nil
+
     result = CommunicationService.send_email(
       communicable: entity,
       to: email,
       subject: subject,
       body: body,
       category: 'nurture',
+      user: sending_user,
       attachments: inline_uploads,
       inline_images: inventory_inline_images,
       metadata: metadata_hash.deep_stringify_keys,
