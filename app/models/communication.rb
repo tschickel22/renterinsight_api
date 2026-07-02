@@ -51,6 +51,12 @@ class Communication < ApplicationRecord
   belongs_to :workflow_run, class_name: 'WorkflowRun', optional: true
 
   has_many :communication_events, dependent: :destroy
+  # TrackedLink belongs_to :communication (optional: true) with a FK; if we
+  # destroy a communication without clearing that reference, Postgres raises
+  # a FK violation. Nullify so cascaded destroys (Lead → communications via
+  # Communicable) don't blow up while preserving the tracked_link row for
+  # click history.
+  has_many :tracked_links, dependent: :nullify
 
   after_create :notify_workflow_of_inbound, if: :should_notify_workflow?
   
