@@ -31,6 +31,8 @@ module Api
           activities = activities.select { |a| statuses.include?(a.status) }
         end
         
+        activities = restrict_tasks_to_current_user(activities)
+
         # Sort by due date
         activities = activities.sort_by { |a| a.due_date || a.start_time || a.created_at }
         
@@ -63,6 +65,8 @@ module Api
           activities = activities.select { |a| statuses.include?(a.status) }
         end
         
+        activities = restrict_tasks_to_current_user(activities)
+
         # Sort by due date
         activities = activities.sort_by { |a| a.due_date || a.start_time || a.created_at }
         
@@ -95,6 +99,8 @@ module Api
           activities = activities.select { |a| statuses.include?(a.status) }
         end
         
+        activities = restrict_tasks_to_current_user(activities)
+
         # Sort by due date
         activities = activities.sort_by { |a| a.due_date || a.start_time || a.created_at }
         
@@ -127,6 +133,8 @@ module Api
           activities = activities.select { |a| statuses.include?(a.status) }
         end
         
+        activities = restrict_tasks_to_current_user(activities)
+
         # Sort by due date
         activities = activities.sort_by { |a| a.due_date || a.start_time || a.created_at }
         
@@ -137,6 +145,22 @@ module Api
       end
       
       private
+
+      # Task privacy: non-admins only see task-type activities they own.
+      # Applies to every aggregate (leads/accounts/contacts/deals) so a
+      # sales rep viewing a workqueue never sees another rep's tasks.
+      # Other activity types (calls, notes, reminders) stay visible.
+      # Opt into a broader view with view=all.
+      TASK_ACTIVITY_TYPES = %w[task lead_activity_task].freeze
+      def restrict_tasks_to_current_user(activities)
+        return activities if current_user.effective_admin?
+        return activities if params[:view] == 'all'
+
+        activities.reject do |a|
+          TASK_ACTIVITY_TYPES.include?(a.activity_type.to_s) &&
+            a.assigned_to_id != current_user.id
+        end
+      end
 
       def set_company_scope
         unless current_user
