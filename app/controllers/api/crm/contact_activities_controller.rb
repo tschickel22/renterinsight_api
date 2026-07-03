@@ -22,7 +22,15 @@ module Api
         activities = activities.where(status: params[:status]) if params[:status].present?
         # Filter by assigned user
         activities = activities.where(assigned_to_id: params[:assigned_to]) if params[:assigned_to].present?
-        
+
+        # Task privacy: non-admins only see task-type activities they're
+        # assigned to. Non-task activities stay visible (contact history).
+        unless current_user.effective_admin? || params[:view] == 'all'
+          activities = activities.where(
+            "activity_type != 'task' OR assigned_to_id = ?", current_user.id
+          )
+        end
+
         render json: activities.map { |a| activity_json(a) }, status: :ok
       rescue => e
         Rails.logger.error "[ContactActivitiesController#index] #{e.class}: #{e.message}"

@@ -13,6 +13,18 @@ module Api
       # GET /api/crm/deals/:deal_id/deal_activities
       def index
         activities = @deal.activities.order(created_at: :desc)
+
+        # Task privacy: non-admins only see task-type activities they're
+        # assigned to. The `activities` table uses namespaced strings
+        # (e.g. 'lead_activity_task'), so match either the bare or
+        # namespaced form for portability across the two schemas.
+        unless current_user.effective_admin? || params[:view] == 'all'
+          activities = activities.where(
+            "activity_type NOT IN ('task', 'lead_activity_task') OR assigned_to_id = ?",
+            current_user.id
+          )
+        end
+
         render json: activities.map { |a| activity_json(a) }, status: :ok
       end
 
