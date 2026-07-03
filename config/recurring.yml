@@ -74,6 +74,10 @@ default: &default
     class: SendAiDigestJob
     queue: default
     schedule: every monday at 7am
+  notification_reminders:
+    class: NotificationRemindersJob
+    queue: default
+    schedule: every hour
 
 production:
   <<: *default

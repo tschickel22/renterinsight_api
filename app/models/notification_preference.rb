@@ -24,6 +24,7 @@ class NotificationPreference < ApplicationRecord
     contact_updated: { in_app: true, email: false, sms: false },
     task_assigned: { in_app: true, email: true, sms: false },
     task_due_soon: { in_app: true, email: true, sms: false },
+    task_overdue: { in_app: true, email: true, sms: false },
     
     # Sales notifications
     quote_accepted: { in_app: true, email: true, sms: false },
