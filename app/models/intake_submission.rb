@@ -511,6 +511,12 @@ class IntakeSubmission < ApplicationRecord
     HTML
     
     begin
+      # Pass the notified user so the sender resolution starts at USER level.
+      # Waterfall: User's own email connection \u2192 Location \u2192 Company \u2192 Platform.
+      # Without this the user branch never fires, so a company-level admin's
+      # personal OAuth token (like Evangeline's Cody) ends up as the sender
+      # for every notification \u2014 confusing for the recipient, who thinks a
+      # coworker emailed them a lead alert.
       CommunicationService.send_email(
         communicable: lead,
         to: user.email,
@@ -519,6 +525,7 @@ class IntakeSubmission < ApplicationRecord
         category: 'system',
         content_type: 'text/html',
         skip_preference_check: true,
+        user: user,
         metadata: {
           source: 'intake_form',
           form_id: form.id,
