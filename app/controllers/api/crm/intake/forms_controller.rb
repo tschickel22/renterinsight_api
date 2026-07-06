@@ -217,7 +217,8 @@ module Api
           params.require(:intake_form).permit(
             :name, :description, :source_id, :is_active, :isActive,
             :thank_you_message, :redirect_url, :submit_button_text,
-            :notified_user_id, :auto_create_lead, :auto_create_activity,
+            :notified_user_id, :location_id, :locationId,
+            :auto_create_lead, :auto_create_activity,
             field_mappings: {},
             fields: [:id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField, options: []]
           ).tap do |p|
@@ -225,7 +226,15 @@ module Api
             if p.key?(:isActive)
               p[:is_active] = p.delete(:isActive)
             end
-            
+            # Camel-case location_id from the FE — same pattern as isActive.
+            if p.key?(:locationId)
+              p[:location_id] = p.delete(:locationId)
+            end
+            # Blank string from an "Any location" dropdown option becomes nil
+            # so the form clears its binding cleanly and re-enters the
+            # Corporate-fallback path on submission.
+            p[:location_id] = nil if p[:location_id].is_a?(String) && p[:location_id].strip.empty?
+
             # Ensure fields is set (will be saved to schema column via model)
             p[:fields] ||= []
             

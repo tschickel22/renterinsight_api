@@ -2,6 +2,10 @@ class IntakeForm < ApplicationRecord
   belongs_to :company
   belongs_to :source, class_name: 'Source', foreign_key: 'source_id', optional: true
   belongs_to :notified_user, class_name: 'User', foreign_key: 'notified_user_id', optional: true
+  # Optional binding to a specific location. When set, leads created from
+  # this form land at that location instead of the company's Corporate
+  # fallback (see IntakeSubmission#create_lead_from_submission).
+  belongs_to :location, optional: true
   has_many :intake_submissions, dependent: :destroy
   
   before_create :generate_public_id
@@ -42,6 +46,7 @@ class IntakeForm < ApplicationRecord
     json['publicUrl'] = public_url
     json['embedCode'] = embed_code
     json['notifiedUserId'] = json['notified_user_id']
+    json['locationId'] = json['location_id']
     json['autoCreateLead'] = json['auto_create_lead']
     json['autoCreateActivity'] = json['auto_create_activity']
     json['fieldMappings'] = json['field_mappings']
