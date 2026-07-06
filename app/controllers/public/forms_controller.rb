@@ -7,7 +7,23 @@ module Public
     before_action :set_form
     
     def show
-      render json: @form.as_json
+      response = @form.as_json
+
+      # Include the company's active locations so the public form can offer
+      # a "which location is closest to you?" picker when the admin left the
+      # form's location_id unset. Hidden when the form is already bound to
+      # a specific location (admin's choice wins — no need to ask the visitor)
+      # or when the company has a single location (nothing to pick).
+      if @form.location_id.blank?
+        locations = @form.company.locations.active.order(:name)
+        if locations.count > 1
+          response['company_locations'] = locations.map do |l|
+            { id: l.id, name: l.name, city: l.city, state: l.state }
+          end
+        end
+      end
+
+      render json: response
     end
     
     def submit
