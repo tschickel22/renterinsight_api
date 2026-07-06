@@ -8,6 +8,8 @@ module Api
 
       # GET /api/company/settings
       def show
+        return unless authorize_action!('company_settings', 'read')
+
         render json: {
           communications: mask_sensitive_fields(fetch_communications_settings(@company)),
           notifications: fetch_notifications_settings(@company),
@@ -25,6 +27,8 @@ module Api
 
       # PUT/PATCH /api/company/settings
       def update
+        return unless authorize_action!('company_settings', 'update')
+
         updated_settings = {}
         
         if params[:communications].present?
@@ -57,8 +61,10 @@ module Api
 
       # POST /api/company/settings/test_email
       def test_email
+        return unless authorize_action!('company_settings', 'update')
+
         email_settings = params[:email] || params[:settings] || {}
-        
+
         return render_missing_settings('email') if email_settings.blank?
         
         settings_hash = email_settings.is_a?(ActionController::Parameters) ? email_settings.to_unsafe_h : email_settings
@@ -100,6 +106,8 @@ module Api
 
       # POST /api/company/settings/send_test_email
       def send_test_email
+        return unless authorize_action!('company_settings', 'update')
+
         email_params = params[:email] || {}
         to = email_params[:to]
         subject = email_params[:subject] || 'Test Email from RenterInsight'
@@ -406,8 +414,10 @@ module Api
 
       # POST /api/company/settings/test_sms
       def test_sms
+        return unless authorize_action!('company_settings', 'update')
+
         sms_settings = params[:sms] || params[:settings] || {}
-        
+
         return render_missing_settings('sms') if sms_settings.blank?
         
         settings_hash = sms_settings.is_a?(ActionController::Parameters) ? sms_settings.to_unsafe_h : sms_settings
