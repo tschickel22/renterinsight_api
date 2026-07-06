@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_02_220000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_06_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3012,7 +3012,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_02_220000) do
     t.json "field_mappings", default: {}
     t.boolean "auto_create_lead", default: true
     t.boolean "auto_create_activity", default: true
+    t.bigint "location_id"
     t.index ["company_id"], name: "index_intake_forms_on_company_id"
+    t.index ["location_id"], name: "index_intake_forms_on_location_id"
     t.index ["notified_user_id"], name: "index_intake_forms_on_notified_user_id"
     t.index ["public_id"], name: "index_intake_forms_on_public_id", unique: true
     t.index ["source_id"], name: "index_intake_forms_on_source_id"
@@ -7522,6 +7524,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_02_220000) do
   add_foreign_key "import_jobs", "users"
   add_foreign_key "import_templates", "companies"
   add_foreign_key "intake_forms", "companies"
+  add_foreign_key "intake_forms", "locations"
   add_foreign_key "intake_forms", "sources"
   add_foreign_key "intake_forms", "users", column: "notified_user_id"
   add_foreign_key "intake_submissions", "leads"
