@@ -46,8 +46,11 @@ module Api
         def show
           response = @form.as_json
 
-          # For public requests, include company locations so the form can show a location picker
-          if params[:token].present? && params[:company_id].present?
+          # For public requests, include company locations so the form can show
+          # a location picker — but only when the form isn't already bound to
+          # a specific location (admin's choice wins; no need to ask the
+          # visitor) and the company has more than one active location.
+          if params[:token].present? && params[:company_id].present? && @form.location_id.blank?
             locations = @company.locations.active.order(:name)
             if locations.count > 1
               response[:company_locations] = locations.map { |l| { id: l.id, name: l.name, city: l.city, state: l.state } }
