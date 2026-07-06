@@ -44,7 +44,6 @@ class IntakeSubmission < ApplicationRecord
         name: pretty_name
       ) do |s|
         s.is_active = true
-        s.description = "Leads captured via #{pretty_name}"
       end
       source_id = utm_source.id
       Rails.logger.info "[IntakeSubmission] Using UTM source '#{pretty_name}': #{source_id}"
@@ -57,7 +56,6 @@ class IntakeSubmission < ApplicationRecord
           name: 'Web Form'
         ) do |s|
           s.is_active = true
-          s.description = 'Leads captured via intake forms'
         end
         source_id = default_source.id
         Rails.logger.info "[IntakeSubmission] Using default Web Form source: #{source_id}"
