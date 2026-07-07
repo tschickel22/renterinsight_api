@@ -329,7 +329,8 @@ module Api
         def step_params
           params.require(:step).permit(
             :position, :step_type, :subject, :body, :wait_hours, :wait_days, :template_id,
-            :include_inventory, :inventory_display_mode,
+            :include_inventory, :inventory_display_mode, :inventory_require_images,
+            inventory_statuses: [],
             attachments: [:s3_key, :filename, :size, :content_type, :delivery_mode]
           )
         end
@@ -429,6 +430,10 @@ module Api
             includeInventory: !!step.include_inventory,
             inventory_display_mode: step.inventory_display_mode,
             inventoryDisplayMode: step.inventory_display_mode,
+            inventory_statuses: Array(step.try(:inventory_statuses)),
+            inventoryStatuses: Array(step.try(:inventory_statuses)),
+            inventory_require_images: !!step.try(:inventory_require_images),
+            inventoryRequireImages: !!step.try(:inventory_require_images),
             createdAt: step.created_at&.iso8601,
             updatedAt: step.updated_at&.iso8601
           }

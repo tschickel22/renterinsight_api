@@ -7,10 +7,18 @@
 #   4. rotation          — newest available inventory as a generic fallback
 class InventoryMatcherService
   MAX_RESULTS = 3
+  DEFAULT_STATUSES = %w[available available_to_order].freeze
+  ALLOWED_STATUSES = %w[available available_to_order pending reserved].freeze
 
-  def initialize(entity, company)
-    @entity = entity
+  # `filters` is a small hash with optional overrides:
+  #   :statuses         — array of vehicle status strings to include
+  #   :require_images   — bool; when true, drop rows with empty images
+  # Empty / nil → today's default behavior (available + available_to_order,
+  # no image gate on the primary match paths).
+  def initialize(entity, company, filters: {})
+    @entity  = entity
     @company = company
+    @filters = filters || {}
   end
 
   def match
@@ -34,9 +42,28 @@ class InventoryMatcherService
   private
 
   def available_inventory
-    @available_inventory ||= @company.vehicles
-      .where(status: ['available', 'available_to_order'])
-      .where(is_deleted: [false, nil])
+    @available_inventory ||= begin
+      base = @company.vehicles
+                     .where(status: filter_statuses)
+                     .where(is_deleted: [false, nil])
+      require_images? ? with_images_only(base) : base
+    end
+  end
+
+  def filter_statuses
+    picked = Array(@filters[:statuses] || @filters['statuses']).map(&:to_s)
+                                                              .select { |s| ALLOWED_STATUSES.include?(s) }
+    picked.presence || DEFAULT_STATUSES
+  end
+
+  def require_images?
+    ActiveModel::Type::Boolean.new.cast(@filters[:require_images] || @filters['require_images'] || false)
+  end
+
+  # Same jsonb pre-filter Messaging::InventoryBlockResolver uses so campaigns
+  # and nurture agree on "has at least one image".
+  def with_images_only(rel)
+    rel.where("images IS NOT NULL AND images::text NOT IN ('[]', '')")
   end
 
   def match_preferred_home

@@ -97,7 +97,14 @@ class ProcessNurtureStepJob < ApplicationJob
     inventory_inline_images = []
     if step.include_inventory && company
       begin
-        matcher  = InventoryMatcherService.new(entity, company)
+        matcher  = InventoryMatcherService.new(
+          entity,
+          company,
+          filters: {
+            statuses:       Array(step.try(:inventory_statuses)),
+            require_images: step.try(:inventory_require_images),
+          }
+        )
         vehicles = matcher.match
         if vehicles.present?
           block_builder = InventoryEmailBlockBuilder.new(

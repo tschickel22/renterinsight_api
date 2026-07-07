@@ -5,6 +5,30 @@ class CampaignAudience < ApplicationRecord
   belongs_to :saved_audience, class_name: 'Audience', optional: true
 
   validates :source_type, inclusion: { in: SOURCE_TYPES }
+  validate  :additional_source_types_valid
+
+  # Enroller fans out across this list in addition to source_type, so the
+  # same tag-filtered audience can pull both Leads and Contacts (or any
+  # combination). Nil / empty preserves the original single-source
+  # behavior. Same allowlist as SOURCE_TYPES; dedupe against source_type
+  # so a caller can't send an entry that duplicates the primary type.
+  def all_source_types
+    ([source_type] + Array(additional_source_types)).uniq.compact
+  end
+
+  private
+
+  def additional_source_types_valid
+    return if additional_source_types.blank?
+    unless additional_source_types.is_a?(Array)
+      errors.add(:additional_source_types, 'must be an array')
+      return
+    end
+    invalid = additional_source_types.reject { |t| SOURCE_TYPES.include?(t.to_s) }
+    errors.add(:additional_source_types, "contains unsupported types: #{invalid.join(', ')}") if invalid.any?
+  end
+
+  public
 
   # Returns a base relation for the campaign's company.
   # For SMS campaigns, automatically scopes to opted-in recipients UNLESS

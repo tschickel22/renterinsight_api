@@ -1,7 +1,8 @@
 module Messaging
   class InventoryBlockResolver
     AVAILABLE_STATUSES = %w[available available_to_order].freeze
-    DEFAULT_MAX_UNITS = 6
+    ALLOWED_STATUSES   = %w[available available_to_order pending reserved].freeze
+    DEFAULT_MAX_UNITS  = 6
 
     def initialize(config:, recipient:, company:, base_url: nil)
       @config = config.is_a?(Hash) ? config : {}
@@ -40,9 +41,32 @@ module Messaging
     private
 
     def company_vehicles_scope
-      base = @company.vehicles.where(status: AVAILABLE_STATUSES)
+      base = @company.vehicles.where(status: allowed_statuses)
       base = base.where(is_deleted: [false, nil]) if Vehicle.column_names.include?('is_deleted')
+      base = require_images_scope(base) if require_images?
       base
+    end
+
+    # Admin-selected status set from config.filters.statuses; ignores any
+    # entries outside ALLOWED_STATUSES so a bad payload can't leak
+    # sold/pending listings into a marketing send. Falls back to today's
+    # default (available + available_to_order) when unset.
+    def allowed_statuses
+      f = @config['filters'] || @config[:filters] || {}
+      picked = Array(f['statuses'] || f[:statuses]).map(&:to_s).select { |s| ALLOWED_STATUSES.include?(s) }
+      picked.presence || AVAILABLE_STATUSES
+    end
+
+    def require_images?
+      f = @config['filters'] || @config[:filters] || {}
+      ActiveModel::Type::Boolean.new.cast(f['require_images'] || f[:require_images] || false)
+    end
+
+    # Postgres jsonb: non-empty array literal is not equal to '[]'. Also
+    # rules out NULL. Doesn't validate individual entries — that's the
+    # unit_hash's problem — this is a fast pre-filter.
+    def require_images_scope(rel)
+      rel.where("images IS NOT NULL AND images::text NOT IN ('[]', '')")
     end
 
     def apply_segment(base)
