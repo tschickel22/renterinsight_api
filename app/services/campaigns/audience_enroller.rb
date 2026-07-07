@@ -8,57 +8,64 @@ module Campaigns
     def enroll_all
       return 0 unless @audience
 
-      base = audience_scope
-
       first_step = @campaign.campaign_steps.active.ordered.first
       first_wait_seconds = ((first_step&.wait_days || 0) * 86400) + ((first_step&.wait_hours || 0) * 3600)
       next_send_at = Time.current + first_wait_seconds.seconds
 
+      # Contact-value dedupe set — so an email that exists on BOTH a Lead
+      # row and a Contact row for the same person only sends once for this
+      # campaign. Seeded with existing enrollments' snapshot addresses so
+      # a rerun (dynamic mode / recurrence cycle) doesn't double-count.
+      seen_contact_values = Set.new(existing_snapshot_values)
+
       enrolled = 0
-      base.find_each do |record|
-        contact_value = if @campaign.email_channel?
-                          record.try(:email)
-                        else
-                          normalize_phone(record.try(:phone))
-                        end
-        next if contact_value.blank?
-        next if CampaignSuppression.suppressed?(@campaign.company_id, contact_value)
+      each_source_type do |source_type, scope|
+        scope.find_each do |record|
+          contact_value = if @campaign.email_channel?
+                            record.try(:email)&.downcase
+                          else
+                            normalize_phone(record.try(:phone))
+                          end
+          next if contact_value.blank?
+          next if CampaignSuppression.suppressed?(@campaign.company_id, contact_value)
+          next unless seen_contact_values.add?(contact_value)
 
-        attrs = {
-          company_id: @campaign.company_id, campaign_id: @campaign.id,
-          recipient_type: @audience.source_type, recipient_id: record.id,
-          status: 'pending', current_step_index: 0,
-          next_send_at: next_send_at
-        }
-        if @campaign.email_channel?
-          attrs[:email_address_snapshot] = contact_value
-        else
-          attrs[:sms_phone_snapshot] = contact_value
-        end
+          attrs = {
+            company_id: @campaign.company_id, campaign_id: @campaign.id,
+            recipient_type: source_type, recipient_id: record.id,
+            status: 'pending', current_step_index: 0,
+            next_send_at: next_send_at
+          }
+          if @campaign.email_channel?
+            attrs[:email_address_snapshot] = contact_value
+          else
+            attrs[:sms_phone_snapshot] = contact_value
+          end
 
-        existing = CampaignEnrollment.find_by(
-          campaign_id: @campaign.id,
-          recipient_type: attrs[:recipient_type],
-          recipient_id: attrs[:recipient_id]
-        )
-        next if existing
-
-        enrollment = CampaignEnrollment.create(attrs)
-        next unless enrollment.persisted?
-
-        enrolled += 1
-        CampaignEvent.create!(
-          company_id: @campaign.company_id, campaign_id: @campaign.id,
-          campaign_enrollment_id: enrollment.id,
-          event_type: 'enrolled', occurred_at: Time.current,
-          payload: { recipient_type: enrollment.recipient_type, recipient_id: enrollment.recipient_id }
-        )
-        if defined?(WebhookService)
-          WebhookService.fire(
-            company_id: @campaign.company_id, event: 'campaign.enrollment_created',
-            payload: { campaign_id: @campaign.id, enrollment_id: enrollment.id,
-                       recipient_type: enrollment.recipient_type, recipient_id: enrollment.recipient_id }
+          existing = CampaignEnrollment.find_by(
+            campaign_id: @campaign.id,
+            recipient_type: attrs[:recipient_type],
+            recipient_id: attrs[:recipient_id]
           )
+          next if existing
+
+          enrollment = CampaignEnrollment.create(attrs)
+          next unless enrollment.persisted?
+
+          enrolled += 1
+          CampaignEvent.create!(
+            company_id: @campaign.company_id, campaign_id: @campaign.id,
+            campaign_enrollment_id: enrollment.id,
+            event_type: 'enrolled', occurred_at: Time.current,
+            payload: { recipient_type: enrollment.recipient_type, recipient_id: enrollment.recipient_id }
+          )
+          if defined?(WebhookService)
+            WebhookService.fire(
+              company_id: @campaign.company_id, event: 'campaign.enrollment_created',
+              payload: { campaign_id: @campaign.id, enrollment_id: enrollment.id,
+                         recipient_type: enrollment.recipient_type, recipient_id: enrollment.recipient_id }
+            )
+          end
         end
       end
 
@@ -69,6 +76,24 @@ module Campaigns
       enrolled
     end
 
+    # Yields [source_type, scope] for the primary source type plus each
+    # additional_source_types entry. Enables one campaign to enroll from
+    # Lead + Contact simultaneously (weekly-newsletter case).
+    def each_source_type
+      types = [@audience.source_type] + Array(@audience.try(:additional_source_types))
+      types.uniq.compact.each do |type|
+        # Each type gets its own filter-compiled scope so the same
+        # audience filter_tree applies (e.g. tagged 'weekly-favorites').
+        yield type, audience_scope_for(type)
+      end
+    end
+
+    def existing_snapshot_values
+      col = @campaign.email_channel? ? :email_address_snapshot : :sms_phone_snapshot
+      values = @campaign.campaign_enrollments.where.not(col => nil).pluck(col)
+      @campaign.email_channel? ? values.map { |v| v.to_s.downcase } : values
+    end
+
     private
 
     # The exact audience set — the SAME Audiences::FilterCompiler the count/preview/members
@@ -77,9 +102,16 @@ module Campaigns
     # and active-nurture excludes), which the old per-record ConditionEvaluator path skipped.
     # SMS opt-in compliance is layered on top for SMS campaigns.
     def audience_scope
+      audience_scope_for(@audience.source_type)
+    end
+
+    # Applies the same filter tree / excludes to any given source type so
+    # cross-source enrollment (Lead + Contact tagged 'weekly-favorites')
+    # yields the same semantic audience across each type.
+    def audience_scope_for(source_type)
       scope = Audiences::FilterCompiler.new(
         company: @campaign.company,
-        source_type: @audience.source_type,
+        source_type: source_type,
         filter_tree: @audience.filter_tree,
         exclude_filter_tree: @audience.exclude_filter_tree,
         manual_exclude_ids: @audience.try(:manual_exclude_ids),
@@ -88,8 +120,8 @@ module Campaigns
       ).scope
       @campaign.sms_channel? ? scope_for_sms_compliance(scope) : scope
     rescue Audiences::FilterCompiler::CompilationError => e
-      Rails.logger.error "[AudienceEnroller] filter compile failed: #{e.message}"
-      @audience.source_type.constantize.none
+      Rails.logger.error "[AudienceEnroller] filter compile failed for #{source_type}: #{e.message}"
+      source_type.constantize.none
     end
 
     # Mirror CampaignAudience#compute_matches SMS handling: only opted-in recipients

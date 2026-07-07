@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_06_000000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_07_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1226,6 +1226,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_06_000000) do
     t.jsonb "manual_exclude_ids", default: []
     t.boolean "exclude_active_campaign_enrollees", default: false, null: false
     t.boolean "exclude_active_nurture_enrollees", default: false, null: false
+    t.jsonb "additional_source_types", default: [], null: false
     t.index ["campaign_id"], name: "index_campaign_audiences_on_campaign_id", unique: true
     t.index ["saved_audience_id"], name: "idx_campaign_audiences_saved_audience"
   end
@@ -4372,6 +4373,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_06_000000) do
     t.jsonb "attachments", default: []
     t.boolean "include_inventory", default: false
     t.string "inventory_display_mode", default: "auto"
+    t.jsonb "inventory_statuses", default: [], null: false
+    t.boolean "inventory_require_images", default: false, null: false
     t.index ["nurture_sequence_id", "position"], name: "index_nurture_steps_on_nurture_sequence_id_and_position"
     t.index ["nurture_sequence_id"], name: "index_nurture_steps_on_nurture_sequence_id"
     t.index ["template_id"], name: "index_nurture_steps_on_template_id"

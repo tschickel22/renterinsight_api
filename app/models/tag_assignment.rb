@@ -26,10 +26,17 @@ class TagAssignment < ApplicationRecord
     scope_company_id = company_id || entity&.try(:company_id)
     return if scope_company_id.blank?
 
+    # Match campaigns whose primary source_type OR any additional_source_types
+    # entry equals the tagged entity_type — that way a Lead+Contact newsletter
+    # (source_type=Contact, additional=['Lead']) refreshes on Lead tags too.
     Campaign
       .where(company_id: scope_company_id, audience_mode: 'dynamic', status: %w[running scheduled])
       .joins(:campaign_audience)
-      .where(campaign_audiences: { source_type: entity_type })
+      .where(
+        "campaign_audiences.source_type = ? OR campaign_audiences.additional_source_types @> ?::jsonb",
+        entity_type,
+        [entity_type].to_json
+      )
       .find_each do |campaign|
         # Simple in-process dedupe so a bulk tag operation doesn't
         # thunder the queue with N identical enroller jobs.

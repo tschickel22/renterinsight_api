@@ -74,7 +74,20 @@ module Api
                 step.subject = step_data[:subject] || ''
                 step.body = step_data[:body] || ''
                 step.template_id = step_data[:template_id] || step_data[:templateId]
-                
+                # Optional per-step inventory filters. Empty statuses array
+                # keeps today's [available, available_to_order] default; the
+                # require_images flag defaults to false so untouched steps
+                # keep including image-less units in their inventory picks.
+                if step_data.key?(:inventory_statuses) || step_data.key?(:inventoryStatuses)
+                  raw = step_data[:inventory_statuses] || step_data[:inventoryStatuses]
+                  step.inventory_statuses = Array(raw).map(&:to_s).reject(&:blank?)
+                end
+                if step_data.key?(:inventory_require_images) || step_data.key?(:inventoryRequireImages)
+                  raw = step_data[:inventory_require_images]
+                  raw = step_data[:inventoryRequireImages] if raw.nil?
+                  step.inventory_require_images = ActiveModel::Type::Boolean.new.cast(raw)
+                end
+
                 step.save!
                 
                 Rails.logger.info "[Nurture] Saved step #{step.id}: type=#{step.step_type}, wait_days=#{step.wait_days}, template_id=#{step.template_id}"
@@ -148,7 +161,16 @@ module Api
                   step.subject = step_data[:subject] if step_data.key?(:subject)
                   step.body = step_data[:body] if step_data.key?(:body)
                   step.template_id = step_data[:template_id] if step_data.key?(:template_id)
-                  
+                  if step_data.key?(:inventory_statuses) || step_data.key?(:inventoryStatuses)
+                    raw = step_data[:inventory_statuses] || step_data[:inventoryStatuses]
+                    step.inventory_statuses = Array(raw).map(&:to_s).reject(&:blank?)
+                  end
+                  if step_data.key?(:inventory_require_images) || step_data.key?(:inventoryRequireImages)
+                    raw = step_data[:inventory_require_images]
+                    raw = step_data[:inventoryRequireImages] if raw.nil?
+                    step.inventory_require_images = ActiveModel::Type::Boolean.new.cast(raw)
+                  end
+
                   step.save!
                 end
               end

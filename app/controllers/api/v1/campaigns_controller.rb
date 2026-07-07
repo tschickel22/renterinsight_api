@@ -90,7 +90,8 @@ class Api::V1::CampaignsController < ApplicationController
         ap = audience_param.respond_to?(:to_unsafe_h) ? audience_param.to_unsafe_h : audience_param.to_h
         @campaign.create_campaign_audience!(
           source_type: ap['source_type'],
-          filter_tree: ap['filter_tree']
+          filter_tree: ap['filter_tree'],
+          additional_source_types: Array(ap['additional_source_types']).map(&:to_s).reject(&:blank?)
         )
       elsif saved_audience_id_param.present?
         apply_saved_audience(@campaign)
@@ -724,6 +725,7 @@ class Api::V1::CampaignsController < ApplicationController
     {
       id: a.id,
       source_type: a.source_type,
+      additional_source_types: Array(a.try(:additional_source_types)),
       filter_tree: a.filter_tree,
       exclude_filter_tree: a.exclude_filter_tree,
       estimated_count: a.estimated_count,
