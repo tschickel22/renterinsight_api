@@ -138,6 +138,7 @@ module Campaigns
         audience = plan['audience'] || {}
         campaign.create_campaign_audience!(
           source_type: audience['source_type'] || 'Lead',
+          additional_source_types: Array(audience['additional_source_types']).map(&:to_s).reject(&:blank?),
           filter_tree: audience['filter_tree'] || {}
         )
 
@@ -296,6 +297,7 @@ module Campaigns
             "audience_mode": "static" | "dynamic",
             "audience": {
               "source_type": "Lead" | "Contact" | "Account",
+              "additional_source_types": ["Lead" | "Contact" | "Account"],  // OPTIONAL; extra entity types to enroll with the SAME filter (dedupe by email). Use when the prompt says "leads and contacts", "customers and prospects", or asks for a newsletter to a shared tag set.
               "filter_tree": { "type": "and", "children": [{ "field": "...", "operator": "equals|in|...", "value": ... }] }
             },
             "goal_config": { "primary_goal": "replied", "remove_on_goal_met": true, "additional_goals": [] },
@@ -310,7 +312,20 @@ module Campaigns
                   { "type": "button", "text": "View homes", "href": "{{public_inventory_url}}" }
                 ],
                 "sms_body": "SMS text (SMS ONLY, max 1500 chars to leave room for STOP footer)",
-                "inventory_block_config": null
+                "inventory_block_config": null | {
+                  "mode": "segment_based" | "category_based" | "manual_pick",
+                  "sort": "newest" | "price_low" | "price_high" | "best_match",
+                  "max_units": 3,
+                  "fallback": "skip_block" | "show_cta" | "abort_send",
+                  "filters": {
+                    "listing_type": "...",
+                    "bedrooms_min": 0,
+                    "price_max": 0,
+                    "location_ids": [1, 2],
+                    "statuses": ["available", "available_to_order"],  // OPTIONAL admin-controlled status set. Omit for default (available + available_to_order). Include "pending" or "reserved" only if the prompt explicitly asks.
+                    "require_images": true | false  // OPTIONAL; set true when the prompt implies visual quality ("only homes with photos", "showcase", "featured", "gallery").
+                  }
+                }
               }
             ]
           },
