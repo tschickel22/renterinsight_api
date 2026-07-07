@@ -142,6 +142,19 @@ module Api
               step_inventory_display_mode =
                 (step[:inventory_display_mode].presence || step['inventory_display_mode'].presence || 'auto').to_s
 
+              # Optional admin-selected inventory filters from the AI modal —
+              # applied per step so the AI plan's inventory recommendations
+              # honor the same filters the runtime resolver uses.
+              step_inventory_statuses = Array(
+                step[:inventory_statuses] || step['inventory_statuses'] ||
+                step[:inventoryStatuses] || step['inventoryStatuses']
+              ).map(&:to_s).reject(&:blank?)
+
+              step_inventory_require_images = ActiveModel::Type::Boolean.new.cast(
+                step[:inventory_require_images] || step['inventory_require_images'] ||
+                step[:inventoryRequireImages] || step['inventoryRequireImages'] || false
+              )
+
               sequence.nurture_steps.create!(
                 position: index,
                 step_type: step[:step_type] || step[:channel] || 'email',
@@ -152,7 +165,9 @@ module Api
                 template_id: template&.id,
                 attachments: step_attachments,
                 include_inventory: step_include_inventory ? true : false,
-                inventory_display_mode: step_inventory_display_mode
+                inventory_display_mode: step_inventory_display_mode,
+                inventory_statuses: step_inventory_statuses,
+                inventory_require_images: step_inventory_require_images
               )
             end
 
