@@ -19,7 +19,8 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       source_type:         attrs[:source_type].presence || saved&.source_type,
       saved_audience_id:   attrs[:saved_audience_id],
       filter_tree:         attrs[:filter_tree] || saved&.filter_tree || {},
-      exclude_filter_tree: attrs[:exclude_filter_tree] || saved&.exclude_filter_tree || {}
+      exclude_filter_tree: attrs[:exclude_filter_tree] || saved&.exclude_filter_tree || {},
+      additional_source_types: normalize_additional_source_types(attrs[:additional_source_types])
     )
 
     if audience.save
@@ -61,6 +62,9 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     end
     if attrs.key?(:exclude_active_nurture_enrollees)
       update_attrs[:exclude_active_nurture_enrollees] = ActiveModel::Type::Boolean.new.cast(attrs[:exclude_active_nurture_enrollees])
+    end
+    if attrs.key?(:additional_source_types)
+      update_attrs[:additional_source_types] = normalize_additional_source_types(attrs[:additional_source_types])
     end
 
     if audience.update(update_attrs)
@@ -179,8 +183,17 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     params.require(:campaign_audience).permit(
       :source_type, :location_id, :saved_audience_id,
       :exclude_active_campaign_enrollees, :exclude_active_nurture_enrollees,
+      additional_source_types: [],
       filter_tree: {}, exclude_filter_tree: {}
     )
+  end
+
+  # Allowlist to the three supported source types; drop the primary from the
+  # extras (only meaningful when different). Enroller/JSON layers already
+  # tolerate blank/nil, so we just normalize into a clean string array.
+  def normalize_additional_source_types(raw)
+    allowed = %w[Lead Contact Account]
+    Array(raw).map(&:to_s).map(&:strip).select { |t| allowed.include?(t) }.uniq
   end
 
   def to_unsafe(value)
@@ -210,6 +223,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       id: audience.id,
       campaign_id: audience.campaign_id,
       source_type: audience.source_type,
+      additional_source_types: Array(audience.try(:additional_source_types)),
       saved_audience_id: audience.saved_audience_id,
       filter_tree: audience.filter_tree,
       exclude_filter_tree: audience.exclude_filter_tree,
