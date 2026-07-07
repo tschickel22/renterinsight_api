@@ -257,7 +257,11 @@ module Audiences
     end
 
     def apply_tag_leaf(scope, operator, value)
-      tag_values = operator == 'tags_any_of' ? Array(value) : [value]
+      # Accept both shapes: TagsValueInput stores an array even for the
+      # scalar operators (tags_include/tags_exclude), and normalize_tag_leaves!
+      # emits a scalar. Flatten in both cases so neither shape produces
+      # zero matches through Array double-wrap.
+      tag_values = Array(value).flatten
 
       string_vals = tag_values.select { |v| v.is_a?(String) && v !~ /\A\d+\z/ }
       int_vals = tag_values.select { |v| v.is_a?(Integer) || (v.is_a?(String) && v =~ /\A\d+\z/) }.map(&:to_i)
