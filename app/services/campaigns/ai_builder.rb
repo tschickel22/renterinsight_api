@@ -136,15 +136,65 @@ module Campaigns
         end
 
         audience = plan['audience'] || {}
+        filter_tree = audience['filter_tree'] || {}
+        # AI can invent tag names ("weekly-favorites") in the plan's filter
+        # tree. Those tags don't exist yet, so FilterCompiler's tag-join
+        # would silently return zero recipients AND the tag wouldn't
+        # appear in the Leads/Contacts/Accounts tag dropdown for manual
+        # subscription. Create them up front so both paths work.
+        ensure_referenced_tags_exist!(filter_tree)
+
         campaign.create_campaign_audience!(
           source_type: audience['source_type'] || 'Lead',
           additional_source_types: Array(audience['additional_source_types']).map(&:to_s).reject(&:blank?),
-          filter_tree: audience['filter_tree'] || {}
+          filter_tree: filter_tree
         )
 
         generation.update!(status: 'accepted', campaign_id: campaign.id)
       end
       campaign
+    end
+
+    # Walk the plan's filter_tree, collect any tag names referenced by
+    # tag conditions (operator starts with 'tags_'), and find_or_create
+    # each one on this company. Ids are left alone — if the AI referenced
+    # a numeric id that doesn't exist, that's a caller/plan bug and we
+    # want the enroller to skip it rather than fabricate a tag.
+    def ensure_referenced_tags_exist!(node)
+      return unless node.is_a?(Hash)
+      names = Set.new
+      collect_tag_names(node, names)
+      return if names.empty?
+      names.each do |raw|
+        name = raw.to_s.strip
+        next if name.blank?
+        # Match TagsController#create semantics: name is scoped by
+        # company_id and case-sensitive.
+        existing = @company.tags.find_by(name: name)
+        next if existing
+        @company.tags.create(
+          name: name,
+          description: 'Auto-created from AI campaign audience',
+          color: '#6B7280',
+          is_active: true,
+          is_system: false
+        )
+      end
+    end
+
+    def collect_tag_names(node, into)
+      return unless node.is_a?(Hash)
+      op = node['operator'].to_s
+      if op.start_with?('tags_')
+        vals = node['value']
+        Array(vals).each do |v|
+          # Numeric strings/ints are ids — skip (see comment above).
+          next if v.is_a?(Integer)
+          next if v.is_a?(String) && v =~ /\A\d+\z/
+          into << v if v.is_a?(String)
+        end
+      end
+      Array(node['children']).each { |c| collect_tag_names(c, into) }
     end
 
     private
@@ -323,7 +373,7 @@ module Campaigns
                     "price_max": 0,
                     "location_ids": [1, 2],
                     "statuses": ["available", "available_to_order"],  // OPTIONAL admin-controlled status set. Omit for default (available + available_to_order). Include "pending" or "reserved" only if the prompt explicitly asks.
-                    "require_images": true | false  // OPTIONAL; set true when the prompt implies visual quality ("only homes with photos", "showcase", "featured", "gallery").
+                    "require_images": true | false  // OPTIONAL; set true when the prompt implies visual quality ("show images", "showcase", "photos", "gallery", "featured").
                   }
                 }
               }
@@ -374,11 +424,19 @@ module Campaigns
         - SMS steps must include opt-out language; "Reply STOP to unsubscribe" is auto-appended by the system, do NOT include it yourself.
         - SMS body max 1500 chars.
 
+        INVENTORY BLOCK (CRITICAL — read carefully):
+        - The system renders `inventory_block_config` as a grid of image CARDS (photo + year/make/model + price + "View details" button). This is NOT a button block — it's the actual inventory.
+        - Whenever the user asks to "show inventory", "show units", "show homes", "show images", "showcase", "feature homes/units", "photos", "gallery", "highlight", "list new arrivals", or provides an example email with inventory photos: you MUST emit an `inventory_block_config` object on the relevant step. Do NOT substitute a plain `{ "type": "button", "text": "View inventory" }` block for this — the button loses all the images and details the user asked for.
+        - Weekly/monthly digests, "new arrivals", "featured this week", "top picks" — always use `inventory_block_config`, never a bare button.
+        - When the request implies photos ("show images", "showcase", "gallery", "featured", "photos"): set `filters.require_images: true` and `fallback: "skip_block"` so the block only renders cards that actually have images.
+        - Only use a `{ "type": "button" }` block instead of `inventory_block_config` when the user explicitly says "no inventory" or "just a link/button to browse".
+        - A single step can have text blocks AROUND the inventory block; the inventory block itself replaces any prior button-only "browse" section.
+
         VERTICAL CUES:
         - "MHI show" / "retailer" / "dealer" -> B2B selling DMS
         - "Facebook leads" / "homebuyers" / "buyers" -> B2C selling homes
         - "budget" / "preferences" -> use inventory_block with mode "segment_based"
-        - "weekly digest" / "new arrivals" -> recurring_digest with inventory_block mode "category_based" or "segment_based"
+        - "weekly digest" / "new arrivals" -> recurring_digest with inventory_block mode "category_based" or "segment_based" — and per the INVENTORY BLOCK rules above, use `inventory_block_config`, not a button.
       SYS
 
       mode == :refine ? base + "\n\nThe user is iterating on a previous plan. Apply their feedback and return the COMPLETE updated plan." : base

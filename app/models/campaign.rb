@@ -63,10 +63,19 @@ class Campaign < ApplicationRecord
   # bundle via sidekiq-cron) so we parse the same 5-field format everyone
   # writes. Returns nil for a blank/invalid expression so callers can
   # decide whether to treat that as "finalize" or "leave running".
+  #
+  # Evaluated in the company's configured time zone so "9:00 AM MON" means
+  # 9 AM in the dealer's local time, not UTC. Falls back to Eastern via
+  # Company#time_zone if operational_settings.timezone is unset. Returned
+  # value is normalized back to UTC for DB storage.
   def next_recurrence_at(from = Time.current)
     return nil if recurrence_cron.blank?
     parsed = ::Fugit.parse(recurrence_cron.to_s)
-    parsed&.next_time(from)&.to_utc_time
+    return nil if parsed.nil?
+    tz = company&.time_zone.presence || 'America/New_York'
+    Time.use_zone(tz) do
+      parsed.next_time(from.in_time_zone(tz))&.to_utc_time
+    end
   rescue StandardError => e
     Rails.logger.warn "[Campaign##{id}] recurrence_cron parse failed: #{e.class}: #{e.message}"
     nil
