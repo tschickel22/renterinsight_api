@@ -39,6 +39,27 @@ class Campaign < ApplicationRecord
   def email_channel? = channel == 'email'
   def sms_channel?   = channel == 'sms'
 
+  # True when this campaign is meant to cycle on a cron cadence (weekly
+  # newsletter, monthly digest, etc.) instead of finalizing after one pass.
+  # CampaignSchedulerJob keys off this to reset the campaign back to
+  # 'scheduled' at each cycle boundary rather than marking it 'completed'.
+  def recurring?
+    campaign_type == 'recurring_digest' && recurrence_cron.present?
+  end
+
+  # Next fire time for the cron expression. Uses Fugit (already in the
+  # bundle via sidekiq-cron) so we parse the same 5-field format everyone
+  # writes. Returns nil for a blank/invalid expression so callers can
+  # decide whether to treat that as "finalize" or "leave running".
+  def next_recurrence_at(from = Time.current)
+    return nil if recurrence_cron.blank?
+    parsed = ::Fugit.parse(recurrence_cron.to_s)
+    parsed&.next_time(from)&.to_utc_time
+  rescue StandardError => e
+    Rails.logger.warn "[Campaign##{id}] recurrence_cron parse failed: #{e.class}: #{e.message}"
+    nil
+  end
+
   def mixed_channel?
     step_channels = campaign_steps.pluck(:channel).compact.uniq
     step_channels.length > 1

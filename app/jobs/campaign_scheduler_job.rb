@@ -42,6 +42,31 @@ class CampaignSchedulerJob < ApplicationJob
       next if total.zero?
       remaining = c.campaign_enrollments.where(status: %w[pending active]).count
       next if remaining.positive?
+
+      if c.recurring?
+        # Recurring digest — don't finalize. Reset the campaign to
+        # 'scheduled' with scheduled_at at the next cron boundary so
+        # promote_scheduled_to_running picks it up again for the next
+        # cycle. Clear audience_snapshot_at so the enroller pulls a
+        # fresh set of matching contacts/leads (i.e. newly-tagged
+        # subscribers get pulled into the next send). Old enrollments
+        # stay for history/analytics but won't re-dispatch.
+        next_at = c.next_recurrence_at
+        if next_at.nil?
+          Rails.logger.warn "[CampaignSchedulerJob] Campaign #{c.id} is recurring but next_recurrence_at is nil; falling through to complete"
+        else
+          c.update!(
+            status: 'scheduled',
+            scheduled_at: next_at,
+            audience_snapshot_at: nil
+          )
+          if defined?(WebhookService)
+            WebhookService.fire(company_id: c.company_id, event: 'campaign.cycle_completed', payload: { campaign_id: c.id, next_send_at: next_at.iso8601 })
+          end
+          next
+        end
+      end
+
       c.update!(status: 'completed', completed_at: Time.current)
       if defined?(WebhookService)
         WebhookService.fire(company_id: c.company_id, event: 'campaign.completed', payload: { campaign_id: c.id })
