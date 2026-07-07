@@ -697,6 +697,8 @@ class Api::V1::CampaignsController < ApplicationController
       scheduled_at: c.scheduled_at,
       started_at: c.started_at,
       completed_at: c.completed_at,
+      recurrence_cron: c.recurrence_cron,
+      next_recurrence_at: c.try(:next_recurrence_at),
       created_by_user_id: c.created_by_user_id,
       location_id: c.location_id,
       created_at: c.created_at,
