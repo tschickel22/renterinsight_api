@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_07_000000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_07_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1378,7 +1378,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_07_000000) do
     t.string "audience_mode", default: "static", null: false
     t.datetime "audience_snapshot_at"
     t.string "from_identity_type", null: false
-    t.bigint "from_identity_id", null: false
+    t.bigint "from_identity_id"
     t.string "from_display_name"
     t.string "reply_to_address"
     t.string "subject_default"

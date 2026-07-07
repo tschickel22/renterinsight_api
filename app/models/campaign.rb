@@ -4,13 +4,18 @@ class Campaign < ApplicationRecord
   STATUSES = %w[draft scheduled running paused completed archived].freeze
   TYPES = %w[blast drip triggered recurring_digest].freeze
   AUDIENCE_MODES = %w[static dynamic].freeze
-  IDENTITY_TYPES = %w[User Location Company].freeze
+  # 'Owner' resolves per-recipient at send time — the sender for each
+  # enrollment is that recipient's owner (Lead#owner / Contact#owner /
+  # Account#owner). Lets a rep author a campaign that other reps can
+  # subscribe their own leads/contacts to and the from-address stays
+  # authentic. Owner-mode campaigns leave from_identity_id NULL.
+  IDENTITY_TYPES = %w[User Location Company Owner].freeze
   CHANNELS = %w[email sms].freeze
 
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :created_by, class_name: 'User', foreign_key: :created_by_user_id
-  belongs_to :from_identity, polymorphic: true
+  belongs_to :from_identity, polymorphic: true, optional: true
   belongs_to :seeded_from_template, class_name: 'CampaignTemplate', optional: true
   belongs_to :generated_from_ai_generation, class_name: 'CampaignAiGeneration', optional: true
 
@@ -27,6 +32,13 @@ class Campaign < ApplicationRecord
   validates :from_identity_type, inclusion: { in: IDENTITY_TYPES }
   validates :channel, inclusion: { in: CHANNELS }
   validates :throttle_per_day, numericality: { greater_than: 0 }
+  # Owner mode has no fixed identity id — the sender is resolved per
+  # recipient at send time. Every other identity type requires an id.
+  validates :from_identity_id, presence: true, unless: :owner_identity?
+
+  def owner_identity?
+    from_identity_type == 'Owner'
+  end
 
   scope :active, -> { where(is_deleted: [false, nil]) }
   scope :running, -> { active.where(status: 'running') }
@@ -72,7 +84,10 @@ class Campaign < ApplicationRecord
 
     step_channels = campaign_steps.active.pluck(:channel).compact.uniq
     if step_channels.include?('email') || (step_channels.empty? && email_channel?)
-      return false if resolve_email_connection_for_step.nil?
+      # Owner mode defers resolution to send time (per-recipient), so we
+      # can't preflight a single connection here. Allow start; the sender
+      # gates each individual send instead.
+      return false unless owner_identity? || !resolve_email_connection_for_step.nil?
     end
     if step_channels.include?('sms') || (step_channels.empty? && sms_channel?)
       return false if resolve_sms_sender_for_step.nil?
@@ -121,8 +136,16 @@ class Campaign < ApplicationRecord
   # drips. Used by CampaignSender#deliver_email when sending an individual step
   # whose channel may differ from the campaign's primary channel.
   # Queries the same company-scoped OAuth connection tables as resolve_email_connection.
-  # NEVER falls back to platform-level senders.
-  def resolve_email_connection_for_step
+  # NEVER falls back to platform-level senders — the caller (CampaignSender)
+  # gates on a nil return so campaigns can't leak through platform SES.
+  #
+  # `recipient` is required for Owner-mode campaigns: the sender resolves to
+  # THIS recipient's owner (Lead#owner / Contact#owner / Account#owner) so a
+  # shared campaign can send from each recipient's real rep. When Owner mode
+  # is set but the recipient has no owner or the owner has no verified email
+  # connection, returns nil — the caller marks the send as failed and moves
+  # on rather than silently downgrading to a company-scoped or platform sender.
+  def resolve_email_connection_for_step(recipient: nil)
     case from_identity_type
     when 'User'
       UserEmailConnection.where(company_id: company_id, user_id: from_identity_id, is_active: true).first
@@ -130,7 +153,19 @@ class Campaign < ApplicationRecord
       LocationEmailConnection.where(company_id: company_id, location_id: from_identity_id, is_active: true).first
     when 'Company'
       CompanyEmailConnection.where(company_id: company_id, is_active: true).first
+    when 'Owner'
+      resolve_owner_email_connection(recipient)
     end
+  end
+
+  # Look up the recipient's owner and their active email connection. Kept
+  # in one place so both the send path and the "can this campaign start?"
+  # preflight speak the same rule.
+  def resolve_owner_email_connection(recipient)
+    return nil unless recipient
+    owner_id = recipient.try(:owner_id) || recipient.try(:owner)&.id
+    return nil if owner_id.blank?
+    UserEmailConnection.where(company_id: company_id, user_id: owner_id, is_active: true).first
   end
 
   # Step-level SMS resolver — bypasses campaign-channel guard for mixed-channel

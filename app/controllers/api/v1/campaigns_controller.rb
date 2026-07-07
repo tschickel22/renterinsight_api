@@ -619,6 +619,10 @@ class Api::V1::CampaignsController < ApplicationController
       Location.find_by(id: c.from_identity_id)&.name
     when 'Company'
       Company.find_by(id: c.from_identity_id)&.name
+    when 'Owner'
+      # Sender resolves per-recipient at send time; no single name to
+      # show on the list view. FE renders a badge from the type instead.
+      "Recipient's owner"
     end
   rescue => e
     Rails.logger.warn "[campaigns] resolve_from_identity_name: #{e.message}"
