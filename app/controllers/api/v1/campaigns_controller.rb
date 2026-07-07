@@ -409,9 +409,20 @@ class Api::V1::CampaignsController < ApplicationController
     return render(json: { error: 'Generation not found' }, status: :not_found) unless generation
 
     plan_channel = generation.generated_plan['channel'] || 'email'
+    from_type = params[:from_identity_type] || (plan_channel == 'sms' ? 'Company' : 'User')
+    # Owner mode carries no fixed identity id — the sender resolves per
+    # recipient at send time. Don't silently override with current_user.id
+    # (that would turn the AI's Owner selection into a personal-mailbox
+    # campaign without the admin noticing).
+    from_id =
+      if from_type == 'Owner'
+        nil
+      else
+        params[:from_identity_id] || (plan_channel == 'sms' ? @company.id : current_user.id)
+      end
     sender = {
-      from_identity_type: params[:from_identity_type] || (plan_channel == 'sms' ? 'Company' : 'User'),
-      from_identity_id: params[:from_identity_id] || (plan_channel == 'sms' ? @company.id : current_user.id),
+      from_identity_type: from_type,
+      from_identity_id: from_id,
       from_display_name: params[:from_display_name],
       location_id: params[:location_id]
     }
