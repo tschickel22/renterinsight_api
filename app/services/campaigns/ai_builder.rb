@@ -143,6 +143,13 @@ module Campaigns
         # appear in the Leads/Contacts/Accounts tag dropdown for manual
         # subscription. Create them up front so both paths work.
         ensure_referenced_tags_exist!(filter_tree)
+        # Normalize AI-authored tag leaves so they match what
+        # CampaignBuilder produces manually: default a missing operator to
+        # tags_include (the AI has been observed emitting a leaf with no
+        # operator, which the UI then renders as a broken empty picker),
+        # and rewrite name-string values to the tag id so the FE
+        # TagsValueInput can display the tag chip properly.
+        normalize_tag_leaves!(filter_tree)
 
         campaign.create_campaign_audience!(
           source_type: audience['source_type'] || 'Lead',
@@ -194,7 +201,54 @@ module Campaigns
           into << v if v.is_a?(String)
         end
       end
+      # A leaf with field="tags" but no operator is treated as a tag
+      # condition for name-collection purposes too, so we auto-create
+      # even when the AI forgot the operator.
+      if op.empty? && node['field'].to_s == 'tags'
+        vals = node['value']
+        Array(vals).each do |v|
+          next if v.is_a?(Integer)
+          next if v.is_a?(String) && v =~ /\A\d+\z/
+          into << v if v.is_a?(String)
+        end
+      end
       Array(node['children']).each { |c| collect_tag_names(c, into) }
+    end
+
+    # Second pass over the filter tree: patch tag leaves in-place so the
+    # persisted tree matches what CampaignBuilder authors manually. Runs
+    # AFTER ensure_referenced_tags_exist! so the tags are guaranteed to
+    # exist and be resolvable by name.
+    def normalize_tag_leaves!(node)
+      return unless node.is_a?(Hash)
+      is_tag_leaf = node['field'].to_s == 'tags' || node['operator'].to_s.start_with?('tags_')
+      if is_tag_leaf
+        # Default the operator if the AI omitted it — the UI shows an
+        # empty operator picker otherwise. Multi-value defaults to
+        # tags_any_of, single-value defaults to tags_include.
+        if node['operator'].to_s.empty? || !node['operator'].to_s.start_with?('tags_')
+          node['operator'] = node['value'].is_a?(Array) && node['value'].length > 1 ? 'tags_any_of' : 'tags_include'
+        end
+        node['field'] = 'tags'
+        # Rewrite name-strings to ids so the FE tag chip displays the
+        # label. FilterCompiler handles either shape, but the FE tag
+        # dropdown keys tags by id.
+        vals = node['value']
+        rewritten = Array(vals).map { |v|
+          if v.is_a?(Integer) || (v.is_a?(String) && v =~ /\A\d+\z/)
+            v.to_i
+          elsif v.is_a?(String)
+            tag = @company.tags.find_by(name: v.strip)
+            tag ? tag.id : v
+          else
+            v
+          end
+        }
+        # Preserve scalar-vs-array shape: tags_include takes a scalar,
+        # tags_any_of takes an array.
+        node['value'] = node['operator'] == 'tags_any_of' ? rewritten : rewritten.first
+      end
+      Array(node['children']).each { |c| normalize_tag_leaves!(c) }
     end
 
     private
@@ -348,7 +402,7 @@ module Campaigns
             "audience": {
               "source_type": "Lead" | "Contact" | "Account",
               "additional_source_types": ["Lead" | "Contact" | "Account"],  // OPTIONAL; extra entity types to enroll with the SAME filter (dedupe by email). Use when the prompt says "leads and contacts", "customers and prospects", or asks for a newsletter to a shared tag set.
-              "filter_tree": { "type": "and", "children": [{ "field": "...", "operator": "equals|in|...", "value": ... }] }
+              "filter_tree": { "type": "and", "children": [{ "field": "...", "operator": "equals|in|tags_include|tags_any_of|tags_exclude|...", "value": ... }] }
             },
             "goal_config": { "primary_goal": "replied", "remove_on_goal_met": true, "additional_goals": [] },
             "send_window": { "business_hours_only": true },
@@ -424,13 +478,47 @@ module Campaigns
         - SMS steps must include opt-out language; "Reply STOP to unsubscribe" is auto-appended by the system, do NOT include it yourself.
         - SMS body max 1500 chars.
 
-        INVENTORY BLOCK (CRITICAL — read carefully):
-        - The system renders `inventory_block_config` as a grid of image CARDS (photo + year/make/model + price + "View details" button). This is NOT a button block — it's the actual inventory.
-        - Whenever the user asks to "show inventory", "show units", "show homes", "show images", "showcase", "feature homes/units", "photos", "gallery", "highlight", "list new arrivals", or provides an example email with inventory photos: you MUST emit an `inventory_block_config` object on the relevant step. Do NOT substitute a plain `{ "type": "button", "text": "View inventory" }` block for this — the button loses all the images and details the user asked for.
-        - Weekly/monthly digests, "new arrivals", "featured this week", "top picks" — always use `inventory_block_config`, never a bare button.
-        - When the request implies photos ("show images", "showcase", "gallery", "featured", "photos"): set `filters.require_images: true` and `fallback: "skip_block"` so the block only renders cards that actually have images.
-        - Only use a `{ "type": "button" }` block instead of `inventory_block_config` when the user explicitly says "no inventory" or "just a link/button to browse".
-        - A single step can have text blocks AROUND the inventory block; the inventory block itself replaces any prior button-only "browse" section.
+        INVENTORY BLOCK (CRITICAL — this is the #1 mistake to avoid):
+        - `inventory_block_config` on a step is what renders REAL VEHICLES with photos. The system renders it as a grid of image CARDS: each card = photo + year/make/model + price + "View details" link. This is NOT a button — it IS the inventory.
+        - When the user asks for ANY of: "show images", "show inventory", "show units", "show homes", "showcase", "feature homes/units", "photos", "pictures", "gallery", "highlight", "list new arrivals", "top picks", "weekly favorites", "featured this week", OR provides a sample email that includes inventory photos: you MUST set `inventory_block_config` on the relevant step to a non-null object. The button block `{ "type": "button", "text": "View inventory", "href": "{{public_inventory_url}}" }` DOES NOT satisfy any of these requests — it just links to the website. Do not substitute it.
+        - Weekly digest / newsletter / "our weekly favorites" campaigns ALWAYS use `inventory_block_config`. A recurring_digest with `inventory_block_config: null` is broken by definition.
+        - When the request implies photos ("show images", "showcase", "gallery", "featured", "photos", "pictures", "weekly favorites"): set `filters.require_images: true` and `fallback: "skip_block"`.
+        - The `body_blocks` array should have text blocks around the inventory (e.g. a greeting text block first, then a closing text block after) — NOT a button-only body. If you produce a body_blocks array with only text + button blocks for a weekly digest, that is a bug.
+        - Only use a bare button block instead of `inventory_block_config` when the user explicitly says "no inventory in this email" or "just a link to browse".
+
+        WORKED EXAMPLE — user says "weekly favorites email showing our inventory with photos":
+        {
+          "campaign_type": "recurring_digest",
+          "channel": "email",
+          "steps": [{
+            "wait_days": 0,
+            "wait_hours": 0,
+            "subject": "This week's favorites at {{company.name}}",
+            "preheader": "New homes worth a look",
+            "body_blocks": [
+              { "type": "text", "html": "<p>Hi {{first_name}},</p><p>Here are this week's favorites from our lot.</p>" },
+              { "type": "text", "html": "<p>See something you like? Reply to this email or book a walk-through — we'd love to show it to you in person.</p>" }
+            ],
+            "inventory_block_config": {
+              "mode": "category_based",
+              "sort": "newest",
+              "max_units": 6,
+              "fallback": "skip_block",
+              "filters": {
+                "statuses": ["available", "available_to_order"],
+                "require_images": true
+              }
+            }
+          }]
+        }
+        Note: the inventory block sits BETWEEN the two text blocks in the render pipeline — you do NOT need to put it inside body_blocks; the system inserts it automatically. Just leave the text blocks doing intro/outro copy.
+
+        TAG CONDITIONS (audience.filter_tree):
+        - To gate a campaign on a tag, use a leaf with `field: "tags"`.
+        - Valid tag operators: "tags_include" (has this tag), "tags_any_of" (has ANY of these tags), "tags_exclude" (does NOT have this tag).
+        - `value` is a TAG NAME STRING (e.g. "weekly-favorites"), or an ARRAY of tag names for tags_any_of. Do NOT use "equals" or "in" for tags — those operators are for regular columns and will silently fail.
+        - Example: { "type": "and", "children": [ { "field": "tags", "operator": "tags_include", "value": "weekly-favorites" } ] }
+        - If the tag doesn't exist yet the system will auto-create it on this company, so you can invent a sensible name like "weekly-favorites" or "vip-buyers" and it will show up in the tag dropdown for the admin to assign to recipients.
 
         VERTICAL CUES:
         - "MHI show" / "retailer" / "dealer" -> B2B selling DMS
