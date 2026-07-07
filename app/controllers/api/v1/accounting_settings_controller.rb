@@ -4,7 +4,14 @@ class Api::V1::AccountingSettingsController < ApplicationController
   before_action :set_company_scope
 
   def show
-    return unless authorize_action!('accounting', 'read')
+    # Sales Reps hit this endpoint on every deal + account page open — the
+    # FE reads tax rates and default terms out of it for deal calculation.
+    # Gating on accounting:read locked out anyone without full accounting
+    # access, which is what triggered the "permission denied" report even
+    # though the user had full deals perms. Downgrade the read gate so
+    # deals:create also satisfies it; update stays on accounting:update
+    # (below) since only Finance/Admin should mutate GL account defaults.
+    return unless authorize_settings_read!
 
     settings = AccountingSettings.for_company(@company)
     render json: settings_json(settings)
@@ -27,7 +34,7 @@ class Api::V1::AccountingSettingsController < ApplicationController
   end
 
   def tax_rates_for_state
-    return unless authorize_action!('accounting', 'read')
+    return unless authorize_settings_read!
 
     state = params[:state].to_s.strip.upcase
     if state.blank?
@@ -46,6 +53,21 @@ class Api::V1::AccountingSettingsController < ApplicationController
   end
 
   private
+
+  # Read gate for accounting settings. Either accounting:read (Finance /
+  # Company Admin — historical semantic) OR deals:create (Sales Rep and
+  # anyone else who writes deals — needs tax rates + default terms to
+  # compute the deal). Renders 403 and returns false on failure so the
+  # caller can `return unless`. Mirrors authorize_action!'s error shape.
+  def authorize_settings_read!
+    return true if can?('accounting', 'read') || can?('deals', 'create')
+    Rails.logger.warn "[Authorization] DENIED for user #{current_user&.id}: accounting_settings:read (needs accounting:read OR deals:create)"
+    render json: {
+      error: 'Access denied',
+      required_permission: 'accounting:read OR deals:create'
+    }, status: :forbidden
+    false
+  end
 
   # Canonical settings serialization — used by BOTH show and update so the FE always
   # receives the nested GL-account associations and effective tax accounts. Keeping this
