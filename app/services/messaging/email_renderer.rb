@@ -115,9 +115,21 @@ module Messaging
       }
     end
 
+    # "Browse all inventory" link — used both by the {{public_inventory_url}}
+    # merge tag and the show_cta fallback when an inventory block resolves
+    # to zero units. Must point at the FE embed route, not the API host,
+    # or recipients get a 404 from the API service.
     def public_inventory_url
-      return nil unless @company.respond_to?(:public_inventory_token) && @company.public_inventory_token.present?
-      "#{@base_url.to_s.chomp('/')}/public/inventory/#{@company.public_inventory_token}"
+      token = @company.try(:public_inventory_token)
+      return nil if token.blank?
+      "#{frontend_base_url}/embed/inventory?token=#{token}"
+    end
+
+    def frontend_base_url
+      @company.try(:dms_frontend_url).presence ||
+        ENV['DMS_FRONTEND_URL'].presence ||
+        ENV['FRONTEND_URL'].presence ||
+        'https://staging-dms.renterinsight.com'
     end
 
     # ---- Attachment handling for campaign emails ----

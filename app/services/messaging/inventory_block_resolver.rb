@@ -141,9 +141,28 @@ module Messaging
       }
     end
 
+    # Per-vehicle detail link. Must point at the FE (public_inventory_token
+    # gates access; the FE route is /public/inventory/:vehicleId with the
+    # token as a query param). The previous shape used @base_url (the API
+    # host) with a path-style token — that's not a route the FE ships and
+    # produced 404s when recipients clicked "View details" in the email.
+    # Mirrors InventoryEmailBlockBuilder#build_public_inventory_url so the
+    # nurture and campaign flows produce identical links.
     def public_url(v)
-      return '#' unless @base_url && @company.respond_to?(:public_inventory_token) && @company.public_inventory_token.present?
-      "#{@base_url.chomp('/')}/public/inventory/#{@company.public_inventory_token}/vehicles/#{v.id}"
+      token = @company.try(:public_inventory_token)
+      return '#' if token.blank?
+      "#{frontend_base_url}/public/inventory/#{v.id}?token=#{token}&company_id=#{@company.id}"
+    end
+
+    # DMS frontend URL — same lookup order the nurture builder uses.
+    # company#dms_frontend_url wins for tenants with a custom domain;
+    # DMS_FRONTEND_URL / FRONTEND_URL cover the shared staging + prod
+    # deploys; staging fallback keeps preview working without env config.
+    def frontend_base_url
+      @company.try(:dms_frontend_url).presence ||
+        ENV['DMS_FRONTEND_URL'].presence ||
+        ENV['FRONTEND_URL'].presence ||
+        'https://staging-dms.renterinsight.com'
     end
   end
 end
