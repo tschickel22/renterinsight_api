@@ -43,7 +43,11 @@ module Campaigns
 
       step_channel = step.effective_channel
       if step_channel == 'email'
-        return mark_failed('no_valid_email_connection') if @campaign.resolve_email_connection_for_step.nil?
+        # Owner mode resolves per-recipient — pass the enrollment's
+        # recipient so we look up THIS recipient's owner's connection,
+        # not a global campaign-wide one.
+        conn_preflight = @campaign.resolve_email_connection_for_step(recipient: recipient)
+        return mark_failed('no_valid_email_connection') if conn_preflight.nil?
       else
         return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender_for_step.nil?
       end
@@ -99,7 +103,7 @@ module Campaigns
     end
 
     def deliver_email(step, send_record)
-      conn = @campaign.resolve_email_connection_for_step
+      conn = @campaign.resolve_email_connection_for_step(recipient: recipient)
       rendered = Messaging::EmailRenderer.new(
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: send_record, company: @company, base_url: @base_url
