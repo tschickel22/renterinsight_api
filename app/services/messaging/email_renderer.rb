@@ -21,6 +21,25 @@ module Messaging
       blocks = Array(@step.body_blocks)
       inventory_block = blocks.find { |b| b.is_a?(Hash) && (b['type'] == 'inventory' || b[:type] == 'inventory') }
 
+      # AI-authored plans put the config on the STEP column and produce a
+      # body_blocks list of just text + footer — no marker block. Manual
+      # CampaignBuilder puts the config on the block itself. Support both
+      # by synthesizing a marker inside body_blocks (just before the
+      # unsubscribe footer, or at the end) whenever the step column has a
+      # config and body_blocks lacks a marker. The step-column config
+      # remains the source of truth via the existing precedence below.
+      step_config = @step.try(:inventory_block_config)
+      if inventory_block.nil? && step_config.is_a?(Hash) && step_config.any?
+        synthetic = { 'type' => 'inventory' }
+        footer_idx = blocks.index { |b| b.is_a?(Hash) && (b['type'] == 'footer_unsubscribe' || b[:type] == 'footer_unsubscribe') }
+        blocks = if footer_idx
+                   blocks[0...footer_idx] + [synthetic] + blocks[footer_idx..]
+                 else
+                   blocks + [synthetic]
+                 end
+        inventory_block = synthetic
+      end
+
       if inventory_block
         config = @step.try(:inventory_block_config).presence || inventory_block
         result = InventoryBlockResolver.new(
