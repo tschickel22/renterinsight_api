@@ -1,11 +1,19 @@
 default: &default
+  # polling_interval bumped 1 → 5 to reduce constant DB churn from the
+  # dispatcher's ready-job poll. Job pickup latency goes from ~1s to
+  # ~5s, which is fine for every current job (email/sms/reminder
+  # dispatch is already async from the user's point of view). Cuts
+  # dispatcher-driven connection load by ~5x.
   dispatchers:
-    - polling_interval: 1
+    - polling_interval: 5
       batch_size: 500
   workers:
     - queues: "*"
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>
+      # Worker polling stays fast so once a job is dispatched it
+      # actually starts running promptly. Only the dispatcher's ready
+      # scan needed slowing down.
       polling_interval: 0.1
 
 development:

@@ -9,6 +9,15 @@ default: &default
   encoding: unicode
   pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 10 } %>
   timeout: 5000
+  # Prune connections whose backend has died (e.g. after a PG restart)
+  # instead of letting a stale handle sit in the pool until the next
+  # checkout raises PG::ConnectionBad. Reaper runs every 10s and
+  # discards any connection that failed an is_alive? ping.
+  reaping_frequency: 10
+  # Cap the wait for an available connection so a stampede on a
+  # degraded DB fails fast instead of piling requests up on threads
+  # that will time out later anyway.
+  checkout_timeout: 5
 
 development:
   <<: *default
