@@ -43,10 +43,11 @@ module Api
 
         bucket_name = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
         obj = s3.bucket(bucket_name).object(s3_key)
+        # The bucket has Object Ownership = Bucket Owner Enforced, so per-object
+        # ACLs are rejected. Public read is granted via the bucket policy instead.
         obj.put(
           body: image_file.read,
-          content_type: image_file.content_type,
-          acl: 'public-read'
+          content_type: image_file.content_type
         )
 
         full_url = obj.public_url
