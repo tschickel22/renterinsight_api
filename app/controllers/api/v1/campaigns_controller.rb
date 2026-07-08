@@ -230,15 +230,30 @@ class Api::V1::CampaignsController < ApplicationController
 
     step_index = @campaign.campaign_steps.active.ordered.pluck(:id).index(step.id) || 0
 
+    # Owner-mode campaigns resolve the sender per-recipient (each Lead/Contact/
+    # Account's rep), so there's no campaign-wide connection to preflight.
+    # For test sends we can't look up a real owner (the "recipient" is the
+    # admin running the test), so we route the test through platform SES and
+    # let the admin type any address they want to receive the test at.
+    owner_mode = @campaign.try(:owner_identity?)
+
     if @campaign.email_channel?
-      return render(json: { error: 'No valid email connection for this campaign' }, status: :unprocessable_entity) if @campaign.resolve_email_connection.nil?
-      test_address = current_user.email
-      return render(json: { error: 'Your user has no email on file for test send' }, status: :unprocessable_entity) if test_address.blank?
+      unless owner_mode
+        return render(json: { error: 'No valid email connection for this campaign' }, status: :unprocessable_entity) if @campaign.resolve_email_connection.nil?
+      end
+      test_address = params[:test_email].to_s.strip.presence || current_user.email
+      return render(json: { error: 'Enter a test email address' }, status: :unprocessable_entity) if test_address.blank?
     else
       return render(json: { error: 'No active SMS number for this company' }, status: :unprocessable_entity) if @campaign.resolve_sms_sender.nil?
       test_address = current_user.try(:phone)
       return render(json: { error: 'Your user has no phone number on file for SMS test' }, status: :unprocessable_entity) if test_address.blank?
     end
+
+    metadata = { 'test_send' => 'true', 'sent_by_user_id' => current_user.id }
+    # Signal to CampaignSender to skip the per-recipient owner resolution
+    # and send via platform SES for this one enrollment. Only meaningful for
+    # Owner-mode campaigns — everyone else already has a resolved connection.
+    metadata['test_platform_send'] = 'true' if owner_mode && @campaign.email_channel?
 
     enrollment = CampaignEnrollment.find_or_initialize_by(
       campaign_id: @campaign.id, recipient_type: 'User', recipient_id: current_user.id
@@ -247,7 +262,7 @@ class Api::V1::CampaignsController < ApplicationController
       company_id: @company.id, status: 'pending', current_step_index: step_index,
       email_address_snapshot: @campaign.email_channel? ? test_address : nil,
       sms_phone_snapshot: @campaign.sms_channel? ? test_address : nil,
-      metadata: { 'test_send' => 'true', 'sent_by_user_id' => current_user.id }
+      metadata: metadata
     )
     enrollment.save!
 
