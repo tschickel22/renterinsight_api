@@ -24,7 +24,11 @@ module Api
         # DEFAULT VIEW SCOPING: non-admins see only tasks assigned to them
         # unless they explicitly ask for a broader view (params[:view] == 'all').
         # Mirrors the Deals#index pattern so a rep doesn't see other reps' tasks.
-        unless current_user.effective_admin? || params[:view] == 'all'
+        # Exception: when scoping to a specific taskable (e.g. all reminders on a
+        # service ticket), anyone allowed to see the ticket should see every
+        # reminder on it, not just their own.
+        scoping_by_taskable = params[:taskable_type].present? && params[:taskable_id].present?
+        unless current_user.effective_admin? || params[:view] == 'all' || scoping_by_taskable
           tasks = tasks.where(assigned_to_id: current_user.id)
         end
 
@@ -33,6 +37,8 @@ module Api
         tasks = tasks.where(priority: params[:priority]) if params[:priority].present?
         tasks = tasks.where(task_module: params[:module]) if params[:module].present?
         tasks = tasks.where(assigned_to_id: params[:assigned_to_id]) if params[:assigned_to_id].present?
+        tasks = tasks.where(taskable_type: params[:taskable_type]) if params[:taskable_type].present?
+        tasks = tasks.where(taskable_id: params[:taskable_id]) if params[:taskable_id].present?
         tasks = tasks.overdue if params[:overdue] == 'true'
         tasks = tasks.active if params[:active] == 'true'
         
