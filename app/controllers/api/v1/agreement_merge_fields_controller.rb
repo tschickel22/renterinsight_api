@@ -8,7 +8,11 @@ module Api
       def index
         return unless authorize_action!('agreements', 'read')
 
-        render json: { merge_fields: decorate_with_source_metadata(merge_field_definitions) }
+        render json: {
+          merge_fields: decorate_with_source_metadata(merge_field_definitions),
+          line_item_values: flattened_line_item_values,
+          line_item_counts: line_item_counts,
+        }
       end
 
       private
@@ -68,6 +72,27 @@ module Api
         rescue => e
           Rails.logger.error("[AgreementMergeFields] Invoice lookup failed: #{e.message}")
         end
+      end
+
+      # Flattens deal line items to indexed keys (deal.line_items[0].description, ...)
+      # so the AgreementBuilder preview + Fill Form step can resolve the same keys
+      # that LineItemsTablePlacer generates for insert-table placements.
+      # Uses the same service that PDF generation uses — single source of truth.
+      def flattened_line_item_values
+        return {} unless @deal
+        values = {}
+        ::Agreements::LineItemValuesFlattener.apply!(values, @deal)
+        values
+      end
+
+      # Actual per-array line-item counts so the frontend can skip overflow rows
+      # (template has 12 rows but the deal only has 5 line items → hide rows 6-12).
+      def line_item_counts
+        return {} unless @deal
+        all_items = ::Agreements::DealLineItemsResolver.call(@deal)
+        ::Agreements::LineItemValuesFlattener
+          .build_arrays_by_key(all_items)
+          .transform_values(&:length)
       end
 
       def merge_field_definitions
