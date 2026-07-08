@@ -44,9 +44,30 @@ module Reports
         return {} if vehicle_ids.empty?
 
         @company.deals
-                .where(vehicle_id: vehicle_ids, stage: OPEN_STAGES, deleted_at: nil)
+                .where(vehicle_id: vehicle_ids, stage: open_stage_keys, deleted_at: nil)
                 .includes(:primary_salesperson, :secondary_salesperson, :account, :contact, :owner)
                 .group_by(&:vehicle_id)
+      end
+    end
+
+    # Open = every configured pipeline stage that isn't a terminal
+    # won (probability 100) or lost (probability 0) bucket. Reads from
+    # the tenant's pipeline_stages setting via Company#pipeline_stage_keys
+    # so custom stages ("construction", "factory_order", "delivery_pending",
+    # etc.) that dealers add for MH/RV workflows still count as active
+    # pipeline for report purposes. Falls back to the hardcoded default
+    # list when a company hasn't customized its pipeline.
+    def open_stage_keys
+      @open_stage_keys ||= begin
+        keys = @company.pipeline_stage_keys
+        if keys.blank?
+          OPEN_STAGES
+        else
+          keys.reject do |k|
+            prob = @company.pipeline_stage_probability(k).to_i
+            prob == 100 || prob == 0
+          end
+        end
       end
     end
 
