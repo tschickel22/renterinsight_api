@@ -37,6 +37,12 @@ module Api
       def create
         activity = @deal.activities.build(activity_params)
         activity.user = current_user
+        # Default assignee to the creator so tasks land on someone's
+        # workqueue instead of sitting Unassigned. Mirrors the Lead /
+        # Contact / Account activity create flows — Deal was the one
+        # outlier. Explicit assigned_to_id in params still wins because
+        # of ||=.
+        activity.assigned_to ||= current_user
 
         if activity.save
           render json: activity_json(activity), status: :created
