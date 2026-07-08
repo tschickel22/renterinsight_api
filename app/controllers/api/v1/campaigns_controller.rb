@@ -200,6 +200,30 @@ class Api::V1::CampaignsController < ApplicationController
 
   def resume
     return unless authorize_action!('campaigns', 'update')
+
+    # Recurring-digest campaigns that landed as completed (pre-fix bug where
+    # the scheduler finalized recurring campaigns missing a cron) can be
+    # reactivated here — auto-heal the cron if blank and reschedule to the
+    # next boundary. Paused campaigns resume to running as before.
+    if @campaign.status == 'completed' && @campaign.campaign_type == 'recurring_digest'
+      cron = @campaign.recurrence_cron.presence || '0 9 * * MON'
+      @campaign.update!(recurrence_cron: cron)
+      next_at = @campaign.next_recurrence_at
+      if next_at.nil?
+        return render(json: { error: 'Recurrence cron is invalid. Fix it in Settings and try again.' }, status: :unprocessable_entity)
+      end
+      @campaign.update!(
+        status: 'scheduled',
+        scheduled_at: next_at,
+        completed_at: nil,
+        audience_snapshot_at: nil
+      )
+      if defined?(WebhookService)
+        WebhookService.fire(company_id: @company.id, event: 'campaign.resumed', payload: { campaign_id: @campaign.id, next_send_at: next_at.iso8601 })
+      end
+      return render json: campaign_json(@campaign, full: true)
+    end
+
     return render(json: { error: "Cannot resume #{@campaign.status} campaign" }, status: :unprocessable_entity) unless @campaign.status == 'paused'
     @campaign.update!(status: 'running')
     if defined?(WebhookService)
