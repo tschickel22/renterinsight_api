@@ -43,11 +43,17 @@ module Campaigns
 
       step_channel = step.effective_channel
       if step_channel == 'email'
-        # Owner mode resolves per-recipient — pass the enrollment's
-        # recipient so we look up THIS recipient's owner's connection,
-        # not a global campaign-wide one.
-        conn_preflight = @campaign.resolve_email_connection_for_step(recipient: recipient)
-        return mark_failed('no_valid_email_connection') if conn_preflight.nil?
+        # test_platform_send lets an admin dry-run an Owner-mode campaign
+        # without binding to a real Lead/Contact/Account: the test routes
+        # through platform SES so it doesn't need any specific owner's
+        # OAuth connection to exist. Skips this preflight only for that path.
+        unless test_platform_send?
+          # Owner mode resolves per-recipient — pass the enrollment's
+          # recipient so we look up THIS recipient's owner's connection,
+          # not a global campaign-wide one.
+          conn_preflight = @campaign.resolve_email_connection_for_step(recipient: recipient)
+          return mark_failed('no_valid_email_connection') if conn_preflight.nil?
+        end
       else
         return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender_for_step.nil?
       end
@@ -74,6 +80,13 @@ module Campaigns
 
     def test_send?
       @enrollment.metadata.is_a?(Hash) && @enrollment.metadata['test_send'].to_s == 'true'
+    end
+
+    # True when the controller flagged this enrollment as an Owner-mode
+    # test send that should bypass per-recipient owner resolution and go
+    # out via platform SES instead. See CampaignsController#test_send.
+    def test_platform_send?
+      @enrollment.metadata.is_a?(Hash) && @enrollment.metadata['test_platform_send'].to_s == 'true'
     end
 
     def advance_unless_test
@@ -103,7 +116,11 @@ module Campaigns
     end
 
     def deliver_email(step, send_record)
-      conn = @campaign.resolve_email_connection_for_step(recipient: recipient)
+      # test_platform_send skips per-recipient owner resolution and sends
+      # via platform SES so an Owner-mode campaign can be smoke-tested
+      # without any owner's OAuth connection being wired up. The rendered
+      # content is unchanged so the test still reflects the real campaign.
+      conn = test_platform_send? ? nil : @campaign.resolve_email_connection_for_step(recipient: recipient)
       rendered = Messaging::EmailRenderer.new(
         step: step, recipient: recipient, campaign: @campaign,
         campaign_send: send_record, company: @company, base_url: @base_url
@@ -115,13 +132,17 @@ module Campaigns
       tracked_link_records  = Array(rendered[:tracked_link_records])
       attachment_metadata   = Array(rendered[:attachment_metadata])
 
-      from_address = formatted_from_for(conn)
+      from_address = formatted_from_for(conn) || platform_test_from_address
       reply_to = "reply+campaign-#{send_record.id}@#{ENV['INBOUND_EMAIL_DOMAIN'].presence || 'mail.renterinsight.com'}"
 
-      provider_sym = case conn.try(:provider).to_s
-                     when 'oauth_gmail'   then :oauth_google
-                     when 'oauth_outlook' then :oauth_microsoft
-                     else :smtp
+      provider_sym = if test_platform_send?
+                       :aws_ses
+                     else
+                       case conn.try(:provider).to_s
+                       when 'oauth_gmail'   then :oauth_google
+                       when 'oauth_outlook' then :oauth_microsoft
+                       else :smtp
+                       end
                      end
 
       metadata_hash = {
@@ -225,6 +246,16 @@ module Campaigns
     def formatted_from_for(conn)
       return nil unless conn
       conn.try(:email_address) || conn.try(:from_email_address) || conn.try(:email)
+    end
+
+    # From-address for test_platform_send. Uses the campaign's configured
+    # display name (if any) wrapped around a platform-verified inbox. Falls
+    # back to a hardcoded no-reply so we always render a valid RFC-5322
+    # address even when the campaign has no display name set.
+    def platform_test_from_address
+      base = ENV['PLATFORM_TEST_FROM'].presence || 'no-reply@renterinsight.com'
+      name = @campaign.try(:from_display_name).to_s.strip
+      name.present? ? "#{name} <#{base}>" : base
     end
 
     def handle_failure(result, send_record)

@@ -43,28 +43,37 @@ class CampaignSchedulerJob < ApplicationJob
       remaining = c.campaign_enrollments.where(status: %w[pending active]).count
       next if remaining.positive?
 
-      if c.recurring?
-        # Recurring digest — don't finalize. Reset the campaign to
-        # 'scheduled' with scheduled_at at the next cron boundary so
-        # promote_scheduled_to_running picks it up again for the next
-        # cycle. Clear audience_snapshot_at so the enroller pulls a
-        # fresh set of matching contacts/leads (i.e. newly-tagged
-        # subscribers get pulled into the next send). Old enrollments
-        # stay for history/analytics but won't re-dispatch.
+      # Recurring-digest campaigns cycle forever — the user's INTENT is
+      # "keep sending". Even when recurrence_cron is blank (older AI-generated
+      # rows before the accept path persisted cadence), auto-heal by
+      # applying the safe weekly-Mon-9AM default and keep the campaign
+      # scheduled for the next boundary. Never mark a recurring_digest as
+      # completed here; a rep asked "recurring campaigns should never be
+      # complete" and they're right.
+      if c.campaign_type == 'recurring_digest'
+        if c.recurrence_cron.blank?
+          Rails.logger.warn "[CampaignSchedulerJob] Campaign #{c.id} is recurring_digest but recurrence_cron is blank — applying weekly-Mon-9AM default"
+          c.update_column(:recurrence_cron, '0 9 * * MON')
+          c.reload
+        end
         next_at = c.next_recurrence_at
         if next_at.nil?
-          Rails.logger.warn "[CampaignSchedulerJob] Campaign #{c.id} is recurring but next_recurrence_at is nil; falling through to complete"
-        else
-          c.update!(
-            status: 'scheduled',
-            scheduled_at: next_at,
-            audience_snapshot_at: nil
-          )
-          if defined?(WebhookService)
-            WebhookService.fire(company_id: c.company_id, event: 'campaign.cycle_completed', payload: { campaign_id: c.id, next_send_at: next_at.iso8601 })
-          end
+          # Fugit couldn't parse the cron even after the auto-heal (malformed
+          # custom expression from a manual edit). Keep the campaign running
+          # rather than finalizing so an admin can fix the cron without
+          # losing the audience — no cycle happens until the cron parses.
+          Rails.logger.warn "[CampaignSchedulerJob] Campaign #{c.id} recurrence_cron did not parse; leaving in running state for admin to fix"
           next
         end
+        c.update!(
+          status: 'scheduled',
+          scheduled_at: next_at,
+          audience_snapshot_at: nil
+        )
+        if defined?(WebhookService)
+          WebhookService.fire(company_id: c.company_id, event: 'campaign.cycle_completed', payload: { campaign_id: c.id, next_send_at: next_at.iso8601 })
+        end
+        next
       end
 
       c.update!(status: 'completed', completed_at: Time.current)
