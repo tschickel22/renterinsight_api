@@ -58,6 +58,7 @@ class WorkqueueService
     closing_week_days:      7,
     tasks_week_days:        7,
     replied_window_days:    7,
+    show_empty_queues:      true,
     hidden_queues:          [],
   }.freeze
 

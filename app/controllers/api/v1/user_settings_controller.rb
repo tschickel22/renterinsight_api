@@ -347,11 +347,19 @@ module Api
           reminders_window_days
           closing_week_days
           tasks_week_days
+          replied_window_days
         ]
 
+        # Kept in sync with WorkqueueService::QUEUES — any queue the user can
+        # see in the Preferences UI must be here, or unchecking it is silently
+        # discarded by the &-filter below.
         valid_queue_ids = %w[
+          inventory_hot_interest
+          engagement_opened_today engagement_opened_week
+          engagement_clicked_today engagement_hot_reopeners
           activity_tasks_today activity_tasks_week activity_meetings_today
           activity_calls_due activity_reminders_upcoming
+          leads_replied contacts_replied
           leads_mine leads_new_24h leads_stale_48h
           deals_mine deals_closing_month deals_closing_week deals_stale_30d
           tickets_mine tickets_awaiting_parts tickets_ready_for_invoice
@@ -365,6 +373,13 @@ module Api
           value = raw[key].to_i
           # Clamp to 1..365 days so a fat-fingered 999999 doesn't wreck queries.
           result[key] = value.clamp(1, 365)
+        end
+
+        # Boolean toggle: when true (default), the sidebar shows every enabled
+        # queue even if it currently has 0 items. When false, empty queues
+        # auto-hide until they get data.
+        if raw.key?(:show_empty_queues)
+          result[:show_empty_queues] = ActiveModel::Type::Boolean.new.cast(raw[:show_empty_queues])
         end
 
         if raw.key?(:hidden_queues)
