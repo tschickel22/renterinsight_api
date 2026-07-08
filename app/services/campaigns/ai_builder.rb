@@ -112,12 +112,22 @@ module Campaigns
         recurrence_cron = '0 9 * * MON' if recurrence_cron.blank? && campaign_type == 'recurring_digest'
         recurrence_cron = nil if campaign_type != 'recurring_digest'
 
+        # Recurring digest campaigns pull a fresh audience each cycle so
+        # newly-tagged Leads/Contacts land in the next send — that only
+        # works when audience_mode is 'dynamic'. Static locks the enrollment
+        # list to whoever matched at start-time and never re-runs the
+        # audience filter, which defeats the whole point of a recurring
+        # newsletter. Force dynamic when the AI omits the field (or
+        # incorrectly picks static) for recurring_digest.
+        audience_mode = plan['audience_mode'].presence || (campaign_type == 'recurring_digest' ? 'dynamic' : 'static')
+        audience_mode = 'dynamic' if campaign_type == 'recurring_digest'
+
         campaign = @company.campaigns.create!(
           name: plan['name'].presence || "AI Campaign #{Time.current.strftime('%b %-d')}",
           description: plan['description'],
           status: 'draft',
           campaign_type: campaign_type,
-          audience_mode: plan['audience_mode'].presence || 'static',
+          audience_mode: audience_mode,
           channel: plan['channel'].presence || 'email',
           from_identity_type: sender_params[:from_identity_type],
           from_identity_id: sender_params[:from_identity_id],
@@ -410,7 +420,7 @@ module Campaigns
             "description": "One-sentence summary",
             "campaign_type": "blast" | "drip" | "triggered" | "recurring_digest",
             "channel": "email" | "sms",
-            "audience_mode": "static" | "dynamic",
+            "audience_mode": "static" | "dynamic",  // ALWAYS "dynamic" for recurring_digest — new subscribers/tagged contacts must land in the next cycle's send. Use "static" only for one-shot blasts where the recipient list should freeze at launch.
             "recurrence_cron": "0 9 * * MON",  // REQUIRED for recurring_digest. Fugit 5-field cron: "min hour dom mon dow". Use "0 9 * * MON" for weekly Monday 9am (safe default), "0 9 * * FRI" for Friday, "0 9 1 * *" for monthly-on-the-1st. Omit or set null for non-recurring types.
             "audience": {
               "source_type": "Lead" | "Contact" | "Account",
