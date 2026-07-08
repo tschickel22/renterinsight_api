@@ -939,6 +939,15 @@ module Api
         contacts = contacts.with_email if params[:has_email] == 'true'
         contacts = contacts.with_phone if params[:has_phone] == 'true'
 
+        # Owner filtering — mirrors AccountsController and the FE picker that
+        # sends owner_id=<user_id> for a specific rep or 'null' for
+        # unassigned. Previously ignored, which made the "Owner" dropdown on
+        # the contacts list decorative (and made the new "default to my
+        # contacts" behavior look broken).
+        if params[:owner_id].present?
+          contacts = params[:owner_id] == 'null' ? contacts.where(owner_id: nil) : contacts.where(owner_id: params[:owner_id])
+        end
+
         # Tag filtering
         if params[:tag_ids].present?
           tag_ids = params[:tag_ids].split(',').map(&:to_i)

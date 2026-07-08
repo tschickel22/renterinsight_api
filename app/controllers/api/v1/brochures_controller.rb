@@ -373,6 +373,44 @@ module Api
           disclaimerText: loan_settings['calculator_disclaimer_text'] || 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.'
         }
 
+        # Company address + phone alongside branding so the print/screen
+        # header can show a full "Sold by <name> / <address> / <phone>" block
+        # without a second API round-trip. Prior payload was just name +
+        # branding.
+        company_payload = {
+          name: company.name,
+          phone: company.try(:phone),
+          address_line1: company.try(:address_line1),
+          address_line2: company.try(:address_line2),
+          city: company.try(:city),
+          state: company.try(:state),
+          zip_code: company.try(:zip_code),
+          branding: branding
+        }
+
+        # Brochure-scoped location wins for branding when set (each rooftop
+        # gets its own name/address/phone/logo). Location logo is optional —
+        # the FE falls back to company.branding.logo when absent, so we
+        # always surface the location payload if a location_id is present,
+        # even when logo is nil.
+        location_payload = nil
+        if @brochure.location_id.present?
+          loc = @brochure.try(:location) || Location.find_by(id: @brochure.location_id)
+          if loc
+            location_payload = {
+              id: loc.id,
+              name: loc.try(:name),
+              phone: loc.try(:phone),
+              address_line1: loc.try(:address_line1),
+              address_line2: loc.try(:address_line2),
+              city: loc.try(:city),
+              state: loc.try(:state),
+              zip_code: loc.try(:zip_code),
+              logo: loc.try(:logo)  # nil is fine — FE falls back to company logo
+            }
+          end
+        end
+
         render json: {
           brochure: {
             id: @brochure.public_id,
@@ -383,10 +421,8 @@ module Api
             vehicles: vehicles,
             viewCount: @brochure.view_count,
             createdAt: @brochure.created_at,
-            company: {
-              name: company.name,
-              branding: branding
-            },
+            company: company_payload,
+            location: location_payload,
             calculatorSettings: calculator_settings
           }
         }
