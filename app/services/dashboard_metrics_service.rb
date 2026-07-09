@@ -2023,10 +2023,20 @@ class DashboardMetricsService
       lead_converted = @company.leads.where(owner_id: user.id, status: 'converted').where(created_at: range).count
       conversion_rate = lead_total.positive? ? (lead_converted.to_f / lead_total * 100).round(1) : 0.0
 
-      name = [user.first_name, user.last_name].compact.join(' ').presence || user.name.presence || user.email
+      full_name = [user.first_name, user.last_name].compact.join(' ').presence || user.name.presence || user.email
+      # Split for the frontend, which formats "First L." itself. Fall back to the
+      # full name in first_name if we couldn't split it (e.g. email-only users).
+      first_name, last_name =
+        if user.first_name.present? || user.last_name.present?
+          [user.first_name.to_s, user.last_name.to_s]
+        else
+          [full_name, '']
+        end
       {
         user_id: user.id,
-        name: name,
+        name: full_name,
+        first_name: first_name,
+        last_name: last_name,
         avatar_url: user.try(:avatar_url),
         closed_count: closed_count,
         closed_value: closed_value,
@@ -2035,6 +2045,7 @@ class DashboardMetricsService
         pipeline_value: pipeline_value,
         formatted_pipeline_value: format_currency(pipeline_value),
         activities: activities,
+        activity_count: activities,
         conversion_rate: conversion_rate
       }
     end
@@ -2103,16 +2114,26 @@ class DashboardMetricsService
       end.sort_by { |row| -row[:count] }
     end
 
-    deals_payload = stale.order(Arel.sql('COALESCE(deals.last_activity_at, deals.created_at) ASC')).limit(20).map do |d|
+    deals_payload = stale.includes(:account, :contact)
+                         .order(Arel.sql('COALESCE(deals.last_activity_at, deals.created_at) ASC'))
+                         .limit(20).map do |d|
       anchor = d.last_activity_at || d.created_at
       days = anchor ? ((Time.current - anchor) / 1.day).to_i : 0
       owner_id = owner_field ? d.public_send(owner_field) : nil
       owner = owner_id ? User.where(id: owner_id, company_id: @company.id).pick(:first_name, :last_name, :email) : nil
       owner_name = owner ? ([owner[0], owner[1]].compact.join(' ').presence || owner[2]) : nil
+      # Customer identity: prefer the denormalized column, then account/contact.
+      customer_name = d.try(:customer_name).presence ||
+                      d.account&.name.presence ||
+                      [d.contact&.first_name, d.contact&.last_name].compact.join(' ').presence
+      title = d.try(:name).presence || customer_name || "Deal ##{d.id}"
       {
         id: d.id,
-        name: d.try(:name) || "Deal ##{d.id}",
+        name: title,
+        title: title,
+        customer_name: customer_name,
         owner: owner_name,
+        owner_name: owner_name || 'Unassigned',
         days_stale: days,
         value: d.value.to_f,
         formatted_value: format_currency(d.value),
