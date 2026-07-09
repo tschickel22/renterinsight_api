@@ -1809,12 +1809,17 @@ class DashboardMetricsService
     current_week  = weeks.last[:count]
     previous_week = weeks[-2] ? weeks[-2][:count] : 0
     trend         = calculate_trend(current_week, previous_week)
+    total         = weeks.sum { |w| w[:count] }
+    avg_per_week  = weeks.any? ? (total.to_f / weeks.size).round(1) : 0.0
 
     {
-      weeks: weeks.map { |w| { week_label: w[:week_label], count: w[:count] } },
+      weeks: weeks.map { |w| { week_label: w[:week_label], week_start: w[:week_start].to_s, count: w[:count] } },
       current_week: current_week,
       previous_week: previous_week,
+      total: total,
+      avg_per_week: avg_per_week,
       change_percentage: trend[:percentage],
+      trend_percentage: trend[:percentage],
       trend_direction: trend[:direction],
       drill_down_url: '/crm/leads'
     }
@@ -2255,9 +2260,12 @@ class DashboardMetricsService
     sources = by_source.map do |(source_id, source_name), count|
       pct = total_leads.positive? ? (count.to_f / total_leads * 100).round(1) : 0.0
       cpl = ad_costs[source_id] && count.positive? ? (ad_costs[source_id] / count).round(2) : nil
+      display_name = source_name.presence || 'Unknown'
       {
         source_id: source_id,
-        source_name: source_name || 'Unknown',
+        source_key: source_id.to_s,
+        source_name: display_name,
+        name: display_name,
         count: count,
         percentage: pct,
         cost_per_lead: cpl
@@ -2267,6 +2275,7 @@ class DashboardMetricsService
     {
       sources: sources,
       total_leads: total_leads,
+      total: total_leads,
       drill_down_url: '/crm/leads'
     }
   end
