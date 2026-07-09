@@ -623,7 +623,7 @@ module Api
 
         when 'deals_closed'
           records = @company.deals
-            .where(stage: 'closed_won')
+            .where(stage: @company.won_stage_keys)
             .where('won_at >= ? OR updated_at >= ?', week_start, week_start)
             .order(Arel.sql('COALESCE(won_at, updated_at) DESC'))
             .limit(100)

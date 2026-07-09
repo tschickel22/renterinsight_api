@@ -314,9 +314,11 @@ module Accounting
     private
 
     def deal_is_closed?
-      closed_statuses = %w[closed_won won closed completed]
-      @deal.try(:status)&.downcase&.in?(closed_statuses) ||
-        @deal.try(:stage)&.downcase&.in?(closed_statuses)
+      # Legacy fallbacks (closed/completed) kept alongside tenant-resolved keys
+      # for edge cases where deal.status carries a coarser value than deal.stage.
+      closed_keys = (@deal.company&.won_stage_keys || %w[closed_won]) | %w[closed completed]
+      @deal.try(:status)&.downcase&.in?(closed_keys) ||
+        @deal.try(:stage)&.downcase&.in?(closed_keys)
     end
 
     def deal_close_date

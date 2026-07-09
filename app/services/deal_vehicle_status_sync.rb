@@ -77,11 +77,15 @@ class DealVehicleStatusSync
 
   private
 
+  def won_keys
+    @won_keys ||= @deal.company&.won_stage_keys || %w[closed_won]
+  end
+
   def transitioned_into_won?
-    @new_stage == 'closed_won' && @previous_stage != 'closed_won'
+    won_keys.include?(@new_stage) && !won_keys.include?(@previous_stage)
   end
 
   def transitioned_out_of_won?
-    @previous_stage == 'closed_won' && @new_stage != 'closed_won'
+    won_keys.include?(@previous_stage) && !won_keys.include?(@new_stage)
   end
 end

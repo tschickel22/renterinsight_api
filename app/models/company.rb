@@ -639,6 +639,33 @@ class Company < ApplicationRecord
     DEFAULT_STAGE_PROBABILITIES[key]
   end
 
+  # Tenant-aware stage classification. Probability drives resolution
+  # (100 = won, 0 = lost) so custom pipelines like Evangeline's 'won'/'lost'
+  # keys don't silently fall through. Legacy default keys are always included
+  # as a safety net for tenants that still use them or have no saved config.
+  def won_stage_keys
+    @won_stage_keys ||= (pipeline_stage_keys.select { |k| pipeline_stage_probability(k).to_i == 100 } | ['closed_won']).freeze
+  end
+
+  def lost_stage_keys
+    @lost_stage_keys ||= (pipeline_stage_keys.select { |k| pipeline_stage_probability(k).to_i == 0 } | ['closed_lost']).freeze
+  end
+
+  def closed_deal_stage_keys
+    @closed_deal_stage_keys ||= (won_stage_keys | lost_stage_keys).freeze
+  end
+
+  # The stage key to WRITE when calling Deal#mark_as_won / mark_as_lost.
+  # Prefer the tenant's own custom key; fall back to the canonical legacy key
+  # for tenants who kept the default.
+  def default_won_stage_key
+    (won_stage_keys - ['closed_won']).first || 'closed_won'
+  end
+
+  def default_lost_stage_key
+    (lost_stage_keys - ['closed_lost']).first || 'closed_lost'
+  end
+
   # Stage a freshly-converted deal should land in: the first stage explicitly
   # marked active (by order), falling back to the first defined stage when no
   # stage carries an active flag (legacy/default configs). Always returns a

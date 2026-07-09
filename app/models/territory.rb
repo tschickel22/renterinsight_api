@@ -34,13 +34,13 @@ class Territory < ApplicationRecord
   end
   
   def won_deals_count
-    deals.won.count
+    deals.won(company).count
   end
-  
+
   def win_rate
-    closed = deals.won.count + deals.lost.count
+    closed = deals.won(company).count + deals.lost(company).count
     return 0 if closed.zero?
-    (deals.won.count.to_f / closed * 100).round(2)
+    (deals.won(company).count.to_f / closed * 100).round(2)
   end
   
   def matches_account?(account)

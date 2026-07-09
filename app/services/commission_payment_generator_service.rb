@@ -15,7 +15,7 @@ class CommissionPaymentGeneratorService
   
   def generate
     # Don't generate if deal not closed won
-    return nil unless @deal.stage == 'closed_won'
+    return nil unless @deal.stage_is_won?
     
     # Don't generate if deal has no commission plan
     return nil unless @deal.commission_plan.present?
@@ -167,14 +167,14 @@ class CommissionPaymentGeneratorService
   end
   
   def can_generate?
-    @deal.stage == 'closed_won' &&
+    @deal.stage_is_won? &&
     @deal.commission_plan.present? &&
     @deal.primary_salesperson_id.present?
   end
-  
+
   def generation_reasons
     reasons = []
-    reasons << "Deal must be closed won" unless @deal.stage == 'closed_won'
+    reasons << "Deal must be closed won" unless @deal.stage_is_won?
     reasons << "Deal must have a commission plan" unless @deal.commission_plan.present?
     reasons << "Deal must have a primary salesperson assigned" unless @deal.primary_salesperson_id.present?
     reasons

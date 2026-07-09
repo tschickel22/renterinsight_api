@@ -35,12 +35,12 @@ module Api
         
         total_value = deals.sum(:value)
         open_value = deals.open.sum(:value)
-        won_value = deals.won.sum(:value)
-        lost_value = deals.lost.sum(:value)
-        
+        won_value = deals.won(@company).sum(:value)
+        lost_value = deals.lost(@company).sum(:value)
+
         open_count = deals.open.count
-        won_count = deals.won.count
-        lost_count = deals.lost.count
+        won_count = deals.won(@company).count
+        lost_count = deals.lost(@company).count
         
         closed_count = won_count + lost_count
         win_rate = closed_count > 0 ? (won_count.to_f / closed_count * 100).round(2) : 0

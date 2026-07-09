@@ -190,6 +190,13 @@ module Api
           notes: build_notes(item_params)
         }
 
+        # Persist product_id when the FE identifies the underlying record (e.g.
+        # vehicle id for a home line item). Keeps deal_products linkable back to
+        # the inventory row so the inventory report can find the deal even when
+        # deal.vehicle_id itself hasn't been set yet.
+        product_id = item_params[:product_id] || item_params[:productId]
+        attrs[:product_id] = product_id if product_id.present?
+
         # Explicit discriminator (deal_products.source_type) when the FE sends one
         # (e.g. 'standard_item' for dealer-installed allowance items — the Max
         # Advance calculator and lender-cap flagging key off this).

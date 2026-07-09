@@ -49,7 +49,7 @@ class AiDigestService
                              .count
 
     # Deals
-    deals_closed_this_week = company.deals.where(stage: 'closed_won')
+    deals_closed_this_week = company.deals.where(stage: company.won_stage_keys)
                                .where('won_at >= ? OR updated_at >= ?', week_start, week_start).count rescue 0
     deals_closing_soon     = company.deals.where(stage: %w[proposal negotiation closing])
                                .where(expected_close_date: now..2.weeks.from_now).count rescue 0

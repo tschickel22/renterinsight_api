@@ -160,7 +160,7 @@ class Deal < ApplicationRecord
   # automatically as part of the close save (before the GL post, an after_commit, reads it).
   # before_save so the figures fold into THIS UPDATE; the hook assigns only (no nested save).
   before_save :apply_selected_scenario_on_close,
-              if: -> { will_save_change_to_stage? && stage == 'closed_won' &&
+              if: -> { will_save_change_to_stage? && stage_is_won? &&
                        company&.deal_desk_writeback_mode == 'on_close' }
 
   # Freeze the vehicle's then-current structured cost onto the deal at close, so GP/COGS
@@ -170,7 +170,7 @@ class Deal < ApplicationRecord
   # Registered after apply_selected_scenario_on_close so a deal-desk write-back's
   # explicit home_cost wins; otherwise capture the live vehicle cost.
   before_save :snapshot_landed_cost_on_close,
-              if: -> { will_save_change_to_stage? && stage == 'closed_won' }
+              if: -> { will_save_change_to_stage? && stage_is_won? }
 
   def snapshot_landed_cost_on_close
     return if home_cost.present? && home_cost.to_f > 0 # respect explicit / deal-desk cost
@@ -200,7 +200,7 @@ class Deal < ApplicationRecord
   # Deals queue for accountant approval by default. Auto-posting only fires when the
   # company opts in via AccountingSettings.auto_post_deals; otherwise the deal sits in
   # the Deal Approvals queue until reviewed.
-  after_commit :auto_post_closing_to_accounting, on: [:create, :update], if: -> { saved_change_to_stage? && stage == 'closed_won' && !gl_posted? }
+  after_commit :auto_post_closing_to_accounting, on: [:create, :update], if: -> { saved_change_to_stage? && stage_is_won? && !gl_posted? }
   # When this deal closes won on a vehicle, every OTHER open deal on that same
   # vehicle just lost the home — notify each of those reps to choose a new one.
   # Fires on the closed_won transition whether closed via mark_as_won or a direct
@@ -233,8 +233,10 @@ class Deal < ApplicationRecord
   
   # Scopes
   scope :open, -> { where(stage: %w[prospecting qualification needs_analysis proposal negotiation closing]) }
-  scope :won, -> { where(stage: 'closed_won') }
-  scope :lost, -> { where(stage: 'closed_lost') }
+  # Tenant-aware: pass the company so custom pipeline keys (e.g. 'won'/'lost'
+  # at Evangeline) resolve correctly. Callers always have the company in scope.
+  scope :won,  ->(company) { where(stage: company.won_stage_keys) }
+  scope :lost, ->(company) { where(stage: company.lost_stage_keys) }
   scope :by_stage, ->(stage) { where(stage: stage&.downcase) }
   scope :by_territory, ->(territory_id) { where(territory_id: territory_id) }
   scope :by_owner, ->(user_id) { where(user_id: user_id) }
@@ -258,27 +260,40 @@ class Deal < ApplicationRecord
   end
   
   # Stage management
+  # Resolves the tenant's won/lost stage key from the company pipeline config,
+  # so custom pipelines (e.g. Evangeline's 'won'/'lost') are written correctly
+  # rather than being force-set to the canonical 'closed_won'.
   def mark_as_won(reason: nil)
     update(
-      stage: 'closed_won',
+      stage: company&.default_won_stage_key || 'closed_won',
       won_at: Time.current,
       actual_close_date: Date.today,
       win_reason: reason
     )
   end
-  
+
   def mark_as_lost(reason: nil, competitor: nil)
     update(
-      stage: 'closed_lost',
+      stage: company&.default_lost_stage_key || 'closed_lost',
       lost_at: Time.current,
       actual_close_date: Date.today,
       loss_reason: reason,
       competitor: competitor
     )
   end
-  
+
   def closed?
-    %w[closed_won closed_lost].include?(stage)
+    stage_is_won? || stage_is_lost?
+  end
+
+  # Predicates used by lifecycle callbacks; resolve against the tenant's
+  # pipeline so custom keys still fire the correct hooks.
+  def stage_is_won?
+    company ? company.won_stage_keys.include?(stage.to_s) : stage == 'closed_won'
+  end
+
+  def stage_is_lost?
+    company ? company.lost_stage_keys.include?(stage.to_s) : stage == 'closed_lost'
   end
   
   def open?
@@ -396,7 +411,7 @@ class Deal < ApplicationRecord
 
   # True once the deal is closed/posted and its cost is frozen on the deal.
   def cost_snapshotted?
-    gl_posted? || stage == 'closed_won'
+    gl_posted? || stage_is_won?
   end
 
   # The vehicle-cost portion of landed cost. Live from the vehicle while open; the
@@ -647,15 +662,15 @@ class Deal < ApplicationRecord
   end
   
   def delivered?
-    stage == 'closed_won' && delivery_date.present?
+    stage_is_won? && delivery_date.present?
   end
-  
+
   def just_closed_won?
-    saved_change_to_stage? && stage == 'closed_won'
+    saved_change_to_stage? && stage_is_won?
   end
-  
+
   def just_delivered?
-    saved_change_to_stage? && stage == 'closed_won' && delivery_date.present?
+    saved_change_to_stage? && stage_is_won? && delivery_date.present?
   end
   
   # Primary salesperson helper (deprecated - use association)
@@ -755,7 +770,8 @@ class Deal < ApplicationRecord
   # deal was open before it), so that save still mirrors the close-time home price.
   def closed_before_this_save?
     prior_stage = will_save_change_to_stage? ? stage_was : stage
-    %w[closed_won closed_lost].include?(prior_stage) || gl_posted?
+    closed_keys = company ? company.closed_deal_stage_keys : %w[closed_won closed_lost]
+    closed_keys.include?(prior_stage) || gl_posted?
   end
 
   # Auto-generate unique deal number per company (e.g. D-000001)
@@ -801,9 +817,8 @@ class Deal < ApplicationRecord
 
   # Fire custom lifecycle webhook events on stage transitions
   def fire_lifecycle_webhooks
-    event = case stage
-            when 'closed_won'  then 'deal.won'
-            when 'closed_lost' then 'deal.lost'
+    event = if stage_is_won?  then 'deal.won'
+            elsif stage_is_lost? then 'deal.lost'
             end
     return unless event
 

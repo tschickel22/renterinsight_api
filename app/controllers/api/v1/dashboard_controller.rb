@@ -305,7 +305,7 @@ class Api::V1::DashboardController < ApplicationController
 
   def debug_top_performers
     # Get all closed_won deals
-    closed_deals = @company.deals.where(stage: 'closed_won')
+    closed_deals = @company.deals.where(stage: @company.won_stage_keys)
     
     # Get column info
     columns = @company.deals.column_names

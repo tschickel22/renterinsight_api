@@ -13,7 +13,9 @@ module Reports
   #   Closed Not Funded = closed_won AND NOT gl_posted (and not funded this month)
   #   Funded           = gl_posted this month, or closed_won with actual_close_date this month
   class SalespersonGpPipelineReportService
-    CLOSED_STAGE = 'closed_won'
+    def won_stages
+      @won_stages ||= @company.won_stage_keys
+    end
 
     FOOTNOTES = [
       'GP is pre-commission (front-end gross), read from the unified Deal#front_gross — never recomputed.',
@@ -66,7 +68,7 @@ module Reports
       end
 
       # Closed / Funded — closed_won deals on in-scope vehicles.
-      @query.deals_for_vehicles(stages: [CLOSED_STAGE]).each do |d|
+      @query.deals_for_vehicles(stages: won_stages).each do |d|
         vehicle = @query.vehicles_by_id[d.vehicle_id]
         next unless vehicle
 
@@ -94,7 +96,7 @@ module Reports
     # longer determines funded.
     def classify_closed(deal)
       return :funded if deal.gl_posted? && in_month?(deal.gl_posted_at)
-      return :closed_not_funded if deal.stage == CLOSED_STAGE && !deal.gl_posted? # closed, awaiting GL approval/posting
+      return :closed_not_funded if won_stages.include?(deal.stage) && !deal.gl_posted? # closed, awaiting GL approval/posting
 
       nil # gl_posted in a prior month -> historical, out of the current pipeline
     end

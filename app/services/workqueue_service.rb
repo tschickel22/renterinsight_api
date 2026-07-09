@@ -568,26 +568,26 @@ class WorkqueueService
 
   def deals_mine
     @company.deals.where(deleted_at: nil, user_id: @user.id)
-                  .where.not(stage: %w[closed_won closed_lost])
+                  .where.not(stage: @company.closed_deal_stage_keys)
   end
 
   def deals_closing_month
     @company.deals.where(deleted_at: nil, user_id: @user.id)
-                  .where.not(stage: %w[closed_won closed_lost])
+                  .where.not(stage: @company.closed_deal_stage_keys)
                   .where(expected_close_date: Date.current.beginning_of_month..Date.current.end_of_month)
   end
 
   def deals_closing_week
     window_end = prefs[:closing_week_days].to_i.days.from_now.to_date
     @company.deals.where(deleted_at: nil, user_id: @user.id)
-                  .where.not(stage: %w[closed_won closed_lost])
+                  .where.not(stage: @company.closed_deal_stage_keys)
                   .where(expected_close_date: Date.current..window_end)
   end
 
   def deals_stale_30d
     cutoff = prefs[:stale_deals_days].to_i.days.ago
     @company.deals.where(deleted_at: nil, user_id: @user.id)
-                  .where.not(stage: %w[closed_won closed_lost])
+                  .where.not(stage: @company.closed_deal_stage_keys)
                   .where('deals.last_activity_at < :t OR (deals.last_activity_at IS NULL AND deals.created_at < :t)',
                          t: cutoff)
   end

@@ -361,6 +361,20 @@ module Api
         end
       end
 
+      # Probability gates the whole app's won/lost lifecycle — commissions, GL
+      # posts, inventory sold status, dashboards. If nothing sits at 100 or 0,
+      # nothing ever fires. Reject the save so the config can't leave the tenant
+      # in a silently-broken state.
+      probabilities = stages.map { |s| (s[:probability] || s['probability'])&.to_i }
+      unless probabilities.include?(100)
+        render json: { error: 'At least one stage must have probability 100 (won). Commissions, accounting posts, and inventory-sold updates rely on it.' }, status: :unprocessable_entity
+        return
+      end
+      unless probabilities.include?(0)
+        render json: { error: 'At least one stage must have probability 0 (lost). Lifecycle events for lost deals rely on it.' }, status: :unprocessable_entity
+        return
+      end
+
       ActiveRecord::Base.transaction do
         remap.each do |old_key, new_key|
           next if old_key.to_s == new_key.to_s

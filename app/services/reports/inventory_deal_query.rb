@@ -318,7 +318,7 @@ module Reports
 
     def sold_deals
       @sold_deals ||= @company.deals
-                              .where(stage: 'closed_won', deleted_at: nil)
+                              .where(stage: @company.won_stage_keys, deleted_at: nil)
                               .where.not(vehicle_id: nil)
                               .includes(:vehicle)
                               .to_a
