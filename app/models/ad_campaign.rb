@@ -21,7 +21,7 @@ class AdCampaign < ApplicationRecord
     if converted_account_ids.any?
       deals = Deal.where(account_id: converted_account_ids)
       self.deals_count = deals.count
-      self.revenue     = deals.where(stage: 'closed_won').sum(:value)
+      self.revenue     = deals.where(stage: company.won_stage_keys).sum(:value)
     else
       self.deals_count = 0
       self.revenue     = 0

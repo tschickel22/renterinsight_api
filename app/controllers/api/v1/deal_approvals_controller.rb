@@ -5,7 +5,12 @@ class Api::V1::DealApprovalsController < ApplicationController
   before_action :authorize_accounting_update!
   before_action :load_deal, only: [:show, :update, :approve, :approve_commission]
 
-  CLOSED_STAGES = %w[closed_won won closed completed].freeze
+  # Which stage keys count as "closed" for approval purposes. Tenant-aware —
+  # 'closed'/'completed' are also recognized as legacy fallbacks.
+  def closed_stages_for_company
+    @closed_stages_for_company ||= (@company.closed_deal_stage_keys | %w[closed completed]).freeze
+  end
+
   VALID_STATUSES = %w[pending commission_pending posted].freeze
   DEFAULT_PER_PAGE = 50
   MAX_PER_PAGE = 200
@@ -244,7 +249,7 @@ class Api::V1::DealApprovalsController < ApplicationController
 
   # GET /api/v1/deal_approvals/stats
   def stats
-    closed = @company.deals.where(stage: CLOSED_STAGES)
+    closed = @company.deals.where(stage: closed_stages_for_company)
     pending_scope = closed.where(gl_posted: [false, nil])
     commission_pending_scope = closed
                                  .where(gl_posted: true)
@@ -281,7 +286,7 @@ class Api::V1::DealApprovalsController < ApplicationController
   def pending_deals_scope
     @company.deals
             .includes(:vehicle, :contact, :owner, :user)
-            .where(stage: CLOSED_STAGES)
+            .where(stage: closed_stages_for_company)
             .where(gl_posted: [false, nil])
             .order(Arel.sql('COALESCE(actual_close_date, won_at::date, updated_at::date) DESC'))
   end
@@ -291,7 +296,7 @@ class Api::V1::DealApprovalsController < ApplicationController
     when 'commission_pending'
       @company.deals
               .includes(:vehicle, :contact, :owner, :user)
-              .where(stage: CLOSED_STAGES)
+              .where(stage: closed_stages_for_company)
               .where(gl_posted: true)
               .where(commission_posted: [false, nil])
               .where('commission_amount > 0')

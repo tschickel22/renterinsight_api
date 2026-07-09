@@ -13,27 +13,19 @@ class DashboardMetricsService
     @date_range = parse_date_range(date_range)
   end
 
-  # Tenant-aware stage helpers. Custom pipelines rename won/lost stages
-  # (e.g. Evangeline uses 'won' and 'lost'), so probability drives resolution
-  # instead of hardcoded keys. Legacy default keys are always included as a
-  # safety net for tenants without a saved pipeline config.
+  # Delegate to Company#*_stage_keys so every dashboard method resolves
+  # won/lost stages the same way as the rest of the app.
   def won_stages
-    @won_stages ||= stages_with_probability(100) | ['closed_won']
+    @company.won_stage_keys
   end
 
   def lost_stages
-    @lost_stages ||= stages_with_probability(0) | ['closed_lost']
+    @company.lost_stage_keys
   end
 
   def closed_stages
-    @closed_stages ||= won_stages | lost_stages
+    @company.closed_deal_stage_keys
   end
-
-  private def stages_with_probability(target)
-    return [] unless @company.respond_to?(:pipeline_stage_keys)
-    @company.pipeline_stage_keys.select { |k| @company.pipeline_stage_probability(k).to_i == target }
-  end
-  public
 
   # ==================== REVENUE SUMMARY CARD ====================
   # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url }
@@ -1136,7 +1128,7 @@ class DashboardMetricsService
       trend_percentage: trend[:percentage],
       trend_direction: trend[:direction],
       sparkline_data: sparkline_data,
-      drill_down_url: '/deals?assigned_to_me=true&stage=closed_won'
+      drill_down_url: "/deals?assigned_to_me=true&stage=#{won_stages.join(',')}"
     }
   end
 

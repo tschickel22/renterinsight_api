@@ -132,7 +132,7 @@ class CommissionCalculationService
     units_this_month = Deal
       .where(company_id: @company.id)
       .where(primary_salesperson_id: @user.id)
-      .where(stage: 'closed_won')
+      .where(stage: @company.won_stage_keys)
       .where('delivery_date >= ? AND delivery_date <= ?', start_of_month, end_of_month)
       .sum(:quantity)
     
@@ -171,7 +171,7 @@ class CommissionCalculationService
     Deal
       .where(company_id: @company.id)
       .where(primary_salesperson_id: @user.id)
-      .where(stage: 'closed_won')
+      .where(stage: @company.won_stage_keys)
       .where('delivery_date >= ? AND delivery_date <= ?', start_of_month, end_of_month)
       .sum(:quantity)
   end

@@ -56,9 +56,9 @@ module Api
         when 'open'
           deals = deals.open
         when 'won'
-          deals = deals.won
+          deals = deals.won(@company)
         when 'lost'
-          deals = deals.lost
+          deals = deals.lost(@company)
         end
 
         # Apply search filter
@@ -183,9 +183,9 @@ module Api
         # Overall metrics
         total_value = company_deals.open.sum(:value)
         total_count = company_deals.open.count
-        won_value = company_deals.won.sum(:value)
-        won_count = company_deals.won.count
-        lost_count = company_deals.lost.count
+        won_value = company_deals.won(@company).sum(:value)
+        won_count = company_deals.won(@company).count
+        lost_count = company_deals.lost(@company).count
         
         # Win rate
         closed_count = won_count + lost_count
@@ -466,11 +466,11 @@ module Api
             end
 
             # Auto-set actual_close_date when deal is won
-            if @deal.stage&.downcase == 'closed_won' && @deal.actual_close_date.blank?
+            if @deal.stage_is_won? && @deal.actual_close_date.blank?
               @deal.update_column(:actual_close_date, Date.today)
             end
           end
-          
+
           render json: deal_json(@deal, detailed: true)
         else
           render json: { errors: @deal.errors.full_messages }, status: :unprocessable_entity
@@ -505,7 +505,7 @@ module Api
           end
 
           # Auto-set actual_close_date when deal is won
-          if new_stage&.downcase == 'closed_won' && @deal.actual_close_date.blank?
+          if @deal.stage_is_won? && @deal.actual_close_date.blank?
             @deal.update_column(:actual_close_date, Date.today)
           end
           

@@ -28,9 +28,9 @@ module Reports
         deals = deals.where(rep_col => salesperson_id) if deals.column_names.include?(rep_col)
       end
 
-      closed_statuses = %w[closed_won won closed completed]
+      closed_keys = (@company.won_stage_keys | %w[closed completed]).map(&:downcase)
       status_col = deals.column_names.include?('stage') ? 'stage' : 'status'
-      deals = deals.where("LOWER(#{status_col}) IN (?)", closed_statuses)
+      deals = deals.where("LOWER(#{status_col}) IN (?)", closed_keys)
 
       deal_rows = deals.map do |deal|
         Accounting::DealAccountingService.new(deal).profitability_summary

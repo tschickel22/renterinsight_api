@@ -43,7 +43,7 @@ module Api
         plan = @deal.commission_plan || @deal.determine_commission_plan
         
         # Check if deal is delivered
-        is_delivered = @deal.stage == 'closed_won' && @deal.delivery_date.present?
+        is_delivered = @deal.stage_is_won? && @deal.delivery_date.present?
         
         # Determine salesperson
         salesperson = @deal.primary_salesperson || @deal.owner

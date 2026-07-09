@@ -109,11 +109,11 @@ class Account < ApplicationRecord
   end
   
   def total_deal_value
-    deals.where(stage: 'closed_won').sum(:value) || 0
+    deals.where(stage: company.won_stage_keys).sum(:value) || 0
   end
-  
+
   def open_deals_count
-    deals.where.not(stage: ['closed_won', 'closed_lost']).count
+    deals.where.not(stage: company.closed_deal_stage_keys).count
   end
   
   def last_activity
