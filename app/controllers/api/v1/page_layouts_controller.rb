@@ -205,7 +205,9 @@ module Api
         when 'inventory'
           inventory_standard_fields
         when 'inventory_rv'
-          inventory_standard_fields.reject { |f| mh_only_field_keys.include?(f[:key]) }
+          inventory_standard_fields.reject { |f| mh_only_field_keys.include?(f[:key]) }.map do |f|
+            f[:key] == 'make' ? f.merge(options: default_rv_makes) : f
+          end
         when 'inventory_mh'
           inventory_standard_fields.reject { |f| rv_only_field_keys.include?(f[:key]) }
         when 'contractors'
@@ -251,6 +253,20 @@ module Api
           dry_weight gross_weight hitch_weight cargo_capacity
           generator generator_make generator_hours generator_fuel_type
         ]
+      end
+
+      def default_mh_makes
+        %w[Cavco Champion Clayton] + ['Deer Valley', 'Destiny', 'Fairmont', 'Fleetwood',
+          'Friendship', 'Homes of Merit', 'Kit', 'Legacy', 'Liberty', 'Live Oak',
+          'Marlette', 'Nobility', 'Oakwood', 'Palm Harbor', 'Redman', 'Schult',
+          'Skyline', 'Southern Energy', 'Sunshine', 'TRU']
+      end
+
+      def default_rv_makes
+        ['Coachmen', 'Cruiser RV', 'Dutchmen', 'Fleetwood', 'Forest River',
+         'Grand Design', 'Gulf Stream', 'Heartland', 'Holiday Rambler', 'Jayco',
+         'Keystone', 'KZ', 'Lance', 'Newmar', 'Northwood', 'Palomino',
+         'Prime Time', 'Thor', 'Tiffin', 'Winnebago']
       end
 
       def mh_only_field_keys
@@ -461,7 +477,8 @@ module Api
           # Basic Information
           { key: 'inventory_id', label: 'Stock #', type: 'text', source: 'standard', required: false, protected: protected_keys.include?('inventory_id'), visibility: 'both' },
           { key: 'year', label: 'Year', type: 'number', source: 'standard', required: true, protected: protected_keys.include?('year'), visibility: 'both' },
-          { key: 'make', label: 'Make', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('make'), visibility: 'both' },
+          { key: 'make', label: 'Make', type: 'select', source: 'standard', required: true, protected: protected_keys.include?('make'), visibility: 'both',
+            options: default_mh_makes },
           { key: 'model', label: 'Model', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('model'), visibility: 'both' },
           { key: 'trim', label: 'Trim', type: 'text', source: 'standard', required: false, protected: false, visibility: 'both' },
           { key: 'listing_type', label: 'Listing Type', type: 'select', source: 'standard', required: true, protected: protected_keys.include?('listing_type'), visibility: 'both',
@@ -543,7 +560,7 @@ module Api
 
           # MH Specifications
           { key: 'home_type', label: 'Home Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',
-            options: ['Single Wide', 'Double Wide', 'Triple Wide', 'Modular', 'Park Model'] },
+            options: ['Double Wide', 'Manufactured Home', 'Mobile Home', 'Modular Home', 'Park Model', 'Single Wide', 'Tiny Home', 'Triple Wide'] },
           { key: 'dwelling_type', label: 'Dwelling Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',
             options: ['Single Wide', 'Double Wide', 'Triple Wide', 'Modular Home', 'Park Model', 'Tiny Home', 'Manufactured Home', 'Mobile Home'] },
           { key: 'bedrooms', label: 'Bedrooms', type: 'number', source: 'standard', required: false, protected: false, visibility: 'both' },
