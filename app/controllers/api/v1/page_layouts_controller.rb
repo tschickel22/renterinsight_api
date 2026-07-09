@@ -103,6 +103,13 @@ module Api
         options = params[:options]
         return render(json: { error: 'Options must be an array' }, status: :unprocessable_entity) unless options.is_a?(Array)
 
+        # Refuse to override options on fields whose values are constrained by
+        # model-level validations (listing_type, status, discount_type, etc.).
+        field_def = standard_field_definitions(params[:module_name]).find { |f| f[:key] == params[:field_key] }
+        if field_def && field_def[:options_locked]
+          return render(json: { error: "\"#{field_def[:label]}\" options are managed by the system and can't be customized" }, status: :unprocessable_entity)
+        end
+
         override = @company.field_option_overrides.find_or_initialize_by(
           module_name: params[:module_name],
           field_key: params[:field_key]
@@ -156,7 +163,10 @@ module Api
 
         fields.map do |field|
           override = overrides[field[:key]]
-          if override
+          # Fields with backend enum/inclusion constraints can't accept custom
+          # values — silently ignore any override rather than surface bogus
+          # picks that would 500 or silently no-op on save.
+          if override && !field[:options_locked]
             field.merge(options: override.options, options_customized: true)
           else
             field
@@ -482,9 +492,9 @@ module Api
           { key: 'model', label: 'Model', type: 'text', source: 'standard', required: true, protected: protected_keys.include?('model'), visibility: 'both' },
           { key: 'trim', label: 'Trim', type: 'text', source: 'standard', required: false, protected: false, visibility: 'both' },
           { key: 'listing_type', label: 'Listing Type', type: 'select', source: 'standard', required: true, protected: protected_keys.include?('listing_type'), visibility: 'both',
-            options: %w[rv manufactured_home] },
+            options: %w[rv manufactured_home], options_locked: true },
           { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',
-            options: %w[available reserved sold pending] },
+            options: %w[available reserved sold pending], options_locked: true },
           { key: 'condition', label: 'Condition', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both',
             options: %w[new used certified refurbished] },
           { key: 'color', label: 'Color', type: 'text', source: 'standard', required: false, protected: false, visibility: 'both' },
@@ -497,7 +507,7 @@ module Api
           { key: 'msrp', label: 'Base Sale Price', type: 'currency', source: 'standard', required: false, protected: true, visibility: 'both', description: 'The home’s selling price before packages and add-ons. This is what the customer pays for the base home — add-ons build on top of it. Not a cost.' },
           { key: 'sale_price', label: 'Sale Price (Legacy)', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'internal', description: 'Legacy field — use Base Sale Price instead' },
           { key: 'special_discount_enabled', label: 'Special Discount', type: 'checkbox', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enable a special discounted price for this unit' },
-          { key: 'discount_type', label: 'Discount Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both', options: ['% of Home Price', '$ Flat Amount', '% of Total w/ Packages'], description: '% of Home Price, flat $ off, or % of Total (Home Price + packages)' },
+          { key: 'discount_type', label: 'Discount Type', type: 'select', source: 'standard', required: false, protected: false, visibility: 'both', options: ['% of Home Price', '$ Flat Amount', '% of Total w/ Packages'], options_locked: true, description: '% of Home Price, flat $ off, or % of Total (Home Price + packages)' },
           { key: 'discount_value', label: 'Discount Value', type: 'number', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Enter percentage or dollar amount' },
           { key: 'discounted_price', label: 'Discounted Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both', description: 'Calculated sale price after discount is applied' },
           { key: 'rent_price', label: 'Rent Price', type: 'currency', source: 'standard', required: false, protected: false, visibility: 'both' },
