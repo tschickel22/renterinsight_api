@@ -2148,6 +2148,7 @@ class DashboardMetricsService
 
     {
       total_stale: total_stale,
+      total_count: total_stale,
       by_owner: by_owner,
       deals: deals_payload,
       drill_down_url: '/deals?stale=true'
@@ -2241,6 +2242,11 @@ class DashboardMetricsService
       open_rate: open_rate,
       click_rate: click_rate,
       bounce_rate: bounce_rate,
+      summary: {
+        total_sent: total_sends,
+        avg_open_rate: open_rate,
+        avg_click_rate: click_rate
+      },
       campaigns: per_campaign,
       drill_down_url: '/marketing/campaigns'
     }
@@ -2313,6 +2319,7 @@ class DashboardMetricsService
       emails_opened: emails_opened,
       emails_clicked: emails_clicked,
       email_open_rate: open_rate,
+      open_rate: open_rate,
       sms_sent: sms_sent,
       response_rate: response_rate,
       drill_down_url: '/communications'
