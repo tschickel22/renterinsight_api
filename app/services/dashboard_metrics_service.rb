@@ -13,6 +13,28 @@ class DashboardMetricsService
     @date_range = parse_date_range(date_range)
   end
 
+  # Tenant-aware stage helpers. Custom pipelines rename won/lost stages
+  # (e.g. Evangeline uses 'won' and 'lost'), so probability drives resolution
+  # instead of hardcoded keys. Legacy default keys are always included as a
+  # safety net for tenants without a saved pipeline config.
+  def won_stages
+    @won_stages ||= stages_with_probability(100) | ['closed_won']
+  end
+
+  def lost_stages
+    @lost_stages ||= stages_with_probability(0) | ['closed_lost']
+  end
+
+  def closed_stages
+    @closed_stages ||= won_stages | lost_stages
+  end
+
+  private def stages_with_probability(target)
+    return [] unless @company.respond_to?(:pipeline_stage_keys)
+    @company.pipeline_stage_keys.select { |k| @company.pipeline_stage_probability(k).to_i == target }
+  end
+  public
+
   # ==================== REVENUE SUMMARY CARD ====================
   # Returns: { value, trend_percentage, trend_direction, sparkline_data, drill_down_url }
   def revenue_summary
@@ -47,14 +69,14 @@ class DashboardMetricsService
     # Get ALL active deals (exclude closed_won and closed_lost)
     # This matches what the Deals page shows - no date filter on active deals
     current_deals = @company.deals
-      .where.not(stage: ['closed_lost', 'closed_won'])
+      .where.not(stage: closed_stages)
     
     current_count = current_deals.count
     
     # For trend: count NEW deals created in current period vs previous period
     new_deals_current = @company.deals
       .where(created_at: @date_range[:start_date]..@date_range[:end_date])
-      .where.not(stage: ['closed_lost', 'closed_won'])
+      .where.not(stage: closed_stages)
       .count
     
     previous_period_days = (@date_range[:end_date] - @date_range[:start_date]).to_i
@@ -62,7 +84,7 @@ class DashboardMetricsService
     previous_end = @date_range[:start_date] - 1.day
     new_deals_previous = @company.deals
       .where(created_at: previous_start..previous_end)
-      .where.not(stage: ['closed_lost', 'closed_won'])
+      .where.not(stage: closed_stages)
       .count
     
     # Calculate trend based on new deals created
@@ -430,7 +452,7 @@ class DashboardMetricsService
     
     # Get all active deals grouped by stage
     deals_by_stage = @company.deals
-      .where.not(stage: ['closed_won', 'closed_lost'])
+      .where.not(stage: closed_stages)
       .group(:stage)
       .select('stage, COUNT(*) as count, SUM(value) as total_value')
     
@@ -540,7 +562,7 @@ class DashboardMetricsService
     Rails.logger.info "[Top Performers] Starting query for company #{@company.id}"
     
     # Get all closed won deals first
-    closed_deals = @company.deals.where(stage: 'closed_won')
+    closed_deals = @company.deals.where(stage: won_stages)
     Rails.logger.info "[Top Performers] Total closed_won deals: #{closed_deals.count}"
     
     if closed_deals.count == 0
@@ -587,7 +609,10 @@ class DashboardMetricsService
       }
     end
     
-    # Simple aggregation query - don't filter by date for now
+    # Simple aggregation query - don't filter by date for now.
+    # Resolve won stages against the tenant's pipeline; safe against SQL injection
+    # because stage keys are constrained to pipeline_stage_keys.
+    won_list = won_stages.map { |s| ActiveRecord::Base.connection.quote(s) }.join(',')
     query = <<-SQL
       SELECT
         users.id as user_id,
@@ -600,7 +625,7 @@ class DashboardMetricsService
       INNER JOIN users ON deals.#{owner_field} = users.id
         AND users.company_id = $1
       WHERE deals.company_id = $1
-        AND deals.stage = 'closed_won'
+        AND deals.stage IN (#{won_list})
         AND deals.#{owner_field} IS NOT NULL
       GROUP BY users.id, users.first_name, users.last_name, users.email
       ORDER BY total_value DESC
@@ -1049,7 +1074,7 @@ class DashboardMetricsService
     
     current_deals = @company.deals
       .where(owner_field => @current_user.id)
-      .where.not(stage: ['closed_lost', 'closed_won'])
+      .where.not(stage: closed_stages)
     
     current_value = current_deals.sum(:value) || 0
     
@@ -1060,7 +1085,7 @@ class DashboardMetricsService
     previous_value = @company.deals
       .where(owner_field => @current_user.id)
       .where(created_at: previous_start..previous_end)
-      .where.not(stage: ['closed_lost', 'closed_won'])
+      .where.not(stage: closed_stages)
       .sum(:value) || 0
     
     trend = calculate_trend(current_value, previous_value)
@@ -1086,7 +1111,7 @@ class DashboardMetricsService
     
     current_deals = @company.deals
       .where(owner_field => @current_user.id)
-      .where(stage: 'closed_won')
+      .where(stage: won_stages)
       .where(updated_at: current_month_start..current_month_end)
     
     current_value = current_deals.sum(:value) || 0
@@ -1097,7 +1122,7 @@ class DashboardMetricsService
     
     previous_value = @company.deals
       .where(owner_field => @current_user.id)
-      .where(stage: 'closed_won')
+      .where(stage: won_stages)
       .where(updated_at: previous_month_start..previous_month_end)
       .sum(:value) || 0
     
@@ -1208,7 +1233,7 @@ class DashboardMetricsService
     
     deals_by_stage = @company.deals
       .where(owner_field => @current_user.id)
-      .where.not(stage: ['closed_won', 'closed_lost'])
+      .where.not(stage: closed_stages)
       .group(:stage)
       .select('stage, COUNT(*) as count, SUM(value) as total_value')
     
@@ -1524,7 +1549,7 @@ class DashboardMetricsService
       value = @company.deals
         .where(owner_field => @current_user.id)
         .where('created_at <= ?', date)
-        .where.not(stage: ['closed_lost', 'closed_won'])
+        .where.not(stage: closed_stages)
         .sum(:value) || 0
       
       sparkline << {
@@ -1544,7 +1569,7 @@ class DashboardMetricsService
     (current_month_start..current_month_end).each do |date|
       count = @company.deals
         .where(owner_field => @current_user.id)
-        .where(stage: 'closed_won')
+        .where(stage: won_stages)
         .where('DATE(updated_at) = ?', date)
         .count
       
@@ -1868,8 +1893,8 @@ class DashboardMetricsService
     closed_deals = @company.deals.where(deleted_at: nil)
     closed_deals = closed_deals.where(location_id: Current.location_id) if location_filtered?
 
-    won = closed_deals.where(stage: 'closed_won').where(won_at: range)
-    lost = closed_deals.where(stage: 'closed_lost').where(lost_at: range)
+    won = closed_deals.where(stage: won_stages).where(won_at: range)
+    lost = closed_deals.where(stage: lost_stages).where(lost_at: range)
 
     won_count  = won.count
     lost_count = lost.count
@@ -1882,7 +1907,7 @@ class DashboardMetricsService
     avg_deal_value = won_count.positive? ? (won.sum(:value).to_f / won_count).round(2) : 0.0
     win_rate       = (won_count + lost_count).positive? ? (won_count.to_f / (won_count + lost_count) * 100).round(1) : 0.0
 
-    pipeline_scope = @company.deals.where(deleted_at: nil).where.not(stage: %w[closed_won closed_lost])
+    pipeline_scope = @company.deals.where(deleted_at: nil).where.not(stage: closed_stages)
     pipeline_scope = pipeline_scope.where(location_id: Current.location_id) if location_filtered?
     total_pipeline_value = pipeline_scope.sum(:value).to_f
 
@@ -1958,8 +1983,12 @@ class DashboardMetricsService
 
     # Win rate
     range = @date_range[:start_date].to_time..@date_range[:end_date].to_time.end_of_day
-    won_count  = @company.deals.where(stage: 'closed_won', won_at: range).count
-    lost_count = @company.deals.where(stage: 'closed_lost', lost_at: range).count
+    # won_at/lost_at aren't reliably set on every won/lost deal (esp. tenants
+    # with custom pipelines), so fall back to updated_at for range filtering.
+    won_count  = @company.deals.where(stage: won_stages)
+                                .where('COALESCE(won_at, updated_at) BETWEEN ? AND ?', range.first, range.last).count
+    lost_count = @company.deals.where(stage: lost_stages)
+                                .where('COALESCE(lost_at, updated_at) BETWEEN ? AND ?', range.first, range.last).count
     win_rate   = (won_count + lost_count).positive? ? (won_count.to_f / (won_count + lost_count) * 100).round(1) : 0.0
     win_status = if win_rate > 30 then 'green'
                  elsif win_rate >= 15 then 'yellow'
@@ -2009,11 +2038,12 @@ class DashboardMetricsService
     rep_rows = users.map do |user|
       user_deals = deals_scope.where(owner_field => user.id)
 
-      closed_won_scope = user_deals.where(stage: 'closed_won', won_at: range)
+      closed_won_scope = user_deals.where(stage: won_stages)
+                                    .where('COALESCE(won_at, updated_at) BETWEEN ? AND ?', range.first, range.last)
       closed_count = closed_won_scope.count
       closed_value = closed_won_scope.sum(:value).to_f
 
-      pipeline_scope = user_deals.where.not(stage: %w[closed_won closed_lost])
+      pipeline_scope = user_deals.where.not(stage: closed_stages)
       pipeline_count = pipeline_scope.count
       pipeline_value = pipeline_scope.sum(:value).to_f
 
@@ -2063,7 +2093,7 @@ class DashboardMetricsService
 
   # ==================== PIPELINE COVERAGE ====================
   def pipeline_coverage
-    pipeline_scope = @company.deals.where(deleted_at: nil).where.not(stage: %w[closed_won closed_lost])
+    pipeline_scope = @company.deals.where(deleted_at: nil).where.not(stage: closed_stages)
     pipeline_scope = pipeline_scope.where(location_id: Current.location_id) if location_filtered?
 
     pipeline_value = pipeline_scope.sum(:value).to_f
@@ -2096,7 +2126,7 @@ class DashboardMetricsService
     owner_field = find_dashboard_owner_field
 
     stale = @company.deals.where(deleted_at: nil)
-                          .where.not(stage: %w[closed_won closed_lost])
+                          .where.not(stage: closed_stages)
                           .where('(deals.last_activity_at IS NULL AND deals.created_at < :c) OR deals.last_activity_at < :c', c: cutoff)
     stale = stale.where(location_id: Current.location_id) if location_filtered?
 
@@ -2403,7 +2433,7 @@ class DashboardMetricsService
     # Group by date and count deals
     daily_deals = @company.deals
       .where(created_at: start_date..end_date)
-      .where.not(stage: ['closed_lost', 'closed_won'])
+      .where.not(stage: closed_stages)
       .group("DATE(created_at)")
       .count
     
