@@ -58,6 +58,7 @@ class WorkqueueService
     closing_week_days:      7,
     tasks_week_days:        7,
     replied_window_days:    7,
+    show_empty_queues:      true,
     hidden_queues:          [],
   }.freeze
 
@@ -109,11 +110,62 @@ class WorkqueueService
     preload_lead_communications(lead_records)
     preload_contact_communications(records.select { |r| r.is_a?(Contact) })
     preload_activity_parents(records.select { |r| r.is_a?(WorkqueueActivity) })
+    preload_location_names(records)
 
     {
-      items: records.map { |r| normalize(r) },
+      items: records.map { |r| normalize(r).merge(location_fields_for(r)) },
       meta: { total: total, page: @page, per_page: @per_page, total_pages: total_pages },
     }
+  end
+
+  # Batch-fetches location names for every location_id touched by the current
+  # page so normalize doesn't do per-row lookups. WorkqueueActivity has no
+  # location column of its own — its location is inherited from its parent
+  # Lead/Deal/Contact/Account and resolved lazily in fetch_activity_location_id.
+  def preload_location_names(records)
+    location_ids = Set.new
+    records.each do |r|
+      lid = r.try(:location_id)
+      location_ids << lid if lid.present?
+    end
+    @location_names = if location_ids.any?
+                        Location.where(id: location_ids.to_a).pluck(:id, :name).to_h
+                      else
+                        {}
+                      end
+  end
+
+  def location_fields_for(record)
+    lid = record.try(:location_id)
+    lid = fetch_activity_location_id(record) if lid.blank? && record.is_a?(WorkqueueActivity)
+    return { location_id: nil, location_name: nil } if lid.blank?
+
+    name = @location_names[lid] || Location.where(id: lid).pick(:name)
+    @location_names[lid] ||= name
+    { location_id: lid, location_name: name }
+  end
+
+  # For activity rows, the parent Lead/Deal/etc. carries the location.
+  def fetch_activity_location_id(activity)
+    parent_type = activity.parent_type
+    parent_id   = activity.parent_id
+    return nil if parent_type.blank? || parent_id.blank?
+
+    klass = safe_parent_klass(parent_type)
+    return nil unless klass
+
+    @activity_parent_locations ||= {}
+    key = [parent_type, parent_id]
+    @activity_parent_locations[key] ||= klass.where(id: parent_id).pick(:location_id)
+  end
+
+  def safe_parent_klass(parent_type)
+    case parent_type
+    when 'Lead'    then Lead
+    when 'Deal'    then Deal
+    when 'Contact' then Contact
+    when 'Account' then Account
+    end
   end
 
   private
@@ -183,7 +235,10 @@ class WorkqueueService
 
   def summary_cache_key
     prefs_digest = Digest::MD5.hexdigest(prefs.sort.to_s)
-    "workqueue_summary:#{@company.id}:#{@user.id}:#{Current.location_id}:#{prefs_digest}"
+    # No Current.location_id in the key — the Workqueue is a personal,
+    # cross-location inbox, so its result set is the same regardless of the
+    # location picker.
+    "workqueue_summary:#{@company.id}:#{@user.id}:#{prefs_digest}"
   end
 
   # Dynamic labels that reflect the current threshold values.
@@ -226,20 +281,15 @@ class WorkqueueService
     scope = send(method_name)
     return nil unless scope
 
-    apply_location_filter(scope)
+    # Deliberately NOT applying Current.location_id — Workqueue is a personal
+    # cross-location inbox: whatever is assigned to me (mine) should surface
+    # here regardless of which location I currently have selected. The
+    # location picker still gates the rest of the app; Workqueue rows carry
+    # their own location_id and the UI silently switches on click.
+    scope
   rescue => e
     Rails.logger.warn "[WorkqueueService] build_scope(#{queue_id}) failed: #{e.message}"
     nil
-  end
-
-  def apply_location_filter(scope)
-    return scope unless Current.location_filtered?
-
-    if scope.klass.column_names.include?('location_id')
-      scope.where(location_id: Current.location_id)
-    else
-      scope
-    end
   end
 
   # ─── Activity queues ─────────────────────────────────────────────
@@ -412,6 +462,13 @@ class WorkqueueService
       time_ago_h   = ((Time.current - link.last_clicked_at) / 3600).round
       link_path    = link.entity_type == 'Lead' ? "/crm/leads/#{link.entity_id}" : "/contacts/#{link.entity_id}"
 
+      # Location on hot-interest rows follows the vehicle the entity was
+      # looking at — that's the physical store the lead/contact would visit
+      # to see the home, so it's the right context to switch into.
+      @location_names ||= {}
+      loc_id   = vehicle.try(:location_id)
+      loc_name = loc_id ? (@location_names[loc_id] ||= Location.where(id: loc_id).pick(:name)) : nil
+
       {
         uid:              "inventory_interest_#{link.entity_type}_#{link.entity_id}_#{link.vehicle_id}",
         entity_type:      link.entity_type.downcase,
@@ -425,6 +482,8 @@ class WorkqueueService
         link:             link_path,
         due_at:           nil,
         last_activity_at: link.last_clicked_at,
+        location_id:      loc_id,
+        location_name:    loc_name,
       }
     end
   end
