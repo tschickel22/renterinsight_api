@@ -8,7 +8,10 @@ RSpec.describe Campaigns::AiBuilder do
 
   before { allow(ENV).to receive(:[]).and_call_original }
 
-  def stub_claude_response(plan, input_tokens: 1000, output_tokens: 500, status: '200')
+  # captured_requests: pass an array to capture every outbound Net::HTTP
+  # request the code makes. Lets tests assert on the JSON payload without
+  # dropping into WebMock, which the rest of this spec file avoids.
+  def stub_claude_response(plan, input_tokens: 1000, output_tokens: 500, status: '200', captured_requests: nil)
     body = {
       'content' => [{ 'type' => 'text', 'text' => plan.to_json }],
       'usage' => { 'input_tokens' => input_tokens, 'output_tokens' => output_tokens }
@@ -19,7 +22,10 @@ RSpec.describe Campaigns::AiBuilder do
     allow(http).to receive(:use_ssl=)
     allow(http).to receive(:read_timeout=)
     allow(http).to receive(:open_timeout=)
-    allow(http).to receive(:request).and_return(response)
+    allow(http).to receive(:request) do |req|
+      captured_requests << req if captured_requests
+      response
+    end
     allow(Net::HTTP).to receive(:new).and_return(http)
     allow(ENV).to receive(:[]).with('ANTHROPIC_API_KEY').and_return('test-key')
   end
@@ -34,6 +40,51 @@ RSpec.describe Campaigns::AiBuilder do
       expect(gen.generated_plan['name']).to eq('Test Plan')
       expect(gen.input_tokens).to eq(1000)
       expect(gen.output_tokens).to eq(500)
+    end
+
+    it 'passes uploaded PNG references to Claude as image content blocks' do
+      png_b64 = Base64.strict_encode64("\x89PNG\r\n\x1a\nDUMMY_PIXELS")
+      requests = []
+      stub_claude_response(plan, captured_requests: requests)
+
+      described_class.new(company: company, user: user).generate(
+        prompt: 'Match this design',
+        channel: 'email',
+        attachment_context: [
+          { 'filename' => 'motorcycle.png', 'content_type' => 'image/png', 'size' => 100, 'data_base64' => png_b64 }
+        ]
+      )
+
+      body = JSON.parse(requests.first.body)
+      content = body['messages'][0]['content']
+      expect(content).to be_an(Array)
+      text_block  = content.find { |b| b['type'] == 'text' }
+      image_block = content.find { |b| b['type'] == 'image' }
+      expect(text_block['text']).to include('Reference images are attached')
+      expect(image_block['source']['type']).to eq('base64')
+      expect(image_block['source']['media_type']).to eq('image/png')
+      expect(image_block['source']['data']).to eq(png_b64)
+    end
+
+    it 'keeps text-only content when only PDF documents are uploaded' do
+      pdf_b64 = Base64.strict_encode64("%PDF-1.4\n%dummy pdf")
+      requests = []
+      stub_claude_response(plan, captured_requests: requests)
+
+      described_class.new(company: company, user: user).generate(
+        prompt: 'Use this brief',
+        channel: 'email',
+        attachment_context: [
+          { 'filename' => 'brief.pdf', 'content_type' => 'application/pdf', 'size' => 100, 'data_base64' => pdf_b64 }
+        ]
+      )
+
+      body = JSON.parse(requests.first.body)
+      content = body['messages'][0]['content']
+      # PDF documents stay in the text prompt path, so content is a plain
+      # string rather than an array of blocks.
+      expect(content).to be_a(String)
+      expect(content).to include('Attached documents for reference')
     end
 
     it 'logs to AiQueryLog with cost in cents' do

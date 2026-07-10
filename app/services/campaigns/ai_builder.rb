@@ -23,13 +23,21 @@ module Campaigns
       context = build_context(channel, context_overrides)
       system_prompt = system_prompt_for(:generate)
 
-      # Build user message with optional document context
+      # Separate visual references (image uploads) from documents. Images go
+      # to Claude as image content blocks so the model can actually SEE the
+      # layout the user's referencing; docs stay text-decoded and stitched
+      # into the prompt. Previously all uploads went through decode_base64_text
+      # which turned image bytes into UTF-8 garbage — the AI never saw the
+      # example, which is the "AI isn't looking at my upload" complaint.
+      images, docs = partition_attachments(attachment_context)
+
       user_parts = ["#{prompt}\n\nContext:\n#{context.to_json}"]
-      if attachment_context.is_a?(Array) && attachment_context.any?
-        doc_summaries = attachment_context.map { |a| "[Document: #{a['filename']}]\n#{decode_base64_text(a['data_base64'])}" }.join("\n\n")
+      if docs.any?
+        doc_summaries = docs.map { |a| "[Document: #{a['filename']}]\n#{decode_base64_text(a['data_base64'])}" }.join("\n\n")
         user_parts << "\n\nAttached documents for reference — use their content to inform the campaign copy:\n#{doc_summaries}"
       end
-      user_message = user_parts.join
+      user_parts << "\n\nReference images are attached below. Match the visual layout, hierarchy, and card style you see — not literal text — when composing this campaign." if images.any?
+      user_message = build_multimodal_content(text: user_parts.join, images: images)
 
       response = call_claude(
         system_prompt: system_prompt, user_message: user_message,
@@ -58,22 +66,25 @@ module Campaigns
       channel = generation.generated_plan['channel'] || 'email'
       system_prompt = system_prompt_for(:refine)
 
-      # Include document context in refine so AI retains knowledge of uploaded docs
+      images, docs = partition_attachments(attachment_context)
+
       doc_section = ''
-      if attachment_context.is_a?(Array) && attachment_context.any?
-        doc_summaries = attachment_context.map { |a| "[Document: #{a['filename']}]\n#{decode_base64_text(a['data_base64'])}" }.join("\n\n")
+      if docs.any?
+        doc_summaries = docs.map { |a| "[Document: #{a['filename']}]\n#{decode_base64_text(a['data_base64'])}" }.join("\n\n")
         doc_section = "\n\nUploaded documents for reference:\n#{doc_summaries}"
       end
+      image_hint = images.any? ? "\n\nReference images attached below — use them to guide the visual layout of the refined plan." : ''
 
-      user_message = <<~MSG
+      text_body = <<~MSG
         Existing plan: #{generation.generated_plan.to_json}
 
         Company context: #{generation.context_snapshot.to_json}
 
-        Feedback: #{feedback}#{doc_section}
+        Feedback: #{feedback}#{doc_section}#{image_hint}
 
         Return the COMPLETE updated plan in the same JSON shape. ALWAYS include steps — never return steps as null.
       MSG
+      user_message = build_multimodal_content(text: text_body, images: images)
 
       response = call_claude(
         system_prompt: system_prompt, user_message: user_message,
@@ -435,14 +446,17 @@ module Campaigns
                 "subject": "Email subject (omit for SMS)",
                 "preheader": "Email preview text (omit for SMS)",
                 "body_blocks": [
+                  { "type": "branded_header" },
                   { "type": "text", "html": "<p>Hi {{first_name}}, ...</p>" },
-                  { "type": "button", "text": "View homes", "href": "{{public_inventory_url}}" }
+                  { "type": "button", "text": "View homes", "href": "{{public_inventory_url}}" },
+                  { "type": "sender_cta", "cta_text": "Schedule a tour" }
                 ],
                 "sms_body": "SMS text (SMS ONLY, max 1500 chars to leave room for STOP footer)",
                 "inventory_block_config": null | {
                   "mode": "segment_based" | "category_based" | "manual_pick",
                   "sort": "newest" | "price_low" | "price_high" | "best_match",
                   "max_units": 3,
+                  "layout": "hero" | "all_rows" | "all_hero",  // OPTIONAL; "hero" (default) renders the first unit big and the rest as compact rows with a left thumbnail — best for weekly digests and featured-inventory emails. "all_rows" is the compact list only. "all_hero" is the old full-width behavior — only use when the prompt explicitly asks for large photos throughout.
                   "fallback": "skip_block" | "show_cta" | "abort_send",
                   "filters": {
                     "listing_type": "...",
@@ -501,6 +515,12 @@ module Campaigns
         - SMS steps must include opt-out language; "Reply STOP to unsubscribe" is auto-appended by the system, do NOT include it yourself.
         - SMS body max 1500 chars.
 
+        LAYOUT BLOCKS (branded_header + sender_cta):
+        - EVERY email campaign body_blocks array should START with `{ "type": "branded_header" }` and end with `{ "type": "sender_cta", "cta_text": "..." }` right before any final closing text — those two blocks render the dealership's logo/phone/address at the top and the sender's contact card at the bottom. The system resolves branding + contact info at send time; you don't need to fill in any fields.
+        - Pick a `cta_text` that matches the campaign intent: "Schedule a tour" for home sales, "Book a demo" for SaaS, "Reserve yours" for pre-order pushes, "Reply to get started" for outreach. Keep it under 4 words.
+        - Omit these ONLY when the prompt explicitly says "plain text style" / "no branding" / "minimal" — otherwise ALWAYS include them, even for outreach and follow-up steps in a multi-step nurture. Every touchpoint should look like it came from the same dealership.
+        - Do NOT try to hand-build a header with a text block containing an <img>. The `branded_header` block pulls the tenant's logo + brand color + address dynamically and cascades correctly across multi-location sends — a hardcoded text block does not.
+
         INVENTORY BLOCK (CRITICAL — this is the #1 mistake to avoid):
         - `inventory_block_config` on a step is what renders REAL VEHICLES with photos. The system renders it as a grid of image CARDS: each card = photo + year/make/model + price + "View details" link. This is NOT a button — it IS the inventory.
         - When the user asks for ANY of: "show images", "show inventory", "show units", "show homes", "showcase", "feature homes/units", "photos", "pictures", "gallery", "highlight", "list new arrivals", "top picks", "weekly favorites", "featured this week", OR provides a sample email that includes inventory photos: you MUST set `inventory_block_config` on the relevant step to a non-null object. The button block `{ "type": "button", "text": "View inventory", "href": "{{public_inventory_url}}" }` DOES NOT satisfy any of these requests — it just links to the website. Do not substitute it.
@@ -519,13 +539,16 @@ module Campaigns
             "subject": "This week's favorites at {{company.name}}",
             "preheader": "New homes worth a look",
             "body_blocks": [
+              { "type": "branded_header" },
               { "type": "text", "html": "<p>Hi {{first_name}},</p><p>Here are this week's favorites from our lot.</p>" },
-              { "type": "text", "html": "<p>See something you like? Reply to this email or book a walk-through — we'd love to show it to you in person.</p>" }
+              { "type": "text", "html": "<p>See something you like? Reply to this email or book a walk-through — we'd love to show it to you in person.</p>" },
+              { "type": "sender_cta", "cta_text": "Schedule a tour" }
             ],
             "inventory_block_config": {
               "mode": "category_based",
               "sort": "newest",
               "max_units": 6,
+              "layout": "hero",
               "fallback": "skip_block",
               "filters": {
                 "statuses": ["available", "available_to_order"],
@@ -567,6 +590,9 @@ module Campaigns
       request['Content-Type'] = 'application/json'
       request['x-api-key'] = api_key
       request['anthropic-version'] = '2023-06-01'
+      # user_message is either a String (text-only prompt) or an Array of
+      # Claude content blocks ({type: 'text', text: ...} / {type: 'image', source: ...}).
+      # The Messages API accepts both shapes on the `content` key.
       request.body = {
         model: model,
         max_tokens: max_tokens,
@@ -627,6 +653,43 @@ module Campaigns
                 (input_tokens * 0.25 + output_tokens * 1.25) / 10_000.0
               end
       cents.round
+    end
+
+    # Splits uploaded attachments into images (become Claude image content
+    # blocks — sent as visual references) and documents (base64-decoded to
+    # text and inlined into the prompt). Claude vision accepts jpeg/png/
+    # gif/webp; anything else falls through to the document path.
+    CLAUDE_IMAGE_MEDIA_TYPES = %w[image/jpeg image/png image/gif image/webp].freeze
+
+    def partition_attachments(attachment_context)
+      return [[], []] unless attachment_context.is_a?(Array) && attachment_context.any?
+
+      attachment_context.partition do |a|
+        ct = a['content_type'].to_s.downcase
+        CLAUDE_IMAGE_MEDIA_TYPES.include?(ct)
+      end
+    end
+
+    # Builds a Claude Messages content payload: a single text block when
+    # there are no images (backwards-compatible with the old String path),
+    # otherwise an array of text + image blocks. Images ride raw base64,
+    # same encoding the browser uploader already produces — no re-encoding
+    # required.
+    def build_multimodal_content(text:, images:)
+      return text unless images.is_a?(Array) && images.any?
+
+      blocks = [{ type: 'text', text: text }]
+      images.each do |img|
+        blocks << {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: img['content_type'].to_s.downcase,
+            data: img['data_base64'].to_s
+          }
+        }
+      end
+      blocks
     end
 
     # Decode base64-encoded document for AI context.
