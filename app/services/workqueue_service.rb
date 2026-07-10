@@ -441,6 +441,11 @@ class WorkqueueService
   # Hot-inventory-interest signals: TrackedLinks scoped to a vehicle that the
   # entity (Lead/Contact) clicked recently. Used as a workqueue surface so reps
   # can act on prospects who showed they're shopping a specific home.
+  #
+  # Scoped to leads/contacts OWNED by the current user — Workqueue is a
+  # personal inbox, so a rep should only see hot signals for prospects
+  # they can actually act on. Prior behavior surfaced every rep's clicks
+  # to every rep, creating noise + accidental disclosure across territories.
   def prospect_hot_signals
     hot_links = TrackedLink
                   .where(company_id: @company.id)
@@ -455,8 +460,8 @@ class WorkqueueService
     vehicle_ids = hot_links.map(&:vehicle_id).uniq
     vehicles_by_id = Vehicle.where(id: vehicle_ids).index_by(&:id)
 
-    leads_by_id    = preload_entities(hot_links, 'Lead',    Lead)
-    contacts_by_id = preload_entities(hot_links, 'Contact', Contact)
+    leads_by_id    = preload_owned_entities(hot_links, 'Lead',    Lead)
+    contacts_by_id = preload_owned_entities(hot_links, 'Contact', Contact)
 
     hot_links.filter_map do |link|
       vehicle = vehicles_by_id[link.vehicle_id]
@@ -507,6 +512,15 @@ class WorkqueueService
     ids = links.select { |l| l.entity_type == type }.map(&:entity_id).compact.uniq
     return {} if ids.empty?
     klass.where(id: ids).index_by(&:id)
+  end
+
+  # Same as preload_entities but restricts to records owned by the
+  # current user. Used by prospect_hot_signals to keep the queue scoped
+  # to the rep's own book.
+  def preload_owned_entities(links, type, klass)
+    ids = links.select { |l| l.entity_type == type }.map(&:entity_id).compact.uniq
+    return {} if ids.empty?
+    klass.where(id: ids, owner_id: @user.id).index_by(&:id)
   end
 
   # ─── Engagement queues ───────────────────────────────────────────
@@ -631,8 +645,14 @@ class WorkqueueService
   # ─── Invoice queues ──────────────────────────────────────────────
 
   def invoices_overdue
-    @company.invoices.where(is_deleted: [false, nil], sales_rep_id: @user.id, status: 'sent')
-                     .where('due_date < ?', Date.current)
+    # Delegates to Invoice.overdue so the queue matches the model's
+    # canonical definition of overdue (due date passed, status NOT IN
+    # paid/cancelled). Prior filter narrowed to status='sent' only and
+    # missed 'viewed', 'partial', and any other in-flight states.
+    @company.invoices
+            .not_deleted
+            .where(sales_rep_id: @user.id)
+            .overdue
   end
 
   # ─── Search ──────────────────────────────────────────────────────
@@ -659,7 +679,17 @@ class WorkqueueService
     when 'Invoice'
       scope.where('invoice_number ILIKE :p', p: pattern)
     when 'WorkqueueActivity'
-      scope.where('subject ILIKE :p', p: pattern)
+      # Search subject and, when the row is a standalone task, its
+      # description. description isn't a column on the view (activity
+      # tables don't carry it consistently), so we fall through to the
+      # underlying tasks table via a subquery. Keeps parity with Task
+      # Center's search which hits both fields.
+      scope.where(
+        'subject ILIKE :p OR (source_table = :tasks AND EXISTS (' \
+          'SELECT 1 FROM tasks t WHERE t.id = workqueue_activities.source_id ' \
+            'AND t.description ILIKE :p))',
+        p: pattern, tasks: 'tasks'
+      )
     else
       scope
     end
