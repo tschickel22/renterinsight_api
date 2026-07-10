@@ -169,6 +169,9 @@ class Api::V1::CampaignsController < ApplicationController
     render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
   rescue Campaigns::AiBuilder::GenerationError => e
     render json: { error: e.message }, status: :unprocessable_entity
+  rescue => e
+    Rails.logger.error "[CampaignsController#refine_with_ai] #{e.class}: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+    render json: { error: "#{e.class}: #{e.message}" }, status: :unprocessable_entity
   end
 
   def duplicate
@@ -735,7 +738,10 @@ class Api::V1::CampaignsController < ApplicationController
   # (missing step at index N) is left alone.
   def apply_refined_plan_to_campaign!(campaign, plan)
     steps_plan = Array(plan.is_a?(Hash) ? plan['steps'] : nil)
-    existing_steps = campaign.campaign_steps.order(:step_number).to_a
+    # CampaignStep is ordered by `position` — there is no `step_number`
+    # column. Ordering by a missing column raises ActiveRecord::StatementInvalid,
+    # which fell out of the endpoint as a 500 with no user-visible message.
+    existing_steps = campaign.campaign_steps.order(:position).to_a
 
     ActiveRecord::Base.transaction do
       steps_plan.each_with_index do |step_plan, idx|
