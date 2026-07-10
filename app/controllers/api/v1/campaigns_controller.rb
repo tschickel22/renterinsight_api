@@ -1,6 +1,6 @@
 class Api::V1::CampaignsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -170,12 +170,8 @@ class Api::V1::CampaignsController < ApplicationController
   rescue Campaigns::AiBuilder::GenerationError => e
     render json: { error: e.message }, status: :unprocessable_entity
   rescue => e
-    # Temporary diagnostic: include the top of the backtrace in the
-    # response so the failing frame is visible in DevTools without
-    # having to sift through Render logs.
-    trace = Array(e.backtrace).grep(%r{/app/}).first(3)
-    Rails.logger.error "[CampaignsController#refine_with_ai] #{e.class}: #{e.message}\n#{trace.join("\n")}"
-    render json: { error: "#{e.class}: #{e.message}", trace: trace }, status: :unprocessable_entity
+    Rails.logger.error "[CampaignsController#refine_with_ai] #{e.class}: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+    render json: { error: "#{e.class}: #{e.message}" }, status: :unprocessable_entity
   end
 
   def duplicate
