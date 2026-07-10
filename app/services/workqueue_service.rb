@@ -342,12 +342,17 @@ class WorkqueueService
 
   # Exclude activities whose parent Lead/Contact/Deal no longer exists or is effectively deleted.
   # We use a raw SQL condition that checks:
+  #   - NULL parent_type (standalone Task rows): always pass — there's no
+  #     parent to validate. Without the explicit NULL branch these get
+  #     silently dropped because `NULL != 'Lead'` evaluates to NULL, which
+  #     WHERE treats as false.
   #   - Lead parents: lead must exist, not converted, not lost/unqualified
-  #   - Non-Lead parents: parent must exist (basic check)
+  #   - Non-Lead parents: pass through (basic existence assumed)
   def valid_parent_condition
     <<~SQL.squish
       (
-        (parent_type != 'Lead') OR
+        parent_type IS NULL OR
+        parent_type != 'Lead' OR
         (parent_type = 'Lead' AND EXISTS (
           SELECT 1 FROM leads
           WHERE leads.id = workqueue_activities.parent_id
@@ -984,22 +989,38 @@ class WorkqueueService
   end
 
   def normalize_activity(r)
-    parent_link = case r.parent_type
-                  when 'Lead'    then "/crm/leads/#{r.parent_id}"
-                  when 'Deal'    then "/deals/#{r.parent_id}"
-                  when 'Contact' then "/contacts/#{r.parent_id}"
-                  when 'Account' then "/accounts/#{r.parent_id}"
-                  else '#'
+    # Standalone Task rows have no parent — link directly to Task Center's
+    # detail view instead of the default '#'. Other rows keep the
+    # per-parent-type link.
+    is_standalone_task = r.source_table == 'tasks'
+    parent_link = if is_standalone_task
+                    "/tasks/#{r.source_id}"
+                  else
+                    case r.parent_type
+                    when 'Lead'    then "/crm/leads/#{r.parent_id}"
+                    when 'Deal'    then "/deals/#{r.parent_id}"
+                    when 'Contact' then "/contacts/#{r.parent_id}"
+                    when 'Account' then "/accounts/#{r.parent_id}"
+                    else '#'
+                    end
                   end
 
     parent_info = activity_parent_info(r.parent_type, r.parent_id)
+
+    # Standalone tasks may have no parent; suppress the "Type ##" subtitle
+    # so the row doesn't render " #" (empty type + hash).
+    subtitle = if r.parent_type.present? && r.parent_id.present?
+                 "#{r.parent_type} ##{r.parent_id}"
+               else
+                 nil
+               end
 
     {
       uid:                r.uid,
       entity_type:        'activity',
       entity_id:          r.source_id,
       title:              r.subject.presence || "#{r.activity_type&.titleize} Activity",
-      subtitle:           "#{r.parent_type} ##{r.parent_id}",
+      subtitle:           subtitle,
       status:             r.status,
       priority:           r.priority,
       badge:              r.activity_type,
