@@ -170,8 +170,12 @@ class Api::V1::CampaignsController < ApplicationController
   rescue Campaigns::AiBuilder::GenerationError => e
     render json: { error: e.message }, status: :unprocessable_entity
   rescue => e
-    Rails.logger.error "[CampaignsController#refine_with_ai] #{e.class}: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
-    render json: { error: "#{e.class}: #{e.message}" }, status: :unprocessable_entity
+    # Temporary diagnostic: include the top of the backtrace in the
+    # response so the failing frame is visible in DevTools without
+    # having to sift through Render logs.
+    trace = Array(e.backtrace).grep(%r{/app/}).first(3)
+    Rails.logger.error "[CampaignsController#refine_with_ai] #{e.class}: #{e.message}\n#{trace.join("\n")}"
+    render json: { error: "#{e.class}: #{e.message}", trace: trace }, status: :unprocessable_entity
   end
 
   def duplicate
