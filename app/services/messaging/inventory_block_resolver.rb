@@ -98,8 +98,16 @@ module Messaging
       rel = rel.where(listing_type: f['listing_type']) if f['listing_type'].present?
       rel = rel.where('bedrooms >= ?', f['bedrooms_min'].to_i) if f['bedrooms_min'].present?
       rel = rel.where('sale_price <= ?', f['price_max'].to_f) if f['price_max'].present?
+      # Orderable inventory has no location_id — a naive location filter
+      # silently drops it. Preserve orderable units when the caller allows
+      # them via the status set, so a location-scoped weekly digest still
+      # shows "build to order" homes alongside physical lot units.
       if f['location_ids'].is_a?(Array) && f['location_ids'].any? && Vehicle.column_names.include?('location_id')
-        rel = rel.where(location_id: f['location_ids'])
+        if allowed_statuses.include?('available_to_order')
+          rel = rel.where('location_id IN (?) OR status = ?', f['location_ids'], 'available_to_order')
+        else
+          rel = rel.where(location_id: f['location_ids'])
+        end
       end
       rel = rel.where(condition: f['condition']) if f['condition'].present?
       rel

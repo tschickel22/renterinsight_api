@@ -1794,6 +1794,7 @@ Rails.application.routes.draw do
           post :ai_generate
           post 'ai_generate/:generation_id/accept', action: :ai_accept, as: :ai_accept
           post 'ai_generate/:generation_id/refine', action: :ai_refine, as: :ai_refine
+          get  'ai_generate/:generation_id/preview_render', action: :ai_preview_render, as: :ai_preview_render
           get :templates, to: 'campaign_templates#index'
           get :merge_fields
           get :audience_field_schema
@@ -1802,6 +1803,7 @@ Rails.application.routes.draw do
           post :duplicate
           post :start
           post :pause
+          post :refine_with_ai
           post :resume
           post :archive
           post :test_send

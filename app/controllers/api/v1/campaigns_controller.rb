@@ -1,6 +1,6 @@
 class Api::V1::CampaignsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members]
+  before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
 
   def index
     return unless authorize_action!('campaigns', 'read')
@@ -123,6 +123,55 @@ class Api::V1::CampaignsController < ApplicationController
     @campaign.update(is_deleted: true, status: 'archived')
     @campaign.campaign_enrollments.where(status: %w[pending active]).update_all(status: 'paused')
     head :no_content
+  end
+
+  # POST /api/v1/campaigns/:id/refine_with_ai
+  # Sends the campaign's current plan back to Claude with additional
+  # feedback so the admin can iterate on an EXISTING campaign (draft,
+  # scheduled, paused) without cloning it. Only works when the campaign
+  # was originally AI-generated — walks to the most recent generation in
+  # the refine chain so subsequent refinements chain correctly. Applies
+  # the resulting plan back to the campaign steps by index (preserves
+  # cadence + timing set on the step rows).
+  def refine_with_ai
+    return unless authorize_action!('campaigns', 'update')
+
+    unless %w[draft scheduled paused].include?(@campaign.status.to_s) ||
+           (@campaign.status.to_s == 'completed' && @campaign.campaign_type.to_s == 'recurring_digest')
+      return render(json: { error: "Cannot refine while status is #{@campaign.status}" }, status: :unprocessable_entity)
+    end
+
+    root_gen = @campaign.generated_from_ai_generation
+    return render(json: { error: 'This campaign was not built by AI — use the step editor to change its content.' }, status: :unprocessable_entity) unless root_gen
+
+    latest = latest_generation_in_chain(root_gen)
+
+    feedback = params[:feedback].to_s.strip
+    return render(json: { error: 'feedback is required' }, status: :unprocessable_entity) if feedback.blank?
+
+    attachment_context = if params[:attachment_context].present?
+                          Array(params[:attachment_context]).map { |a|
+                            ac = a.respond_to?(:to_unsafe_h) ? a.to_unsafe_h : a.to_h
+                            ac.stringify_keys
+                          }
+                        else
+                          []
+                        end
+
+    new_gen = Campaigns::AiBuilder.new(company: @company, user: current_user, location: current_location).refine(
+      generation: latest, feedback: feedback, attachment_context: attachment_context
+    )
+
+    apply_refined_plan_to_campaign!(@campaign, new_gen.generated_plan)
+
+    render json: campaign_json(@campaign.reload, full: true)
+  rescue Campaigns::AiBuilder::CreditLimitError => e
+    render json: { error: e.message, code: 'credit_limit' }, status: :too_many_requests
+  rescue Campaigns::AiBuilder::GenerationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  rescue => e
+    Rails.logger.error "[CampaignsController#refine_with_ai] #{e.class}: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+    render json: { error: "#{e.class}: #{e.message}" }, status: :unprocessable_entity
   end
 
   def duplicate
@@ -507,6 +556,72 @@ class Api::V1::CampaignsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # GET /api/v1/campaigns/ai_generate/:generation_id/preview_render
+  # Renders the AI-authored plan through the same EmailRenderer used at send
+  # time — real inventory, real branding, placeholder recipient — so the
+  # admin can see the finished email BEFORE accepting the generation. That
+  # closes the "accepted the plan, then found out images were huge" loop.
+  #
+  # No specific recipient is used. MergeTagResolver's placeholder path
+  # handles {{first_name}} etc. gracefully when recipient is nil.
+  def ai_preview_render
+    return unless authorize_action!('campaigns', 'read')
+
+    generation = CampaignAiGeneration.find_by(id: params[:generation_id], company_id: @company.id)
+    return render(json: { error: 'Generation not found' }, status: :not_found) unless generation
+
+    plan = generation.generated_plan || {}
+    step_plan = Array(plan['steps']).first
+    return render(json: { error: 'Plan has no steps to preview' }, status: :unprocessable_entity) if step_plan.blank?
+
+    # Un-persisted models so the preview doesn't leak into the campaigns
+    # list, stats, or credit accounting. EmailRenderer treats
+    # campaign_send.persisted? as the "render for real" signal.
+    campaign = Campaign.new(
+      company_id: @company.id,
+      name: plan['name'] || 'AI Preview',
+      channel: plan['channel'] || 'email',
+      campaign_type: plan['campaign_type'] || 'drip',
+      from_identity_type: 'Company',
+      from_identity_id: nil,
+      location_id: current_location&.id,
+      status: 'draft'
+    )
+    # CampaignStep is company-scoped via its Campaign, not directly — the
+    # step table has no company_id column. It has `position`, not
+    # `step_number`. Setting either would raise UnknownAttributeError before
+    # this endpoint could render.
+    step = CampaignStep.new(
+      position: 1,
+      subject: step_plan['subject'],
+      body_blocks: step_plan['body_blocks'] || [],
+      inventory_block_config: step_plan['inventory_block_config']
+    )
+    fake_send = CampaignSend.new(company_id: @company.id, campaign_id: 0, campaign_step_id: 0, campaign_enrollment_id: 0)
+
+    recipient = OpenStruct.new(
+      first_name: 'Sample', last_name: 'Recipient',
+      email: 'sample@example.com', phone: '+15555550100',
+      custom_field_values: {}, location: current_location, owner_id: nil, owner: nil
+    )
+
+    base_url = ENV['DMS_API_URL'].presence || ENV['CAMPAIGN_BASE_URL'].presence || 'https://renterinsight-api-staging.onrender.com'
+    rendered = Messaging::EmailRenderer.new(
+      step: step, recipient: recipient, campaign: campaign,
+      campaign_send: fake_send, company: @company, base_url: base_url
+    ).render
+
+    render json: {
+      channel: 'email',
+      subject: rendered[:subject],
+      html_body: rendered[:html_body],
+      error: rendered[:error]
+    }
+  rescue => e
+    Rails.logger.error "[CampaignsController#ai_preview_render] #{e.class}: #{e.message}"
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   def merge_fields
     return unless authorize_action!('campaigns', 'read')
     source_type = params[:source_type].presence || 'Lead'
@@ -602,6 +717,53 @@ class Api::V1::CampaignsController < ApplicationController
   end
 
   private
+
+  # Walks the parent_generation chain forward to the most recent descendant
+  # so subsequent refines build on top of prior ones rather than starting
+  # over from the original generation.
+  def latest_generation_in_chain(root_gen)
+    current = root_gen
+    loop do
+      next_gen = CampaignAiGeneration.where(parent_generation_id: current.id, company_id: @company.id).order(created_at: :desc).first
+      break unless next_gen
+      current = next_gen
+    end
+    current
+  end
+
+  # Applies a refined AI plan back to an existing campaign's steps in-place.
+  # Matches by step index so cadence/timing set on the step rows survive the
+  # refine — the AI's `wait_days` / `wait_hours` are respected only if the
+  # existing row didn't already have one. Anything the AI didn't return
+  # (missing step at index N) is left alone.
+  def apply_refined_plan_to_campaign!(campaign, plan)
+    steps_plan = Array(plan.is_a?(Hash) ? plan['steps'] : nil)
+    # CampaignStep is ordered by `position` — there is no `step_number`
+    # column. Ordering by a missing column raises ActiveRecord::StatementInvalid,
+    # which fell out of the endpoint as a 500 with no user-visible message.
+    existing_steps = campaign.campaign_steps.order(:position).to_a
+
+    ActiveRecord::Base.transaction do
+      steps_plan.each_with_index do |step_plan, idx|
+        step = existing_steps[idx]
+        next unless step
+        attrs = {
+          subject:              step_plan['subject'].presence || step.subject,
+          preheader:            step_plan['preheader'].presence || step.preheader,
+          body_blocks:          step_plan['body_blocks'] || step.body_blocks,
+          sms_body:             step_plan['sms_body'].presence || step.sms_body,
+          inventory_block_config: step_plan.key?('inventory_block_config') ? step_plan['inventory_block_config'] : step.inventory_block_config
+        }
+        step.update!(attrs.compact)
+      end
+
+      # Name and description are cheap to overwrite when the AI updated them.
+      campaign_updates = {}
+      campaign_updates[:name] = plan['name'] if plan['name'].present?
+      campaign_updates[:description] = plan['description'] if plan['description'].present?
+      campaign.update!(campaign_updates) if campaign_updates.any?
+    end
+  end
 
   def campaign_member_row(r, source_type, enrollments = [])
     base = case source_type
@@ -740,6 +902,7 @@ class Api::V1::CampaignsController < ApplicationController
       next_recurrence_at: c.try(:next_recurrence_at),
       created_by_user_id: c.created_by_user_id,
       location_id: c.location_id,
+      generated_from_ai_generation_id: c.generated_from_ai_generation_id,
       created_at: c.created_at,
       updated_at: c.updated_at,
       stats_cache: c.stats_cache

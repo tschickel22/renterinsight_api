@@ -76,5 +76,42 @@ RSpec.describe Messaging::InventoryBlockResolver do
       ).resolve
       expect(result[:fallback_action]).to eq(:abort_send)
     end
+
+    context 'when filters.location_ids is set' do
+      let!(:loc_a) { Location.create!(company: company, name: 'A') }
+      let!(:loc_b) { Location.create!(company: company, name: 'B') }
+      let!(:at_a)  { make_vehicle(location_id: loc_a.id) }
+      let!(:at_b)  { make_vehicle(location_id: loc_b.id, inventory_id: SecureRandom.hex(6), serial_number: SecureRandom.hex(8), vin: SecureRandom.hex(8)) }
+      let!(:orderable) { make_vehicle(location_id: nil, status: 'available_to_order', inventory_id: SecureRandom.hex(6), serial_number: SecureRandom.hex(8), vin: SecureRandom.hex(8)) }
+
+      it 'includes units at the specified locations' do
+        result = described_class.new(
+          config: { 'mode' => 'category_based', 'filters' => { 'location_ids' => [loc_a.id] } },
+          recipient: nil, company: company
+        ).resolve
+        ids = result[:units].map { |u| u[:id] }
+        expect(ids).to include(at_a.id)
+        expect(ids).not_to include(at_b.id)
+      end
+
+      it 'also includes available_to_order units regardless of location' do
+        result = described_class.new(
+          config: { 'mode' => 'category_based', 'filters' => { 'location_ids' => [loc_a.id] } },
+          recipient: nil, company: company
+        ).resolve
+        ids = result[:units].map { |u| u[:id] }
+        expect(ids).to include(orderable.id) # orderable has location_id=nil but must not be dropped
+      end
+
+      it 'excludes orderable units when the caller narrows statuses to available only' do
+        result = described_class.new(
+          config: { 'mode' => 'category_based', 'filters' => { 'location_ids' => [loc_a.id], 'statuses' => ['available'] } },
+          recipient: nil, company: company
+        ).resolve
+        ids = result[:units].map { |u| u[:id] }
+        expect(ids).not_to include(orderable.id)
+        expect(ids).to include(at_a.id)
+      end
+    end
   end
 end

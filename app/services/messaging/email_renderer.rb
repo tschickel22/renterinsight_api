@@ -68,9 +68,24 @@ module Messaging
 
       subject = MergeTagResolver.resolve(@step.subject || @campaign.try(:subject_default), context)
 
+      branding = BrandingResolver.new(
+        recipient: @recipient, campaign: @campaign, company: @company
+      ).resolve
+      contact = ContactResolver.new(
+        sender_user: resolve_sender_user, campaign: @campaign, company: @company, recipient: @recipient
+      ).resolve
+
+      # Compatibility net for campaigns authored before branded_header /
+      # sender_cta existed. If the plan doesn't include them, inject at the
+      # canonical positions so pre-existing weekly digests get the branded
+      # look automatically. New AI plans include them explicitly, so this
+      # is a no-op for them.
+      blocks = inject_layout_blocks(blocks)
+
       raw_html = BlockRenderer.new(
         blocks: blocks, context: context, company: @company,
-        unsubscribe_url: urls[:unsubscribe_url], inventory_units: inventory_units
+        unsubscribe_url: urls[:unsubscribe_url], inventory_units: inventory_units,
+        branding: branding, contact: contact
       ).render
 
       # Process step attachments only on real sends (skip on preview where @send is unsaved).
@@ -100,6 +115,46 @@ module Messaging
     end
 
     private
+
+    # Ensures every rendered email has a branded_header at the top and a
+    # sender_cta right before the unsubscribe footer, even if the plan
+    # didn't include them. Idempotent — silently returns blocks unchanged
+    # if either is already present.
+    def inject_layout_blocks(blocks)
+      has_header = blocks.any? { |b| b.is_a?(Hash) && (b['type'] == 'branded_header' || b[:type] == 'branded_header') }
+      has_cta    = blocks.any? { |b| b.is_a?(Hash) && (b['type'] == 'sender_cta'     || b[:type] == 'sender_cta') }
+      return blocks if has_header && has_cta
+
+      result = blocks.dup
+      result.unshift({ 'type' => 'branded_header' }) unless has_header
+
+      unless has_cta
+        footer_idx = result.index { |b| b.is_a?(Hash) && (b['type'] == 'footer_unsubscribe' || b[:type] == 'footer_unsubscribe') }
+        cta_block = { 'type' => 'sender_cta' }
+        result = if footer_idx
+                   result[0...footer_idx] + [cta_block] + result[footer_idx..]
+                 else
+                   result + [cta_block]
+                 end
+      end
+      result
+    end
+
+    # For CTA rendering. Owner mode = recipient's owner (per-recipient), User
+    # mode = the picked user, Location/Company = nil so ContactResolver falls
+    # through to the location/company chain and doesn't show a random rep card.
+    def resolve_sender_user
+      case @campaign.try(:from_identity_type).to_s
+      when 'User'
+        User.find_by(id: @campaign.from_identity_id, company_id: @company.id)
+      when 'Owner'
+        owner_id = @recipient.try(:owner_id) || @recipient.try(:owner)&.id
+        return nil if owner_id.blank?
+        User.find_by(id: owner_id, company_id: @company.id)
+      else
+        nil
+      end
+    end
 
     def build_urls
       unsub = if @send && @send.persisted?
