@@ -294,17 +294,27 @@ class WorkqueueService
 
   # ─── Activity queues ─────────────────────────────────────────────
 
+  # Task Center pulls tasks from FIVE sources (Task + 4 CRM activity
+  # tables). Workqueue historically only queried the standalone Task
+  # model, so lead/contact/deal/account activity tasks — which is where
+  # most reps actually record follow-ups — never surfaced here. Switching
+  # to the workqueue_activities view (already unions the 4 activity
+  # tables) filtered to activity_type='task' matches what a rep sees in
+  # Task Center. Standalone Task-model records are a followup — extending
+  # the view to include them keeps this path simple.
   def activity_tasks_today
-    Task.where(company_id: @company.id, assigned_to_id: @user.id)
-        .where.not(status: [:completed, :cancelled])
-        .where('due_date IS NULL OR due_date <= ?', Date.current.end_of_day)
+    WorkqueueActivity.where(company_id: @company.id, assigned_to_id: @user.id, activity_type: 'task')
+                     .where.not(status: %w[completed cancelled])
+                     .where('due_date IS NULL OR due_date <= ?', Date.current.end_of_day)
+                     .where(valid_parent_condition)
   end
 
   def activity_tasks_week
     window_end = prefs[:tasks_week_days].to_i.days.from_now.end_of_day
-    Task.where(company_id: @company.id, assigned_to_id: @user.id)
-        .where.not(status: [:completed, :cancelled])
-        .where('due_date > ? AND due_date <= ?', Date.current.end_of_day, window_end)
+    WorkqueueActivity.where(company_id: @company.id, assigned_to_id: @user.id, activity_type: 'task')
+                     .where.not(status: %w[completed cancelled])
+                     .where('due_date > ? AND due_date <= ?', Date.current.end_of_day, window_end)
+                     .where(valid_parent_condition)
   end
 
   def activity_meetings_today
