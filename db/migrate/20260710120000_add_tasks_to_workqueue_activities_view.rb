@@ -14,8 +14,18 @@
 # Down restores the pre-Task 4-branch view.
 class AddTasksToWorkqueueActivitiesView < ActiveRecord::Migration[8.0]
   def up
+    # DROP + CREATE (not CREATE OR REPLACE) because PostgreSQL's
+    # CREATE OR REPLACE VIEW rejects any column-type difference,
+    # including precision — the pre-existing view had start_time as
+    # `timestamp(6) without time zone` and the new NULL::timestamp
+    # column resolves to `timestamp without time zone` (no precision),
+    # which is semantically identical but PG treats as incompatible.
+    # Dropping first gives us a clean slate. The view has no dependent
+    # objects, so DROP is safe.
+    execute "DROP VIEW IF EXISTS workqueue_activities;"
+
     execute <<~SQL
-      CREATE OR REPLACE VIEW workqueue_activities AS
+      CREATE VIEW workqueue_activities AS
 
       -- Lead Activities
       SELECT
@@ -160,10 +170,10 @@ class AddTasksToWorkqueueActivitiesView < ActiveRecord::Migration[8.0]
            ELSE NULL
          END)::text                                  AS priority,
         t.due_date                                   AS due_date,
-        NULL::timestamp                              AS start_time,
-        NULL::timestamp                              AS end_time,
+        NULL::timestamp(6) without time zone         AS start_time,
+        NULL::timestamp(6) without time zone         AS end_time,
         t.completed_at                               AS completed_at,
-        NULL::timestamp                              AS reminder_time,
+        NULL::timestamp(6) without time zone         AS reminder_time,
         t.created_at                                 AS created_at,
         t.updated_at                                 AS updated_at
       FROM tasks t
@@ -172,8 +182,13 @@ class AddTasksToWorkqueueActivitiesView < ActiveRecord::Migration[8.0]
   end
 
   def down
+    # Same DROP + CREATE pattern as `up` — rollback needs to change the
+    # view's column set (removing the tasks branch), and CREATE OR
+    # REPLACE would fail if any column type differs.
+    execute "DROP VIEW IF EXISTS workqueue_activities;"
+
     execute <<~SQL
-      CREATE OR REPLACE VIEW workqueue_activities AS
+      CREATE VIEW workqueue_activities AS
 
       SELECT
         ('lead-' || la.id)::text                     AS uid,
