@@ -224,9 +224,10 @@ module Api
 
       def create
         vp = vehicle_params
-        
-        # UPSERT: If VIN/serial already exists for this company, update instead of fail
-        # Check active records first, then soft-deleted (to restore them)
+
+        # UPSERT: If VIN/serial/inventory_id already exists for this company,
+        # update instead of fail. Check active records first, then soft-deleted
+        # (to restore them).
         existing = nil
         serial = vp[:serial_number].presence || vp[:vin].presence
         if serial.present?
@@ -235,6 +236,18 @@ module Api
           # Also check soft-deleted records (restore instead of failing on uniqueness)
           existing ||= @company.vehicles.where(is_deleted: true).find_by(serial_number: serial)
           existing ||= @company.vehicles.where(is_deleted: true).find_by(vin: serial)
+        end
+
+        # Inventory ID (Stock #) — DB has a unique index on
+        # (company_id, inventory_id) with NO is_deleted filter, but the AR
+        # uniqueness validation excludes soft-deleted rows. A re-submission
+        # with the same Stock # as a previously-deleted home would AR-validate
+        # clean and then raise PG::UniqueViolation on INSERT (→ 500). Extend
+        # the upsert lookup so the archived record gets restored instead.
+        inventory_id_val = vp[:inventory_id].presence
+        if existing.nil? && inventory_id_val.present?
+          existing = @company.vehicles.where(is_deleted: [false, nil]).find_by(inventory_id: inventory_id_val)
+          existing ||= @company.vehicles.where(is_deleted: true).find_by(inventory_id: inventory_id_val)
         end
         
         if existing
@@ -297,6 +310,16 @@ module Api
             render json: { errors: vehicle.errors.full_messages }, status: :unprocessable_entity
           end
         end
+      rescue ActiveRecord::RecordNotUnique => e
+        # Defense-in-depth: whenever an AR uniqueness scope diverges from
+        # its underlying DB unique index (e.g. the AR check filters out
+        # soft-deleted rows but the DB index doesn't), the save can slip
+        # past AR validation and blow up at INSERT time. Return a clean
+        # 422 with a human-readable message instead of a bare 500.
+        Rails.logger.error "[VehiclesController#create] RecordNotUnique: #{e.message}"
+        render json: {
+          errors: ['A home with this VIN, Serial #, or Stock # already exists (possibly in the archive). Use a different value, or restore the archived home from the archive view.']
+        }, status: :unprocessable_entity
       end
 
       def update
