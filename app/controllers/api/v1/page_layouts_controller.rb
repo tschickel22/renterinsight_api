@@ -341,6 +341,8 @@ module Api
           { key: 'delivery_fee', label: 'Delivery Fee', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'setup_fee', label: 'Setup Fee', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'skirting_fee', label: 'Skirting Fee', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'down_payment', label: 'Deposit', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'down_payment_due_date', label: 'Deposit Due Date', type: 'date', source: 'standard', required: false, protected: false },
           # Text
           { key: 'win_reason', label: 'Win Reason', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'loss_reason', label: 'Loss Reason', type: 'text', source: 'standard', required: false, protected: false },
