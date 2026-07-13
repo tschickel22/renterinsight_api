@@ -9,8 +9,11 @@ module Reports
   # For available (no-deal) units the estimate is price − vehicle structured cost.
   # Missing cost is flagged, never guessed.
   class InventoryDealQuery
+    # Safety-net fallback for tenants whose pipeline_stages setting is
+    # empty — used ONLY by open_stage_keys, and only in the empty-setting
+    # branch. Ranking + previews go through Company#pipeline_stage_probability
+    # so custom pipelines are correctly ordered without needing this list.
     OPEN_STAGES = %w[prospecting qualification needs_analysis proposal negotiation closing].freeze
-    DEFAULT_PIPELINE = OPEN_STAGES
 
     AGING = {
       '0-30'  => (0..30),
@@ -103,19 +106,20 @@ module Reports
 
     # ---- Multi-deal resolution ----------------------------------------------
 
-    def pipeline_stages
-      @pipeline_stages ||= begin
-        setting = Setting.get('Company', @company.id, 'pipeline_stages')
-        list = case setting
-               when Array then setting.map(&:to_s)
-               when Hash  then setting.values.map(&:to_s)
-               end
-        list&.any? ? list : DEFAULT_PIPELINE
-      end
-    end
-
+    # Rank a stage on the 0-100 probability scale so the report's "most
+    # advanced deal wins" logic keeps working across tenant-customized
+    # pipelines. The prior version indexed a list of stage-name strings,
+    # but built that list by calling to_s on the tenant's saved config
+    # (an array of {"key" => ..., "probability" => ...} hashes). The
+    # resulting list held Ruby hash-inspect strings instead of stage
+    # keys, so index() returned -1 for every real deal — ranking
+    # collapsed to created_at tie-break and the wrong deal won.
+    #
+    # Probability is already resolved tenant-aware by Company (custom
+    # stages carry their own probability, defaults fall back to
+    # DEFAULT_STAGE_PROBABILITIES). Higher = more advanced.
     def stage_rank(stage)
-      pipeline_stages.index(stage.to_s) || -1
+      @company.pipeline_stage_probability(stage.to_s).to_i
     end
 
     # "Closed" identified by probability=100 rather than stage name, so the Closed/Funded
