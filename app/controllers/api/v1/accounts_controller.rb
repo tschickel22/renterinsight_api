@@ -907,9 +907,10 @@ module Api
         %w[name email phone website industry status rating ownership description notes
            billing_street billing_city billing_state billing_postal_code billing_country
            shipping_street shipping_city shipping_state shipping_postal_code shipping_country
-           parent_account_id owner_id].each do |key|
+           parent_account_id owner_id deposit_amount].each do |key|
           clean[key] = raw[key] if raw.key?(key)
         end
+        clean['deposit_amount'] ||= raw['depositAmount']
         
         # Handle account_type (accept account_type, accountType, or type)
         clean['account_type'] = raw['account_type'] || raw['accountType'] || raw['type']
