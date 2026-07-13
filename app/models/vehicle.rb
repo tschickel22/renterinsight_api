@@ -382,6 +382,11 @@ class Vehicle < ApplicationRecord
     self.status = normalize_status(status)
     self.listing_type = listing_type&.downcase
 
+    # Empty string vin collides on the partial unique index
+    # `index_vehicles_on_company_id_and_vin` (WHERE vin IS NOT NULL): '' is
+    # indexed but NULL isn't, so two rows with vin='' hit RecordNotUnique.
+    self.vin = nil if vin.is_a?(String) && vin.strip.empty?
+
     # MH: Auto-copy vin to serial_number if serial_number is blank
     if listing_type == 'manufactured_home' && serial_number.blank? && vin.present?
       self.serial_number = vin
