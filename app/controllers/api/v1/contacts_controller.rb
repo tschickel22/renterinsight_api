@@ -890,7 +890,8 @@ module Api
           :preferred_max_sqft,
           :preferred_home_type,
           :preferred_vehicle_id,
-          :budget_range
+          :budget_range,
+          :deposit_amount
         )
       end
 
@@ -922,6 +923,7 @@ module Api
           :delivery_state,
           :delivery_zip,
           :delivery_country,
+          :deposit_amount,
           tags: []
         )
       end
@@ -1012,6 +1014,7 @@ module Api
           preferredHomeType:  contact.respond_to?(:preferred_home_type)  ? contact.preferred_home_type  : nil,
           preferredVehicleId: contact.respond_to?(:preferred_vehicle_id) ? contact.preferred_vehicle_id : nil,
           budgetRange:        contact.respond_to?(:budget_range)         ? contact.budget_range         : nil,
+          depositAmount:      contact.respond_to?(:deposit_amount)       ? contact.deposit_amount       : nil,
           customFieldValues: contact.respond_to?(:custom_field_values) ? contact.custom_field_values : {},
           tags: contact.tags.map { |t| { id: t.id, name: t.name, color: t.color } },
           createdAt: contact.created_at,

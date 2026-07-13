@@ -341,6 +341,8 @@ module Api
           { key: 'delivery_fee', label: 'Delivery Fee', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'setup_fee', label: 'Setup Fee', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'skirting_fee', label: 'Skirting Fee', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'down_payment', label: 'Deposit', type: 'currency', source: 'standard', required: false, protected: false },
+          { key: 'down_payment_due_date', label: 'Deposit Due Date', type: 'date', source: 'standard', required: false, protected: false },
           # Text
           { key: 'win_reason', label: 'Win Reason', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'loss_reason', label: 'Loss Reason', type: 'text', source: 'standard', required: false, protected: false },
@@ -380,6 +382,7 @@ module Api
           { key: 'shipping_state', label: 'Shipping State', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'shipping_postal_code', label: 'Shipping Postal Code', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'shipping_country', label: 'Shipping Country', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'deposit_amount', label: 'Deposit', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'description', label: 'Description', type: 'longtext', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
         ]
@@ -423,6 +426,7 @@ module Api
           { key: 'budget_range', label: 'Budget Range', type: 'select', source: 'standard', required: false, protected: false,
             options: ['Under $50k', '$50k-$100k', '$100k-$150k', '$150k-$200k', '$200k-$300k', '$300k+'] },
           { key: 'preferred_vehicle_id', label: "Interested #{ilabel('vehicle', 'Home')}", type: 'vehicle', source: 'standard', required: false, protected: false },
+          { key: 'deposit_amount', label: 'Deposit', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false }
         ]
       end
@@ -470,6 +474,7 @@ module Api
           { key: 'preferred_max_sqft', label: 'Max Square Feet', type: 'number', source: 'standard', required: false, protected: false },
           { key: 'preferred_home_type', label: 'Preferred Home Type', type: 'select', source: 'standard', required: false, protected: false,
             options: ['manufactured', 'rv', 'tiny_home', 'modular'] },
+          { key: 'deposit_amount', label: 'Deposit', type: 'currency', source: 'standard', required: false, protected: false },
           { key: 'interests_requirements', label: 'Interests/Requirements', type: 'longtext', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false },
           # Address

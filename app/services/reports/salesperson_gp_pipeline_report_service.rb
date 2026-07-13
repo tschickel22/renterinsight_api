@@ -60,27 +60,31 @@ module Reports
       entries = []
 
       # Pending — one row per open deal (contention surfaced via open_deal_count).
+      # Pass the full open_deals list so every row on a contended unit can
+      # populate the "N deals" hover-preview with all sibling deals, matching
+      # the Stock List report's DealsPopover pattern.
       @query.open_deals_by_vehicle.each do |vehicle_id, open_deals|
         vehicle = @query.vehicles_by_id[vehicle_id]
         next unless vehicle
 
-        open_deals.each { |d| entries << make_entry(vehicle, d, :pending, open_deals.size) }
+        open_deals.each { |d| entries << make_entry(vehicle, d, :pending, open_deals.size, deals: open_deals) }
       end
 
-      # Closed / Funded — closed_won deals on in-scope vehicles.
+      # Closed / Funded — closed_won deals on in-scope vehicles. Single deal
+      # per row (no contention on closed rows).
       @query.deals_for_vehicles(stages: won_stages).each do |d|
         vehicle = @query.vehicles_by_id[d.vehicle_id]
         next unless vehicle
 
         state = classify_closed(d)
-        entries << make_entry(vehicle, d, state, 0) if state
+        entries << make_entry(vehicle, d, state, 0, deals: [d]) if state
       end
 
       entries
     end
 
-    def make_entry(vehicle, deal, state, open_deal_count)
-      row = @query.build_row(vehicle, deal: deal, open_deal_count: open_deal_count)
+    def make_entry(vehicle, deal, state, open_deal_count, deals: [])
+      row = @query.build_row(vehicle, deal: deal, open_deal_count: open_deal_count, deals: deals)
       row[:offline] = row[:offline] || 'Not Ord' # deal exists but not yet scheduled/ordered
       # Match the salesperson "cheat sheet" identifier: stock# preferred, else serial/VIN.
       row[:serial_last5] = (row[:stock_number].presence || row[:serial_number]).to_s.last(5).presence
@@ -176,7 +180,11 @@ module Reports
     end
 
     def funded_group(key, label, entries)
-      h = { key: key, label: label, count: entries.size, total_price: entries.sum { |e| e[:row][:price].to_d } }
+      # total_price on the Funded This Month subtotal is the customer-facing
+      # deal amount (home + add-ons). Read deal_amount when present; fall back
+      # to :price only for rows emitted before the report row shape widened.
+      h = { key: key, label: label, count: entries.size,
+            total_price: entries.sum { |e| (e[:row][:deal_amount] || e[:row][:price]).to_d } }
       h[:total_gp] = entries.sum { |e| e[:gp].to_d } if @can_view_costs
       h
     end

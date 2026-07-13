@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_10_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_13_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -186,6 +186,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_10_120000) do
     t.datetime "deleted_at"
     t.bigint "location_id"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.decimal "deposit_amount", precision: 15, scale: 2
     t.index ["account_number"], name: "index_accounts_on_account_number", unique: true
     t.index ["account_type"], name: "index_accounts_on_account_type"
     t.index ["company_id", "location_id"], name: "index_accounts_on_company_id_and_location_id"
@@ -2226,6 +2227,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_10_120000) do
     t.string "preferred_home_type"
     t.bigint "preferred_vehicle_id"
     t.string "budget_range"
+    t.decimal "deposit_amount", precision: 15, scale: 2
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
@@ -3664,6 +3666,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_10_120000) do
     t.string "co_applicant_last_name"
     t.string "co_applicant_email"
     t.string "co_applicant_phone"
+    t.decimal "deposit_amount", precision: 15, scale: 2
     t.index ["champion_action_token"], name: "index_leads_on_champion_action_token", unique: true
     t.index ["champion_config_id"], name: "index_leads_on_champion_config_id"
     t.index ["champion_salesforce_id"], name: "index_leads_on_champion_salesforce_id"

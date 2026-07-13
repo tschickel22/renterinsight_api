@@ -463,6 +463,8 @@ module Api
               a.billing_state       = @lead.state
               a.billing_postal_code = @lead.zip
               a.billing_country     = @lead.country
+              # Deposit follows the customer forward
+              a.deposit_amount      = @lead.deposit_amount if a.respond_to?(:deposit_amount=)
             end
 
             Rails.logger.info "✅ [ConvertLead] Account #{account.previously_new_record? ? 'created' : 'reused'}: #{account.id}"
@@ -517,6 +519,7 @@ module Api
                 zip: @lead.zip,
                 country: @lead.country
               }
+              contact_attrs[:deposit_amount] = @lead.deposit_amount if Contact.column_names.include?('deposit_amount') && @lead.deposit_amount.present?
               contact_attrs[:title] = @lead.title if @lead.try(:title).present? && Contact.column_names.include?('title')
 
               contact = Contact.new(contact_attrs)
@@ -591,6 +594,8 @@ module Api
                 user_id: inherited_owner_id,
                 description: deal_params[:description] || "Converted from lead ##{@lead.id}",
                 vehicle_id: @lead.vehicle_id,  # Carry over vehicle from lead
+                # Deposit carried forward from lead qualification
+                down_payment: @lead.deposit_amount,
                 # Copy lead address → deal billing address
                 billing_street: @lead.street,
                 billing_city: @lead.city,
@@ -1008,7 +1013,9 @@ module Api
                    :co_applicant_email,      :coApplicantEmail,
                    :co_applicant_phone,      :coApplicantPhone,
                    # Address fields
-                   :street, :city, :state, :zip, :country]
+                   :street, :city, :state, :zip, :country,
+                   # Deposit / earnest money collected during lead qualification
+                   :deposit_amount, :depositAmount]
 
         root = params.permit(*allowed, lead: {})
         nested = params[:lead].is_a?(ActionController::Parameters) ? params.require(:lead).permit(*allowed) : {}
@@ -1051,7 +1058,9 @@ module Api
           city:    raw['city'],
           state:   raw['state'],
           zip:     raw['zip'],
-          country: raw['country']
+          country: raw['country'],
+          # Deposit
+          deposit_amount: (raw['deposit_amount'] || raw['depositAmount']).presence
         }.compact
       end
 
@@ -1153,6 +1162,8 @@ module Api
           state: l.state,
           zip: l.zip,
           country: l.country,
+          # Deposit
+          depositAmount: l.respond_to?(:deposit_amount) ? l.deposit_amount : nil,
           # Co-applicant (co-borrower) identity
           coApplicantFirstName: l.respond_to?(:co_applicant_first_name) ? l.co_applicant_first_name : nil,
           coApplicantLastName:  l.respond_to?(:co_applicant_last_name)  ? l.co_applicant_last_name  : nil,

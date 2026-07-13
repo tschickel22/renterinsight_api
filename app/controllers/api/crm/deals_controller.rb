@@ -741,6 +741,10 @@ module Api
           :finance_reserve, :product_margin,
           :accessories_total, :doc_fee,
           :delivery_fee, :setup_fee, :skirting_fee,
+          # Deposit (a.k.a. down payment): the up-front cash the buyer puts
+          # toward the purchase. Reports read this column ("Deposit" in
+          # Sales GP and Inventory reports).
+          :down_payment, :down_payment_due_date,
           # Lender: lender_id references the managed list and denormalizes to lender_name
           # (see Deal#denormalize_lender_name); lender_name still accepted as a free string.
           :lender_id, :lender_name, :payment_type,
@@ -895,6 +899,10 @@ module Api
           deliveryFee: deal.delivery_fee,
           setupFee: deal.setup_fee,
           skirtingFee: deal.skirting_fee,
+          # Deposit (persisted as `down_payment`; UI labels it "Deposit").
+          # Reports also read `down_payment` — this is the single source of truth.
+          downPayment: deal.down_payment,
+          downPaymentDueDate: deal.down_payment_due_date&.iso8601,
           dealType: deal.deal_type,
           vertical: deal.vertical,
           quantity: deal.quantity,

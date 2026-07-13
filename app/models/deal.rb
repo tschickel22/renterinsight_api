@@ -377,6 +377,20 @@ class Deal < ApplicationRecord
     hli ? line_item_price(hli) : nil
   end
 
+  # PER-UNIT cost of the HOME line item (dp.cost × quantity). Mirrors
+  # home_line_item_price on the cost side so backend front_gross reads the same
+  # home cost the rep sees in the Deal Line Items card. Vehicle.structured_cost
+  # is the fallback when no home line exists — but when the rep entered a
+  # specific cost on the deal's home line (common: catalog cost differs from
+  # the actual purchase order), that value wins. nil when no home line.
+  def home_line_item_cost
+    hli = home_line_item
+    return nil unless hli
+    qty = (hli.quantity || 1).to_i
+    qty = 1 if qty < 1
+    (hli.cost.to_f * qty).round(2)
+  end
+
   # ALL-LINES TOTAL (the DEAL VALUE): pre-tax SUM of (unit_price*qty - discount)
   # across every deal_product — home + fees + accessories + recon. Discount math
   # mirrors DealProduct#line_profit / calculate_total.
@@ -437,9 +451,17 @@ class Deal < ApplicationRecord
       return nil
     end
 
-    # OPEN deal: prefer the live vehicle cost (read-through), then the home line item
-    # cost mirror (unit_cost), then home_cost. So a deal whose cost was entered on the
-    # line item computes GP even when the vehicle record itself has no cost.
+    # OPEN deal: prefer the HOME LINE ITEM's own cost — that's what the rep
+    # entered on this specific deal and what the Deal Line Items UI displays
+    # in the "Cost" column. Vehicle.structured_cost is the fallback for legacy
+    # deals with no home line. This priority matches the FE's "Line Items
+    # Profit" number and the Financial Details card's "Unit Cost (from home
+    # line item)" label; the earlier vehicle-first order made backend
+    # front_gross diverge whenever the rep priced a deal against a cost
+    # different from the (possibly stale) vehicle.dealer_cost.
+    hlc = home_line_item_cost
+    return hlc if hlc && hlc > 0
+
     live = vehicle&.structured_cost
     return live unless live.nil?
 
@@ -478,13 +500,20 @@ class Deal < ApplicationRecord
   end
 
   # FRONT-END ADD-ON MARGIN — the margin (price − cost) on every front-end add-on line
-  # item: accessories and fees (skirting, delivery-as-a-charge, setup, A/C, steps, etc.).
-  # The home's own margin is handled via selling_price − landed_cost; this captures the
-  # margin on everything else the customer buys with the home. Back-end F&I products are
-  # excluded (they belong to back_gross). Uses each line's (unit_price − cost) × quantity.
+  # item: accessories, fees, services (allowance items like Trim Out / Delivery & Set /
+  # Skirting / AC), land add-ons, and any "other" custom lines the rep adds. The home's
+  # own margin is handled via selling_price − landed_cost; this captures the margin on
+  # everything else the customer buys with the home. Back-end F&I products (category:
+  # product) are excluded — they belong to back_gross. Uses each line's
+  # (unit_price − cost) × quantity.
+  #
+  # Historical note: earlier this method only counted category:fee + category:accessory,
+  # which silently dropped every allowance item (the FE hardcodes standard items to
+  # category:service in DealLineItemsCard.tsx). Add-on margin therefore under-reported
+  # on almost every MH deal until this widened.
   def front_end_addon_margin
     deal_products.sum do |dp|
-      next 0.0 unless fee_line_item?(dp) || accessory_line_item?(dp)
+      next 0.0 unless front_end_addon_line_item?(dp)
       qty = (dp.quantity || 1).to_f
       ((dp.unit_price.to_f - dp.cost.to_f) * qty)
     end.round(2)
@@ -627,17 +656,36 @@ class Deal < ApplicationRecord
     has_fee_line_items? ? fee_totals_from_line_items[:accessories].round(2) : (accessories_total || 0).to_f
   end
 
-  # ADD-ON GROSS (MH dealers pay separately on these). Mirrors the historical column
-  # formula (delivery + setup + skirting + accessories; doc fee excluded) but sourced
-  # from line items when present. Unrecognized fee lines (:other) are included so reps
-  # are paid on the full add-on amount rather than silently dropping it.
+  # ADD-ON GROSS — total revenue (price × qty − discount) charged to the customer for
+  # every front-end add-on line: fees, accessories, services (allowance items — Trim
+  # Out, AC, Skirting, Delivery & Set), land, and custom "other" lines. Doc fee is
+  # deliberately excluded (it's a pass-through, not commissionable add-on revenue).
+  #
+  # Sourced from `deal_products` when the deal has any add-on lines at all; falls back
+  # to the deprecated columns (delivery_fee + setup_fee + skirting_fee + accessories_
+  # total) only for legacy/API-created deals that predate Phase 3 line items.
+  #
+  # Note: this is REVENUE, not margin. Margin lives on front_end_addon_margin (which
+  # feeds front_gross). Both were widened to include the same categories at the same
+  # time, so revenue and margin now agree on what "add-on" means.
   def addon_gross
-    if has_fee_line_items?
-      t = fee_totals_from_line_items
-      (t[:delivery] + t[:setup] + t[:skirting] + t[:accessories] + t[:other]).round(2)
+    if has_addon_line_items?
+      deal_products.sum do |dp|
+        next 0.0 unless front_end_addon_line_item?(dp)
+        # Doc fee is excluded from add-on gross (commission-wise it's a pass-through).
+        next 0.0 if fee_line_item?(dp) && normalize_fee_name(dp.product_name) == 'doc fee'
+        line_item_price(dp)
+      end.round(2)
     else
       ((delivery_fee || 0) + (setup_fee || 0) + (skirting_fee || 0) + (accessories_total || 0)).round(2)
     end
+  end
+
+  # True when the deal has ANY front-end add-on line (fee/accessory/service/land/other).
+  # Widens has_fee_line_items? so addon_gross doesn't fall through to legacy columns on
+  # a Phase 3 deal that only has service-category allowance items.
+  def has_addon_line_items?
+    deal_products.any? { |dp| front_end_addon_line_item?(dp) }
   end
   
   # Gross per unit (for multi-unit deals)
@@ -737,6 +785,26 @@ class Deal < ApplicationRecord
   # accessories_total column maps to these (FE puts accessories under their own category).
   def accessory_line_item?(dp)
     dp.notes.to_s.match?(/category:\s*accessory\b/i)
+  end
+
+  # Any front-end add-on line: everything on the deal that is neither the home base
+  # (`category:home`, handled separately by selling_price − landed_cost) nor a back-end
+  # F&I product (`category:product`, folded into back_gross). Includes fee, accessory,
+  # service (allowance items — Trim Out, AC, Skirting, etc.), land, and custom "other"
+  # lines. Line items with no category tag at all are treated as front-end add-ons too:
+  # a rep who typed a Custom Item is charging the customer something extra with a cost
+  # basis, so it belongs in front-end margin.
+  BACK_END_LINE_CATEGORIES = %w[home product].freeze
+
+  def front_end_addon_line_item?(dp)
+    category = extract_line_item_category(dp)
+    return false if BACK_END_LINE_CATEGORIES.include?(category)
+    true
+  end
+
+  def extract_line_item_category(dp)
+    match = dp.notes.to_s.match(/category:\s*([a-z_]+)/i)
+    match ? match[1].downcase : nil
   end
 
   def normalize_fee_name(str)
