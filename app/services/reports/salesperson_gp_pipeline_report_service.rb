@@ -180,7 +180,11 @@ module Reports
     end
 
     def funded_group(key, label, entries)
-      h = { key: key, label: label, count: entries.size, total_price: entries.sum { |e| e[:row][:price].to_d } }
+      # total_price on the Funded This Month subtotal is the customer-facing
+      # deal amount (home + add-ons). Read deal_amount when present; fall back
+      # to :price only for rows emitted before the report row shape widened.
+      h = { key: key, label: label, count: entries.size,
+            total_price: entries.sum { |e| (e[:row][:deal_amount] || e[:row][:price]).to_d } }
       h[:total_gp] = entries.sum { |e| e[:gp].to_d } if @can_view_costs
       h
     end
