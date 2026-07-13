@@ -20,8 +20,8 @@ class Lead < ApplicationRecord
         { key: "email",      label: "Email",       type: "string",  filterable: true,  sortable: true },
         { key: "phone",      label: "Phone",       type: "string",  filterable: true,  sortable: false },
         { key: "status",     label: "Status",      type: "enum",    filterable: true,  sortable: true },
-        { key: "source_id",  label: "Source",      type: "number",  filterable: true,  sortable: true },
-        { key: "owner_id",   label: "Assigned To", type: "number",  filterable: true,  sortable: true },
+        { key: "source_id",  label: "Source",      type: "number",  filterable: true,  sortable: true,  resolve_as: :source },
+        { key: "owner_id",   label: "Assigned To", type: "number",  filterable: true,  sortable: true,  resolve_as: :user   },
         { key: "created_at", label: "Created At",  type: "date",    filterable: true,  sortable: true },
         { key: "updated_at", label: "Updated At",  type: "date",    filterable: true,  sortable: true }
       ]

@@ -136,6 +136,13 @@ class ReportEngine
       column_keys.each_with_object({}) { |k, h| h[k] = rec[k] }
     end
 
+    # Replace foreign-key IDs with human-readable display strings for any
+    # field marked with `resolve_as:` in reportable_config. Batches one
+    # SELECT per referenced type — cheap even at max page size. Filters
+    # continue to run against the underlying integer column; only display
+    # is affected.
+    klass.resolve_references!(rows, klass.reportable_config[:fields])
+
     {
       columns: columns,
       rows:    rows,
