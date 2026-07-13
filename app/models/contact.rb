@@ -19,7 +19,7 @@ class Contact < ApplicationRecord
         { key: "email",      label: "Email",      type: "string", filterable: true, sortable: true },
         { key: "phone",      label: "Phone",      type: "string", filterable: true, sortable: false },
         { key: "title",      label: "Title",      type: "string", filterable: true, sortable: true },
-        { key: "account_id", label: "Account",    type: "number", filterable: true, sortable: true },
+        { key: "account_id", label: "Account",    type: "number", filterable: true, sortable: true, resolve_as: :account },
         { key: "created_at", label: "Created At", type: "date",   filterable: true, sortable: true },
         { key: "updated_at", label: "Updated At", type: "date",   filterable: true, sortable: true }
       ]
