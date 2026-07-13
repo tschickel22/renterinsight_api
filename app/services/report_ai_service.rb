@@ -85,25 +85,74 @@ class ReportAiService
 
       The user asks: "#{question}"
 
-      Respond with ONLY a JSON object (no markdown, no explanation outside JSON):
+      TREAT REPORT-BUILDING PHRASING AS REPORT QUERIES.
+      A user who says any of the following is asking you to build a report — not asking
+      an ambiguous question. Never bail with module_key=null just because the phrasing
+      is imperative rather than interrogative:
+        - "build me a ___ report"          - "make me a ___ report"
+        - "create a ___ report"            - "give me a ___ report"
+        - "I want a report of ___"         - "pull a list of ___"
+        - "show me ___"                    - "list all ___"
+
+      COMMON BUSINESS SHORTHAND (map to fields BEFORE bailing on null):
+        - "sales" or "sales report" or "pipeline"  -> module_key: "deals"
+        - "pending"                                -> filter stage NOT IN closed_won/closed_lost
+                                                      (use where: [{field:"stage", operator:"in", value:["prospecting","qualification","needs_analysis","proposal","negotiation","closing"]}])
+        - "open"                                   -> same as pending
+        - "closed"                                 -> filter stage IN closed_won/closed_lost
+        - "won" or "closed won"                    -> filter stage eq closed_won
+        - "lost" or "closed lost"                  -> filter stage eq closed_lost
+        - "sold homes" / "sold inventory"          -> module_key: "vehicles", filter status eq sold
+        - "available homes"                        -> module_key: "vehicles", filter status eq available
+        - "unpaid invoices" / "overdue"            -> module_key: "invoices", filter status NOT eq paid
+        - "customers" / "buyers"                   -> module_key: "contacts"
+        - "top rep" / "salesperson performance"    -> module_key: "deals", sort_by primary_salesperson
+
+      EXAMPLES (respond with ONLY a JSON object — no markdown, no prose outside JSON):
+
+      Question: "Show me deals closed in the past 7 days"
       {
-        "module_key": "leads",
-        "fields": ["id", "first_name", "last_name", "status", "created_at"],
+        "module_key": "deals",
+        "fields": ["id", "name", "stage", "selling_price", "primary_salesperson_id", "actual_close_date"],
         "filters": {
-          "date_range": { "field": "created_at", "from": "2026-03-01", "to": "2026-04-06" },
+          "date_range": { "field": "actual_close_date", "from": "2026-04-06", "to": "2026-04-13" },
           "where": [{ "field": "stage", "operator": "eq", "value": "closed_won" }]
         },
-        "sort_by": "created_at",
+        "sort_by": "actual_close_date",
         "sort_order": "desc",
-        "explanation": "Showing closed won deals from the past 7 days, sorted newest first."
+        "explanation": "Deals won in the past 7 days, most recent first."
+      }
+
+      Question: "Build me a sales pending report"
+      {
+        "module_key": "deals",
+        "fields": ["id", "name", "stage", "primary_salesperson_id", "selling_price", "expected_close_date"],
+        "filters": {
+          "where": [{ "field": "stage", "operator": "in",
+                      "value": ["prospecting","qualification","needs_analysis","proposal","negotiation","closing"] }]
+        },
+        "sort_by": "expected_close_date",
+        "sort_order": "asc",
+        "explanation": "Open (pending) deals still in the sales pipeline, soonest expected close first."
+      }
+
+      Question: "Make me a report of unpaid invoices"
+      {
+        "module_key": "invoices",
+        "fields": ["id", "invoice_number", "contact_id", "amount_due", "due_date", "status"],
+        "filters": {
+          "where": [{ "field": "status", "operator": "in", "value": ["sent", "overdue", "partial"] }]
+        },
+        "sort_by": "due_date",
+        "sort_order": "asc",
+        "explanation": "Invoices that are sent, overdue, or partially paid — oldest due date first."
       }
 
       Rules:
-      - Only use fields that exist in the modules_summary above
-      - If date range is implied (e.g., "this week", "past 7 days", "this month"), calculate exact dates from today
-      - If the question is ambiguous, pick the most reasonable interpretation
-      - Set explanation to a single clear sentence describing what the report will show
-      - If a question cannot be answered with the available modules/fields, set module_key to null and explanation to why
+      - Only use fields that exist in the modules_summary above (skip any that aren't listed).
+      - If a date range is implied (e.g., "this week", "past 7 days", "this month"), calculate exact dates from today.
+      - If the phrasing is ambiguous, pick the most reasonable interpretation and build the query — do NOT bail with null.
+      - Only set module_key to null when the question truly can't map to any available module. In that case, set explanation to what you would need to answer it (e.g., "I need a module to query — try asking about leads, deals, invoices, or inventory.").
     PROMPT
   end
 
