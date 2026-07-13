@@ -201,8 +201,19 @@ module Reports
         secondary_salesperson: assigned ? salesperson_name(deal.secondary_salesperson) : nil,
         secondary_salesperson_id: assigned ? deal.secondary_salesperson_id : nil,
         deposit: assigned ? deal.down_payment : nil,
-        price: price,
+        # Report columns break the deal amount into its two components so users
+        # can see what's in the Deal Amount column without clicking through:
+        #   home_price  = the home line item price (== deal.selling_price on modern deals)
+        #   addon_gross = add-on revenue (fees/accessories/services/land/other)
+        #   deal_amount = home_price + addon_gross (the customer-facing total)
+        # For unassigned inventory rows, home_price falls back to the vehicle's
+        # total_home_price and add-ons are nil.
+        home_price: assigned ? deal.selling_price : (sold_no_deal ? nil : vehicle.total_home_price),
         addon_gross: assigned ? deal.addon_gross : nil,
+        deal_amount: assigned ? ((deal.selling_price || 0).to_d + (deal.addon_gross || 0).to_d).round(2) : price,
+        # `price` retained for back-compat with any consumer still reading it —
+        # equals deal_amount for assigned rows / vehicle price for unassigned.
+        price: price,
         lender: lender_for(deal, vehicle, fp),
         status: status_label(vehicle, deal, assigned),
         vehicle_status: status,
