@@ -81,6 +81,27 @@ RSpec.describe 'Deal front-end add-on classification', type: :model do
     end
   end
 
+  describe '#front_gross (home + add-ons)' do
+    it 'sums home margin (home line item price − cost) and add-on margin' do
+      add_line(category: 'service', name: 'Delivery & Set', price: 8_776, cost: 65)
+      # Home line: 174_990 price, 112_876 cost — from before block.
+      # Home margin: 174_990 − 112_876 = 62_114
+      # Add-on margin: 8_776 − 65 = 8_711
+      expect(deal.reload.front_gross).to eq(62_114.0 + 8_711.0)
+    end
+
+    it "reads the home LINE ITEM's cost even when vehicle.dealer_cost is wrong" do
+      # Simulates deal 291's shape: vehicle cost mistakenly equals the sale price,
+      # but the rep entered the real acquisition cost on the home line item.
+      vehicle.update!(dealer_cost: 174_990) # ← intentionally bogus (== sale price)
+      add_line(category: 'service', name: 'Delivery & Set', price: 8_776, cost: 65)
+      # Home line item cost is 112_876 (per the before block). front_gross MUST
+      # use the line item cost, not the vehicle's wrong dealer_cost, or home
+      # margin collapses to 0 and reps see add-on margin only.
+      expect(deal.reload.front_gross).to eq(62_114.0 + 8_711.0)
+    end
+  end
+
   describe '#addon_gross (revenue)' do
     it 'sums revenue on service/fee/accessory/land/other; excludes home + product' do
       add_line(category: 'service', name: 'Trim Out',   price: 8_999, cost: 900)

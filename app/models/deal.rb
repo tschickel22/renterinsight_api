@@ -377,6 +377,20 @@ class Deal < ApplicationRecord
     hli ? line_item_price(hli) : nil
   end
 
+  # PER-UNIT cost of the HOME line item (dp.cost × quantity). Mirrors
+  # home_line_item_price on the cost side so backend front_gross reads the same
+  # home cost the rep sees in the Deal Line Items card. Vehicle.structured_cost
+  # is the fallback when no home line exists — but when the rep entered a
+  # specific cost on the deal's home line (common: catalog cost differs from
+  # the actual purchase order), that value wins. nil when no home line.
+  def home_line_item_cost
+    hli = home_line_item
+    return nil unless hli
+    qty = (hli.quantity || 1).to_i
+    qty = 1 if qty < 1
+    (hli.cost.to_f * qty).round(2)
+  end
+
   # ALL-LINES TOTAL (the DEAL VALUE): pre-tax SUM of (unit_price*qty - discount)
   # across every deal_product — home + fees + accessories + recon. Discount math
   # mirrors DealProduct#line_profit / calculate_total.
@@ -437,9 +451,17 @@ class Deal < ApplicationRecord
       return nil
     end
 
-    # OPEN deal: prefer the live vehicle cost (read-through), then the home line item
-    # cost mirror (unit_cost), then home_cost. So a deal whose cost was entered on the
-    # line item computes GP even when the vehicle record itself has no cost.
+    # OPEN deal: prefer the HOME LINE ITEM's own cost — that's what the rep
+    # entered on this specific deal and what the Deal Line Items UI displays
+    # in the "Cost" column. Vehicle.structured_cost is the fallback for legacy
+    # deals with no home line. This priority matches the FE's "Line Items
+    # Profit" number and the Financial Details card's "Unit Cost (from home
+    # line item)" label; the earlier vehicle-first order made backend
+    # front_gross diverge whenever the rep priced a deal against a cost
+    # different from the (possibly stale) vehicle.dealer_cost.
+    hlc = home_line_item_cost
+    return hlc if hlc && hlc > 0
+
     live = vehicle&.structured_cost
     return live unless live.nil?
 
