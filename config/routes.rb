@@ -2332,9 +2332,16 @@ Rails.application.routes.draw do
         end
 
         # Nested resources
-        
-        # Activities
-        resources :activities, only: %i[index create update destroy]
+
+        # Activities — aliased to LeadActivitiesController so
+        # /api/crm/leads/:lead_id/activities/:id follows the same convention as
+        # accounts/contacts (which point at their own *_activities controllers).
+        # The previous declaration omitted `controller:` and defaulted to
+        # Api::Crm::ActivitiesController, which is aggregation-only and has no
+        # RESTful actions — every DELETE/POST/PATCH under this route 404'd with
+        # AbstractController::ActionNotFound. Broke Task Center bulk-delete for
+        # every lead-activity row (staging 291-row runaway couldn't be cleared).
+        resources :activities, controller: 'lead_activities', only: %i[index create update destroy]
 
         # Communications
         resources :communications, only: %i[index create] do
