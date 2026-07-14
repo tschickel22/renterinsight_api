@@ -421,8 +421,12 @@ module Api
     # POST /api/settings/custom_fields
     def create_custom_field
       field_params = params.require(:custom_field).permit(
-        :module, :name, :label, :field_type, :required, 
-        :default_value, :display_order, options: []
+        :module, :name, :label, :field_type, :required,
+        :default_value, :display_order, :section,
+        # Tooltip/help text shown next to the field label everywhere it
+        # renders (DynamicFormSection reads this as the tooltip).
+        :description, :placeholder,
+        options: []
       )
 
       field = @company.custom_fields.create!(field_params)
@@ -439,8 +443,10 @@ module Api
       field = @company.custom_fields.find(params[:id])
       
       field_params = params.require(:custom_field).permit(
-        :label, :field_type, :required, :default_value, 
-        :display_order, options: []
+        :label, :field_type, :required, :default_value,
+        :display_order, :section,
+        :description, :placeholder,
+        options: []
       )
 
       field.update!(field_params)
