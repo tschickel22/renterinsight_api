@@ -295,7 +295,21 @@ module Workflows
              of the CONTEXT — use the field_key column verbatim.
 
         6) create_activity
-           config: { "activity_type": "task"|"call"|"email"|"meeting"|"note"|"reminder", "subject": "...", "description": "...", "due_in_days": 1, "assigned_to_user_id": null }
+           config: {
+             "activity_type": "task"|"call"|"email"|"meeting"|"note"|"reminder",
+             "subject": "...", "description": "...",
+             "status": "pending"|"in_progress"|"completed" (optional),
+             "priority": "low"|"medium"|"high" (optional),
+             "assigned_to_user_id": <numeric user id> | "owner" | null,
+             // Choose ONE due-date form:
+             "due_in_days": 1,                              // relative day offset
+             "due_in_hours": 24,                            // relative hour offset
+             "due_date": "{{activity.due_date}}",           // literal / templated value
+             "due_date_field": "next_appointment",          // pull date FROM the entity (real column or custom_field field_key)
+             "due_time": "09:00"                            // HH:MM, pairs with due_in_days or due_date_field
+           }
+           - When the user says "same date as X", use `due_date_field: "<snake_case_field>"` and add `due_time` for the hour.
+           - `due_date_field` reads BOTH real columns and custom_field_values (custom fields use field_key snake_case).
 
         7) add_tag
            config: { "tag_names": ["hot-lead", "champion"] }
