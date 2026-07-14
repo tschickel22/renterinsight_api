@@ -200,7 +200,17 @@ module Api
         
         # Create communication BEFORE sending (so we have ID for tracking pixel)
         communication = create_pending_communication(email_params, email_config) if params[:entity_id]
-        
+
+        # Persist attachments to the Communication record for the audit trail.
+        # Done before send so a failed send still shows the user what they tried
+        # to attach; the Graph payload also gets the same bytes below.
+        if communication
+          persist_communication_attachments(
+            communication,
+            graph_normalize_attachments(email_params[:attachments])
+          )
+        end
+
         # Auto-generate Reply-To address for tracking
         if communication
           generated_reply_to = ReplyToAddressService.generate_for(communication, user: current_user)
@@ -775,6 +785,76 @@ module Api
 
       GRAPH_SCOPE = 'https://graph.microsoft.com/Mail.Send offline_access'.freeze
 
+      # Microsoft Graph /sendMail refuses payloads over ~4MB total. Cap the inline
+      # attachment budget below that so we don't blow through the JSON overhead of
+      # base64 encoding + message body + envelope.
+      GRAPH_INLINE_ATTACHMENT_MAX_BYTES = 3.megabytes
+
+      # Normalize incoming attachments (UploadedFile from user, Hash from templates)
+      # into a common shape: { filename, content_type, bytes }.
+      def graph_normalize_attachments(atts)
+        Array(atts).filter_map do |file|
+          if file.respond_to?(:read) && file.respond_to?(:original_filename)
+            file.rewind if file.respond_to?(:rewind)
+            {
+              filename: file.original_filename.to_s,
+              content_type: (file.content_type.presence || 'application/octet-stream'),
+              bytes: file.read
+            }
+          elsif file.is_a?(Hash) || file.is_a?(ActionController::Parameters)
+            h = file.respond_to?(:to_unsafe_h) ? file.to_unsafe_h : file
+            filename = h[:filename] || h['filename']
+            content  = h[:content]  || h['content']
+            next nil if filename.blank? || content.blank?
+            {
+              filename: filename.to_s,
+              content_type: (h[:content_type] || h['content_type'] || 'application/octet-stream'),
+              bytes: content
+            }
+          else
+            nil
+          end
+        end
+      end
+
+      # Build the Graph fileAttachment array. Returns [attachments_json_array, error_string_or_nil].
+      # If the total exceeds Graph's inline limit, returns an error rather than silently dropping.
+      def graph_build_attachments(normalized)
+        return [[], nil] if normalized.empty?
+
+        total = normalized.sum { |a| a[:bytes].bytesize }
+        if total > GRAPH_INLINE_ATTACHMENT_MAX_BYTES
+          return [[], "Attachments total #{(total / 1.megabyte.to_f).round(1)}MB exceeds Microsoft Graph's 3MB inline limit. Send a smaller file or use a share link."]
+        end
+
+        payload = normalized.map do |a|
+          {
+            '@odata.type' => '#microsoft.graph.fileAttachment',
+            name: a[:filename],
+            contentType: a[:content_type],
+            contentBytes: Base64.strict_encode64(a[:bytes])
+          }
+        end
+        [payload, nil]
+      end
+
+      # Persist normalized attachments onto the Communication so we keep an audit
+      # trail even for outbound-only records (customer received the file; we should
+      # have it on the record too).
+      def persist_communication_attachments(communication, normalized)
+        return unless communication && normalized.present?
+        normalized.each do |a|
+          io = StringIO.new(a[:bytes])
+          communication.attachments.attach(
+            io: io,
+            filename: a[:filename],
+            content_type: a[:content_type]
+          )
+        end
+      rescue => e
+        Rails.logger.error "[persist_communication_attachments] Failed for comm #{communication&.id}: #{e.message}"
+      end
+
       # Send email via Microsoft Graph API (avoids SMTP port blocking / SMTP AUTH disabled)
       def send_email_via_microsoft_graph(email_params, config, reply_to: nil)
         oauth_email = config['oauthEmail'] || config[:oauthEmail] || config['fromEmail'] || config[:fromEmail]
@@ -811,9 +891,20 @@ module Api
         message[:bccRecipients] = email_params[:bcc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:bcc].present?
         message[:replyTo] = reply_to.to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if reply_to.present?
 
+        # Attachments: encode as inline fileAttachments on the Graph message so
+        # they actually reach the recipient. Previous version silently dropped
+        # them, which meant users thought they were attaching files but the mail
+        # went out empty.
+        normalized_atts = graph_normalize_attachments(email_params[:attachments])
+        graph_atts, att_error = graph_build_attachments(normalized_atts)
+        if att_error
+          return { success: false, error: att_error }
+        end
+        message[:attachments] = graph_atts if graph_atts.any?
+
         payload = { message: message, saveToSentItems: true }
 
-        Rails.logger.info "[send_email_via_microsoft_graph] Sending to #{email_params[:to]} as #{oauth_email}"
+        Rails.logger.info "[send_email_via_microsoft_graph] Sending to #{email_params[:to]} as #{oauth_email} (#{graph_atts.size} attachment#{graph_atts.size == 1 ? '' : 's'})"
 
         uri = URI('https://graph.microsoft.com/v1.0/me/sendMail')
         request = Net::HTTP::Post.new(uri)
