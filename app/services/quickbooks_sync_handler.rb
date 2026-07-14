@@ -59,6 +59,22 @@ class QuickbooksSyncHandler
       quickbooks_synced_at: Time.current
     )
   end
+
+  # QB updates require the current SyncToken to be echoed back in the
+  # payload — omitting it fails with "Stale Object Error". Fetches the
+  # entity's current state from QB and returns the SyncToken so a handler
+  # can inject it into the update payload alongside Id.
+  #
+  # Params:
+  #   endpoint - the lowercase QB endpoint ("customer", "invoice", "payment", ...)
+  #   response_root - the CamelCase key QB uses in the response ("Customer", "Invoice", ...)
+  #   qb_id - the entity id to fetch
+  def fetch_sync_token!(endpoint, response_root, qb_id)
+    fetched = @api.get_entity(endpoint, qb_id)
+    token = fetched&.dig(response_root, 'SyncToken')
+    raise "QB #{response_root} #{qb_id} returned no SyncToken; cannot update" if token.nil?
+    token
+  end
   
   protected
   

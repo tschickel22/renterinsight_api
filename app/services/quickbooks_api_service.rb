@@ -129,6 +129,42 @@ class QuickbooksApiService
     query(sql)
   end
   
+  # Ask QB for the custom field definitions configured on this realm's
+  # entities and return them as { 'Invoice' => [{ 'DefinitionId' => '1',
+  # 'Name' => '...', 'Type' => 'StringType' }, ...], ... }. Cached per
+  # API instance since definitions rarely change during a sync run.
+  #
+  # QB exposes definitions via a Preferences query — we ask for the whole
+  # Preferences object and pull SalesFormsPrefs.CustomField from it. If
+  # the tenant hasn't configured any, this returns an empty hash and
+  # callers should skip the CustomField block entirely.
+  def custom_field_definitions
+    @custom_field_definitions ||= begin
+      response = query('SELECT * FROM Preferences')
+      prefs = response.dig('QueryResponse', 'Preferences', 0) || {}
+      raw   = prefs.dig('SalesFormsPrefs', 'CustomField') || []
+      # Group by TransactionTypeName so callers can ask
+      # `definitions_for('Invoice')` and get back its list.
+      raw.each_with_object({}) do |group, memo|
+        txn = group['TransactionTypeName'] || 'Invoice'
+        cf  = group['CustomField'] || []
+        memo[txn] = cf.select { |f| f['Type'] == 'StringType' }
+      end
+    rescue => e
+      Rails.logger.warn "[QB API] Failed to fetch custom field defs: #{e.message}"
+      {}
+    end
+  end
+
+  # True when the tenant's QB company has a custom field with this
+  # DefinitionId on the given transaction type. Handlers use this to
+  # decide whether to send the CustomField block or leave it off.
+  def custom_field_defined?(transaction_type, definition_id)
+    (custom_field_definitions[transaction_type] || []).any? do |cf|
+      cf['DefinitionId'].to_s == definition_id.to_s
+    end
+  end
+
   # Get all entities of a type, optionally filtered to those changed after
   # a given time (real from-QB incremental). QB supports the standard SQL
   # WHERE clause on MetaData.LastUpdatedTime with an ISO 8601 timestamp.

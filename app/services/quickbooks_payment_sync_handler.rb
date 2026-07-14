@@ -38,11 +38,9 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
   end
   
   def transform_to_quickbooks(payment, config)
-    # Get customer reference
     customer_ref = get_customer_ref(payment)
-    
-    # Map payment to QuickBooks Payment format
-    {
+
+    payload = {
       CustomerRef: customer_ref,
       TxnDate: payment.payment_date&.iso8601 || Date.today.iso8601,
       TotalAmt: payment.amount || 0,
@@ -50,16 +48,25 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
       PrivateNote: payment.notes,
       DepositToAccountRef: get_deposit_account_ref(config),
       Line: build_line_items(payment),
-      # Custom fields
-      CustomField: [
+      # Custom fields — only send if the connected QB realm has defined
+      # DefinitionId '1' on Payment transactions; otherwise leave off.
+      CustomField: (@api.custom_field_defined?('Payment', '1') ? [
         {
           DefinitionId: '1',
           Name: 'Payment ID',
           Type: 'StringType',
           StringValue: payment.id.to_s
         }
-      ].compact
-    }.compact
+      ] : nil)
+    }
+
+    # For updates, echo current SyncToken back — QB rejects updates without it.
+    if payment.quickbooks_id.present?
+      payload[:Id] = payment.quickbooks_id
+      payload[:SyncToken] = fetch_sync_token!('payment', 'Payment', payment.quickbooks_id)
+    end
+
+    payload.compact
   end
   
   def find_by_quickbooks_id(qb_id)

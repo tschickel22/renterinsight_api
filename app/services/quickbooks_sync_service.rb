@@ -212,11 +212,7 @@ class QuickbooksSyncService
   
   private
   
-  # 'purchases' is intentionally out — the handler targets a nonexistent
-  # Purchase model rather than the real PurchaseOrder. Rewrite handler
-  # (fields: po_number/order_date/total_amount, associations: supplier,
-  # purchase_order_lines) before re-adding it here.
-  ENTITY_TYPES = %w[inventory customers invoices payments vendors]
+  ENTITY_TYPES = %w[inventory customers invoices payments vendors purchases credit_memos]
   
   # Sync TO QuickBooks - only records that are new or modified since 'since'
   def sync_to_quickbooks_incremental(entity_type, since, config)
@@ -409,6 +405,8 @@ class QuickbooksSyncService
       QuickbooksVendorSyncHandler.new(@entity, @api)
     when 'purchases'
       QuickbooksPurchaseSyncHandler.new(@entity, @api)
+    when 'credit_memos'
+      QuickbooksCreditMemoSyncHandler.new(@entity, @api)
     else
       raise "Unknown entity type: #{entity_type}"
     end
@@ -516,8 +514,10 @@ class QuickbooksSyncService
       'payments'
     when 'Vendor'
       'vendors'
-    when 'Purchase'
+    when 'PurchaseOrder'
       'purchases'
+    when 'CreditMemo'
+      'credit_memos'
     else
       model_name.underscore.pluralize
     end

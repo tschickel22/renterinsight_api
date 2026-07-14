@@ -1,0 +1,185 @@
+# frozen_string_literal: true
+
+# QuickBooks CreditMemo Sync Handler
+#
+# Pushes issued (non-draft, non-voided) credit memos to QuickBooks as
+# CreditMemo entities. Payloads mirror the invoice handler's shape — same
+# CustomerRef resolution, same line-item + TxnTaxDetail (from
+# invoice_item_taxes / tax_codes if configured), same SyncToken echo on
+# update.
+class QuickbooksCreditMemoSyncHandler < QuickbooksSyncHandler
+  def qb_entity_type
+    'CreditMemo'
+  end
+
+  # Only issued/partial/applied credit memos are meaningful in QB. Draft
+  # memos stay local, voided ones stay local (and if previously synced,
+  # would need a separate void-in-QB path).
+  def get_all_syncable_records
+    scope = company.credit_memos.where(is_deleted: [false, nil])
+    scope = scope.where(status: %w[issued partial applied])
+    scope = scope.where(location_id: location.id) if location.present?
+    scope
+  end
+
+  def get_records_by_ids(ids)
+    company.credit_memos.where(id: ids)
+  end
+
+  def get_records_by_quickbooks_ids(qb_ids)
+    company.credit_memos.where(quickbooks_id: qb_ids)
+  end
+
+  def transform_to_quickbooks(memo, config)
+    payload = {
+      CustomerRef: get_customer_ref(memo),
+      TxnDate:     memo.memo_date&.iso8601 || Date.today.iso8601,
+      DocNumber:   memo.credit_memo_number,
+      PrivateNote: [memo.reason, memo.notes].compact.reject(&:blank?).join(' — ').presence,
+      Line:        build_line_items(memo)
+    }
+
+    tax_detail = build_txn_tax_detail(memo)
+    payload[:TxnTaxDetail] = tax_detail if tax_detail
+
+    if memo.quickbooks_id.present?
+      payload[:Id] = memo.quickbooks_id
+      payload[:SyncToken] = fetch_sync_token!('creditmemo', 'CreditMemo', memo.quickbooks_id)
+    end
+
+    payload.compact
+  end
+
+  def find_by_quickbooks_id(qb_id)
+    company.credit_memos.find_by(quickbooks_id: qb_id)
+  end
+
+  def create_from_quickbooks(qb_memo, config)
+    customer_id = qb_memo.dig('CustomerRef', 'value')
+    contact = find_or_create_contact_from_qb(customer_id)
+
+    resolved_location_id = location&.id ||
+      company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
+
+    CreditMemo.transaction do
+      memo = company.credit_memos.create!(
+        location_id: resolved_location_id,
+        contact_id:  contact&.id,
+        quickbooks_id: qb_memo['Id'],
+        credit_memo_number: qb_memo['DocNumber'] || "QB-CM-#{qb_memo['Id']}",
+        memo_date:   qb_memo['TxnDate'] ? Date.parse(qb_memo['TxnDate']) : Date.today,
+        status:      'issued',
+        reason:      qb_memo['PrivateNote'],
+        quickbooks_synced_at: Time.current
+      )
+      create_line_items_from_qb(memo, qb_memo)
+
+      total_amt = qb_memo['TotalAmt'].to_f
+      tax_amt   = qb_memo.dig('TxnTaxDetail', 'TotalTax').to_f
+      subtotal  = total_amt - tax_amt
+      remaining = qb_memo['RemainingCredit'].to_f
+      applied   = total_amt - remaining
+
+      memo.update_columns(
+        subtotal:         subtotal,
+        tax_amount:       tax_amt,
+        total:            total_amt,
+        amount_applied:   applied,
+        amount_remaining: remaining,
+        updated_at:       memo.updated_at
+      )
+      memo
+    end
+  end
+
+  def update_from_quickbooks(memo, qb_memo, config)
+    memo.credit_memo_items.destroy_all
+    create_line_items_from_qb(memo, qb_memo)
+
+    total_amt = qb_memo['TotalAmt'].to_f
+    tax_amt   = qb_memo.dig('TxnTaxDetail', 'TotalTax').to_f
+    subtotal  = total_amt - tax_amt
+    remaining = qb_memo['RemainingCredit'].to_f
+    applied   = total_amt - remaining
+
+    memo.update_columns(
+      credit_memo_number: qb_memo['DocNumber'] || memo.credit_memo_number,
+      memo_date:  qb_memo['TxnDate'] ? Date.parse(qb_memo['TxnDate']) : memo.memo_date,
+      subtotal:   subtotal,
+      tax_amount: tax_amt,
+      total:      total_amt,
+      amount_applied:   applied,
+      amount_remaining: remaining,
+      reason:     qb_memo['PrivateNote'],
+      quickbooks_synced_at: Time.current,
+      updated_at: memo.updated_at
+    )
+  end
+
+  private
+
+  def get_customer_ref(memo)
+    contact = memo.contact
+    raise "CreditMemo ##{memo.id} has no contact — cannot sync to QuickBooks" unless contact.present?
+
+    if contact.quickbooks_id.present?
+      { value: contact.quickbooks_id }
+    else
+      customer_handler = QuickbooksCustomerSyncHandler.new(@entity, @api)
+      customer_data = customer_handler.transform_to_quickbooks(contact, {})
+      response = @api.create_entity('Customer', customer_data)
+      qb_id = response.dig('Customer', 'Id')
+      raise "QB Customer create returned no Id for contact ##{contact.id}" if qb_id.blank?
+
+      customer_handler.save_quickbooks_id(contact, qb_id)
+      { value: qb_id }
+    end
+  end
+
+  def build_line_items(memo)
+    memo.credit_memo_items.map.with_index do |item, idx|
+      {
+        LineNum:    idx + 1,
+        DetailType: 'SalesItemLineDetail',
+        Amount:     item.amount || (item.quantity * item.rate),
+        Description: item.description,
+        SalesItemLineDetail: {
+          Qty:       item.quantity || 1,
+          UnitPrice: item.rate || 0
+        }.compact
+      }
+    end
+  end
+
+  # Credit memos don't currently carry InvoiceItemTax snapshots — those live
+  # on invoice_items. Return nil so QB computes tax from Item defaults.
+  # Placeholder for a future CreditMemoItemTax parallel to InvoiceItemTax.
+  def build_txn_tax_detail(_memo)
+    nil
+  end
+
+  def find_or_create_contact_from_qb(customer_id)
+    contact = company.contacts.find_by(quickbooks_id: customer_id)
+    return contact if contact
+
+    qb_customer = @api.get_entity('Customer', customer_id)
+    QuickbooksCustomerSyncHandler.new(@entity, @api)
+                                 .create_from_quickbooks(qb_customer['Customer'], {})
+  rescue => e
+    Rails.logger.error "Failed to find/create contact from QB (for CreditMemo import): #{e.message}"
+    nil
+  end
+
+  def create_line_items_from_qb(memo, qb_memo)
+    (qb_memo['Line'] || []).each do |line|
+      next unless line['DetailType'] == 'SalesItemLineDetail'
+      detail = line['SalesItemLineDetail']
+      memo.credit_memo_items.create!(
+        description: line['Description'] || 'Line',
+        quantity:    detail['Qty'] || 1,
+        rate:        detail['UnitPrice'] || 0,
+        amount:      line['Amount'] || 0
+      )
+    end
+  end
+end

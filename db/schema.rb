@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2343,8 +2343,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_200000) do
     t.bigint "created_by_id"
     t.boolean "is_deleted", default: false, null: false
     t.datetime "deleted_at"
-    t.string "qbo_id"
-    t.datetime "qbo_synced_at"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "credit_memo_number"], name: "idx_credit_memos_unique_number", unique: true

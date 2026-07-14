@@ -43,18 +43,17 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       # sending it with a nil/blank value made QB fall back to "Due on
       # Receipt", marking every invoice past-due at creation.
       SalesTermRef: (config[:default_terms].presence ? { value: config[:default_terms] } : nil),
-      # Custom fields — DefinitionId 1 is a per-QB-company setting, so this
-      # is only honored if the connected QB company has a custom field with
-      # that DefinitionId. Left as-is (audit follow-up: fetch definitions
-      # at connect time and skip if not present).
-      CustomField: [
+      # Custom fields — DefinitionId 1 is a per-QB-company setting. Only
+      # include if the connected QB realm has actually defined it, else QB
+      # silently ignores it (or complains on stricter API versions).
+      CustomField: (@api.custom_field_defined?('Invoice', '1') ? [
         {
           DefinitionId: '1',
           Name: 'Invoice ID',
           Type: 'StringType',
           StringValue: invoice.id.to_s
         }
-      ].compact
+      ] : nil)
     }
 
     # Attach TxnTaxDetail when this invoice's line items have TaxCode-driven
@@ -62,6 +61,13 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     # let QB compute tax from Item defaults as before.
     tax_detail = build_txn_tax_detail(invoice)
     payload[:TxnTaxDetail] = tax_detail if tax_detail
+
+    # For updates, include Id + SyncToken — QB rejects updates that don't
+    # echo the current SyncToken back.
+    if invoice.quickbooks_id.present?
+      payload[:Id] = invoice.quickbooks_id
+      payload[:SyncToken] = fetch_sync_token!('invoice', 'Invoice', invoice.quickbooks_id)
+    end
 
     payload.compact
   end
