@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1959,7 +1959,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_210000) do
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["public_inventory_settings"], name: "index_companies_on_public_inventory_settings", using: :gin
     t.index ["public_inventory_token"], name: "index_companies_on_public_inventory_token", unique: true
-    t.index ["quickbooks_realm_id"], name: "idx_companies_unique_qb_realm", unique: true, where: "(quickbooks_realm_id IS NOT NULL)"
+    t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
     t.index ["quickbooks_scope"], name: "index_companies_on_quickbooks_scope"
     t.index ["sms_provisioning_mode"], name: "index_companies_on_sms_provisioning_mode"
     t.index ["status"], name: "index_companies_on_status"
