@@ -167,7 +167,9 @@ class Contact < ApplicationRecord
   end
 
   def emit_workflow_updated
-    WorkflowEngine.emit('contact.updated', self, { id: id, changes: saved_changes.keys })
+    changes = saved_changes.keys
+    return if changes.blank?
+    WorkflowEngine.emit('contact.updated', self, { id: id, changes: changes })
   end
 
   def emit_workflow_deleted

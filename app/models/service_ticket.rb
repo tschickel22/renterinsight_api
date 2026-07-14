@@ -51,7 +51,9 @@ class ServiceTicket < ApplicationRecord
 
   def emit_workflow_updated
     return unless defined?(WorkflowEngine)
-    WorkflowEngine.emit('service_ticket.updated', self, { id: id, changes: saved_changes.keys })
+    changes = saved_changes.keys
+    return if changes.blank?
+    WorkflowEngine.emit('service_ticket.updated', self, { id: id, changes: changes })
     if self.class.column_names.include?('status') && saved_change_to_attribute?(:status)
       from, to = saved_change_to_attribute(:status)
       WorkflowEngine.emit('service_ticket.status_changed', self, { id: id, from: from, to: to })

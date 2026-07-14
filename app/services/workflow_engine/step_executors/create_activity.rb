@@ -56,13 +56,16 @@ module WorkflowEngine
       private
 
       # Assignee resolution:
-      # - "owner": use the entity's owner
+      # - "owner": use the entity's owner (explicit)
       # - numeric id or numeric string: use as-is
-      # - anything else (name/blank): nil (activity will be unassigned)
+      # - blank/null: DEFAULT to the entity's owner rather than leaving the
+      #   task unassigned — users expect "the person responsible for the
+      #   lead" to see the task, and the AI often emits `null` when it
+      #   doesn't have a specific user in mind.
+      # - anything else (unrecognized name): nil (unassigned)
       def resolve_assignee(value)
-        return nil if value.blank?
-        if value.to_s == 'owner'
-          return @run.entity.owner_id if @run.entity.respond_to?(:owner_id)
+        if value.blank? || value.to_s == 'owner'
+          return @run.entity.owner_id if @run.entity.respond_to?(:owner_id) && @run.entity.owner_id.present?
           return default_user_id
         end
         value.to_s =~ /\A\d+\z/ ? value.to_i : nil

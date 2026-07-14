@@ -14,7 +14,11 @@
 #   Current.location_filtered? 
 #
 class Current < ActiveSupport::CurrentAttributes
-  attribute :user, :original_user, :company_id, :location_id, :ip_address
+  # `suppress_workflow_events` is set by ProcessWorkflowStepJob while a workflow
+  # step is executing. Model after_commit hooks that call WorkflowEngine.emit
+  # check this flag and skip emission so a workflow that updates an entity
+  # doesn't retrigger its own rule (see rule 63 on staging: 291 runs in 8min).
+  attribute :user, :original_user, :company_id, :location_id, :ip_address, :suppress_workflow_events
   
   # Check if we're filtering by a specific location
   def location_filtered?

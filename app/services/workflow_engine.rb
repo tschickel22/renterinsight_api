@@ -3,6 +3,16 @@ module WorkflowEngine
 
   def emit(event_type, entity, payload = {})
     return if entity.nil?
+
+    # Loop guard: if a workflow step is currently executing and its side
+    # effects are what caused this event, don't fan out another dispatch —
+    # otherwise rules that trigger on lead.updated with an is_set condition
+    # form an infinite loop against their own writes.
+    if defined?(Current) && Current.suppress_workflow_events
+      Rails.logger.debug "[WorkflowEngine.emit] suppressed #{event_type} for #{entity.class.name}##{entity.id} (inside workflow step)"
+      return nil
+    end
+
     company_id = entity.respond_to?(:company_id) ? entity.company_id : nil
     return if company_id.nil?
 

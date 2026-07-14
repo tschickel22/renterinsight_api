@@ -217,7 +217,9 @@ class Account < ApplicationRecord
   end
 
   def emit_workflow_updated
-    WorkflowEngine.emit('account.updated', self, { id: id, changes: saved_changes.keys })
+    changes = saved_changes.keys
+    return if changes.blank?
+    WorkflowEngine.emit('account.updated', self, { id: id, changes: changes })
     if saved_change_to_attribute?(:status)
       from, to = saved_change_to_attribute(:status)
       WorkflowEngine.emit('account.status_changed', self, { id: id, from: from, to: to })

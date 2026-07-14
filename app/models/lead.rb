@@ -117,7 +117,12 @@ class Lead < ApplicationRecord
   end
 
   def emit_workflow_updated
-    WorkflowEngine.emit('lead.updated', self, { id: id, changes: saved_changes.keys })
+    changes = saved_changes.keys
+    # No-op saves (touch on a record already in memory with no attr changes,
+    # or a wrapper that resets saved_changes before the callback runs) shouldn't
+    # fan out workflow events — staging rule 63 saw 289 empty-changes emissions.
+    return if changes.blank?
+    WorkflowEngine.emit('lead.updated', self, { id: id, changes: changes })
     if saved_change_to_attribute?(:status)
       from, to = saved_change_to_attribute(:status)
       WorkflowEngine.emit('lead.status_changed', self, { id: id, from: from, to: to })
