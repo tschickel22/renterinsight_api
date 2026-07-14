@@ -6,54 +6,82 @@
 
 class QuickbooksSyncService
   attr_reader :entity, :api, :settings
-  
+
+  # Advisory-lock namespace for whole-entity sync operations. Distinct from
+  # accounting number-generator and token-refresh namespaces.
+  SYNC_LOCK_NAMESPACE = 0x1_2E_00_5C.freeze
+
   def initialize(entity)
     @entity = entity # Company or Location
     @api = QuickbooksApiService.new(entity)
     @settings = entity.resolved_quickbooks_settings || {}
+  end
+
+  # Wrap a sync operation in a per-entity advisory lock so a manual sync
+  # can't race a scheduled sync on the same company/location — concurrent
+  # runs could otherwise write conflicting SyncTokens or double-import.
+  # Waits for the lock (no timeout) because the caller is a background job
+  # and starving one run is worse than delaying it briefly.
+  def with_sync_lock(&block)
+    ApplicationRecord.transaction do
+      self.class.connection.execute(
+        ActiveRecord::Base.sanitize_sql_array([
+          'SELECT pg_advisory_xact_lock(?, ?)',
+          SYNC_LOCK_NAMESPACE,
+          @entity.id
+        ])
+      )
+      block.call
+    end
+  end
+
+  def self.connection
+    ActiveRecord::Base.connection
   end
   
   # Sync specific entity type (e.g., 'inventory', 'customers')
   def sync_entity_type(entity_type, direction: nil, entity_ids: nil)
     # Get entity settings
     entity_config = @settings.dig(:entities, entity_type.to_sym) || {}
-    
+
     # Check if sync is enabled
     unless entity_config[:enabled]
       return { success: false, message: "Sync disabled for #{entity_type}" }
     end
-    
+
     # Use configured direction or override
     sync_direction = direction || entity_config[:sync_direction] || 'to_qb'
-    
+
     # Create sync log
     log = create_sync_log(entity_type, sync_direction)
-    
+
     begin
-      result = case sync_direction
-      when 'to_qb'
-        sync_to_quickbooks(entity_type, entity_ids, entity_config)
-      when 'from_qb'
-        sync_from_quickbooks(entity_type, entity_config)
-      when 'bidirectional'
-        sync_bidirectional(entity_type, entity_ids, entity_config)
-      else
-        raise "Unknown sync direction: #{sync_direction}"
+      result = with_sync_lock do
+        case sync_direction
+        when 'to_qb'
+          sync_to_quickbooks(entity_type, entity_ids, entity_config)
+        when 'from_qb'
+          sync_from_quickbooks(entity_type, entity_config)
+        when 'bidirectional'
+          sync_bidirectional(entity_type, entity_ids, entity_config)
+        else
+          raise "Unknown sync direction: #{sync_direction}"
+        end
       end
-      
+
       log.mark_success!(result)
-      
+
       # Update entity's last sync timestamp
       @entity.update_column(:quickbooks_last_sync_at, Time.current)
-      
+
       { success: true, log: log, result: result }
-      
+
     rescue => e
       Rails.logger.error "QuickBooks sync error (#{entity_type}): #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
-      
+
       log.mark_error!(e.message)
-      
+
       { success: false, log: log, error: e.message }
     end
   end
@@ -199,12 +227,12 @@ class QuickbooksSyncService
     sync_to_quickbooks(entity_type, nil, config)
   end
   
-  # Sync FROM QuickBooks - only records that were modified since 'since'
+  # Sync FROM QuickBooks — filter by QB's MetaData.LastUpdatedTime > since
+  # so we don't re-fetch every entity on every tick. Falls back to a full
+  # scan if `since` is nil (first sync).
   def sync_from_quickbooks_incremental(entity_type, since, config)
-    # For now, fall back to regular sync but with filtering
-    # TODO: Implement @api.get_entities_since(entity_type, since) for true QB-side filtering
     Rails.logger.info "[QB Sync FROM] #{entity_type}: Incremental sync since #{since || 'beginning'}"
-    sync_from_quickbooks(entity_type, config)
+    sync_from_quickbooks(entity_type, config, since: since)
   end
   
   def sync_to_quickbooks(entity_type, entity_ids, config)
@@ -285,11 +313,12 @@ class QuickbooksSyncService
     }
   end
   
-  def sync_from_quickbooks(entity_type, config)
+  def sync_from_quickbooks(entity_type, config, since: nil)
     handler = get_sync_handler(entity_type)
-    
-    # Get all entities from QuickBooks
-    qb_entities = @api.get_all_entities(handler.qb_entity_type)
+
+    # Ask QB for only entities changed since `since` — a proper incremental
+    # pull. `since` nil means first-time sync, so we scan the whole realm.
+    qb_entities = @api.get_all_entities(handler.qb_entity_type, since: since)
     
     # OPTIMIZATION: Batch-load all existing records to avoid N+1 queries
     qb_ids = qb_entities.map { |e| e['Id'] }.compact

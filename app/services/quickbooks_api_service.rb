@@ -30,48 +30,57 @@ class QuickbooksApiService
   # certain minorversions.
   MINOR_VERSION = 65
 
+  # 429 backoff — retry up to 3 times with exponential delay before giving
+  # up. QB rate limits are per-app-per-realm; a caller should see a real
+  # rate-limit error only after all retries fail.
+  RATE_LIMIT_RETRY_LIMIT = 3
+  RATE_LIMIT_BACKOFF_BASE_SECONDS = 2
+
   # GET request to QuickBooks API
   def get(endpoint, params = {})
     url = build_url(endpoint)
 
-    response = HTTParty.get(url, {
-      headers: auth_headers,
-      query: params.reverse_merge(minorversion: MINOR_VERSION),
-      timeout: 30
-    })
-
-    handle_response(response)
+    with_rate_limit_retry do
+      response = HTTParty.get(url, {
+        headers: auth_headers,
+        query: params.reverse_merge(minorversion: MINOR_VERSION),
+        timeout: 30
+      })
+      handle_response(response)
+    end
   end
 
   # POST request to QuickBooks API
   def post(endpoint, data)
     url = build_url(endpoint)
 
-    response = HTTParty.post(url, {
-      headers: auth_headers.merge('Content-Type' => 'application/json'),
-      query: { minorversion: MINOR_VERSION },
-      body: data.to_json,
-      timeout: 30
-    })
-
-    handle_response(response)
+    with_rate_limit_retry do
+      response = HTTParty.post(url, {
+        headers: auth_headers.merge('Content-Type' => 'application/json'),
+        query: { minorversion: MINOR_VERSION },
+        body: data.to_json,
+        timeout: 30
+      })
+      handle_response(response)
+    end
   end
 
   # POST with sparse update (PATCH equivalent)
   def update(endpoint, id, data)
     url = build_url(endpoint)
 
-    # QuickBooks updates use POST with Id and SyncToken in body.
-    # minorversion goes in the query string (not the body) so we still get
-    # the newer schema without confusing QB about the operation type.
-    response = HTTParty.post(url, {
-      headers: auth_headers.merge('Content-Type' => 'application/json'),
-      query: { minorversion: MINOR_VERSION },
-      body: data.to_json,
-      timeout: 30
-    })
-
-    handle_response(response)
+    with_rate_limit_retry do
+      # QuickBooks updates use POST with Id and SyncToken in body.
+      # minorversion goes in the query string (not the body) so we still
+      # get the newer schema without confusing QB about the operation.
+      response = HTTParty.post(url, {
+        headers: auth_headers.merge('Content-Type' => 'application/json'),
+        query: { minorversion: MINOR_VERSION },
+        body: data.to_json,
+        timeout: 30
+      })
+      handle_response(response)
+    end
   end
 
   # Query QuickBooks data with SQL-like syntax
@@ -120,22 +129,34 @@ class QuickbooksApiService
     query(sql)
   end
   
-  # Get all entities of a type
-  def get_all_entities(entity_type, max_results: 1000)
+  # Get all entities of a type, optionally filtered to those changed after
+  # a given time (real from-QB incremental). QB supports the standard SQL
+  # WHERE clause on MetaData.LastUpdatedTime with an ISO 8601 timestamp.
+  # `entity_type` is validated at the boundary so it can't be a SQL vector.
+  def get_all_entities(entity_type, max_results: 1000, since: nil)
+    safe_type = sanitize_qb_identifier(entity_type)
     results = []
     start_position = 1
-    
+
+    where_clause =
+      if since
+        ts = since.respond_to?(:utc) ? since.utc.iso8601 : since.to_s
+        " WHERE MetaData.LastUpdatedTime > '#{escape_qb_value(ts)}'"
+      else
+        ''
+      end
+
     loop do
-      sql = "SELECT * FROM #{entity_type} STARTPOSITION #{start_position} MAXRESULTS 1000"
+      sql = "SELECT * FROM #{safe_type}#{where_clause} STARTPOSITION #{start_position} MAXRESULTS 1000"
       response = query(sql)
-      
+
       entities = response.dig('QueryResponse', entity_type) || []
       results.concat(entities)
-      
+
       break if entities.length < 1000 || results.length >= max_results
       start_position += 1000
     end
-    
+
     results
   end
   
@@ -187,6 +208,23 @@ class QuickbooksApiService
     end
   end
   
+  # Wrap a QB request in bounded exponential retries when QB replies with
+  # 429 (rate limit). Anything else propagates immediately.
+  def with_rate_limit_retry
+    attempts = 0
+    begin
+      yield
+    rescue QuickbooksRateLimitError => e
+      attempts += 1
+      raise if attempts > RATE_LIMIT_RETRY_LIMIT
+
+      sleep_for = RATE_LIMIT_BACKOFF_BASE_SECONDS**attempts
+      Rails.logger.warn "[QB API] 429 rate-limited, retrying in #{sleep_for}s (attempt #{attempts}/#{RATE_LIMIT_RETRY_LIMIT})"
+      sleep(sleep_for)
+      retry
+    end
+  end
+
   # QB identifiers (entity + field names) come from code in practice, but
   # search_entities has been called with dynamic values in the past, so
   # enforce the shape at the boundary.
