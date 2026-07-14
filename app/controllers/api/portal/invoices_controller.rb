@@ -94,19 +94,19 @@ module Api
           return
         end
 
-        # Create payment record
-        payment = @invoice.payments.build(
+        # Create payment record — application ties it to this invoice, so
+        # once processing completes and status flips to 'completed' the
+        # invoice's amount_paid recomputes from the joined applications.
+        payment = @invoice.company.payments.build(
           amount: amount,
           payment_date: Date.today,
           payment_type: 'one_time',
           status: 'pending',
-          company_id: @invoice.company_id,
           payer: current_portal_buyer.buyer,
-          payable: @invoice,
           payment_method_id: payment_method.id
         )
 
-        if payment.save
+        if payment.save && payment.apply_to!(@invoice, amount: amount)
           # Process payment via Zego
           zego_api = RenterInsightZegoApi.new(@invoice.company)
           

@@ -163,19 +163,28 @@ module Api
       # POST /api/v1/payments
       def create
         return unless authorize_action!('finance', 'create')
-        
+
         # STRICT TENANT ISOLATION: Create payment within current company
-        @payment = @company.payments.new(payment_params)
-        
+        attrs = payment_params
+        # Pull out payable_type/id — for invoices we now express the link via
+        # a PaymentApplication row instead of storing it on the payment.
+        invoice_payable_id = nil
+        if attrs['payable_type'].to_s == 'Invoice' && attrs['payable_id'].present?
+          invoice_payable_id = attrs['payable_id'].to_i
+          attrs = attrs.except('payable_type', 'payable_id')
+        end
+
+        @payment = @company.payments.new(attrs)
+
         # Auto-assign location from selector (if user selected a specific location)
         @payment.location_id ||= Current.location_id if Current.location_id.present?
-        
+
         # RBAC fallback: Location-tier users auto-assign to their first location if no selector
         if @payment.location_id.nil? && current_user.uses_rbac? && !current_user.effective_admin?
           location_ids = permission_service.accessible_location_ids
           @payment.location_id ||= location_ids.first if location_ids.any?
         end
-        
+
         # Convert contact_id/account_id to polymorphic payer_type/payer_id
         if params[:contact_id].present?
           @payment.payer_type = 'Contact'
@@ -184,12 +193,20 @@ module Api
           @payment.payer_type = 'Account'
           @payment.payer_id = params[:account_id]
         end
-        
+
         # Set gateway name
         @payment.gateway_name ||= 'zego'
-        
+
         # Save payment first (to get ID and payment_number)
         if @payment.save
+          # Link to invoice via PaymentApplication if this came in as an
+          # invoice payment. Scope the invoice lookup to @company so a
+          # forged payable_id can't cross tenants.
+          if invoice_payable_id
+            target_invoice = @company.invoices.find_by(id: invoice_payable_id)
+            @payment.apply_to!(target_invoice, amount: @payment.amount, created_by: current_user) if target_invoice
+          end
+
           # Process payment immediately if not scheduled
           if @payment.scheduled_at.blank? || @payment.scheduled_at <= Time.current
             process_payment_now(@payment)

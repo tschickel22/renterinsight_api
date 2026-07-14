@@ -333,11 +333,14 @@ class Api::V1::InvoicesController < ApplicationController
       .where(paid_at: start_of_month..end_of_month)
       .sum(:total)
     
-    # Payment success rate (completed payments / total payments this month)
-    month_payments = Payment
-      .where(company_id: @company.id)
-      .where(payable_type: 'Invoice')
+    # Payment success rate (completed payments / total payments this month).
+    # A "payment on an invoice" is one that has at least one PaymentApplication
+    # against an Invoice; DISTINCT since a split payment joins multiple rows.
+    month_payments = @company.payments
+      .joins(:payment_applications)
+      .where(payment_applications: { applicable_type: 'Invoice' })
       .where(created_at: start_of_month..end_of_month)
+      .distinct
     
     if Current.location_filtered?
       month_payments = month_payments.where(location_id: Current.location_id)

@@ -43,7 +43,8 @@ class Invoice < ApplicationRecord
   belongs_to :sales_rep, class_name: 'User', optional: true
   
   has_many :invoice_items, dependent: :destroy
-  has_many :payments, as: :payable, dependent: :nullify
+  has_many :payment_applications, as: :applicable, dependent: :destroy
+  has_many :payments, through: :payment_applications
   has_many :invoice_inventory_usages, dependent: :destroy
   
   accepts_nested_attributes_for :invoice_items, allow_destroy: true
@@ -119,28 +120,26 @@ class Invoice < ApplicationRecord
   scope :for_service_tickets, -> { where(source_type: 'ServiceTicket') }
   scope :for_warranty_claims, -> { where(source_type: 'WarrantyClaim') }
   
-  # Record a manual payment for this invoice
+  # Record a manual payment for this invoice. Creates a Payment plus a
+  # PaymentApplication tying it back — the application is what
+  # update_status_based_on_payments reads to compute amount_paid.
   def record_payment!(amount, payment_type = 'manual', metadata = {})
-    # Create payment record linked to this invoice
-    payment = company.payments.build(
-      payable_type: 'Invoice',      # CRITICAL: Links payment to invoice
-      payable_id: id,                # CRITICAL: Invoice ID
-      payer_type: 'Contact',
-      payer_id: contact_id,
-      amount: amount,
-      payment_type: 'one_time',      # FIXED: Use valid payment_type instead of 'manual'
-      payment_date: Date.current,    # FIXED: Use payment_date (not payment_at)
-      status: 'completed',           # Manual payments are immediately completed
-      gateway_name: payment_type,    # Keep 'manual' as gateway_name
-      location_id: location_id,
-      metadata: metadata.merge(recorded_by: Current.user&.id)  # FIXED: Use Current.user&.id instead of Current.user_id
-    )
-    
-    payment.save!
-    
-    # Trigger status update (which will call mark_inventory_as_used if status becomes 'paid')
-    update_status_based_on_payments
-    
+    Payment.transaction do
+      payment = company.payments.create!(
+        payer_type: 'Contact',
+        payer_id: contact_id,
+        amount: amount,
+        payment_type: 'one_time',
+        payment_date: Date.current,
+        status: 'completed',
+        gateway_name: payment_type,
+        location_id: location_id,
+        metadata: metadata.merge(recorded_by: Current.user&.id)
+      )
+
+      payment.apply_to!(self, amount: amount, created_by: Current.user)
+    end
+
     true
   rescue => e
     Rails.logger.error "[Invoice] Failed to record payment: #{e.message}"
@@ -278,7 +277,55 @@ class Invoice < ApplicationRecord
   def force_mark_inventory_as_used!(user)
     mark_inventory_as_used!(user)
   end
-  
+
+  # Recomputes amount_paid / amount_due / status from the current set of
+  # payment applications. Called from Invoice's own after_save and from
+  # PaymentApplication/Payment callbacks — needs to be public so those
+  # callers can invoke it directly (touch does not fire after_save).
+  def update_status_based_on_payments
+    return if is_deleted? || status == 'cancelled'
+    return if new_record?
+
+    # Serialize concurrent payment applications with a row-level lock so
+    # two payments completing at the same time can't both compute stale
+    # `total_paid` and race their writes on amount_paid/amount_due.
+    with_lock do
+      total_paid = payment_applications
+                   .joins(:payment)
+                   .where(payments: { status: 'completed' })
+                   .sum('payment_applications.amount')
+      calculated_amount_due = total - total_paid
+
+      new_status = if total_paid >= total && total > 0
+        'paid'
+      elsif total_paid > 0 && total_paid < total
+        'partial'
+      elsif overdue?
+        'overdue'
+      else
+        status
+      end
+
+      if new_status != status
+        # update! triggers callbacks (mark_inventory_as_used_on_payment fires
+        # when status transitions to 'paid'). Re-entry into this method from
+        # the resulting after_save is safe: status will match on re-read and
+        # the else-branch below writes the same values.
+        update!(
+          status: new_status,
+          paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
+          amount_paid: total_paid,
+          amount_due: new_status == 'paid' ? 0 : calculated_amount_due
+        )
+      else
+        update_columns(
+          amount_paid: total_paid,
+          amount_due: calculated_amount_due
+        )
+      end
+    end
+  end
+
   private
   
   # Namespace for the advisory lock — arbitrary constant so different features
@@ -353,50 +400,11 @@ class Invoice < ApplicationRecord
     self.amount_due = total - (amount_paid || 0)
   end
   
-  def update_status_based_on_payments
-    return if is_deleted? || status == 'cancelled'
-    return if new_record?
-
-    # Serialize concurrent payment applications with a row-level lock so
-    # two payments completing at the same time can't both compute stale
-    # `total_paid` and race their writes on amount_paid/amount_due.
-    with_lock do
-      total_paid = payments.where(status: 'completed').sum(:amount)
-      calculated_amount_due = total - total_paid
-
-      new_status = if total_paid >= total && total > 0
-        'paid'
-      elsif total_paid > 0 && total_paid < total
-        'partial'
-      elsif overdue?
-        'overdue'
-      else
-        status
-      end
-
-      if new_status != status
-        # update! triggers callbacks (mark_inventory_as_used_on_payment fires
-        # when status transitions to 'paid'). Re-entry into this method from
-        # the resulting after_save is safe: status will match on re-read and
-        # the else-branch below writes the same values.
-        update!(
-          status: new_status,
-          paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
-          amount_paid: total_paid,
-          amount_due: new_status == 'paid' ? 0 : calculated_amount_due
-        )
-      else
-        update_columns(
-          amount_paid: total_paid,
-          amount_due: calculated_amount_due
-        )
-      end
-    end
-  end
-  
   def mark_inventory_as_used_on_payment
-    # Find the user who recorded the payment
-    last_payment = payments.where(status: 'completed').order(created_at: :desc).first
+    # Find the user who recorded the payment. Explicit table on the order —
+    # `payments` is a through-association, so `created_at` is ambiguous
+    # between payments and payment_applications otherwise.
+    last_payment = payments.where(status: 'completed').order('payments.created_at DESC').first
     
     # Try to get user from metadata first (manual payments store this)
     user_id = last_payment&.metadata&.dig('recorded_by') if last_payment&.metadata.is_a?(Hash)

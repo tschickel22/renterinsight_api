@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4564,6 +4564,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.index ["user_id", "user_type"], name: "index_password_reset_tokens_on_user_id_and_user_type"
   end
 
+  create_table "payment_applications", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payment_id", null: false
+    t.string "applicable_type", null: false
+    t.bigint "applicable_id", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.datetime "applied_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["applicable_type", "applicable_id", "company_id"], name: "idx_payment_applications_by_target_and_company"
+    t.index ["applicable_type", "applicable_id"], name: "index_payment_applications_on_applicable"
+    t.index ["company_id"], name: "index_payment_applications_on_company_id"
+    t.index ["payment_id", "applicable_type", "applicable_id"], name: "idx_payment_applications_unique_pair", unique: true
+    t.index ["payment_id"], name: "index_payment_applications_on_payment_id"
+  end
+
   create_table "payment_methods", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -7649,6 +7666,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
   add_foreign_key "parts", "part_categories", column: "category_id"
   add_foreign_key "parts", "users", column: "created_by_id"
   add_foreign_key "parts", "users", column: "updated_by_id"
+  add_foreign_key "payment_applications", "companies"
+  add_foreign_key "payment_applications", "payments"
   add_foreign_key "payment_methods", "companies"
   add_foreign_key "payment_methods", "locations"
   add_foreign_key "payments", "companies"
