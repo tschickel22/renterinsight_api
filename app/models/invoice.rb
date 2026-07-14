@@ -55,7 +55,8 @@ class Invoice < ApplicationRecord
   before_validation :set_default_status, on: :create
   before_save :stringify_jsonb_keys
   before_save :calculate_totals
-  after_save :update_status_based_on_payments
+  after_save  :finalize_line_taxes_if_needed
+  after_save  :update_status_based_on_payments
   after_update :mark_inventory_as_used_on_payment, if: -> { saved_change_to_status? && status == 'paid' }
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
   after_commit :auto_post_to_accounting, on: [:create, :update], if: :should_auto_post_to_accounting?
@@ -278,6 +279,25 @@ class Invoice < ApplicationRecord
     mark_inventory_as_used!(user)
   end
 
+  # Rebuild every line item's tax snapshots against the company's active
+  # TaxCodes, then rewrite this invoice's tax_amount / total / amount_due
+  # from the fresh snapshots. Public so any caller editing line items
+  # outside of an invoice save can force a refresh (the invoice's own
+  # after_save calls this too, but only when TaxCodes exist).
+  def finalize_line_taxes!
+    return if is_deleted? || status == 'cancelled'
+
+    # Reload so items autosaved as part of the parent save are visible.
+    invoice_items.reload.each(&:recompute_taxes!)
+
+    new_tax   = invoice_items.reload.sum { |i| i.tax_amount }
+    new_tax   = new_tax.round(2)
+    new_total = (subtotal || 0) + new_tax
+    new_due   = new_total - (amount_paid || 0)
+    # update_columns skips callbacks so this doesn't re-enter after_save.
+    update_columns(tax_amount: new_tax, total: new_total, amount_due: new_due)
+  end
+
   # Recomputes amount_paid / amount_due / status from the current set of
   # payment applications. Called from Invoice's own after_save and from
   # PaymentApplication/Payment callbacks — needs to be public so those
@@ -379,6 +399,14 @@ class Invoice < ApplicationRecord
   # against string keys from JSON API payloads silently return nil.
   def stringify_jsonb_keys
     self.draw_schedule = draw_schedule.deep_stringify_keys if draw_schedule.is_a?(Hash)
+  end
+
+  # Only run the TaxCode-aware finalize when the company has actually adopted
+  # TaxCodes; otherwise leave calculate_totals' legacy tax_rate output alone
+  # so existing invoices keep balancing.
+  def finalize_line_taxes_if_needed
+    return unless company&.tax_codes&.active&.exists?
+    finalize_line_taxes!
   end
 
   def calculate_totals

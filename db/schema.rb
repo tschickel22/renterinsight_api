@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2228,6 +2228,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
     t.bigint "preferred_vehicle_id"
     t.string "budget_range"
     t.decimal "deposit_amount", precision: 15, scale: 2
+    t.boolean "tax_exempt", default: false, null: false
+    t.string "tax_exempt_reason"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
@@ -3174,6 +3176,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
     t.index ["marked_by_id"], name: "index_invoice_inventory_usages_on_marked_by_id"
   end
 
+  create_table "invoice_item_taxes", force: :cascade do |t|
+    t.bigint "invoice_item_id", null: false
+    t.bigint "tax_code_id", null: false
+    t.decimal "computed_amount", precision: 12, scale: 4, default: "0.0", null: false
+    t.decimal "computed_rate", precision: 8, scale: 5, default: "0.0", null: false
+    t.decimal "taxable_base", precision: 12, scale: 4, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["invoice_item_id", "tax_code_id"], name: "idx_invoice_item_taxes_unique_pair", unique: true
+    t.index ["invoice_item_id"], name: "index_invoice_item_taxes_on_invoice_item_id"
+    t.index ["tax_code_id"], name: "index_invoice_item_taxes_on_tax_code_id"
+  end
+
   create_table "invoice_items", force: :cascade do |t|
     t.bigint "invoice_id", null: false
     t.string "item_type"
@@ -3193,6 +3208,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
     t.boolean "taxable", default: false
     t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
     t.text "notes"
+    t.boolean "skip_tax", default: false, null: false
     t.index ["invoice_id", "position"], name: "index_invoice_items_on_invoice_id_and_position"
     t.index ["invoice_id"], name: "index_invoice_items_on_invoice_id"
     t.index ["itemable_type", "itemable_id"], name: "index_invoice_items_on_itemable_type_and_itemable_id"
@@ -6209,6 +6225,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
     t.index ["taskable_type", "taskable_id"], name: "index_tasks_on_taskable"
   end
 
+  create_table "tax_codes", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.decimal "rate", precision: 8, scale: 5, default: "0.0", null: false
+    t.boolean "is_compound", default: false, null: false
+    t.string "tax_authority"
+    t.bigint "chart_of_account_id"
+    t.string "qbo_tax_code_id"
+    t.boolean "is_active", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["chart_of_account_id"], name: "index_tax_codes_on_chart_of_account_id"
+    t.index ["company_id", "is_active", "position"], name: "idx_tax_codes_active_ordered"
+    t.index ["company_id", "name"], name: "index_tax_codes_on_company_id_and_name", unique: true
+    t.index ["company_id"], name: "index_tax_codes_on_company_id"
+  end
+
   create_table "templates", force: :cascade do |t|
     t.string "name", null: false
     t.string "template_type", null: false
@@ -7569,6 +7603,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
   add_foreign_key "invoice_inventory_usages", "invoice_items"
   add_foreign_key "invoice_inventory_usages", "invoices"
   add_foreign_key "invoice_inventory_usages", "users", column: "marked_by_id"
+  add_foreign_key "invoice_item_taxes", "invoice_items"
+  add_foreign_key "invoice_item_taxes", "tax_codes"
   add_foreign_key "invoice_items", "invoices"
   add_foreign_key "invoice_items", "listings"
   add_foreign_key "invoices", "companies"
@@ -7802,6 +7838,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_160000) do
   add_foreign_key "tasks", "companies"
   add_foreign_key "tasks", "locations"
   add_foreign_key "tasks", "users", column: "assigned_to_id"
+  add_foreign_key "tax_codes", "chart_of_accounts"
+  add_foreign_key "tax_codes", "companies"
   add_foreign_key "templates", "companies"
   add_foreign_key "tenant_module_overrides", "companies"
   add_foreign_key "tenant_module_overrides", "users", column: "overridden_by_id"
