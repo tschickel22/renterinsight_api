@@ -260,6 +260,23 @@ RSpec.describe 'QB mapper refactor for new accounting shape', type: :service do
       expect { handler.transform_to_quickbooks(po, {}) }
         .to raise_error(/no vendor/)
     end
+
+    it 'from-QB: aborts loudly when no supplier is available to satisfy the FK' do
+      # Verifies the guard in create_from_quickbooks — real from-QB DB
+      # persistence is blocked by a separate pre-existing schema quirk
+      # (Supplier is STI'd on vendors but the FK still points at the
+      # legacy suppliers table). The mapping shape itself is covered by
+      # the to_qb specs above.
+      qb_bill = {
+        'Id' => 'QBBILL-100', 'DocNumber' => 'B-2026-100',
+        'TxnDate' => '2026-07-14', 'DueDate' => '2026-07-28',
+        'TotalAmt' => 100.00, 'Balance' => 0,
+        'VendorRef' => { 'value' => 'QBVND-nonexistent' }
+      }
+      handler = QuickbooksPurchaseSyncHandler.new(company, api)
+      expect { handler.create_from_quickbooks(qb_bill, {}) }
+        .to raise_error(/no supplier available/)
+    end
   end
 
   describe 'CreditMemo → QB CreditMemo mapping' do
@@ -298,6 +315,45 @@ RSpec.describe 'QB mapper refactor for new accounting shape', type: :service do
       handler = QuickbooksCreditMemoSyncHandler.new(company, api)
       expect(handler.get_all_syncable_records.map(&:id)).to include(issued.id)
       expect(handler.get_all_syncable_records.map(&:status).uniq).not_to include('draft')
+    end
+
+    it 'includes voided memos that were previously synced (for the void push)' do
+      voided = build_issued_memo(total: 20, qb_id: 'QBCM-1')
+      voided.update!(status: 'voided')
+      handler = QuickbooksCreditMemoSyncHandler.new(company, api)
+      expect(handler.get_all_syncable_records.map(&:id)).to include(voided.id)
+      expect(handler.should_void_in_qb?(voided)).to be(true)
+    end
+
+    it 'does not flag never-synced voided memos for QB void (nothing to void)' do
+      handler = QuickbooksCreditMemoSyncHandler.new(company, api)
+      local_only = company.credit_memos.create!(location: location, contact: contact, memo_date: Date.current)
+      local_only.credit_memo_items.create!(description: 'x', quantity: 1, rate: 10)
+      local_only.save!
+      local_only.update!(status: 'voided')
+      expect(handler.should_void_in_qb?(local_only)).to be(false)
+    end
+  end
+
+  describe 'Invoice push payload correctness (bidirectional sanity)' do
+    it 'produces a QB Invoice payload with CustomerRef, Line[], and SyncToken when synced' do
+      inv = build_synced_invoice(total: 250, qb_id: 'QBINV-Z', taxable: false)
+      handler = QuickbooksInvoiceSyncHandler.new(company, api)
+      payload = handler.transform_to_quickbooks(inv, {})
+
+      expect(payload[:CustomerRef]).to eq({ value: 'QBCUST-1' })
+      expect(payload[:DocNumber]).to eq(inv.invoice_number)
+      expect(payload[:Line]).to be_a(Array).and satisfy { |lines| lines.length >= 1 }
+      expect(payload[:Line].first[:Amount].to_f).to eq(250.0)
+      expect(payload[:Id]).to eq('QBINV-Z')
+      expect(payload[:SyncToken]).to eq('0')
+    end
+
+    it 'skips invoices with zero line items in get_all_syncable_records' do
+      empty_inv = company.invoices.create!(location: location, contact: contact, invoice_date: Date.current, status: 'draft')
+      # No invoice_items added
+      handler = QuickbooksInvoiceSyncHandler.new(company, api)
+      expect(handler.get_all_syncable_records.map(&:id)).not_to include(empty_inv.id)
     end
   end
 end

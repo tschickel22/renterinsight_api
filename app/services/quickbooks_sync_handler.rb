@@ -60,6 +60,13 @@ class QuickbooksSyncHandler
     )
   end
 
+  # Override in subclasses that support voiding a QB entity when the
+  # local record transitions to a voided state. Default is false so
+  # existing handlers keep the old create/update-only behavior.
+  def should_void_in_qb?(_record)
+    false
+  end
+
   # QB updates require the current SyncToken to be echoed back in the
   # payload — omitting it fails with "Stale Object Error". Fetches the
   # entity's current state from QB and returns the SyncToken so a handler

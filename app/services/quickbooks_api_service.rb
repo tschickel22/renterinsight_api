@@ -87,6 +87,23 @@ class QuickbooksApiService
   def query(sql_query)
     get('query', { query: sql_query })
   end
+
+  # Void a transactional entity (Invoice, Payment, CreditMemo, etc.). QB
+  # marks the entity as voided with $0.00 lines but keeps the record for
+  # audit — that's what our local "voided" state maps to. Requires the
+  # current SyncToken.
+  def void_entity(entity_type, id, sync_token)
+    url = build_url(entity_type.to_s.downcase)
+    with_rate_limit_retry do
+      response = HTTParty.post(url, {
+        headers: auth_headers.merge('Content-Type' => 'application/json'),
+        query: { operation: 'void', minorversion: MINOR_VERSION },
+        body: { Id: id.to_s, SyncToken: sync_token.to_s }.to_json,
+        timeout: 30
+      })
+      handle_response(response)
+    end
+  end
   
   # Get company info (useful for testing connection)
   def get_company_info

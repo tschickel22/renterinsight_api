@@ -253,9 +253,19 @@ class QuickbooksSyncService
           next
         end
         
+        # Handle "was synced, now voided" as a Void call instead of an
+        # update — QB tracks void as a distinct transaction operation.
+        if handler.should_void_in_qb?(record)
+          sync_token = handler.fetch_sync_token!(handler.qb_entity_type.downcase, handler.qb_entity_type, record.quickbooks_id)
+          @api.void_entity(handler.qb_entity_type, record.quickbooks_id, sync_token)
+          record.update_column(:quickbooks_synced_at, Time.current) if record.respond_to?(:quickbooks_synced_at=)
+          synced += 1
+          next
+        end
+
         # Transform to QuickBooks format
         qb_data = handler.transform_to_quickbooks(record, config)
-        
+
         # Check if exists in QuickBooks
         if record.quickbooks_id.present?
           # Update existing
