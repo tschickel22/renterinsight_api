@@ -9,12 +9,15 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   end
   
   def get_all_syncable_records
-    # Get invoices from company or location
-    scope = company.invoices.where(is_deleted: [false, nil])
-    
-    # Filter by location if needed
+    # QB rejects invoices without line items, so skip empty ones locally.
+    # We also skip zero-total drafts — those are our own scaffolding and
+    # aren't meaningful in QB.
+    scope = company.invoices
+                   .where(is_deleted: [false, nil])
+                   .where('EXISTS (SELECT 1 FROM invoice_items WHERE invoice_items.invoice_id = invoices.id)')
+
     scope = scope.where(location_id: location.id) if location.present?
-    
+
     scope
   end
   
@@ -98,10 +101,14 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     customer_id = qb_invoice.dig('CustomerRef', 'value')
     contact = find_or_create_contact_from_qb(customer_id)
     
-    # Resolve location: prefer the handler's scoped location; otherwise fall back
-    # to the company's first active location. Invoice validation now requires
-    # location_id, so company-scoped syncs must still produce a valid row.
+    # Resolve location in priority order:
+    #   1. Handler's own scope (sync was triggered against a Location entity)
+    #   2. Current.location_id — the location the user has selected in the UI
+    #      when they hit "Sync". Without this every import lands on the
+    #      company's first active location regardless of who triggered it.
+    #   3. First active location (last-resort so Invoice validation passes)
     resolved_location_id = location&.id ||
+      (Current.location_filtered? ? Current.location_id : nil) ||
       company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
 
     # Create invoice with basic info first (without financial totals to avoid callback issues)

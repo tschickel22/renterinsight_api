@@ -59,6 +59,7 @@ class QuickbooksCreditMemoSyncHandler < QuickbooksSyncHandler
     contact = find_or_create_contact_from_qb(customer_id)
 
     resolved_location_id = location&.id ||
+      (Current.location_filtered? ? Current.location_id : nil) ||
       company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
 
     CreditMemo.transaction do
