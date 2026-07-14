@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_170000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4687,6 +4687,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_170000) do
     t.bigint "payable_id"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.bigint "bank_account_id"
+    t.index ["bank_account_id"], name: "index_payments_on_bank_account_id"
     t.index ["company_id", "is_deleted"], name: "index_payments_on_company_id_and_is_deleted"
     t.index ["company_id", "payment_number"], name: "index_payments_on_company_id_and_payment_number", unique: true
     t.index ["company_id", "status"], name: "index_payments_on_company_id_and_status"
@@ -7706,6 +7708,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_170000) do
   add_foreign_key "payment_applications", "payments"
   add_foreign_key "payment_methods", "companies"
   add_foreign_key "payment_methods", "locations"
+  add_foreign_key "payments", "bank_accounts"
   add_foreign_key "payments", "companies"
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"

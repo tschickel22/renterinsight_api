@@ -50,6 +50,9 @@ class Payment < ApplicationRecord
   # which still passes it, but new invoice-side flows go through
   # payment_applications and leave these columns nil.
   belongs_to :payable, polymorphic: true, optional: true
+  # Per-payment bank account override — top rung of the posting waterfall
+  # in Accounting::PaymentPostingService#resolve_bank_account.
+  belongs_to :bank_account, optional: true
   has_many   :payment_applications, dependent: :destroy
   
   # Validations

@@ -619,10 +619,10 @@ module Api
         # Direct mappings
         %w[payment_type amount payment_method_id payer_type payer_id loan_id
            scheduled_at description fee_responsibility processing_fee payable_type payable_id
-           principal_amount interest_amount fee_amount late_fee_amount].each do |key|
+           principal_amount interest_amount fee_amount late_fee_amount bank_account_id].each do |key|
           clean[key] = raw[key] if raw.key?(key)
         end
-        
+
         # Handle camelCase variants
         clean['payment_type'] ||= raw['paymentType']
         clean['payment_method_id'] ||= raw['paymentMethodId']
@@ -630,6 +630,7 @@ module Api
         clean['payer_id'] ||= raw['payerId']
         clean['loan_id'] ||= raw['loanId']
         clean['scheduled_at'] ||= raw['scheduledAt']
+        clean['bank_account_id'] ||= raw['bankAccountId']
         clean['fee_responsibility'] ||= raw['feeResponsibility']
         clean['processing_fee'] ||= raw['processingFee']
         clean['payable_type'] ||= raw['payableType']

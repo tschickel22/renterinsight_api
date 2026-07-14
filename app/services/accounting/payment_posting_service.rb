@@ -140,14 +140,27 @@ module Accounting
       ).where("memo LIKE 'REFUND:%'").exists?
     end
 
+    # Enterprise waterfall for the bank GL account that receives this
+    # payment's debit:
+    #   1. payment.bank_account         — per-payment override chosen at capture
+    #   2. payment.location.operating_bank_account
+    #                                    — per-location default (bank_accounts
+    #                                      are already scoped by location_id)
+    #   3. settings.default_bank_account — per-company default
+    # Each rung resolves to a ChartOfAccount via bank_account.chart_of_account,
+    # since JE lines require chart_of_account_id, not bank_account_id.
     def resolve_bank_account(settings)
-      if @payment.respond_to?(:bank_account) && @payment.bank_account
-        ba = @payment.bank_account
-        @company.chart_of_accounts.find_by(bank_account_id: ba.id) ||
-          settings.default_bank_account&.then { |dba| @company.chart_of_accounts.find_by(bank_account_id: dba.id) }
-      else
-        @company.chart_of_accounts.where(sub_type: 'bank', is_active: true).order(:account_number).first
-      end
+      bank = @payment.bank_account
+      bank ||= @payment.location&.operating_bank_account if @payment.location.present?
+      bank ||= settings.default_bank_account
+
+      return nil unless bank
+
+      # Prefer the direct FK on bank_account; fall back to the historical
+      # chart_of_accounts.bank_account_id lookup for legacy CoA rows that
+      # predate the FK on bank_accounts.
+      bank.chart_of_account ||
+        @company.chart_of_accounts.find_by(bank_account_id: bank.id)
     end
 
     def resolve_contact_id
