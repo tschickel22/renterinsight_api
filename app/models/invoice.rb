@@ -410,6 +410,10 @@ class Invoice < ApplicationRecord
   end
 
   def calculate_totals
+    # Soft-deleted invoices shouldn't drift their totals if items change
+    # underneath them (e.g., a cascading destroy fires and re-saves).
+    return if is_deleted?
+
     self.subtotal = invoice_items.sum(&:amount)
     
     # Per-item tax: if any items have taxable flag set, use per-item calculation

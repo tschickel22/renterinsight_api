@@ -69,6 +69,13 @@ module Accounting
 
     def post_refund!
       return if already_refund_posted?
+      # A refund without the original payment JE is a floating reversal —
+      # posting one would leave a debit against AR with no matching credit
+      # ever having been booked. Skip and let the user see the log.
+      unless original_payment_posted?
+        Rails.logger.warn("[Accounting] Skipping refund for payment #{@payment.id} — original payment was never posted")
+        return
+      end
 
       settings = AccountingSettings.for_company(@company)
       ar_account = settings.default_ar_account
@@ -138,6 +145,14 @@ module Accounting
         source_entity_id: @payment.id,
         is_void: false
       ).where("memo LIKE 'REFUND:%'").exists?
+    end
+
+    def original_payment_posted?
+      @company.journal_entries.where(
+        source_entity_type: 'Payment',
+        source_entity_id: @payment.id,
+        is_void: false
+      ).where.not("memo LIKE 'REFUND:%'").exists?
     end
 
     # Enterprise waterfall for the bank GL account that receives this
