@@ -189,7 +189,7 @@ module Api
       private
       
       def calendar_params
-        params.permit(:view, :start_date, :end_date, :status, :priority, :assigned_to, types: [])
+        params.permit(:view, :start_date, :end_date, :status, :priority, :assigned_to, types: [], location_ids: [])
       end
       
       def valid_view?(view)

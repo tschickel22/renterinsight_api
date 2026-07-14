@@ -4,7 +4,7 @@ module Api
   module V1
     class WarrantyClaimsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_warranty_claim, only: [:show, :update, :submit, :resubmit, :reopen, :record_payment, :close, :add_note]
+      before_action :set_warranty_claim, only: [:show, :update, :submit, :resubmit, :reopen, :record_payment, :close, :add_note, :approve, :deny, :request_more_info, :public_link]
       
       # GET /api/v1/warranty-claims
       def index
@@ -109,15 +109,22 @@ module Api
       # POST /api/v1/warranty-claims/:id/submit
       def submit
         return unless authorize_action!('service', 'update')
-        
+
+        # Fail loudly with a specific reason (missing manufacturer email, no parts, etc.)
+        # rather than the old generic "unable to submit" which masked silent email failures.
+        blocked = @warranty_claim.submission_blocked_reason
+        if blocked.present?
+          return render json: { errors: [blocked] }, status: :unprocessable_entity
+        end
+
         if @warranty_claim.submit!(current_user.name || current_user.email)
-          render json: { 
+          render json: {
             data: @warranty_claim.as_json,
             message: 'Warranty claim submitted successfully'
           }
         else
-          render json: { 
-            errors: ['Unable to submit warranty claim. Please ensure all required fields are filled.'] 
+          render json: {
+            errors: ['Unable to submit warranty claim. Please ensure all required fields are filled.']
           }, status: :unprocessable_entity
         end
       end
@@ -254,6 +261,84 @@ module Api
         end
       end
       
+      # POST /api/v1/warranty-claims/:id/approve
+      # Dealer-side: log a manufacturer approval received off-platform (phone, fax,
+      # in-person). The manufacturer's own token endpoint at /w/:token/respond
+      # handles online responses; this action exists for cases where the dealer
+      # takes the decision manually.
+      def approve
+        return unless authorize_action!('service', 'update')
+
+        unless @warranty_claim.pending?
+          return render json: { errors: ['Only pending (submitted/under_review/resubmitted) claims can be approved'] },
+                        status: :unprocessable_entity
+        end
+
+        approved_amount = params[:approved_amount].to_f
+        if approved_amount <= 0
+          return render json: { errors: ['Approved amount must be greater than 0'] },
+                        status: :unprocessable_entity
+        end
+
+        if @warranty_claim.approve!(approved_amount, params[:response_text])
+          render json: { data: @warranty_claim.as_json, message: 'Warranty claim approved' }
+        else
+          render json: { errors: @warranty_claim.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      # POST /api/v1/warranty-claims/:id/deny
+      # Dealer-side: log a manufacturer denial received off-platform.
+      def deny
+        return unless authorize_action!('service', 'update')
+
+        unless @warranty_claim.pending?
+          return render json: { errors: ['Only pending claims can be denied'] },
+                        status: :unprocessable_entity
+        end
+
+        denial_reason = params[:denial_reason].to_s.strip
+        if denial_reason.blank?
+          return render json: { errors: ['Denial reason is required'] },
+                        status: :unprocessable_entity
+        end
+
+        if @warranty_claim.deny!(denial_reason)
+          render json: { data: @warranty_claim.as_json, message: 'Warranty claim denied' }
+        else
+          render json: { errors: @warranty_claim.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      # POST /api/v1/warranty-claims/:id/request_more_info
+      # Dealer-side: log that the manufacturer requested more information.
+      def request_more_info
+        return unless authorize_action!('service', 'update')
+
+        request_message = params[:request_message].to_s.strip
+        if request_message.blank?
+          return render json: { errors: ['Request message is required'] },
+                        status: :unprocessable_entity
+        end
+
+        if @warranty_claim.mark_under_review!
+          @warranty_claim.update!(manufacturer_response: request_message)
+          @warranty_claim.add_manufacturer_note!(body: "Info requested: #{request_message}", author: current_user)
+          render json: { data: @warranty_claim.as_json, message: 'Info request logged' }
+        else
+          render json: { errors: @warranty_claim.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
+      # GET /api/v1/warranty-claims/:id/public_link
+      # Returns the tokenized URL a dealer can copy/paste to send the manufacturer
+      # (useful when the auto-email bounced or the manufacturer prefers a different channel).
+      def public_link
+        return unless authorize_action!('service', 'read')
+
+        render json: { data: { publicToken: @warranty_claim.public_token, url: @warranty_claim.public_link } }
+      end
+
       # GET /api/v1/warranty-claims/stats
       def stats
         return unless authorize_action!('service', 'read')

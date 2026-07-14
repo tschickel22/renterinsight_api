@@ -8,30 +8,18 @@ module Api
       
       # GET /api/portal/service-tickets
       def index
-        tickets = ServiceTicket
-          .where(company_id: current_portal_user.company_id)
-          .where(portal_visible: true)  # Only show portal-visible tickets
-          .where("account_id = ? OR contact_id = ?", 
-                 current_portal_user.buyer_id, 
-                 current_portal_user.buyer_id)
-          .order(created_at: :desc)
-        
+        tickets = portal_visible_tickets.order(created_at: :desc)
+
         render json: {
           success: true,
           data: tickets.map { |ticket| serialize_ticket(ticket) }
         }
       end
-      
+
       # GET /api/portal/service-tickets/:id
       def show
-        ticket = ServiceTicket
-          .where(company_id: current_portal_user.company_id)
-          .where(portal_visible: true)  # Only show portal-visible tickets
-          .where("account_id = ? OR contact_id = ?", 
-                 current_portal_user.buyer_id, 
-                 current_portal_user.buyer_id)
-          .find(params[:id])
-        
+        ticket = portal_visible_tickets.find(params[:id])
+
         render json: {
           success: true,
           data: serialize_ticket(ticket, include_details: true)
@@ -39,17 +27,11 @@ module Api
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Service ticket not found' }, status: :not_found
       end
-      
+
       # POST /api/portal/service-tickets/:id/notes
       # Lets a customer reply to the customer-facing note thread on their ticket.
       def notes
-        ticket = ServiceTicket
-          .where(company_id: current_portal_user.company_id)
-          .where(portal_visible: true)
-          .where("account_id = ? OR contact_id = ?",
-                 current_portal_user.buyer_id,
-                 current_portal_user.buyer_id)
-          .find(params[:id])
+        ticket = portal_visible_tickets.find(params[:id])
 
         content = params.dig(:note, :content) || params[:content]
         if content.blank?
@@ -95,7 +77,23 @@ module Api
                        status: :unprocessable_entity
         end
         
-        ticket = ServiceTicket.new(ticket_params)
+        # Reject vehicle_ids that don't belong to the portal user's account so a
+        # customer can't attach a ticket to someone else's home by guessing IDs.
+        # Vehicles (homes) are linked to accounts through Deals, so we verify the
+        # ownership through a deal on that account/contact.
+        params_hash = ticket_params
+        if params_hash[:vehicle_id].present?
+          vehicle = Vehicle.where(company_id: current_portal_user.company_id, id: params_hash[:vehicle_id]).first
+          owned = vehicle && Deal.where(company_id: current_portal_user.company_id, vehicle_id: vehicle.id)
+                                 .where('account_id = ? OR contact_id = ?', account.id, current_portal_user.buyer_id)
+                                 .exists?
+          unless owned
+            return render json: { error: 'Selected home is not associated with your account' },
+                          status: :unprocessable_entity
+          end
+        end
+
+        ticket = ServiceTicket.new(params_hash)
         ticket.company_id = current_portal_user.company_id
         ticket.account_id = account.id
         ticket.contact_id = current_portal_user.buyer_id if current_portal_user.buyer_type == 'Contact'
@@ -212,6 +210,35 @@ module Api
       
       def current_portal_user
         @current_portal_user
+      end
+
+      # Base scope for tickets the current portal user is allowed to see.
+      # - Account-typed portal users see every ticket on their account (that's the
+      #   whole point of account-level portal access).
+      # - Contact-typed portal users see only tickets where they are the contact,
+      #   plus tickets on their account that aren't tied to a specific contact.
+      # The previous OR against buyer_id cross-compared account_id and contact_id
+      # columns, which could leak sibling contacts' tickets to any account-level user.
+      def portal_visible_tickets
+        base = ServiceTicket
+          .where(company_id: current_portal_user.company_id)
+          .where(portal_visible: true)
+
+        case current_portal_user.buyer_type
+        when 'Account'
+          base.where(account_id: current_portal_user.buyer_id)
+        when 'Contact'
+          buyer = current_portal_user.buyer
+          contact_id = current_portal_user.buyer_id
+          account_id = buyer&.respond_to?(:account_id) ? buyer.account_id : nil
+          if account_id.present?
+            base.where('contact_id = ? OR (contact_id IS NULL AND account_id = ?)', contact_id, account_id)
+          else
+            base.where(contact_id: contact_id)
+          end
+        else
+          base.none
+        end
       end
 
       # Best-effort display name for a portal (customer) author on a note.

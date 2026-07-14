@@ -33,9 +33,12 @@ class CalendarService
   # @return [Array<Hash>] Array of unified event hashes
   def aggregated_events
     view = params[:view] || 'my'
-    
+
     # Validate user has permission for requested view
     return [] unless can_view?(view)
+
+    # Resolve the location scope once per request (memoized)
+    location_scope
     
     events = []
     
@@ -210,52 +213,41 @@ class CalendarService
     
     # Tasks don't have is_deleted column - only filter completed/cancelled if needed
     tasks = company.tasks.where.not(status: [:completed, :cancelled])
-    
+    scope = location_scope
+
     tasks = case view
     when 'my'
       tasks.where(assigned_to_id: user.id)
     when 'team'
-      team_user_ids = get_team_user_ids
-      tasks.where(assigned_to_id: team_user_ids)
+      tasks = tasks.where(assigned_to_id: get_team_user_ids(scope))
+      tasks = tasks.where(location_id: scope) if scope.present?
+      tasks
     when 'all'
-      # Filter by location based on user context
-      if Current.location_filtered?
-        tasks.where(location_id: Current.location_id)
-      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
-        tasks.where(location_id: permission_service.accessible_location_ids)
-      else
-        tasks
-      end
+      scope.present? ? tasks.where(location_id: scope) : tasks
     else
       tasks.where(assigned_to_id: user.id)
     end
-    
+
     tasks.map { |task| task_to_event(task) }.compact
   end
   
-  # Filter activities by calendar view
+  # Filter activities by calendar view. Both `team` and `all` respect the
+  # resolved location_scope so admins and location-tier users see counts that
+  # obey the same location boundary; `my` is intentionally location-agnostic
+  # (your own assignments regardless of where the parent record lives).
   def filter_activities_by_view(activities, view)
+    parent_table = get_parent_table_name(activities)
+    scope = location_scope
+
     case view
     when 'my'
       activities.where(assigned_to_id: user.id)
     when 'team'
-      # Get team members based on assigned locations
-      team_user_ids = get_team_user_ids
-      activities.where(assigned_to_id: team_user_ids)
-    when 'all'
-      parent_table = get_parent_table_name(activities)
-      
-      # Apply location filter based on user context
-      if Current.location_filtered?
-        # Location selector is active - filter to that specific location
-        activities = activities.where("#{parent_table}.location_id" => Current.location_id)
-      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
-        # Location-tier user with no location selected - filter to ALL their assigned locations
-        activities = activities.where("#{parent_table}.location_id" => permission_service.accessible_location_ids)
-      end
-      # else: Company admin with no filter = sees everything
-      
+      activities = activities.where(assigned_to_id: get_team_user_ids(scope))
+      activities = activities.where("#{parent_table}.location_id" => scope) if scope.present?
       activities
+    when 'all'
+      scope.present? ? activities.where("#{parent_table}.location_id" => scope) : activities
     else
       activities.where(assigned_to_id: user.id)
     end
@@ -294,70 +286,69 @@ class CalendarService
                      permission_service.can?('service', 'read', 'all')
     
     tickets = company.service_tickets  # Remove .includes(:assigned_to_user) - it's a method not association
-    
+
     # Filter by scheduled date - only show tickets with scheduled dates
     tickets = tickets.where.not(scheduled_date: nil)
-    
+    scope = location_scope
+
     tickets = case view
     when 'my'
       tickets.where(assigned_to: user.id.to_s)
     when 'team'
-      team_user_ids = get_team_user_ids
-      tickets.where(assigned_to: team_user_ids.map(&:to_s))
+      tickets = tickets.where(assigned_to: get_team_user_ids(scope).map(&:to_s))
+      tickets = tickets.where(location_id: scope) if scope.present?
+      tickets
     when 'service_all'
-      # All service tickets - filter by location
-      if Current.location_filtered?
-        tickets.where(location_id: Current.location_id)
-      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
-        tickets.where(location_id: permission_service.accessible_location_ids)
-      else
-        tickets
-      end
+      scope.present? ? tickets.where(location_id: scope) : tickets
     when 'service_unassigned'
-      # Unassigned tickets - filter by location
       base = tickets.where(assigned_to: [nil, ''])
-      if Current.location_filtered?
-        base.where(location_id: Current.location_id)
-      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
-        base.where(location_id: permission_service.accessible_location_ids)
-      else
-        base
-      end
+      scope.present? ? base.where(location_id: scope) : base
     when 'all'
-      # All tickets - filter by location
-      if Current.location_filtered?
-        tickets.where(location_id: Current.location_id)
-      elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
-        tickets.where(location_id: permission_service.accessible_location_ids)
-      else
-        tickets
-      end
+      scope.present? ? tickets.where(location_id: scope) : tickets
     else
       tickets.where(assigned_to: user.id.to_s)
     end
-    
+
     tickets.map { |ticket| service_ticket_to_event(ticket) }.compact  # Remove nil values
   end
   
-  # Get team user IDs based on user's assigned locations
-  def get_team_user_ids
+  # Get team user IDs. When a location scope is provided, "team" is the set of
+  # active users assigned to those locations (via UserLocation) — the rule is
+  # the same for admins and location-tier users. When scope is nil, team falls
+  # back to every active user in the company (whole-company team).
+  def get_team_user_ids(scope = nil)
     return [user.id] unless user.uses_rbac?
-    
-    if user.effective_admin?
-      # Company admins see everyone (only active users)
-      company.users.where(status: 'active').pluck(:id)
+
+    base = company.users.where(status: 'active')
+
+    if scope.present?
+      user_ids_at_scope = UserLocation.where(location_id: scope).pluck(:user_id).uniq
+      base.where(id: user_ids_at_scope).pluck(:id)
     else
-      # Location-tier users see users at their assigned locations
-      location_ids = permission_service.accessible_location_ids
-      
-      if location_ids.any?
-        # Get active users assigned to these locations
-        User.where(id: UserLocation.where(location_id: location_ids).pluck(:user_id).uniq)
-            .where(status: 'active')
-            .pluck(:id)
-      else
-        [user.id]
-      end
+      base.pluck(:id)
+    end
+  end
+
+  # Resolve the location filter the calendar should apply. Priority:
+  #   1. Explicit `location_ids[]` param (calendar's own filter UI)
+  #   2. Header-driven `Current.location_id` (global location selector)
+  #   3. Non-admin's `accessible_location_ids` (fall back to their assigned locs)
+  #   4. nil (means "no location filter" — the caller sees the whole company)
+  # Returns an Array<Integer> or nil. Never returns []; empty resolves to nil.
+  def location_scope
+    return @location_scope if defined?(@location_scope)
+
+    explicit = Array(params[:location_ids]).map(&:to_i).reject(&:zero?)
+    if explicit.any?
+      # Guard against cross-tenant IDs sneaking through the query string.
+      valid = company.locations.where(id: explicit).pluck(:id)
+      @location_scope = valid.presence
+    elsif Current.location_id.present?
+      @location_scope = [Current.location_id.to_i]
+    elsif !user.effective_admin? && permission_service.accessible_location_ids.any?
+      @location_scope = permission_service.accessible_location_ids
+    else
+      @location_scope = nil
     end
   end
   

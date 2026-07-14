@@ -78,6 +78,10 @@ default: &default
     class: NotificationRemindersJob
     queue: default
     schedule: every hour
+  sync_all_users_sent_emails:
+    class: SyncAllUsersSentEmailsJob
+    queue: default
+    schedule: every 10 minutes
 
 production:
   <<: *default

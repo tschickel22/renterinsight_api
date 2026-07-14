@@ -656,6 +656,10 @@ module Api
             )
           )
 
+          # Persist attachments to the Communication so users can see what was
+          # actually sent (audit trail). Same bytes we handed to the Graph API.
+          persist_communication_attachments(log, graph_normalize_attachments(email_params[:attachments]))
+
           render json: {
             ok: true,
             success: true,
@@ -924,6 +928,67 @@ module Api
 
       GRAPH_SCOPE = 'https://graph.microsoft.com/Mail.Send offline_access'.freeze
 
+      # Microsoft Graph /sendMail refuses payloads over ~4MB total. Cap the inline
+      # attachment budget below that so we don't blow through the JSON overhead of
+      # base64 encoding + message body + envelope.
+      GRAPH_INLINE_ATTACHMENT_MAX_BYTES = 3.megabytes
+
+      def graph_normalize_attachments(atts)
+        Array(atts).filter_map do |file|
+          if file.respond_to?(:read) && file.respond_to?(:original_filename)
+            file.rewind if file.respond_to?(:rewind)
+            {
+              filename: file.original_filename.to_s,
+              content_type: (file.content_type.presence || 'application/octet-stream'),
+              bytes: file.read
+            }
+          elsif file.is_a?(Hash) || file.is_a?(ActionController::Parameters)
+            h = file.respond_to?(:to_unsafe_h) ? file.to_unsafe_h : file
+            filename = h[:filename] || h['filename']
+            content  = h[:content]  || h['content']
+            next nil if filename.blank? || content.blank?
+            {
+              filename: filename.to_s,
+              content_type: (h[:content_type] || h['content_type'] || 'application/octet-stream'),
+              bytes: content
+            }
+          else
+            nil
+          end
+        end
+      end
+
+      def graph_build_attachments(normalized)
+        return [[], nil] if normalized.empty?
+        total = normalized.sum { |a| a[:bytes].bytesize }
+        if total > GRAPH_INLINE_ATTACHMENT_MAX_BYTES
+          return [[], "Attachments total #{(total / 1.megabyte.to_f).round(1)}MB exceeds Microsoft Graph's 3MB inline limit. Send a smaller file or use a share link."]
+        end
+        payload = normalized.map do |a|
+          {
+            '@odata.type' => '#microsoft.graph.fileAttachment',
+            name: a[:filename],
+            contentType: a[:content_type],
+            contentBytes: Base64.strict_encode64(a[:bytes])
+          }
+        end
+        [payload, nil]
+      end
+
+      def persist_communication_attachments(communication, normalized)
+        return unless communication && normalized.present?
+        normalized.each do |a|
+          io = StringIO.new(a[:bytes])
+          communication.attachments.attach(
+            io: io,
+            filename: a[:filename],
+            content_type: a[:content_type]
+          )
+        end
+      rescue => e
+        Rails.logger.error "[persist_communication_attachments] Failed for comm #{communication&.id}: #{e.message}"
+      end
+
       # Send email via Microsoft Graph API (avoids SMTP port blocking and SMTP AUTH issues)
       def send_email_via_microsoft_graph(email_params, connection, reply_to: nil)
         Rails.logger.info "[send_email_via_microsoft_graph] Sending to #{email_params[:to]} as #{connection.email_address}"
@@ -957,6 +1022,15 @@ module Api
         message[:ccRecipients] = email_params[:cc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:cc].present?
         message[:bccRecipients] = email_params[:bcc].to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if email_params[:bcc].present?
         message[:replyTo] = reply_to.to_s.split(',').map(&:strip).reject(&:blank?).map { |e| { emailAddress: { address: e } } } if reply_to.present?
+
+        # Attachments were previously dropped silently — always encode them as
+        # inline fileAttachments so the recipient actually receives the file.
+        normalized_atts = graph_normalize_attachments(email_params[:attachments])
+        graph_atts, att_error = graph_build_attachments(normalized_atts)
+        if att_error
+          return { success: false, error: att_error }
+        end
+        message[:attachments] = graph_atts if graph_atts.any?
 
         payload = { message: message, saveToSentItems: true }
 

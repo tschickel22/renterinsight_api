@@ -155,6 +155,7 @@ module Api
           :meeting_link,
           :attendees,
           :outcome,
+          :outcome_notes,
           :reminder_time,
           :related_activity_id,
           reminder_method: []
@@ -188,7 +189,8 @@ module Api
           meetingLocation: activity.location,
           meetingLink: activity.meeting_link,
           meetingAttendees: activity.attendees,
-          outcomeNotes: activity.outcome,
+          outcome: activity.outcome,
+          outcomeNotes: activity.outcome_notes,
           reminderTime: activity.reminder_time&.iso8601,
           reminderMethod: activity.reminder_method,
           reminderSent: activity.reminder_sent,
