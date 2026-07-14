@@ -64,11 +64,13 @@ class InvoiceItem < ApplicationRecord
     itemable_type.present? && ['Part', 'Vehicle', 'LandParcel'].include?(itemable_type)
   end
 
-  # Per-item tax amount (uses item-level tax_rate if taxable)
+  # Per-item tax amount (uses item-level tax_rate if taxable).
+  # Keeps arithmetic in BigDecimal — a literal 100.0 (Float) would coerce
+  # the whole expression and drop cents on values like 1.005.
   def tax_amount
-    return 0.0 unless taxable?
+    return BigDecimal('0') unless taxable?
     effective_rate = (tax_rate.present? && tax_rate > 0) ? tax_rate : (invoice&.tax_rate || 0)
-    ((amount || 0) * effective_rate / 100.0).round(2)
+    ((amount || 0) * effective_rate / 100).round(2)
   end
 
   # Profit per item

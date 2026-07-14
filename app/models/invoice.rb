@@ -52,6 +52,7 @@ class Invoice < ApplicationRecord
   before_validation :generate_payment_token, on: :create
   before_validation :generate_public_token, on: :create
   before_validation :set_default_status, on: :create
+  before_save :stringify_jsonb_keys
   before_save :calculate_totals
   after_save :update_status_based_on_payments
   after_update :mark_inventory_as_used_on_payment, if: -> { saved_change_to_status? && status == 'paid' }
@@ -327,6 +328,12 @@ class Invoice < ApplicationRecord
     self.status ||= 'draft'
   end
   
+  # JSONB columns must be stored with string keys — otherwise dig/[] lookups
+  # against string keys from JSON API payloads silently return nil.
+  def stringify_jsonb_keys
+    self.draw_schedule = draw_schedule.deep_stringify_keys if draw_schedule.is_a?(Hash)
+  end
+
   def calculate_totals
     self.subtotal = invoice_items.sum(&:amount)
     

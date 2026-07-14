@@ -80,6 +80,7 @@ class Payment < ApplicationRecord
   before_validation :generate_payment_number, on: :create
   before_validation :calculate_total_charged
   before_validation :set_payment_date, if: -> { payment_date.nil? && status == 'completed' }
+  before_save :stringify_metadata_keys
   after_initialize :set_defaults, if: :new_record?
   after_commit :update_loan_after_completion, if: -> { saved_change_to_status? && status == 'completed' && !try(:skip_loan_processing?) }
   after_commit :update_invoice_after_completion, if: -> { saved_change_to_status? && status == 'completed' && payable_type == 'Invoice' }
@@ -266,6 +267,13 @@ class Payment < ApplicationRecord
   
   private
   
+  # Metadata JSONB must be stored with string keys — Invoice#record_payment!
+  # and other callers pass symbol keys via Ruby literal hashes, which then
+  # break dedup checks and frontend parsing that assumes strings.
+  def stringify_metadata_keys
+    self.metadata = metadata.deep_stringify_keys if metadata.is_a?(Hash)
+  end
+
   def set_defaults
     self.status ||= 'pending'
     self.payment_type ||= 'one_time'
