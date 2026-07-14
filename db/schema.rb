@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_220000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2305,6 +2305,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_220000) do
     t.index ["company_id"], name: "index_credit_memo_applications_on_company_id"
     t.index ["credit_memo_id", "applicable_type", "applicable_id"], name: "idx_credit_memo_applications_unique_pair", unique: true
     t.index ["credit_memo_id"], name: "index_credit_memo_applications_on_credit_memo_id"
+  end
+
+  create_table "credit_memo_item_taxes", force: :cascade do |t|
+    t.bigint "credit_memo_item_id", null: false
+    t.bigint "tax_code_id", null: false
+    t.decimal "computed_amount", precision: 12, scale: 4, default: "0.0", null: false
+    t.decimal "computed_rate", precision: 8, scale: 5, default: "0.0", null: false
+    t.decimal "taxable_base", precision: 12, scale: 4, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["credit_memo_item_id", "tax_code_id"], name: "idx_credit_memo_item_taxes_unique_pair", unique: true
+    t.index ["credit_memo_item_id"], name: "index_credit_memo_item_taxes_on_credit_memo_item_id"
+    t.index ["tax_code_id"], name: "index_credit_memo_item_taxes_on_tax_code_id"
   end
 
   create_table "credit_memo_items", force: :cascade do |t|
@@ -7591,6 +7604,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_220000) do
   add_foreign_key "contractor_assignments", "vendors", on_delete: :nullify
   add_foreign_key "credit_memo_applications", "companies"
   add_foreign_key "credit_memo_applications", "credit_memos"
+  add_foreign_key "credit_memo_item_taxes", "credit_memo_items"
+  add_foreign_key "credit_memo_item_taxes", "tax_codes"
   add_foreign_key "credit_memo_items", "credit_memos"
   add_foreign_key "credit_memos", "companies"
   add_foreign_key "credit_memos", "contacts"

@@ -27,6 +27,7 @@ class CreditMemo < ApplicationRecord
   before_validation :generate_number,    on: :create
   before_validation :set_default_status, on: :create
   before_save :calculate_totals
+  after_save  :finalize_line_taxes_if_needed
   after_save  :sync_applied_state
   after_save  :notify_applicables_of_status_change, if: :saved_change_to_status?
 
@@ -129,6 +130,25 @@ class CreditMemo < ApplicationRecord
     self.total      = subtotal + tax_amount
     self.amount_applied   ||= 0
     self.amount_remaining = total - amount_applied
+  end
+
+  # Rebuild each line's tax snapshots against active TaxCodes, then
+  # rewrite tax_amount / total / amount_remaining from the fresh values.
+  # Only runs when the company has TaxCodes configured; without them the
+  # legacy calculate_totals result stands.
+  def finalize_line_taxes!
+    return if is_deleted?
+    credit_memo_items.reload.each(&:recompute_taxes!)
+
+    new_tax   = credit_memo_items.reload.sum { |i| i.tax_amount }.round(2)
+    new_total = (subtotal || 0) + new_tax
+    new_rem   = new_total - (amount_applied || 0)
+    update_columns(tax_amount: new_tax, total: new_total, amount_remaining: new_rem)
+  end
+
+  def finalize_line_taxes_if_needed
+    return unless company&.tax_codes&.active&.exists?
+    finalize_line_taxes!
   end
 
   def sync_applied_state

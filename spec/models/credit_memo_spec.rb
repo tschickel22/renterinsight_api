@@ -103,4 +103,43 @@ RSpec.describe CreditMemo, type: :model do
       expect(invoice.amount_due.to_f).to eq(100.0)
     end
   end
+
+  describe 'compound tax on credit memo line items (parity with invoice)' do
+    before do
+      company.tax_codes.create!(name: 'State 5%', rate: 5, position: 1, is_compound: false)
+      company.tax_codes.create!(name: 'City 2% compound', rate: 2, position: 2, is_compound: true)
+    end
+
+    def build_taxable_memo(rate:)
+      cm = company.credit_memos.create!(location: location, contact: contact, memo_date: Date.current)
+      cm.credit_memo_items.create!(description: 'Return', quantity: 1, rate: rate, taxable: true)
+      cm.save!
+      cm.reload
+    end
+
+    it 'sums per-jurisdiction snapshots with compound stacking' do
+      cm = build_taxable_memo(rate: 100)
+      # State 5% of 100 = 5; City 2% of 105 = 2.10; total tax = 7.10
+      expect(cm.tax_amount.to_f).to eq(7.10)
+      expect(cm.total.to_f).to eq(107.10)
+      snapshots = cm.credit_memo_items.first.credit_memo_item_taxes.includes(:tax_code)
+      expect(snapshots.map { |s| s.tax_code.name }).to contain_exactly('State 5%', 'City 2% compound')
+    end
+
+    it 'zeros when the contact is tax_exempt' do
+      contact.update!(tax_exempt: true)
+      cm = build_taxable_memo(rate: 100)
+      expect(cm.tax_amount.to_f).to eq(0.0)
+      expect(cm.credit_memo_items.first.credit_memo_item_taxes).to be_empty
+    end
+
+    it 'zeros a single line via skip_tax without affecting sibling lines' do
+      cm = company.credit_memos.create!(location: location, contact: contact, memo_date: Date.current)
+      cm.credit_memo_items.create!(description: 'Taxed',   quantity: 1, rate: 100, taxable: true)
+      cm.credit_memo_items.create!(description: 'Skipped', quantity: 1, rate: 100, taxable: true, skip_tax: true)
+      cm.save!
+      cm.reload
+      expect(cm.tax_amount.to_f).to eq(7.10)
+    end
+  end
 end

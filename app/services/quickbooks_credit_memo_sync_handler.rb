@@ -12,12 +12,14 @@ class QuickbooksCreditMemoSyncHandler < QuickbooksSyncHandler
     'CreditMemo'
   end
 
-  # Only issued/partial/applied credit memos are meaningful in QB. Draft
-  # memos stay local, voided ones stay local (and if previously synced,
-  # would need a separate void-in-QB path).
+  # Sync issued/partial/applied memos (push new/updated to QB), plus
+  # voided memos that were previously synced (push the void so QB's copy
+  # doesn't diverge from ours). Draft memos never sync until issued.
   def get_all_syncable_records
     scope = company.credit_memos.where(is_deleted: [false, nil])
-    scope = scope.where(status: %w[issued partial applied])
+    scope = scope.where(
+      "(status IN ('issued','partial','applied')) OR (status = 'voided' AND quickbooks_id IS NOT NULL)"
+    )
     scope = scope.where(location_id: location.id) if location.present?
     scope
   end
@@ -28,6 +30,13 @@ class QuickbooksCreditMemoSyncHandler < QuickbooksSyncHandler
 
   def get_records_by_quickbooks_ids(qb_ids)
     company.credit_memos.where(quickbooks_id: qb_ids)
+  end
+
+  # A voided memo that has already been pushed to QB needs a Void call,
+  # not an update — QB treats "voided" as a discrete state transition.
+  # Draft or already-unsynced memos have nothing to void.
+  def should_void_in_qb?(memo)
+    memo.status == 'voided' && memo.quickbooks_id.present?
   end
 
   def transform_to_quickbooks(memo, config)
@@ -152,11 +161,38 @@ class QuickbooksCreditMemoSyncHandler < QuickbooksSyncHandler
     end
   end
 
-  # Credit memos don't currently carry InvoiceItemTax snapshots — those live
-  # on invoice_items. Return nil so QB computes tax from Item defaults.
-  # Placeholder for a future CreditMemoItemTax parallel to InvoiceItemTax.
-  def build_txn_tax_detail(_memo)
-    nil
+  # Emit a QB TxnTaxDetail block built from CreditMemoItemTax snapshots.
+  # Same shape as the invoice handler's version — one TaxLine per unique
+  # TaxCode, with TaxRateRef, TaxPercent, and NetAmountTaxable. Returns
+  # nil when the memo has no snapshots so QB computes tax from Item
+  # defaults (parity with the invoice legacy path).
+  def build_txn_tax_detail(memo)
+    snapshots = CreditMemoItemTax.includes(:tax_code)
+                                 .joins(:credit_memo_item)
+                                 .where(credit_memo_items: { credit_memo_id: memo.id })
+    return nil if snapshots.none?
+
+    per_code = snapshots.group_by(&:tax_code)
+    tax_lines = per_code.map do |code, rows|
+      next nil unless code
+      {
+        Amount: rows.sum(&:computed_amount).round(2),
+        DetailType: 'TaxLineDetail',
+        TaxLineDetail: {
+          TaxRateRef: code.qbo_tax_code_id.present? ? { value: code.qbo_tax_code_id } : nil,
+          PercentBased: true,
+          TaxPercent: code.rate,
+          NetAmountTaxable: rows.sum(&:taxable_base).round(2)
+        }.compact
+      }
+    end.compact
+
+    return nil if tax_lines.empty?
+
+    {
+      TotalTax: snapshots.sum(&:computed_amount).round(2),
+      TaxLine: tax_lines
+    }
   end
 
   def find_or_create_contact_from_qb(customer_id)
