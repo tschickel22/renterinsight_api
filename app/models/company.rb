@@ -1420,6 +1420,70 @@ class Company < ApplicationRecord
     {}
   end
 
+  # -----------------------------------------------------------------------
+  # Field tooltip overrides — per-company help text for both system fields
+  # and custom fields. Same shape as label_overrides but keyed by module +
+  # field_key so a single lookup can serve every entity type. Custom-field
+  # tooltips ALSO live on CustomField#description; this store is the source
+  # of truth for tooltips on real AR columns (e.g. "leads.email") that
+  # don't have a CustomField row to hang metadata on.
+  #
+  # Storage shape:
+  #   {
+  #     "leads"   => { "email" => "Primary contact email", "phone" => "..." },
+  #     "deals"   => { "amount" => "Sale total including add-ons" }
+  #   }
+  # -----------------------------------------------------------------------
+
+  def field_tooltip_overrides
+    Setting.get('Company', id, 'field_tooltip_overrides') || {}
+  end
+
+  # Look up a single tooltip. Falls through to any custom-field description
+  # stored on CustomField when no override exists — so setting a description
+  # on a custom field in the CustomFieldModal automatically works as a
+  # tooltip without a second write.
+  def resolved_field_tooltip(module_name, field_key)
+    mod = module_name.to_s
+    key = field_key.to_s
+    override = field_tooltip_overrides.dig(mod, key)
+    return override if override.present?
+
+    custom_fields
+      .where(module: mod, field_key: key, is_active: true)
+      .limit(1)
+      .pick(:description)
+  end
+
+  # Save/replace a single tooltip. Blank text clears the entry so an empty
+  # value in the UI resets to the shipped/CustomField default without a
+  # separate delete call.
+  def save_field_tooltip(module_name, field_key, text)
+    mod = module_name.to_s
+    key = field_key.to_s
+    overrides = field_tooltip_overrides.deep_dup
+    overrides[mod] ||= {}
+
+    if text.blank?
+      overrides[mod].delete(key)
+      overrides.delete(mod) if overrides[mod].empty?
+    else
+      overrides[mod][key] = text.to_s
+    end
+
+    Setting.set('Company', id, 'field_tooltip_overrides', overrides)
+    overrides
+  end
+
+  def clear_field_tooltip!(module_name, field_key)
+    save_field_tooltip(module_name, field_key, nil)
+  end
+
+  def reset_field_tooltips!
+    Setting.set('Company', id, 'field_tooltip_overrides', {})
+    {}
+  end
+
   # Get inventory embed code (iframe)
   def inventory_embed_code(filters = {}, options = {})
     return nil unless public_inventory_enabled?

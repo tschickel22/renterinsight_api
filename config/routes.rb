@@ -348,6 +348,16 @@ Rails.application.routes.draw do
         post   'labels/reset',   action: :reset
         delete 'labels/:key',    action: :destroy
       end
+
+      # Field-level tooltip overrides (system + custom fields). Same shape as
+      # labels — see Api::V1::FieldTooltipsController.
+      scope path: 'company', controller: 'field_tooltips' do
+        get    'field-tooltips',                          action: :index
+        put    'field-tooltips',                          action: :update
+        patch  'field-tooltips',                          action: :update
+        post   'field-tooltips/reset',                    action: :reset
+        delete 'field-tooltips/:module/:field_key',       action: :destroy, constraints: { module: /[^\/]+/, field_key: /[^\/]+/ }
+      end
       
       # ==================== NOTIFICATIONS ====================
       resources :notifications, only: [:index, :show, :destroy] do
