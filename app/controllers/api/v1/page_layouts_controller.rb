@@ -71,9 +71,14 @@ module Api
         standard = standard_field_definitions(module_name)
         standard = apply_option_overrides(standard, module_name)
         custom = custom_field_definitions(module_name)
+        # Merge per-company tooltip overrides onto BOTH standard and custom
+        # field defs so the read-only lead detail (which uses DynamicFormSection
+        # → def.description as the InfoHint) shows the same text the admin
+        # entered in Company Settings > Field Tooltips or via the gear editor.
+        merged = apply_tooltip_overrides(standard + custom, module_name)
 
         render json: {
-          field_definitions: standard + custom,
+          field_definitions: merged,
           meta: {
             module: module_name,
             standard_count: standard.size,
@@ -168,6 +173,24 @@ module Api
           # picks that would 500 or silently no-op on save.
           if override && !field[:options_locked]
             field.merge(options: override.options, options_customized: true)
+          else
+            field
+          end
+        end
+      end
+
+      # Merge per-company tooltip overrides (from Company#field_tooltip_overrides)
+      # into the `description` slot on each field def. An override wins over any
+      # shipped default (standard fields) or CustomField#description (custom
+      # fields); missing keys leave the def alone.
+      def apply_tooltip_overrides(fields, module_name)
+        module_overrides = @company.field_tooltip_overrides[module_name.to_s] || {}
+        return fields if module_overrides.empty?
+
+        fields.map do |field|
+          override_text = module_overrides[field[:key].to_s]
+          if override_text.present?
+            field.merge(description: override_text)
           else
             field
           end
@@ -735,6 +758,11 @@ module Api
             protected: false,
             options: field.options,
             placeholder: field.placeholder,
+            # description is used as the hover tooltip on the form
+            # (FieldLabel component reads it). Without this the NewLeadForm's
+            # renderCustomField was getting undefined and never showed the ⓘ.
+            description: field.description,
+            section: field.section,
             visibility: field.visibility || 'internal'
           }
         end
