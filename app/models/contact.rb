@@ -38,6 +38,7 @@ class Contact < ApplicationRecord
   has_many :note_records, class_name: 'Note', as: :entity, dependent: :destroy
   has_many :quotes, dependent: :destroy
   has_many :invoices, dependent: :destroy
+  has_many :credit_memos, dependent: :destroy
   has_many :loans, as: :borrower, dependent: :destroy
   has_many :payments, as: :payable, dependent: :destroy
   has_many :communications, as: :communicable, dependent: :destroy
