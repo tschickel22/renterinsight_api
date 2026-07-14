@@ -280,21 +280,34 @@ class Invoice < ApplicationRecord
   
   private
   
+  # Namespace for the advisory lock — arbitrary constant so different features
+  # can't collide on the (int, int) two-arg pg_advisory_xact_lock form.
+  INVOICE_NUMBER_LOCK_NAMESPACE = 0x1_2E_00_CE.freeze # 'INVC' ~-ish, just needs to be stable
+
   def generate_invoice_number
     return if invoice_number.present?
-    
-    # Use simple default prefix - can be customized later via company settings
+    return unless company_id
+
+    # Serialize invoice number generation per company. Advisory lock is
+    # scoped to the current transaction (Rails wraps save! in one) and
+    # released automatically on commit/rollback.
+    self.class.connection.execute(
+      self.class.sanitize_sql_array(['SELECT pg_advisory_xact_lock(?, ?)', INVOICE_NUMBER_LOCK_NAMESPACE, company_id])
+    )
+
     prefix = 'INV'
     last_invoice = company.invoices.order(created_at: :desc).first
-    
+
     if last_invoice&.invoice_number&.start_with?(prefix)
       last_number = last_invoice.invoice_number.gsub(/\D/, '').to_i
       next_number = last_number + 1
     else
       next_number = 1000
     end
-    
-    # Handle collisions - keep incrementing until we find an unused number
+
+    # Loop is defence-in-depth against numbers inserted via a path that
+    # bypasses this generator (e.g. raw SQL import). Under the advisory
+    # lock this normally exits on the first iteration.
     loop do
       candidate = "#{prefix}-#{next_number.to_s.rjust(6, '0')}"
       break self.invoice_number = candidate unless company.invoices.exists?(invoice_number: candidate)
@@ -335,37 +348,42 @@ class Invoice < ApplicationRecord
   
   def update_status_based_on_payments
     return if is_deleted? || status == 'cancelled'
-    
-    total_paid = payments.where(status: 'completed').sum(:amount)
-    calculated_amount_due = total - total_paid
-    
-    # Determine new status
-    new_status = if total_paid >= total && total > 0
-      'paid'
-    elsif total_paid > 0 && total_paid < total
-      'partial'
-    elsif overdue?
-      'overdue'
-    else
-      status # Keep current status if no payment logic applies
-    end
-    
-    # Only update if status would change (to avoid infinite loops)
-    if new_status != status
-      # Use update! instead of update_columns to trigger callbacks
-      # This will trigger mark_inventory_as_used_on_payment when status becomes 'paid'
-      update!(
-        status: new_status,
-        paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
-        amount_paid: total_paid,
-        amount_due: new_status == 'paid' ? 0 : calculated_amount_due
-      )
-    else
-      # Just update amounts without changing status
-      update_columns(
-        amount_paid: total_paid,
-        amount_due: calculated_amount_due
-      )
+    return if new_record?
+
+    # Serialize concurrent payment applications with a row-level lock so
+    # two payments completing at the same time can't both compute stale
+    # `total_paid` and race their writes on amount_paid/amount_due.
+    with_lock do
+      total_paid = payments.where(status: 'completed').sum(:amount)
+      calculated_amount_due = total - total_paid
+
+      new_status = if total_paid >= total && total > 0
+        'paid'
+      elsif total_paid > 0 && total_paid < total
+        'partial'
+      elsif overdue?
+        'overdue'
+      else
+        status
+      end
+
+      if new_status != status
+        # update! triggers callbacks (mark_inventory_as_used_on_payment fires
+        # when status transitions to 'paid'). Re-entry into this method from
+        # the resulting after_save is safe: status will match on re-read and
+        # the else-branch below writes the same values.
+        update!(
+          status: new_status,
+          paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
+          amount_paid: total_paid,
+          amount_due: new_status == 'paid' ? 0 : calculated_amount_due
+        )
+      else
+        update_columns(
+          amount_paid: total_paid,
+          amount_due: calculated_amount_due
+        )
+      end
     end
   end
   

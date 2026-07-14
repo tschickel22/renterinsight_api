@@ -20,6 +20,15 @@ module Accounting
         return
       end
 
+      # Every GL line for this invoice must post to the invoice's own location.
+      # Falling back to Current.location_id would silently attribute revenue to
+      # whichever location the actor happens to have selected — wrong for reports.
+      location_id = @invoice.location_id
+      unless location_id.present?
+        Rails.logger.error("[Accounting] Cannot post invoice #{@invoice.id} — no location_id on invoice")
+        return
+      end
+
       ActiveRecord::Base.transaction do
         je = @company.journal_entries.build(
           entry_date: @invoice.invoice_date || @invoice.created_at.to_date,
@@ -39,7 +48,7 @@ module Accounting
             debit_amount: invoice_total,
             credit_amount: 0,
             memo: "Invoice #{@invoice.invoice_number}",
-            location_id: @invoice.try(:location_id) || Current.location_id,
+            location_id: location_id,
             contact_id: @invoice.try(:contact_id) || @invoice.try(:customer_id)
           )
         end
@@ -51,7 +60,7 @@ module Accounting
             debit_amount: 0,
             credit_amount: line_data[:amount],
             memo: line_data[:memo],
-            location_id: @invoice.try(:location_id) || Current.location_id,
+            location_id: location_id,
             department: line_data[:department],
             deal_id: line_data[:deal_id],
             vehicle_id: line_data[:vehicle_id],
@@ -65,7 +74,7 @@ module Accounting
             debit_amount: 0,
             credit_amount: tax_amount,
             memo: "Sales tax — Invoice #{@invoice.invoice_number}",
-            location_id: @invoice.try(:location_id) || Current.location_id
+            location_id: location_id
           )
         end
 

@@ -23,6 +23,12 @@ module Accounting
       payment_amount = @payment.amount || @payment.try(:total) || BigDecimal('0')
       return if payment_amount <= 0
 
+      location_id = resolve_location_id
+      unless location_id.present?
+        Rails.logger.error("[Accounting] Cannot post payment #{@payment.id} — no location_id on payment or its payable")
+        return
+      end
+
       ActiveRecord::Base.transaction do
         je = @company.journal_entries.build(
           entry_date: @payment.try(:payment_date) || @payment.try(:paid_at)&.to_date || @payment.created_at.to_date,
@@ -37,7 +43,7 @@ module Accounting
           debit_amount: payment_amount,
           credit_amount: 0,
           memo: "Payment received",
-          location_id: @payment.try(:location_id) || Current.location_id,
+          location_id: location_id,
           contact_id: resolve_contact_id
         )
 
@@ -46,7 +52,7 @@ module Accounting
           debit_amount: 0,
           credit_amount: payment_amount,
           memo: "Payment applied",
-          location_id: @payment.try(:location_id) || Current.location_id,
+          location_id: location_id,
           contact_id: resolve_contact_id,
           deal_id: @payment.try(:deal_id)
         )
@@ -73,6 +79,12 @@ module Accounting
       refund_amount = @payment.amount || BigDecimal('0')
       return if refund_amount <= 0
 
+      location_id = resolve_location_id
+      unless location_id.present?
+        Rails.logger.error("[Accounting] Cannot post refund for payment #{@payment.id} — no location_id on payment or its payable")
+        return
+      end
+
       ActiveRecord::Base.transaction do
         je = @company.journal_entries.build(
           entry_date: Date.current,
@@ -86,7 +98,7 @@ module Accounting
           debit_amount: refund_amount,
           credit_amount: 0,
           memo: "Payment refund",
-          location_id: @payment.try(:location_id) || Current.location_id,
+          location_id: location_id,
           contact_id: resolve_contact_id
         )
 
@@ -95,7 +107,7 @@ module Accounting
           debit_amount: 0,
           credit_amount: refund_amount,
           memo: "Payment refund",
-          location_id: @payment.try(:location_id) || Current.location_id,
+          location_id: location_id,
           contact_id: resolve_contact_id
         )
 
@@ -140,6 +152,13 @@ module Accounting
 
     def resolve_contact_id
       @payment.try(:contact_id) || @payment.try(:customer_id)
+    end
+
+    # Location for GL posting: the payment's own location, or the invoice/
+    # loan/etc it applies to. Never Current.location_id — that reflects the
+    # actor's UI selection, not where the money actually belongs.
+    def resolve_location_id
+      @payment.location_id.presence || @payment.payable&.try(:location_id)
     end
 
     def payment_contact_name
