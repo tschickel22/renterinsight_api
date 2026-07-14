@@ -120,21 +120,23 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
   
   private
   
-  # Build a unique DisplayName for QB
-  # QB requires unique DisplayName across Customers, Vendors, and Employees
-  # Strategy: base name → with email → with contact ID
+  # Build a unique DisplayName for QB. QB requires uniqueness across
+  # Customers, Vendors, and Employees. Strategy in order of user-visibility:
+  #   1. base name        — the ideal
+  #   2. base + email     — still readable in QB dropdowns
+  #   3. base + " — RI#<id>" — always unique per contact, guaranteed to
+  #      resolve any residual collision (two contacts with the same name
+  #      AND the same email, or a collision against a QB Vendor with the
+  #      same email address).
   def build_unique_display_name(contact, suffix = nil)
-    base_name = contact.display_name || "#{contact.first_name} #{contact.last_name}"
-    
+    base_name = contact.display_name.presence || "#{contact.first_name} #{contact.last_name}".strip
+    base_name = "Contact #{contact.id}" if base_name.blank?
+
     case suffix
     when :email
-      if contact.email.present?
-        "#{base_name} - #{contact.email}"
-      else
-        "#{base_name} (#{contact.id})"
-      end
+      contact.email.present? ? "#{base_name} - #{contact.email}" : "#{base_name} — RI##{contact.id}"
     when :id
-      "#{base_name} (#{contact.id})"
+      "#{base_name} — RI##{contact.id}"
     else
       base_name
     end

@@ -11,16 +11,21 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
   def get_all_syncable_records
     # Get payments from company or location
     scope = company.payments.where(is_deleted: [false, nil])
-    
-    # Filter by location if needed
     scope = scope.where(location_id: location.id) if location.present?
-    
-    # CRITICAL: Only sync payments where the related invoice has been synced to QB
-    # This prevents "Required param missing" errors for unapplied payments
-    scope = scope.joins('LEFT JOIN invoices ON payments.payable_type = \'Invoice\' AND payments.payable_id = invoices.id')
-                 .where('(payments.payable_type != \'Invoice\') OR (invoices.quickbooks_id IS NOT NULL)')
-    
-    scope
+
+    # Only sync payments where every applied invoice has already been
+    # pushed to QB. The old join went through payments.payable_id (now
+    # legacy); we now inspect payment_applications and skip payments that
+    # apply to any not-yet-synced invoice. Payments with no applications
+    # (pure unapplied credit) are still syncable — QB accepts them.
+    ids_with_unsynced_applications = PaymentApplication
+      .where(payment_id: scope.select(:id), applicable_type: 'Invoice')
+      .joins("INNER JOIN invoices ON invoices.id = payment_applications.applicable_id")
+      .where(invoices: { quickbooks_id: nil })
+      .distinct
+      .pluck(:payment_id)
+
+    scope.where.not(id: ids_with_unsynced_applications)
   end
   
   def get_records_by_ids(ids)
@@ -95,15 +100,19 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
   private
   
   def get_customer_ref(payment)
-    # Payment uses polymorphic payer association
+    # Contact resolution: payer first, then fall back to the contact on any
+    # invoice this payment applies to. The old code looked at payment.payable
+    # (legacy 1:1 link); now we walk payment_applications.
     contact = if payment.payer_type == 'Contact'
       company.contacts.find_by(id: payment.payer_id)
-    elsif payment.respond_to?(:payable) && payment.payable.is_a?(Invoice)
-      payment.payable.contact
     else
-      nil
+      applied_invoice = payment.payment_applications
+                               .where(applicable_type: 'Invoice')
+                               .joins("INNER JOIN invoices ON invoices.id = payment_applications.applicable_id")
+                               .first&.applicable
+      applied_invoice&.contact
     end
-    
+
     if contact&.quickbooks_id.present?
       { value: contact.quickbooks_id }
     elsif contact.present?
@@ -112,9 +121,10 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
       customer_data = customer_handler.transform_to_quickbooks(contact, {})
       response = @api.create_entity('Customer', customer_data)
       qb_id = response.dig('Customer', 'Id')
-      
+      raise "QB customer create returned no Id for contact ##{contact.id}" if qb_id.blank?
+
       customer_handler.save_quickbooks_id(contact, qb_id)
-      
+
       { value: qb_id }
     else
       raise "Payment must have a contact to sync to QuickBooks"
@@ -146,35 +156,43 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
     nil
   end
   
+  # Build one Payment.Line per PaymentApplication so a payment split across
+  # multiple invoices maps to QB's LinkedTxn model exactly. Unapplied credit
+  # (payment.unapplied_amount > 0) rides as an additional line with no
+  # LinkedTxn — QB accepts this and shows it as unapplied on the customer.
   def build_line_items(payment)
     lines = []
-    
-    # If payment is linked to an invoice via payable, add that
-    if payment.payable_type == 'Invoice'
-      if payment.payable&.quickbooks_id.present?
-        lines << {
-          Amount: payment.amount,
-          LinkedTxn: [
-            {
-              TxnId: payment.payable.quickbooks_id,
-              TxnType: 'Invoice'
-            }
-          ]
-        }
-      else
-        # Invoice exists but hasn't been synced to QB yet
-        invoice_number = payment.payable&.invoice_number || "##{payment.payable_id}"
-        raise "Payment for Invoice #{invoice_number} cannot sync - invoice must be synced to QuickBooks first"
+
+    applications = payment.payment_applications
+                          .where(applicable_type: 'Invoice')
+                          .includes(:applicable)
+
+    applications.each do |app|
+      invoice = app.applicable
+      unless invoice&.quickbooks_id.present?
+        raise "Payment ##{payment.id} applies to Invoice ##{invoice&.id || app.applicable_id} which is not yet synced to QuickBooks"
       end
-    else
-      # Non-invoice payment (unapplied)
-      # QuickBooks doesn't support true unapplied payments via API
-      # These payments need to be manually applied in QB
+
       lines << {
-        Amount: payment.amount
+        Amount: app.amount,
+        LinkedTxn: [
+          {
+            TxnId:   invoice.quickbooks_id,
+            TxnType: 'Invoice'
+          }
+        ]
       }
     end
-    
+
+    unapplied = payment.unapplied_amount
+    if unapplied.present? && unapplied > 0
+      lines << { Amount: unapplied }
+    end
+
+    # QB requires at least one Line — should already be true from applications
+    # or unapplied, but be explicit.
+    lines << { Amount: payment.amount } if lines.empty?
+
     lines
   end
   

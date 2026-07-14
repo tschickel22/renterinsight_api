@@ -30,9 +30,8 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   def transform_to_quickbooks(invoice, config)
     # Get or sync customer first
     customer_ref = get_customer_ref(invoice)
-    
-    # Map invoice to QuickBooks Invoice format
-    {
+
+    payload = {
       CustomerRef: customer_ref,
       TxnDate: invoice.invoice_date&.iso8601 || Date.today.iso8601,
       DueDate: invoice.due_date&.iso8601,
@@ -40,8 +39,14 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       PrivateNote: invoice.notes,
       Line: build_line_items(invoice),
       BillEmail: invoice.contact&.email ? { Address: invoice.contact.email } : nil,
-      SalesTermRef: config[:default_terms] ? { value: config[:default_terms] } : nil,
-      # Custom fields
+      # Only include SalesTermRef when a default is actually configured;
+      # sending it with a nil/blank value made QB fall back to "Due on
+      # Receipt", marking every invoice past-due at creation.
+      SalesTermRef: (config[:default_terms].presence ? { value: config[:default_terms] } : nil),
+      # Custom fields — DefinitionId 1 is a per-QB-company setting, so this
+      # is only honored if the connected QB company has a custom field with
+      # that DefinitionId. Left as-is (audit follow-up: fetch definitions
+      # at connect time and skip if not present).
       CustomField: [
         {
           DefinitionId: '1',
@@ -50,7 +55,15 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
           StringValue: invoice.id.to_s
         }
       ].compact
-    }.compact
+    }
+
+    # Attach TxnTaxDetail when this invoice's line items have TaxCode-driven
+    # snapshots (i.e., the tenant has adopted our TaxCode model). Otherwise
+    # let QB compute tax from Item defaults as before.
+    tax_detail = build_txn_tax_detail(invoice)
+    payload[:TxnTaxDetail] = tax_detail if tax_detail
+
+    payload.compact
   end
   
   def find_by_quickbooks_id(qb_id)
@@ -187,6 +200,40 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     end
   end
   
+  # Build a QB TxnTaxDetail block from our InvoiceItemTax snapshots. Each
+  # unique tax_code becomes one TaxLine with TaxRateRef.value = the QB
+  # TaxCode/TaxRate id (stored on tax_codes.qbo_tax_code_id). Returns nil
+  # when the invoice has no snapshots — in that case we let QB compute tax
+  # from Item defaults, preserving pre-TaxCode invoice behavior.
+  def build_txn_tax_detail(invoice)
+    snapshots = InvoiceItemTax.includes(:tax_code)
+                              .joins(:invoice_item)
+                              .where(invoice_items: { invoice_id: invoice.id })
+    return nil if snapshots.none?
+
+    per_code = snapshots.group_by(&:tax_code)
+    tax_lines = per_code.map do |code, rows|
+      next nil unless code # snapshot with a deleted tax_code — skip
+      {
+        Amount: rows.sum(&:computed_amount).round(2),
+        DetailType: 'TaxLineDetail',
+        TaxLineDetail: {
+          TaxRateRef: code.qbo_tax_code_id.present? ? { value: code.qbo_tax_code_id } : nil,
+          PercentBased: true,
+          TaxPercent: code.rate,
+          NetAmountTaxable: rows.sum(&:taxable_base).round(2)
+        }.compact
+      }
+    end.compact
+
+    return nil if tax_lines.empty?
+
+    {
+      TotalTax: snapshots.sum(&:computed_amount).round(2),
+      TaxLine: tax_lines
+    }
+  end
+
   def build_line_items(invoice)
     lines = []
     
