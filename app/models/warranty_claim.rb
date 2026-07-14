@@ -201,7 +201,7 @@ class WarrantyClaim < ApplicationRecord
   end
   
   def can_be_submitted?
-    draft? && parts.present? && manufacturer_id.present?
+    draft? && parts.present? && manufacturer_id.present? && manufacturer_claim_email.present?
   end
 
   # Human-readable reason a draft can't yet be submitted (for FE badges).
@@ -212,7 +212,17 @@ class WarrantyClaim < ApplicationRecord
     return 'Already submitted' unless draft?
     return 'No manufacturer selected' if manufacturer_id.blank?
     return 'Claim must have parts or labor added to the service ticket to submit' unless parts.present?
+    if manufacturer_claim_email.blank?
+      return 'Manufacturer has no claim email on file — add one on the manufacturer record or company-manufacturer override before submitting'
+    end
     'Not ready'
+  end
+
+  # Resolve the email a submission would target. Nil means the submit would send
+  # nowhere and should be blocked. Delegates to WarrantyNotificationService so
+  # the resolution order stays in one place.
+  def manufacturer_claim_email
+    WarrantyNotificationService.resolve_manufacturer_email(self)
   end
   
   def can_be_resubmitted?

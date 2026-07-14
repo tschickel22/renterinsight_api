@@ -274,28 +274,28 @@ module Api
       # POST /api/v1/service-tickets/:id/set-line-billing
       # Set billing type (warranty vs customer) for a specific line item
       def set_line_billing
-      return unless authorize_action!('service', 'update')
-      
-      begin
-      @service_ticket.set_line_billing(
-        index: params[:index].to_i,
-      type: params[:type],
-      billing_type: params[:billing_type],
-      manufacturer_id: params[:manufacturer_id]
-      )
-      
-      @service_ticket.reload
-      
-      render json: {
-      success: true,
-      data: serialize_ticket(@service_ticket),
-      message: "Line item marked as #{params[:billing_type]}"
-      }
-      rescue => e
-      Rails.logger.error "❌ [set_line_billing] Error: #{e.message}"
-      Rails.logger.error e.backtrace.join("\n")
-      render json: { error: e.message }, status: :unprocessable_entity
-      end
+        return unless authorize_action!('service', 'update')
+
+        begin
+          @service_ticket.set_line_billing(
+            index: params[:index].to_i,
+            type: params[:type],
+            billing_type: params[:billing_type],
+            manufacturer_id: params[:manufacturer_id]
+          )
+
+          @service_ticket.reload
+
+          render json: {
+            success: true,
+            data: serialize_ticket(@service_ticket),
+            message: "Line item marked as #{params[:billing_type]}"
+          }
+        rescue => e
+          Rails.logger.error "❌ [set_line_billing] Error: #{e.message}"
+          Rails.logger.error e.backtrace.join("\n")
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
       end
       
       # POST /api/v1/service-tickets/:id/generate-customer-invoice
@@ -505,34 +505,41 @@ module Api
 
       # GET /api/v1/service-tickets/stats
       def stats
-      return unless authorize_action!('service', 'read')
-      
-      tickets = @company.service_tickets
-      
-      # Apply account filter if provided
-      if params[:account_id].present?
-      tickets = tickets.where(account_id: params[:account_id])
-      end
-      
-      # Apply location selector filter for stats
-      if Current.location_filtered?
-      tickets = tickets.where(location_id: Current.location_id)
-      end
-      
-      stats_data = {
-      total: tickets.count,
-      open: tickets.open.count,
-      in_progress: tickets.in_progress.count,
-      waiting_on_manufacturer: tickets.waiting_on_manufacturer.count,
-        completed: tickets.completed.count,
-        overdue: tickets.where('scheduled_date < ? AND status != ?', Date.today, 'completed').count,
-        warranty_suspected: tickets.warranty_suspected.count,
+        return unless authorize_action!('service', 'read')
+
+        tickets = @company.service_tickets
+
+        # Apply account filter if provided
+        if params[:account_id].present?
+          tickets = tickets.where(account_id: params[:account_id])
+        end
+
+        # RBAC location filtering: mirror the index action so non-admins don't
+        # see counts across locations they can't otherwise access.
+        if current_user.uses_rbac? && !current_user.effective_admin?
+          location_ids = permission_service.accessible_location_ids
+          tickets = location_ids.any? ? tickets.where(location_id: location_ids) : tickets.none
+        end
+
+        # Apply location selector filter for stats
+        if Current.location_filtered?
+          tickets = tickets.where(location_id: Current.location_id)
+        end
+
+        stats_data = {
+          total: tickets.count,
+          open: tickets.open.count,
+          in_progress: tickets.in_progress.count,
+          waiting_on_manufacturer: tickets.waiting_on_manufacturer.count,
+          completed: tickets.completed.count,
+          overdue: tickets.where('scheduled_date < ? AND status != ?', Date.today, 'completed').count,
+          warranty_suspected: tickets.warranty_suspected.count,
           warranty_confirmed: tickets.warranty_confirmed.count,
-      total_revenue: tickets.sum { |t| t.total_cost }
-    }
-    
-    render json: { data: stats_data }
-  end
+          total_revenue: tickets.sum { |t| t.total_cost }
+        }
+
+        render json: { data: stats_data }
+      end
       
       private
       
