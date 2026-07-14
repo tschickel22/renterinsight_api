@@ -2,6 +2,8 @@
 
 class ContactActivity < ApplicationRecord
   include ActivityTrackable
+  include EmitsWorkflowActivityEvents
+  workflow_parent :contact
 
   belongs_to :contact
   belongs_to :account, optional: true

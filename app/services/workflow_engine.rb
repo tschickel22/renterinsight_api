@@ -85,6 +85,14 @@ module WorkflowEngine
     Rails.logger.info "[WorkflowEngine] Cancelled run #{run.id} reason=#{reason}"
   end
 
+  # Called from Branch and other executors that need a fresh, denormalized
+  # snapshot of an entity outside of the initial run.variables. Delegates to
+  # the private helper so we don't duplicate the denormalization logic.
+  def self.entity_hash(entity)
+    return {} if entity.nil?
+    entity_as_hash_with_denormalized(entity)
+  end
+
   class << self
     private
 
@@ -96,11 +104,12 @@ module WorkflowEngine
       'Lead'          => { 'home' => :vehicle, 'account' => :converted_account },
       'Deal'          => { 'account' => :account, 'contact' => :contact, 'home' => :vehicle },
       'Contact'       => { 'account' => :account },
-      'ServiceTicket' => { 'contact' => :contact, 'account' => :account, 'home' => :vehicle, 'deal' => :deal },
+      # ServiceTicket carries its own location, so expose it as {{location.*}}
+      # for templates that want to route by shop/branch.
+      'ServiceTicket' => { 'contact' => :contact, 'account' => :account, 'home' => :vehicle, 'deal' => :deal, 'location' => :location },
       'Listing'       => { 'home' => :vehicle },
       'Account'       => {},
-      'Vehicle'       => {},
-      'Home'          => {}
+      'Vehicle'       => {}
     }.freeze
 
     def build_initial_variables(entity, event)
@@ -110,6 +119,12 @@ module WorkflowEngine
         'started_at' => Time.current.iso8601,
         'frontend_url' => ENV['FRONTEND_URL'].presence || 'https://localhost:5173'
       }
+      # Activity-scoped triggers (e.g. lead_activity.created) carry the child
+      # record inside the event payload. Hoist it to a top-level {{activity.*}}
+      # so templates and update_field steps can reference it directly.
+      if (activity_payload = event&.payload&.dig('activity')).is_a?(Hash)
+        vars['activity'] = activity_payload
+      end
       vars.merge!(related_entity_snapshots(entity))
       vars
     end

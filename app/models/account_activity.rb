@@ -1,5 +1,7 @@
 class AccountActivity < ApplicationRecord
   include ActivityTrackable
+  include EmitsWorkflowActivityEvents
+  workflow_parent :account
 
   belongs_to :account
   belongs_to :user, optional: true # creator

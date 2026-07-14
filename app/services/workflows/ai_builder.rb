@@ -18,6 +18,11 @@ module Workflows
       deal.created deal.updated deal.status_changed deal.deleted
       contact.created contact.updated contact.status_changed contact.deleted
       account.created account.updated account.status_changed account.deleted
+      service_ticket.created service_ticket.updated service_ticket.status_changed
+      lead_activity.created lead_activity.updated lead_activity.completed
+      deal_activity.created deal_activity.updated deal_activity.completed
+      contact_activity.created contact_activity.updated contact_activity.completed
+      account_activity.created account_activity.updated account_activity.completed
       inbound.webhook cron.minutely cron.hourly cron.daily cron.weekly
     ].freeze
 
@@ -237,6 +242,11 @@ module Workflows
         - deal.created, deal.updated, deal.status_changed, deal.deleted
         - contact.created, contact.updated, contact.status_changed, contact.deleted
         - account.created, account.updated, account.status_changed, account.deleted
+        - service_ticket.created, service_ticket.updated, service_ticket.status_changed
+        - lead_activity.created / updated / completed — fires when an activity is added/edited/completed on a lead.
+          The workflow runs on the PARENT lead; the activity is exposed as {{activity.due_date}}, {{activity.subject}}, {{activity.status}}, etc.
+          Use this for "when a lead gets a new activity/task/meeting with a due date, update the lead". Analogous:
+          deal_activity.*, contact_activity.*, account_activity.*.
         - inbound.webhook (use for "when a form is submitted" or external HTTP triggers)
         - cron.minutely, cron.hourly, cron.daily, cron.weekly (use for time-based workflows like "every Monday")
 

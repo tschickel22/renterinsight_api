@@ -48,20 +48,29 @@ module WorkflowEngine
                                 .order(created_at: :desc).first
         rescue => e
           Rails.logger.error "[SendEmail] CommunicationService.send_email failed: #{e.message} — adapt if signature differs"
-          # Fallback: create a Communication directly so reply-pause still has a parent
+          # Fallback: create a Communication row so reply-pause still has a
+          # parent, but stamp it as FAILED with the real (possibly blank)
+          # addresses. Previously this wrote status: 'sent' with placeholder
+          # addresses like 'unknown@example.com' / 'workflow@renterinsight.test',
+          # which polluted the comm log and misled audits into thinking the
+          # email actually went out.
           begin
             comm = Communication.create!(
               communicable: @run.entity,
               direction: 'outbound',
               channel: 'email',
-              status: 'sent',
+              status: 'failed',
               subject: subject.presence || '(no subject)',
               body: body.presence || '(empty)',
-              to_address: to.presence || 'unknown@example.com',
-              from_address: 'workflow@renterinsight.test',
-              sent_at: Time.current,
+              to_address: to,
+              from_address: sending_user&.email,
+              sent_at: nil,
               company: (@run.entity.respond_to?(:company) ? @run.entity.company : nil),
-              metadata: { workflow_run_id: @run.id, step_id: @step['id'] }
+              metadata: {
+                workflow_run_id: @run.id,
+                step_id: @step['id'],
+                error: e.message
+              }
             )
           rescue => e2
             Rails.logger.error "[SendEmail] fallback Communication.create! failed: #{e2.message}"

@@ -105,15 +105,33 @@ module WorkflowEngine
       current = context
       parts.each do |part|
         return nil if current.nil?
-        current = if current.is_a?(Hash)
-                    current[part] || current[part.to_sym]
-                  elsif current.respond_to?(part)
-                    current.public_send(part)
-                  else
-                    nil
-                  end
+        current = step_into(current, part)
       end
       current
+    end
+
+    # One step of the path walk. Falls through to custom_field_values when the
+    # segment isn't a real attribute — otherwise conditions comparing a custom
+    # field (e.g. `entity.next_appointment` on Evangeline leads) always came
+    # back nil and branches silently took the wrong path.
+    def step_into(current, part)
+      if current.is_a?(Hash)
+        current[part] || current[part.to_sym]
+      elsif current.respond_to?(part) && !attribute_missing?(current, part)
+        current.public_send(part)
+      elsif current.respond_to?(:custom_field_values)
+        CustomFieldsAccess.read(current, part)
+      end
+    end
+
+    # An AR model responds_to? every column, but we want the custom-field
+    # fallback to fire when the segment is a JSONB key rather than a real
+    # column. This picks the fallback when the AR model doesn't have the
+    # attribute at all.
+    def attribute_missing?(record, name)
+      return false unless record.class.respond_to?(:column_names)
+      !record.class.column_names.include?(name.to_s) &&
+        !record.class.instance_methods(false).include?(name.to_sym)
     end
   end
 end

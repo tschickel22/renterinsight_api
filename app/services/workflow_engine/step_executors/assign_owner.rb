@@ -1,12 +1,20 @@
 module WorkflowEngine
   module StepExecutors
     class AssignOwner < Base
+      # Each entity has its own idea of "owner". ServiceTicket stores it as a
+      # string (per legacy column), everything else uses a FK integer. The
+      # value-normalization at write time (see below) handles the type diff.
       OWNER_COLS = {
-        'Lead' => 'owner_id',
-        'Deal' => 'owner_id',
-        'Contact' => 'owner_id',
-        'Account' => 'account_manager_id'
+        'Lead'          => 'owner_id',
+        'Deal'          => 'owner_id',
+        'Contact'       => 'owner_id',
+        'Account'       => 'account_manager_id',
+        'ServiceTicket' => 'assigned_to'
       }.freeze
+
+      # Columns that hold user IDs as strings, not FK integers. Written as
+      # `to_s` so DB doesn't reject the value.
+      STRING_ID_COLS = %w[assigned_to].freeze
 
       def call
         cfg = @step['config'] || {}
@@ -38,12 +46,21 @@ module WorkflowEngine
                          end
                          pool = @run.company.users if pool.blank?
                          klass = entity.class
-                         ranked = pool.to_a.min_by { |u| klass.where(owner_col => u.id).count }
+                         # Match the column type when counting so ServiceTicket
+                         # (assigned_to = string) doesn't return 0 for every user
+                         # and pick an arbitrary one.
+                         ranked = pool.to_a.min_by do |u|
+                           lookup = STRING_ID_COLS.include?(owner_col) ? u.id.to_s : u.id
+                           klass.where(owner_col => lookup).count
+                         end
                          ranked&.id
                        end
 
         if new_owner_id.present?
-          entity.update!(owner_col => new_owner_id)
+          # ServiceTicket's `assigned_to` is a string column even though it holds
+          # a user id — coerce here so we don't crash on a type mismatch.
+          value = STRING_ID_COLS.include?(owner_col) ? new_owner_id.to_s : new_owner_id
+          entity.update!(owner_col => value)
           { status: 'success', output: { owner_id: new_owner_id, column: owner_col }, next_step_id: next_step_from_edges, wait: nil, error: {} }
         else
           { status: 'skipped', output: { reason: 'no_user_selected' }, next_step_id: next_step_from_edges, wait: nil, error: {} }

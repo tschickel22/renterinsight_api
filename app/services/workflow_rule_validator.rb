@@ -6,6 +6,11 @@ class WorkflowRuleValidator
     deal.created deal.updated deal.deleted deal.status_changed
     contact.created contact.updated contact.deleted contact.status_changed
     account.created account.updated account.deleted account.status_changed
+    service_ticket.created service_ticket.updated service_ticket.status_changed
+    lead_activity.created lead_activity.updated lead_activity.completed
+    deal_activity.created deal_activity.updated deal_activity.completed
+    contact_activity.created contact_activity.updated contact_activity.completed
+    account_activity.created account_activity.updated account_activity.completed
     inbound.webhook
     cron.minutely cron.hourly cron.daily cron.weekly
   ].freeze
@@ -138,6 +143,12 @@ class WorkflowRuleValidator
           if cfg[k].blank?
             add_error("Node '#{id}' (create_activity) is missing required config '#{k}'", step_id: id, step_type: type, field: k)
           end
+        end
+        # Warn early when the step will silently no-op because the rule's
+        # entity type has no matching activity model (e.g. ServiceTicket).
+        supported = %w[Lead Deal Contact Account]
+        if @rule.entity_type.present? && !supported.include?(@rule.entity_type)
+          add_warning("Node '#{id}' (create_activity) does nothing for entity type '#{@rule.entity_type}' — only supported for: #{supported.join(', ')}")
         end
       when 'wait'
         if cfg['duration'].blank?

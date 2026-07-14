@@ -2,6 +2,8 @@
 
 class LeadActivity < ApplicationRecord
   include ActivityTrackable
+  include EmitsWorkflowActivityEvents
+  workflow_parent :lead
 
   belongs_to :lead
   belongs_to :user # creator
