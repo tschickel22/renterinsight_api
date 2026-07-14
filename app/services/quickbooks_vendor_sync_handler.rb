@@ -59,6 +59,11 @@ class QuickbooksVendorSyncHandler < QuickbooksSyncHandler
       email: qb_vendor.dig('PrimaryEmailAddr', 'Address'),
       phone: qb_vendor.dig('PrimaryPhone', 'FreeFormNumber'),
       status: qb_vendor['Active'] ? 'active' : 'inactive',
+      # QB doesn't distinguish "supplier vs contractor" — that's our
+      # taxonomy. Land on the neutral 'other' bucket so the QB import
+      # doesn't hide inside a filter tab the user isn't looking at.
+      # Users can re-categorize per-vendor as needed.
+      vendor_type: infer_vendor_type(qb_vendor),
       address_line1: qb_vendor.dig('BillAddr', 'Line1'),
       city:          qb_vendor.dig('BillAddr', 'City'),
       state:         qb_vendor.dig('BillAddr', 'CountrySubDivisionCode'),
@@ -84,6 +89,14 @@ class QuickbooksVendorSyncHandler < QuickbooksSyncHandler
   end
 
   private
+
+  # QB doesn't have supplier/contractor as first-class fields. Best signal
+  # available is Vendor1099 (US 1099 eligibility, typical for contractors)
+  # or nothing at all — fall back to 'other' so the vendor isn't hidden by
+  # a supplier-only or contractor-only view.
+  def infer_vendor_type(qb_vendor)
+    qb_vendor['Vendor1099'] ? 'contractor' : 'other'
+  end
 
   def format_address(vendor)
     return nil if vendor.address_line1.blank? && vendor.city.blank?
