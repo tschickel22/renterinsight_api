@@ -12,6 +12,12 @@
 # ActiveRecord::UnknownAttributeError because `next_appointment` is a custom
 # field, not a real column. Read paths silently returned nil for the same
 # reason. Route through here to make both work.
+#
+# Alias matching: rule builders (AI or human) commonly pass the display name
+# ("Next Appointment") instead of the canonical field_key ("next_appointment").
+# Both forms are accepted — resolve_field_key normalizes each side (downcase,
+# strip, whitespace/dashes → underscores) and always writes back under the
+# canonical field_key so the JSONB stays clean.
 module WorkflowEngine
   module CustomFieldsAccess
     module_function
@@ -36,37 +42,70 @@ module WorkflowEngine
         ENTITY_MODULE_MAP.key?(entity.class.name)
     end
 
-    # Field keys defined as custom fields for this entity's module + company.
-    # Cached per-request via Current for hot code paths (variable resolution
-    # walks this for every {{path}} miss).
+    # Canonical field_keys defined for this entity's module + company.
+    # Kept as a bare Array so existing callers that iterate keys still work.
     def custom_field_keys(entity)
-      return [] unless supports_custom_fields?(entity)
+      alias_map(entity).values.uniq
+    end
+
+    # Normalized alias → canonical field_key map. Recognizes:
+    #   - the exact field_key ("next_appointment")
+    #   - the display name ("Next Appointment", "next appointment")
+    #   - loose variants (spaces/dashes ↔ underscores, mixed case)
+    # Cached per-request in Thread.current since resolve_field_key is called
+    # for every {{path}} miss during variable resolution.
+    def alias_map(entity)
+      return {} unless supports_custom_fields?(entity)
 
       company_id = entity.respond_to?(:company_id) ? entity.company_id : nil
-      return [] if company_id.nil?
+      return {} if company_id.nil?
 
       mod = ENTITY_MODULE_MAP[entity.class.name]
-      # Thread.current keys must be strings/symbols; serialize to keep the
-      # per-request cache scoped by (company, module) without allocating an
-      # array key that Thread.current rejects.
-      cache = (Thread.current[:workflow_custom_fields_cache] ||= {})
-      cache["#{company_id}:#{mod}"] ||= CustomField
+      cache = (Thread.current[:workflow_custom_fields_alias_cache] ||= {})
+      cache["#{company_id}:#{mod}"] ||= build_alias_map(company_id, mod)
+    end
+
+    def build_alias_map(company_id, mod)
+      map = {}
+      CustomField
         .where(company_id: company_id, module: mod, is_active: true)
-        .pluck(:field_key)
+        .pluck(:field_key, :name)
+        .each do |field_key, name|
+          canonical = field_key.to_s
+          [canonical, name.to_s].each do |candidate|
+            key = normalize_alias(candidate)
+            map[key] = canonical if key.present?
+          end
+        end
+      map
+    end
+
+    # Fold whitespace/dashes into underscores and downcase so "Next Appointment"
+    # and "next-appointment" both collide with "next_appointment".
+    def normalize_alias(str)
+      return nil if str.nil?
+      str.to_s.strip.downcase.gsub(/[\s\-]+/, '_')
+    end
+
+    # Return the canonical field_key for a candidate, or nil if the entity has
+    # no custom field matching that alias.
+    def resolve_field_key(entity, candidate)
+      alias_map(entity)[normalize_alias(candidate)]
     end
 
     # Split an attributes hash into { real:, custom: } so callers can
     # `entity.update!(real)` and merge `custom` into `custom_field_values`.
+    # Custom-side keys are always the canonical field_key even if the caller
+    # passed a display-name alias.
     def partition(entity, attrs)
       return { real: attrs.dup, custom: {} } unless supports_custom_fields?(entity)
 
-      cf_keys = custom_field_keys(entity).map(&:to_s)
       real = {}
       custom = {}
       attrs.each do |k, v|
-        k_s = k.to_s
-        if cf_keys.include?(k_s)
-          custom[k_s] = v
+        canonical = resolve_field_key(entity, k)
+        if canonical
+          custom[canonical] = v
         else
           real[k] = v
         end
@@ -86,15 +125,17 @@ module WorkflowEngine
       true
     end
 
-    # Look up a single custom field value for an entity by field_key.
+    # Look up a single custom field value for an entity by field_key OR any
+    # accepted alias (display name, normalized form).
     def read(entity, key)
       return nil unless supports_custom_fields?(entity)
 
       values = entity.custom_field_values
       return nil if values.blank?
 
-      key_s = key.to_s
-      values[key_s] || values[key_s.to_sym]
+      canonical = resolve_field_key(entity, key)
+      lookup = canonical || key.to_s
+      values[lookup] || values[lookup.to_sym]
     end
   end
 end

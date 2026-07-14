@@ -153,9 +153,28 @@ module Workflows
         'trigger_event_types' => TRIGGER_EVENT_TYPES,
         'step_types' => STEP_TYPES,
         'existing_rule_names' => safe_pluck(@company.try(:workflow_rules), :name).first(50),
-        'merge_tags_by_entity' => merge_tags_summary
+        'merge_tags_by_entity' => merge_tags_summary,
+        # Company-specific custom fields so the model uses field_key snake_case
+        # (e.g. "next_appointment") in update_field configs instead of the
+        # human-readable name ("Next Appointment"), which crashes at run time.
+        'custom_fields_by_entity' => custom_fields_context
       }
       base.merge((overrides || {}).stringify_keys)
+    end
+
+    # Snapshot of the company's active custom fields grouped by entity, keyed
+    # to the shape the update_field step expects.
+    def custom_fields_context
+      return {} unless defined?(CustomField)
+      CustomField
+        .where(company_id: @company.id, is_active: true)
+        .pluck(:module, :field_key, :name, :field_type)
+        .group_by(&:first)
+        .transform_values do |rows|
+          rows.map { |(_, field_key, name, field_type)| { 'field_key' => field_key, 'name' => name, 'field_type' => field_type } }
+        end
+    rescue
+      {}
     end
 
     def sender_context_hash
@@ -270,6 +289,10 @@ module Workflows
 
         5) update_field
            config: { "fields": { "status": "contacted", "priority": "high" } }
+           - Field keys MUST be the snake_case column name or custom_field field_key.
+             NEVER use the display name. Example: use "next_appointment" NOT "Next Appointment".
+             Custom fields for the current company are listed in the "Custom Fields" section
+             of the CONTEXT — use the field_key column verbatim.
 
         6) create_activity
            config: { "activity_type": "task"|"call"|"email"|"meeting"|"note"|"reminder", "subject": "...", "description": "...", "due_in_days": 1, "assigned_to_user_id": null }

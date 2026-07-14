@@ -56,11 +56,12 @@ module WorkflowEngine
         # exists on the AR model, otherwise a custom_field_values entry.
         # Previously this silently no-op'd when the score_field pointed at a
         # custom field, so scoring workflows on entities with custom fields
-        # never persisted the value.
+        # never persisted the value. Alias-aware so "Lead Score" and
+        # "lead_score" both resolve to the same custom field.
         if entity && score_field.present? && value
-          cf_keys = CustomFieldsAccess.custom_field_keys(entity).map(&:to_s)
-          if cf_keys.include?(score_field.to_s)
-            CustomFieldsAccess.write(entity, score_field.to_s => value)
+          canonical_cf = CustomFieldsAccess.resolve_field_key(entity, score_field)
+          if canonical_cf
+            CustomFieldsAccess.write(entity, canonical_cf => value)
           elsif entity.respond_to?(score_field)
             entity.update_column(score_field, value)
           else
