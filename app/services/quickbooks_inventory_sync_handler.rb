@@ -79,9 +79,16 @@ class QuickbooksInventorySyncHandler < QuickbooksSyncHandler
     # Parse make/model/year from description or name
     name_parts = parse_vehicle_name(qb_item['Name'])
     
+    # Landing location: handler scope → user's current UI location → first
+    # active. Without this vehicles land on NULL and the inventory list —
+    # which filters via inventory_visible_location_ids — hides them.
+    resolved_location_id = location&.id ||
+      (Current.location_filtered? ? Current.location_id : nil) ||
+      company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
+
     vehicle_data = {
       company_id: company.id,
-      location_id: location&.id,
+      location_id: resolved_location_id,
       quickbooks_id: qb_item['Id'],
       stock_number: extract_custom_field(qb_item, 'Stock Number') || "QB-#{qb_item['Id']}",
       vin: extract_custom_field(qb_item, 'VIN') || "QB-IMPORTED-#{qb_item['Id']}",

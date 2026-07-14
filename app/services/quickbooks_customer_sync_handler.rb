@@ -77,10 +77,17 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
   end
   
   def create_from_quickbooks(qb_customer, config)
-    # Extract data from QuickBooks Customer
+    # Extract data from QuickBooks Customer. Resolve landing location:
+    # handler scope → user's current UI location → first active. Leaving
+    # location NULL made these invisible to the standard contacts list
+    # which strict-filters by location.
+    resolved_location_id = location&.id ||
+      (Current.location_filtered? ? Current.location_id : nil) ||
+      company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
+
     contact_data = {
       company_id: company.id,
-      location_id: location&.id,
+      location_id: resolved_location_id,
       quickbooks_id: qb_customer['Id'],
       first_name: qb_customer['GivenName'],
       last_name: qb_customer['FamilyName'],

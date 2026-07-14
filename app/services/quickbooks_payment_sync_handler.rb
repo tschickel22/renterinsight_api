@@ -78,9 +78,15 @@ class QuickbooksPaymentSyncHandler < QuickbooksSyncHandler
     customer_id = qb_payment.dig('CustomerRef', 'value')
     contact = find_contact_by_qb_id(customer_id)
     
+    # Landing location — same waterfall as invoice/customer/inventory so
+    # payments stay in the location where the user was working.
+    resolved_location_id = location&.id ||
+      (Current.location_filtered? ? Current.location_id : nil) ||
+      company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
+
     payment_data = {
       company_id: company.id,
-      location_id: location&.id,
+      location_id: resolved_location_id,
       payer_type: 'Contact',
       payer_id: contact&.id,
       quickbooks_id: qb_payment['Id'],
