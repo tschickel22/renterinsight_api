@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2290,6 +2290,70 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_180000) do
     t.index ["vendor_id"], name: "index_contractor_assignments_on_vendor_id"
   end
 
+  create_table "credit_memo_applications", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "credit_memo_id", null: false
+    t.string "applicable_type", null: false
+    t.bigint "applicable_id", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.datetime "applied_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["applicable_type", "applicable_id", "company_id"], name: "idx_credit_memo_applications_by_target"
+    t.index ["applicable_type", "applicable_id"], name: "index_credit_memo_applications_on_applicable"
+    t.index ["company_id"], name: "index_credit_memo_applications_on_company_id"
+    t.index ["credit_memo_id", "applicable_type", "applicable_id"], name: "idx_credit_memo_applications_unique_pair", unique: true
+    t.index ["credit_memo_id"], name: "index_credit_memo_applications_on_credit_memo_id"
+  end
+
+  create_table "credit_memo_items", force: :cascade do |t|
+    t.bigint "credit_memo_id", null: false
+    t.string "description", null: false
+    t.decimal "quantity", precision: 10, scale: 2, default: "1.0"
+    t.decimal "rate", precision: 10, scale: 2, null: false
+    t.decimal "amount", precision: 10, scale: 2, default: "0.0", null: false
+    t.string "itemable_type"
+    t.bigint "itemable_id"
+    t.boolean "taxable", default: false
+    t.boolean "skip_tax", default: false
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["credit_memo_id"], name: "index_credit_memo_items_on_credit_memo_id"
+    t.index ["itemable_type", "itemable_id"], name: "index_credit_memo_items_on_itemable_type_and_itemable_id"
+  end
+
+  create_table "credit_memos", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id", null: false
+    t.bigint "contact_id"
+    t.string "credit_memo_number", null: false
+    t.date "memo_date", null: false
+    t.string "status", default: "draft", null: false
+    t.text "reason"
+    t.decimal "subtotal", precision: 12, scale: 2, default: "0.0"
+    t.decimal "tax_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "total", precision: 12, scale: 2, default: "0.0"
+    t.decimal "amount_applied", precision: 12, scale: 2, default: "0.0"
+    t.decimal "amount_remaining", precision: 12, scale: 2, default: "0.0"
+    t.text "notes"
+    t.string "source_type"
+    t.bigint "source_id"
+    t.bigint "created_by_id"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.string "qbo_id"
+    t.datetime "qbo_synced_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "credit_memo_number"], name: "idx_credit_memos_unique_number", unique: true
+    t.index ["company_id"], name: "index_credit_memos_on_company_id"
+    t.index ["contact_id"], name: "index_credit_memos_on_contact_id"
+    t.index ["location_id"], name: "index_credit_memos_on_location_id"
+    t.index ["source_type", "source_id"], name: "index_credit_memos_on_source_type_and_source_id"
+  end
+
   create_table "custom_field_migrations", force: :cascade do |t|
     t.bigint "source_custom_field_id", null: false
     t.string "target_module", null: false
@@ -3288,6 +3352,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_180000) do
     t.string "delivery_zip"
     t.string "delivery_country"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.decimal "amount_credited", precision: 10, scale: 2, default: "0.0"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -7518,6 +7583,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_180000) do
   add_foreign_key "contractor_assignments", "companies"
   add_foreign_key "contractor_assignments", "users", column: "assigned_by_id"
   add_foreign_key "contractor_assignments", "vendors", on_delete: :nullify
+  add_foreign_key "credit_memo_applications", "companies"
+  add_foreign_key "credit_memo_applications", "credit_memos"
+  add_foreign_key "credit_memo_items", "credit_memos"
+  add_foreign_key "credit_memos", "companies"
+  add_foreign_key "credit_memos", "contacts"
+  add_foreign_key "credit_memos", "locations"
   add_foreign_key "custom_field_migrations", "companies"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "source_custom_field_id"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "target_custom_field_id"

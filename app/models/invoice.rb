@@ -45,6 +45,8 @@ class Invoice < ApplicationRecord
   has_many :invoice_items, dependent: :destroy
   has_many :payment_applications, as: :applicable, dependent: :destroy
   has_many :payments, through: :payment_applications
+  has_many :credit_memo_applications, as: :applicable, dependent: :destroy
+  has_many :credit_memos, through: :credit_memo_applications
   has_many :invoice_inventory_usages, dependent: :destroy
   
   accepts_nested_attributes_for :invoice_items, allow_destroy: true
@@ -298,27 +300,34 @@ class Invoice < ApplicationRecord
     update_columns(tax_amount: new_tax, total: new_total, amount_due: new_due)
   end
 
-  # Recomputes amount_paid / amount_due / status from the current set of
-  # payment applications. Called from Invoice's own after_save and from
-  # PaymentApplication/Payment callbacks — needs to be public so those
-  # callers can invoke it directly (touch does not fire after_save).
+  # Recomputes amount_paid / amount_credited / amount_due / status from the
+  # current set of payment applications AND credit memo applications. Called
+  # from Invoice's own after_save and from PaymentApplication / Payment /
+  # CreditMemoApplication callbacks — public so those callers can invoke it
+  # directly (touch does not fire after_save).
   def update_status_based_on_payments
     return if is_deleted? || status == 'cancelled'
     return if new_record?
 
-    # Serialize concurrent payment applications with a row-level lock so
-    # two payments completing at the same time can't both compute stale
-    # `total_paid` and race their writes on amount_paid/amount_due.
+    # Serialize concurrent payment / credit applications with a row-level
+    # lock so two writes can't both compute stale totals and race.
     with_lock do
       total_paid = payment_applications
                    .joins(:payment)
                    .where(payments: { status: 'completed' })
                    .sum('payment_applications.amount')
-      calculated_amount_due = total - total_paid
 
-      new_status = if total_paid >= total && total > 0
+      total_credited = credit_memo_applications
+                       .joins(:credit_memo)
+                       .where(credit_memos: { status: %w[issued partial applied], is_deleted: [false, nil] })
+                       .sum('credit_memo_applications.amount')
+
+      reduction = total_paid + total_credited
+      calculated_amount_due = total - reduction
+
+      new_status = if reduction >= total && total > 0
         'paid'
-      elsif total_paid > 0 && total_paid < total
+      elsif reduction > 0 && reduction < total
         'partial'
       elsif overdue?
         'overdue'
@@ -335,11 +344,13 @@ class Invoice < ApplicationRecord
           status: new_status,
           paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
           amount_paid: total_paid,
+          amount_credited: total_credited,
           amount_due: new_status == 'paid' ? 0 : calculated_amount_due
         )
       else
         update_columns(
           amount_paid: total_paid,
+          amount_credited: total_credited,
           amount_due: calculated_amount_due
         )
       end
