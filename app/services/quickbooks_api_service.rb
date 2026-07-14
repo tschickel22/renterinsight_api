@@ -25,47 +25,55 @@ class QuickbooksApiService
     raise "QuickBooks not connected" unless @access_token.present? && @realm_id.present?
   end
   
+  # Every request should send minorversion so QB doesn't silently drift to an
+  # older schema — some fields (custom fields, tax detail) only exist above
+  # certain minorversions.
+  MINOR_VERSION = 65
+
   # GET request to QuickBooks API
   def get(endpoint, params = {})
     url = build_url(endpoint)
-    
+
     response = HTTParty.get(url, {
       headers: auth_headers,
-      query: params,
+      query: params.reverse_merge(minorversion: MINOR_VERSION),
       timeout: 30
     })
-    
+
     handle_response(response)
   end
-  
+
   # POST request to QuickBooks API
   def post(endpoint, data)
     url = build_url(endpoint)
-    
+
     response = HTTParty.post(url, {
       headers: auth_headers.merge('Content-Type' => 'application/json'),
+      query: { minorversion: MINOR_VERSION },
       body: data.to_json,
       timeout: 30
     })
-    
+
     handle_response(response)
   end
-  
+
   # POST with sparse update (PATCH equivalent)
   def update(endpoint, id, data)
     url = build_url(endpoint)
-    
-    # QuickBooks updates use POST with Id and SyncToken in body
-    # NO query parameters - that causes "Unsupported Operation"
+
+    # QuickBooks updates use POST with Id and SyncToken in body.
+    # minorversion goes in the query string (not the body) so we still get
+    # the newer schema without confusing QB about the operation type.
     response = HTTParty.post(url, {
       headers: auth_headers.merge('Content-Type' => 'application/json'),
+      query: { minorversion: MINOR_VERSION },
       body: data.to_json,
       timeout: 30
     })
-    
+
     handle_response(response)
   end
-  
+
   # Query QuickBooks data with SQL-like syntax
   def query(sql_query)
     get('query', { query: sql_query })
@@ -95,16 +103,20 @@ class QuickbooksApiService
     update(entity_type.downcase, id, data)
   end
   
-  # Search for entities
+  # Search for entities. QB's query language uses SQL-ish syntax with single
+  # quotes; values are escaped by doubling embedded single quotes. Field
+  # names are only allowed if they match a plain [A-Za-z0-9_.] pattern so a
+  # caller can't inject SQL through the field name either.
   def search_entities(entity_type, conditions = {})
-    # Build SQL query
-    sql = "SELECT * FROM #{entity_type}"
-    
+    sql = "SELECT * FROM #{sanitize_qb_identifier(entity_type)}"
+
     if conditions.any?
-      where_clauses = conditions.map { |field, value| "#{field} = '#{value}'" }
+      where_clauses = conditions.map do |field, value|
+        "#{sanitize_qb_identifier(field)} = '#{escape_qb_value(value)}'"
+      end
       sql += " WHERE #{where_clauses.join(' AND ')}"
     end
-    
+
     query(sql)
   end
   
@@ -175,6 +187,21 @@ class QuickbooksApiService
     end
   end
   
+  # QB identifiers (entity + field names) come from code in practice, but
+  # search_entities has been called with dynamic values in the past, so
+  # enforce the shape at the boundary.
+  def sanitize_qb_identifier(identifier)
+    str = identifier.to_s
+    raise ArgumentError, "Unsafe QB identifier: #{str.inspect}" unless str.match?(/\A[A-Za-z_][A-Za-z0-9_.]*\z/)
+    str
+  end
+
+  # QB SQL uses single-quoted string literals; embedded ' is escaped by
+  # doubling.
+  def escape_qb_value(value)
+    value.to_s.gsub("'", "''")
+  end
+
   def extract_error_message(response)
     parsed = response.parsed_response
     

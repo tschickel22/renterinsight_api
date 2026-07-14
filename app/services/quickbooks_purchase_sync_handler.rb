@@ -1,25 +1,28 @@
 # frozen_string_literal: true
 
 # QuickBooks Purchase Sync Handler
-# Syncs purchases as QuickBooks Bills
-
+# Syncs purchases as QuickBooks Bills.
+#
+# NOTE: this handler was written against a `Purchase` model that never
+# existed in the schema. The real record type is `PurchaseOrder` with
+# different columns (po_number, order_date, total_amount) and associations
+# (supplier, purchase_order_lines). Until the handler is rewritten,
+# ENTITY_TYPES in QuickbooksSyncService omits 'purchases' so it won't be
+# invoked. If a caller instantiates it directly, methods raise loudly
+# instead of silently returning an empty scope that looks successful.
 class QuickbooksPurchaseSyncHandler < QuickbooksSyncHandler
+  NOT_IMPLEMENTED = 'QuickbooksPurchaseSyncHandler needs a rewrite against PurchaseOrder — see class docs.'
+
   def qb_entity_type
     'Bill'
   end
-  
+
   def get_all_syncable_records
-    # Get purchases from company or location if table exists
-    return [] unless defined?(Purchase)
-    
-    scope = company.purchases.where(is_deleted: [false, nil])
-    scope = scope.where(location_id: location.id) if location.present?
-    scope
+    raise NotImplementedError, NOT_IMPLEMENTED
   end
-  
-  def get_records_by_ids(ids)
-    return [] unless defined?(Purchase)
-    company.purchases.where(id: ids)
+
+  def get_records_by_ids(_ids)
+    raise NotImplementedError, NOT_IMPLEMENTED
   end
   
   def transform_to_quickbooks(purchase, config)

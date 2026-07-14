@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_190000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1959,7 +1959,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_190000) do
     t.index ["loan_settings"], name: "index_companies_on_loan_settings", using: :gin
     t.index ["public_inventory_settings"], name: "index_companies_on_public_inventory_settings", using: :gin
     t.index ["public_inventory_token"], name: "index_companies_on_public_inventory_token", unique: true
-    t.index ["quickbooks_realm_id"], name: "index_companies_on_quickbooks_realm_id"
+    t.index ["quickbooks_realm_id"], name: "idx_companies_unique_qb_realm", unique: true, where: "(quickbooks_realm_id IS NOT NULL)"
     t.index ["quickbooks_scope"], name: "index_companies_on_quickbooks_scope"
     t.index ["sms_provisioning_mode"], name: "index_companies_on_sms_provisioning_mode"
     t.index ["status"], name: "index_companies_on_status"
@@ -5269,6 +5269,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_190000) do
     t.datetime "updated_at", null: false
     t.datetime "received_date"
     t.bigint "vendor_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
     t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
     t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
@@ -5280,6 +5282,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_190000) do
     t.index ["is_deleted"], name: "index_purchase_orders_on_is_deleted"
     t.index ["location_id"], name: "index_purchase_orders_on_location_id"
     t.index ["order_date"], name: "index_purchase_orders_on_order_date"
+    t.index ["quickbooks_id"], name: "index_purchase_orders_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["received_date"], name: "index_purchase_orders_on_received_date"
     t.index ["status"], name: "index_purchase_orders_on_status"
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
@@ -7015,12 +7018,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_190000) do
     t.boolean "is_1099_eligible", default: false
     t.bigint "default_expense_account_id"
     t.boolean "sms_opt_in", default: false, null: false
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["company_id"], name: "index_vendors_on_company_id"
     t.index ["default_expense_account_id"], name: "index_vendors_on_default_expense_account_id"
     t.index ["email"], name: "index_vendors_on_email"
     t.index ["is_vendor"], name: "index_vendors_on_is_vendor"
     t.index ["portal_access_token"], name: "index_vendors_on_portal_access_token", unique: true
     t.index ["qb_vendor_id"], name: "index_vendors_on_qb_vendor_id"
+    t.index ["quickbooks_id"], name: "index_vendors_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["status"], name: "index_vendors_on_status"
     t.index ["trade_type"], name: "index_vendors_on_trade_type"
     t.index ["vendor_type"], name: "index_vendors_on_vendor_type"

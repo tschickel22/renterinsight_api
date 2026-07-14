@@ -99,28 +99,31 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       quickbooks_synced_at: Time.current
     }
     
-    invoice = company.invoices.create!(invoice_data)
-    
-    # Create line items first
-    create_line_items_from_qb(invoice, qb_invoice)
-    
-    # Now update financial totals using update_columns to skip callbacks
-    total_amt = qb_invoice['TotalAmt'].to_f
-    tax_amt = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
-    subtotal_amt = total_amt - tax_amt
-    balance_amt = qb_invoice['Balance'].to_f
-    paid_amt = total_amt - balance_amt
-    
-    invoice.update_columns(
-      subtotal: subtotal_amt,
-      tax_amount: tax_amt,
-      tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
-      total: total_amt,
-      amount_paid: paid_amt,
-      amount_due: balance_amt,
-      updated_at: invoice.updated_at  # Prevent circular sync
-    )
-    
+    # Wrap create + line-item build + totals in one transaction: if any line
+    # item fails validation, the whole invoice rolls back rather than leaving
+    # a "successfully synced" invoice with missing/partial lines.
+    invoice = Invoice.transaction do
+      inv = company.invoices.create!(invoice_data)
+      create_line_items_from_qb(inv, qb_invoice)
+
+      total_amt    = qb_invoice['TotalAmt'].to_f
+      tax_amt      = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
+      subtotal_amt = total_amt - tax_amt
+      balance_amt  = qb_invoice['Balance'].to_f
+      paid_amt     = total_amt - balance_amt
+
+      inv.update_columns(
+        subtotal: subtotal_amt,
+        tax_amount: tax_amt,
+        tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
+        total: total_amt,
+        amount_paid: paid_amt,
+        amount_due: balance_amt,
+        updated_at: inv.updated_at  # Prevent circular sync
+      )
+      inv
+    end
+
     invoice
   end
   

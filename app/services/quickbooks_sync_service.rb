@@ -184,7 +184,11 @@ class QuickbooksSyncService
   
   private
   
-  ENTITY_TYPES = %w[inventory customers invoices payments vendors purchases]
+  # 'purchases' is intentionally out — the handler targets a nonexistent
+  # Purchase model rather than the real PurchaseOrder. Rewrite handler
+  # (fields: po_number/order_date/total_amount, associations: supplier,
+  # purchase_order_lines) before re-adding it here.
+  ENTITY_TYPES = %w[inventory customers invoices payments vendors]
   
   # Sync TO QuickBooks - only records that are new or modified since 'since'
   def sync_to_quickbooks_incremental(entity_type, since, config)
@@ -236,9 +240,15 @@ class QuickbooksSyncService
           # Create new
           response = @api.create_entity(handler.qb_entity_type, qb_data)
           qb_id = response.dig(handler.qb_entity_type, 'Id')
-          
-          # Save QuickBooks ID back to our record
-          handler.save_quickbooks_id(record, qb_id)
+
+          # Save QuickBooks ID back — refuse to persist nil since a null id
+          # would let the next sync pass re-create the same record as a
+          # duplicate in QB.
+          if qb_id.present?
+            handler.save_quickbooks_id(record, qb_id)
+          else
+            raise QuickbooksApiError, "QB create response missing Id for #{handler.qb_entity_type} ##{record.id}: #{response.inspect}"
+          end
         end
         
         # CRITICAL: Update sync timestamp so we don't re-sync unchanged records
@@ -513,6 +523,7 @@ class QuickbooksSyncService
         else
           response = @api.create_entity(handler.qb_entity_type, qb_data)
           qb_id = response.dig(handler.qb_entity_type, 'Id')
+          raise QuickbooksApiError, "QB create response missing Id for #{handler.qb_entity_type} ##{record.id}" if qb_id.blank?
           handler.save_quickbooks_id(record, qb_id)
         end
 
