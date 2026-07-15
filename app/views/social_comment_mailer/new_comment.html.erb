@@ -37,7 +37,7 @@
     <% end %>
 
     <div class="cta">
-      <a href="<%= @reply_url %>" class="btn btn-primary">Reply in RenterInsight</a>
+      <a href="<%= @reply_url %>" class="btn btn-primary">Reply in <%= brand.name %></a>
       <% if @facebook_url.present? %>
         <a href="<%= @facebook_url %>" class="btn btn-secondary">View on <%= @post&.platform.to_s == 'instagram' ? 'Instagram' : 'Facebook' %></a>
       <% end %>
