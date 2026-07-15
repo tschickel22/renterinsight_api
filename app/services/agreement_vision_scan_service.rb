@@ -965,6 +965,103 @@ class AgreementVisionScanService
     nil
   end
 
+  # ── Built-in PDF calc actions → FormulaEngine formulas ───────────────────────
+  # PDF forms designed in Acrobat can carry a "Calculate" JavaScript on each field.
+  # The two shapes we translate:
+  #   1. Simplified: AFSimple_Calculate("SUM"|"PRD"|"AVG"|"MIN"|"MAX", ["a","b",...])
+  #   2. Handwritten: event.value = this.getField("a").value <op> this.getField("b").value ...
+  # Field-name references are rewritten to the scan-field key we emit downstream.
+  # If any referenced field wasn't emitted, we drop the formula silently.
+  def apply_acroform_calc_formulas!(mapped_fields, raw_acroform_fields)
+    return if mapped_fields.blank?
+
+    # PDF-field-name → scan-field-key lookup (mapped fields carry :original_field_name)
+    name_to_key = {}
+    mapped_fields.each do |mf|
+      pdf_name = mf[:original_field_name].to_s
+      name_to_key[pdf_name] = mf[:key] if pdf_name.present? && mf[:key].present?
+    end
+
+    # PDF-field-name → raw record (holds the :calc_js we captured earlier)
+    raw_by_name = {}
+    raw_acroform_fields.each { |r| raw_by_name[r[:name].to_s] = r if r[:name] }
+
+    attached = 0
+    skipped_unmapped = 0
+    skipped_unrecognised = 0
+
+    mapped_fields.each do |mf|
+      raw = raw_by_name[mf[:original_field_name].to_s]
+      next unless raw && raw[:calc_js].present?
+      next if mf[:formula].present?  # never overwrite a formula that got set elsewhere
+
+      formula = translate_pdf_calc_js(raw[:calc_js], name_to_key)
+      if formula.nil?
+        # Distinguish "we understood the shape but missed a name" from "unknown shape" for logging
+        if raw[:calc_js].match?(/AFSimple_Calculate|this\.getField/)
+          skipped_unmapped += 1
+        else
+          skipped_unrecognised += 1
+        end
+        next
+      end
+
+      mf[:formula] = formula
+      mf[:auto_fill] = true
+      attached += 1
+    end
+
+    if attached > 0 || skipped_unmapped > 0 || skipped_unrecognised > 0
+      Rails.logger.info(
+        "[AcroForm] Built-in calc actions — attached: #{attached}, " \
+        "skipped (unresolved refs): #{skipped_unmapped}, " \
+        "skipped (unrecognised JS): #{skipped_unrecognised}"
+      )
+    end
+  end
+
+  # Returns a FormulaEngine expression starting with "=" or nil if we can't safely translate.
+  def translate_pdf_calc_js(js, name_to_key)
+    return nil if js.blank?
+    s = js.to_s
+
+    # Shape 1: AFSimple_Calculate("OP", ["name", ...])
+    if (m = s.match(/AFSimple_Calculate\s*\(\s*['"](SUM|PRD|AVG|MIN|MAX)['"]\s*,\s*\[(.*?)\]\s*\)/m))
+      op = m[1]
+      names = m[2].scan(/['"]([^'"]+)['"]/).flatten
+      return nil if names.empty?
+      keys = names.map { |n| name_to_key[n] }
+      return nil if keys.any?(&:nil?)
+      case op
+      when 'SUM' then "=#{keys.join(' + ')}"
+      when 'PRD' then "=#{keys.join(' * ')}"
+      when 'AVG' then "=(#{keys.join(' + ')}) / #{keys.length}"
+      # MIN / MAX aren't supported by FormulaEngine — leave for manual mapping.
+      else nil
+      end
+
+    # Shape 2: event.value = <expression referencing this.getField("name").value>
+    elsif s.include?('event.value')
+      body = s.sub(/.*event\.value\s*=\s*/m, '').split(/;/, 2).first.to_s.strip
+      return nil if body.blank?
+
+      ok = true
+      body = body.gsub(/this\.getField\(\s*['"]([^'"]+)['"]\s*\)\.value/m) do
+        key = name_to_key[Regexp.last_match(1)]
+        ok = false unless key
+        key.to_s
+      end
+      return nil unless ok
+
+      # Whitelist: only numbers, our keys, spaces, +-*/, parens, decimals
+      return nil unless body.match?(/\A[A-Za-z0-9_\s+\-*\/().]+\z/)
+      # Reject any function call we didn't rewrite (safety — no math/round/etc.)
+      return nil if body.match?(/[A-Za-z_]\w*\s*\(/)
+
+      "=#{body}"
+    end
+  end
+
   # ─── Pattern Placement Engine ─────────────────────────────────────────────────
   #
   # Claude identifies WHAT each field is (semantic classification).
@@ -2213,9 +2310,38 @@ class AgreementVisionScanService
         default_value: field[:V],
         options: field[:Opt],
         max_length: field[:MaxLen],
+        calc_js: extract_field_calc_js(reader, field),
         source: 'acroform'
       }
     end
+  end
+
+  # Read the field's Additional Actions / Calculate trigger, which for PDF forms
+  # holds the JavaScript expression that Acrobat runs to compute the field's value.
+  # Returns the raw JS as a String, or nil when there's no calc action.
+  def extract_field_calc_js(reader, field)
+    aa = field[:AA]
+    return nil unless aa
+    aa = reader.objects.deref(aa)
+    return nil unless aa.is_a?(Hash)
+    calc = aa[:C]
+    return nil unless calc
+    calc = reader.objects.deref(calc)
+    return nil unless calc.is_a?(Hash)
+    # Only handle JavaScript-triggered calc actions
+    return nil unless calc[:S] == :JavaScript
+    js = reader.objects.deref(calc[:JS])
+    case js
+    when String
+      js.encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+    when Array
+      js.map(&:to_s).join("\n").encode('UTF-8', invalid: :replace, undef: :replace, replace: '')
+    else
+      js.respond_to?(:to_s) ? js.to_s : nil
+    end
+  rescue => e
+    Rails.logger.debug "[AcroForm] Failed to read calc JS for field '#{field[:T]}': #{e.message}"
+    nil
   end
 
   def resolve_field_name(reader, field)
@@ -2505,6 +2631,10 @@ class AgreementVisionScanService
 
     # Disambiguate duplicate custom field labels using section headers from OCR/text data
     mapped = disambiguate_custom_field_labels(mapped, text_map)
+
+    # Honor built-in PDF calculation actions (Acrobat "Calculate" tab) by translating
+    # their JavaScript into our FormulaEngine syntax and attaching to the mapped field.
+    apply_acroform_calc_formulas!(mapped, acroform_fields)
 
     page_classifications = classify_pages(mapped, total_pages)
 
