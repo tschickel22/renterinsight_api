@@ -680,12 +680,19 @@ class AgreementVisionScanService
       enrichment = call_claude_enrichment(filled_b64, fields)
       Rails.logger.info "[SmartScan] Enrichment returned #{enrichment.length} entry(ies) for #{fields.length} field(s)"
 
-      by_key = {}
-      enrichment.each { |e| by_key[e[:key]] = e if e[:key] }
+      # Match by 1-based index sent in the prompt, NOT by field key.
+      # Upstream scan can produce duplicate keys (e.g. many fields keyed 'cf_total'
+      # or 'cf_buyer_1_initials' because their labels normalized to the same string).
+      # Key-based merge would cross-pollinate one enrichment onto every collision.
+      by_index = {}
+      enrichment.each do |e|
+        idx = e[:i]
+        by_index[idx] = e if idx
+      end
 
       matched = 0
-      fields.each do |f|
-        e = by_key[f[:key].to_s]
+      fields.each_with_index do |f, idx|
+        e = by_index[idx + 1]
         next unless e
         f[:example_value] = e[:example_value]
         f[:inferred_type] = e[:inferred_type]
@@ -701,9 +708,11 @@ class AgreementVisionScanService
 
   def call_claude_enrichment(filled_pdf_b64, fields)
     # Compact field reference. Truncate long labels so the prompt doesn't explode.
-    field_lines = fields.first(400).map do |f|
+    # Each field gets a 1-based index (i) — that's the ONLY reliable way to
+    # match responses back, since our scan pipeline can emit duplicate keys.
+    field_lines = fields.first(400).each_with_index.map do |f, idx|
       label = f[:label].to_s.gsub(/\s+/, ' ').strip.first(80)
-      "  #{f[:key]} @ p#{f[:page]} (#{f[:x].to_f.round(1)}%, #{f[:y].to_f.round(1)}%, #{f[:width].to_f.round(1)}%x#{f[:height].to_f.round(1)}%) [type=#{f[:type]}] label=\"#{label}\""
+      "  i=#{idx + 1}  key=#{f[:key]}  page=#{f[:page]}  pos=(#{f[:x].to_f.round(1)}%, #{f[:y].to_f.round(1)}%, #{f[:width].to_f.round(1)}%x#{f[:height].to_f.round(1)}%)  type=#{f[:type]}  label=\"#{label}\""
     end.join("\n")
 
     prompt = <<~PROMPT
@@ -715,7 +724,9 @@ class AgreementVisionScanService
       HARD RULES:
       - Do NOT invent new fields.
       - Do NOT remove fields even if the sample left them blank.
-      - Emit EXACTLY one JSON object per input field, referenced by the exact "key" I give you.
+      - Emit EXACTLY one JSON object per input field, referenced by its "i" index (1-based).
+      - Field "key" values may repeat across the list (multiple fields can share a key);
+        the "i" index is what distinguishes them. Match strictly on "i".
       - If a field is blank in the sample: example_value = null, inferred_type = null, formula = null.
       - The sample is JUST A SAMPLE. If the buyer only filled 3 add-on rows out of 10,
         the other 7 stay blank — do NOT delete them from the field set.
@@ -724,8 +735,8 @@ class AgreementVisionScanService
       #{field_lines}
 
       FOR EACH FIELD PROVIDE:
-      - key: the EXACT key from the list above (copy verbatim)
-      - example_value: the value written at that position in the sample, as a string (or null if blank)
+      - i: the SAME 1-based index from the list above (integer)
+      - example_value: the value written at that field's position, as a string (or null if blank)
       - inferred_type: one of text | currency | date | number | percentage | checkbox | signature | initials, or null
       - formula: FormulaEngine expression if this value is computed from other fields, else null
 
@@ -736,14 +747,16 @@ class AgreementVisionScanService
       - Numeric literals allowed (e.g. 0.0725)
       - VERIFY: compute the candidate expression against the actual filled values and only
         emit it when |expected - actual| < 0.02. If the math doesn't check out, formula = null.
+      - When the referenced key appears multiple times in the field list, prefer the one
+        with the closest / most-relevant position. If unclear, leave formula null.
 
-      WORKED EXAMPLES:
+      WORKED EXAMPLES (shape only — use YOUR field's actual key names):
       - retail 275000, discount 3834, subtotal 271166 → "=cf_retail_price - cf_dealer_discount"
       - total 276480.98, down 5000, unpaid 271480.98 → "=cf_total_amount - cf_down_payment"
       - subtotal 276166, tax rate 7.25%, tax 20022.04 → "=percent_of(cf_subtotal_2, 0.0725)"
-      - qty 3, price 1250, line total 3750 → "=cf_quantity * cf_price"
 
       OUTPUT: JSON array only, no explanation. Start with [ end with ].
+      Example response shape: [{"i":1,"example_value":"John","inferred_type":"text","formula":null},{"i":2,...}]
     PROMPT
 
     body = {
@@ -809,10 +822,14 @@ class AgreementVisionScanService
     end
     return [] unless raw.is_a?(Array)
 
-    raw.map do |entry|
+    raw.each_with_index.map do |entry, idx|
       next nil unless entry.is_a?(Hash)
-      key = entry["key"].to_s.strip
-      next nil if key.empty?
+
+      # Prefer the explicit "i" the model was asked to echo back. Fall back to
+      # array position if the model dropped it (some responses may omit it).
+      i = entry["i"]
+      i = i.to_i if i.is_a?(String) && i =~ /\A\d+\z/
+      i = idx + 1 unless i.is_a?(Integer) && i > 0
 
       formula = entry["formula"].to_s.strip
       formula = nil unless formula.start_with?('=') && formula.length > 1
@@ -824,7 +841,7 @@ class AgreementVisionScanService
       inferred = entry["inferred_type"].to_s.strip.downcase
       inferred = nil if inferred.empty? || inferred == 'null'
 
-      { key: key, example_value: example_value, inferred_type: inferred, formula: formula }
+      { i: i, example_value: example_value, inferred_type: inferred, formula: formula }
     end.compact
   end
 
