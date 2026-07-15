@@ -118,6 +118,11 @@ class AgreementVisionScanService
     # leaves in the middle of the add-ons / line-items grid.
     fill_numbered_table_gaps!(fields)
 
+    # Step 4: Auto-wire numbered line-item labels to deal.line_items[N-1].*
+    # so the mapping review pre-selects them and the Fill Form flow pulls
+    # values from the linked deal instead of asking the user to retype.
+    apply_line_item_merge_fields!(fields)
+
     # Detect values that appear on multiple pages (repeated headers etc.).
     detect_repeated_values!(fields)
 
@@ -969,6 +974,54 @@ class AgreementVisionScanService
       Rails.logger.info "[SmartScan] Table-gap fill added #{added} interpolated row(s)"
       fields.sort_by! { |f| [f[:page].to_i, f[:y].to_f, f[:x].to_f] }
     end
+  end
+
+  # ── Line-item auto-mapping ───────────────────────────────────────────────────
+  # Turn numbered add-on / line-item labels into merge_field references so the
+  # Fill Form flow pulls values from the linked deal's line_items automatically.
+  # Only fires on labels that end in "<column> <N>" for the tight whitelist below.
+  # Everything else is left unmapped for the user's mapping-review step.
+  LINE_ITEM_DESCRIPTION_LABEL = /\A(?:add[\s\-_]?on|item|line|product|row)\s+(\d{1,2})\z/i
+  LINE_ITEM_AMOUNT_LABEL      = /\A(?:add[\s\-_]?on\s*cost|item\s*cost|line\s*total|amount|price|cost|total)\s+(\d{1,2})\z/i
+  LINE_ITEM_QTY_LABEL         = /\A(?:qty|quantity)\s+(\d{1,2})\z/i
+  LINE_ITEM_MAX_ROW           = 30
+
+  def apply_line_item_merge_fields!(fields)
+    return if fields.blank?
+
+    tagged = 0
+    fields.each do |f|
+      next if f[:merge_field].to_s.strip.present?
+      label = f[:label].to_s.strip
+      next if label.empty?
+
+      column, row = detect_line_item_column(label)
+      next unless column && row.between?(0, LINE_ITEM_MAX_ROW - 1)
+
+      f[:merge_field] = "deal.line_items[#{row}].#{column}"
+      f[:auto_fill]   = true
+      f[:group]       = 'line_items'
+      tagged += 1
+    end
+
+    Rails.logger.info "[SmartScan] Line-item auto-map tagged #{tagged} field(s)" if tagged > 0
+  end
+
+  # Returns [column_key, 0-based_row_index] or [nil, nil] when the label isn't
+  # a recognisable numbered line-item entry.
+  def detect_line_item_column(label)
+    # Order matters: amount / qty checks run BEFORE description so "Add-on Cost 5"
+    # doesn't get picked up as "Add-on 5" style description.
+    if (m = label.match(LINE_ITEM_AMOUNT_LABEL))
+      return ['amount', m[1].to_i - 1]
+    end
+    if (m = label.match(LINE_ITEM_QTY_LABEL))
+      return ['quantity', m[1].to_i - 1]
+    end
+    if (m = label.match(LINE_ITEM_DESCRIPTION_LABEL))
+      return ['description', m[1].to_i - 1]
+    end
+    [nil, nil]
   end
 
   # Extracts "<prefix> <number>" from a label. Returns nil when the label doesn't
