@@ -113,6 +113,11 @@ class AgreementVisionScanService
     # Never adds or removes fields — soft-fails if the enrichment call errors.
     enrich_fields_with_filled_sample!(fields, filled_pdf_url)
 
+    # Step 3: Detect columns that look like numbered repeating tables and
+    # interpolate any missing rows. Fills gaps that Claude's vision scan often
+    # leaves in the middle of the add-ons / line-items grid.
+    fill_numbered_table_gaps!(fields)
+
     # Detect values that appear on multiple pages (repeated headers etc.).
     detect_repeated_values!(fields)
 
@@ -858,6 +863,128 @@ class AgreementVisionScanService
       val = f[:example_value].to_s.strip.downcase
       f[:is_repeated] = repeated.include?(val)
     end
+  end
+
+  # ─── Numbered-Table Gap Fill ─────────────────────────────────────────────────
+  # When the empty-scan produces a column of numbered rows ("Add-on 1", "Add-on 3",
+  # "Add-on 4"…) with gaps in the sequence, interpolate the missing rows so the
+  # user has an editable slot at every position in the physical form.
+  #
+  # Only fires when the column clearly looks like a numbered table:
+  #   • ≥ 3 fields at the same x + width + type on the same page
+  #   • ≥ 70% of labels parse to "<shared prefix> <number>"
+  #   • Prefixes are identical (case-insensitive)
+  # Synthetic rows get null enrichment (the sample can't tell us their value)
+  # and confidence 0.5 so the FE can flag them as interpolated if it wants.
+
+  TABLE_FILL_TYPES = %w[text currency number date].freeze
+  TABLE_X_TOLERANCE = 2.5  # % — fields within this x-distance belong to the same column
+  TABLE_W_TOLERANCE = 3.0  # % — fields' widths must also match within this tolerance
+
+  def fill_numbered_table_gaps!(fields)
+    return if fields.blank?
+    return if fields.length < 3
+
+    # Cluster into columns without banding — bucket boundaries at x=37 kept splitting
+    # the same physical column when Claude jittered x by ±0.1%. Instead, group by
+    # (page, type) then walk sorted fields and start a new column whenever x jumps
+    # by more than TABLE_X_TOLERANCE. Also require width similarity within a column.
+    columns = []
+    fields
+      .select { |f| TABLE_FILL_TYPES.include?(f[:type].to_s) }
+      .group_by { |f| [f[:page].to_i, f[:type].to_s] }
+      .each_value do |group|
+        by_x = group.sort_by { |f| f[:x].to_f }
+        current = [by_x.first]
+        by_x.drop(1).each do |f|
+          near_x   = (f[:x].to_f - current.last[:x].to_f).abs <= TABLE_X_TOLERANCE
+          near_w   = (f[:width].to_f - current.first[:width].to_f).abs <= TABLE_W_TOLERANCE
+          if near_x && near_w
+            current << f
+          else
+            columns << current
+            current = [f]
+          end
+        end
+        columns << current
+      end
+
+    added = 0
+    columns.each do |col_fields|
+      next if col_fields.length < 3
+
+      sorted = col_fields.sort_by { |f| f[:y].to_f }
+
+      # Labels must look like a numbered series with a common (canonicalised) prefix.
+      # Canonical form collapses hyphens / whitespace / case so "Add-on Cost" and
+      # "Add On Cost" are treated as the same series.
+      parsed = sorted.map { |f| parse_numbered_label(f[:label]) }
+      numbered = parsed.compact
+      next if numbered.length < (sorted.length * 0.7).ceil
+      canon_prefixes = numbered.map { |p| canonical_prefix(p[:prefix]) }.uniq
+      next unless canon_prefixes.length == 1
+
+      # Modal row spacing — median of positive deltas.
+      positive_deltas = sorted.each_cons(2).map { |a, b| (b[:y].to_f - a[:y].to_f).round(2) }.select { |d| d > 0.3 }
+      next if positive_deltas.empty?
+      modal = positive_deltas.sort[positive_deltas.length / 2]
+      next unless modal.between?(0.5, 5.0)
+
+      # Interpolate gaps.
+      new_rows = []
+      sorted.each_cons(2) do |a, b|
+        delta = b[:y].to_f - a[:y].to_f
+        missing = (delta / modal).round - 1
+        next unless missing.between?(1, 8)
+
+        a_parsed = parse_numbered_label(a[:label])
+        next unless a_parsed
+
+        missing.times do |m|
+          y_interp = (a[:y].to_f + modal * (m + 1)).round(1)
+          new_number = a_parsed[:number] + m + 1
+          new_label = "#{a_parsed[:prefix]} #{new_number}"
+          new_key = a[:key].to_s.sub(/\d+\z/, new_number.to_s)
+          new_key = "cf_#{new_label.parameterize(separator: '_').first(30)}" if new_key == a[:key].to_s
+
+          synthetic = a.dup
+          synthetic[:y]             = y_interp
+          synthetic[:label]         = new_label
+          synthetic[:key]           = new_key
+          synthetic[:example_value] = nil
+          synthetic[:inferred_type] = nil
+          synthetic[:formula]       = nil
+          synthetic[:is_repeated]   = false
+          synthetic[:confidence]    = 0.5
+          synthetic[:source]        = 'interpolated'
+          new_rows << synthetic
+        end
+      end
+
+      new_rows.each { |r| fields << r }
+      added += new_rows.length
+    end
+
+    if added > 0
+      Rails.logger.info "[SmartScan] Table-gap fill added #{added} interpolated row(s)"
+      fields.sort_by! { |f| [f[:page].to_i, f[:y].to_f, f[:x].to_f] }
+    end
+  end
+
+  # Extracts "<prefix> <number>" from a label. Returns nil when the label doesn't
+  # end with an integer suffix. Accepts optional "#" separator and stray spaces.
+  def parse_numbered_label(label)
+    m = label.to_s.strip.match(/\A(.+?)\s*#?\s*(\d+)\z/)
+    return nil unless m
+    prefix = m[1].strip
+    return nil if prefix.empty?
+    { prefix: prefix, number: m[2].to_i }
+  end
+
+  # Canonicalise a label prefix so hyphenation / whitespace / case differences
+  # don't split what is otherwise the same column ("Add-on Cost" ≡ "Add On Cost").
+  def canonical_prefix(prefix)
+    prefix.to_s.downcase.gsub(/[\s\-_]+/, ' ').strip
   end
 
   # ─── Response Parsing ─────────────────────────────────────────────────────────
