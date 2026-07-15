@@ -588,7 +588,7 @@ module Api
       {
         id: @company.id.to_s,
         name: @company.name,
-        domain: @company.try(:domain) || "#{@company.name.parameterize}.renterinsight.com",
+        domain: @company.try(:domain) || "#{@company.name.parameterize}.#{Brand.current.subdomain_root}",
         use_rbac_system: @company.use_rbac_system || false,
         settings: serialize_settings,
         branding: serialize_branding,
@@ -607,7 +607,7 @@ module Api
       {
         id: @company.id.to_s,
         name: @company.name,
-        domain: @company.try(:domain) || "#{@company.name.parameterize}.renterinsight.com",
+        domain: @company.try(:domain) || "#{@company.name.parameterize}.#{Brand.current.subdomain_root}",
         use_rbac_system: @company.use_rbac_system || false,
         settings: serialize_basic_settings,
         branding: serialize_branding,

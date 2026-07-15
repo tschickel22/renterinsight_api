@@ -9,9 +9,11 @@
 #   # => "reply+lead-38@mail.renterinsight.com"
 #
 class ReplyToAddressService
-  # Default mail domain for receiving replies
-  # IMPORTANT: This must have MX records configured for inbound email processing
-  MAIL_DOMAIN = ENV.fetch('INBOUND_MAIL_DOMAIN', 'mail.renterinsight.com')
+  # Default mail domain for receiving replies.
+  # IMPORTANT: This must have MX records configured for inbound email processing.
+  # ENV wins if set; otherwise derived at call time from Brand.current.subdomain_root
+  # so Platform Admin (or a per-tenant override later) can flip the reply domain
+  # alongside the rest of the brand kernel.
   
   # Prefix for reply tracking
   REPLY_PREFIX = 'reply'
@@ -89,7 +91,7 @@ class ReplyToAddressService
     
     # Get the configured mail domain
     def mail_domain
-      MAIL_DOMAIN
+      ENV['INBOUND_MAIL_DOMAIN'].presence || "mail.#{Brand.current.subdomain_root}"
     end
     
     private
