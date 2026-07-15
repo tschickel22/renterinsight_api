@@ -86,6 +86,10 @@ class AgreementVisionScanService
     # Step 5b: Fallback line-item merge-field mapper for anything Claude missed
     apply_line_item_merge_fields!(fields)
 
+    # Step 5c: Pair paired initials boxes left→buyer_1 / right→buyer_2 by position.
+    # Safety net for the "x____ x____" pattern when Claude got the order wrong.
+    pair_initials_by_position(fields)
+
     page_classifications = classify_pages(fields, total_pages)
     Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages"
 
@@ -126,6 +130,7 @@ class AgreementVisionScanService
     Rails.logger.info "[SmartScan] Detected #{fields.length} fields with example values"
 
     apply_line_item_merge_fields!(fields)
+    pair_initials_by_position(fields)
 
     page_classifications = classify_pages(fields, total_pages)
 
@@ -491,11 +496,42 @@ class AgreementVisionScanService
       - Do NOT emit a line_items placement for grand totals, sub-totals, or single-value pricing rows
         (those belong to their normal pricing merge fields, e.g. deal.total_amount, deal.subtotal_1).
 
+      SIGNATURES AND INITIALS (IMPORTANT — most agreements have these at the bottom of key pages):
+      Identify every signature block and initial box and tag them with the correct signer role
+      using merge_field. Set group "signatures" for all of them.
+
+      Signature roles — up to 4 possible parties:
+      - "signer.role.buyer_1"        Primary buyer. Labels: "Buyer", "Buyer 1", "Purchaser", "Customer",
+                                      or the right/upper column of a two-column sign block.
+      - "signer.role.buyer_2"        Secondary buyer, only when the form provides a Buyer 2 slot.
+                                      Labels: "Buyer 2", "Co-Buyer", "Second Purchaser".
+      - "signer.role.dealer_rep"     Dealer / seller / representative. Labels: "Salesperson",
+                                      "Representative", "Seller", "Dealer", "By" (with dealer
+                                      context), or the left column of a two-column sign block.
+      - "signer.role.dealer_manager" Manager approval slot. Labels: "Manager", "Sales Manager",
+                                      "Approved by", "Authorized by".
+
+      Initials — usually 1 or 2 slots per row, one per buyer (rarely more):
+      - "signer.role.buyer_1_initials"  First (left) initial slot in a paired row like "x____ x____"
+      - "signer.role.buyer_2_initials"  Second (right) initial slot in the same row
+      - If only ONE initial slot exists in a row: default to "signer.role.buyer_1_initials"
+      - Initials are the small ~4-6% wide boxes; signatures are the wider ~25-35% boxes
+
+      Signing dates — a date line next to a signature (labels: "Date", "Date Signed", "Signed on"):
+      - Use type "date", merge_field "date.today", group "signatures"
+
+      Layout heuristics when the label is ambiguous:
+      - Two-column sign blocks: LEFT column is usually the dealer side, RIGHT column is the buyer side.
+      - If the label alone doesn't identify the role, use x position: x < 50 leans dealer, x >= 50 leans buyer.
+      - Full-width signature blocks stacked vertically: order is usually Buyer 1, Buyer 2, Dealer Rep, Manager.
+      - Do NOT invent extra signer roles (no "signer.role.attorney", no "signer.role.witness"). If the
+        party doesn't fit the 4 above, use type "signature", group "signatures", and leave merge_field null.
+
       GENERAL MERGE_FIELD HINTS (only when you are confident):
       - You MAY populate the "merge_field" key on any field where the label unambiguously maps to a well-known
         deal / contact / vehicle attribute (e.g. label "Buyer" → "contact.full_name", "VIN" → "vehicle.vin",
         "Total" → "deal.total_amount"). If you're unsure, LEAVE IT OUT — a downstream mapper will fill it in.
-      - Never invent merge fields outside the deal.* / contact.* / vehicle.* / account.* / date.* namespaces.
+      - Never invent merge fields outside the deal.* / contact.* / vehicle.* / account.* / date.* / signer.* namespaces.
 
       CRITICAL OVERLAP RULE — FIELDS MUST NEVER COVER TEXT:
       - A field box must ONLY cover blank/empty space — the underline, the blank cell, or the empty area.
@@ -641,9 +677,40 @@ class AgreementVisionScanService
       - Signature lines with names -> signature
       - Everything else -> text
 
-      FORMULA DETECTION:
-      - If SUB-TOTAL = BASE PRICE + OPTIONAL EQUIPMENT, output formula accordingly
-      - Only include formula if you are confident the math checks out
+      FORMULA DETECTION (only fires when a filled example is available — that's you, right now):
+      Some fields are calculated from other fields (subtotals, taxes, totals, discounts, unpaid
+      balances, line totals = qty × price, etc.). When you detect one, emit the formula so the
+      field can auto-compute later.
+
+      STRICT SYNTAX RULES — invalid formulas are silently dropped by the downstream engine:
+      - Formula MUST start with "=" (equals sign)
+      - Reference other fields using their exact "key" — the same snake_case key you emit
+        for the referenced field in this same scan (self-consistency required)
+      - Supported operators: + - * /
+      - Supported functions: round(value, decimals), if(cond, true_val, false_val), percent_of(base, rate)
+      - Numeric literals are allowed (e.g. 0.0725 for a tax rate)
+
+      VERIFICATION IS REQUIRED before you emit a formula:
+      Read the numeric values in the FILLED document. Compute your candidate expression using
+      those values and compare to the target field's filled value. Only emit "formula" when
+      |expected - actual| < 0.02 (within two cents). If the math doesn't check out, set formula
+      to null — do NOT guess.
+
+      WORKED EXAMPLES (assume the referenced field keys are what you emitted elsewhere):
+      - Retail 275000, Discount 3834, Sub Total 271166 →  "formula": "=retail_price - dealer_discount"
+      - Sub Total 271166, Addendum 5000, Sub Total 2 276166 →  "formula": "=subtotal_1 + addendum_total"
+      - Sub Total 276166, Tax Rate 7.25%, Tax 20022.04 →  "formula": "=percent_of(subtotal_2, 0.0725)"
+      - Total 276480.98, Down 5000, Unpaid 271480.98 →  "formula": "=total_amount - down_payment"
+      - Qty 3, Price 1250, Line Total 3750 →  "formula": "=quantity * price"
+
+      Common shapes worth looking for on purchase / sales agreements:
+      - subtotal = base − discount              - subtotal2 = subtotal + addendum
+      - tax = subtotal * rate                   - total = subtotal + freight + setup + fees + tax
+      - unpaid = total − down                   - line_total = qty * price
+      - dealer discount = (base − subtotal)     - percent = part / whole
+
+      For line-item cells with merge_field set to "deal.line_items[...]", do NOT emit a formula —
+      the deal record supplies those values directly.
 
       POSITIONING RULES:
       - For "Label: ________" patterns: INPUT starts AFTER the label text
@@ -677,11 +744,43 @@ class AgreementVisionScanService
       - Do NOT emit a line_items placement for grand totals, sub-totals, or single-value pricing rows
         (those belong to their normal pricing merge fields, e.g. deal.total_amount, deal.subtotal_1).
 
+      SIGNATURES AND INITIALS (IMPORTANT — most agreements have these at the bottom of key pages):
+      Identify every signature block and initial box and tag them with the correct signer role
+      using merge_field. Set group "signatures" for all of them.
+
+      Signature roles — up to 4 possible parties:
+      - "signer.role.buyer_1"        Primary buyer. Labels: "Buyer", "Buyer 1", "Purchaser", "Customer",
+                                      or the right/upper column of a two-column sign block.
+      - "signer.role.buyer_2"        Secondary buyer, only when the form provides a Buyer 2 slot.
+                                      Labels: "Buyer 2", "Co-Buyer", "Second Purchaser".
+      - "signer.role.dealer_rep"     Dealer / seller / representative. Labels: "Salesperson",
+                                      "Representative", "Seller", "Dealer", "By" (with dealer
+                                      context), or the left column of a two-column sign block.
+      - "signer.role.dealer_manager" Manager approval slot. Labels: "Manager", "Sales Manager",
+                                      "Approved by", "Authorized by".
+
+      Initials — usually 1 or 2 slots per row, one per buyer (rarely more):
+      - "signer.role.buyer_1_initials"  First (left) initial slot in a paired row like "x____ x____"
+      - "signer.role.buyer_2_initials"  Second (right) initial slot in the same row
+      - If only ONE initial slot exists in a row: default to "signer.role.buyer_1_initials"
+      - Initials are the small ~4-6% wide boxes; signatures are the wider ~25-35% boxes
+
+      Signing dates — a date line next to a signature (labels: "Date", "Date Signed", "Signed on"):
+      - Use type "date", merge_field "date.today", group "signatures"
+
+      Layout heuristics when the label is ambiguous:
+      - Two-column sign blocks: LEFT column is usually the dealer side, RIGHT column is the buyer side.
+      - If the label alone doesn't identify the role, use x position: x < 50 leans dealer, x >= 50 leans buyer.
+      - Full-width signature blocks stacked vertically: order is usually Buyer 1, Buyer 2, Dealer Rep, Manager.
+      - In the FILLED document, cross-check: whichever party's name/signature appears in each box confirms the role.
+      - Do NOT invent extra signer roles (no "signer.role.attorney", no "signer.role.witness"). If the
+        party doesn't fit the 4 above, use type "signature", group "signatures", and leave merge_field null.
+
       GENERAL MERGE_FIELD HINTS (only when you are confident):
       - You MAY populate "merge_field" on any field where the label unambiguously maps to a well-known
         deal / contact / vehicle attribute (e.g. "Buyer" → "contact.full_name", "VIN" → "vehicle.vin",
         "Total" → "deal.total_amount"). If unsure, leave it out.
-      - Never invent merge fields outside deal.* / contact.* / vehicle.* / account.* / date.* namespaces.
+      - Never invent merge fields outside deal.* / contact.* / vehicle.* / account.* / date.* / signer.* namespaces.
 
       For each field provide:
       - key: unique snake_case (e.g. "buyer_name")
