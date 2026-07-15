@@ -83,7 +83,12 @@ class AgreementVisionScanService
     fields = validate_placements(fields, text_map, blank_lines)
     Rails.logger.info "[VisionScan] Validated #{fields.length} fields"
 
-    # Step 6: Auto-wire numbered line-item labels (Add-on 1, Add-on Cost 1, …)
+    # Step 6: Interpolate missing rows in numbered repeating columns (Add-on 1..N,
+    # Add-on Cost 1..N). Claude's vision scan often skips 3-5 rows in the middle of
+    # the grid — this closes the gaps by cloning column geometry across the range.
+    fill_numbered_table_gaps!(fields)
+
+    # Step 7: Auto-wire numbered line-item labels (Add-on 1, Add-on Cost 1, …)
     # to deal.line_items[N-1].* and single-value labels (Buyer, Phone, Retail
     # Price, Trade-in Credit, …) to their canonical merge fields. Previously
     # only smart_scan did this — a plain empty-template scan came back with
