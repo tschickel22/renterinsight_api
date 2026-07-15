@@ -123,6 +123,10 @@ class AgreementVisionScanService
     # values from the linked deal instead of asking the user to retype.
     apply_line_item_merge_fields!(fields)
 
+    # Step 5: Auto-wire other well-known single-value labels (Buyer, Phone,
+    # Date, Retail Price, Down Payment, etc.) to their canonical merge fields.
+    apply_generic_merge_fields!(fields)
+
     # Detect values that appear on multiple pages (repeated headers etc.).
     detect_repeated_values!(fields)
 
@@ -1022,6 +1026,108 @@ class AgreementVisionScanService
       return ['description', m[1].to_i - 1]
     end
     [nil, nil]
+  end
+
+  # ── Generic single-value merge-field auto-mapping ───────────────────────────
+  # Turn well-known label patterns into their canonical merge_field so the
+  # user's mapping review starts with buyer / vehicle / pricing fields already
+  # wired to the deal, contact, and vehicle records. Only maps labels that
+  # match anchored patterns exactly — anything even slightly ambiguous is left
+  # unmapped for the user to assign.
+  #
+  # Ordered most-specific → least-specific because Ruby regex is greedy and we
+  # want "Cash Down Payment" to hit before generic "Down Payment" etc.
+  GENERIC_MERGE_MAP = [
+    # ── Buyer / contact identity ──────────────────────────────────────────
+    [/\A(?:buyers?|buyer\s*1|primary\s+buyer|purchaser|customer)\z/,      'contact.full_name'],
+    [/\A(?:buyer\s*2|co[\-\s]?buyer|second\s+purchaser)\z/,               'contact2.full_name'],
+    [/\A(?:cell(?:\s*phone)?|mobile(?:\s*phone)?)\z/,                     'contact.mobile_phone'],
+    [/\A(?:phone(?:\s*number)?|buyer\s+phone|home\s+phone)\z/,            'contact.phone'],
+    [/\A(?:email(?:\s+address)?)\z/,                                      'contact.email'],
+    [/\Adelivery\s+address\z/,                                            'contact.delivery_street'],
+    [/\A(?:mailing\s+address|street\s+address|address)\z/,                'contact.street'],
+    [/\Acity\z/,                                                          'contact.city'],
+    [/\Astate\z/,                                                         'contact.state'],
+    [/\A(?:zip(?:\s+code)?|postal\s+code)\z/,                             'contact.zip'],
+
+    # ── Vehicle / home identity ───────────────────────────────────────────
+    [/\Ayear\z/,                                                          'vehicle.year'],
+    [/\Amake\z/,                                                          'vehicle.make'],
+    [/\Amodel\z/,                                                         'vehicle.model'],
+    [/\A(?:serial\s+number|serial\s*no\.?)\z/,                            'vehicle.serial_number'],
+    [/\A(?:vin|v\.?i\.?n\.?)\z/,                                          'vehicle.vin'],
+    [/\A(?:bd\.?\s*rooms?|bedrooms?)\z/,                                  'vehicle.bedrooms'],
+    [/\A(?:baths?|bathrooms?)\z/,                                         'vehicle.bathrooms'],
+    [/\Aapprox\.?\s*(?:size|sq\.?\s*ft\.?|square\s+feet?)\z/,             'vehicle.square_feet'],
+    [/\A(?:home\s+color|exterior\s+color)\z/,                             'vehicle.exterior_color'],
+    [/\Ainterior\s+color\z/,                                              'vehicle.interior_color'],
+    [/\Astock\s*(?:number|no\.?|#)\z/,                                    'vehicle.stock_number'],
+    [/\A(?:length|\bl\z)\z/,                                              'vehicle.length'],
+    [/\A(?:width|\bw\z)\z/,                                               'vehicle.width'],
+
+    # ── Deal identity / owner ─────────────────────────────────────────────
+    [/\A(?:salesperson|sales\s+person|sales\s+rep(?:resentative)?)\z/,    'deal.owner_name'],
+    [/\A(?:deal\s*(?:#|number|no\.?)|deal\z)\z/,                          'deal.deal_number'],
+
+    # ── Pricing (most specific first) ─────────────────────────────────────
+    [/\A(?:retail\s+price|base\s+price|msrp)\z/,                          'vehicle.msrp'],
+    [/\A(?:factory\s+direct\s+savings?|dealer\s+discount)\z/,             'deal.dealer_discount'],
+    [/\Asales\s+event(?:\s+discount|\s+savings?)?\z/,                     'deal.sales_event_discount'],
+    [/\Amanager\s+discount\z/,                                            'deal.manager_discount'],
+    [/\Apreferred\s+payment(?:\s+discount)?\z/,                           'deal.preferred_payment_discount'],
+    [/\Amulti[\-\s]?unit\s+discount\z/,                                   'deal.multi_unit_discount'],
+    [/\Ayour\s+discounted\s+price\z/,                                     'deal.discounted_price'],
+    [/\Atotal\s+home\s+price\z/,                                          'deal.total_home_price'],
+    [/\A(?:total\s+amount\s+due|grand\s+total|total\s+due)\z/,            'deal.total_amount'],
+    [/\A(?:cash\s+down\s+payment|down\s+payment)\z/,                      'deal.down_payment'],
+    [/\Aadditional\s+payment\z/,                                          'deal.additional_payment'],
+    [/\A(?:trade[\-\s]?in\s+credit|trade[\-\s]?in\s+allowance|trade[\-\s]?in\s+value|trade[\-\s]?in)\z/, 'deal.trade_allowance'],
+    [/\Atrade[\-\s]?in\s+payoff\z/,                                       'deal.trade_payoff'],
+    [/\A(?:unpaid\s+balance(?:\s+of\s+cash\s+sale\s+price)?|balance\s+due)\z/, 'deal.unpaid_balance'],
+    [/\A(?:sales?\s+tax|tax(?:es)?(?:\s+amount)?)\z/,                     'deal.tax_amount'],
+    [/\A(?:selling\s+price|sale\s+price)\z/,                              'deal.selling_price'],
+
+    # ── Date & signing ─────────────────────────────────────────────────────
+    [/\A(?:date|contract\s+date|today[''`]?s?\s+date|current\s+date)\z/,  'date.today'],
+
+    # ── Signature roles (most specific first) ─────────────────────────────
+    [/\A(?:buyer\s*1|buyer|primary\s+buyer|purchaser)\s+initials?\z/,     'signer.role.buyer_1_initials'],
+    [/\A(?:buyer\s*2|co[\-\s]?buyer|second\s+purchaser)\s+initials?\z/,   'signer.role.buyer_2_initials'],
+    [/\A(?:buyer\s*1|buyer|primary\s+buyer|purchaser)\s+signature\z/,     'signer.role.buyer_1'],
+    [/\A(?:buyer\s*2|co[\-\s]?buyer|second\s+purchaser)\s+signature\z/,   'signer.role.buyer_2'],
+    [/\A(?:seller|dealer(?:\s+rep(?:resentative)?)?|representative)\s+signature\z/, 'signer.role.dealer_rep'],
+    [/\A(?:sales\s+manager|manager|approved\s+by|authorized\s+by)\s+signature\z/,   'signer.role.dealer_manager'],
+  ].freeze
+
+  def apply_generic_merge_fields!(fields)
+    return if fields.blank?
+
+    tagged = 0
+    fields.each do |f|
+      next if f[:merge_field].to_s.strip.present?
+      canonical = canonical_label(f[:label])
+      next if canonical.empty?
+
+      GENERIC_MERGE_MAP.each do |(pattern, key)|
+        next unless canonical.match?(pattern)
+        f[:merge_field] = key
+        f[:auto_fill]   = true
+        tagged += 1
+        break
+      end
+    end
+
+    Rails.logger.info "[SmartScan] Generic label auto-map tagged #{tagged} field(s)" if tagged > 0
+  end
+
+  # Canonicalise a label for pattern-matching:
+  #   • strip section-prefix disambiguation ("COSTS BREAKDOWN · Total" → "total")
+  #   • drop trailing colons, uppercase → lowercase, collapse whitespace
+  def canonical_label(label)
+    s = label.to_s.strip
+    s = s.split(/\s*[·|]\s*/).last if s.include?('·') || s.include?('|')
+    s = s.to_s.strip.sub(/[:;]\s*\z/, '').downcase.gsub(/\s+/, ' ')
+    s
   end
 
   # Extracts "<prefix> <number>" from a label. Returns nil when the label doesn't
