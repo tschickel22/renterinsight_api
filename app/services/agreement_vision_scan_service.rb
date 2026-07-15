@@ -83,6 +83,9 @@ class AgreementVisionScanService
     fields = validate_placements(fields, text_map, blank_lines)
     Rails.logger.info "[VisionScan] Validated #{fields.length} fields"
 
+    # Step 5b: Fallback line-item merge-field mapper for anything Claude missed
+    apply_line_item_merge_fields!(fields)
+
     page_classifications = classify_pages(fields, total_pages)
     Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages"
 
@@ -121,6 +124,8 @@ class AgreementVisionScanService
 
     fields = call_claude_smart_scan(empty_b64, filled_b64, empty_text_map, filled_text_map, pages_to_scan)
     Rails.logger.info "[SmartScan] Detected #{fields.length} fields with example values"
+
+    apply_line_item_merge_fields!(fields)
 
     page_classifications = classify_pages(fields, total_pages)
 
@@ -461,6 +466,37 @@ class AgreementVisionScanService
       - For company rep/manager signatures: use type "signature" with group "signatures".
       - NEVER stack multiple fields at the same x,y.
 
+      REPEATING LINE-ITEM TABLES (IMPORTANT — read carefully):
+      Many agreements contain a repeating table where each row is a purchased item / add-on / fee / accessory
+      with columns like "Description", "Qty", "Price", "Amount", "Line Total". These rows are dealer deal
+      line items and MUST be tagged so we can auto-populate them from the deal record. Rules:
+      - Detect any table with ≥ 2 empty rows sharing the same column headers where the columns match ANY of:
+        description, item, product, qty, quantity, price, unit price, amount, line total, total, cost, category.
+      - Emit ONE placement per cell (not one per row). For each cell:
+          * group MUST be "line_items"
+          * merge_field MUST be "deal.<array>[<row_index>].<column_key>"
+          * row_index is 0-based (first data row = 0)
+          * <column_key> is one of exactly: description | amount | quantity | price | line_total | cost | category
+          * <array> is one of exactly:
+              - line_items             (default when the table is a generic items list)
+              - line_items_land        (if the section/header mentions "land")
+              - line_items_fee         (if the section mentions "fees", "closing costs")
+              - line_items_accessory   (if the section mentions "accessories", "options", "add-ons")
+              - line_items_service     (if the section mentions "services", "labor", "installation")
+              - line_items_product     (if the section mentions "products", "parts", "materials")
+              - line_items_other       (fallback for uncategorised tables)
+              - non_home_line_items    (if the header says "non-home" or the table explicitly excludes the home unit)
+      - Keep the field label short and human ("Description #1", "Amount #2") — don't include the row index in the key.
+      - Cell heights should be ~2.2, widths sized to the column.
+      - Do NOT emit a line_items placement for grand totals, sub-totals, or single-value pricing rows
+        (those belong to their normal pricing merge fields, e.g. deal.total_amount, deal.subtotal_1).
+
+      GENERAL MERGE_FIELD HINTS (only when you are confident):
+      - You MAY populate the "merge_field" key on any field where the label unambiguously maps to a well-known
+        deal / contact / vehicle attribute (e.g. label "Buyer" → "contact.full_name", "VIN" → "vehicle.vin",
+        "Total" → "deal.total_amount"). If you're unsure, LEAVE IT OUT — a downstream mapper will fill it in.
+      - Never invent merge fields outside the deal.* / contact.* / vehicle.* / account.* / date.* namespaces.
+
       CRITICAL OVERLAP RULE — FIELDS MUST NEVER COVER TEXT:
       - A field box must ONLY cover blank/empty space — the underline, the blank cell, or the empty area.
       - A field box must NEVER overlap or cover printed label text, headings, or other static content.
@@ -474,7 +510,7 @@ class AgreementVisionScanService
       - key: unique snake_case (e.g. "buyer_name")
       - label: exact label text
       - type: text|currency|number|percentage|date|checkbox|signature|initials
-      - group: buyer|unit|pricing|delivery|signatures|general|terms
+      - group: buyer|unit|pricing|delivery|signatures|general|terms|line_items
       - page: 1-indexed page number
       - x: INPUT AREA x position (percentage, 0-100) — must be on blank space, not on label text
       - y: INPUT AREA y position (percentage, 0-100) — must be on blank space, not on label text
@@ -482,12 +518,16 @@ class AgreementVisionScanService
       - height: field height as percentage (text/date/number: 2.5, table cells: 2.2, checkbox: 2.5, signature: 4)
       - required: true/false
       - confidence: 0.0-1.0 (how confident you are in the placement. 1.0 = matched a detected blank line exactly, 0.5 = estimated from text position, 0.3 = guessed)
+      - merge_field: OPTIONAL — token that this field maps to (e.g. "deal.line_items[0].description",
+        "deal.total_amount"). REQUIRED for line-item cells, otherwise only include when confident.
 
       CRITICAL: Output ONLY a JSON array. No explanation. Start with [ end with ].
 
       [
         {"key":"date","label":"Date","type":"date","group":"general","page":1,"x":84,"y":15,"width":14,"height":2.5,"required":true,"confidence":0.9},
-        {"key":"buyer_name","label":"Buyer","type":"text","group":"buyer","page":1,"x":42,"y":22,"width":35,"height":2.5,"required":true,"confidence":0.7}
+        {"key":"buyer_name","label":"Buyer","type":"text","group":"buyer","page":1,"x":42,"y":22,"width":35,"height":2.5,"required":true,"confidence":0.7,"merge_field":"contact.full_name"},
+        {"key":"li_desc_1","label":"Description #1","type":"text","group":"line_items","page":2,"x":8,"y":30,"width":40,"height":2.2,"required":false,"confidence":0.85,"merge_field":"deal.line_items[0].description"},
+        {"key":"li_amt_1","label":"Amount #1","type":"currency","group":"line_items","page":2,"x":80,"y":30,"width":12,"height":2.2,"required":false,"confidence":0.85,"merge_field":"deal.line_items[0].amount"}
       ]
     PROMPT
 
@@ -613,11 +653,41 @@ class AgreementVisionScanService
       - For company rep/manager signatures: type "signature", group "signatures"
       - NEVER stack multiple fields at the same x,y
 
+      REPEATING LINE-ITEM TABLES (IMPORTANT — read carefully):
+      Many agreements contain a repeating table where each row is a purchased item / add-on / fee / accessory
+      with columns like "Description", "Qty", "Price", "Amount", "Line Total". Those rows are dealer deal
+      line items and MUST be tagged so we can auto-populate them from the deal record. Rules:
+      - Detect any table with ≥ 2 filled/blank rows sharing the same column headers where the columns match
+        ANY of: description, item, product, qty, quantity, price, unit price, amount, line total, total,
+        cost, category.
+      - Emit ONE placement per cell (not one per row). For each cell:
+          * group MUST be "line_items"
+          * merge_field MUST be "deal.<array>[<row_index>].<column_key>"
+          * row_index is 0-based (first data row = 0)
+          * <column_key> is one of exactly: description | amount | quantity | price | line_total | cost | category
+          * <array> is one of exactly:
+              - line_items             (default when the table is a generic items list)
+              - line_items_land        (if the section/header mentions "land")
+              - line_items_fee         (if the section mentions "fees", "closing costs")
+              - line_items_accessory   (if the section mentions "accessories", "options", "add-ons")
+              - line_items_service     (if the section mentions "services", "labor", "installation")
+              - line_items_product     (if the section mentions "products", "parts", "materials")
+              - line_items_other       (fallback for uncategorised tables)
+              - non_home_line_items    (if the header says "non-home" or the table explicitly excludes the home unit)
+      - Do NOT emit a line_items placement for grand totals, sub-totals, or single-value pricing rows
+        (those belong to their normal pricing merge fields, e.g. deal.total_amount, deal.subtotal_1).
+
+      GENERAL MERGE_FIELD HINTS (only when you are confident):
+      - You MAY populate "merge_field" on any field where the label unambiguously maps to a well-known
+        deal / contact / vehicle attribute (e.g. "Buyer" → "contact.full_name", "VIN" → "vehicle.vin",
+        "Total" → "deal.total_amount"). If unsure, leave it out.
+      - Never invent merge fields outside deal.* / contact.* / vehicle.* / account.* / date.* namespaces.
+
       For each field provide:
       - key: unique snake_case (e.g. "buyer_name")
       - label: exact label text from empty form
       - type: text|currency|number|percentage|date|checkbox|signature|initials (INFERRED from filled value)
-      - group: buyer|unit|pricing|delivery|insulation|optional_equipment|remarks|trade_in|shipping|signatures|terms|general
+      - group: buyer|unit|pricing|delivery|insulation|optional_equipment|remarks|trade_in|shipping|signatures|terms|general|line_items
       - page: 1-indexed page number
       - x: INPUT AREA x position (percentage, 0-100) from EMPTY template
       - y: INPUT AREA y position (percentage, 0-100) from EMPTY template
@@ -628,6 +698,7 @@ class AgreementVisionScanService
       - inferred_type: the type you inferred from the example value
       - formula: calculation formula if detected, or null
       - confidence: 0.0-1.0 (placement confidence)
+      - merge_field: OPTIONAL — token this field maps to (REQUIRED for line-item cells, otherwise only when confident)
 
       CRITICAL: Output ONLY a JSON array. No explanation. Start with [ end with ].
     PROMPT
@@ -776,7 +847,10 @@ class AgreementVisionScanService
     type = "text" unless %w[text currency number percentage date select checkbox signature initials].include?(type)
 
     group = field["group"].to_s.strip.downcase
-    group = "general" unless %w[buyer delivery unit insulation pricing optional_equipment remarks trade_in shipping signatures terms general].include?(group)
+    group = "general" unless %w[buyer delivery unit insulation pricing optional_equipment remarks trade_in shipping signatures terms general line_items].include?(group)
+
+    raw_merge_field = field["merge_field"].to_s.strip
+    merge_field = raw_merge_field.presence && valid_merge_field_token?(raw_merge_field) ? raw_merge_field : nil
 
     # Apply calibration offsets (compensates for pdf-reader vs PDF.js rendering gap)
     raw_y = field["y"].to_f + Y_OFFSET
@@ -787,7 +861,7 @@ class AgreementVisionScanService
     confidence = field["confidence"].to_f
     confidence = 0.5 if confidence <= 0 || confidence > 1.0
 
-    {
+    result = {
       key: key,
       label: label,
       type: type,
@@ -800,6 +874,82 @@ class AgreementVisionScanService
       required: field["required"] == true,
       confidence: confidence.round(2),
     }
+    if merge_field
+      result[:merge_field] = merge_field
+      result[:auto_fill] = true
+    end
+    result
+  end
+
+  # Very small allow-list check to keep hallucinated tokens out of the pipeline.
+  # Accepts foo.bar, foo.bar.baz, and array forms like deal.line_items[3].amount.
+  def valid_merge_field_token?(token)
+    return false if token.blank?
+    prefix = token.split('.', 2).first
+    return false unless %w[deal contact contact2 vehicle inventory account signer date company agreement property custom].include?(prefix)
+    token =~ /\A[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*(?:\[\d+\])?)+\z/i ? true : false
+  end
+
+  # Fallback that catches line-item cells Claude didn't tag itself.
+  # Recognises labels of the form "<Column> #<n>", "<Column> <n>", or "Item <n> <Column>"
+  # where Column ∈ {description, qty/quantity, price/unit price, amount, line total, total, cost, category}.
+  # Only touches fields that don't already have a merge_field, and skips obvious grand-total rows.
+  LINE_ITEM_COLUMN_KEYS = {
+    /\A(?:item\s+)?desc(?:ription)?\z/i           => 'description',
+    /\A(?:qty|quantity)\z/i                        => 'quantity',
+    /\A(?:unit\s+)?price\z/i                       => 'price',
+    /\Aamount\z/i                                  => 'amount',
+    /\A(?:line\s+)?total\z/i                       => 'line_total',
+    /\Acost\z/i                                    => 'cost',
+    /\Acategory\z/i                                => 'category',
+  }.freeze
+
+  LINE_ITEM_SKIP_LABEL = /\b(?:grand\s*total|sub[-\s]*total|total\s+due|amount\s+due|balance)\b/i
+
+  def apply_line_item_merge_fields!(fields)
+    return if fields.blank?
+
+    tagged = 0
+    fields.each do |f|
+      next if f[:merge_field].present?
+      label = f[:label].to_s.strip
+      next if label.blank? || label.match?(LINE_ITEM_SKIP_LABEL)
+
+      column, row_index = parse_line_item_label(label)
+      next unless column && row_index
+
+      array_key = f[:group].to_s == 'line_items' ? 'line_items' : 'line_items'
+      f[:group]       = 'line_items'
+      f[:merge_field] = "deal.#{array_key}[#{row_index}].#{column}"
+      f[:auto_fill]   = true
+      tagged += 1
+    end
+
+    Rails.logger.info "[VisionScan] line-item fallback mapper tagged #{tagged} field(s)" if tagged > 0
+  end
+
+  # Returns [column_key, zero_based_row_index] or [nil, nil] if the label doesn't look line-item shaped.
+  def parse_line_item_label(label)
+    # "Description #2" / "Amount 3" / "Line Total #1" / "Qty 4"
+    if (m = label.match(/\A(.+?)\s*#?\s*(\d{1,2})\z/))
+      col_text, row_str = m[1].strip, m[2]
+      key = match_line_item_column(col_text)
+      return [key, row_str.to_i - 1] if key && row_str.to_i.between?(1, 99)
+    end
+    # "Item 2 Description" / "Line 3 Amount"
+    if (m = label.match(/\A(?:item|line|row)\s*#?\s*(\d{1,2})\s+(.+)\z/i))
+      row_str, col_text = m[1], m[2].strip
+      key = match_line_item_column(col_text)
+      return [key, row_str.to_i - 1] if key && row_str.to_i.between?(1, 99)
+    end
+    [nil, nil]
+  end
+
+  def match_line_item_column(text)
+    LINE_ITEM_COLUMN_KEYS.each do |pattern, key|
+      return key if text.match?(pattern)
+    end
+    nil
   end
 
   # ─── Pattern Placement Engine ─────────────────────────────────────────────────
