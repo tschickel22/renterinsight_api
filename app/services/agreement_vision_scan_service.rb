@@ -94,55 +94,33 @@ class AgreementVisionScanService
     }
   end
 
-  # Smart Scan: Compare empty template PDF against a filled example PDF
+  # Smart Scan: field set comes from the EMPTY template (AcroForm or vision), then
+  # the FILLED sample enriches each detected field with example_value, inferred_type,
+  # and formula. The sample never adds or removes fields — a buyer filling only 3 of
+  # 10 add-on rows still leaves all 10 wired.
   def smart_scan(empty_pdf_url, filled_pdf_url, max_pages: MAX_PAGES)
     raise ScanError, "No empty PDF URL provided" if empty_pdf_url.blank?
     raise ScanError, "No filled PDF URL provided" if filled_pdf_url.blank?
 
-    Rails.logger.info "[SmartScan] Starting comparison scan"
+    Rails.logger.info "[SmartScan] Starting empty-first + enrichment scan"
 
-    empty_data = download_pdf(empty_pdf_url)
-    filled_data = download_pdf(filled_pdf_url)
+    # Step 1: Detect fields from the empty template (source of truth for what exists).
+    base_result = scan(empty_pdf_url, max_pages: max_pages)
+    fields = base_result[:fields]
+    Rails.logger.info "[SmartScan] Base scan (empty) produced #{fields.length} field(s)"
 
-    [empty_data, filled_data].each_with_index do |data, i|
-      label = i == 0 ? 'Empty' : 'Filled'
-      if data.bytesize > PDF_MAX_SIZE
-        raise ScanError, "#{label} PDF is too large (#{(data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
-      end
-    end
+    # Step 2: Enrich each field with observations from the filled sample.
+    # Never adds or removes fields — soft-fails if the enrichment call errors.
+    enrich_fields_with_filled_sample!(fields, filled_pdf_url)
 
-    empty_text_map, _ = extract_text_with_positions(empty_data)
-    filled_text_map, _ = extract_text_with_positions(filled_data)
-    total_pages = [empty_text_map.keys.max || 1, filled_text_map.keys.max || 1].max
-    pages_to_scan = [max_pages, total_pages].min
-
-    empty_b64 = Base64.strict_encode64(empty_data)
-    filled_b64 = Base64.strict_encode64(filled_data)
-
-    fields = call_claude_smart_scan(empty_b64, filled_b64, empty_text_map, filled_text_map, pages_to_scan)
-    Rails.logger.info "[SmartScan] Detected #{fields.length} fields with example values"
-
-    page_classifications = classify_pages(fields, total_pages)
-
-    # Detect repeated fields
-    value_pages = {}
-    fields.each do |f|
-      val = f[:example_value].to_s.strip.downcase
-      next if val.blank? || val.length < 2
-      value_pages[val] ||= []
-      value_pages[val] << f[:page]
-    end
-    repeated_values = value_pages.select { |_, pages| pages.uniq.length > 1 }.keys.to_set
-    fields.each do |f|
-      val = f[:example_value].to_s.strip.downcase
-      f[:is_repeated] = repeated_values.include?(val)
-    end
+    # Detect values that appear on multiple pages (repeated headers etc.).
+    detect_repeated_values!(fields)
 
     {
       fields: fields,
-      pages_scanned: pages_to_scan,
-      total_pages: total_pages,
-      page_classifications: page_classifications,
+      pages_scanned: base_result[:pages_scanned],
+      total_pages: base_result[:total_pages],
+      page_classifications: base_result[:page_classifications],
       scan_type: 'smart',
     }
   end
@@ -674,6 +652,195 @@ class AgreementVisionScanService
     text_content = result["content"]&.find { |c| c["type"] == "text" }&.fetch("text", "")
 
     parse_smart_response(text_content)
+  end
+
+  # ─── Smart Scan Enrichment (empty-first architecture) ────────────────────────
+  # Runs after the empty template has produced the field set. Sends only the
+  # filled sample to Claude and asks it to emit one enrichment entry per
+  # pre-detected field: example_value, inferred_type, formula. Never adds or
+  # removes fields — the sample is a sample.
+  def enrich_fields_with_filled_sample!(fields, filled_pdf_url)
+    # Default keys so downstream contracts hold even if the enrichment call fails.
+    fields.each do |f|
+      f[:example_value] = nil unless f.key?(:example_value)
+      f[:inferred_type] = nil unless f.key?(:inferred_type)
+      f[:formula]       = nil unless f.key?(:formula)
+      f[:is_repeated]   = false unless f.key?(:is_repeated)
+    end
+
+    return if fields.empty?
+
+    begin
+      filled_data = download_pdf(filled_pdf_url)
+      if filled_data.bytesize > PDF_MAX_SIZE
+        raise ScanError, "Filled PDF is too large (#{(filled_data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
+      end
+
+      filled_b64 = Base64.strict_encode64(filled_data)
+      enrichment = call_claude_enrichment(filled_b64, fields)
+      Rails.logger.info "[SmartScan] Enrichment returned #{enrichment.length} entry(ies) for #{fields.length} field(s)"
+
+      by_key = {}
+      enrichment.each { |e| by_key[e[:key]] = e if e[:key] }
+
+      matched = 0
+      fields.each do |f|
+        e = by_key[f[:key].to_s]
+        next unless e
+        f[:example_value] = e[:example_value]
+        f[:inferred_type] = e[:inferred_type]
+        f[:formula]       = e[:formula]
+        matched += 1
+      end
+      Rails.logger.info "[SmartScan] Enrichment merged into #{matched} of #{fields.length} field(s)"
+    rescue => e
+      # Soft-fail: fields stay with nil enrichment values.
+      Rails.logger.warn "[SmartScan] Enrichment failed (fields remain unenriched): #{e.class}: #{e.message}"
+    end
+  end
+
+  def call_claude_enrichment(filled_pdf_b64, fields)
+    # Compact field reference. Truncate long labels so the prompt doesn't explode.
+    field_lines = fields.first(400).map do |f|
+      label = f[:label].to_s.gsub(/\s+/, ' ').strip.first(80)
+      "  #{f[:key]} @ p#{f[:page]} (#{f[:x].to_f.round(1)}%, #{f[:y].to_f.round(1)}%, #{f[:width].to_f.round(1)}%x#{f[:height].to_f.round(1)}%) [type=#{f[:type]}] label=\"#{label}\""
+    end.join("\n")
+
+    prompt = <<~PROMPT
+      You are looking at ONE PDF: a COMPLETED sample form that a user filled out.
+      The empty template's fillable fields have already been detected. The field set
+      is FIXED. Your only job is to describe, for each pre-detected field, what
+      value (if any) appears at that field's position in the filled sample.
+
+      HARD RULES:
+      - Do NOT invent new fields.
+      - Do NOT remove fields even if the sample left them blank.
+      - Emit EXACTLY one JSON object per input field, referenced by the exact "key" I give you.
+      - If a field is blank in the sample: example_value = null, inferred_type = null, formula = null.
+      - The sample is JUST A SAMPLE. If the buyer only filled 3 add-on rows out of 10,
+        the other 7 stay blank — do NOT delete them from the field set.
+
+      FIELDS TO ENRICH (N=#{fields.length}, in scan order):
+      #{field_lines}
+
+      FOR EACH FIELD PROVIDE:
+      - key: the EXACT key from the list above (copy verbatim)
+      - example_value: the value written at that position in the sample, as a string (or null if blank)
+      - inferred_type: one of text | currency | date | number | percentage | checkbox | signature | initials, or null
+      - formula: FormulaEngine expression if this value is computed from other fields, else null
+
+      FORMULA SYNTAX (only emit when you have verified the math):
+      - Must start with "="
+      - Reference other fields by their exact key from the list above
+      - Operators: + - * /   Functions: round(v, d), if(cond, t, f), percent_of(base, rate)
+      - Numeric literals allowed (e.g. 0.0725)
+      - VERIFY: compute the candidate expression against the actual filled values and only
+        emit it when |expected - actual| < 0.02. If the math doesn't check out, formula = null.
+
+      WORKED EXAMPLES:
+      - retail 275000, discount 3834, subtotal 271166 → "=cf_retail_price - cf_dealer_discount"
+      - total 276480.98, down 5000, unpaid 271480.98 → "=cf_total_amount - cf_down_payment"
+      - subtotal 276166, tax rate 7.25%, tax 20022.04 → "=percent_of(cf_subtotal_2, 0.0725)"
+      - qty 3, price 1250, line total 3750 → "=cf_quantity * cf_price"
+
+      OUTPUT: JSON array only, no explanation. Start with [ end with ].
+    PROMPT
+
+    body = {
+      model: CLAUDE_MODEL,
+      max_tokens: 32000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: filled_pdf_b64 } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    }
+
+    uri = URI(CLAUDE_API_URL)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 180
+    http.open_timeout = 30
+
+    request = Net::HTTP::Post.new(uri)
+    request["Content-Type"] = "application/json"
+    request["x-api-key"] = @api_key
+    request["anthropic-version"] = "2023-06-01"
+    request.body = body.to_json
+
+    Rails.logger.info "[SmartScan] Enrichment: sending filled PDF + #{fields.length} field descriptor(s)"
+
+    response = http.request(request)
+
+    unless response.code == "200"
+      error_body = JSON.parse(response.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{response.code}"
+      Rails.logger.error "[SmartScan] Enrichment API error: #{error_msg}"
+      raise ScanError, "Smart scan enrichment failed: #{error_msg}"
+    end
+
+    result = JSON.parse(response.body)
+    text_content = result["content"]&.find { |c| c["type"] == "text" }&.fetch("text", "")
+
+    parse_enrichment_response(text_content)
+  end
+
+  def parse_enrichment_response(text)
+    json_str = text.to_s.strip
+    json_str = json_str.gsub(/```json?\s*/i, '').gsub(/```/, '').strip if json_str.include?('```')
+    if !json_str.start_with?('[') && json_str =~ /(\[\s*\{.*\}\s*\])/m
+      json_str = Regexp.last_match(1)
+    end
+    return [] unless json_str.start_with?('[')
+
+    raw = begin
+      JSON.parse(json_str)
+    rescue JSON::ParserError
+      last_brace = json_str.rindex('}')
+      if last_brace
+        JSON.parse(json_str[0..last_brace] + ']') rescue []
+      else
+        []
+      end
+    end
+    return [] unless raw.is_a?(Array)
+
+    raw.map do |entry|
+      next nil unless entry.is_a?(Hash)
+      key = entry["key"].to_s.strip
+      next nil if key.empty?
+
+      formula = entry["formula"].to_s.strip
+      formula = nil unless formula.start_with?('=') && formula.length > 1
+
+      ex = entry["example_value"]
+      example_value = ex.nil? ? nil : ex.to_s
+      example_value = nil if example_value == '' || example_value&.downcase == 'null'
+
+      inferred = entry["inferred_type"].to_s.strip.downcase
+      inferred = nil if inferred.empty? || inferred == 'null'
+
+      { key: key, example_value: example_value, inferred_type: inferred, formula: formula }
+    end.compact
+  end
+
+  def detect_repeated_values!(fields)
+    value_pages = {}
+    fields.each do |f|
+      val = f[:example_value].to_s.strip.downcase
+      next if val.blank? || val.length < 2
+      value_pages[val] ||= []
+      value_pages[val] << f[:page]
+    end
+    repeated = value_pages.select { |_, pages| pages.uniq.length > 1 }.keys.to_set
+    fields.each do |f|
+      val = f[:example_value].to_s.strip.downcase
+      f[:is_repeated] = repeated.include?(val)
+    end
   end
 
   # ─── Response Parsing ─────────────────────────────────────────────────────────
