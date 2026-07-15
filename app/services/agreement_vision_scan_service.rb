@@ -83,6 +83,9 @@ class AgreementVisionScanService
     fields = validate_placements(fields, text_map, blank_lines)
     Rails.logger.info "[VisionScan] Validated #{fields.length} fields"
 
+    # Step 6: Drop position duplicates Claude sometimes emits on the same spot
+    fields = deduplicate_overlapping_fields(fields)
+
     page_classifications = classify_pages(fields, total_pages)
     Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages"
 
@@ -121,6 +124,10 @@ class AgreementVisionScanService
 
     fields = call_claude_smart_scan(empty_b64, filled_b64, empty_text_map, filled_text_map, pages_to_scan)
     Rails.logger.info "[SmartScan] Detected #{fields.length} fields with example values"
+
+    # Position dedup — smart_scan is the worst offender since Claude sees two
+    # PDFs and often enumerates the same label twice.
+    fields = deduplicate_overlapping_fields(fields)
 
     page_classifications = classify_pages(fields, total_pages)
 
@@ -705,6 +712,87 @@ class AgreementVisionScanService
     json_str = $1 if !json_str.start_with?('[') && json_str =~ /(\[\s*\{.*\}\s*\])/m
     return nil unless json_str.start_with?('[')
     JSON.parse(json_str) rescue nil
+  end
+
+  # ── Position-based dedup ────────────────────────────────────────────────────
+  # Claude occasionally emits two fields on the same page location — most often
+  # in smart_scan, where it sees both the empty and filled PDF and enumerates
+  # the same label twice. This removes overlapping duplicates keeping the
+  # higher-confidence / more precise placement.
+  #
+  # Only runs on Claude output paths. AcroForm has its own dedup upstream
+  # (deduplicate_merge_fields) and its coordinates come straight from the PDF,
+  # so it doesn't need this.
+  DEDUP_OVERLAP_RATIO = 0.6  # intersection / smaller_area ≥ this = same field
+  DEDUP_TEXT_LIKE_TYPES = %w[text number currency percentage date].freeze
+
+  def deduplicate_overlapping_fields(fields)
+    return fields if fields.blank?
+
+    before = fields.length
+    kept = []
+    fields.each do |f|
+      dup_index = kept.index { |k| fields_are_position_duplicate?(k, f) }
+      if dup_index.nil?
+        kept << f
+      elsif dedup_winner_is?(f, kept[dup_index])
+        kept[dup_index] = f
+      end
+      # else: existing kept entry is the winner, drop f
+    end
+
+    dropped = before - kept.length
+    Rails.logger.info "[Dedup] Position-based dedup: #{before} -> #{kept.length} fields (dropped #{dropped})" if dropped > 0
+    kept
+  end
+
+  # Two fields are considered the same physical input when their bounding boxes
+  # overlap by ≥ DEDUP_OVERLAP_RATIO of the smaller box's area.
+  # Using overlap (not center distance) so a narrow "precise" box vs a wide
+  # "sloppy" box covering the same cell are correctly matched.
+  def fields_are_position_duplicate?(a, b)
+    return false unless a[:page] == b[:page]
+    return false unless dedup_types_compatible?(a[:type], b[:type])
+
+    ax1, ay1 = a[:x].to_f, a[:y].to_f
+    ax2, ay2 = ax1 + a[:width].to_f, ay1 + a[:height].to_f
+    bx1, by1 = b[:x].to_f, b[:y].to_f
+    bx2, by2 = bx1 + b[:width].to_f, by1 + b[:height].to_f
+
+    ix1 = [ax1, bx1].max
+    iy1 = [ay1, by1].max
+    ix2 = [ax2, bx2].min
+    iy2 = [ay2, by2].min
+    return false if ix2 <= ix1 || iy2 <= iy1  # boxes don't overlap at all
+
+    intersection = (ix2 - ix1) * (iy2 - iy1)
+    smaller_area = [a[:width].to_f * a[:height].to_f, b[:width].to_f * b[:height].to_f].min
+    return false if smaller_area <= 0
+
+    intersection / smaller_area >= DEDUP_OVERLAP_RATIO
+  end
+
+  # Two fields are candidates for dedup only when their types would render as
+  # the same kind of input. Signatures / initials / checkboxes only dedup
+  # against themselves so legitimate signature+date stacks survive.
+  def dedup_types_compatible?(t1, t2)
+    s1, s2 = t1.to_s, t2.to_s
+    return true if s1 == s2
+    DEDUP_TEXT_LIKE_TYPES.include?(s1) && DEDUP_TEXT_LIKE_TYPES.include?(s2)
+  end
+
+  # Returns true when candidate should displace incumbent.
+  # Primary: higher confidence (with a 0.1 margin so tiny gaps don't flip)
+  # Tiebreaker: smaller area = more precise placement
+  def dedup_winner_is?(candidate, incumbent)
+    c_conf = candidate[:confidence].to_f
+    i_conf = incumbent[:confidence].to_f
+    return true  if c_conf - i_conf > 0.1
+    return false if i_conf - c_conf > 0.1
+
+    c_area = candidate[:width].to_f * candidate[:height].to_f
+    i_area = incumbent[:width].to_f * incumbent[:height].to_f
+    c_area < i_area
   end
 
   def parse_response(text)
