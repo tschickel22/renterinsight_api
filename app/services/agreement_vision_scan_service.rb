@@ -937,14 +937,25 @@ class AgreementVisionScanService
 
       sorted = col_fields.sort_by { |f| f[:y].to_f }
 
-      # Labels must look like a numbered series with a common (canonicalised) prefix.
-      # Canonical form collapses hyphens / whitespace / case so "Add-on Cost" and
-      # "Add On Cost" are treated as the same series.
+      # Two ways a column qualifies as a repeating table:
+      #   (A) Numbered series — "Add-on 1", "Add-on 2", … with a shared canonical
+      #       prefix. Canonical form collapses hyphens / whitespace / case so
+      #       "Add-on Cost" and "Add On Cost" are the same series.
+      #   (B) Identical labels — a stack of blank rows all labelled "Amount"
+      #       (or all empty). Vision scans often skip labels for the description
+      #       column of an add-on grid; without this fallback the left column
+      #       stays gappy while the right (numbered) column fills cleanly.
       parsed = sorted.map { |f| parse_numbered_label(f[:label]) }
       numbered = parsed.compact
-      next if numbered.length < (sorted.length * 0.7).ceil
+      has_numbered_series = numbered.length >= (sorted.length * 0.7).ceil
       canon_prefixes = numbered.map { |p| canonical_prefix(p[:prefix]) }.uniq
-      next unless canon_prefixes.length == 1
+      use_numbered = has_numbered_series && canon_prefixes.length == 1
+
+      labels_lower = sorted.map { |f| f[:label].to_s.strip.downcase }
+      identical_label = labels_lower.uniq.length == 1
+      use_identical = !use_numbered && identical_label
+
+      next unless use_numbered || use_identical
 
       # Modal row spacing — median of positive deltas.
       positive_deltas = sorted.each_cons(2).map { |a, b| (b[:y].to_f - a[:y].to_f).round(2) }.select { |d| d > 0.3 }
@@ -959,15 +970,24 @@ class AgreementVisionScanService
         missing = (delta / modal).round - 1
         next unless missing.between?(1, 8)
 
-        a_parsed = parse_numbered_label(a[:label])
-        next unless a_parsed
+        a_parsed = use_numbered ? parse_numbered_label(a[:label]) : nil
+        next if use_numbered && a_parsed.nil?
 
         missing.times do |m|
           y_interp = (a[:y].to_f + modal * (m + 1)).round(1)
-          new_number = a_parsed[:number] + m + 1
-          new_label = "#{a_parsed[:prefix]} #{new_number}"
-          new_key = a[:key].to_s.sub(/\d+\z/, new_number.to_s)
-          new_key = "cf_#{new_label.parameterize(separator: '_').first(30)}" if new_key == a[:key].to_s
+
+          if use_numbered
+            new_number = a_parsed[:number] + m + 1
+            new_label = "#{a_parsed[:prefix]} #{new_number}"
+            new_key = a[:key].to_s.sub(/\d+\z/, new_number.to_s)
+            new_key = "cf_#{new_label.parameterize(separator: '_').first(30)}" if new_key == a[:key].to_s
+          else
+            # Identical-label path — clone the label, mint a unique key so
+            # downstream key-collision dedup doesn't merge these rows together.
+            new_label = a[:label].to_s
+            base_key = a[:key].to_s.sub(/_syn_.*\z/, '')
+            new_key = "#{base_key}_syn_#{y_interp.to_i}_#{m}"
+          end
 
           synthetic = a.dup
           synthetic[:y]             = y_interp
