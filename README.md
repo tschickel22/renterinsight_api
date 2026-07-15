@@ -1,6 +1,6 @@
-# RenterInsight API (Rails)
+# DealerTide API (Rails)
 
-Ruby/Rails API that powers the Renter Insight DMS/CRM platform.
+Ruby/Rails API that powers the DealerTide DMS/CRM platform (formerly Renter Insight).
 
 - **Do not** commit `config/master.key`.
 - Provide secrets via environment (e.g., `RAILS_MASTER_KEY`) in deploy environments.
