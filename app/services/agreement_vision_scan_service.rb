@@ -83,6 +83,14 @@ class AgreementVisionScanService
     fields = validate_placements(fields, text_map, blank_lines)
     Rails.logger.info "[VisionScan] Validated #{fields.length} fields"
 
+    # Step 6: Auto-wire numbered line-item labels (Add-on 1, Add-on Cost 1, …)
+    # to deal.line_items[N-1].* and single-value labels (Buyer, Phone, Retail
+    # Price, Trade-in Credit, …) to their canonical merge fields. Previously
+    # only smart_scan did this — a plain empty-template scan came back with
+    # nearly everything as preparer/custom.
+    apply_line_item_merge_fields!(fields)
+    apply_generic_merge_fields!(fields)
+
     page_classifications = classify_pages(fields, total_pages)
     Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages"
 
@@ -2812,6 +2820,13 @@ class AgreementVisionScanService
 
     # Disambiguate duplicate custom field labels using section headers from OCR/text data
     mapped = disambiguate_custom_field_labels(mapped, text_map)
+
+    # Auto-wire numbered line-item labels + single-value canonical labels to
+    # merge keys. AcroForm fields often carry PDF widget names ("cf_trade-in
+    # _credit") that mean nothing to Claude, but the printed label right next
+    # to them ("Trade-in Credit") is enough to map to deal.trade_allowance.
+    apply_line_item_merge_fields!(mapped)
+    apply_generic_merge_fields!(mapped)
 
     page_classifications = classify_pages(mapped, total_pages)
 
