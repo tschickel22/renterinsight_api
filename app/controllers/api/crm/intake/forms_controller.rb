@@ -227,7 +227,8 @@ module Api
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
               :helpText, :helpTextPosition, :consentText, :width,
-              options: []
+              options: [],
+              leadFieldMap: [:street, :street2, :city, :state, :zip]
             ]
           ).tap do |p|
             # Normalize isActive to is_active for Rails
@@ -281,7 +282,8 @@ module Api
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
               :helpText, :helpTextPosition, :consentText, :width,
-              options: []
+              options: [],
+              leadFieldMap: [:street, :street2, :city, :state, :zip]
             ]
           ).tap do |p|
             p[:source_id] = hash[:sourceId] if hash[:sourceId].present? && p[:source_id].blank?

@@ -106,12 +106,34 @@ class IntakeSubmission < ApplicationRecord
     # Map fields using explicit mappings
     form.fields.each do |field|
       field_name = field['name'] || field[:name]
+      field_type = field['type'] || field[:type]
       lead_field = field['leadField'] || field[:leadField]
+      lead_field_map = field['leadFieldMap'] || field[:leadFieldMap] || {}
       value = submission_data[field_name] || submission_data[field_name.to_sym]
-      
-      Rails.logger.info "[IntakeSubmission] Processing field: #{field_name}, leadField: #{lead_field}, value: #{value}"
-      
-      if lead_field.present? && value.present?
+
+      Rails.logger.info "[IntakeSubmission] Processing field: #{field_name}, type: #{field_type}, leadField: #{lead_field}, value: #{value.inspect}"
+
+      # Address block: one form field, up to five sub-values, each mapped to
+      # its own CRM Lead attribute. Sub-values that aren't mapped fall into
+      # unmapped_data so they still show up in the lead's notes.
+      if field_type == 'address' && value.is_a?(Hash)
+        sub_values = value.transform_keys(&:to_s)
+        lead_field_map.to_h.each do |sub_key, mapped_lead_field|
+          next if mapped_lead_field.blank?
+          sub_value = sub_values[sub_key.to_s]
+          if sub_value.present?
+            lead_data[mapped_lead_field.to_sym] = sub_value
+            Rails.logger.info "[IntakeSubmission] Mapped #{field_name}.#{sub_key} -> #{mapped_lead_field} = #{sub_value}"
+          end
+        end
+        # Any unmapped sub-values ride along in unmapped_data under a
+        # namespaced key so they don't collide with other fields.
+        sub_values.each do |sub_key, sub_value|
+          next if sub_value.blank?
+          next if lead_field_map[sub_key].present? || lead_field_map[sub_key.to_sym].present?
+          unmapped_data["#{field_name}_#{sub_key}"] = sub_value
+        end
+      elsif lead_field.present? && value.present?
         lead_data[lead_field.to_sym] = value
         Rails.logger.info "[IntakeSubmission] Mapped #{field_name} -> #{lead_field} = #{value}"
       elsif value.present?
