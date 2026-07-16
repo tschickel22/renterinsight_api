@@ -1011,6 +1011,118 @@ class AgreementVisionScanService
       Rails.logger.info "[SmartScan] Table-gap fill added #{added} interpolated row(s)"
       fields.sort_by! { |f| [f[:page].to_i, f[:y].to_f, f[:x].to_f] }
     end
+
+    align_sister_column_rows!(fields)
+  end
+
+  # Row-alignment pass: after gap-fill, if a "short" column sits next to a
+  # "tall" companion column with more rows, extend the short one so both
+  # columns have the same row count. This catches the case where Claude
+  # dropped 2-3 rows at the TOP or BOTTOM of the description column (which
+  # fill_numbered_table_gaps! can't reach — it only interpolates between
+  # existing rows).
+  #
+  # Two columns are "sisters" when:
+  #   • same page, both have ≥3 fields at same (canonicalised) type
+  #   • their x-ranges are adjacent (short.x within 30% of tall.x span)
+  #   • their y-ranges overlap by at least half of the short's height
+  # Only pads the short column — never adds duplicate rows to an already-
+  # aligned pair.
+  SISTER_COLUMN_X_GAP  = 40.0  # % — max horizontal distance between column centers
+  SISTER_COLUMN_Y_MIN_OVERLAP = 0.5
+  SISTER_COLUMN_MIN_ROWS = 3
+
+  def align_sister_column_rows!(fields)
+    return if fields.blank?
+
+    input_fields = fields.select { |f| TABLE_FILL_TYPES.include?(f[:type].to_s) }
+    return if input_fields.length < 6
+
+    added = 0
+    input_fields.group_by { |f| f[:page].to_i }.each do |_page, page_fields|
+      columns = cluster_page_into_columns(page_fields)
+      tall_columns = columns.select { |c| c.length >= SISTER_COLUMN_MIN_ROWS }
+      next if tall_columns.length < 2
+
+      # For each pair, extend the shorter column to match the taller.
+      tall_columns.combination(2) do |col_a, col_b|
+        short_col, tall_col = col_a.length <= col_b.length ? [col_a, col_b] : [col_b, col_a]
+        next if short_col.length == tall_col.length
+
+        next unless sister_columns?(short_col, tall_col)
+
+        # Build the row-Y set from the tall column's field positions.
+        short_ys = short_col.map { |f| f[:y].to_f.round(1) }
+        tall_ys  = tall_col.map { |f| f[:y].to_f.round(1) }
+
+        # Estimate short column's modal row spacing so we don't paste rows on
+        # top of existing ones. Any tall-column Y within TABLE_X_TOLERANCE of
+        # an existing short-column Y is considered "already covered."
+        template = short_col.first
+        tall_ys.each do |ty|
+          next if short_ys.any? { |sy| (sy - ty).abs <= TABLE_X_TOLERANCE }
+
+          synthetic = template.dup
+          synthetic[:y]             = ty
+          synthetic[:example_value] = nil
+          synthetic[:inferred_type] = nil
+          synthetic[:formula]       = nil
+          synthetic[:is_repeated]   = false
+          synthetic[:confidence]    = 0.5
+          synthetic[:source]        = 'sister-aligned'
+          synthetic[:key]           = "#{template[:key].to_s.sub(/_sis_.*\z/, '')}_sis_#{ty.to_i}"
+          fields << synthetic
+          added += 1
+          short_ys << ty
+        end
+      end
+    end
+
+    if added > 0
+      Rails.logger.info "[SmartScan] Sister-column alignment added #{added} row(s)"
+      fields.sort_by! { |f| [f[:page].to_i, f[:y].to_f, f[:x].to_f] }
+    end
+  end
+
+  # Cluster fields on one page into columns using the same x/width tolerance
+  # as fill_numbered_table_gaps! (no type gating — the sister column can have
+  # a slightly different type, e.g. text vs currency).
+  def cluster_page_into_columns(page_fields)
+    columns = []
+    page_fields
+      .group_by { |f| f[:type].to_s }
+      .each_value do |group|
+        by_x = group.sort_by { |f| f[:x].to_f }
+        current = [by_x.first]
+        by_x.drop(1).each do |f|
+          near_x = (f[:x].to_f - current.last[:x].to_f).abs <= TABLE_X_TOLERANCE
+          near_w = (f[:width].to_f - current.first[:width].to_f).abs <= TABLE_W_TOLERANCE
+          if near_x && near_w
+            current << f
+          else
+            columns << current
+            current = [f]
+          end
+        end
+        columns << current
+      end
+    columns
+  end
+
+  def sister_columns?(col_a, col_b)
+    ax = col_a.first[:x].to_f + col_a.first[:width].to_f / 2.0
+    bx = col_b.first[:x].to_f + col_b.first[:width].to_f / 2.0
+    return false if (ax - bx).abs > SISTER_COLUMN_X_GAP
+
+    a_ys = col_a.map { |f| f[:y].to_f }
+    b_ys = col_b.map { |f| f[:y].to_f }
+    a_top, a_bot = a_ys.min, a_ys.max
+    b_top, b_bot = b_ys.min, b_ys.max
+    overlap = [a_bot, b_bot].min - [a_top, b_top].max
+    return false if overlap <= 0
+
+    short_height = [a_bot - a_top, b_bot - b_top].min
+    short_height > 0 && (overlap / short_height) >= SISTER_COLUMN_Y_MIN_OVERLAP
   end
 
   # ── Line-item auto-mapping ───────────────────────────────────────────────────
