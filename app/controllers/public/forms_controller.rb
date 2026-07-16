@@ -28,11 +28,22 @@ module Public
     
     def submit
       Rails.logger.info "Form submission received for public_id: #{params[:public_id]}"
-      
+
       # Parse the JSON body
       data = JSON.parse(request.body.read) rescue {}
       Rails.logger.info "Parsed submission data: #{data.inspect}"
-      
+
+      # CAPTCHA gate — pulled out of the submission data so it never lands in
+      # the stored lead record. Fails closed if the form requires it and the
+      # token is missing or invalid.
+      if @form.captcha_required
+        token = data.delete('captcha_token') || data.delete('captchaToken')
+        unless TurnstileVerifier.verify(token, remote_ip: request.remote_ip)
+          Rails.logger.warn "[Public::FormsController] Turnstile verification failed for form #{@form.id}"
+          render json: { success: false, error: 'CAPTCHA verification failed. Please try again.' }, status: :forbidden and return
+        end
+      end
+
       submission = @form.intake_submissions.build(
         data: data,
         ip_address: request.remote_ip,

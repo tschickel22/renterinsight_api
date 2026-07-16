@@ -222,8 +222,13 @@ module Api
             :thank_you_message, :redirect_url, :submit_button_text,
             :notified_user_id, :location_id, :locationId,
             :auto_create_lead, :auto_create_activity,
+            :captcha_required, :captchaRequired,
             field_mappings: {},
-            fields: [:id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField, options: []]
+            fields: [
+              :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
+              :helpText, :helpTextPosition, :consentText,
+              options: []
+            ]
           ).tap do |p|
             # Normalize isActive to is_active for Rails
             if p.key?(:isActive)
@@ -237,6 +242,14 @@ module Api
             # so the form clears its binding cleanly and re-enters the
             # Corporate-fallback path on submission.
             p[:location_id] = nil if p[:location_id].is_a?(String) && p[:location_id].strip.empty?
+
+            # Accept camelCase captchaRequired from the FE, coerce to boolean.
+            if p.key?(:captchaRequired)
+              p[:captcha_required] = p.delete(:captchaRequired)
+            end
+            if p.key?(:captcha_required)
+              p[:captcha_required] = ActiveModel::Type::Boolean.new.cast(p[:captcha_required])
+            end
 
             # Ensure fields is set (will be saved to schema column via model)
             p[:fields] ||= []
@@ -264,10 +277,21 @@ module Api
           hash.permit(
             :name, :description, :source_id, :sourceId, :is_active, :isActive,
             :thank_you_message, :redirect_url, :submit_button_text,
-            fields: [:id, :name, :label, :type, :required, :placeholder, :order, :isActive, options: []]
+            :captcha_required, :captchaRequired,
+            fields: [
+              :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
+              :helpText, :helpTextPosition, :consentText,
+              options: []
+            ]
           ).tap do |p|
             p[:source_id] = hash[:sourceId] if hash[:sourceId].present? && p[:source_id].blank?
             p[:is_active] = hash[:isActive] if hash.key?(:isActive) && !hash.key?(:is_active)
+            if p.key?(:captchaRequired)
+              p[:captcha_required] = p.delete(:captchaRequired)
+            end
+            if p.key?(:captcha_required)
+              p[:captcha_required] = ActiveModel::Type::Boolean.new.cast(p[:captcha_required])
+            end
           end
         end
       end

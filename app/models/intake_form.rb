@@ -50,7 +50,12 @@ class IntakeForm < ApplicationRecord
     json['autoCreateLead'] = json['auto_create_lead']
     json['autoCreateActivity'] = json['auto_create_activity']
     json['fieldMappings'] = json['field_mappings']
-    
+    json['captchaRequired'] = json['captcha_required']
+    # Site key travels with the form so the public page can render the widget
+    # without any FE ENV wiring. Site keys are public by design (Cloudflare
+    # binds them to allowlisted domains at their edge).
+    json['captchaSiteKey'] = TurnstileVerifier.site_key if json['captcha_required']
+
     json
   end
   
