@@ -226,7 +226,7 @@ module Api
             field_mappings: {},
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
-              :helpText, :helpTextPosition, :consentText,
+              :helpText, :helpTextPosition, :consentText, :width,
               options: []
             ]
           ).tap do |p|
@@ -280,7 +280,7 @@ module Api
             :captcha_required, :captchaRequired,
             fields: [
               :id, :name, :label, :type, :required, :placeholder, :order, :isActive, :leadField,
-              :helpText, :helpTextPosition, :consentText,
+              :helpText, :helpTextPosition, :consentText, :width,
               options: []
             ]
           ).tap do |p|
