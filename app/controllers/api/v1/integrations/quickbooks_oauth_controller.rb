@@ -78,19 +78,36 @@ class Api::V1::Integrations::QuickbooksOauthController < ApplicationController
       entity.reload
       Rails.logger.info "[QB Callback] Token expires at AFTER reload: #{entity.quickbooks_token_expires_at.inspect}"
       Rails.logger.info "[QB Callback] Connected at AFTER reload: #{entity.quickbooks_connected_at.inspect}"
-      
-      entity.update!(
-        quickbooks_realm_id: params[:realmId],
-        quickbooks_sync_enabled: true
-      )
-      
+
+      begin
+        entity.update!(
+          quickbooks_realm_id: params[:realmId],
+          quickbooks_sync_enabled: true
+        )
+      rescue ActiveRecord::RecordNotUnique => e
+        # Another company/location already claims this realm — surface a
+        # useful message instead of a generic 500. Common cause: multiple
+        # dev tenants pointing at the same sandbox realm.
+        existing = Company.find_by(quickbooks_realm_id: params[:realmId]) ||
+                   Location.find_by(quickbooks_realm_id: params[:realmId])
+        Rails.logger.error "[QB Callback] Realm #{params[:realmId]} already claimed by #{existing&.class&.name}##{existing&.id}: #{e.message}"
+        return render json: {
+          error: "QuickBooks realm is already connected to #{existing&.class&.name} '#{existing&.name || existing&.id}'. Disconnect there first.",
+          conflicting_entity_type: existing&.class&.name,
+          conflicting_entity_id:   existing&.id
+        }, status: :conflict
+      rescue ActiveRecord::RecordInvalid => e
+        Rails.logger.error "[QB Callback] Realm assignment failed: #{e.record.errors.full_messages.join(', ')}"
+        return render json: { error: "Failed to complete connection: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
+      end
+
       # Reload again to confirm update
       entity.reload
       Rails.logger.info "[QB Callback] Token expires at FINAL: #{entity.quickbooks_token_expires_at.inspect}"
-      
+
       # Return success with entity info and return URL
-      render json: { 
-        success: true, 
+      render json: {
+        success: true,
         company_name: company.name,
         location_name: entity.is_a?(Location) ? entity.name : nil,
         scope: entity.is_a?(Location) ? 'location' : 'company',

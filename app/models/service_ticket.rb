@@ -51,7 +51,9 @@ class ServiceTicket < ApplicationRecord
 
   def emit_workflow_updated
     return unless defined?(WorkflowEngine)
-    WorkflowEngine.emit('service_ticket.updated', self, { id: id, changes: saved_changes.keys })
+    changes = saved_changes.keys
+    return if changes.blank?
+    WorkflowEngine.emit('service_ticket.updated', self, { id: id, changes: changes })
     if self.class.column_names.include?('status') && saved_change_to_attribute?(:status)
       from, to = saved_change_to_attribute(:status)
       WorkflowEngine.emit('service_ticket.status_changed', self, { id: id, from: from, to: to })
@@ -266,7 +268,7 @@ class ServiceTicket < ApplicationRecord
   # flags/link. Returns [:ok] on success or [:blocked, reason] if not permitted.
   def unmark_warranty!
     # Fresh query — never trust a cached association.
-    claim = WarrantyClaim.where(service_ticket_id: id, is_deleted: false).first
+    claim = company.warranty_claims.where(service_ticket_id: id, is_deleted: false).first
     unless claim
       update!(warranty_claim_id: nil, is_warranty_confirmed: false, is_warranty_suspected: false)
       association(:warranty_claim_owned).reset
@@ -275,7 +277,7 @@ class ServiceTicket < ApplicationRecord
 
     return [:blocked, 'Claim has already been submitted to the manufacturer'] unless claim.draft?
 
-    warranty_invoice = Invoice.where(source_type: 'WarrantyClaim', source_id: claim.id).first
+    warranty_invoice = company.invoices.where(source_type: 'WarrantyClaim', source_id: claim.id).first
     if warranty_invoice && warranty_invoice.status != 'draft'
       return [:blocked, 'Warranty invoice has been finalized/sent — remove it explicitly first']
     end

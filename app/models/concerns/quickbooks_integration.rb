@@ -71,13 +71,39 @@ module QuickbooksIntegration
     quickbooks_token_expires_at < 5.minutes.from_now
   end
   
-  # Refresh QuickBooks access token using refresh token
+  # Advisory-lock namespace for QB token refresh — distinct from other
+  # accounting number-generator namespaces.
+  QB_TOKEN_REFRESH_LOCK_NAMESPACE = 0x1_2E_00_71.freeze
+
+  # Refresh QuickBooks access token using refresh token. Serialized via a
+  # per-entity advisory lock so two concurrent syncs can't both burn a
+  # refresh_token grant. If another process refreshed while we waited on
+  # the lock, we short-circuit and return the just-refreshed state.
   def refresh_quickbooks_token!
+    ApplicationRecord.transaction do
+      self.class.connection.execute(
+        self.class.sanitize_sql_array([
+          'SELECT pg_advisory_xact_lock(?, ?)',
+          QB_TOKEN_REFRESH_LOCK_NAMESPACE,
+          id
+        ])
+      )
+      reload
+      unless quickbooks_token_expired?
+        return { success: true, expires_at: quickbooks_token_expires_at, note: 'refreshed by another process while waiting on lock' }
+      end
+      _do_refresh_quickbooks_token!
+    end
+  end
+
+  # Internal — the actual HTTP call and DB writes. Callers should go through
+  # refresh_quickbooks_token! so the advisory lock guarantees serialization.
+  def _do_refresh_quickbooks_token!
     # CRITICAL: Use decryption method, not encrypted attribute directly
     current_refresh_token = quickbooks_refresh_token
-    
+
     return { success: false, error: 'No refresh token' } unless current_refresh_token.present?
-    
+
     begin
       # QuickBooks token endpoint
       token_url = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'

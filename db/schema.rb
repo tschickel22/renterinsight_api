@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_14_230000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2228,6 +2228,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.bigint "preferred_vehicle_id"
     t.string "budget_range"
     t.decimal "deposit_amount", precision: 15, scale: 2
+    t.boolean "tax_exempt", default: false, null: false
+    t.string "tax_exempt_reason"
     t.index ["account_id"], name: "index_contacts_on_account_id"
     t.index ["company_id", "location_id"], name: "index_contacts_on_company_id_and_location_id"
     t.index ["company_id"], name: "index_contacts_on_company_id"
@@ -2286,6 +2288,83 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.index ["reviewed_by_id"], name: "index_contractor_assignments_on_reviewed_by_id"
     t.index ["status"], name: "index_contractor_assignments_on_status"
     t.index ["vendor_id"], name: "index_contractor_assignments_on_vendor_id"
+  end
+
+  create_table "credit_memo_applications", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "credit_memo_id", null: false
+    t.string "applicable_type", null: false
+    t.bigint "applicable_id", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.datetime "applied_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["applicable_type", "applicable_id", "company_id"], name: "idx_credit_memo_applications_by_target"
+    t.index ["applicable_type", "applicable_id"], name: "index_credit_memo_applications_on_applicable"
+    t.index ["company_id"], name: "index_credit_memo_applications_on_company_id"
+    t.index ["credit_memo_id", "applicable_type", "applicable_id"], name: "idx_credit_memo_applications_unique_pair", unique: true
+    t.index ["credit_memo_id"], name: "index_credit_memo_applications_on_credit_memo_id"
+  end
+
+  create_table "credit_memo_item_taxes", force: :cascade do |t|
+    t.bigint "credit_memo_item_id", null: false
+    t.bigint "tax_code_id", null: false
+    t.decimal "computed_amount", precision: 12, scale: 4, default: "0.0", null: false
+    t.decimal "computed_rate", precision: 8, scale: 5, default: "0.0", null: false
+    t.decimal "taxable_base", precision: 12, scale: 4, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["credit_memo_item_id", "tax_code_id"], name: "idx_credit_memo_item_taxes_unique_pair", unique: true
+    t.index ["credit_memo_item_id"], name: "index_credit_memo_item_taxes_on_credit_memo_item_id"
+    t.index ["tax_code_id"], name: "index_credit_memo_item_taxes_on_tax_code_id"
+  end
+
+  create_table "credit_memo_items", force: :cascade do |t|
+    t.bigint "credit_memo_id", null: false
+    t.string "description", null: false
+    t.decimal "quantity", precision: 10, scale: 2, default: "1.0"
+    t.decimal "rate", precision: 10, scale: 2, null: false
+    t.decimal "amount", precision: 10, scale: 2, default: "0.0", null: false
+    t.string "itemable_type"
+    t.bigint "itemable_id"
+    t.boolean "taxable", default: false
+    t.boolean "skip_tax", default: false
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["credit_memo_id"], name: "index_credit_memo_items_on_credit_memo_id"
+    t.index ["itemable_type", "itemable_id"], name: "index_credit_memo_items_on_itemable_type_and_itemable_id"
+  end
+
+  create_table "credit_memos", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id", null: false
+    t.bigint "contact_id"
+    t.string "credit_memo_number", null: false
+    t.date "memo_date", null: false
+    t.string "status", default: "draft", null: false
+    t.text "reason"
+    t.decimal "subtotal", precision: 12, scale: 2, default: "0.0"
+    t.decimal "tax_amount", precision: 12, scale: 2, default: "0.0"
+    t.decimal "total", precision: 12, scale: 2, default: "0.0"
+    t.decimal "amount_applied", precision: 12, scale: 2, default: "0.0"
+    t.decimal "amount_remaining", precision: 12, scale: 2, default: "0.0"
+    t.text "notes"
+    t.string "source_type"
+    t.bigint "source_id"
+    t.bigint "created_by_id"
+    t.boolean "is_deleted", default: false, null: false
+    t.datetime "deleted_at"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "credit_memo_number"], name: "idx_credit_memos_unique_number", unique: true
+    t.index ["company_id"], name: "index_credit_memos_on_company_id"
+    t.index ["contact_id"], name: "index_credit_memos_on_contact_id"
+    t.index ["location_id"], name: "index_credit_memos_on_location_id"
+    t.index ["source_type", "source_id"], name: "index_credit_memos_on_source_type_and_source_id"
   end
 
   create_table "custom_field_migrations", force: :cascade do |t|
@@ -3174,6 +3253,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.index ["marked_by_id"], name: "index_invoice_inventory_usages_on_marked_by_id"
   end
 
+  create_table "invoice_item_taxes", force: :cascade do |t|
+    t.bigint "invoice_item_id", null: false
+    t.bigint "tax_code_id", null: false
+    t.decimal "computed_amount", precision: 12, scale: 4, default: "0.0", null: false
+    t.decimal "computed_rate", precision: 8, scale: 5, default: "0.0", null: false
+    t.decimal "taxable_base", precision: 12, scale: 4, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["invoice_item_id", "tax_code_id"], name: "idx_invoice_item_taxes_unique_pair", unique: true
+    t.index ["invoice_item_id"], name: "index_invoice_item_taxes_on_invoice_item_id"
+    t.index ["tax_code_id"], name: "index_invoice_item_taxes_on_tax_code_id"
+  end
+
   create_table "invoice_items", force: :cascade do |t|
     t.bigint "invoice_id", null: false
     t.string "item_type"
@@ -3193,6 +3285,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.boolean "taxable", default: false
     t.decimal "tax_rate", precision: 5, scale: 2, default: "0.0"
     t.text "notes"
+    t.boolean "skip_tax", default: false, null: false
     t.index ["invoice_id", "position"], name: "index_invoice_items_on_invoice_id_and_position"
     t.index ["invoice_id"], name: "index_invoice_items_on_invoice_id"
     t.index ["itemable_type", "itemable_id"], name: "index_invoice_items_on_itemable_type_and_itemable_id"
@@ -3272,6 +3365,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.string "delivery_zip"
     t.string "delivery_country"
     t.jsonb "custom_field_values", default: {}, null: false
+    t.decimal "amount_credited", precision: 10, scale: 2, default: "0.0"
     t.index ["billing_category"], name: "index_invoices_on_billing_category"
     t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id"], name: "index_invoices_on_company_id"
@@ -4564,6 +4658,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.index ["user_id", "user_type"], name: "index_password_reset_tokens_on_user_id_and_user_type"
   end
 
+  create_table "payment_applications", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "payment_id", null: false
+    t.string "applicable_type", null: false
+    t.bigint "applicable_id", null: false
+    t.decimal "amount", precision: 12, scale: 2, null: false
+    t.datetime "applied_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["applicable_type", "applicable_id", "company_id"], name: "idx_payment_applications_by_target_and_company"
+    t.index ["applicable_type", "applicable_id"], name: "index_payment_applications_on_applicable"
+    t.index ["company_id"], name: "index_payment_applications_on_company_id"
+    t.index ["payment_id", "applicable_type", "applicable_id"], name: "idx_payment_applications_unique_pair", unique: true
+    t.index ["payment_id"], name: "index_payment_applications_on_payment_id"
+  end
+
   create_table "payment_methods", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "location_id"
@@ -4654,6 +4765,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.bigint "payable_id"
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.bigint "bank_account_id"
+    t.index ["bank_account_id"], name: "index_payments_on_bank_account_id"
     t.index ["company_id", "is_deleted"], name: "index_payments_on_company_id_and_is_deleted"
     t.index ["company_id", "payment_number"], name: "index_payments_on_company_id_and_payment_number", unique: true
     t.index ["company_id", "status"], name: "index_payments_on_company_id_and_status"
@@ -5169,6 +5282,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.datetime "updated_at", null: false
     t.datetime "received_date"
     t.bigint "vendor_id"
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["approved_by_id"], name: "index_purchase_orders_on_approved_by_id"
     t.index ["company_id", "location_id"], name: "index_purchase_orders_on_company_id_and_location_id"
     t.index ["company_id", "po_number"], name: "index_purchase_orders_on_company_id_and_po_number", unique: true, where: "(is_deleted = false)"
@@ -5180,6 +5295,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.index ["is_deleted"], name: "index_purchase_orders_on_is_deleted"
     t.index ["location_id"], name: "index_purchase_orders_on_location_id"
     t.index ["order_date"], name: "index_purchase_orders_on_order_date"
+    t.index ["quickbooks_id"], name: "index_purchase_orders_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["received_date"], name: "index_purchase_orders_on_received_date"
     t.index ["status"], name: "index_purchase_orders_on_status"
     t.index ["supplier_id"], name: "index_purchase_orders_on_supplier_id"
@@ -6192,6 +6308,24 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.index ["taskable_type", "taskable_id"], name: "index_tasks_on_taskable"
   end
 
+  create_table "tax_codes", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.decimal "rate", precision: 8, scale: 5, default: "0.0", null: false
+    t.boolean "is_compound", default: false, null: false
+    t.string "tax_authority"
+    t.bigint "chart_of_account_id"
+    t.string "qbo_tax_code_id"
+    t.boolean "is_active", default: true, null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["chart_of_account_id"], name: "index_tax_codes_on_chart_of_account_id"
+    t.index ["company_id", "is_active", "position"], name: "idx_tax_codes_active_ordered"
+    t.index ["company_id", "name"], name: "index_tax_codes_on_company_id_and_name", unique: true
+    t.index ["company_id"], name: "index_tax_codes_on_company_id"
+  end
+
   create_table "templates", force: :cascade do |t|
     t.string "name", null: false
     t.string "template_type", null: false
@@ -6897,12 +7031,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
     t.boolean "is_1099_eligible", default: false
     t.bigint "default_expense_account_id"
     t.boolean "sms_opt_in", default: false, null: false
+    t.string "quickbooks_id"
+    t.datetime "quickbooks_synced_at"
     t.index ["company_id"], name: "index_vendors_on_company_id"
     t.index ["default_expense_account_id"], name: "index_vendors_on_default_expense_account_id"
     t.index ["email"], name: "index_vendors_on_email"
     t.index ["is_vendor"], name: "index_vendors_on_is_vendor"
     t.index ["portal_access_token"], name: "index_vendors_on_portal_access_token", unique: true
     t.index ["qb_vendor_id"], name: "index_vendors_on_qb_vendor_id"
+    t.index ["quickbooks_id"], name: "index_vendors_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["status"], name: "index_vendors_on_status"
     t.index ["trade_type"], name: "index_vendors_on_trade_type"
     t.index ["vendor_type"], name: "index_vendors_on_vendor_type"
@@ -7465,6 +7602,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
   add_foreign_key "contractor_assignments", "companies"
   add_foreign_key "contractor_assignments", "users", column: "assigned_by_id"
   add_foreign_key "contractor_assignments", "vendors", on_delete: :nullify
+  add_foreign_key "credit_memo_applications", "companies"
+  add_foreign_key "credit_memo_applications", "credit_memos"
+  add_foreign_key "credit_memo_item_taxes", "credit_memo_items"
+  add_foreign_key "credit_memo_item_taxes", "tax_codes"
+  add_foreign_key "credit_memo_items", "credit_memos"
+  add_foreign_key "credit_memos", "companies"
+  add_foreign_key "credit_memos", "contacts"
+  add_foreign_key "credit_memos", "locations"
   add_foreign_key "custom_field_migrations", "companies"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "source_custom_field_id"
   add_foreign_key "custom_field_migrations", "custom_fields", column: "target_custom_field_id"
@@ -7552,6 +7697,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
   add_foreign_key "invoice_inventory_usages", "invoice_items"
   add_foreign_key "invoice_inventory_usages", "invoices"
   add_foreign_key "invoice_inventory_usages", "users", column: "marked_by_id"
+  add_foreign_key "invoice_item_taxes", "invoice_items"
+  add_foreign_key "invoice_item_taxes", "tax_codes"
   add_foreign_key "invoice_items", "invoices"
   add_foreign_key "invoice_items", "listings"
   add_foreign_key "invoices", "companies"
@@ -7649,8 +7796,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
   add_foreign_key "parts", "part_categories", column: "category_id"
   add_foreign_key "parts", "users", column: "created_by_id"
   add_foreign_key "parts", "users", column: "updated_by_id"
+  add_foreign_key "payment_applications", "companies"
+  add_foreign_key "payment_applications", "payments"
   add_foreign_key "payment_methods", "companies"
   add_foreign_key "payment_methods", "locations"
+  add_foreign_key "payments", "bank_accounts"
   add_foreign_key "payments", "companies"
   add_foreign_key "payments", "loans"
   add_foreign_key "payments", "locations"
@@ -7783,6 +7933,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_150000) do
   add_foreign_key "tasks", "companies"
   add_foreign_key "tasks", "locations"
   add_foreign_key "tasks", "users", column: "assigned_to_id"
+  add_foreign_key "tax_codes", "chart_of_accounts"
+  add_foreign_key "tax_codes", "companies"
   add_foreign_key "templates", "companies"
   add_foreign_key "tenant_module_overrides", "companies"
   add_foreign_key "tenant_module_overrides", "users", column: "overridden_by_id"

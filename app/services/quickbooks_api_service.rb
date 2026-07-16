@@ -25,50 +25,84 @@ class QuickbooksApiService
     raise "QuickBooks not connected" unless @access_token.present? && @realm_id.present?
   end
   
+  # Every request should send minorversion so QB doesn't silently drift to an
+  # older schema — some fields (custom fields, tax detail) only exist above
+  # certain minorversions.
+  MINOR_VERSION = 65
+
+  # 429 backoff — retry up to 3 times with exponential delay before giving
+  # up. QB rate limits are per-app-per-realm; a caller should see a real
+  # rate-limit error only after all retries fail.
+  RATE_LIMIT_RETRY_LIMIT = 3
+  RATE_LIMIT_BACKOFF_BASE_SECONDS = 2
+
   # GET request to QuickBooks API
   def get(endpoint, params = {})
     url = build_url(endpoint)
-    
-    response = HTTParty.get(url, {
-      headers: auth_headers,
-      query: params,
-      timeout: 30
-    })
-    
-    handle_response(response)
+
+    with_rate_limit_retry do
+      response = HTTParty.get(url, {
+        headers: auth_headers,
+        query: params.reverse_merge(minorversion: MINOR_VERSION),
+        timeout: 30
+      })
+      handle_response(response)
+    end
   end
-  
+
   # POST request to QuickBooks API
   def post(endpoint, data)
     url = build_url(endpoint)
-    
-    response = HTTParty.post(url, {
-      headers: auth_headers.merge('Content-Type' => 'application/json'),
-      body: data.to_json,
-      timeout: 30
-    })
-    
-    handle_response(response)
+
+    with_rate_limit_retry do
+      response = HTTParty.post(url, {
+        headers: auth_headers.merge('Content-Type' => 'application/json'),
+        query: { minorversion: MINOR_VERSION },
+        body: data.to_json,
+        timeout: 30
+      })
+      handle_response(response)
+    end
   end
-  
+
   # POST with sparse update (PATCH equivalent)
   def update(endpoint, id, data)
     url = build_url(endpoint)
-    
-    # QuickBooks updates use POST with Id and SyncToken in body
-    # NO query parameters - that causes "Unsupported Operation"
-    response = HTTParty.post(url, {
-      headers: auth_headers.merge('Content-Type' => 'application/json'),
-      body: data.to_json,
-      timeout: 30
-    })
-    
-    handle_response(response)
+
+    with_rate_limit_retry do
+      # QuickBooks updates use POST with Id and SyncToken in body.
+      # minorversion goes in the query string (not the body) so we still
+      # get the newer schema without confusing QB about the operation.
+      response = HTTParty.post(url, {
+        headers: auth_headers.merge('Content-Type' => 'application/json'),
+        query: { minorversion: MINOR_VERSION },
+        body: data.to_json,
+        timeout: 30
+      })
+      handle_response(response)
+    end
   end
-  
+
   # Query QuickBooks data with SQL-like syntax
   def query(sql_query)
     get('query', { query: sql_query })
+  end
+
+  # Void a transactional entity (Invoice, Payment, CreditMemo, etc.). QB
+  # marks the entity as voided with $0.00 lines but keeps the record for
+  # audit — that's what our local "voided" state maps to. Requires the
+  # current SyncToken.
+  def void_entity(entity_type, id, sync_token)
+    url = build_url(entity_type.to_s.downcase)
+    with_rate_limit_retry do
+      response = HTTParty.post(url, {
+        headers: auth_headers.merge('Content-Type' => 'application/json'),
+        query: { operation: 'void', minorversion: MINOR_VERSION },
+        body: { Id: id.to_s, SyncToken: sync_token.to_s }.to_json,
+        timeout: 30
+      })
+      handle_response(response)
+    end
   end
   
   # Get company info (useful for testing connection)
@@ -95,35 +129,87 @@ class QuickbooksApiService
     update(entity_type.downcase, id, data)
   end
   
-  # Search for entities
+  # Search for entities. QB's query language uses SQL-ish syntax with single
+  # quotes; values are escaped by doubling embedded single quotes. Field
+  # names are only allowed if they match a plain [A-Za-z0-9_.] pattern so a
+  # caller can't inject SQL through the field name either.
   def search_entities(entity_type, conditions = {})
-    # Build SQL query
-    sql = "SELECT * FROM #{entity_type}"
-    
+    sql = "SELECT * FROM #{sanitize_qb_identifier(entity_type)}"
+
     if conditions.any?
-      where_clauses = conditions.map { |field, value| "#{field} = '#{value}'" }
+      where_clauses = conditions.map do |field, value|
+        "#{sanitize_qb_identifier(field)} = '#{escape_qb_value(value)}'"
+      end
       sql += " WHERE #{where_clauses.join(' AND ')}"
     end
-    
+
     query(sql)
   end
   
-  # Get all entities of a type
-  def get_all_entities(entity_type, max_results: 1000)
+  # Ask QB for the custom field definitions configured on this realm's
+  # entities and return them as { 'Invoice' => [{ 'DefinitionId' => '1',
+  # 'Name' => '...', 'Type' => 'StringType' }, ...], ... }. Cached per
+  # API instance since definitions rarely change during a sync run.
+  #
+  # QB exposes definitions via a Preferences query — we ask for the whole
+  # Preferences object and pull SalesFormsPrefs.CustomField from it. If
+  # the tenant hasn't configured any, this returns an empty hash and
+  # callers should skip the CustomField block entirely.
+  def custom_field_definitions
+    @custom_field_definitions ||= begin
+      response = query('SELECT * FROM Preferences')
+      prefs = response.dig('QueryResponse', 'Preferences', 0) || {}
+      raw   = prefs.dig('SalesFormsPrefs', 'CustomField') || []
+      # Group by TransactionTypeName so callers can ask
+      # `definitions_for('Invoice')` and get back its list.
+      raw.each_with_object({}) do |group, memo|
+        txn = group['TransactionTypeName'] || 'Invoice'
+        cf  = group['CustomField'] || []
+        memo[txn] = cf.select { |f| f['Type'] == 'StringType' }
+      end
+    rescue => e
+      Rails.logger.warn "[QB API] Failed to fetch custom field defs: #{e.message}"
+      {}
+    end
+  end
+
+  # True when the tenant's QB company has a custom field with this
+  # DefinitionId on the given transaction type. Handlers use this to
+  # decide whether to send the CustomField block or leave it off.
+  def custom_field_defined?(transaction_type, definition_id)
+    (custom_field_definitions[transaction_type] || []).any? do |cf|
+      cf['DefinitionId'].to_s == definition_id.to_s
+    end
+  end
+
+  # Get all entities of a type, optionally filtered to those changed after
+  # a given time (real from-QB incremental). QB supports the standard SQL
+  # WHERE clause on MetaData.LastUpdatedTime with an ISO 8601 timestamp.
+  # `entity_type` is validated at the boundary so it can't be a SQL vector.
+  def get_all_entities(entity_type, max_results: 1000, since: nil)
+    safe_type = sanitize_qb_identifier(entity_type)
     results = []
     start_position = 1
-    
+
+    where_clause =
+      if since
+        ts = since.respond_to?(:utc) ? since.utc.iso8601 : since.to_s
+        " WHERE MetaData.LastUpdatedTime > '#{escape_qb_value(ts)}'"
+      else
+        ''
+      end
+
     loop do
-      sql = "SELECT * FROM #{entity_type} STARTPOSITION #{start_position} MAXRESULTS 1000"
+      sql = "SELECT * FROM #{safe_type}#{where_clause} STARTPOSITION #{start_position} MAXRESULTS 1000"
       response = query(sql)
-      
+
       entities = response.dig('QueryResponse', entity_type) || []
       results.concat(entities)
-      
+
       break if entities.length < 1000 || results.length >= max_results
       start_position += 1000
     end
-    
+
     results
   end
   
@@ -175,6 +261,38 @@ class QuickbooksApiService
     end
   end
   
+  # Wrap a QB request in bounded exponential retries when QB replies with
+  # 429 (rate limit). Anything else propagates immediately.
+  def with_rate_limit_retry
+    attempts = 0
+    begin
+      yield
+    rescue QuickbooksRateLimitError => e
+      attempts += 1
+      raise if attempts > RATE_LIMIT_RETRY_LIMIT
+
+      sleep_for = RATE_LIMIT_BACKOFF_BASE_SECONDS**attempts
+      Rails.logger.warn "[QB API] 429 rate-limited, retrying in #{sleep_for}s (attempt #{attempts}/#{RATE_LIMIT_RETRY_LIMIT})"
+      sleep(sleep_for)
+      retry
+    end
+  end
+
+  # QB identifiers (entity + field names) come from code in practice, but
+  # search_entities has been called with dynamic values in the past, so
+  # enforce the shape at the boundary.
+  def sanitize_qb_identifier(identifier)
+    str = identifier.to_s
+    raise ArgumentError, "Unsafe QB identifier: #{str.inspect}" unless str.match?(/\A[A-Za-z_][A-Za-z0-9_.]*\z/)
+    str
+  end
+
+  # QB SQL uses single-quoted string literals; embedded ' is escaped by
+  # doubling.
+  def escape_qb_value(value)
+    value.to_s.gsub("'", "''")
+  end
+
   def extract_error_message(response)
     parsed = response.parsed_response
     

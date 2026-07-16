@@ -57,16 +57,30 @@ class JournalEntry < ApplicationRecord
     end
   end
 
+  # Advisory-lock namespace, distinct from Invoice#INVOICE_NUMBER_LOCK_NAMESPACE
+  # so the two number-generators don't share a lock slot.
+  ENTRY_NUMBER_LOCK_NAMESPACE = 0x1_2E_00_4E.freeze
+
   def assign_entry_number
     return if entry_number.present?
+    return unless company_id
+
+    # Serialize entry-number generation per company for the enclosing
+    # transaction so concurrent journal saves can't both compute the same
+    # max and race the unique index.
+    self.class.connection.execute(
+      self.class.sanitize_sql_array(['SELECT pg_advisory_xact_lock(?, ?)', ENTRY_NUMBER_LOCK_NAMESPACE, company_id])
+    )
+
     # Only consider numeric entry numbers when computing the next sequence
     # value; entries with prefixed/labelled numbers (e.g., from seed data
     # or future imports) must not shadow the running counter.
     max = company.journal_entries
                  .where("entry_number ~ '^[0-9]+$'")
                  .maximum("entry_number::int") || 0
-    # Defensive: loop past any unexpected collisions so a duplicate
-    # numeric entry can't crash the save with a unique-violation.
+    # Defence-in-depth against numbers inserted via a path that bypasses
+    # this generator (e.g. raw SQL import). Under the advisory lock this
+    # normally exits on the first iteration.
     loop do
       candidate = (max + 1).to_s.rjust(6, '0')
       unless company.journal_entries.exists?(entry_number: candidate)

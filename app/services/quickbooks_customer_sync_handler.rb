@@ -77,10 +77,17 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
   end
   
   def create_from_quickbooks(qb_customer, config)
-    # Extract data from QuickBooks Customer
+    # Extract data from QuickBooks Customer. Resolve landing location:
+    # handler scope → user's current UI location → first active. Leaving
+    # location NULL made these invisible to the standard contacts list
+    # which strict-filters by location.
+    resolved_location_id = location&.id ||
+      (Current.location_filtered? ? Current.location_id : nil) ||
+      company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
+
     contact_data = {
       company_id: company.id,
-      location_id: location&.id,
+      location_id: resolved_location_id,
       quickbooks_id: qb_customer['Id'],
       first_name: qb_customer['GivenName'],
       last_name: qb_customer['FamilyName'],
@@ -120,21 +127,23 @@ class QuickbooksCustomerSyncHandler < QuickbooksSyncHandler
   
   private
   
-  # Build a unique DisplayName for QB
-  # QB requires unique DisplayName across Customers, Vendors, and Employees
-  # Strategy: base name → with email → with contact ID
+  # Build a unique DisplayName for QB. QB requires uniqueness across
+  # Customers, Vendors, and Employees. Strategy in order of user-visibility:
+  #   1. base name        — the ideal
+  #   2. base + email     — still readable in QB dropdowns
+  #   3. base + " — RI#<id>" — always unique per contact, guaranteed to
+  #      resolve any residual collision (two contacts with the same name
+  #      AND the same email, or a collision against a QB Vendor with the
+  #      same email address).
   def build_unique_display_name(contact, suffix = nil)
-    base_name = contact.display_name || "#{contact.first_name} #{contact.last_name}"
-    
+    base_name = contact.display_name.presence || "#{contact.first_name} #{contact.last_name}".strip
+    base_name = "Contact #{contact.id}" if base_name.blank?
+
     case suffix
     when :email
-      if contact.email.present?
-        "#{base_name} - #{contact.email}"
-      else
-        "#{base_name} (#{contact.id})"
-      end
+      contact.email.present? ? "#{base_name} - #{contact.email}" : "#{base_name} — RI##{contact.id}"
     when :id
-      "#{base_name} (#{contact.id})"
+      "#{base_name} — RI##{contact.id}"
     else
       base_name
     end

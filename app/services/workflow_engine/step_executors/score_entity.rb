@@ -52,8 +52,21 @@ module WorkflowEngine
         value = data && data['value']
         reason = data && data['reason']
 
-        if entity && score_field.present? && entity.respond_to?(score_field)
-          entity.update_column(score_field, value)
+        # Write the score wherever it belongs: a real column when the field
+        # exists on the AR model, otherwise a custom_field_values entry.
+        # Previously this silently no-op'd when the score_field pointed at a
+        # custom field, so scoring workflows on entities with custom fields
+        # never persisted the value. Alias-aware so "Lead Score" and
+        # "lead_score" both resolve to the same custom field.
+        if entity && score_field.present? && value
+          canonical_cf = CustomFieldsAccess.resolve_field_key(entity, score_field)
+          if canonical_cf
+            CustomFieldsAccess.write(entity, canonical_cf => value)
+          elsif entity.respond_to?(score_field)
+            entity.update_column(score_field, value)
+          else
+            Rails.logger.warn "[ScoreEntity] score_field '#{score_field}' is neither an attribute nor a custom field on #{entity.class.name}"
+          end
         end
 
         {

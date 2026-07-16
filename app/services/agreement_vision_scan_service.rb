@@ -83,6 +83,19 @@ class AgreementVisionScanService
     fields = validate_placements(fields, text_map, blank_lines)
     Rails.logger.info "[VisionScan] Validated #{fields.length} fields"
 
+    # Step 6: Interpolate missing rows in numbered repeating columns (Add-on 1..N,
+    # Add-on Cost 1..N). Claude's vision scan often skips 3-5 rows in the middle of
+    # the grid — this closes the gaps by cloning column geometry across the range.
+    fill_numbered_table_gaps!(fields)
+
+    # Step 7: Auto-wire numbered line-item labels (Add-on 1, Add-on Cost 1, …)
+    # to deal.line_items[N-1].* and single-value labels (Buyer, Phone, Retail
+    # Price, Trade-in Credit, …) to their canonical merge fields. Previously
+    # only smart_scan did this — a plain empty-template scan came back with
+    # nearly everything as preparer/custom.
+    apply_line_item_merge_fields!(fields)
+    apply_generic_merge_fields!(fields)
+
     page_classifications = classify_pages(fields, total_pages)
     Rails.logger.info "[VisionScan] Classified #{page_classifications.length} pages"
 
@@ -94,55 +107,47 @@ class AgreementVisionScanService
     }
   end
 
-  # Smart Scan: Compare empty template PDF against a filled example PDF
+  # Smart Scan: field set comes from the EMPTY template (AcroForm or vision), then
+  # the FILLED sample enriches each detected field with example_value, inferred_type,
+  # and formula. The sample never adds or removes fields — a buyer filling only 3 of
+  # 10 add-on rows still leaves all 10 wired.
   def smart_scan(empty_pdf_url, filled_pdf_url, max_pages: MAX_PAGES)
     raise ScanError, "No empty PDF URL provided" if empty_pdf_url.blank?
     raise ScanError, "No filled PDF URL provided" if filled_pdf_url.blank?
 
-    Rails.logger.info "[SmartScan] Starting comparison scan"
+    Rails.logger.info "[SmartScan] Starting empty-first + enrichment scan"
 
-    empty_data = download_pdf(empty_pdf_url)
-    filled_data = download_pdf(filled_pdf_url)
+    # Step 1: Detect fields from the empty template (source of truth for what exists).
+    base_result = scan(empty_pdf_url, max_pages: max_pages)
+    fields = base_result[:fields]
+    Rails.logger.info "[SmartScan] Base scan (empty) produced #{fields.length} field(s)"
 
-    [empty_data, filled_data].each_with_index do |data, i|
-      label = i == 0 ? 'Empty' : 'Filled'
-      if data.bytesize > PDF_MAX_SIZE
-        raise ScanError, "#{label} PDF is too large (#{(data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
-      end
-    end
+    # Step 2: Enrich each field with observations from the filled sample.
+    # Never adds or removes fields — soft-fails if the enrichment call errors.
+    enrich_fields_with_filled_sample!(fields, filled_pdf_url)
 
-    empty_text_map, _ = extract_text_with_positions(empty_data)
-    filled_text_map, _ = extract_text_with_positions(filled_data)
-    total_pages = [empty_text_map.keys.max || 1, filled_text_map.keys.max || 1].max
-    pages_to_scan = [max_pages, total_pages].min
+    # Step 3: Detect columns that look like numbered repeating tables and
+    # interpolate any missing rows. Fills gaps that Claude's vision scan often
+    # leaves in the middle of the add-ons / line-items grid.
+    fill_numbered_table_gaps!(fields)
 
-    empty_b64 = Base64.strict_encode64(empty_data)
-    filled_b64 = Base64.strict_encode64(filled_data)
+    # Step 4: Auto-wire numbered line-item labels to deal.line_items[N-1].*
+    # so the mapping review pre-selects them and the Fill Form flow pulls
+    # values from the linked deal instead of asking the user to retype.
+    apply_line_item_merge_fields!(fields)
 
-    fields = call_claude_smart_scan(empty_b64, filled_b64, empty_text_map, filled_text_map, pages_to_scan)
-    Rails.logger.info "[SmartScan] Detected #{fields.length} fields with example values"
+    # Step 5: Auto-wire other well-known single-value labels (Buyer, Phone,
+    # Date, Retail Price, Down Payment, etc.) to their canonical merge fields.
+    apply_generic_merge_fields!(fields)
 
-    page_classifications = classify_pages(fields, total_pages)
-
-    # Detect repeated fields
-    value_pages = {}
-    fields.each do |f|
-      val = f[:example_value].to_s.strip.downcase
-      next if val.blank? || val.length < 2
-      value_pages[val] ||= []
-      value_pages[val] << f[:page]
-    end
-    repeated_values = value_pages.select { |_, pages| pages.uniq.length > 1 }.keys.to_set
-    fields.each do |f|
-      val = f[:example_value].to_s.strip.downcase
-      f[:is_repeated] = repeated_values.include?(val)
-    end
+    # Detect values that appear on multiple pages (repeated headers etc.).
+    detect_repeated_values!(fields)
 
     {
       fields: fields,
-      pages_scanned: pages_to_scan,
-      total_pages: total_pages,
-      page_classifications: page_classifications,
+      pages_scanned: base_result[:pages_scanned],
+      total_pages: base_result[:total_pages],
+      page_classifications: base_result[:page_classifications],
       scan_type: 'smart',
     }
   end
@@ -674,6 +679,616 @@ class AgreementVisionScanService
     text_content = result["content"]&.find { |c| c["type"] == "text" }&.fetch("text", "")
 
     parse_smart_response(text_content)
+  end
+
+  # ─── Smart Scan Enrichment (empty-first architecture) ────────────────────────
+  # Runs after the empty template has produced the field set. Sends only the
+  # filled sample to Claude and asks it to emit one enrichment entry per
+  # pre-detected field: example_value, inferred_type, formula. Never adds or
+  # removes fields — the sample is a sample.
+  def enrich_fields_with_filled_sample!(fields, filled_pdf_url)
+    # Default keys so downstream contracts hold even if the enrichment call fails.
+    fields.each do |f|
+      f[:example_value] = nil unless f.key?(:example_value)
+      f[:inferred_type] = nil unless f.key?(:inferred_type)
+      f[:formula]       = nil unless f.key?(:formula)
+      f[:is_repeated]   = false unless f.key?(:is_repeated)
+    end
+
+    return if fields.empty?
+
+    begin
+      filled_data = download_pdf(filled_pdf_url)
+      if filled_data.bytesize > PDF_MAX_SIZE
+        raise ScanError, "Filled PDF is too large (#{(filled_data.bytesize / 1_000_000.0).round(1)}MB). Maximum is 25MB."
+      end
+
+      filled_b64 = Base64.strict_encode64(filled_data)
+      enrichment = call_claude_enrichment(filled_b64, fields)
+      Rails.logger.info "[SmartScan] Enrichment returned #{enrichment.length} entry(ies) for #{fields.length} field(s)"
+
+      # Match by 1-based index sent in the prompt, NOT by field key.
+      # Upstream scan can produce duplicate keys (e.g. many fields keyed 'cf_total'
+      # or 'cf_buyer_1_initials' because their labels normalized to the same string).
+      # Key-based merge would cross-pollinate one enrichment onto every collision.
+      by_index = {}
+      enrichment.each do |e|
+        idx = e[:i]
+        by_index[idx] = e if idx
+      end
+
+      matched = 0
+      fields.each_with_index do |f, idx|
+        e = by_index[idx + 1]
+        next unless e
+        f[:example_value] = e[:example_value]
+        f[:inferred_type] = e[:inferred_type]
+        f[:formula]       = e[:formula]
+        matched += 1
+      end
+      Rails.logger.info "[SmartScan] Enrichment merged into #{matched} of #{fields.length} field(s)"
+    rescue => e
+      # Soft-fail: fields stay with nil enrichment values.
+      Rails.logger.warn "[SmartScan] Enrichment failed (fields remain unenriched): #{e.class}: #{e.message}"
+    end
+  end
+
+  def call_claude_enrichment(filled_pdf_b64, fields)
+    # Compact field reference. Truncate long labels so the prompt doesn't explode.
+    # Each field gets a 1-based index (i) — that's the ONLY reliable way to
+    # match responses back, since our scan pipeline can emit duplicate keys.
+    field_lines = fields.first(400).each_with_index.map do |f, idx|
+      label = f[:label].to_s.gsub(/\s+/, ' ').strip.first(80)
+      "  i=#{idx + 1}  key=#{f[:key]}  page=#{f[:page]}  pos=(#{f[:x].to_f.round(1)}%, #{f[:y].to_f.round(1)}%, #{f[:width].to_f.round(1)}%x#{f[:height].to_f.round(1)}%)  type=#{f[:type]}  label=\"#{label}\""
+    end.join("\n")
+
+    prompt = <<~PROMPT
+      You are looking at ONE PDF: a COMPLETED sample form that a user filled out.
+      The empty template's fillable fields have already been detected. The field set
+      is FIXED. Your only job is to describe, for each pre-detected field, what
+      value (if any) appears at that field's position in the filled sample.
+
+      HARD RULES:
+      - Do NOT invent new fields.
+      - Do NOT remove fields even if the sample left them blank.
+      - Emit EXACTLY one JSON object per input field, referenced by its "i" index (1-based).
+      - Field "key" values may repeat across the list (multiple fields can share a key);
+        the "i" index is what distinguishes them. Match strictly on "i".
+      - If a field is blank in the sample: example_value = null, inferred_type = null, formula = null.
+      - The sample is JUST A SAMPLE. If the buyer only filled 3 add-on rows out of 10,
+        the other 7 stay blank — do NOT delete them from the field set.
+
+      FIELDS TO ENRICH (N=#{fields.length}, in scan order):
+      #{field_lines}
+
+      FOR EACH FIELD PROVIDE:
+      - i: the SAME 1-based index from the list above (integer)
+      - example_value: the value written at that field's position, as a string (or null if blank)
+      - inferred_type: one of text | currency | date | number | percentage | checkbox | signature | initials, or null
+      - formula: FormulaEngine expression if this value is computed from other fields, else null
+
+      FORMULA SYNTAX (only emit when you have verified the math):
+      - Must start with "="
+      - Reference other fields by their exact key from the list above
+      - Operators: + - * /   Functions: round(v, d), if(cond, t, f), percent_of(base, rate)
+      - Numeric literals allowed (e.g. 0.0725)
+      - VERIFY: compute the candidate expression against the actual filled values and only
+        emit it when |expected - actual| < 0.02. If the math doesn't check out, formula = null.
+      - When the referenced key appears multiple times in the field list, prefer the one
+        with the closest / most-relevant position. If unclear, leave formula null.
+
+      WORKED EXAMPLES (shape only — use YOUR field's actual key names):
+      - retail 275000, discount 3834, subtotal 271166 → "=cf_retail_price - cf_dealer_discount"
+      - total 276480.98, down 5000, unpaid 271480.98 → "=cf_total_amount - cf_down_payment"
+      - subtotal 276166, tax rate 7.25%, tax 20022.04 → "=percent_of(cf_subtotal_2, 0.0725)"
+
+      OUTPUT: JSON array only, no explanation. Start with [ end with ].
+      Example response shape: [{"i":1,"example_value":"John","inferred_type":"text","formula":null},{"i":2,...}]
+    PROMPT
+
+    body = {
+      model: CLAUDE_MODEL,
+      max_tokens: 32000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: filled_pdf_b64 } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    }
+
+    uri = URI(CLAUDE_API_URL)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 180
+    http.open_timeout = 30
+
+    request = Net::HTTP::Post.new(uri)
+    request["Content-Type"] = "application/json"
+    request["x-api-key"] = @api_key
+    request["anthropic-version"] = "2023-06-01"
+    request.body = body.to_json
+
+    Rails.logger.info "[SmartScan] Enrichment: sending filled PDF + #{fields.length} field descriptor(s)"
+
+    response = http.request(request)
+
+    unless response.code == "200"
+      error_body = JSON.parse(response.body) rescue {}
+      error_msg = error_body.dig("error", "message") || "HTTP #{response.code}"
+      Rails.logger.error "[SmartScan] Enrichment API error: #{error_msg}"
+      raise ScanError, "Smart scan enrichment failed: #{error_msg}"
+    end
+
+    result = JSON.parse(response.body)
+    text_content = result["content"]&.find { |c| c["type"] == "text" }&.fetch("text", "")
+
+    parse_enrichment_response(text_content)
+  end
+
+  def parse_enrichment_response(text)
+    json_str = text.to_s.strip
+    json_str = json_str.gsub(/```json?\s*/i, '').gsub(/```/, '').strip if json_str.include?('```')
+    if !json_str.start_with?('[') && json_str =~ /(\[\s*\{.*\}\s*\])/m
+      json_str = Regexp.last_match(1)
+    end
+    return [] unless json_str.start_with?('[')
+
+    raw = begin
+      JSON.parse(json_str)
+    rescue JSON::ParserError
+      last_brace = json_str.rindex('}')
+      if last_brace
+        JSON.parse(json_str[0..last_brace] + ']') rescue []
+      else
+        []
+      end
+    end
+    return [] unless raw.is_a?(Array)
+
+    raw.each_with_index.map do |entry, idx|
+      next nil unless entry.is_a?(Hash)
+
+      # Prefer the explicit "i" the model was asked to echo back. Fall back to
+      # array position if the model dropped it (some responses may omit it).
+      i = entry["i"]
+      i = i.to_i if i.is_a?(String) && i =~ /\A\d+\z/
+      i = idx + 1 unless i.is_a?(Integer) && i > 0
+
+      formula = entry["formula"].to_s.strip
+      formula = nil unless formula.start_with?('=') && formula.length > 1
+
+      ex = entry["example_value"]
+      example_value = ex.nil? ? nil : ex.to_s
+      example_value = nil if example_value == '' || example_value&.downcase == 'null'
+
+      inferred = entry["inferred_type"].to_s.strip.downcase
+      inferred = nil if inferred.empty? || inferred == 'null'
+
+      { i: i, example_value: example_value, inferred_type: inferred, formula: formula }
+    end.compact
+  end
+
+  def detect_repeated_values!(fields)
+    value_pages = {}
+    fields.each do |f|
+      val = f[:example_value].to_s.strip.downcase
+      next if val.blank? || val.length < 2
+      value_pages[val] ||= []
+      value_pages[val] << f[:page]
+    end
+    repeated = value_pages.select { |_, pages| pages.uniq.length > 1 }.keys.to_set
+    fields.each do |f|
+      val = f[:example_value].to_s.strip.downcase
+      f[:is_repeated] = repeated.include?(val)
+    end
+  end
+
+  # ─── Numbered-Table Gap Fill ─────────────────────────────────────────────────
+  # When the empty-scan produces a column of numbered rows ("Add-on 1", "Add-on 3",
+  # "Add-on 4"…) with gaps in the sequence, interpolate the missing rows so the
+  # user has an editable slot at every position in the physical form.
+  #
+  # Only fires when the column clearly looks like a numbered table:
+  #   • ≥ 3 fields at the same x + width + type on the same page
+  #   • ≥ 70% of labels parse to "<shared prefix> <number>"
+  #   • Prefixes are identical (case-insensitive)
+  # Synthetic rows get null enrichment (the sample can't tell us their value)
+  # and confidence 0.5 so the FE can flag them as interpolated if it wants.
+
+  TABLE_FILL_TYPES = %w[text currency number date].freeze
+  TABLE_X_TOLERANCE = 2.5  # % — fields within this x-distance belong to the same column
+  TABLE_W_TOLERANCE = 3.0  # % — fields' widths must also match within this tolerance
+
+  def fill_numbered_table_gaps!(fields)
+    return if fields.blank?
+    return if fields.length < 3
+
+    # Cluster into columns without banding — bucket boundaries at x=37 kept splitting
+    # the same physical column when Claude jittered x by ±0.1%. Instead, group by
+    # (page, type) then walk sorted fields and start a new column whenever x jumps
+    # by more than TABLE_X_TOLERANCE. Also require width similarity within a column.
+    columns = []
+    fields
+      .select { |f| TABLE_FILL_TYPES.include?(f[:type].to_s) }
+      .group_by { |f| [f[:page].to_i, f[:type].to_s] }
+      .each_value do |group|
+        by_x = group.sort_by { |f| f[:x].to_f }
+        current = [by_x.first]
+        by_x.drop(1).each do |f|
+          near_x   = (f[:x].to_f - current.last[:x].to_f).abs <= TABLE_X_TOLERANCE
+          near_w   = (f[:width].to_f - current.first[:width].to_f).abs <= TABLE_W_TOLERANCE
+          if near_x && near_w
+            current << f
+          else
+            columns << current
+            current = [f]
+          end
+        end
+        columns << current
+      end
+
+    added = 0
+    columns.each do |col_fields|
+      next if col_fields.length < 3
+
+      sorted = col_fields.sort_by { |f| f[:y].to_f }
+
+      # Two ways a column qualifies as a repeating table:
+      #   (A) Numbered series — "Add-on 1", "Add-on 2", … with a shared canonical
+      #       prefix. Canonical form collapses hyphens / whitespace / case so
+      #       "Add-on Cost" and "Add On Cost" are the same series.
+      #   (B) Identical labels — a stack of blank rows all labelled "Amount"
+      #       (or all empty). Vision scans often skip labels for the description
+      #       column of an add-on grid; without this fallback the left column
+      #       stays gappy while the right (numbered) column fills cleanly.
+      parsed = sorted.map { |f| parse_numbered_label(f[:label]) }
+      numbered = parsed.compact
+      has_numbered_series = numbered.length >= (sorted.length * 0.7).ceil
+      canon_prefixes = numbered.map { |p| canonical_prefix(p[:prefix]) }.uniq
+      use_numbered = has_numbered_series && canon_prefixes.length == 1
+
+      labels_lower = sorted.map { |f| f[:label].to_s.strip.downcase }
+      identical_label = labels_lower.uniq.length == 1
+      use_identical = !use_numbered && identical_label
+
+      next unless use_numbered || use_identical
+
+      # Modal row spacing — median of positive deltas.
+      positive_deltas = sorted.each_cons(2).map { |a, b| (b[:y].to_f - a[:y].to_f).round(2) }.select { |d| d > 0.3 }
+      next if positive_deltas.empty?
+      modal = positive_deltas.sort[positive_deltas.length / 2]
+      next unless modal.between?(0.5, 5.0)
+
+      # Interpolate gaps.
+      new_rows = []
+      sorted.each_cons(2) do |a, b|
+        delta = b[:y].to_f - a[:y].to_f
+        missing = (delta / modal).round - 1
+        next unless missing.between?(1, 8)
+
+        a_parsed = use_numbered ? parse_numbered_label(a[:label]) : nil
+        next if use_numbered && a_parsed.nil?
+
+        missing.times do |m|
+          y_interp = (a[:y].to_f + modal * (m + 1)).round(1)
+
+          if use_numbered
+            new_number = a_parsed[:number] + m + 1
+            new_label = "#{a_parsed[:prefix]} #{new_number}"
+            new_key = a[:key].to_s.sub(/\d+\z/, new_number.to_s)
+            new_key = "cf_#{new_label.parameterize(separator: '_').first(30)}" if new_key == a[:key].to_s
+          else
+            # Identical-label path — clone the label, mint a unique key so
+            # downstream key-collision dedup doesn't merge these rows together.
+            new_label = a[:label].to_s
+            base_key = a[:key].to_s.sub(/_syn_.*\z/, '')
+            new_key = "#{base_key}_syn_#{y_interp.to_i}_#{m}"
+          end
+
+          synthetic = a.dup
+          synthetic[:y]             = y_interp
+          synthetic[:label]         = new_label
+          synthetic[:key]           = new_key
+          synthetic[:example_value] = nil
+          synthetic[:inferred_type] = nil
+          synthetic[:formula]       = nil
+          synthetic[:is_repeated]   = false
+          synthetic[:confidence]    = 0.5
+          synthetic[:source]        = 'interpolated'
+          new_rows << synthetic
+        end
+      end
+
+      new_rows.each { |r| fields << r }
+      added += new_rows.length
+    end
+
+    if added > 0
+      Rails.logger.info "[SmartScan] Table-gap fill added #{added} interpolated row(s)"
+      fields.sort_by! { |f| [f[:page].to_i, f[:y].to_f, f[:x].to_f] }
+    end
+
+    align_sister_column_rows!(fields)
+  end
+
+  # Row-alignment pass: after gap-fill, if a "short" column sits next to a
+  # "tall" companion column with more rows, extend the short one so both
+  # columns have the same row count. This catches the case where Claude
+  # dropped 2-3 rows at the TOP or BOTTOM of the description column (which
+  # fill_numbered_table_gaps! can't reach — it only interpolates between
+  # existing rows).
+  #
+  # Two columns are "sisters" when:
+  #   • same page, both have ≥3 fields at same (canonicalised) type
+  #   • their x-ranges are adjacent (short.x within 30% of tall.x span)
+  #   • their y-ranges overlap by at least half of the short's height
+  # Only pads the short column — never adds duplicate rows to an already-
+  # aligned pair.
+  SISTER_COLUMN_X_GAP  = 40.0  # % — max horizontal distance between column centers
+  SISTER_COLUMN_Y_MIN_OVERLAP = 0.5
+  SISTER_COLUMN_MIN_ROWS = 3
+
+  def align_sister_column_rows!(fields)
+    return if fields.blank?
+
+    input_fields = fields.select { |f| TABLE_FILL_TYPES.include?(f[:type].to_s) }
+    return if input_fields.length < 6
+
+    added = 0
+    input_fields.group_by { |f| f[:page].to_i }.each do |_page, page_fields|
+      columns = cluster_page_into_columns(page_fields)
+      tall_columns = columns.select { |c| c.length >= SISTER_COLUMN_MIN_ROWS }
+      next if tall_columns.length < 2
+
+      # For each pair, extend the shorter column to match the taller.
+      tall_columns.combination(2) do |col_a, col_b|
+        short_col, tall_col = col_a.length <= col_b.length ? [col_a, col_b] : [col_b, col_a]
+        next if short_col.length == tall_col.length
+
+        next unless sister_columns?(short_col, tall_col)
+
+        # Build the row-Y set from the tall column's field positions.
+        short_ys = short_col.map { |f| f[:y].to_f.round(1) }
+        tall_ys  = tall_col.map { |f| f[:y].to_f.round(1) }
+
+        # Estimate short column's modal row spacing so we don't paste rows on
+        # top of existing ones. Any tall-column Y within TABLE_X_TOLERANCE of
+        # an existing short-column Y is considered "already covered."
+        template = short_col.first
+        tall_ys.each do |ty|
+          next if short_ys.any? { |sy| (sy - ty).abs <= TABLE_X_TOLERANCE }
+
+          synthetic = template.dup
+          synthetic[:y]             = ty
+          synthetic[:example_value] = nil
+          synthetic[:inferred_type] = nil
+          synthetic[:formula]       = nil
+          synthetic[:is_repeated]   = false
+          synthetic[:confidence]    = 0.5
+          synthetic[:source]        = 'sister-aligned'
+          synthetic[:key]           = "#{template[:key].to_s.sub(/_sis_.*\z/, '')}_sis_#{ty.to_i}"
+          fields << synthetic
+          added += 1
+          short_ys << ty
+        end
+      end
+    end
+
+    if added > 0
+      Rails.logger.info "[SmartScan] Sister-column alignment added #{added} row(s)"
+      fields.sort_by! { |f| [f[:page].to_i, f[:y].to_f, f[:x].to_f] }
+    end
+  end
+
+  # Cluster fields on one page into columns using the same x/width tolerance
+  # as fill_numbered_table_gaps! (no type gating — the sister column can have
+  # a slightly different type, e.g. text vs currency).
+  def cluster_page_into_columns(page_fields)
+    columns = []
+    page_fields
+      .group_by { |f| f[:type].to_s }
+      .each_value do |group|
+        by_x = group.sort_by { |f| f[:x].to_f }
+        current = [by_x.first]
+        by_x.drop(1).each do |f|
+          near_x = (f[:x].to_f - current.last[:x].to_f).abs <= TABLE_X_TOLERANCE
+          near_w = (f[:width].to_f - current.first[:width].to_f).abs <= TABLE_W_TOLERANCE
+          if near_x && near_w
+            current << f
+          else
+            columns << current
+            current = [f]
+          end
+        end
+        columns << current
+      end
+    columns
+  end
+
+  def sister_columns?(col_a, col_b)
+    ax = col_a.first[:x].to_f + col_a.first[:width].to_f / 2.0
+    bx = col_b.first[:x].to_f + col_b.first[:width].to_f / 2.0
+    return false if (ax - bx).abs > SISTER_COLUMN_X_GAP
+
+    a_ys = col_a.map { |f| f[:y].to_f }
+    b_ys = col_b.map { |f| f[:y].to_f }
+    a_top, a_bot = a_ys.min, a_ys.max
+    b_top, b_bot = b_ys.min, b_ys.max
+    overlap = [a_bot, b_bot].min - [a_top, b_top].max
+    return false if overlap <= 0
+
+    short_height = [a_bot - a_top, b_bot - b_top].min
+    short_height > 0 && (overlap / short_height) >= SISTER_COLUMN_Y_MIN_OVERLAP
+  end
+
+  # ── Line-item auto-mapping ───────────────────────────────────────────────────
+  # Turn numbered add-on / line-item labels into merge_field references so the
+  # Fill Form flow pulls values from the linked deal's line_items automatically.
+  # Only fires on labels that end in "<column> <N>" for the tight whitelist below.
+  # Everything else is left unmapped for the user's mapping-review step.
+  LINE_ITEM_DESCRIPTION_LABEL = /\A(?:add[\s\-_]?on|item|line|product|row)\s+(\d{1,2})\z/i
+  LINE_ITEM_AMOUNT_LABEL      = /\A(?:add[\s\-_]?on\s*cost|item\s*cost|line\s*total|amount|price|cost|total)\s+(\d{1,2})\z/i
+  LINE_ITEM_QTY_LABEL         = /\A(?:qty|quantity)\s+(\d{1,2})\z/i
+  LINE_ITEM_MAX_ROW           = 30
+
+  def apply_line_item_merge_fields!(fields)
+    return if fields.blank?
+
+    tagged = 0
+    fields.each do |f|
+      next if f[:merge_field].to_s.strip.present?
+      label = f[:label].to_s.strip
+      next if label.empty?
+
+      column, row = detect_line_item_column(label)
+      next unless column && row.between?(0, LINE_ITEM_MAX_ROW - 1)
+
+      f[:merge_field] = "deal.line_items[#{row}].#{column}"
+      f[:auto_fill]   = true
+      f[:group]       = 'line_items'
+      tagged += 1
+    end
+
+    Rails.logger.info "[SmartScan] Line-item auto-map tagged #{tagged} field(s)" if tagged > 0
+  end
+
+  # Returns [column_key, 0-based_row_index] or [nil, nil] when the label isn't
+  # a recognisable numbered line-item entry.
+  def detect_line_item_column(label)
+    # Order matters: amount / qty checks run BEFORE description so "Add-on Cost 5"
+    # doesn't get picked up as "Add-on 5" style description.
+    if (m = label.match(LINE_ITEM_AMOUNT_LABEL))
+      return ['amount', m[1].to_i - 1]
+    end
+    if (m = label.match(LINE_ITEM_QTY_LABEL))
+      return ['quantity', m[1].to_i - 1]
+    end
+    if (m = label.match(LINE_ITEM_DESCRIPTION_LABEL))
+      return ['description', m[1].to_i - 1]
+    end
+    [nil, nil]
+  end
+
+  # ── Generic single-value merge-field auto-mapping ───────────────────────────
+  # Turn well-known label patterns into their canonical merge_field so the
+  # user's mapping review starts with buyer / vehicle / pricing fields already
+  # wired to the deal, contact, and vehicle records. Only maps labels that
+  # match anchored patterns exactly — anything even slightly ambiguous is left
+  # unmapped for the user to assign.
+  #
+  # Ordered most-specific → least-specific because Ruby regex is greedy and we
+  # want "Cash Down Payment" to hit before generic "Down Payment" etc.
+  GENERIC_MERGE_MAP = [
+    # ── Buyer / contact identity ──────────────────────────────────────────
+    [/\A(?:buyers?|buyer\s*1|primary\s+buyer|purchaser|customer)\z/,      'contact.full_name'],
+    [/\A(?:buyer\s*2|co[\-\s]?buyer|second\s+purchaser)\z/,               'contact2.full_name'],
+    [/\A(?:cell(?:\s*phone)?|mobile(?:\s*phone)?)\z/,                     'contact.mobile_phone'],
+    [/\A(?:phone(?:\s*number)?|buyer\s+phone|home\s+phone)\z/,            'contact.phone'],
+    [/\A(?:email(?:\s+address)?)\z/,                                      'contact.email'],
+    [/\Adelivery\s+address\z/,                                            'contact.delivery_street'],
+    [/\A(?:mailing\s+address|street\s+address|address)\z/,                'contact.street'],
+    [/\Acity\z/,                                                          'contact.city'],
+    [/\Astate\z/,                                                         'contact.state'],
+    [/\A(?:zip(?:\s+code)?|postal\s+code)\z/,                             'contact.zip'],
+
+    # ── Vehicle / home identity ───────────────────────────────────────────
+    [/\Ayear\z/,                                                          'vehicle.year'],
+    [/\Amake\z/,                                                          'vehicle.make'],
+    [/\Amodel\z/,                                                         'vehicle.model'],
+    [/\A(?:serial\s+number|serial\s*no\.?)\z/,                            'vehicle.serial_number'],
+    [/\A(?:vin|v\.?i\.?n\.?)\z/,                                          'vehicle.vin'],
+    [/\A(?:bd\.?\s*rooms?|bedrooms?)\z/,                                  'vehicle.bedrooms'],
+    [/\A(?:baths?|bathrooms?)\z/,                                         'vehicle.bathrooms'],
+    [/\Aapprox\.?\s*(?:size|sq\.?\s*ft\.?|square\s+feet?)\z/,             'vehicle.square_feet'],
+    [/\A(?:home\s+color|exterior\s+color)\z/,                             'vehicle.exterior_color'],
+    [/\Ainterior\s+color\z/,                                              'vehicle.interior_color'],
+    [/\Astock\s*(?:number|no\.?|#)\z/,                                    'vehicle.stock_number'],
+    [/\A(?:length|\bl\z)\z/,                                              'vehicle.length'],
+    [/\A(?:width|\bw\z)\z/,                                               'vehicle.width'],
+
+    # ── Deal identity / owner ─────────────────────────────────────────────
+    [/\A(?:salesperson|sales\s+person|sales\s+rep(?:resentative)?)\z/,    'deal.owner_name'],
+    [/\A(?:deal\s*(?:#|number|no\.?)|deal\z)\z/,                          'deal.deal_number'],
+
+    # ── Pricing (most specific first) ─────────────────────────────────────
+    [/\A(?:retail\s+price|base\s+price|msrp)\z/,                          'vehicle.msrp'],
+    [/\A(?:factory\s+direct\s+savings?|dealer\s+discount)\z/,             'deal.dealer_discount'],
+    [/\Asales\s+event(?:\s+discount|\s+savings?)?\z/,                     'deal.sales_event_discount'],
+    [/\Amanager\s+discount\z/,                                            'deal.manager_discount'],
+    [/\Apreferred\s+payment(?:\s+discount)?\z/,                           'deal.preferred_payment_discount'],
+    [/\Amulti[\-\s]?unit\s+discount\z/,                                   'deal.multi_unit_discount'],
+    [/\Ayour\s+discounted\s+price\z/,                                     'deal.discounted_price'],
+    [/\Atotal\s+home\s+price\z/,                                          'deal.total_home_price'],
+    [/\A(?:total\s+amount\s+due|grand\s+total|total\s+due)\z/,            'deal.total_amount'],
+    [/\A(?:cash\s+down\s+payment|down\s+payment)\z/,                      'deal.down_payment'],
+    [/\Aadditional\s+payment\z/,                                          'deal.additional_payment'],
+    [/\A(?:trade[\-\s]?in\s+credit|trade[\-\s]?in\s+allowance|trade[\-\s]?in\s+value|trade[\-\s]?in)\z/, 'deal.trade_allowance'],
+    [/\Atrade[\-\s]?in\s+payoff\z/,                                       'deal.trade_payoff'],
+    [/\A(?:unpaid\s+balance(?:\s+of\s+cash\s+sale\s+price)?|balance\s+due)\z/, 'deal.unpaid_balance'],
+    [/\A(?:sales?\s+tax|tax(?:es)?(?:\s+amount)?)\z/,                     'deal.tax_amount'],
+    [/\A(?:selling\s+price|sale\s+price)\z/,                              'deal.selling_price'],
+
+    # ── Date & signing ─────────────────────────────────────────────────────
+    [/\A(?:date|contract\s+date|today[''`]?s?\s+date|current\s+date)\z/,  'date.today'],
+
+    # ── Signature roles (most specific first) ─────────────────────────────
+    [/\A(?:buyer\s*1|buyer|primary\s+buyer|purchaser)\s+initials?\z/,     'signer.role.buyer_1_initials'],
+    [/\A(?:buyer\s*2|co[\-\s]?buyer|second\s+purchaser)\s+initials?\z/,   'signer.role.buyer_2_initials'],
+    [/\A(?:buyer\s*1|buyer|primary\s+buyer|purchaser)\s+signature\z/,     'signer.role.buyer_1'],
+    [/\A(?:buyer\s*2|co[\-\s]?buyer|second\s+purchaser)\s+signature\z/,   'signer.role.buyer_2'],
+    [/\A(?:seller|dealer(?:\s+rep(?:resentative)?)?|representative)\s+signature\z/, 'signer.role.dealer_rep'],
+    [/\A(?:sales\s+manager|manager|approved\s+by|authorized\s+by)\s+signature\z/,   'signer.role.dealer_manager'],
+  ].freeze
+
+  def apply_generic_merge_fields!(fields)
+    return if fields.blank?
+
+    tagged = 0
+    fields.each do |f|
+      next if f[:merge_field].to_s.strip.present?
+      canonical = canonical_label(f[:label])
+      next if canonical.empty?
+
+      GENERIC_MERGE_MAP.each do |(pattern, key)|
+        next unless canonical.match?(pattern)
+        f[:merge_field] = key
+        f[:auto_fill]   = true
+        tagged += 1
+        break
+      end
+    end
+
+    Rails.logger.info "[SmartScan] Generic label auto-map tagged #{tagged} field(s)" if tagged > 0
+  end
+
+  # Canonicalise a label for pattern-matching:
+  #   • strip section-prefix disambiguation ("COSTS BREAKDOWN · Total" → "total")
+  #   • drop trailing colons, uppercase → lowercase, collapse whitespace
+  def canonical_label(label)
+    s = label.to_s.strip
+    s = s.split(/\s*[·|]\s*/).last if s.include?('·') || s.include?('|')
+    s = s.to_s.strip.sub(/[:;]\s*\z/, '').downcase.gsub(/\s+/, ' ')
+    s
+  end
+
+  # Extracts "<prefix> <number>" from a label. Returns nil when the label doesn't
+  # end with an integer suffix. Accepts optional "#" separator and stray spaces.
+  def parse_numbered_label(label)
+    m = label.to_s.strip.match(/\A(.+?)\s*#?\s*(\d+)\z/)
+    return nil unless m
+    prefix = m[1].strip
+    return nil if prefix.empty?
+    { prefix: prefix, number: m[2].to_i }
+  end
+
+  # Canonicalise a label prefix so hyphenation / whitespace / case differences
+  # don't split what is otherwise the same column ("Add-on Cost" ≡ "Add On Cost").
+  def canonical_prefix(prefix)
+    prefix.to_s.downcase.gsub(/[\s\-_]+/, ' ').strip
   end
 
   # ─── Response Parsing ─────────────────────────────────────────────────────────
@@ -2342,6 +2957,20 @@ class AgreementVisionScanService
 
     # Disambiguate duplicate custom field labels using section headers from OCR/text data
     mapped = disambiguate_custom_field_labels(mapped, text_map)
+
+    # Interpolate missing numbered rows (Add-on 2/6/11 gaps, etc.) + align
+    # sister columns so the description column doesn't run 5 rows shorter
+    # than the amount column. AcroForm PDFs regularly ship with holes in the
+    # widget-name series because the form designer left placeholder rows
+    # blank when re-authoring.
+    fill_numbered_table_gaps!(mapped)
+
+    # Auto-wire numbered line-item labels + single-value canonical labels to
+    # merge keys. AcroForm fields often carry PDF widget names ("cf_trade-in
+    # _credit") that mean nothing to Claude, but the printed label right next
+    # to them ("Trade-in Credit") is enough to map to deal.trade_allowance.
+    apply_line_item_merge_fields!(mapped)
+    apply_generic_merge_fields!(mapped)
 
     page_classifications = classify_pages(mapped, total_pages)
 

@@ -20,6 +20,15 @@ module Accounting
         return
       end
 
+      # Every GL line for this invoice must post to the invoice's own location.
+      # Falling back to Current.location_id would silently attribute revenue to
+      # whichever location the actor happens to have selected — wrong for reports.
+      location_id = @invoice.location_id
+      unless location_id.present?
+        Rails.logger.error("[Accounting] Cannot post invoice #{@invoice.id} — no location_id on invoice")
+        return
+      end
+
       ActiveRecord::Base.transaction do
         je = @company.journal_entries.build(
           entry_date: @invoice.invoice_date || @invoice.created_at.to_date,
@@ -39,7 +48,7 @@ module Accounting
             debit_amount: invoice_total,
             credit_amount: 0,
             memo: "Invoice #{@invoice.invoice_number}",
-            location_id: @invoice.try(:location_id) || Current.location_id,
+            location_id: location_id,
             contact_id: @invoice.try(:contact_id) || @invoice.try(:customer_id)
           )
         end
@@ -51,7 +60,7 @@ module Accounting
             debit_amount: 0,
             credit_amount: line_data[:amount],
             memo: line_data[:memo],
-            location_id: @invoice.try(:location_id) || Current.location_id,
+            location_id: location_id,
             department: line_data[:department],
             deal_id: line_data[:deal_id],
             vehicle_id: line_data[:vehicle_id],
@@ -59,13 +68,18 @@ module Accounting
           )
         end
 
-        if tax_amount.present? && tax_amount > 0 && tax_account
+        # Prefer per-TaxCode credit lines so state/county/city/etc post to
+        # their configured liability accounts. Falls back to a single lump
+        # credit to the default tax-payable account when the invoice has no
+        # snapshots (legacy tax_rate path or no TaxCodes configured).
+        tax_buckets = tax_credit_buckets(default_account: tax_account)
+        tax_buckets.each do |account, breakdown|
           je.journal_entry_lines.build(
-            chart_of_account: tax_account,
+            chart_of_account: account,
             debit_amount: 0,
-            credit_amount: tax_amount,
-            memo: "Sales tax — Invoice #{@invoice.invoice_number}",
-            location_id: @invoice.try(:location_id) || Current.location_id
+            credit_amount: breakdown[:amount],
+            memo: breakdown[:memo],
+            location_id: location_id
           )
         end
 
@@ -102,6 +116,46 @@ module Accounting
       else
         "Customer"
       end
+    end
+
+    # Groups tax credit lines by chart_of_account. When invoice line items
+    # have TaxCode snapshots, each snapshot's tax_code.chart_of_account_id
+    # decides the bucket; otherwise everything falls into a single bucket
+    # against the company's default sales-tax-payable account.
+    def tax_credit_buckets(default_account:)
+      snapshots = InvoiceItemTax.includes(:tax_code)
+                                .joins(:invoice_item)
+                                .where(invoice_items: { invoice_id: @invoice.id })
+
+      # No per-line snapshots — fall back to the invoice's aggregate tax_amount
+      # posted to the default liability account.
+      if snapshots.none?
+        tax_amount = @invoice.tax_amount || BigDecimal('0')
+        return {} unless tax_amount > 0 && default_account
+        return {
+          default_account => {
+            amount: tax_amount,
+            memo:   "Sales tax — Invoice #{@invoice.invoice_number}"
+          }
+        }
+      end
+
+      buckets = {}
+      snapshots.each do |snap|
+        account = snap.tax_code.chart_of_account || default_account
+        next unless account
+
+        buckets[account] ||= { amount: BigDecimal('0'), memo_parts: [] }
+        buckets[account][:amount] += snap.computed_amount
+        buckets[account][:memo_parts] << snap.tax_code.name
+      end
+
+      buckets.each_value do |b|
+        b[:memo] = "Sales tax (#{b[:memo_parts].uniq.first(3).join(', ')}) — Invoice #{@invoice.invoice_number}"
+        b.delete(:memo_parts)
+      end
+
+      buckets.reject { |_acct, b| b[:amount] <= 0 }
     end
 
     def build_revenue_lines

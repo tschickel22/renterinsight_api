@@ -287,16 +287,9 @@ class Quickbooks::Client
   end
 end
 
-class QuickbooksApiError < StandardError
-  attr_reader :status_code, :response_body
-  def initialize(msg, status_code = nil, response_body = nil)
-    super(msg)
-    @status_code   = status_code
-    @response_body = response_body
-  end
-end
-
-class QuickbooksAuthError < QuickbooksApiError; end
-class QuickbooksValidationError < QuickbooksApiError; end
-class QuickbooksRateLimitError < QuickbooksApiError; end
-class QuickbooksServerError < QuickbooksApiError; end
+# QuickbooksApiError, QuickbooksAuthError, QuickbooksValidationError,
+# QuickbooksRateLimitError, QuickbooksServerError moved to individual files
+# under app/services/ so Zeitwerk can auto-load them. This file used to
+# define them inline; that made them invisible to the autoloader and every
+# `rescue QuickbooksValidationError` blew up with an uninitialized-constant
+# NameError as soon as an actual QB error hit the rescue evaluation.

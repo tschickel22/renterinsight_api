@@ -43,7 +43,10 @@ class Invoice < ApplicationRecord
   belongs_to :sales_rep, class_name: 'User', optional: true
   
   has_many :invoice_items, dependent: :destroy
-  has_many :payments, as: :payable, dependent: :nullify
+  has_many :payment_applications, as: :applicable, dependent: :destroy
+  has_many :payments, through: :payment_applications
+  has_many :credit_memo_applications, as: :applicable, dependent: :destroy
+  has_many :credit_memos, through: :credit_memo_applications
   has_many :invoice_inventory_usages, dependent: :destroy
   
   accepts_nested_attributes_for :invoice_items, allow_destroy: true
@@ -52,8 +55,10 @@ class Invoice < ApplicationRecord
   before_validation :generate_payment_token, on: :create
   before_validation :generate_public_token, on: :create
   before_validation :set_default_status, on: :create
+  before_save :stringify_jsonb_keys
   before_save :calculate_totals
-  after_save :update_status_based_on_payments
+  after_save  :finalize_line_taxes_if_needed
+  after_save  :update_status_based_on_payments
   after_update :mark_inventory_as_used_on_payment, if: -> { saved_change_to_status? && status == 'paid' }
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
   after_commit :auto_post_to_accounting, on: [:create, :update], if: :should_auto_post_to_accounting?
@@ -118,28 +123,26 @@ class Invoice < ApplicationRecord
   scope :for_service_tickets, -> { where(source_type: 'ServiceTicket') }
   scope :for_warranty_claims, -> { where(source_type: 'WarrantyClaim') }
   
-  # Record a manual payment for this invoice
+  # Record a manual payment for this invoice. Creates a Payment plus a
+  # PaymentApplication tying it back — the application is what
+  # update_status_based_on_payments reads to compute amount_paid.
   def record_payment!(amount, payment_type = 'manual', metadata = {})
-    # Create payment record linked to this invoice
-    payment = company.payments.build(
-      payable_type: 'Invoice',      # CRITICAL: Links payment to invoice
-      payable_id: id,                # CRITICAL: Invoice ID
-      payer_type: 'Contact',
-      payer_id: contact_id,
-      amount: amount,
-      payment_type: 'one_time',      # FIXED: Use valid payment_type instead of 'manual'
-      payment_date: Date.current,    # FIXED: Use payment_date (not payment_at)
-      status: 'completed',           # Manual payments are immediately completed
-      gateway_name: payment_type,    # Keep 'manual' as gateway_name
-      location_id: location_id,
-      metadata: metadata.merge(recorded_by: Current.user&.id)  # FIXED: Use Current.user&.id instead of Current.user_id
-    )
-    
-    payment.save!
-    
-    # Trigger status update (which will call mark_inventory_as_used if status becomes 'paid')
-    update_status_based_on_payments
-    
+    Payment.transaction do
+      payment = company.payments.create!(
+        payer_type: 'Contact',
+        payer_id: contact_id,
+        amount: amount,
+        payment_type: 'one_time',
+        payment_date: Date.current,
+        status: 'completed',
+        gateway_name: payment_type,
+        location_id: location_id,
+        metadata: metadata.merge(recorded_by: Current.user&.id)
+      )
+
+      payment.apply_to!(self, amount: amount, created_by: Current.user)
+    end
+
     true
   rescue => e
     Rails.logger.error "[Invoice] Failed to record payment: #{e.message}"
@@ -277,24 +280,113 @@ class Invoice < ApplicationRecord
   def force_mark_inventory_as_used!(user)
     mark_inventory_as_used!(user)
   end
-  
+
+  # Rebuild every line item's tax snapshots against the company's active
+  # TaxCodes, then rewrite this invoice's tax_amount / total / amount_due
+  # from the fresh snapshots. Public so any caller editing line items
+  # outside of an invoice save can force a refresh (the invoice's own
+  # after_save calls this too, but only when TaxCodes exist).
+  def finalize_line_taxes!
+    return if is_deleted? || status == 'cancelled'
+
+    # Reload so items autosaved as part of the parent save are visible.
+    invoice_items.reload.each(&:recompute_taxes!)
+
+    new_tax   = invoice_items.reload.sum { |i| i.tax_amount }
+    new_tax   = new_tax.round(2)
+    new_total = (subtotal || 0) + new_tax
+    new_due   = new_total - (amount_paid || 0)
+    # update_columns skips callbacks so this doesn't re-enter after_save.
+    update_columns(tax_amount: new_tax, total: new_total, amount_due: new_due)
+  end
+
+  # Recomputes amount_paid / amount_credited / amount_due / status from the
+  # current set of payment applications AND credit memo applications. Called
+  # from Invoice's own after_save and from PaymentApplication / Payment /
+  # CreditMemoApplication callbacks — public so those callers can invoke it
+  # directly (touch does not fire after_save).
+  def update_status_based_on_payments
+    return if is_deleted? || status == 'cancelled'
+    return if new_record?
+
+    # Serialize concurrent payment / credit applications with a row-level
+    # lock so two writes can't both compute stale totals and race.
+    with_lock do
+      total_paid = payment_applications
+                   .joins(:payment)
+                   .where(payments: { status: 'completed' })
+                   .sum('payment_applications.amount')
+
+      total_credited = credit_memo_applications
+                       .joins(:credit_memo)
+                       .where(credit_memos: { status: %w[issued partial applied], is_deleted: [false, nil] })
+                       .sum('credit_memo_applications.amount')
+
+      reduction = total_paid + total_credited
+      calculated_amount_due = total - reduction
+
+      new_status = if reduction >= total && total > 0
+        'paid'
+      elsif reduction > 0 && reduction < total
+        'partial'
+      elsif overdue?
+        'overdue'
+      else
+        status
+      end
+
+      if new_status != status
+        # update! triggers callbacks (mark_inventory_as_used_on_payment fires
+        # when status transitions to 'paid'). Re-entry into this method from
+        # the resulting after_save is safe: status will match on re-read and
+        # the else-branch below writes the same values.
+        update!(
+          status: new_status,
+          paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
+          amount_paid: total_paid,
+          amount_credited: total_credited,
+          amount_due: new_status == 'paid' ? 0 : calculated_amount_due
+        )
+      else
+        update_columns(
+          amount_paid: total_paid,
+          amount_credited: total_credited,
+          amount_due: calculated_amount_due
+        )
+      end
+    end
+  end
+
   private
   
+  # Namespace for the advisory lock — arbitrary constant so different features
+  # can't collide on the (int, int) two-arg pg_advisory_xact_lock form.
+  INVOICE_NUMBER_LOCK_NAMESPACE = 0x1_2E_00_CE.freeze # 'INVC' ~-ish, just needs to be stable
+
   def generate_invoice_number
     return if invoice_number.present?
-    
-    # Use simple default prefix - can be customized later via company settings
+    return unless company_id
+
+    # Serialize invoice number generation per company. Advisory lock is
+    # scoped to the current transaction (Rails wraps save! in one) and
+    # released automatically on commit/rollback.
+    self.class.connection.execute(
+      self.class.sanitize_sql_array(['SELECT pg_advisory_xact_lock(?, ?)', INVOICE_NUMBER_LOCK_NAMESPACE, company_id])
+    )
+
     prefix = 'INV'
     last_invoice = company.invoices.order(created_at: :desc).first
-    
+
     if last_invoice&.invoice_number&.start_with?(prefix)
       last_number = last_invoice.invoice_number.gsub(/\D/, '').to_i
       next_number = last_number + 1
     else
       next_number = 1000
     end
-    
-    # Handle collisions - keep incrementing until we find an unused number
+
+    # Loop is defence-in-depth against numbers inserted via a path that
+    # bypasses this generator (e.g. raw SQL import). Under the advisory
+    # lock this normally exits on the first iteration.
     loop do
       candidate = "#{prefix}-#{next_number.to_s.rjust(6, '0')}"
       break self.invoice_number = candidate unless company.invoices.exists?(invoice_number: candidate)
@@ -314,7 +406,25 @@ class Invoice < ApplicationRecord
     self.status ||= 'draft'
   end
   
+  # JSONB columns must be stored with string keys — otherwise dig/[] lookups
+  # against string keys from JSON API payloads silently return nil.
+  def stringify_jsonb_keys
+    self.draw_schedule = draw_schedule.deep_stringify_keys if draw_schedule.is_a?(Hash)
+  end
+
+  # Only run the TaxCode-aware finalize when the company has actually adopted
+  # TaxCodes; otherwise leave calculate_totals' legacy tax_rate output alone
+  # so existing invoices keep balancing.
+  def finalize_line_taxes_if_needed
+    return unless company&.tax_codes&.active&.exists?
+    finalize_line_taxes!
+  end
+
   def calculate_totals
+    # Soft-deleted invoices shouldn't drift their totals if items change
+    # underneath them (e.g., a cascading destroy fires and re-saves).
+    return if is_deleted?
+
     self.subtotal = invoice_items.sum(&:amount)
     
     # Per-item tax: if any items have taxable flag set, use per-item calculation
@@ -333,45 +443,11 @@ class Invoice < ApplicationRecord
     self.amount_due = total - (amount_paid || 0)
   end
   
-  def update_status_based_on_payments
-    return if is_deleted? || status == 'cancelled'
-    
-    total_paid = payments.where(status: 'completed').sum(:amount)
-    calculated_amount_due = total - total_paid
-    
-    # Determine new status
-    new_status = if total_paid >= total && total > 0
-      'paid'
-    elsif total_paid > 0 && total_paid < total
-      'partial'
-    elsif overdue?
-      'overdue'
-    else
-      status # Keep current status if no payment logic applies
-    end
-    
-    # Only update if status would change (to avoid infinite loops)
-    if new_status != status
-      # Use update! instead of update_columns to trigger callbacks
-      # This will trigger mark_inventory_as_used_on_payment when status becomes 'paid'
-      update!(
-        status: new_status,
-        paid_at: (new_status == 'paid' ? (paid_at || Time.current) : paid_at),
-        amount_paid: total_paid,
-        amount_due: new_status == 'paid' ? 0 : calculated_amount_due
-      )
-    else
-      # Just update amounts without changing status
-      update_columns(
-        amount_paid: total_paid,
-        amount_due: calculated_amount_due
-      )
-    end
-  end
-  
   def mark_inventory_as_used_on_payment
-    # Find the user who recorded the payment
-    last_payment = payments.where(status: 'completed').order(created_at: :desc).first
+    # Find the user who recorded the payment. Explicit table on the order —
+    # `payments` is a through-association, so `created_at` is ambiguous
+    # between payments and payment_applications otherwise.
+    last_payment = payments.where(status: 'completed').order('payments.created_at DESC').first
     
     # Try to get user from metadata first (manual payments store this)
     user_id = last_payment&.metadata&.dig('recorded_by') if last_payment&.metadata.is_a?(Hash)

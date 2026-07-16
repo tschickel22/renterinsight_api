@@ -986,7 +986,9 @@ class Deal < ApplicationRecord
   end
 
   def emit_workflow_updated
-    WorkflowEngine.emit('deal.updated', self, { id: id, changes: saved_changes.keys })
+    changes = saved_changes.keys
+    return if changes.blank?
+    WorkflowEngine.emit('deal.updated', self, { id: id, changes: changes })
   end
 
   def emit_workflow_deleted

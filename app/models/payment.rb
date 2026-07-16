@@ -46,7 +46,14 @@ class Payment < ApplicationRecord
   belongs_to :loan, optional: true
   belongs_to :payment_method, optional: true
   belongs_to :payer, polymorphic: true, optional: true
+  # `payable` (polymorphic) is legacy — retained for the loan portal path
+  # which still passes it, but new invoice-side flows go through
+  # payment_applications and leave these columns nil.
   belongs_to :payable, polymorphic: true, optional: true
+  # Per-payment bank account override — top rung of the posting waterfall
+  # in Accounting::PaymentPostingService#resolve_bank_account.
+  belongs_to :bank_account, optional: true
+  has_many   :payment_applications, dependent: :destroy
   
   # Validations
   validates :company_id, presence: true
@@ -80,9 +87,10 @@ class Payment < ApplicationRecord
   before_validation :generate_payment_number, on: :create
   before_validation :calculate_total_charged
   before_validation :set_payment_date, if: -> { payment_date.nil? && status == 'completed' }
+  before_save :stringify_metadata_keys
   after_initialize :set_defaults, if: :new_record?
   after_commit :update_loan_after_completion, if: -> { saved_change_to_status? && status == 'completed' && !try(:skip_loan_processing?) }
-  after_commit :update_invoice_after_completion, if: -> { saved_change_to_status? && status == 'completed' && payable_type == 'Invoice' }
+  after_commit :notify_applicables_of_status_change, if: :saved_change_to_status?
   after_commit :fire_lifecycle_webhooks, if: :saved_change_to_status?
   after_commit :auto_post_to_accounting, if: -> { saved_change_to_status? && status == 'completed' }
   after_commit :auto_post_refund_to_accounting, if: -> { saved_change_to_status? && status == 'refunded' }
@@ -224,6 +232,33 @@ class Payment < ApplicationRecord
     update!(status: 'cancelled')
   end
   
+  # How much of this payment has been applied to targets (invoices, etc).
+  def applied_amount
+    payment_applications.sum(:amount)
+  end
+
+  # Leftover payment that hasn't been assigned to any invoice — surface this
+  # in the UI as unapplied credit.
+  def unapplied_amount
+    (amount || 0) - applied_amount
+  end
+
+  def fully_applied?
+    applied_amount >= (amount || 0)
+  end
+
+  # Convenience: create an application against a target with an amount that
+  # defaults to whatever's still unapplied on the payment.
+  def apply_to!(target, amount: nil, applied_at: Time.current, created_by: nil)
+    payment_applications.create!(
+      company_id: company_id,
+      applicable: target,
+      amount: amount || unapplied_amount,
+      applied_at: applied_at,
+      created_by: created_by
+    )
+  end
+
   # Payment breakdown for display
   def breakdown
     {
@@ -266,6 +301,13 @@ class Payment < ApplicationRecord
   
   private
   
+  # Metadata JSONB must be stored with string keys — Invoice#record_payment!
+  # and other callers pass symbol keys via Ruby literal hashes, which then
+  # break dedup checks and frontend parsing that assumes strings.
+  def stringify_metadata_keys
+    self.metadata = metadata.deep_stringify_keys if metadata.is_a?(Hash)
+  end
+
   def set_defaults
     self.status ||= 'pending'
     self.payment_type ||= 'one_time'
@@ -307,15 +349,16 @@ class Payment < ApplicationRecord
     loan.process_payment!(self)
   end
   
-  def update_invoice_after_completion
-    return unless payable_type == 'Invoice' && payable.present?
-    
-    # Trigger invoice's after_save callback by touching the record
-    # This will run update_status_based_on_payments which:
-    # 1. Calculates total paid from all completed payments
-    # 2. Updates status to 'paid' if total_paid >= total
-    # 3. Triggers mark_inventory_as_used! if status becomes 'paid'
-    payable.touch
+  # Notify every target this payment applies to that the payment's status
+  # changed, so their amount_paid / status recomputes off the current set of
+  # applications joined with completed payments.
+  def notify_applicables_of_status_change
+    payment_applications.includes(:applicable).each do |app|
+      next unless app.applicable.respond_to?(:update_status_based_on_payments)
+      app.applicable.update_status_based_on_payments
+    end
+  rescue ActiveRecord::RecordNotFound
+    # Applicable was destroyed in the same transaction.
   end
 
   # Fire custom lifecycle webhook events on status transitions

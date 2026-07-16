@@ -9,12 +9,15 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   end
   
   def get_all_syncable_records
-    # Get invoices from company or location
-    scope = company.invoices.where(is_deleted: [false, nil])
-    
-    # Filter by location if needed
+    # QB rejects invoices without line items, so skip empty ones locally.
+    # We also skip zero-total drafts — those are our own scaffolding and
+    # aren't meaningful in QB.
+    scope = company.invoices
+                   .where(is_deleted: [false, nil])
+                   .where('EXISTS (SELECT 1 FROM invoice_items WHERE invoice_items.invoice_id = invoices.id)')
+
     scope = scope.where(location_id: location.id) if location.present?
-    
+
     scope
   end
   
@@ -30,9 +33,8 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
   def transform_to_quickbooks(invoice, config)
     # Get or sync customer first
     customer_ref = get_customer_ref(invoice)
-    
-    # Map invoice to QuickBooks Invoice format
-    {
+
+    payload = {
       CustomerRef: customer_ref,
       TxnDate: invoice.invoice_date&.iso8601 || Date.today.iso8601,
       DueDate: invoice.due_date&.iso8601,
@@ -40,17 +42,37 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       PrivateNote: invoice.notes,
       Line: build_line_items(invoice),
       BillEmail: invoice.contact&.email ? { Address: invoice.contact.email } : nil,
-      SalesTermRef: config[:default_terms] ? { value: config[:default_terms] } : nil,
-      # Custom fields
-      CustomField: [
+      # Only include SalesTermRef when a default is actually configured;
+      # sending it with a nil/blank value made QB fall back to "Due on
+      # Receipt", marking every invoice past-due at creation.
+      SalesTermRef: (config[:default_terms].presence ? { value: config[:default_terms] } : nil),
+      # Custom fields — DefinitionId 1 is a per-QB-company setting. Only
+      # include if the connected QB realm has actually defined it, else QB
+      # silently ignores it (or complains on stricter API versions).
+      CustomField: (@api.custom_field_defined?('Invoice', '1') ? [
         {
           DefinitionId: '1',
           Name: 'Invoice ID',
           Type: 'StringType',
           StringValue: invoice.id.to_s
         }
-      ].compact
-    }.compact
+      ] : nil)
+    }
+
+    # Attach TxnTaxDetail when this invoice's line items have TaxCode-driven
+    # snapshots (i.e., the tenant has adopted our TaxCode model). Otherwise
+    # let QB compute tax from Item defaults as before.
+    tax_detail = build_txn_tax_detail(invoice)
+    payload[:TxnTaxDetail] = tax_detail if tax_detail
+
+    # For updates, include Id + SyncToken — QB rejects updates that don't
+    # echo the current SyncToken back.
+    if invoice.quickbooks_id.present?
+      payload[:Id] = invoice.quickbooks_id
+      payload[:SyncToken] = fetch_sync_token!('invoice', 'Invoice', invoice.quickbooks_id)
+    end
+
+    payload.compact
   end
   
   def find_by_quickbooks_id(qb_id)
@@ -79,10 +101,14 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     customer_id = qb_invoice.dig('CustomerRef', 'value')
     contact = find_or_create_contact_from_qb(customer_id)
     
-    # Resolve location: prefer the handler's scoped location; otherwise fall back
-    # to the company's first active location. Invoice validation now requires
-    # location_id, so company-scoped syncs must still produce a valid row.
+    # Resolve location in priority order:
+    #   1. Handler's own scope (sync was triggered against a Location entity)
+    #   2. Current.location_id — the location the user has selected in the UI
+    #      when they hit "Sync". Without this every import lands on the
+    #      company's first active location regardless of who triggered it.
+    #   3. First active location (last-resort so Invoice validation passes)
     resolved_location_id = location&.id ||
+      (Current.location_filtered? ? Current.location_id : nil) ||
       company.locations.where(active: true, is_deleted: [false, nil]).order(:id).first&.id
 
     # Create invoice with basic info first (without financial totals to avoid callback issues)
@@ -99,28 +125,31 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
       quickbooks_synced_at: Time.current
     }
     
-    invoice = company.invoices.create!(invoice_data)
-    
-    # Create line items first
-    create_line_items_from_qb(invoice, qb_invoice)
-    
-    # Now update financial totals using update_columns to skip callbacks
-    total_amt = qb_invoice['TotalAmt'].to_f
-    tax_amt = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
-    subtotal_amt = total_amt - tax_amt
-    balance_amt = qb_invoice['Balance'].to_f
-    paid_amt = total_amt - balance_amt
-    
-    invoice.update_columns(
-      subtotal: subtotal_amt,
-      tax_amount: tax_amt,
-      tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
-      total: total_amt,
-      amount_paid: paid_amt,
-      amount_due: balance_amt,
-      updated_at: invoice.updated_at  # Prevent circular sync
-    )
-    
+    # Wrap create + line-item build + totals in one transaction: if any line
+    # item fails validation, the whole invoice rolls back rather than leaving
+    # a "successfully synced" invoice with missing/partial lines.
+    invoice = Invoice.transaction do
+      inv = company.invoices.create!(invoice_data)
+      create_line_items_from_qb(inv, qb_invoice)
+
+      total_amt    = qb_invoice['TotalAmt'].to_f
+      tax_amt      = qb_invoice['TxnTaxDetail']&.dig('TotalTax').to_f || 0
+      subtotal_amt = total_amt - tax_amt
+      balance_amt  = qb_invoice['Balance'].to_f
+      paid_amt     = total_amt - balance_amt
+
+      inv.update_columns(
+        subtotal: subtotal_amt,
+        tax_amount: tax_amt,
+        tax_rate: subtotal_amt > 0 ? (tax_amt / subtotal_amt * 100).round(2) : 0,
+        total: total_amt,
+        amount_paid: paid_amt,
+        amount_due: balance_amt,
+        updated_at: inv.updated_at  # Prevent circular sync
+      )
+      inv
+    end
+
     invoice
   end
   
@@ -184,6 +213,40 @@ class QuickbooksInvoiceSyncHandler < QuickbooksSyncHandler
     end
   end
   
+  # Build a QB TxnTaxDetail block from our InvoiceItemTax snapshots. Each
+  # unique tax_code becomes one TaxLine with TaxRateRef.value = the QB
+  # TaxCode/TaxRate id (stored on tax_codes.qbo_tax_code_id). Returns nil
+  # when the invoice has no snapshots — in that case we let QB compute tax
+  # from Item defaults, preserving pre-TaxCode invoice behavior.
+  def build_txn_tax_detail(invoice)
+    snapshots = InvoiceItemTax.includes(:tax_code)
+                              .joins(:invoice_item)
+                              .where(invoice_items: { invoice_id: invoice.id })
+    return nil if snapshots.none?
+
+    per_code = snapshots.group_by(&:tax_code)
+    tax_lines = per_code.map do |code, rows|
+      next nil unless code # snapshot with a deleted tax_code — skip
+      {
+        Amount: rows.sum(&:computed_amount).round(2),
+        DetailType: 'TaxLineDetail',
+        TaxLineDetail: {
+          TaxRateRef: code.qbo_tax_code_id.present? ? { value: code.qbo_tax_code_id } : nil,
+          PercentBased: true,
+          TaxPercent: code.rate,
+          NetAmountTaxable: rows.sum(&:taxable_base).round(2)
+        }.compact
+      }
+    end.compact
+
+    return nil if tax_lines.empty?
+
+    {
+      TotalTax: snapshots.sum(&:computed_amount).round(2),
+      TaxLine: tax_lines
+    }
+  end
+
   def build_line_items(invoice)
     lines = []
     

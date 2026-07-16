@@ -687,7 +687,7 @@ module Api
         end
         
         # Load generated invoices for this ticket
-        invoices = Invoice.where(source_type: 'ServiceTicket', source_id: ticket.id)
+        invoices = @company.invoices.where(source_type: 'ServiceTicket', source_id: ticket.id)
         data[:customerInvoice] = invoices.find { |i| i.billing_category == 'customer' }&.then do |inv|
           serialize_invoice(inv)
         end

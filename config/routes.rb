@@ -348,6 +348,16 @@ Rails.application.routes.draw do
         post   'labels/reset',   action: :reset
         delete 'labels/:key',    action: :destroy
       end
+
+      # Field-level tooltip overrides (system + custom fields). Same shape as
+      # labels — see Api::V1::FieldTooltipsController.
+      scope path: 'company', controller: 'field_tooltips' do
+        get    'field-tooltips',                          action: :index
+        put    'field-tooltips',                          action: :update
+        patch  'field-tooltips',                          action: :update
+        post   'field-tooltips/reset',                    action: :reset
+        delete 'field-tooltips/:module/:field_key',       action: :destroy, constraints: { module: /[^\/]+/, field_key: /[^\/]+/ }
+      end
       
       # ==================== NOTIFICATIONS ====================
       resources :notifications, only: [:index, :show, :destroy] do
@@ -2332,9 +2342,16 @@ Rails.application.routes.draw do
         end
 
         # Nested resources
-        
-        # Activities
-        resources :activities, only: %i[index create update destroy]
+
+        # Activities — aliased to LeadActivitiesController so
+        # /api/crm/leads/:lead_id/activities/:id follows the same convention as
+        # accounts/contacts (which point at their own *_activities controllers).
+        # The previous declaration omitted `controller:` and defaulted to
+        # Api::Crm::ActivitiesController, which is aggregation-only and has no
+        # RESTful actions — every DELETE/POST/PATCH under this route 404'd with
+        # AbstractController::ActionNotFound. Broke Task Center bulk-delete for
+        # every lead-activity row (staging 291-row runaway couldn't be cleared).
+        resources :activities, controller: 'lead_activities', only: %i[index create update destroy]
 
         # Communications
         resources :communications, only: %i[index create] do

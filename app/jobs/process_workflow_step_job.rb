@@ -44,7 +44,17 @@ class ProcessWorkflowStepJob < ApplicationJob
     executor_class_name = EXECUTOR_MAP[node['type'].to_s] || "WorkflowEngine::StepExecutors::#{node['type'].to_s.camelize}"
     executor_class = executor_class_name.constantize
     t0 = Time.current
-    result = executor_class.new(run: run, step: node).call
+    # Suppress downstream workflow event emissions caused by this step's own
+    # writes, so a rule can't loop by observing its own side effect (e.g.
+    # create_activity → touches lead.last_activity_at → re-triggers
+    # lead.updated → creates another activity → ...).
+    prev_suppress = Current.suppress_workflow_events
+    Current.suppress_workflow_events = true
+    begin
+      result = executor_class.new(run: run, step: node).call
+    ensure
+      Current.suppress_workflow_events = prev_suppress
+    end
     duration = ((Time.current - t0) * 1000).to_i
 
     run.record_step(

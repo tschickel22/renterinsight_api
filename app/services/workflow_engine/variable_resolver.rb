@@ -30,17 +30,41 @@ module WorkflowEngine
 
       parts = path.split('.')
       current = variables
-      parts.each do |part|
-        return nil if current.nil?
-        current = if current.is_a?(Hash)
-                    current[part] || current[part.to_sym]
-                  elsif current.respond_to?(part)
-                    current.public_send(part)
-                  else
-                    nil
-                  end
+      value = nil
+      parts.each_with_index do |part, i|
+        return log_unresolved(path, i, parts) if current.nil?
+        current = step_into(current, part)
+        value = current
       end
-      current
+      value
+    end
+
+    # One step of the walk. Falls through to `custom_field_values` when the
+    # segment isn't a real AR attribute — so `{{entity.next_appointment}}` in a
+    # send_email template resolves to the custom-field value instead of ''.
+    def step_into(current, part)
+      if current.is_a?(Hash)
+        current[part] || current[part.to_sym]
+      elsif current.respond_to?(part) && !attribute_missing?(current, part)
+        current.public_send(part)
+      elsif current.respond_to?(:custom_field_values)
+        CustomFieldsAccess.read(current, part)
+      end
+    end
+
+    def attribute_missing?(record, name)
+      return false unless record.class.respond_to?(:column_names)
+      !record.class.column_names.include?(name.to_s) &&
+        !record.class.instance_methods(false).include?(name.to_sym)
+    end
+
+    # Emit a single-line warning when a template references a path that doesn't
+    # exist in the variables hash. Silent nil→'' collapse was masking every
+    # typo in workflow templates; the warning gives builders a breadcrumb
+    # without changing the runtime behaviour (returns nil as before).
+    def log_unresolved(path, index, parts)
+      Rails.logger.warn "[VariableResolver] path '#{path}' unresolved at segment '#{parts[index]}' (index #{index})" if defined?(Rails)
+      nil
     end
   end
 end

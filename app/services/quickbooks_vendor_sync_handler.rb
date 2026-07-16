@@ -9,78 +9,103 @@ class QuickbooksVendorSyncHandler < QuickbooksSyncHandler
   end
   
   def get_all_syncable_records
-    # Get vendors from company or location if table exists
-    return [] unless defined?(Vendor)
-    
     scope = company.vendors.where(is_deleted: [false, nil])
     scope = scope.where(location_id: location.id) if location.present?
     scope
   end
-  
+
   def get_records_by_ids(ids)
-    return [] unless defined?(Vendor)
     company.vendors.where(id: ids)
   end
-  
+
+  def get_records_by_quickbooks_ids(qb_ids)
+    company.vendors.where(quickbooks_id: qb_ids)
+  end
+
   def transform_to_quickbooks(vendor, config)
-    {
-      DisplayName: vendor.name || "#{vendor.first_name} #{vendor.last_name}",
-      CompanyName: vendor.company_name,
-      GivenName: vendor.first_name,
-      FamilyName: vendor.last_name,
+    # Vendor doesn't have first_name / last_name / company_name — it stores
+    # a single display name and an optional contact_name for a human within
+    # the vendor org. Send DisplayName as the vendor name and CompanyName
+    # as the same (QB requires DisplayName to be unique across all name
+    # lists; CompanyName is display-only).
+    display = vendor.name.presence || "Vendor #{vendor.id}"
+
+    payload = {
+      DisplayName: display,
+      CompanyName: display,
       PrimaryPhone: vendor.phone ? { FreeFormNumber: vendor.phone } : nil,
       PrimaryEmailAddr: vendor.email ? { Address: vendor.email } : nil,
       BillAddr: format_address(vendor),
       Active: vendor.status != 'inactive'
-    }.compact
+    }
+
+    # For updates, echo current SyncToken back — QB rejects updates without it.
+    if vendor.quickbooks_id.present?
+      payload[:Id] = vendor.quickbooks_id
+      payload[:SyncToken] = fetch_sync_token!('vendor', 'Vendor', vendor.quickbooks_id)
+    end
+
+    payload.compact
   end
-  
+
   def find_by_quickbooks_id(qb_id)
-    return nil unless defined?(Vendor)
     company.vendors.find_by(quickbooks_id: qb_id)
   end
-  
+
   def create_from_quickbooks(qb_vendor, config)
-    return nil unless defined?(Vendor)
-    
-    vendor_data = {
-      company_id: company.id,
-      location_id: location&.id,
+    company.vendors.create!(
       quickbooks_id: qb_vendor['Id'],
-      name: qb_vendor['DisplayName'],
-      company_name: qb_vendor['CompanyName'],
-      first_name: qb_vendor['GivenName'],
-      last_name: qb_vendor['FamilyName'],
+      name:  qb_vendor['DisplayName'] || qb_vendor['CompanyName'] || "QB Vendor #{qb_vendor['Id']}",
       email: qb_vendor.dig('PrimaryEmailAddr', 'Address'),
       phone: qb_vendor.dig('PrimaryPhone', 'FreeFormNumber'),
       status: qb_vendor['Active'] ? 'active' : 'inactive',
-      quickbooks_synced_at: Time.current
-    }
-    
-    company.vendors.create!(vendor_data)
-  end
-  
-  def update_from_quickbooks(vendor, qb_vendor, config)
-    vendor.update!(
-      name: qb_vendor['DisplayName'],
-      company_name: qb_vendor['CompanyName'],
-      email: qb_vendor.dig('PrimaryEmailAddr', 'Address'),
-      phone: qb_vendor.dig('PrimaryPhone', 'FreeFormNumber'),
-      status: qb_vendor['Active'] ? 'active' : 'inactive',
+      # QB doesn't distinguish "supplier vs contractor" — that's our
+      # taxonomy. Land on the neutral 'other' bucket so the QB import
+      # doesn't hide inside a filter tab the user isn't looking at.
+      # Users can re-categorize per-vendor as needed.
+      vendor_type: infer_vendor_type(qb_vendor),
+      address_line1: qb_vendor.dig('BillAddr', 'Line1'),
+      city:          qb_vendor.dig('BillAddr', 'City'),
+      state:         qb_vendor.dig('BillAddr', 'CountrySubDivisionCode'),
+      zip_code:      qb_vendor.dig('BillAddr', 'PostalCode'),
+      country:       qb_vendor.dig('BillAddr', 'Country') || 'US',
       quickbooks_synced_at: Time.current
     )
   end
-  
+
+  def update_from_quickbooks(vendor, qb_vendor, config)
+    vendor.update!(
+      name:  qb_vendor['DisplayName'] || vendor.name,
+      email: qb_vendor.dig('PrimaryEmailAddr', 'Address'),
+      phone: qb_vendor.dig('PrimaryPhone', 'FreeFormNumber'),
+      status: qb_vendor['Active'] ? 'active' : 'inactive',
+      address_line1: qb_vendor.dig('BillAddr', 'Line1'),
+      city:          qb_vendor.dig('BillAddr', 'City'),
+      state:         qb_vendor.dig('BillAddr', 'CountrySubDivisionCode'),
+      zip_code:      qb_vendor.dig('BillAddr', 'PostalCode'),
+      country:       qb_vendor.dig('BillAddr', 'Country') || vendor.country,
+      quickbooks_synced_at: Time.current
+    )
+  end
+
   private
-  
+
+  # QB doesn't have supplier/contractor as first-class fields. Best signal
+  # available is Vendor1099 (US 1099 eligibility, typical for contractors)
+  # or nothing at all — fall back to 'other' so the vendor isn't hidden by
+  # a supplier-only or contractor-only view.
+  def infer_vendor_type(qb_vendor)
+    qb_vendor['Vendor1099'] ? 'contractor' : 'other'
+  end
+
   def format_address(vendor)
-    return nil if vendor.street.blank? && vendor.city.blank?
-    
+    return nil if vendor.address_line1.blank? && vendor.city.blank?
+
     {
-      Line1: vendor.street,
+      Line1: vendor.address_line1,
       City: vendor.city,
       CountrySubDivisionCode: vendor.state,
-      PostalCode: vendor.zip,
+      PostalCode: vendor.zip_code,
       Country: vendor.country || 'USA'
     }.compact
   end

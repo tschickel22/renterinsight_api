@@ -16,10 +16,16 @@ module WorkflowEngine
           v.is_a?(String) ? resolve_variables(v) : v
         end
 
-        Rails.logger.info "[UpdateField] run=#{@run.id} step=#{@step['id']} updating=#{resolved.keys}"
+        # Split into real AR attributes vs custom_field_values so a rule that
+        # sets `next_appointment` on a Lead (a custom field on Evangeline) doesn't
+        # crash with `unknown attribute 'next_appointment' for Lead`.
+        partitioned = CustomFieldsAccess.partition(@run.entity, resolved)
+
+        Rails.logger.info "[UpdateField] run=#{@run.id} step=#{@step['id']} real=#{partitioned[:real].keys} custom=#{partitioned[:custom].keys}"
 
         begin
-          @run.entity.update!(resolved)
+          @run.entity.update!(partitioned[:real]) if partitioned[:real].any?
+          CustomFieldsAccess.write(@run.entity, partitioned[:custom]) if partitioned[:custom].any?
         rescue => e
           Rails.logger.error "[UpdateField] failed: #{e.message}"
           return { status: 'failed', output: {}, next_step_id: nil, wait: nil, error: { message: e.message } }

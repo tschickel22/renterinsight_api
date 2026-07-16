@@ -49,7 +49,12 @@ class CashReceipt < ApplicationRecord
       invoice = app.invoice
       next unless invoice
 
-      total_paid_from_payments = invoice.payments.where.not(status: 'voided').sum(:amount) rescue 0
+      # Sum applied amounts (not payment totals) so a payment split across
+      # multiple invoices only credits each invoice with its own share.
+      total_paid_from_payments = invoice.payment_applications
+        .joins(:payment)
+        .where.not(payments: { status: 'voided' })
+        .sum(:amount) rescue 0
       total_paid_from_receipts = CashReceiptApplication
         .joins(:cash_receipt)
         .where(invoice_id: invoice.id)

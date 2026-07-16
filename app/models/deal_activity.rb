@@ -1,5 +1,7 @@
 class DealActivity < ApplicationRecord
   include ActivityTrackable
+  include EmitsWorkflowActivityEvents
+  workflow_parent :deal
 
   belongs_to :deal
   belongs_to :user, optional: true # creator

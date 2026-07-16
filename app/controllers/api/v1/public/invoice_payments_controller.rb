@@ -138,11 +138,13 @@ class Api::V1::Public::InvoicePaymentsController < ApplicationController
       company: @invoice.company,
       location: @invoice.location,
       payer: @invoice.contact,
-      payable: @invoice,
       amount: amount,
       payment_method: payment_method,
       status: 'processing'
     )
+    # Application ties the payment to this invoice so it counts toward the
+    # invoice's amount_paid once the payment lands in 'completed'.
+    payment.apply_to!(@invoice, amount: amount)
     
     begin
       # Attempt to capture payment
@@ -157,8 +159,13 @@ class Api::V1::Public::InvoicePaymentsController < ApplicationController
         # Update invoice status to paid if fully paid
         @invoice.reload
         
-        # Calculate total paid directly from database to avoid cache issues
-        total_paid = @invoice.payments.where(status: 'completed').sum(:amount)
+        # Calculate total paid directly from database to avoid cache issues.
+        # Sum application amounts, not payment totals — splits credit each
+        # invoice only for its share.
+        total_paid = @invoice.payment_applications
+          .joins(:payment)
+          .where(payments: { status: 'completed' })
+          .sum(:amount)
         
         if total_paid >= @invoice.total
           @invoice.update!(status: 'paid', paid_at: Time.current)
