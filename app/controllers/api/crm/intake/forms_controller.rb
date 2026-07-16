@@ -245,7 +245,13 @@ module Api
             p[:location_id] = nil if p[:location_id].is_a?(String) && p[:location_id].strip.empty?
 
             # Accept camelCase captchaRequired from the FE, coerce to boolean.
-            if p.key?(:captchaRequired)
+            # When BOTH keys arrive (the FE spreads formData AND explicitly
+            # writes snake_case), the snake_case value is authoritative — the
+            # camelCase copy is usually a stale echo of what came back from
+            # as_json. Prefer snake_case; drop the camelCase duplicate.
+            if p.key?(:captcha_required)
+              p.delete(:captchaRequired)
+            elsif p.key?(:captchaRequired)
               p[:captcha_required] = p.delete(:captchaRequired)
             end
             if p.key?(:captcha_required)
@@ -288,7 +294,9 @@ module Api
           ).tap do |p|
             p[:source_id] = hash[:sourceId] if hash[:sourceId].present? && p[:source_id].blank?
             p[:is_active] = hash[:isActive] if hash.key?(:isActive) && !hash.key?(:is_active)
-            if p.key?(:captchaRequired)
+            if p.key?(:captcha_required)
+              p.delete(:captchaRequired)
+            elsif p.key?(:captchaRequired)
               p[:captcha_required] = p.delete(:captchaRequired)
             end
             if p.key?(:captcha_required)
