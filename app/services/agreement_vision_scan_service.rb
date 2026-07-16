@@ -2958,6 +2958,13 @@ class AgreementVisionScanService
     # Disambiguate duplicate custom field labels using section headers from OCR/text data
     mapped = disambiguate_custom_field_labels(mapped, text_map)
 
+    # Interpolate missing numbered rows (Add-on 2/6/11 gaps, etc.) + align
+    # sister columns so the description column doesn't run 5 rows shorter
+    # than the amount column. AcroForm PDFs regularly ship with holes in the
+    # widget-name series because the form designer left placeholder rows
+    # blank when re-authoring.
+    fill_numbered_table_gaps!(mapped)
+
     # Auto-wire numbered line-item labels + single-value canonical labels to
     # merge keys. AcroForm fields often carry PDF widget names ("cf_trade-in
     # _credit") that mean nothing to Claude, but the printed label right next
