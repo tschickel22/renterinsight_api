@@ -358,8 +358,11 @@ module Webhooks
       base_body    = "DMS Reply from #{from_number} (#{entity_label}): #{body}"
 
       if reply_token.present?
-        app_base     = ENV.fetch('FRONTEND_URL', 'https://staging-dms.renterinsight.com')
-        reply_url    = "#{app_base}/reply/#{reply_token}"
+        # Prefer brand kernel so the reply link tracks whatever Platform
+        # Admin → General → App URL is set to. ENV['FRONTEND_URL'] still
+        # wins if the kernel is missing; last-resort fallback is local dev.
+        app_base     = Brand.current.app_url.presence || ENV['FRONTEND_URL'].presence || 'https://localhost:5173'
+        reply_url    = "#{app_base.chomp('/')}/reply/#{reply_token}"
         forward_body = "#{base_body}\nReply here: #{reply_url}"
       else
         forward_body = base_body
