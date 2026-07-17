@@ -5,7 +5,7 @@
   elsif @company.present?
     @company.name
   else
-    'RenterInsight'
+    brand.name
   end
 %>
 <%= display_name %> Notification
@@ -34,7 +34,7 @@ ACTION REQUIRED:
 
 --------------------------------------------------------------------------------
 
-You received this notification because you are registered in <%= @company&.name || 'RenterInsight' %>.
+You received this notification because you are registered in <%= @company&.name || brand.name %>.
 
 <% if @location.present? %>
 <%= @location.name %>
@@ -51,4 +51,4 @@ You received this notification because you are registered in <%= @company&.name 
 View all notifications: <%= frontend_url %>/notifications
 Manage preferences: <%= frontend_url %>/account/settings?tab=notifications
 
-© <%= Time.current.year %> <%= @company&.name || 'RenterInsight' %>. All rights reserved.
+© <%= Time.current.year %> <%= @company&.name || brand.name %>. All rights reserved.

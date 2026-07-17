@@ -1,0 +1,107 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+RSpec.describe Brand, type: :model do
+  before do
+    Setting.where(scope_type: 'Platform', scope_id: 0).destroy_all
+  end
+
+  describe '.current with defaults only' do
+    it 'exposes the ENV-fallback kernel from PlatformSetting.general' do
+      brand = Brand.current
+
+      expect(brand.name).to eq('RenterInsight')
+      expect(brand.support_email).to eq('support@renterinsight.com')
+      expect(brand.from_email).to eq('noreply@renterinsight.com')
+      expect(brand.from_name).to eq('RenterInsight')
+      expect(brand.website_url).to eq('https://renterinsight.com')
+      expect(brand.privacy_url).to eq('https://www.renterinsight.com/privacy-policy/')
+      expect(brand.terms_url).to eq('https://www.renterinsight.com/terms-of-use/')
+      expect(brand.subdomain_root).to eq('renterinsight.com')
+    end
+
+    it 'falls back short_name to name when not set' do
+      expect(Brand.current.short_name).to eq('RenterInsight')
+    end
+  end
+
+  describe '.current with persisted platform overrides' do
+    before do
+      PlatformSetting.general = {
+        platformName: 'DealerTide',
+        supportEmail: 'support@dealertide.com',
+        fromEmail: 'noreply@dealertide.com',
+        fromName: 'DealerTide',
+        websiteUrl: 'https://dealertide.com',
+        appUrl: 'https://app.dealertide.com',
+        privacyUrl: 'https://dealertide.com/privacy',
+        termsUrl: 'https://dealertide.com/terms',
+        subdomainRoot: 'dealertide.com'
+      }
+    end
+
+    it 'returns the persisted kernel' do
+      brand = Brand.current
+
+      expect(brand.name).to eq('DealerTide')
+      expect(brand.support_email).to eq('support@dealertide.com')
+      expect(brand.website_url).to eq('https://dealertide.com')
+      expect(brand.subdomain_root).to eq('dealertide.com')
+    end
+
+    it 'preserves defaults for keys that were not persisted' do
+      # Simulate a legacy save that only set platformName
+      Setting.set('Platform', 0, 'general', { platformName: 'DealerTide' })
+
+      brand = Brand.current
+      expect(brand.name).to eq('DealerTide')
+      # New kernel keys still resolve to their ENV defaults
+      expect(brand.privacy_url).to eq('https://www.renterinsight.com/privacy-policy/')
+      expect(brand.subdomain_root).to eq('renterinsight.com')
+    end
+  end
+
+  describe '.current with company overrides (whitelabel design intent)' do
+    let(:company) { Company.create!(name: 'Acme Homes RV') }
+
+    before do
+      PlatformSetting.general = {
+        platformName: 'DealerTide',
+        supportEmail: 'support@dealertide.com',
+        websiteUrl: 'https://dealertide.com'
+      }
+    end
+
+    it 'degrades to platform-only when Company#branding_overrides column is absent' do
+      # Column doesn't exist yet — resolver must not raise.
+      brand = Brand.current(company: company)
+      expect(brand.name).to eq('DealerTide')
+    end
+
+    it 'layers company overrides over platform when the column is present' do
+      # Simulate a future migration adding companies.branding_overrides JSONB
+      unless Company.column_names.include?('branding_overrides')
+        skip 'branding_overrides column not yet migrated; whitelabel path deferred to future PR'
+      end
+
+      company.update!(branding_overrides: {
+        name: 'Acme Fleet Portal',
+        support_email: 'help@acmefleet.com'
+      })
+
+      brand = Brand.current(company: company)
+      expect(brand.name).to eq('Acme Fleet Portal')
+      expect(brand.support_email).to eq('help@acmefleet.com')
+      # Non-overridden keys still come from platform
+      expect(brand.website_url).to eq('https://dealertide.com')
+    end
+  end
+
+  describe '#to_h' do
+    it 'returns a flat hash keyed by kernel attributes' do
+      hash = Brand.current.to_h
+      expect(hash.keys).to match_array(Brand::ATTRIBUTES)
+    end
+  end
+end

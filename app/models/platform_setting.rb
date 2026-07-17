@@ -22,7 +22,9 @@ class PlatformSetting
     end
 
     def general
-      Setting.get('Platform', PLATFORM_SCOPE_ID, 'general') || default_general
+      persisted = Setting.get('Platform', PLATFORM_SCOPE_ID, 'general')
+      return default_general if persisted.blank?
+      default_general.merge(persisted.symbolize_keys)
     end
 
     def general=(value)
@@ -79,6 +81,14 @@ class PlatformSetting
       {
         platformName: ENV['PLATFORM_NAME'] || 'RenterInsight',
         supportEmail: ENV['SUPPORT_EMAIL'] || 'support@renterinsight.com',
+        salesEmail: ENV['SALES_EMAIL'] || 'sales@renterinsight.com',
+        fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@renterinsight.com',
+        fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'RenterInsight',
+        websiteUrl: ENV['PLATFORM_WEBSITE_URL'] || 'https://renterinsight.com',
+        appUrl: ENV['APP_URL'] || ENV['FRONTEND_URL'] || 'https://app.renterinsight.com',
+        privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.renterinsight.com/privacy-policy/',
+        termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.renterinsight.com/terms-of-use/',
+        subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'renterinsight.com',
         maintenanceMode: false,
         maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
       }

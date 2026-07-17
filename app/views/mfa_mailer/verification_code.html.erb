@@ -77,7 +77,7 @@
     <div class="content">
       <p>Hi <%= @user_name %>,</p>
 
-      <p>Your verification code for logging into Renter Insight is:</p>
+      <p>Your verification code for logging into <%= brand.name %> is:</p>
 
       <div class="code-box" style="background: #2563eb; color: #ffffff !important; font-size: 36px; font-weight: bold; letter-spacing: 8px; text-align: center; padding: 30px; border-radius: 8px; margin: 30px 0; font-family: 'Courier New', monospace; border: 2px solid #2563eb;">
         <%= @code %>
@@ -97,7 +97,7 @@
     </div>
 
     <div class="footer">
-      <p>This is an automated message from Renter Insight.<br>
+      <p>This is an automated message from <%= brand.name %>.<br>
       Please do not reply to this email.</p>
     </div>
   </div>
