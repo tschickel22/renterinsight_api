@@ -51,6 +51,26 @@ class PlatformSetting
       Setting.set('Platform', PLATFORM_SCOPE_ID, 'tours_paused', value == true)
     end
 
+    # Exposed publicly so callers that need the raw brand-kernel defaults
+    # (e.g. the platform-settings controller's reset-to-defaults path) can
+    # read them without reaching for `send(:default_general)`.
+    def default_general
+      {
+        platformName: ENV['PLATFORM_NAME'] || 'RenterInsight',
+        supportEmail: ENV['SUPPORT_EMAIL'] || 'support@renterinsight.com',
+        salesEmail: ENV['SALES_EMAIL'] || 'sales@renterinsight.com',
+        fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@renterinsight.com',
+        fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'RenterInsight',
+        websiteUrl: ENV['PLATFORM_WEBSITE_URL'] || 'https://renterinsight.com',
+        appUrl: ENV['APP_URL'] || ENV['FRONTEND_URL'] || 'https://app.renterinsight.com',
+        privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.renterinsight.com/privacy-policy/',
+        termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.renterinsight.com/terms-of-use/',
+        subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'renterinsight.com',
+        maintenanceMode: false,
+        maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
+      }
+    end
+
     private
 
     def default_communications
@@ -74,23 +94,6 @@ class PlatformSetting
         email: { isEnabled: true, sendReminders: true },
         sms: { isEnabled: false, sendReminders: true },
         popup: { isEnabled: true, autoClose: true, autoCloseDelay: 5000 }
-      }
-    end
-
-    def default_general
-      {
-        platformName: ENV['PLATFORM_NAME'] || 'RenterInsight',
-        supportEmail: ENV['SUPPORT_EMAIL'] || 'support@renterinsight.com',
-        salesEmail: ENV['SALES_EMAIL'] || 'sales@renterinsight.com',
-        fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@renterinsight.com',
-        fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'RenterInsight',
-        websiteUrl: ENV['PLATFORM_WEBSITE_URL'] || 'https://renterinsight.com',
-        appUrl: ENV['APP_URL'] || ENV['FRONTEND_URL'] || 'https://app.renterinsight.com',
-        privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.renterinsight.com/privacy-policy/',
-        termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.renterinsight.com/terms-of-use/',
-        subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'renterinsight.com',
-        maintenanceMode: false,
-        maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
       }
     end
 
