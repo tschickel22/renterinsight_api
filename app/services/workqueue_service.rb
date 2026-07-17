@@ -318,9 +318,13 @@ class WorkqueueService
   end
 
   def activity_meetings_today
+    # Meetings created from a Deal set start_time / end_time (calendar-style) and
+    # leave due_date null. The old due_date-only filter silently hid them from
+    # Today's Meetings. Prefer due_date when set, fall back to start_time.
     WorkqueueActivity.where(company_id: @company.id, assigned_to_id: @user.id, activity_type: 'meeting')
                      .where.not(status: %w[completed cancelled])
-                     .where('due_date >= ? AND due_date <= ?', Date.current.beginning_of_day, Date.current.end_of_day)
+                     .where('COALESCE(due_date, start_time) >= ? AND COALESCE(due_date, start_time) <= ?',
+                            Date.current.beginning_of_day, Date.current.end_of_day)
                      .where(valid_parent_condition)
   end
 
@@ -1055,7 +1059,9 @@ class WorkqueueService
       priority:           r.priority,
       badge:              r.activity_type,
       amount:             nil,
-      due_at:             r.due_date,
+      # Meetings created from a Deal only set start_time — fall back so the FE
+      # column doesn't render "—" for them.
+      due_at:             r.due_date || r.start_time,
       last_activity_at:   r.updated_at,
       link:               parent_link,
       parent_entity_type: r.parent_type&.downcase,
