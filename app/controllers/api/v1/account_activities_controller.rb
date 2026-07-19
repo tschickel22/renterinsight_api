@@ -14,20 +14,22 @@ module Api
 
       # GET /api/v1/accounts/:account_id/activities
       def index
-        activities = @account.activities
-                             .includes(:user, :assigned_to)
-                             .order(Arel.sql('COALESCE(due_date, start_time, created_at) ASC'))
-        
-        # Filter by type if provided
-        activities = activities.where(activity_type: params[:type]) if params[:type].present?
-        # Filter by status
-        activities = activities.where(status: params[:status]) if params[:status].present?
-        # Filter by assigned user
-        activities = activities.where(assigned_to_id: params[:assigned_to]) if params[:assigned_to].present?
-        
-        render json: activities.map { |a| activity_json(a) }, status: :ok
+        # Rollup feed: native AccountActivity + DealActivity (from account's
+        # deals) + ContactActivity (from account's contacts). Rolled-up rows
+        # come back with source/readOnly/parentEntity so the FE can render
+        # them inline and disable edit/delete on child-owned items.
+        rows = AccountActivityFeedService.feed(
+          @account,
+          type:        params[:type],
+          status:      params[:status],
+          assigned_to: params[:assigned_to],
+          limit:       (params[:limit].presence || 200).to_i,
+        )
+        # Strip the internal sort key before rendering
+        rows.each { |r| r.delete(:sort_time) }
+        render json: rows, status: :ok
       rescue => e
-        Rails.logger.error "[AccountActivitiesController#index] #{e.class}: #{e.message}"
+        Rails.logger.error "[AccountActivitiesController#index] #{e.class}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
         render json: { error: 'Failed to load activities', message: e.message }, status: :internal_server_error
       end
 

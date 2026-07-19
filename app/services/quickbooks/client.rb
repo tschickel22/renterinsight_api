@@ -275,9 +275,22 @@ class Quickbooks::Client
   end
 
   def self.default_redirect_uri
+    # Resolution order: explicit Platform Setting override → Rails
+    # credentials → brand kernel app_url (auto-flips with the rest of the
+    # rebrand kernel; matches whatever Platform Admin → General → App URL
+    # is set to) → local-dev fallback.
     setting_value('quickbooks_redirect_uri') ||
       Rails.application.credentials.dig(:quickbooks, :redirect_uri) ||
+      brand_derived_redirect_uri ||
       'http://localhost:3002/api/v1/quickbooks/callback'
+  end
+
+  def self.brand_derived_redirect_uri
+    base = Brand.current.app_url
+    return nil if base.blank?
+    "#{base.chomp('/')}/integrations/quickbooks/callback"
+  rescue StandardError
+    nil
   end
 
   def self.setting_value(key)

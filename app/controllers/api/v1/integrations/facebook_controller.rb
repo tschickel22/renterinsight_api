@@ -231,8 +231,13 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   end
 
   def callback_redirect_uri
-    frontend_url = ENV['FRONTEND_URL'] || 'https://localhost:5173'
-    "#{frontend_url}/integrations/facebook/callback"
+    # Route through the brand kernel so this flips with Platform Admin →
+    # General → App URL (same knob that controls share URLs + QB OAuth).
+    # ENV['FRONTEND_URL'] still takes precedence via PlatformSetting's
+    # default_general chain; the localhost fallback is only for local dev
+    # when no brand data is available.
+    base = Brand.current.app_url.presence || ENV['FRONTEND_URL'].presence || 'https://localhost:5173'
+    "#{base.chomp('/')}/integrations/facebook/callback"
   end
 
   def state_encryptor

@@ -1,7 +1,15 @@
 class ApplicationMailer < ActionMailer::Base
   layout 'mailer'
+  helper BrandHelper
 
   private
+
+  # Mailer-context accessor for the brand kernel. Templates get `brand` via
+  # BrandHelper; mailer .rb files use this method for from_name/from_email
+  # fallbacks and any subject-line composition.
+  def brand
+    @_brand ||= Brand.current(company: @company)
+  end
 
   # Resolves the From: address for a mailer using a User → Location → Company → Platform waterfall.
   # Set @sender_user, @location, and/or @company in the mailer action to scope the lookup.
@@ -40,7 +48,7 @@ class ApplicationMailer < ActionMailer::Base
       return nil
     end
 
-    from_name = from_name.presence || 'RenterInsight'
+    from_name = from_name.presence || brand.from_name
     "#{from_name} <#{from_email}>"
   end
 

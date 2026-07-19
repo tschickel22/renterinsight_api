@@ -5,7 +5,7 @@ class MagicLinkMailer < ApplicationMailer
   def admin_magic_link(user, token)
     @user = user
     @token = token
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = ENV['COMPANY_NAME'].presence || brand.name
     
     # Get the frontend URL - use 5173 for Vite dev server
     frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
@@ -70,17 +70,17 @@ class MagicLinkMailer < ApplicationMailer
   
   def get_from_email
     settings = get_platform_settings
-    settings&.dig('communications', 'email', 'fromEmail') || 
-      ENV['MAILER_FROM'] || 
-      'noreply@renterinsight.com'
+    settings&.dig('communications', 'email', 'fromEmail').presence ||
+      ENV['MAILER_FROM'].presence ||
+      brand.from_email
   end
-  
+
   def get_from_name
     settings = get_platform_settings
-    settings&.dig('communications', 'email', 'fromName') || 
-      ENV['EMAIL_FROM_NAME'] || 
-      ENV['COMPANY_NAME'] || 
-      'RenterInsight'
+    settings&.dig('communications', 'email', 'fromName').presence ||
+      ENV['EMAIL_FROM_NAME'].presence ||
+      ENV['COMPANY_NAME'].presence ||
+      brand.from_name
   end
   
   def decrypt_setting(encrypted_value)

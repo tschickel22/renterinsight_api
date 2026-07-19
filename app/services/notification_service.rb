@@ -359,9 +359,15 @@ class NotificationService
   end
   
   def self.frontend_url
-    # Get frontend URL with environment-based fallback - respects FRONTEND_URL env var for staging
-    ENV['FRONTEND_URL'] || 
-      (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://localhost:5173')
+    # Route through the brand kernel so notification links (Champion lead
+    # accept/decline, SMS notification URLs, "View in app" links) track
+    # whatever Platform Admin → General → App URL is set to. ENV wins if
+    # explicitly set; brand kernel wins next; local dev fallback last.
+    ENV['FRONTEND_URL'].presence ||
+      Brand.current.app_url.presence ||
+      (Rails.env.production? ? 'https://app.dealertide.com' : 'https://localhost:5173')
+  rescue StandardError
+    ENV['FRONTEND_URL'].presence || 'https://localhost:5173'
   end
   
   def self.send_sms(notification, user)

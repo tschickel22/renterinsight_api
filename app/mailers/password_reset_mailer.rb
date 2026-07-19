@@ -8,8 +8,8 @@ class PasswordResetMailer < ApplicationMailer
     @expires_in = '1 hour'
 
     # Get from email and name from settings
-    from_email = email_settings['fromEmail'] || ENV['MAILER_FROM'] || 'noreply@renterinsight.com'
-    from_name = email_settings['fromName'] || ENV['EMAIL_FROM_NAME'] || 'RenterInsight'
+    from_email = email_settings['fromEmail'].presence || ENV['MAILER_FROM'].presence || brand.from_email
+    from_name = email_settings['fromName'].presence || ENV['EMAIL_FROM_NAME'].presence || brand.from_name
 
     mail(
       to: email,

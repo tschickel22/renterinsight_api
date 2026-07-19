@@ -445,7 +445,7 @@ class Company < ApplicationRecord
   
   def subdomain_with_base_domain
     return nil unless subdomain.present?
-    base_domain = Rails.application.credentials.dig(:domain, :base) || 'renterinsight.com'
+    base_domain = Rails.application.credentials.dig(:domain, :base) || Brand.current.subdomain_root
     "#{subdomain}.#{base_domain}"
   end
   

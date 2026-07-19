@@ -4,10 +4,10 @@ class MfaMailer < ApplicationMailer
   def mfa_reset(email:, user_name:, reset_by:, company_name: nil, email_settings: nil)
     @user_name = user_name
     @reset_by = reset_by
-    @company_name = company_name || 'RenterInsight'
+    @company_name = company_name.presence || brand.name
 
-    from_email = email_settings&.dig('fromEmail') || ENV['MAILER_FROM'] || 'noreply@renterinsight.com'
-    from_name = email_settings&.dig('fromName') || ENV['EMAIL_FROM_NAME'] || 'RenterInsight'
+    from_email = email_settings&.dig('fromEmail').presence || ENV['MAILER_FROM'].presence || brand.from_email
+    from_name = email_settings&.dig('fromName').presence || ENV['EMAIL_FROM_NAME'].presence || brand.from_name
 
     mail(
       to: email,
@@ -22,8 +22,8 @@ class MfaMailer < ApplicationMailer
     @expires_in = 5 # minutes
 
     # Configure sender from settings
-    from_email = email_settings&.dig('fromEmail') || ENV['MAILER_FROM'] || 'noreply@renterinsight.com'
-    from_name = email_settings&.dig('fromName') || ENV['EMAIL_FROM_NAME'] || 'RenterInsight'
+    from_email = email_settings&.dig('fromEmail').presence || ENV['MAILER_FROM'].presence || brand.from_email
+    from_name = email_settings&.dig('fromName').presence || ENV['EMAIL_FROM_NAME'].presence || brand.from_name
 
     mail(
       to: email,

@@ -6,7 +6,7 @@
 Post: <%= @post.headline.presence || truncate(@post.caption.to_s, length: 100) %>
 <% end %>
 
-Reply in RenterInsight: <%= @reply_url %>
+Reply in <%= brand.name %>: <%= @reply_url %>
 <% if @facebook_url.present? %>View on <%= @post&.platform.to_s == 'instagram' ? 'Instagram' : 'Facebook' %>: <%= @facebook_url %>
 <% end %>
 

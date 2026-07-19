@@ -318,9 +318,13 @@ class WorkqueueService
   end
 
   def activity_meetings_today
+    # Meetings created from a Deal set start_time / end_time (calendar-style) and
+    # leave due_date null. The old due_date-only filter silently hid them from
+    # Today's Meetings. Prefer due_date when set, fall back to start_time.
     WorkqueueActivity.where(company_id: @company.id, assigned_to_id: @user.id, activity_type: 'meeting')
                      .where.not(status: %w[completed cancelled])
-                     .where('due_date >= ? AND due_date <= ?', Date.current.beginning_of_day, Date.current.end_of_day)
+                     .where('COALESCE(due_date, start_time) >= ? AND COALESCE(due_date, start_time) <= ?',
+                            Date.current.beginning_of_day, Date.current.end_of_day)
                      .where(valid_parent_condition)
   end
 
@@ -753,8 +757,29 @@ class WorkqueueService
       amount:           nil,
       due_at:           r.due_date,
       last_activity_at: r.updated_at,
-      link:             "/tasks/#{r.id}",
+      link:             task_deep_link(r.taskable_type, r.taskable_id, r.id),
     }
+  end
+
+  # Deep-link a Task to the parent record it belongs to (Service Ticket, Deal,
+  # etc.) instead of the generic Task Center detail. Service reminders live on
+  # /service/{id}; a link to /tasks/{id} makes the user chase down the ticket
+  # by hand, which is exactly what they flagged in the workqueue.
+  # Falls back to /tasks/{id} for standalone tasks with no taskable.
+  def task_deep_link(taskable_type, taskable_id, task_id)
+    return "/tasks/#{task_id}" if taskable_type.blank? || taskable_id.blank?
+
+    case taskable_type
+    when 'ServiceTicket'  then "/service/#{taskable_id}"
+    when 'Lead'           then "/crm/leads/#{taskable_id}"
+    when 'Deal'           then "/deals/#{taskable_id}?tab=activities"
+    when 'Contact'        then "/contacts/#{taskable_id}?tab=activities"
+    when 'Account'        then "/accounts/#{taskable_id}?tab=activities"
+    when 'Quote'          then "/quotes/#{taskable_id}"
+    when 'Delivery'       then "/delivery/#{taskable_id}"
+    when 'WarrantyClaim'  then "/warranty-mgmt/claims/#{taskable_id}"
+    else                       "/tasks/#{task_id}"
+    end
   end
 
   def normalize_lead(r)
@@ -1019,12 +1044,13 @@ class WorkqueueService
   end
 
   def normalize_activity(r)
-    # Standalone Task rows have no parent — link directly to Task Center's
-    # detail view instead of the default '#'. Other rows keep the
-    # per-parent-type link.
-    is_standalone_task = r.source_table == 'tasks'
-    parent_link = if is_standalone_task
-                    "/tasks/#{r.source_id}"
+    # Task rows in the workqueue_activities view carry the polymorphic
+    # taskable in parent_type/parent_id ('ServiceTicket', 'Deal', …), so a
+    # service reminder should land the user on the ticket, not Task Center.
+    # Only fall back to /tasks/{id} when there's genuinely no parent.
+    is_task_row = r.source_table == 'tasks'
+    parent_link = if is_task_row
+                    task_deep_link(r.parent_type, r.parent_id, r.source_id)
                   else
                     case r.parent_type
                     when 'Lead'    then "/crm/leads/#{r.parent_id}"
@@ -1055,7 +1081,9 @@ class WorkqueueService
       priority:           r.priority,
       badge:              r.activity_type,
       amount:             nil,
-      due_at:             r.due_date,
+      # Meetings created from a Deal only set start_time — fall back so the FE
+      # column doesn't render "—" for them.
+      due_at:             r.due_date || r.start_time,
       last_activity_at:   r.updated_at,
       link:               parent_link,
       parent_entity_type: r.parent_type&.downcase,

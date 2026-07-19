@@ -32,7 +32,8 @@ module Api
       # branding change (colors, font, section shading, etc.).
       branding_updated = Setting.where(scope_type: 'Company', scope_id: @company.id, key: 'branding').maximum(:updated_at)&.to_i || 0
       platform_branding_updated = Setting.where(scope_type: 'Platform', scope_id: 0, key: 'branding').maximum(:updated_at)&.to_i || 0
-      cache_key = "tenant_basic/#{@company.id}/#{@company.updated_at.to_i}/#{sub_updated}/#{override_updated}/#{plan_updated}/#{plan_modules_updated}/#{branding_updated}/#{platform_branding_updated}"
+      platform_general_updated = Setting.where(scope_type: 'Platform', scope_id: 0, key: 'general').maximum(:updated_at)&.to_i || 0
+      cache_key = "tenant_basic/#{@company.id}/#{@company.updated_at.to_i}/#{sub_updated}/#{override_updated}/#{plan_updated}/#{plan_modules_updated}/#{branding_updated}/#{platform_branding_updated}/#{platform_general_updated}"
       result = Rails.cache.fetch(cache_key, expires_in: 5.minutes) do
         serialize_tenant_basic
       end
@@ -593,7 +594,7 @@ module Api
       {
         id: @company.id.to_s,
         name: @company.name,
-        domain: @company.try(:domain) || "#{@company.name.parameterize}.renterinsight.com",
+        domain: @company.try(:domain) || "#{@company.name.parameterize}.#{Brand.current.subdomain_root}",
         use_rbac_system: @company.use_rbac_system || false,
         settings: serialize_settings,
         branding: serialize_branding,
@@ -612,7 +613,7 @@ module Api
       {
         id: @company.id.to_s,
         name: @company.name,
-        domain: @company.try(:domain) || "#{@company.name.parameterize}.renterinsight.com",
+        domain: @company.try(:domain) || "#{@company.name.parameterize}.#{Brand.current.subdomain_root}",
         use_rbac_system: @company.use_rbac_system || false,
         settings: serialize_basic_settings,
         branding: serialize_branding,
@@ -651,6 +652,12 @@ module Api
 
       platform_general = Setting.get('Platform', 0, 'general', {})
       base_settings[:platformName] = platform_general['platformName'] || platform_general[:platformName] || ''
+
+      # Brand kernel — flat text-identity object (name, support/from emails, URLs).
+      # Consumed by the FE via useBrand() to replace hardcoded prose. Passing the
+      # company argument keeps the door open for per-tenant whitelabel when
+      # Company#branding_overrides is introduced.
+      base_settings[:brand] = Brand.current(company: @company).to_h
 
       if @company.operational_settings.present?
         operational = @company.operational_settings.deep_symbolize_keys

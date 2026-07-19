@@ -85,21 +85,19 @@ class Task < ApplicationRecord
   def generate_link
     return link if link.present?
     
+    # Keep this list in sync with WorkqueueService#task_deep_link — both walk
+    # taskable_type to build the FE deep link. ServiceOps mounts tickets at
+    # /service/:ticketId, not /service/tickets/:id.
     case taskable_type
-    when 'Lead'
-      "/crm/leads/#{taskable_id}"
-    when 'ServiceTicket'
-      "/service/tickets/#{taskable_id}"
-    when 'Deal'
-      "/crm/deals/#{taskable_id}"
-    when 'Quote'
-      "/quotes/#{taskable_id}"
-    when 'Delivery'
-      "/delivery/#{taskable_id}"
-    when 'WarrantyClaim'
-      "/warranty-mgmt/claims/#{taskable_id}"
-    else
-      nil
+    when 'Lead'           then "/crm/leads/#{taskable_id}"
+    when 'ServiceTicket'  then "/service/#{taskable_id}"
+    when 'Deal'           then "/deals/#{taskable_id}?tab=activities"
+    when 'Contact'        then "/contacts/#{taskable_id}?tab=activities"
+    when 'Account'        then "/accounts/#{taskable_id}?tab=activities"
+    when 'Quote'          then "/quotes/#{taskable_id}"
+    when 'Delivery'       then "/delivery/#{taskable_id}"
+    when 'WarrantyClaim'  then "/warranty-mgmt/claims/#{taskable_id}"
+    else nil
     end
   end
   

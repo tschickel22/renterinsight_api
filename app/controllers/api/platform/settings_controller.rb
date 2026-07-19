@@ -173,8 +173,11 @@ module Api
       end
 
       def fetch_general_settings
-        stored = Setting.get('Platform', 0, 'general')
-        stored || default_general_settings
+        # Delegate to PlatformSetting.general so brand-kernel defaults + persisted
+        # overrides come from a single source of truth. That way any new default
+        # field added to PlatformSetting.default_general automatically appears
+        # here without touching this controller.
+        PlatformSetting.general
       end
 
       def fetch_branding_settings
@@ -434,12 +437,10 @@ module Api
       end
 
       def default_general_settings
-        {
-          platformName: ENV['PLATFORM_NAME'] || 'RenterInsight',
-          supportEmail: ENV['SUPPORT_EMAIL'] || 'support@renterinsight.com',
-          maintenanceMode: false,
-          maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
-        }
+        # Kept for backward compatibility with the reset-to-defaults flow.
+        # PlatformSetting.default_general is the actual source of truth for
+        # brand-kernel defaults; this method delegates so we don't duplicate.
+        PlatformSetting.default_general
       end
 
       def default_branding_settings
