@@ -33,11 +33,22 @@ class IntakeSubmission < ApplicationRecord
     # Use explicit field mappings if available
     field_mappings = form.field_mappings || {}
     
-    # Determine the lead source.
-    # Priority: utm_source param (e.g. "google_business") > form.source_id > default "Web Form".
-    # A utm_source lets one form attribute leads to the channel that sent them.
+    # Determine the lead source. Priority:
+    #   1. source_id param — canonical, matches the CRM Sources tab (source of truth).
+    #   2. utm_source param — legacy links in the wild; title-cased and looked up
+    #      (or created) as a Source name so the lead still attributes.
+    #   3. form.source_id — the form's configured Lead Source.
+    #   4. default "Web Form" Source (created on demand) so a lead is never sourceless.
+    explicit_source_id = submission_data['source_id'] || submission_data['sourceId']
     utm_source_raw = submission_data['utm_source'] || submission_data['utmSource']
-    if utm_source_raw.present?
+    catalog_source = if explicit_source_id.present?
+      Source.find_by(id: explicit_source_id.to_i, company_id: form.company_id)
+    end
+
+    if catalog_source
+      source_id = catalog_source.id
+      Rails.logger.info "[IntakeSubmission] Using catalog source_id=#{source_id} (#{catalog_source.name})"
+    elsif utm_source_raw.present?
       pretty_name = utm_source_raw.to_s.tr('_', ' ').split.map(&:capitalize).join(' ')
       utm_source = Source.find_or_create_by(
         company_id: form.company_id,
@@ -338,12 +349,31 @@ class IntakeSubmission < ApplicationRecord
                        when :account then 'Account'
                        end
 
+    # Fill-empty merge: enrich the matched record with any submission fields
+    # it doesn't already have (never overwrite existing data). MergeHelper
+    # only touches columns that actually exist on the record, so this is
+    # safe across Contact/Account/Lead. Conflicts are captured for the note.
+    mergeable = lead_data.except(:company_id, :source_id, :status, :location_id, :owner_id)
+    merge_result = { applied: {}, conflicts: [] }
+    begin
+      merge_result = MergeHelper.fill_empty(record, mergeable)
+      record.save! if merge_result[:applied].any?
+    rescue => merge_error
+      Rails.logger.error "[IntakeSubmission] Fill-empty merge failed on #{entity_label} #{record.id}: #{merge_error.message}"
+    end
+
     begin
       form_mapped_notes = lead_data[:notes]
       base_note = build_notes_with_vehicle(submission_data, unmapped_data, form, form_mapped_notes)
       header = "👤 EXISTING CUSTOMER INQUIRY — already in system as #{entity_label} ##{record.id}. " \
                "New intake submission received; no new lead created."
-      note_content = [header, base_note].compact.join("\n\n")
+      applied_block =
+        if merge_result[:applied].any?
+          "✅ FILLED EMPTY FIELDS FROM THIS SUBMISSION: " +
+            merge_result[:applied].keys.map { |k| k.to_s.humanize }.join(', ')
+        end
+      conflict_block = MergeHelper.conflicts_note(merge_result[:conflicts])
+      note_content = [header, applied_block, conflict_block, base_note].compact.join("\n\n")
 
       Note.create!(
         entity_type: note_entity_type,
@@ -372,11 +402,16 @@ class IntakeSubmission < ApplicationRecord
   # bell/email to the designated user, worded as an existing-customer inquiry
   # rather than a new lead. Links to the matched record's detail page.
   def notify_existing_customer_inquiry(match, form)
-    return unless form.notified_user_id.present?
-    notified_user = User.find_by(id: form.notified_user_id)
+    record = match.record
+    # Recipient priority: record.owner (the assigned rep) wins, then the form's
+    # configured notified_user. This matches the product rule that inquiries
+    # about an existing customer go to that customer's owner, not to whoever
+    # happened to be listed on the form.
+    notified_user =
+      (record.respond_to?(:owner) ? record.owner : nil) ||
+      (form.notified_user_id.present? ? User.find_by(id: form.notified_user_id) : nil)
     return unless notified_user
 
-    record = match.record
     person_name = match.name.presence || 'Existing customer'
     entity_label = case match.type
                    when :account then 'Account'
@@ -427,14 +462,23 @@ class IntakeSubmission < ApplicationRecord
       <p style="color: #6b7280; font-size: 12px;">#{company&.name || 'RenterInsight'} - Automated Notification</p>
     HTML
 
+    # Attach the Communication row to the recipient rep, not to the customer
+    # record. This is a system-to-rep ping ("hey, look at this incoming"), not
+    # part of the customer's conversation — putting it on the customer's
+    # timeline was confusing (looked like a failed email TO the customer).
+    #
+    # Pass sending_user so the outbound uses THAT rep's credentials at the top
+    # of the waterfall (User → Location → Company → Platform). Matches the
+    # rule that outbound about a customer should come from their owner.
     CommunicationService.send_email(
-      communicable: record,
+      communicable: user,
       to: user.email,
       subject: subject,
       body: body,
       category: 'system',
       content_type: 'text/html',
       skip_preference_check: true,
+      user: user,
       metadata: {
         source: 'intake_form_existing_customer',
         form_id: form.id,
@@ -443,7 +487,7 @@ class IntakeSubmission < ApplicationRecord
         matched_entity_id: record.id
       }
     )
-    Rails.logger.info "[IntakeSubmission] ✅ Sent existing-customer inquiry email to #{user.email}"
+    Rails.logger.info "[IntakeSubmission] ✅ Sent existing-customer inquiry email to #{user.email} (via #{user.email} credentials)"
   end
 
   def create_activity_and_notify(lead, form, mode: :new_lead)
@@ -671,7 +715,7 @@ class IntakeSubmission < ApplicationRecord
         # Skip vehicle fields (already shown above)
         next if vehicle_keys.include?(key.to_s)
         # Skip internal/metadata fields
-        next if %w[location_id source utm_source utmSource vehicle_location_id].include?(key.to_s)
+        next if %w[location_id source source_id sourceId utm_source utmSource vehicle_location_id].include?(key.to_s)
         # Skip notes field (already shown above)
         next if key.to_s.downcase == 'notes' || key.to_s.downcase == 'comments' || key.to_s.downcase == 'message'
         

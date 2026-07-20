@@ -154,11 +154,29 @@ module Api
       end
       
       # DELETE /api/v1/service-tickets/:id
+      # Pass ?cascade=true to also clear an attached draft warranty claim (+ its
+      # draft invoice) before deletion. Non-draft claims / finalized invoices
+      # are still refused by unmark_warranty!. On cascade the claim row is
+      # hard-deleted (not just soft-deleted) so the ticket FK is released.
       def destroy
         return unless authorize_action!('service', 'delete')
-        
-        @service_ticket.destroy
-        head :no_content
+
+        if ActiveModel::Type::Boolean.new.cast(params[:cascade])
+          status, reason = @service_ticket.unmark_warranty!
+          if status == :blocked
+            return render json: { errors: [reason] }, status: :unprocessable_entity
+          end
+          # unmark_warranty! soft-deletes the claim; hard-delete it now so the
+          # service_tickets ↔ warranty_claims FK doesn't block ticket destroy.
+          WarrantyClaim.where(service_ticket_id: @service_ticket.id).destroy_all
+        end
+
+        if @service_ticket.destroy
+          head :no_content
+        else
+          render json: { errors: @service_ticket.errors.full_messages },
+                 status: :unprocessable_entity
+        end
       end
       
       # POST /api/v1/service-tickets/:id/upload-attachments

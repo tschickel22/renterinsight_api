@@ -182,10 +182,59 @@ class UserEmailConnection < ApplicationRecord
       last_error_message: message.to_s.truncate(500)
     )
   end
-  
+
   # Clear error state
   def clear_error!
     update_columns(last_error_at: nil, last_error_message: nil)
+  end
+
+  # Substring patterns that indicate the provider rejected our bearer token
+  # (Google SMTP XOAUTH2, Microsoft SMTP XOAUTH2, Microsoft Graph). These are
+  # the errors that mean the user must re-connect their email account — a
+  # token refresh alone won't fix them.
+  REAUTH_ERROR_PATTERNS = [
+    /XOAUTH2/i,
+    /invalid_grant/i,
+    /invalid_token/i,
+    /InvalidAuthenticationToken/i,
+    /\bBearer\b.*\bscope\b/i,   # Google's "334 <base64>" decodes to a Bearer/scope challenge
+    /reauth/i,
+    /consent_required/i
+  ].freeze
+
+  # True when the connection is currently broken and needs the user to re-run
+  # the OAuth flow (as opposed to a transient network error we should retry).
+  def needs_reauth?
+    return false if last_error_message.blank?
+    REAUTH_ERROR_PATTERNS.any? { |re| last_error_message =~ re }
+  end
+
+  # Mark the connection as needing re-authentication AND notify the owning
+  # user so the failure isn't invisible. Callers should invoke this whenever a
+  # send fails with a pattern from REAUTH_ERROR_PATTERNS.
+  def mark_needs_reauth!(exception_message)
+    record_error!("Reauth required: #{exception_message}")
+    return unless user_id.present?
+    NotificationService.create(
+      recipient: user,
+      notification_type: :email_connection_broken,
+      notifiable: self,
+      message: "Your #{provider_label} connection (#{email_address}) has stopped sending. " \
+               "Reconnect it in Settings → Email to resume outbound email.",
+      action_url: '/settings/email',
+      deliver_now: false
+    )
+  rescue => e
+    Rails.logger.error "[UserEmailConnection#mark_needs_reauth!] Notification failed for user #{user_id}: #{e.message}"
+  end
+
+  def provider_label
+    case provider
+    when 'oauth_gmail'     then 'Gmail'
+    when 'oauth_microsoft' then 'Outlook/Microsoft 365'
+    when 'smtp'            then 'SMTP'
+    else provider.to_s.humanize
+    end
   end
   
   # Test the SMTP connection
