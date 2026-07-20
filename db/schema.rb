@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_14_230000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_16_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -3096,6 +3096,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_14_230000) do
     t.boolean "auto_create_lead", default: true
     t.boolean "auto_create_activity", default: true
     t.bigint "location_id"
+    t.boolean "captcha_required", default: false, null: false
     t.index ["company_id"], name: "index_intake_forms_on_company_id"
     t.index ["location_id"], name: "index_intake_forms_on_location_id"
     t.index ["notified_user_id"], name: "index_intake_forms_on_notified_user_id"

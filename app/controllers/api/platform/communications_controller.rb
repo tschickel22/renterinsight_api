@@ -426,11 +426,20 @@ module Api
         
         # Check user email connection LAST (highest priority for EMAIL only)
         # Only override email settings - preserve SMS from location/company/platform
-        user_settings = fetch_user_email_settings
-        if user_settings.present?
-          Rails.logger.info "[get_effective_settings] ✅ Overlaying USER email connection for #{current_user&.email}"
-          result[:communications] ||= {}
-          result[:communications][:email] = user_settings.dig(:communications, :email)
+        #
+        # SKIP the user overlay when the request explicitly opts out (test_mode).
+        # The Platform/Company/Location "Send Test" buttons use this so they
+        # actually test the tier's stored credentials instead of silently
+        # falling through to the logged-in user's personal OAuth connection.
+        if ActiveModel::Type::Boolean.new.cast(params[:test_mode])
+          Rails.logger.info "[get_effective_settings] test_mode=true — skipping USER overlay to test platform-tier credentials"
+        else
+          user_settings = fetch_user_email_settings
+          if user_settings.present?
+            Rails.logger.info "[get_effective_settings] ✅ Overlaying USER email connection for #{current_user&.email}"
+            result[:communications] ||= {}
+            result[:communications][:email] = user_settings.dig(:communications, :email)
+          end
         end
         
         final_email = result.dig(:communications, :email, :provider) || 'none'
@@ -471,7 +480,11 @@ module Api
                 oauthEmail: connection.email_address,
                 oauthAccessToken: connection.oauth_token_encrypted,
                 oauthRefreshToken: connection.oauth_refresh_token_encrypted,
-                oauthExpiresAt: connection.oauth_expires_at&.iso8601
+                oauthExpiresAt: connection.oauth_expires_at&.iso8601,
+                # Back-reference so the send path can mark this specific
+                # connection as needing re-auth when the provider rejects it.
+                _sourceConnectionType: 'UserEmailConnection',
+                _sourceConnectionId: connection.id
               }
             }
           }
@@ -942,11 +955,15 @@ module Api
             response.body.to_s.truncate(200)
           end
           Rails.logger.error "[send_email_via_microsoft_graph] Failed (#{response.code}): #{error_msg}"
+          if response.code.to_i == 401 || error_msg.to_s =~ /InvalidAuthenticationToken/i
+            flag_source_connection_reauth(config, StandardError.new(error_msg))
+          end
           { success: false, error: "Microsoft Graph API error (#{response.code}): #{error_msg}" }
         end
       rescue => e
         Rails.logger.error "[send_email_via_microsoft_graph] Exception: #{e.message}"
         Rails.logger.error e.backtrace.first(5).join("\n")
+        flag_source_connection_reauth(config, e)
         { success: false, error: e.message }
       end
 
@@ -1030,16 +1047,36 @@ module Api
         )
         
         mail.deliver_now
-        
+
         Rails.logger.info "[send_email_via_action_mailer] Success: #{mail.message_id}"
-        { 
-          success: true, 
+        {
+          success: true,
           message_id: mail.message_id
         }
       rescue => e
         Rails.logger.error "[send_email_via_action_mailer] Exception: #{e.message}"
         Rails.logger.error(e.backtrace.first(5).join("\n"))
+        flag_source_connection_reauth(config, e)
         { success: false, error: e.message }
+      end
+
+      # If this send used a user-tier OAuth connection AND the provider
+      # rejected the bearer token, mark that connection as needing re-auth so
+      # the user gets an in-app notification instead of silent failure.
+      def flag_source_connection_reauth(config, exception)
+        return unless config.is_a?(Hash)
+        source_type = config['_sourceConnectionType'] || config[:_sourceConnectionType]
+        source_id   = config['_sourceConnectionId']   || config[:_sourceConnectionId]
+        return unless source_type == 'UserEmailConnection' && source_id.present?
+
+        connection = UserEmailConnection.find_by(id: source_id)
+        return unless connection
+        return unless UserEmailConnection::REAUTH_ERROR_PATTERNS.any? { |re| exception.message =~ re }
+
+        connection.mark_needs_reauth!(exception.message)
+        Rails.logger.warn "[Platform::CommunicationsController] Marked UserEmailConnection ##{source_id} as needing reauth; notified user #{connection.user_id}"
+      rescue => e
+        Rails.logger.error "[flag_source_connection_reauth] Failed to flag connection: #{e.message}"
       end
 
       def send_sms_via_provider(to, message, config)

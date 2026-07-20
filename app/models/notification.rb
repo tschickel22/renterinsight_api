@@ -75,6 +75,7 @@ class Notification < ApplicationRecord
     sms_reply_received: { category: 'communications', priority: 'high', title: 'SMS Reply Received' },
     email_reply_received: { category: 'communications', priority: 'high', title: 'Email Reply Received' },
     sms_cap_alert: { category: 'system', priority: 'normal', title: 'SMS Usage Alert' },
+    email_connection_broken: { category: 'communications', priority: 'urgent', title: 'Email Connection Needs Reconnection' },
 
     # Project / Contractor notifications
     contractor_review_submitted: { category: 'service', priority: 'high', title: 'Contractor Submitted for Review' },
