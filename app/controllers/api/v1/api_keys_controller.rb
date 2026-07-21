@@ -156,6 +156,9 @@ module Api
         if params[:permissions].present?
           permitted[:permissions] = normalize_permissions(params[:permissions])
         end
+        if params[:webhook_config].present?
+          permitted[:webhook_config] = normalize_webhook_config(params[:webhook_config])
+        end
         permitted
       end
 
@@ -164,7 +167,45 @@ module Api
         if params[:permissions].present?
           permitted[:permissions] = normalize_permissions(params[:permissions])
         end
+        if params[:webhook_config].present?
+          permitted[:webhook_config] = normalize_webhook_config(params[:webhook_config])
+        end
         permitted
+      end
+
+      # Whitelist just the keys the backend actually reads on the inbound-lead
+      # path. Anything else the client sends is ignored — no ad-hoc keys leak
+      # into the JSONB column.
+      def normalize_webhook_config(raw)
+        h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+        return {} unless h.is_a?(Hash)
+        allowed = %w[
+          default_source_id default_source_name default_location_id
+          assignment_mode assigned_user_id round_robin_list_id
+          dedupe_enabled
+        ]
+        result = {}
+        h.each do |k, v|
+          key = k.to_s
+          next unless allowed.include?(key)
+          # Coerce booleans and integers so the JSONB stays typed sanely.
+          result[key] = case key
+                       when 'dedupe_enabled' then ActiveModel::Type::Boolean.new.cast(v)
+                       when 'assignment_mode' then v.to_s
+                       when 'default_source_name' then v.to_s.presence
+                       else v.presence && v.to_i
+                       end
+        end
+        # If a source NAME was provided, resolve it to an id up front so
+        # runtime lookup stays fast (SourceResolverService still runs on the
+        # webhook path, but this avoids a fuzzy match on every request when
+        # the operator already picked one at key-creation time).
+        if result['default_source_name'].present? && result['default_source_id'].blank? && @company
+          resolved = SourceResolverService.resolve(company: @company, source_name: result['default_source_name'])
+          result['default_source_id'] = resolved&.id
+        end
+        result.delete('default_source_name')
+        result
       end
 
       # Accept either hash format { "contacts" => ["read", "write"] }

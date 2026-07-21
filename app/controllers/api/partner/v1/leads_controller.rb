@@ -56,8 +56,39 @@ module Api
         end
 
         # POST /api/partner/v1/leads
+        #
+        # Applies the current API key's webhook_config in this order before
+        # saving so a Zapier/FB payload becomes a well-attributed, well-assigned
+        # lead even when the caller can't map every field:
+        #
+        #   1. Source — SourceResolverService takes payload source_id/source
+        #      and falls back to webhook_config.default_source_id, with fuzzy
+        #      matching + auto-creation for unknown names.
+        #   2. Location — payload wins; otherwise webhook_config.default_location_id.
+        #   3. Owner — payload wins; otherwise webhook_config.assignment_mode
+        #      picks (specific user, round-robin from a shared list, or leave
+        #      unassigned for a workflow to handle).
+        #   4. Dedupe — if webhook_config.dedupe_enabled and IdentityResolver
+        #      matches an existing Lead or Contact by email/phone, we DON'T
+        #      create a duplicate. We return 202 with the matched record so
+        #      Zapier's history reflects "handled, not duplicated."
         def create
-          lead = company_scope(Lead).new(lead_params)
+          attrs = lead_params.to_h.symbolize_keys
+          config = webhook_config
+
+          apply_source_config!(attrs, config)
+          apply_location_config!(attrs, config)
+
+          if config['dedupe_enabled'] && (match = dedupe_match(attrs))
+            return render json: {
+              data: nil,
+              deduped_to: { type: match.type.to_s, id: match.record.id, matched_on: match.matched.to_s }
+            }, status: :accepted
+          end
+
+          apply_owner_config!(attrs, config)
+
+          lead = company_scope(Lead).new(attrs)
 
           if lead.save
             render json: { data: lead_json(lead, detailed: true) }, status: :created
@@ -103,10 +134,50 @@ module Api
         def lead_params
           params.permit(
             :first_name, :last_name, :email, :phone, :status,
-            :source_id, :owner_id, :location_id,
+            :source_id, :source, :owner_id, :location_id,
             :budget_range, :purchase_timeframe, :rv_experience,
             :preferred_contact_method, :interests_requirements, :notes
           )
+        end
+
+        def webhook_config
+          (current_api_key&.webhook_config || {}).with_indifferent_access
+        end
+
+        def apply_source_config!(attrs, config)
+          resolved = SourceResolverService.resolve(
+            company: @current_company,
+            source_id: attrs[:source_id],
+            source_name: attrs.delete(:source),
+            default_source_id: config['default_source_id']
+          )
+          attrs[:source_id] = resolved&.id if resolved && attrs[:source_id].blank?
+        end
+
+        def apply_location_config!(attrs, config)
+          return if attrs[:location_id].present?
+          attrs[:location_id] = config['default_location_id'] if config['default_location_id'].present?
+        end
+
+        def apply_owner_config!(attrs, config)
+          return if attrs[:owner_id].present?
+
+          case config['assignment_mode'].to_s
+          when 'specific'
+            user_id = config['assigned_user_id']
+            attrs[:owner_id] = user_id if user_id.present? && User.exists?(id: user_id, company_id: @current_company.id, status: 'active')
+          when 'round_robin'
+            list_id = config['round_robin_list_id']
+            list = RoundRobinAssignmentList.active.find_by(id: list_id, company_id: @current_company.id)
+            picked = list&.next_active_user!
+            attrs[:owner_id] = picked.id if picked
+          # 'unassigned' or unknown: leave nil, downstream workflow handles it
+          end
+        end
+
+        def dedupe_match(attrs)
+          return nil if attrs[:email].blank? && attrs[:phone].blank?
+          IdentityResolver.new(@current_company, email: attrs[:email], phone: attrs[:phone]).resolve
         end
 
         def lead_json(lead, detailed: false)
