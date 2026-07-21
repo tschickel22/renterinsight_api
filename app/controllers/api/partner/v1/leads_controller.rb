@@ -180,6 +180,19 @@ module Api
           when 'specific'
             user_id = config['assigned_user_id']
             attrs[:owner_id] = user_id if user_id.present? && User.exists?(id: user_id, company_id: @current_company.id, status: 'active')
+          when 'specific_per_location'
+            # Per-location: map from webhook_config['assigned_user_ids_by_location']
+            # keyed by the RESOLVED location_id (already applied by
+            # apply_location_config!). Skips inactive users. Falls through to
+            # nil (unassigned) if no mapping exists — validation at key-create
+            # time prevents this in the common case, but a config edited after
+            # the fact could theoretically miss a location.
+            map = config['assigned_user_ids_by_location'] || {}
+            loc_key = attrs[:location_id].to_s
+            picked_id = map[loc_key] || map[loc_key.to_i]
+            if picked_id.present? && User.exists?(id: picked_id, company_id: @current_company.id, status: 'active')
+              attrs[:owner_id] = picked_id.to_i
+            end
           when 'round_robin'
             picked_id = round_robin_pick(config)
             attrs[:owner_id] = picked_id if picked_id

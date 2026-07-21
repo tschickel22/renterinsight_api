@@ -171,6 +171,47 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
       expect(lead.owner_id).to be_nil
     end
 
+    context 'specific_per_location mode' do
+      let(:location2) { Location.create!(company_id: company.id, name: 'Aurora', code: 'AUR', active: true) }
+
+      it 'assigns based on the resolved location_id' do
+        key = make_key(webhook_config: {
+          default_location_ids: [location.id, location2.id],
+          assignment_mode: 'specific_per_location',
+          assigned_user_ids_by_location: { location.id.to_s => u1.id, location2.id.to_s => owner_specific.id }
+        })
+
+        # Lead 1: location.id → u1
+        post '/api/partner/v1/leads',
+             params: { first_name: 'A', last_name: 'A', email: 'pla@x.com', location_id: location.id }.to_json,
+             headers: headers_for(key)
+        expect(Lead.find(JSON.parse(response.body).dig('data', 'id')).owner_id).to eq(u1.id)
+
+        # Lead 2: location2.id → owner_specific
+        post '/api/partner/v1/leads',
+             params: { first_name: 'B', last_name: 'B', email: 'plb@x.com', location_id: location2.id }.to_json,
+             headers: headers_for(key)
+        expect(Lead.find(JSON.parse(response.body).dig('data', 'id')).owner_id).to eq(owner_specific.id)
+      end
+
+      it 'leaves owner nil when no mapping exists for the resolved location' do
+        location3 = Location.create!(company_id: company.id, name: 'Boulder', code: 'BLD', active: true)
+        # Note: default_location_ids intentionally includes location3 with no
+        # mapping — normally validation blocks this, but a config edited later
+        # could get here; ensure we degrade gracefully.
+        key = make_key(webhook_config: {
+          default_location_ids: [location.id, location3.id],
+          assignment_mode: 'specific_per_location',
+          assigned_user_ids_by_location: { location.id.to_s => u1.id }
+        })
+
+        post '/api/partner/v1/leads',
+             params: { first_name: 'X', last_name: 'X', email: 'plx@x.com', location_id: location3.id }.to_json,
+             headers: headers_for(key)
+        expect(Lead.find(JSON.parse(response.body).dig('data', 'id')).owner_id).to be_nil
+      end
+    end
+
     it 'payload owner_id wins over any assignment_mode' do
       key = make_key(webhook_config: { assignment_mode: 'specific', assigned_user_id: owner_specific.id })
       post '/api/partner/v1/leads',

@@ -138,6 +138,18 @@ module Api
             per_key_config['default_location_id']  = loc_id
             per_key_config.delete('round_robin_cursor') # start fresh per key
 
+            # When the caller picked "one user per location" for a bulk create,
+            # collapse the map into a scalar assigned_user_id on THIS location's
+            # key — every key becomes a plain 'specific' key with the right
+            # user, and the map itself is dropped from storage. Keeps each
+            # generated key simple + self-contained.
+            per_loc_map = per_key_config.delete('assigned_user_ids_by_location') || {}
+            if per_key_config['assignment_mode'].to_s == 'specific_per_location'
+              scalar_user_id = per_loc_map[loc_id.to_s] || per_loc_map[loc_id]
+              per_key_config['assignment_mode'] = 'specific'
+              per_key_config['assigned_user_id'] = scalar_user_id.to_i if scalar_user_id
+            end
+
             key = ApiKey.new(
               name: "#{base_name} — #{location_map[loc_id]}",
               rate_limit: (params[:rate_limit] || 1000).to_i,
@@ -299,14 +311,27 @@ module Api
           return "webhook_config default_location_ids #{invalid.inspect} do not belong to company #{company_id}"
         end
 
-        # Check any assigned users belong to this company
-        candidate_ids = [cfg['assigned_user_id']].compact + Array(cfg['assigned_user_ids'])
+        # Check any assigned users belong to this company (scalar + list + per-location map)
+        per_loc_map = (cfg['assigned_user_ids_by_location'] || {})
+        per_loc_user_ids = per_loc_map.values.map(&:to_i)
+        candidate_ids = [cfg['assigned_user_id']].compact + Array(cfg['assigned_user_ids']) + per_loc_user_ids
         candidate_ids = candidate_ids.map(&:to_i).reject(&:zero?).uniq
         if candidate_ids.any?
           valid = User.where(id: candidate_ids, company_id: company_id).pluck(:id)
           invalid = candidate_ids - valid
           if invalid.any?
             return "webhook_config assigned users not in company #{company_id}: #{invalid.join(', ')}"
+          end
+        end
+
+        # If the caller chose per-location assignment, EVERY selected location
+        # must have a user picked. Otherwise a lead for the missing location
+        # falls through to "unassigned" silently — the exact orphaning problem
+        # this feature is trying to prevent for source/location.
+        if cfg['assignment_mode'].to_s == 'specific_per_location'
+          missing_for = location_ids - per_loc_map.keys.map(&:to_i)
+          if missing_for.any?
+            return "webhook_config assignment_mode=specific_per_location requires a user for every location; missing users for locations #{missing_for.inspect}"
           end
         end
 
@@ -322,7 +347,7 @@ module Api
         allowed = %w[
           default_source_id default_source_name
           default_location_id default_location_ids
-          assignment_mode assigned_user_id assigned_user_ids
+          assignment_mode assigned_user_id assigned_user_ids assigned_user_ids_by_location
           round_robin_list_id round_robin_cursor
           dedupe_enabled
         ]
@@ -336,6 +361,16 @@ module Api
                        when 'assignment_mode' then v.to_s
                        when 'default_source_name' then v.to_s.presence
                        when 'assigned_user_ids', 'default_location_ids' then Array(v).map(&:to_i).reject(&:zero?)
+                       when 'assigned_user_ids_by_location'
+                         # { "48" => 12, "49" => 15 } — normalize both sides to
+                         # strings-of-integers keys and integer values so the
+                         # JSONB read path doesn't need to guess types.
+                         raw_map = v.respond_to?(:to_unsafe_h) ? v.to_unsafe_h : v
+                         raw_map.is_a?(Hash) ? raw_map.each_with_object({}) { |(lk, lv), acc|
+                           loc_id = lk.to_i
+                           usr_id = lv.to_i
+                           acc[loc_id.to_s] = usr_id if loc_id.positive? && usr_id.positive?
+                         } : {}
                        else v.presence && v.to_i
                        end
         end
