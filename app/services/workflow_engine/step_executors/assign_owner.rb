@@ -31,6 +31,15 @@ module WorkflowEngine
         new_owner_id = case cfg['strategy'].to_s
                        when 'specific_user'
                          cfg['user_id']
+                       when 'round_robin_list'
+                         # True cursor-based round-robin using a shared
+                         # RoundRobinAssignmentList — same rotation that
+                         # inbound webhook api keys use, so tokens and
+                         # workflows draw from one ordered list and one
+                         # cursor. Skips inactive users automatically.
+                         list_id = cfg['round_robin_list_id']
+                         list = RoundRobinAssignmentList.active.find_by(id: list_id, company_id: @run.company_id)
+                         list&.next_active_user!&.id
                        when 'round_robin', 'load_balanced'
                          pool = @run.company.users
                          if cfg['role_filter'].present?

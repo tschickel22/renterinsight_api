@@ -33,45 +33,22 @@ class IntakeSubmission < ApplicationRecord
     # Use explicit field mappings if available
     field_mappings = form.field_mappings || {}
     
-    # Determine the lead source. Priority:
-    #   1. source_id param — canonical, matches the CRM Sources tab (source of truth).
-    #   2. utm_source param — legacy links in the wild; title-cased and looked up
-    #      (or created) as a Source name so the lead still attributes.
-    #   3. form.source_id — the form's configured Lead Source.
-    #   4. default "Web Form" Source (created on demand) so a lead is never sourceless.
+    # Lead source resolution now lives in SourceResolverService — the exact
+    # same 4-tier chain (explicit id → name/utm with fuzzy match → default →
+    # "Web Form" fallback) is used here and on the partner API webhook path,
+    # so a Zapier lead and an intake form lead attribute the same way.
     explicit_source_id = submission_data['source_id'] || submission_data['sourceId']
-    utm_source_raw = submission_data['utm_source'] || submission_data['utmSource']
-    catalog_source = if explicit_source_id.present?
-      Source.find_by(id: explicit_source_id.to_i, company_id: form.company_id)
-    end
+    utm_source_raw     = submission_data['utm_source'] || submission_data['utmSource']
+    source_name        = utm_source_raw.present? ? utm_source_raw.to_s.tr('_', ' ').split.map(&:capitalize).join(' ') : nil
 
-    if catalog_source
-      source_id = catalog_source.id
-      Rails.logger.info "[IntakeSubmission] Using catalog source_id=#{source_id} (#{catalog_source.name})"
-    elsif utm_source_raw.present?
-      pretty_name = utm_source_raw.to_s.tr('_', ' ').split.map(&:capitalize).join(' ')
-      utm_source = Source.find_or_create_by(
-        company_id: form.company_id,
-        name: pretty_name
-      ) do |s|
-        s.is_active = true
-      end
-      source_id = utm_source.id
-      Rails.logger.info "[IntakeSubmission] Using UTM source '#{pretty_name}': #{source_id}"
-    else
-      # Get or create default "Web Form" source if form doesn't have one
-      source_id = form.source_id
-      if source_id.nil?
-        default_source = Source.find_or_create_by(
-          company_id: form.company_id,
-          name: 'Web Form'
-        ) do |s|
-          s.is_active = true
-        end
-        source_id = default_source.id
-        Rails.logger.info "[IntakeSubmission] Using default Web Form source: #{source_id}"
-      end
-    end
+    resolved_source = SourceResolverService.resolve(
+      company: Company.find_by(id: form.company_id),
+      source_id: explicit_source_id,
+      source_name: source_name,
+      default_source_id: form.source_id
+    )
+    source_id = resolved_source&.id
+    Rails.logger.info "[IntakeSubmission] Resolved source_id=#{source_id} (#{resolved_source&.name})" if resolved_source
     
     lead_data = { 
       company_id: form.company_id, 

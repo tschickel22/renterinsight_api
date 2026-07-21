@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_16_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_21_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -582,11 +582,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_16_120000) do
     t.bigint "created_by_user_id", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "webhook_config", default: {}, null: false
     t.index ["company_id", "status"], name: "index_api_keys_on_company_id_and_status"
     t.index ["company_id"], name: "index_api_keys_on_company_id"
     t.index ["created_by_user_id"], name: "index_api_keys_on_created_by_user_id"
     t.index ["key"], name: "index_api_keys_on_key", unique: true
     t.index ["status"], name: "index_api_keys_on_status"
+    t.index ["webhook_config"], name: "index_api_keys_on_webhook_config", using: :gin
   end
 
   create_table "api_logs", force: :cascade do |t|
@@ -5675,6 +5677,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_16_120000) do
     t.index ["tier"], name: "index_roles_on_tier"
   end
 
+  create_table "round_robin_assignment_lists", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.jsonb "user_ids", default: [], null: false
+    t.integer "cursor", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "name"], name: "index_round_robin_assignment_lists_on_company_id_and_name", unique: true
+    t.index ["company_id"], name: "index_round_robin_assignment_lists_on_company_id"
+  end
+
   create_table "scopes", force: :cascade do |t|
     t.string "key", limit: 100, null: false
     t.string "name", null: false
@@ -7903,6 +7917,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_16_120000) do
   add_foreign_key "role_permissions", "roles", on_delete: :cascade
   add_foreign_key "role_permissions", "scopes", on_delete: :cascade
   add_foreign_key "roles", "companies", on_delete: :cascade
+  add_foreign_key "round_robin_assignment_lists", "companies"
   add_foreign_key "scrape_runs", "catalog_sources"
   add_foreign_key "service_tickets", "accounts"
   add_foreign_key "service_tickets", "companies"
