@@ -70,6 +70,43 @@ RSpec.describe 'Api::V1 ApiKeys bulk create', type: :request do
     expect(JSON.parse(response.body)['errors'].join(' ')).to include('do not belong to company')
   end
 
+  it 'per-location assignment: each fanned-out key gets the mapped user as a scalar' do
+    u1 = User.create!(email: "u1-#{SecureRandom.hex(4)}@x.com", first_name: 'U', last_name: '1',
+                     password: 'Pass1234!', company_id: company.id, role: 'sales_rep')
+    u2 = User.create!(email: "u2-#{SecureRandom.hex(4)}@x.com", first_name: 'U', last_name: '2',
+                     password: 'Pass1234!', company_id: company.id, role: 'sales_rep')
+
+    post '/api/v1/api-keys/bulk',
+         params: {
+           name: 'FB',
+           company_id: company.id,
+           rate_limit: 500,
+           permissions: { leads: %w[read write] },
+           location_ids: [loc1.id, loc2.id],
+           webhook_config: {
+             assignment_mode: 'specific_per_location',
+             assigned_user_ids_by_location: { loc1.id.to_s => u1.id, loc2.id.to_s => u2.id }
+           }
+         }.to_json,
+         headers: headers
+
+    expect(response).to have_http_status(:created)
+    body = JSON.parse(response.body)
+    expect(body['api_keys'].length).to eq(2)
+
+    # Each key should now be plain 'specific' mode with the mapped user
+    by_loc = body['api_keys'].index_by { |k| k['location_id'] }
+    key_loc1 = ApiKey.find(by_loc[loc1.id]['id'])
+    key_loc2 = ApiKey.find(by_loc[loc2.id]['id'])
+
+    expect(key_loc1.webhook_config['assignment_mode']).to eq('specific')
+    expect(key_loc1.webhook_config['assigned_user_id']).to eq(u1.id)
+    expect(key_loc1.webhook_config).not_to have_key('assigned_user_ids_by_location')
+
+    expect(key_loc2.webhook_config['assignment_mode']).to eq('specific')
+    expect(key_loc2.webhook_config['assigned_user_id']).to eq(u2.id)
+  end
+
   it 'rejects when location_ids is empty' do
     post '/api/v1/api-keys/bulk',
          params: {
