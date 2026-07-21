@@ -82,6 +82,15 @@ default: &default
     class: SyncAllUsersSentEmailsJob
     queue: default
     schedule: every 10 minutes
+  send_activity_reminders:
+    # Fires bell/email reminders for lead/contact/account/deal activities
+    # when reminder_time is coming up in the next 5 minutes. Was never
+    # scheduled before this — every reminder set on a lead/contact/account/
+    # deal was silently dropped, discovered after cody@evangelinehomecenter
+    # missed a Fire Marshal follow-up reminder on Deal 328.
+    class: SendActivityRemindersJob
+    queue: default
+    schedule: every minute
 
 production:
   <<: *default
