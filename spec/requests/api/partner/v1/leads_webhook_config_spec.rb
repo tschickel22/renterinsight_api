@@ -99,6 +99,42 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
       expect(owners).to eq([u1.id, owner_specific.id, u1.id])
     end
 
+    it 'round_robin mode with inline assigned_user_ids advances the cursor on the key itself' do
+      u2.update!(status: 'inactive')
+      key = make_key(webhook_config: {
+        assignment_mode: 'round_robin',
+        assigned_user_ids: [u1.id, u2.id, owner_specific.id]
+      })
+
+      owners = 3.times.map do |i|
+        post '/api/partner/v1/leads',
+             params: { first_name: 'RR', last_name: "IL#{i}", email: "ril#{i}@x.com" }.to_json,
+             headers: headers_for(key)
+        Lead.find(JSON.parse(response.body).dig('data', 'id')).owner_id
+      end
+      # u2 is inactive → skipped; effective rotation is u1, owner_specific, u1
+      expect(owners).to eq([u1.id, owner_specific.id, u1.id])
+
+      # Cursor persisted back to the key so a later request keeps the rotation going.
+      key.reload
+      expect(key.webhook_config['round_robin_cursor']).to eq(1)
+    end
+
+    it 'round_robin returns nil owner when every configured inline user is inactive' do
+      [u1, u2, owner_specific].each { |u| u.update!(status: 'inactive') }
+      key = make_key(webhook_config: {
+        assignment_mode: 'round_robin',
+        assigned_user_ids: [u1.id, u2.id, owner_specific.id]
+      })
+
+      post '/api/partner/v1/leads',
+           params: { first_name: 'X', last_name: 'Y', email: 'x@x.com' }.to_json,
+           headers: headers_for(key)
+      expect(response).to have_http_status(:created)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.owner_id).to be_nil
+    end
+
     it 'payload owner_id wins over any assignment_mode' do
       key = make_key(webhook_config: { assignment_mode: 'specific', assigned_user_id: owner_specific.id })
       post '/api/partner/v1/leads',
