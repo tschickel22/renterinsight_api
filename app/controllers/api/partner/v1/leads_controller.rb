@@ -154,9 +154,23 @@ module Api
           attrs[:source_id] = resolved&.id if resolved && attrs[:source_id].blank?
         end
 
+        # Location rules for a webhook key:
+        #   - If the payload includes location_id AND it's in the key's allowed
+        #     list, honor it (per-location Zaps sending explicit location).
+        #   - If the payload's location_id is NOT in the allowed list, ignore
+        #     it and fall back to the key's first default — prevents a
+        #     misconfigured Zap from attributing leads to a wrong location.
+        #   - If the payload has no location_id, use the first default.
         def apply_location_config!(attrs, config)
-          return if attrs[:location_id].present?
-          attrs[:location_id] = config['default_location_id'] if config['default_location_id'].present?
+          allowed = Array(config['default_location_ids']).map(&:to_i).reject(&:zero?)
+          allowed = [config['default_location_id'].to_i] if allowed.empty? && config['default_location_id'].present?
+
+          if attrs[:location_id].present?
+            return if allowed.empty? # nothing to enforce against
+            attrs[:location_id] = allowed.first unless allowed.include?(attrs[:location_id].to_i)
+          else
+            attrs[:location_id] = allowed.first if allowed.any?
+          end
         end
 
         def apply_owner_config!(attrs, config)

@@ -93,6 +93,89 @@ module Api
         render json: { message: "API key permanently deleted" }
       end
 
+      # POST /api/v1/api-keys/bulk
+      #
+      # Fan-out create: takes one config + a location_ids array and creates
+      # one api_key per location, each with default_location_ids = [that id]
+      # baked into its webhook_config. Everything else (permissions, source,
+      # assignment, dedupe) is copied verbatim so the caller doesn't need to
+      # repeat it N times. Runs in a transaction so a validation error on
+      # location #3 rolls back locations #1 and #2 — no orphan keys on the
+      # DB even if the caller has to retry.
+      #
+      # Response mirrors #create for a single key but as an array; each entry
+      # includes the raw Bearer token exactly once. The caller MUST surface
+      # every token immediately — they're masked after this response.
+      def bulk
+        return unless authorize_action!("api_keys", "create")
+
+        location_ids = Array(params[:location_ids]).map(&:to_i).reject(&:zero?).uniq
+        if location_ids.empty?
+          return render json: { errors: ['location_ids is required and must contain at least one location'] },
+                        status: :unprocessable_entity
+        end
+
+        target_company_id = resolve_target_company_id
+        if target_company_id.nil?
+          return render json: { errors: ['bulk create requires a company scope (not platform-level)'] },
+                        status: :unprocessable_entity
+        end
+
+        base_name = params[:name].to_s.strip.presence || 'Inbound Leads'
+        # Fetch location names up front so we can suffix each key nicely.
+        location_map = Location.where(id: location_ids, company_id: target_company_id).pluck(:id, :name).to_h
+        missing = location_ids - location_map.keys
+        if missing.any?
+          return render json: { errors: ["locations #{missing.inspect} do not belong to company #{target_company_id}"] },
+                        status: :unprocessable_entity
+        end
+
+        created = []
+        ActiveRecord::Base.transaction do
+          location_ids.each do |loc_id|
+            per_key_config = normalize_webhook_config(params[:webhook_config] || {})
+            per_key_config['default_location_ids'] = [loc_id]
+            per_key_config['default_location_id']  = loc_id
+            per_key_config.delete('round_robin_cursor') # start fresh per key
+
+            key = ApiKey.new(
+              name: "#{base_name} — #{location_map[loc_id]}",
+              rate_limit: (params[:rate_limit] || 1000).to_i,
+              permissions: normalize_permissions(params[:permissions] || {}),
+              webhook_config: per_key_config,
+              company_id: target_company_id,
+              created_by_user_id: current_user.id
+            )
+
+            if (err = webhook_config_error(key))
+              raise ActiveRecord::Rollback.new.tap { @bulk_error = err }
+            end
+
+            unless key.save
+              @bulk_error = key.errors.full_messages.join(', ')
+              raise ActiveRecord::Rollback
+            end
+
+            created << key
+          end
+        end
+
+        if @bulk_error
+          return render json: { errors: [@bulk_error] }, status: :unprocessable_entity
+        end
+
+        render json: {
+          api_keys: created.map do |k|
+            json = api_key_json(k, detailed: true)
+            json[:key] = k.key
+            json[:location_id] = k.webhook_config['default_location_ids']&.first
+            json[:location_name] = location_map[json[:location_id]]
+            json
+          end,
+          message: "Generated #{created.size} API #{created.size == 1 ? 'key' : 'keys'}. Save each key now — they will be masked after this response."
+        }, status: :created
+      end
+
       # POST /api/v1/api-keys/:id/revoke
       def revoke
         return unless authorize_action!("api_keys", "update")
@@ -199,16 +282,21 @@ module Api
                            Array(api_key.permissions['leads']).map(&:to_s).include?('write')
         return nil unless can_create_leads
 
-        if cfg['default_location_id'].blank?
-          return 'webhook_config.default_location_id is required for keys that can create leads (prevents orphaned inbound leads)'
+        location_ids = Array(cfg['default_location_ids']).compact.map(&:to_i).reject(&:zero?)
+        location_ids = [cfg['default_location_id'].to_i] if location_ids.empty? && cfg['default_location_id'].present?
+
+        if location_ids.empty?
+          return 'webhook_config.default_location_ids (or default_location_id) is required for keys that can create leads (prevents orphaned inbound leads)'
         end
 
         company_id = api_key.company_id
         return nil unless company_id
 
-        # Sanity-check the location belongs to this company
-        unless Location.where(id: cfg['default_location_id'], company_id: company_id).exists?
-          return "webhook_config.default_location_id #{cfg['default_location_id']} does not belong to company #{company_id}"
+        # Sanity-check every location belongs to this company.
+        valid_ids = Location.where(id: location_ids, company_id: company_id).pluck(:id)
+        invalid = location_ids - valid_ids
+        if invalid.any?
+          return "webhook_config default_location_ids #{invalid.inspect} do not belong to company #{company_id}"
         end
 
         # Check any assigned users belong to this company
@@ -232,7 +320,8 @@ module Api
         h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
         return {} unless h.is_a?(Hash)
         allowed = %w[
-          default_source_id default_source_name default_location_id
+          default_source_id default_source_name
+          default_location_id default_location_ids
           assignment_mode assigned_user_id assigned_user_ids
           round_robin_list_id round_robin_cursor
           dedupe_enabled
@@ -246,10 +335,18 @@ module Api
                        when 'dedupe_enabled' then ActiveModel::Type::Boolean.new.cast(v)
                        when 'assignment_mode' then v.to_s
                        when 'default_source_name' then v.to_s.presence
-                       when 'assigned_user_ids' then Array(v).map(&:to_i).reject(&:zero?)
+                       when 'assigned_user_ids', 'default_location_ids' then Array(v).map(&:to_i).reject(&:zero?)
                        else v.presence && v.to_i
                        end
         end
+        # Normalize: if the caller passed the scalar `default_location_id` OR
+        # the array `default_location_ids`, always store the array form so the
+        # runtime code has one shape to read. The scalar is still permitted on
+        # the wire for backward compat and single-location keys.
+        if result['default_location_id'].present? && result['default_location_ids'].blank?
+          result['default_location_ids'] = [result['default_location_id'].to_i]
+        end
+        result['default_location_id'] = result['default_location_ids']&.first if result['default_location_ids'].present?
         # If a source NAME was provided, resolve it to an id up front so
         # runtime lookup stays fast (SourceResolverService still runs on the
         # webhook path, but this avoids a fuzzy match on every request when
