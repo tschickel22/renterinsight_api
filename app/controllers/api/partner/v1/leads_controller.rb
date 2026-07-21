@@ -76,6 +76,12 @@ module Api
           attrs = lead_params.to_h.symbolize_keys
           config = webhook_config
 
+          # Default status to 'new' when the payload doesn't provide one so
+          # inbound Zapier/FB leads always land on the "All Active" / "New"
+          # tab instead of an empty pill that leaves dealers scratching
+          # their head. Callers can still override by passing status:.
+          attrs[:status] = 'new' if attrs[:status].blank?
+
           apply_source_config!(attrs, config)
           apply_location_config!(attrs, config)
 
