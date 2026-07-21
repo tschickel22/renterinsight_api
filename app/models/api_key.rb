@@ -71,13 +71,24 @@ class ApiKey < ApplicationRecord
     update_columns(last_used_at: Time.current, request_count: request_count + 1)
   end
 
+  # "write" is a superset that implies create + update + delete on the resource.
+  # This matches the two-toggle UX (Read / Write) the API Keys tab surfaces —
+  # dealers picking "Write" reasonably expect to be able to POST/PATCH/DELETE,
+  # not just some undefined subset. If someone stores the finer-grained action
+  # strings directly ("create", "update", "delete"), those still match too.
+  WRITE_ACTIONS = %w[create update delete].freeze
+
   def has_permission?(resource, action)
     return true if permissions.blank? || permissions.empty?
 
     resource_perms = permissions[resource.to_s]
-    return false unless resource_perms
+    return false if resource_perms.blank?
 
-    resource_perms.include?(action.to_s)
+    action_str = action.to_s
+    return true if resource_perms.include?(action_str)
+    return true if resource_perms.include?('write') && WRITE_ACTIONS.include?(action_str)
+
+    false
   end
 
   def rate_limit_key
