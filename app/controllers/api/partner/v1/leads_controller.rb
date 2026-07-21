@@ -167,11 +167,60 @@ module Api
             user_id = config['assigned_user_id']
             attrs[:owner_id] = user_id if user_id.present? && User.exists?(id: user_id, company_id: @current_company.id, status: 'active')
           when 'round_robin'
-            list_id = config['round_robin_list_id']
-            list = RoundRobinAssignmentList.active.find_by(id: list_id, company_id: @current_company.id)
-            picked = list&.next_active_user!
-            attrs[:owner_id] = picked.id if picked
+            picked_id = round_robin_pick(config)
+            attrs[:owner_id] = picked_id if picked_id
           # 'unassigned' or unknown: leave nil, downstream workflow handles it
+          end
+        end
+
+        # Round-robin pick supports two storage shapes:
+        #
+        #   1. Inline on the key (default UX): webhook_config.assigned_user_ids
+        #      is an ordered array + webhook_config.round_robin_cursor is the
+        #      pointer to the next assignee. Simple case — no separate list
+        #      resource needed for the operator to manage.
+        #   2. Shared list (advanced UX): webhook_config.round_robin_list_id
+        #      references a RoundRobinAssignmentList so multiple keys or a
+        #      workflow can share one cursor. Falls back to this when the
+        #      inline list is empty.
+        #
+        # Skips inactive users; returns nil if every configured user is inactive
+        # (caller leaves the lead unassigned).
+        def round_robin_pick(config)
+          inline_ids = Array(config['assigned_user_ids']).map(&:to_i).reject(&:zero?)
+          return round_robin_from_shared_list(config['round_robin_list_id']) if inline_ids.empty?
+
+          round_robin_from_inline_list(inline_ids)
+        end
+
+        def round_robin_from_shared_list(list_id)
+          return nil if list_id.blank?
+          list = RoundRobinAssignmentList.active.find_by(id: list_id, company_id: @current_company.id)
+          list&.next_active_user!&.id
+        end
+
+        # Atomic cursor advance directly on the api_keys row's webhook_config
+        # JSONB. Reloads inside the lock so two concurrent Zap POSTs can't
+        # hand the same lead to the same user.
+        def round_robin_from_inline_list(user_ids)
+          key = current_api_key
+          key.with_lock do
+            key.reload
+            cfg = (key.webhook_config || {}).with_indifferent_access
+            ids = Array(cfg['assigned_user_ids']).map(&:to_i).reject(&:zero?)
+            return nil if ids.empty?
+
+            active_ids = User.where(id: ids, company_id: @current_company.id, status: 'active').pluck(:id)
+            return nil if active_ids.empty?
+
+            ordered_actives = ids.select { |id| active_ids.include?(id) }
+            idx = cfg['round_robin_cursor'].to_i % ordered_actives.length
+            picked_id = ordered_actives[idx]
+
+            new_cfg = cfg.to_h
+            new_cfg['round_robin_cursor'] = (idx + 1) % ordered_actives.length
+            key.update_column(:webhook_config, new_cfg)
+            picked_id
           end
         end
 

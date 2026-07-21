@@ -41,10 +41,14 @@ module Api
 
         # Platform admins can create platform-level or company-scoped keys
         target_company_id = resolve_target_company_id
-        
+
         api_key = ApiKey.new(api_key_params)
         api_key.company_id = target_company_id
         api_key.created_by_user_id = current_user.id
+
+        if (err = webhook_config_error(api_key))
+          return render json: { errors: [err] }, status: :unprocessable_entity
+        end
 
         if api_key.save
           # Return the full key ONCE — it cannot be retrieved again (only a masked preview is stored)
@@ -64,7 +68,14 @@ module Api
       def update
         return unless authorize_action!("api_keys", "update")
 
-        if @api_key.update(api_key_update_params)
+        # Apply changes in-memory so we can validate webhook_config against the
+        # merged final state before writing.
+        @api_key.assign_attributes(api_key_update_params)
+        if (err = webhook_config_error(@api_key))
+          return render json: { errors: [err] }, status: :unprocessable_entity
+        end
+
+        if @api_key.save
           render json: {
             api_key: api_key_json(@api_key, detailed: true),
             message: "API key updated successfully"
@@ -173,6 +184,47 @@ module Api
         permitted
       end
 
+      # A key that can create leads MUST have a default_location_id — otherwise
+      # inbound Zapier/FB leads land with location_id nil and get hidden from
+      # every location-scoped RBAC user (per for_current_location). Silent
+      # orphaning is worse than blocking the key create.
+      #
+      # Also validates that any user IDs referenced actually belong to the
+      # target company — prevents cross-tenant assignment.
+      def webhook_config_error(api_key)
+        cfg = (api_key.webhook_config || {}).with_indifferent_access
+        return nil if cfg.blank?
+
+        can_create_leads = api_key.permissions.is_a?(Hash) &&
+                           Array(api_key.permissions['leads']).map(&:to_s).include?('write')
+        return nil unless can_create_leads
+
+        if cfg['default_location_id'].blank?
+          return 'webhook_config.default_location_id is required for keys that can create leads (prevents orphaned inbound leads)'
+        end
+
+        company_id = api_key.company_id
+        return nil unless company_id
+
+        # Sanity-check the location belongs to this company
+        unless Location.where(id: cfg['default_location_id'], company_id: company_id).exists?
+          return "webhook_config.default_location_id #{cfg['default_location_id']} does not belong to company #{company_id}"
+        end
+
+        # Check any assigned users belong to this company
+        candidate_ids = [cfg['assigned_user_id']].compact + Array(cfg['assigned_user_ids'])
+        candidate_ids = candidate_ids.map(&:to_i).reject(&:zero?).uniq
+        if candidate_ids.any?
+          valid = User.where(id: candidate_ids, company_id: company_id).pluck(:id)
+          invalid = candidate_ids - valid
+          if invalid.any?
+            return "webhook_config assigned users not in company #{company_id}: #{invalid.join(', ')}"
+          end
+        end
+
+        nil
+      end
+
       # Whitelist just the keys the backend actually reads on the inbound-lead
       # path. Anything else the client sends is ignored — no ad-hoc keys leak
       # into the JSONB column.
@@ -181,18 +233,20 @@ module Api
         return {} unless h.is_a?(Hash)
         allowed = %w[
           default_source_id default_source_name default_location_id
-          assignment_mode assigned_user_id round_robin_list_id
+          assignment_mode assigned_user_id assigned_user_ids
+          round_robin_list_id round_robin_cursor
           dedupe_enabled
         ]
         result = {}
         h.each do |k, v|
           key = k.to_s
           next unless allowed.include?(key)
-          # Coerce booleans and integers so the JSONB stays typed sanely.
+          # Coerce booleans, arrays, strings, and integers so the JSONB stays typed sanely.
           result[key] = case key
                        when 'dedupe_enabled' then ActiveModel::Type::Boolean.new.cast(v)
                        when 'assignment_mode' then v.to_s
                        when 'default_source_name' then v.to_s.presence
+                       when 'assigned_user_ids' then Array(v).map(&:to_i).reject(&:zero?)
                        else v.presence && v.to_i
                        end
         end
