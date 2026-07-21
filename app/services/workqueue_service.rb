@@ -9,10 +9,13 @@ class WorkqueueService
 
   QUEUES = {
     'inventory_hot_interest'      => :prospect_hot_signals,
-    'engagement_opened_today'     => :engagement_opened_today,
-    'engagement_opened_week'      => :engagement_opened_week,
-    'engagement_clicked_today'    => :engagement_clicked_today,
-    'engagement_hot_reopeners'    => :engagement_hot_reopeners,
+    'engagement_opened_today'          => :engagement_opened_today,
+    'engagement_opened_week'           => :engagement_opened_week,
+    'engagement_clicked_today'         => :engagement_clicked_today,
+    'engagement_hot_reopeners'         => :engagement_hot_reopeners,
+    'engagement_contact_opened_today'  => :engagement_contact_opened_today,
+    'engagement_contact_opened_week'   => :engagement_contact_opened_week,
+    'engagement_contact_clicked_today' => :engagement_contact_clicked_today,
     'activity_tasks_today'        => :activity_tasks_today,
     'activity_tasks_week'         => :activity_tasks_week,
     'activity_meetings_today'     => :activity_meetings_today,
@@ -36,7 +39,7 @@ class WorkqueueService
 
   GROUPS = [
     { id: 'engagement', label: 'Hot Engagement',
-      queue_ids: %w[inventory_hot_interest engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week] },
+      queue_ids: %w[inventory_hot_interest engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week engagement_contact_opened_today engagement_contact_clicked_today engagement_contact_opened_week] },
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
@@ -245,10 +248,13 @@ class WorkqueueService
   def queue_label(queue_id)
     case queue_id
     when 'inventory_hot_interest'      then 'Hot Inventory Interest'
-    when 'engagement_opened_today'     then 'Opened Email Today'
-    when 'engagement_opened_week'      then 'Opened Email This Week'
-    when 'engagement_clicked_today'    then 'Clicked Link Today'
-    when 'engagement_hot_reopeners'    then 'Hot Reopeners (3+)'
+    when 'engagement_opened_today'          then 'Leads — Opened Email Today'
+    when 'engagement_opened_week'           then 'Leads — Opened Email This Week'
+    when 'engagement_clicked_today'         then 'Leads — Clicked Link Today'
+    when 'engagement_hot_reopeners'         then 'Leads — Hot Reopeners (3+)'
+    when 'engagement_contact_opened_today'  then 'Contacts — Opened Email Today'
+    when 'engagement_contact_opened_week'   then 'Contacts — Opened Email This Week'
+    when 'engagement_contact_clicked_today' then 'Contacts — Clicked Link Today'
     when 'activity_tasks_today'        then 'Tasks — Today & Overdue'
     when 'activity_tasks_week'         then "Tasks — Next #{prefs[:tasks_week_days]}d"
     when 'activity_meetings_today'     then 'Meetings — Today'
@@ -595,6 +601,51 @@ class WorkqueueService
     @company.leads.where(owner_id: @user.id, id: ordered_ids)
                   .where.not(status: %w[converted lost unqualified])
                   .order(Arel.sql("array_position(ARRAY[#{ids_csv}]::bigint[], leads.id)"))
+  end
+
+  # Contact-side engagement queues. Parallel to the Lead-side queues above but
+  # sourced only from CommunicationEvent (direct sends from the Communication
+  # Center) — campaign flows target Lead recipients today, so CampaignSend
+  # would contribute nothing for Contacts.
+  def engagement_contact_opened_today
+    recency = engagement_contact_recency(event: 'opened', since: 24.hours.ago)
+    engagement_contact_scope_for(recency)
+  end
+
+  def engagement_contact_opened_week
+    recent = engagement_contact_recency(event: 'opened', since: 24.hours.ago)
+    weekly = engagement_contact_recency(event: 'opened', since: 7.days.ago, before: 24.hours.ago)
+    weekly.reject! { |contact_id, _| recent.key?(contact_id) }
+    engagement_contact_scope_for(weekly)
+  end
+
+  def engagement_contact_clicked_today
+    recency = engagement_contact_recency(event: 'clicked', since: 24.hours.ago)
+    engagement_contact_scope_for(recency)
+  end
+
+  def engagement_contact_recency(event:, since:, before: nil)
+    comm_q = CommunicationEvent
+               .joins(:communication)
+               .where(event_type: event)
+               .where(communications: { communicable_type: 'Contact', company_id: @company.id })
+               .where('communication_events.occurred_at >= ?', since)
+    comm_q = comm_q.where('communication_events.occurred_at < ?', before) if before
+
+    comm_q.pluck('communications.communicable_id, communication_events.occurred_at')
+          .group_by(&:first)
+          .transform_values { |arr| arr.map(&:last).compact.max }
+  end
+
+  def engagement_contact_scope_for(recency_by_contact)
+    return @company.contacts.none if recency_by_contact.empty?
+
+    ordered_ids = recency_by_contact.sort_by { |_, ts| -(ts ? ts.to_f : 0) }.map { |id, _| id.to_i }
+    ids_csv = ordered_ids.join(',')
+
+    @company.contacts.where(owner_id: @user.id, id: ordered_ids)
+                     .where(is_deleted: [false, nil])
+                     .order(Arel.sql("array_position(ARRAY[#{ids_csv}]::bigint[], contacts.id)"))
   end
 
   # ─── Deal queues ─────────────────────────────────────────────────
