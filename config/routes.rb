@@ -1628,6 +1628,7 @@ Rails.application.routes.draw do
       resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do
         collection do
           get :available_resources
+          post :bulk
         end
         member do
           post :revoke

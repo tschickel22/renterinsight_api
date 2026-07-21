@@ -70,6 +70,42 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
       lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
       expect(lead.location_id).to eq(location.id)
     end
+
+    context 'with default_location_ids array (multi-location key)' do
+      let(:location2) { Location.create!(company_id: company.id, name: 'Aurora', code: 'AUR', active: true) }
+      let(:location3) { Location.create!(company_id: company.id, name: 'Boulder', code: 'BLD', active: true) }
+
+      it 'uses first allowed location when payload omits location_id' do
+        key = make_key(webhook_config: { default_location_ids: [location.id, location2.id, location3.id] })
+        post '/api/partner/v1/leads',
+             params: { first_name: 'Tom', last_name: 'Test', email: 'ml1@x.com' }.to_json,
+             headers: headers_for(key)
+        expect(response).to have_http_status(:created)
+        lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+        expect(lead.location_id).to eq(location.id)
+      end
+
+      it 'honors payload location_id when it is in the allowed list' do
+        key = make_key(webhook_config: { default_location_ids: [location.id, location2.id, location3.id] })
+        post '/api/partner/v1/leads',
+             params: { first_name: 'Tom', last_name: 'Test', email: 'ml2@x.com', location_id: location2.id }.to_json,
+             headers: headers_for(key)
+        expect(response).to have_http_status(:created)
+        lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+        expect(lead.location_id).to eq(location2.id)
+      end
+
+      it 'falls back to first allowed when payload location_id is NOT in the allowed list' do
+        other_location = Location.create!(company_id: company.id, name: 'Denied', code: 'DNY', active: true)
+        key = make_key(webhook_config: { default_location_ids: [location.id, location2.id] })
+        post '/api/partner/v1/leads',
+             params: { first_name: 'Tom', last_name: 'Test', email: 'ml3@x.com', location_id: other_location.id }.to_json,
+             headers: headers_for(key)
+        expect(response).to have_http_status(:created)
+        lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+        expect(lead.location_id).to eq(location.id) # rejected + fallback
+      end
+    end
   end
 
   describe 'owner assignment' do

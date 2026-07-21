@@ -40,13 +40,13 @@ RSpec.describe 'Api::V1 ApiKeys webhook_config validation', type: :request do
   it 'rejects a leads:write key with no default_location_id' do
     create_key(webhook_config: { assignment_mode: 'unassigned', dedupe_enabled: true })
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(JSON.parse(response.body)['errors'].join(' ')).to include('default_location_id is required')
+    expect(JSON.parse(response.body)['errors'].join(' ')).to match(/default_location_ids?.*required/i)
   end
 
   it 'rejects a location from another company' do
     create_key(webhook_config: { default_location_id: foreign_location.id, assignment_mode: 'unassigned' })
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(JSON.parse(response.body)['errors'].join(' ')).to include('does not belong to company')
+    expect(JSON.parse(response.body)['errors'].join(' ')).to include('do not belong to company')
   end
 
   it 'rejects assigned users from another company' do
