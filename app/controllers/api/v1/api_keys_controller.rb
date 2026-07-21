@@ -100,24 +100,33 @@ module Api
 
       private
 
-      # Scope API keys based on user role:
-      # - Platform admin: sees all (platform-level + all companies)
-      # - Company admin: sees only their company's keys
+      # Scope API keys based on the ACTIVE company scope, not the caller's role.
+      #
+      # SECURITY: platform_admin used to fall through to `ApiKey.all` here,
+      # which leaked keys across tenants — a platform admin viewing Company
+      # A's settings would see Company B's keys. `@company` is always set by
+      # `set_company_scope` (either the admin's own company or whatever they
+      # switched to via the company selector), so the correct default is to
+      # scope to that.
+      #
+      # Platform admins can still cross-scope explicitly via the URL:
+      #   ?company_id=<id>       — a specific different company
+      #   ?company_id=platform   — platform-level (company_id NULL) keys
+      #   ?company_id=all        — every key across every company
       def scoped_api_keys
-        if current_user.role == "platform_admin"
-          # Platform admins see everything
-          # Optionally filter by company_id param
-          if params[:company_id].present?
-            if params[:company_id] == "platform"
-              ApiKey.platform_level
-            else
-              ApiKey.where(company_id: params[:company_id])
-            end
-          else
+        if current_user.role == "platform_admin" && params[:company_id].present?
+          case params[:company_id].to_s
+          when "platform"
+            ApiKey.platform_level
+          when "all"
             ApiKey.all
+          else
+            ApiKey.where(company_id: params[:company_id].to_i)
           end
         else
-          @company.api_keys
+          # Everyone else — including platform admins with no explicit override
+          # — is scoped to the currently active company.
+          @company ? @company.api_keys : ApiKey.none
         end
       end
 
