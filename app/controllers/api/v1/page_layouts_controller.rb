@@ -454,6 +454,42 @@ module Api
         ]
       end
 
+      # Builds the "status" field definition for the leads page layout from
+      # the tenant's configured lead_statuses. Preserves display order
+      # (sort_order asc) and includes both active + excluded statuses so a
+      # lead currently in a dead-end status ("Closed Lost", etc.) can still
+      # be re-picked. Inactive-only statuses are excluded — they're
+      # intentionally hidden from new pickers.
+      LEGACY_LEAD_STATUS_FALLBACK = %w[
+        new not_contacted attempted_to_contact contact_in_future contacted
+        engaged pre_qualified qualified showing_scheduled proposal negotiation
+        application_submitted closed_won closed_lost lost_lead not_qualified
+        junk_lead
+      ].freeze
+
+      def leads_status_field_definition
+        rows = @company&.lead_statuses&.active&.ordered&.to_a || []
+        if rows.any?
+          options = rows.map(&:key)
+          option_labels = rows.each_with_object({}) { |r, h| h[r.key] = r.label }
+          {
+            key: 'status', label: 'Status', type: 'select', source: 'standard',
+            required: false, protected: false,
+            options: options, option_labels: option_labels
+          }
+        else
+          # Defensive fallback — the seed migration guarantees every company
+          # has statuses, but if that's somehow missing, don't ship an empty
+          # dropdown.
+          {
+            key: 'status', label: 'Status', type: 'select', source: 'standard',
+            required: false, protected: false,
+            options: LEGACY_LEAD_STATUS_FALLBACK,
+            option_labels: LEGACY_LEAD_STATUS_FALLBACK.each_with_object({}) { |k, h| h[k] = k.humanize }
+          }
+        end
+      end
+
       def leads_standard_fields
         protected_keys = PageLayout::PROTECTED_FIELDS['leads'] || []
         [
@@ -469,16 +505,14 @@ module Api
           { key: 'company_name', label: 'Company Name', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'title', label: 'Job Title', type: 'text', source: 'standard', required: false, protected: false },
           { key: 'created_at', label: 'Lead Created', type: 'datetime', source: 'standard', required: false, protected: false },
-          { key: 'status', label: 'Status', type: 'select', source: 'standard', required: false, protected: false,
-            options: %w[new not_contacted attempted_to_contact contact_in_future contacted engaged pre_qualified qualified showing_scheduled proposal negotiation application_submitted closed_won closed_lost lost_lead not_qualified junk_lead],
-            option_labels: {
-              'new' => 'New', 'not_contacted' => 'Not Contacted', 'attempted_to_contact' => 'Attempted to Contact',
-              'contact_in_future' => 'Contact in Future', 'contacted' => 'Contacted', 'engaged' => 'Engaged',
-              'pre_qualified' => 'Pre-Qualified', 'qualified' => 'Qualified', 'showing_scheduled' => 'Showing Scheduled',
-              'proposal' => 'Proposal', 'negotiation' => 'Negotiation', 'application_submitted' => 'Application Submitted',
-              'closed_won' => 'Closed Won', 'closed_lost' => 'Closed Lost', 'lost_lead' => 'Lost Lead',
-              'not_qualified' => 'Not Qualified', 'junk_lead' => 'Junk Lead'
-            } },
+          # Status options come from the tenant's configurable lead_statuses
+          # table (CRM → Lead Statuses), NOT a hardcoded enum. Any status the
+          # dealer adds in the manager surfaces here on the very next fetch,
+          # in the exact sort_order the manager displays. Falls back to the
+          # legacy hardcoded list if the tenant somehow has no configured
+          # statuses (defensive — the seed migration creates 17 defaults per
+          # company so this shouldn't happen in practice).
+          leads_status_field_definition,
           { key: 'owner_id', label: 'Owner', type: 'user', source: 'standard', required: false, protected: false },
           { key: 'source_id', label: 'Source', type: 'select', source: 'standard', required: false, protected: false,
             options: Source.for_company(@company.id).order(:name).pluck(:name) },
