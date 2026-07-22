@@ -23,8 +23,13 @@ module Api
         end
         
         deals = deals.includes(:account, :contact, :territory, :user, :location, :deal_products, :commission_plan)
-                    .order(created_at: :desc)
-        
+        # sort_by=name gives pickers a stable alphabetical list; default stays newest-first
+        deals = if params[:sort_by] == 'name'
+                  deals.order(Arel.sql('LOWER(deals.name) ASC'), :id)
+                else
+                  deals.order(created_at: :desc)
+                end
+
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
         if params[:account_id].present?
           deals = deals.where(account_id: params[:account_id])

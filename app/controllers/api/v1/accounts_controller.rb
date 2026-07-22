@@ -61,7 +61,11 @@ module Api
         
         # Count AFTER search filter (for pagination)
         filtered_count = @accounts.count
-        
+
+        # Deterministic alphabetical order — without it pagination is DB-order
+        # and records silently fall off page 1 (pickers never see them)
+        @accounts = @accounts.order(Arel.sql('LOWER(accounts.name) ASC'), :id)
+
         # Paginate
         page = (params[:page] || 1).to_i
         per_page = (params[:per_page] || 50).to_i

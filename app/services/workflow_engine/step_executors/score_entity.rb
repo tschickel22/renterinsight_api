@@ -6,7 +6,7 @@ module WorkflowEngine
   module StepExecutors
     class ScoreEntity < Base
       ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'.freeze
-      MODEL = 'claude-sonnet-4-6'.freeze
+      MODEL = AiModel.for(:classification)
 
       def call
         cfg = @step['config'] || {}
