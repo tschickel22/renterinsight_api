@@ -23,7 +23,8 @@ module Api
           user_type: @user_type,
           landing_page: @user.respond_to?(:landing_page) ? @user.landing_page : nil,
           booking_url: @user.respond_to?(:booking_url) ? @user.booking_url : nil,
-          workqueue_preferences: @user.respond_to?(:workqueue_preferences) ? (@user.workqueue_preferences || {}) : {}
+          workqueue_preferences: @user.respond_to?(:workqueue_preferences) ? (@user.workqueue_preferences || {}) : {},
+          calendar_preferences: @user.respond_to?(:calendar_preferences) ? (@user.calendar_preferences || {}) : {}
         }, status: :ok
       end
 
@@ -31,7 +32,7 @@ module Api
       def update_profile
         profile_params = params.permit(
           :first_name, :last_name, :title, :phone, :email, :address, :city, :state, :zip, :landing_page, :booking_url,
-          workqueue_preferences: {}
+          workqueue_preferences: {}, calendar_preferences: {}
         )
 
         begin
@@ -74,6 +75,13 @@ module Api
               # numeric workqueue settings or hidden_queues.
               existing = (@user.workqueue_preferences || {}).symbolize_keys
               updates[:workqueue_preferences] = existing.merge(sanitized)
+            end
+
+            if params.key?(:calendar_preferences) && @user.respond_to?(:calendar_preferences)
+              raw = profile_params[:calendar_preferences] || {}
+              sanitized = sanitize_calendar_preferences(raw)
+              existing = (@user.calendar_preferences || {}).symbolize_keys
+              updates[:calendar_preferences] = existing.merge(sanitized)
             end
 
             @user.update!(updates) if updates.any?
@@ -345,6 +353,7 @@ module Api
           stale_leads_days
           stale_deals_days
           reminders_window_days
+          meetings_window_days
           closing_week_days
           tasks_week_days
           replied_window_days
@@ -358,7 +367,7 @@ module Api
           engagement_opened_today engagement_opened_week
           engagement_clicked_today engagement_hot_reopeners
           activity_tasks_today activity_tasks_week activity_meetings_today
-          activity_calls_due activity_reminders_upcoming
+          activity_meetings_upcoming activity_calls_due activity_reminders_upcoming
           leads_replied contacts_replied
           leads_mine leads_new_24h leads_stale_48h
           deals_mine deals_closing_month deals_closing_week deals_stale_30d
@@ -431,6 +440,39 @@ module Api
         if raw.key?(:stock_list_hidden_columns)
           arr = Array(raw[:stock_list_hidden_columns]).map(&:to_s)
           result[:stock_list_hidden_columns] = arr.first(100)
+        end
+
+        result
+      end
+
+      # Coerces and constrains calendar_preferences input. Mirrors
+      # sanitize_workqueue_preferences — users can't store arbitrary data.
+      def sanitize_calendar_preferences(raw)
+        raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+        raw = raw.symbolize_keys
+
+        result = {}
+
+        if raw.key?(:default_view)
+          view = raw[:default_view].to_s
+          result[:default_view] = view if %w[my team service_all service_unassigned all].include?(view)
+        end
+
+        # Empty array = show all types (matches the events endpoint contract).
+        if raw.key?(:default_types)
+          types = Array(raw[:default_types]).map(&:to_s)
+          result[:default_types] = types & %w[task meeting call reminder service_ticket]
+        end
+
+        %i[hide_completed hide_past].each do |key|
+          result[key] = ActiveModel::Type::Boolean.new.cast(raw[key]) if raw.key?(key)
+        end
+
+        # Date window around "today" that the calendar loads. days_back: 0 is
+        # valid ("don't load the past"); clamp both to a year.
+        %i[days_back days_forward].each do |key|
+          next unless raw.key?(key)
+          result[key] = raw[key].to_i.clamp(0, 365)
         end
 
         result

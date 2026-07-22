@@ -19,6 +19,7 @@ class WorkqueueService
     'activity_tasks_today'        => :activity_tasks_today,
     'activity_tasks_week'         => :activity_tasks_week,
     'activity_meetings_today'     => :activity_meetings_today,
+    'activity_meetings_upcoming'  => :activity_meetings_upcoming,
     'activity_calls_due'          => :activity_calls_due,
     'activity_reminders_upcoming' => :activity_reminders_upcoming,
     'leads_replied'               => :leads_replied,
@@ -41,7 +42,7 @@ class WorkqueueService
     { id: 'engagement', label: 'Hot Engagement',
       queue_ids: %w[inventory_hot_interest engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week engagement_contact_opened_today engagement_contact_clicked_today engagement_contact_opened_week] },
     { id: 'my_activity', label: 'My Open Activity',
-      queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_calls_due activity_reminders_upcoming] },
+      queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_meetings_upcoming activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
       queue_ids: %w[leads_replied contacts_replied leads_mine leads_new_24h leads_stale_48h] },
     { id: 'my_deals', label: 'My Deals',
@@ -58,6 +59,7 @@ class WorkqueueService
     stale_leads_days:       2,
     stale_deals_days:       30,
     reminders_window_days:  1,
+    meetings_window_days:   7,
     closing_week_days:      7,
     tasks_week_days:        7,
     replied_window_days:    7,
@@ -258,6 +260,7 @@ class WorkqueueService
     when 'activity_tasks_today'        then 'Tasks — Today & Overdue'
     when 'activity_tasks_week'         then "Tasks — Next #{prefs[:tasks_week_days]}d"
     when 'activity_meetings_today'     then 'Meetings — Today'
+    when 'activity_meetings_upcoming'  then "Meetings — Next #{prefs[:meetings_window_days]}d"
     when 'activity_calls_due'          then 'Calls — Due'
     when 'activity_reminders_upcoming' then "Reminders — Next #{prefs[:reminders_window_days]}d"
     when 'leads_replied'               then 'Replied — Needs Response'
@@ -331,6 +334,19 @@ class WorkqueueService
                      .where.not(status: %w[completed cancelled])
                      .where('COALESCE(due_date, start_time) >= ? AND COALESCE(due_date, start_time) <= ?',
                             Date.current.beginning_of_day, Date.current.end_of_day)
+                     .where(valid_parent_condition)
+  end
+
+  # Forward-looking counterpart to activity_meetings_today — meetings scheduled
+  # after today, within the user's meetings_window_days preference. Same
+  # COALESCE(due_date, start_time) rule as the today queue so Deal-created
+  # meetings (start_time only) are included.
+  def activity_meetings_upcoming
+    window_end = prefs[:meetings_window_days].to_i.days.from_now.end_of_day
+    WorkqueueActivity.where(company_id: @company.id, assigned_to_id: @user.id, activity_type: 'meeting')
+                     .where.not(status: %w[completed cancelled])
+                     .where('COALESCE(due_date, start_time) > ? AND COALESCE(due_date, start_time) <= ?',
+                            Date.current.end_of_day, window_end)
                      .where(valid_parent_condition)
   end
 
@@ -758,8 +774,12 @@ class WorkqueueService
 
   def apply_sort(scope)
     case scope.klass.name
-    when 'Task', 'WorkqueueActivity'
+    when 'Task'
       scope.order(Arel.sql('due_date ASC NULLS LAST'))
+    when 'WorkqueueActivity'
+      # Meetings created from a Deal carry only start_time; sort them by it
+      # instead of dumping every NULL-due_date row at the end.
+      scope.order(Arel.sql('COALESCE(due_date, start_time) ASC NULLS LAST'))
     when 'Lead'
       scope.order(created_at: :desc)
     when 'Contact'
