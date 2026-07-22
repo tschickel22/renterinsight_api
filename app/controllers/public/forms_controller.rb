@@ -23,6 +23,13 @@ module Public
         end
       end
 
+      # Resolved conversion-tracking IDs (company default, with the form's
+      # location override applied per-key). Absent when nothing is configured.
+      # Bound to a location => that location's effective config; unbound =>
+      # company default. Consumed verbatim by the frontend tracking helper.
+      tracking = @form.company.resolved_tracking(@form.location)
+      response['tracking'] = tracking if tracking.present?
+
       render json: response
     end
     

@@ -1387,6 +1387,51 @@ class Company < ApplicationRecord
     label_defaults.merge(label_overrides)
   end
 
+  # ==================== CONVERSION TRACKING ====================
+  # Ad-platform IDs used to fire PageView + Lead conversions on public intake
+  # forms. Company holds the default; a location overrides per-key. Keys are
+  # camelCase to pass straight through to the frontend tracking helper.
+  TRACKING_KEYS = %w[metaPixelId googleGa4Id googleAdsId googleAdsLeadLabel].freeze
+
+  # Company-level defaults (whitelisted, blanks dropped).
+  def tracking_defaults
+    sanitize_tracking(tracking_settings)
+  end
+
+  # Effective config for a given location (nil => company default only).
+  # Per-key: a present location value wins, else the company default.
+  def resolved_tracking(location = nil)
+    company_cfg = tracking_defaults
+    loc_cfg = location ? sanitize_tracking(location.tracking_settings) : {}
+    TRACKING_KEYS.each_with_object({}) do |key, out|
+      value = loc_cfg[key].presence || company_cfg[key].presence
+      out[key] = value if value
+    end
+  end
+
+  # Persist the company default. Accepts a hash of TRACKING_KEYS; unknown keys
+  # ignored, blanks cleared. Returns the saved (sanitized) config.
+  def save_tracking_defaults(submitted)
+    update!(tracking_settings: sanitize_tracking(submitted))
+    tracking_defaults
+  end
+
+  # Whitelist to TRACKING_KEYS, stringify, drop blanks. Tolerates
+  # ActionController params, symbol keys, and nil. Class method so Location can
+  # reuse it for its overrides without duplicating the shape.
+  def self.sanitize_tracking(raw)
+    hash = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : (raw || {})
+    TRACKING_KEYS.each_with_object({}) do |key, out|
+      value = hash[key] || hash[key.to_sym]
+      value = value.to_s.strip if value
+      out[key] = value if value.present?
+    end
+  end
+
+  def sanitize_tracking(raw)
+    self.class.sanitize_tracking(raw)
+  end
+
   def save_label_overrides(submitted)
     return {} if submitted.blank?
 
