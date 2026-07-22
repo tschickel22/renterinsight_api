@@ -231,12 +231,21 @@ module Api
               leadFieldMap: [:street, :street2, :city, :state, :zip]
             ]
           ).tap do |p|
-            # Normalize isActive to is_active for Rails
-            if p.key?(:isActive)
+            # Normalize isActive → is_active. The FE spreads ...formData (which
+            # still carries the camelCase copy) AND emits the fresh snake_case
+            # value, so both keys land here. Prefer snake_case — the camelCase
+            # copy is a stale echo of what came back from as_json. Same tap
+            # pattern as captcha_required below (added after edits to those
+            # fields silently reverted because the tap overwrote the new
+            # value with the old one).
+            if p.key?(:is_active)
+              p.delete(:isActive)
+            elsif p.key?(:isActive)
               p[:is_active] = p.delete(:isActive)
             end
-            # Camel-case location_id from the FE — same pattern as isActive.
-            if p.key?(:locationId)
+            if p.key?(:location_id)
+              p.delete(:locationId)
+            elsif p.key?(:locationId)
               p[:location_id] = p.delete(:locationId)
             end
             # Blank string from an "Any location" dropdown option becomes nil
