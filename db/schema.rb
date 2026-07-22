@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_22_000000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_23_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1950,6 +1950,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_22_000000) do
     t.string "industry", default: "manufactured_housing", null: false
     t.jsonb "deal_desk_settings", default: {}, null: false
     t.string "account_number"
+    t.jsonb "tracking_settings", default: {}, null: false
     t.index ["account_number"], name: "index_companies_on_account_number", unique: true
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
@@ -4148,6 +4149,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_22_000000) do
     t.boolean "is_default", default: false, null: false
     t.jsonb "allowed_form_states", default: [], null: false
     t.boolean "is_corporate", default: false, null: false
+    t.jsonb "tracking_settings", default: {}, null: false
     t.index ["active"], name: "index_locations_on_active"
     t.index ["company_id", "active"], name: "index_locations_on_company_id_and_active"
     t.index ["company_id", "code"], name: "index_locations_on_company_id_and_code", unique: true, where: "(code IS NOT NULL)"

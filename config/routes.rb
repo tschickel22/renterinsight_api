@@ -349,6 +349,14 @@ Rails.application.routes.draw do
         delete 'labels/:key',    action: :destroy
       end
 
+      # ==================== CONVERSION TRACKING ====================
+      # Company default + per-location overrides for public-form ad tracking.
+      scope path: 'company', controller: 'tracking_settings' do
+        get   'tracking-settings', action: :show
+        put   'tracking-settings', action: :update
+        patch 'tracking-settings', action: :update
+      end
+
       # Field-level tooltip overrides (system + custom fields). Same shape as
       # labels — see Api::V1::FieldTooltipsController.
       scope path: 'company', controller: 'field_tooltips' do
