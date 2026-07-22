@@ -1,7 +1,7 @@
 class AiActionService
   class AiError < StandardError; end
 
-  MODEL = 'claude-sonnet-4-6'
+  MODEL = AiModel.for(:classification)
   MAX_TOKENS = 1500
 
   INTENT_READ    = 'read'

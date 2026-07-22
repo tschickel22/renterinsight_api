@@ -11,7 +11,7 @@ require 'json'
 class SocialPostGeneratorService
   class Error < StandardError; end
 
-  MODEL             = 'claude-sonnet-4-6'
+  MODEL             = AiModel.for(:generation)
   MAX_TOKENS        = 800
   MAX_IMAGES        = 4
   MAX_PAST_EXAMPLES = 5

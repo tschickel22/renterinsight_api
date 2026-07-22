@@ -9,7 +9,7 @@ module Accounting
     class ScanError < StandardError; end
 
     CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-    CLAUDE_MODEL = "claude-sonnet-4-6"
+    CLAUDE_MODEL = AiModel.for(:vision)
     MAX_IMAGE_SIZE = 10_000_000  # 10MB
 
     def initialize(company, user = nil)

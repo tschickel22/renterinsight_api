@@ -11,7 +11,7 @@ require 'json'
 # variance reporting.
 class BudgetService
   ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
-  ANTHROPIC_MODEL   = 'claude-sonnet-4-6'
+  ANTHROPIC_MODEL   = AiModel.for(:analysis)
 
   # =========================================================================
   # FISCAL YEAR HELPERS

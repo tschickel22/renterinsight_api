@@ -1,7 +1,7 @@
 class AiDraftService
   class AiError < StandardError; end
 
-  MODEL = 'claude-sonnet-4-6'
+  MODEL = AiModel.for(:generation)
   MAX_TOKENS = 800
 
   def initialize(api_key)

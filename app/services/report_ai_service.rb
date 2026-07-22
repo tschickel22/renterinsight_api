@@ -2,7 +2,7 @@ class ReportAiService
   class AiError < StandardError; end
   class RateLimitError < StandardError; end
 
-  MODEL = 'claude-sonnet-4-6'
+  MODEL = AiModel.for(:analysis)
   MAX_TOKENS = 1000
 
   def initialize(api_key)

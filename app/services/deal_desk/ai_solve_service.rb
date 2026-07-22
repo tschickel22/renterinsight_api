@@ -18,7 +18,7 @@ module DealDesk
   class AiSolveService
     class Error < StandardError; end
 
-    MODEL = 'claude-sonnet-4-6'
+    MODEL = AiModel.for(:analysis)
     LEVERS = %w[term cash_down price rate].freeze
 
     def initialize(company:, deal:, base_structure:, prompt:, can_view_costs: false, api_key: nil, user: nil)
