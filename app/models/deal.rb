@@ -40,6 +40,10 @@ class Deal < ApplicationRecord
   belongs_to :location, optional: true
   belongs_to :account, optional: true
   belongs_to :contact, optional: true
+  # Co-applicant / co-borrower. A second Contact on the same account, created by
+  # lead conversion from the lead's co_applicant_* fields. The Contact stays the
+  # source of truth — the deal only points at it.
+  belongs_to :co_applicant_contact, class_name: 'Contact', optional: true
   belongs_to :user, optional: true  # FIX: Made optional to prevent 422 errors when user_id not set
   belongs_to :owner, class_name: 'User', foreign_key: 'owner_id', optional: true
   belongs_to :territory, optional: true
@@ -98,7 +102,13 @@ class Deal < ApplicationRecord
   
   # Ensure at least account or contact is present
   validate :account_or_contact_required
-  
+
+  # The co-applicant is now settable from the deal page (not just at conversion),
+  # so guard the three ways a picker can go wrong: another tenant's contact, the
+  # primary applicant listed as their own co-applicant, or someone who isn't on
+  # this deal's account.
+  validate :co_applicant_contact_is_valid
+
   # Auto-generate deal number on creation
   before_create :generate_deal_number
 
@@ -230,7 +240,26 @@ class Deal < ApplicationRecord
       errors.add(:base, "Deal must have either an account or a contact")
     end
   end
-  
+
+  def co_applicant_contact_is_valid
+    return if co_applicant_contact_id.blank?
+
+    if co_applicant_contact_id.to_s == contact_id.to_s
+      errors.add(:co_applicant_contact_id, "can't be the same person as the primary applicant")
+      return
+    end
+
+    candidate = Contact.find_by(id: co_applicant_contact_id)
+    if candidate.nil? || candidate.company_id != company_id
+      errors.add(:co_applicant_contact_id, 'must be a contact in this company')
+      return
+    end
+
+    if account_id.present? && candidate.account_id.present? && candidate.account_id != account_id
+      errors.add(:co_applicant_contact_id, "must be a contact on this deal's account")
+    end
+  end
+
   # Scopes
   scope :open, -> { where(stage: %w[prospecting qualification needs_analysis proposal negotiation closing]) }
   # Tenant-aware: pass the company so custom pipeline keys (e.g. 'won'/'lost'

@@ -22,7 +22,7 @@ module Api
                              current_user.id, current_user.id, current_user.email)
         end
         
-        deals = deals.includes(:account, :contact, :territory, :user, :location, :deal_products, :commission_plan)
+        deals = deals.includes(:account, :contact, :co_applicant_contact, :territory, :user, :location, :deal_products, :commission_plan)
         # sort_by=name gives pickers a stable alphabetical list; default stays newest-first
         deals = if params[:sort_by] == 'name'
                   deals.order(Arel.sql('LOWER(deals.name) ASC'), :id)
@@ -152,7 +152,7 @@ module Api
           Current.location_filtered? ? scope.where(location_id: Current.location_id) : scope
         end
 
-        deals = deals.includes(:account, :contact, :territory, :user, :location, :deal_products)
+        deals = deals.includes(:account, :contact, :co_applicant_contact, :territory, :user, :location, :deal_products)
                     .order(created_at: :desc)
         
         render json: deals.map { |d| deal_json(d) }
@@ -732,6 +732,10 @@ module Api
       def deal_params
         params.require(:deal).permit(
           :name, :account_id, :contact_id, :vehicle_id, :value, :stage, :probability,
+          # Co-applicant link. Settable after conversion via the Applicants card
+          # picker; Deal#co_applicant_contact_is_valid enforces same-company,
+          # same-account, and not-the-primary. Blank clears it.
+          :co_applicant_contact_id,
           :expected_close_date, :actual_close_date, :user_id, :assigned_to,
           :territory_id, :lead_source, :description, :notes,
           :win_reason, :loss_reason, :competitor,
@@ -849,6 +853,15 @@ module Api
           contactName: deal.contact ? "#{deal.contact.first_name} #{deal.contact.last_name}".strip : nil,
           contactEmail: deal.contact&.email,
           contactPhone: deal.contact&.phone,
+          # Co-applicant / co-borrower. Derived from the linked Contact rather
+          # than stored on the deal, so edits to the contact show here with no
+          # sync step. contactId is included so the UI can deep-link into that
+          # contact's Communication tab.
+          coApplicantContactId: deal.co_applicant_contact_id,
+          coApplicantName: deal.co_applicant_contact ?
+            "#{deal.co_applicant_contact.first_name} #{deal.co_applicant_contact.last_name}".strip : nil,
+          coApplicantEmail: deal.co_applicant_contact&.email,
+          coApplicantPhone: deal.co_applicant_contact&.phone,
           vehicleId: deal.vehicle_id,
           vehicleName: deal.vehicle&.display_name,
           vehicleInventoryId: deal.vehicle&.inventory_id,

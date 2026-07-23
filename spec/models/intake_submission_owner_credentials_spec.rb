@@ -3,10 +3,16 @@
 require 'rails_helper'
 
 # Covers Issue #2: for existing-customer inquiries the notification should
-# route to (and be sent via) the record's OWNER's credentials, not the form's
-# fixed notified_user. And the Communication row should attach to the rep,
-# not to the customer record (which was confusing — a failed rep-notification
-# looked like a failed email TO the customer).
+# route TO the record's OWNER, not the form's fixed notified_user. And the
+# Communication row should attach to the rep, not to the customer record
+# (which was confusing — a failed rep-notification looked like a failed
+# email TO the customer).
+#
+# Routing the RECIPIENT by owner is still correct. Routing the SENDER by owner
+# is not, and was removed: `user:` put the recipient at the top of the sender
+# waterfall, so the From address depended on whether that rep had a personal
+# mailbox connected. Reps ended up receiving lead alerts that appeared to come
+# from a coworker's inbox. Sender now resolves Location → Company → Platform.
 RSpec.describe IntakeSubmission, '#notify_existing_customer_inquiry (owner-first routing)', type: :model do
   let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}", industry: 'manufactured_housing') }
   let(:owner_user) do
@@ -38,7 +44,7 @@ RSpec.describe IntakeSubmission, '#notify_existing_customer_inquiry (owner-first
     submission.notify_existing_customer_inquiry(match, form)
 
     expect(CommunicationService).to have_received(:send_email).with(
-      hash_including(to: owner_user.email, user: owner_user, communicable: owner_user)
+      hash_including(to: owner_user.email, communicable: owner_user)
     )
   end
 
@@ -48,8 +54,17 @@ RSpec.describe IntakeSubmission, '#notify_existing_customer_inquiry (owner-first
     submission.notify_existing_customer_inquiry(match, form)
 
     expect(CommunicationService).to have_received(:send_email).with(
-      hash_including(to: form_notified_user.email, user: form_notified_user, communicable: form_notified_user)
+      hash_including(to: form_notified_user.email, communicable: form_notified_user)
     )
+  end
+
+  it 'does NOT send as the recipient — sender resolves company/platform, never the rep' do
+    submission.notify_existing_customer_inquiry(match, form)
+
+    expect(CommunicationService).to have_received(:send_email) do |args|
+      expect(args).not_to have_key(:user)
+      expect(args).not_to have_key(:sent_by)
+    end
   end
 
   it 'sends nothing when neither owner nor form notified_user is set' do

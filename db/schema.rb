@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_23_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_23_163314) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2748,9 +2748,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_23_120000) do
     t.integer "deal_invoice_id"
     t.bigint "lender_id"
     t.jsonb "deal_desk_baseline"
+    t.bigint "co_applicant_contact_id"
     t.index ["account_id", "stage"], name: "index_deals_on_account_id_and_stage"
     t.index ["account_id"], name: "index_deals_on_account_id"
     t.index ["assigned_to"], name: "index_deals_on_assigned_to"
+    t.index ["co_applicant_contact_id"], name: "index_deals_on_co_applicant_contact_id"
     t.index ["commission_plan_id", "delivery_date"], name: "index_deals_on_plan_and_delivery"
     t.index ["commission_plan_id"], name: "index_deals_on_commission_plan_id"
     t.index ["company_id", "deal_number"], name: "index_deals_on_company_id_and_deal_number", unique: true
@@ -7664,6 +7666,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_23_120000) do
   add_foreign_key "deals", "commission_plans"
   add_foreign_key "deals", "companies"
   add_foreign_key "deals", "contacts"
+  add_foreign_key "deals", "contacts", column: "co_applicant_contact_id", on_delete: :nullify
   add_foreign_key "deals", "lenders"
   add_foreign_key "deals", "locations"
   add_foreign_key "deals", "projects"
