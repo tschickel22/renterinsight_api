@@ -585,6 +585,10 @@ module Api
                 name: deal_params[:name].presence || "#{account_name} Opportunity",
                 account_id: account.id,
                 contact_id: contact&.id,
+                # Point the deal at the co-applicant Contact built just above, so
+                # the co-borrower is visible from the deal and not only from the
+                # account. nil when the lead captured no co-applicant.
+                co_applicant_contact_id: co_applicant&.id,
                 company_id: @lead.company_id,
                 location_id: location_id,
                 stage: stage,
