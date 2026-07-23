@@ -393,6 +393,44 @@ module Api
         render json: { updated_count: updated_count, assigned_to: { id: new_owner.id, name: new_owner.try(:full_name) || new_owner.email } }
       end
 
+      # POST /api/crm/leads/bulk_update
+      # General bulk field update (status and/or owner) across a selection or the
+      # full filtered set — the "select all matching" path for the Bulk Edit modal.
+      # Like bulk_reassign, one update_all query, which skips callbacks/notifications;
+      # that's the deliberate tradeoff for updating the whole matching set without a
+      # per-row PATCH storm. Small explicit selections still go through the client's
+      # per-row path (which keeps callbacks).
+      #
+      # Accepts EITHER lead_ids: [int] OR filter: { status_category, search, owner_id,
+      # health_band }, PLUS any of: status, owner_id.
+      def bulk_update
+        return unless authorize_action!('leads', 'update')
+
+        updates = {}
+        updates[:status] = params[:status].to_s if params[:status].present?
+        if params[:owner_id].present?
+          new_owner = @company.users.find_by(id: params[:owner_id])
+          return render(json: { error: 'Invalid assignee' }, status: :unprocessable_entity) unless new_owner
+          updates[:owner_id] = new_owner.id
+        end
+        return render(json: { error: 'No updatable fields (status, owner_id) provided' }, status: :bad_request) if updates.empty?
+
+        scope = base_leads_scope
+        if params[:filter].present?
+          scope = apply_index_filters(scope, params[:filter])
+        elsif params[:lead_ids].is_a?(Array) && params[:lead_ids].any?
+          scope = scope.where(id: params[:lead_ids])
+        else
+          return render(json: { error: 'lead_ids or filter required' }, status: :bad_request)
+        end
+
+        updated_count = scope.update_all(updates.merge(updated_at: Time.current))
+
+        Rails.logger.info "[LeadsController#bulk_update] user=#{current_user.email} updated #{updated_count} leads (#{updates.keys.join(', ')})"
+
+        render json: { updated_count: updated_count, updates: updates }
+      end
+
       # POST /api/crm/leads/bulk_add_tags
       # Adds one or more tags to a set of leads — the "select all matching" tagging
       # path so a user can tag the whole filtered set, not just the visible page.
