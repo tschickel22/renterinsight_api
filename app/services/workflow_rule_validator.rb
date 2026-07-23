@@ -2,10 +2,10 @@
 
 class WorkflowRuleValidator
   KNOWN_EVENT_TYPES = %w[
-    lead.created lead.updated lead.deleted lead.status_changed
-    deal.created deal.updated deal.deleted deal.status_changed
-    contact.created contact.updated contact.deleted contact.status_changed
-    account.created account.updated account.deleted account.status_changed
+    lead.created lead.updated lead.deleted lead.status_changed lead.tagged
+    deal.created deal.updated deal.deleted deal.status_changed deal.tagged
+    contact.created contact.updated contact.deleted contact.status_changed contact.tagged
+    account.created account.updated account.deleted account.status_changed account.tagged
     service_ticket.created service_ticket.updated service_ticket.status_changed
     lead_activity.created lead_activity.updated lead_activity.completed
     deal_activity.created deal_activity.updated deal_activity.completed

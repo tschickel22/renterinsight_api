@@ -117,6 +117,13 @@ module WorkflowEngine
     def step_into(current, part)
       if current.is_a?(Hash)
         current[part] || current[part.to_sym]
+      elsif %w[tags tag_names].include?(part.to_s) && current.respond_to?(:tags)
+        # `tags` is a has_many association, so attribute_missing? routes it to the
+        # custom-field fallback (returning nil) — which left the tags_include /
+        # tags_exclude / tags_any_of operators unable to see a record's tags.
+        # Resolve it to an array of tag names so those operators work (e.g. the
+        # lead.tagged trigger with a "tags include 'hot-lead'" condition).
+        current.tags.map { |t| t.respond_to?(:name) ? t.name : t }
       elsif current.respond_to?(part) && !attribute_missing?(current, part)
         current.public_send(part)
       elsif current.respond_to?(:custom_field_values)
