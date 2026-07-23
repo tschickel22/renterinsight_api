@@ -518,15 +518,16 @@ class CalendarService
       end
       
     when 'meeting'
-      # Meetings: Use start_time and end_time
-      if activity.start_time.present? && activity.end_time.present?
-        # Reschedules can leave end_time before the new start_time; a negative
-        # span renders as "all day" and trips the hide_past filter
-        if activity.end_time <= activity.start_time
-          [activity.start_time, activity.start_time + duration_hours.hours, false]
-        else
-          [activity.start_time, activity.end_time, false]
-        end
+      # Meetings: Use start_time; end_time when it's usable, else duration
+      # (default 1 hour). Missing or corrupt end (reschedules can leave it
+      # before the new start) must not drop the meeting or trip hide_past.
+      if activity.start_time.present?
+        end_time = if activity.end_time.present? && activity.end_time > activity.start_time
+                     activity.end_time
+                   else
+                     activity.start_time + duration_hours.hours
+                   end
+        [activity.start_time, end_time, false]
       elsif activity.due_date.present?
         # Fallback: use due_date with 1-hour duration
         start_time = activity.due_date.is_a?(DateTime) ? activity.due_date : activity.due_date.to_time.change(hour: 9)
