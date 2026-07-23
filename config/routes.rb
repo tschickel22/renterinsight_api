@@ -1357,8 +1357,11 @@ Rails.application.routes.draw do
           post :check_duplicate
           post :check_duplicates
           post :quick_create
+          # Bulk add tags across the whole filtered set (select-all-matching),
+          # not just the visible page. Accepts contact_ids OR filter.
+          post :bulk_add_tags
         end
-        
+
         # Contact Communications
         resources :communications, controller: 'contact_communications', only: [:index] do
           collection do
