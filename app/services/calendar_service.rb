@@ -667,6 +667,11 @@ class CalendarService
   def filter_out_past(events)
     now = Time.current
     events.select do |event|
+      # Overdue-but-open items are still actionable work — hiding them buries
+      # tasks the user hasn't done. "Past" only hides events that are over AND
+      # finished/cancelled; hide_completed covers finished items anywhere in time.
+      next true unless COMPLETED_STATUSES.include?(event[:status].to_s.downcase)
+
       # Use the LATEST of start/end — corrupt records can carry an end before
       # their start, and trusting end alone hides events that haven't happened
       times = [event[:end], event[:start]].filter_map do |ts|
