@@ -19,7 +19,37 @@ class TagAssignment < ApplicationRecord
   # already-enrolled recipients), so re-runs are safe.
   after_commit :refresh_dynamic_campaigns, on: %i[create]
 
+  # Adding a tag fires a `<entity>.tagged` workflow event (e.g. lead.tagged) so
+  # automations can trigger on it — "when tagged 'hot-lead' → start a nurture
+  # sequence." The tag id/name ride along in the payload as {{trigger.tag_name}};
+  # narrow to a specific tag with a `tags` / tags_include condition on the rule.
+  # WorkflowEngine.emit is a no-op while a workflow step is executing
+  # (Current.suppress_workflow_events), so a rule's own add_tag step can't loop.
+  after_commit :emit_workflow_tagged_event, on: %i[create]
+
+  # Entities the workflow engine can trigger on. Tag rows also exist for other
+  # types (e.g. Vehicle) that have no tagged-trigger, so we only emit for these.
+  WORKFLOW_TAGGABLE_ENTITY_TYPES = %w[Lead Contact Account Deal].freeze
+
   private
+
+  def emit_workflow_tagged_event
+    return unless defined?(WorkflowEngine)
+    return if entity_type.blank? || entity_id.blank?
+    return unless WORKFLOW_TAGGABLE_ENTITY_TYPES.include?(entity_type)
+
+    record = entity
+    return if record.nil?
+
+    WorkflowEngine.emit(
+      "#{entity_type.underscore}.tagged",
+      record,
+      { 'tag_id' => tag_id, 'tag_name' => tag&.name }
+    )
+  rescue StandardError => e
+    Rails.logger.warn "[TagAssignment#emit_workflow_tagged_event] #{e.class}: #{e.message}"
+  end
+
 
   def refresh_dynamic_campaigns
     return if entity_type.blank? || entity_id.blank?

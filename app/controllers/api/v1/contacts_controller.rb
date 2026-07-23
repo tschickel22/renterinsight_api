@@ -799,7 +799,114 @@ module Api
         render json: { error: e.message }, status: :internal_server_error
       end
 
+      # POST /api/v1/contacts/bulk_add_tags
+      # Adds one or more tags to a set of contacts — the "select all matching"
+      # tagging path so a user can tag the whole filtered set (every page), not
+      # just the visible selection. Mirrors the leads bulk_add_tags endpoint.
+      #
+      # Accepts EITHER:
+      #   contact_ids: [int]  — explicit selection (visible page)
+      # OR
+      #   filter: { search, owner_id, account_id, department, has_email, has_phone }
+      #                       — re-applies the same scoping #index uses so a user
+      #                         can't tag contacts they can't see.
+      # PLUS at least one of: tag_ids: [int], tag_names: [string].
+      def bulk_add_tags
+        return unless authorize_action!('crm', 'update')
+
+        tags = resolve_bulk_contact_tags(params[:tag_ids], params[:tag_names])
+        return render(json: { error: 'tag_ids or tag_names required' }, status: :bad_request) if tags.empty?
+
+        scope = bulk_contacts_scope
+        if params[:filter].present?
+          scope = apply_bulk_contact_filter(scope, params[:filter])
+        elsif params[:contact_ids].is_a?(Array) && params[:contact_ids].any?
+          scope = scope.where(id: params[:contact_ids])
+        else
+          return render(json: { error: 'contact_ids or filter required' }, status: :bad_request)
+        end
+
+        contact_ids = scope.pluck(:id)
+        created = 0
+
+        tags.each do |tag|
+          # One query for who already has this tag so re-tagging is a no-op; create!
+          # (not insert_all) so TagAssignment's after_commit hooks still fire —
+          # dynamic-campaign enrollment and the contact.tagged workflow event.
+          already = TagAssignment.where(tag_id: tag.id, entity_type: 'Contact', entity_id: contact_ids)
+                                  .pluck(:entity_id).to_set
+          (contact_ids - already.to_a).each do |cid|
+            TagAssignment.create!(
+              company_id: @company.id, tag: tag,
+              entity_type: 'Contact', entity_id: cid,
+              assigned_by: current_user&.id&.to_s || 'system', assigned_at: Time.current
+            )
+            created += 1
+          end
+        end
+
+        Rails.logger.info "[ContactsController#bulk_add_tags] user=#{current_user.email} tagged #{contact_ids.size} contacts with #{tags.size} tag(s); #{created} new"
+
+        render json: {
+          tagged_count: contact_ids.size,
+          assignments_created: created,
+          tags: tags.map { |t| { id: t.id, name: t.name } }
+        }
+      end
+
       private
+
+      # Tenant + RBAC + location-scoped contact set — same rules #index applies
+      # before per-request filters, so bulk tagging can't reach a contact the
+      # user wouldn't see in the list.
+      def bulk_contacts_scope
+        scope = if current_user.uses_rbac? && !current_user.effective_admin?
+                  location_ids = permission_service.accessible_location_ids
+                  location_ids.any? ? @company.contacts.where(location_id: location_ids) : @company.contacts
+                else
+                  @company.contacts
+                end
+        scope = scope.where(location_id: Current.location_id) if Current.location_filtered?
+        scope
+      end
+
+      # Re-apply the list filters (from the "select all matching" payload) so the
+      # bulk set matches exactly what the user is looking at.
+      def apply_bulk_contact_filter(scope, f)
+        scope = scope.where(account_id: f[:account_id]) if f[:account_id].present?
+        scope = scope.where(department: f[:department]) if f[:department].present?
+        scope = scope.with_email if f[:has_email].to_s == 'true'
+        scope = scope.with_phone if f[:has_phone].to_s == 'true'
+        if f[:owner_id].present?
+          scope = f[:owner_id].to_s == 'null' ? scope.where(owner_id: nil) : scope.where(owner_id: f[:owner_id])
+        end
+        if f[:search].present?
+          q = "%#{f[:search]}%"
+          scope = scope.where(
+            'first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR title ILIKE ? OR department ILIKE ?',
+            q, q, q, q, q, q
+          )
+        end
+        scope
+      end
+
+      # Existing tags by id + names (found-or-created within the company), matching
+      # the single-contact add_tags path. Deduped by id.
+      def resolve_bulk_contact_tags(tag_ids, tag_names)
+        tags = []
+        tags.concat(@company.tags.where(id: Array(tag_ids).reject(&:blank?)).to_a) if tag_ids.present?
+
+        Array(tag_names).map { |n| n.to_s.strip }.reject(&:blank?).each do |name|
+          tags << @company.tags.find_or_create_by!(name: name) do |t|
+            t.color = '#6B7280'
+            t.is_active = true
+            t.created_by = current_user&.id&.to_s || 'system'
+          end
+        end
+
+        tags.uniq(&:id)
+      end
+
 
       def set_company_scope
         unless current_user

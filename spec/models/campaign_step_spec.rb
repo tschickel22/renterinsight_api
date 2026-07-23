@@ -47,6 +47,15 @@ RSpec.describe CampaignStep, type: :model do
       step.reload
       expect(step.body_blocks).to eq([])
     end
+
+    it "does NOT inject a footer block for a raw_html step (it manages its own unsubscribe)" do
+      step = campaign.campaign_steps.create!(position: 0, body_blocks: [
+        { "type" => "raw_html", "html" => "<html><body>hi</body></html>", "append_unsubscribe" => true }
+      ])
+      step.reload
+      expect(step.raw_html_step?).to be(true)
+      expect(step.body_blocks.map { |b| b["type"] }).to eq(["raw_html"])
+    end
   end
 
   # ============================================================

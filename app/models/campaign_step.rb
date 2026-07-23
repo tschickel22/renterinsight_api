@@ -28,6 +28,13 @@ class CampaignStep < ApplicationRecord
   def email_channel? = effective_channel == 'email'
   def sms_channel?   = effective_channel == 'sms'
 
+  # True when the body is a pasted, fully-designed HTML document (Option A) —
+  # rendered as-is by EmailRenderer, bypassing the block layout pipeline.
+  def raw_html_step?
+    body_blocks.is_a?(Array) &&
+      body_blocks.any? { |b| b.is_a?(Hash) && (b['type'] == 'raw_html' || b[:type] == 'raw_html') }
+  end
+
   def effective_channel
     return channel if channel.present?
     campaign&.channel
@@ -64,6 +71,10 @@ class CampaignStep < ApplicationRecord
     return unless email_channel?
     return if body_blocks.blank?
     return unless body_blocks.is_a?(Array)
+    # Raw-HTML steps manage their own unsubscribe via the block's
+    # append_unsubscribe toggle (EmailRenderer appends the footer at send time),
+    # so don't inject a table-row footer block that would never render there.
+    return if raw_html_step?
     has_footer = body_blocks.any? { |b| b.is_a?(Hash) && (b['type'] == 'footer_unsubscribe' || b[:type] == 'footer_unsubscribe') }
     self.body_blocks = body_blocks + [{ 'type' => 'footer_unsubscribe' }] unless has_footer
   end
