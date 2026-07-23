@@ -2325,6 +2325,14 @@ Rails.application.routes.draw do
           # one query. Accepts lead_ids OR filter (status_category/search/owner_id).
           post :bulk_reassign
 
+          # Bulk add tags — "select all matching" tagging across every page, not
+          # just the visible selection. Accepts lead_ids OR the same filter.
+          post :bulk_add_tags
+
+          # Bulk field update (status/owner) across the whole filtered set, not
+          # just the visible page. Accepts lead_ids OR the same filter.
+          post :bulk_update
+
           # Kanban view: leads grouped by status, capped per column.
           get :kanban
         end

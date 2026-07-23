@@ -247,4 +247,51 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
       expect(Lead.where(email: 'dup2@x.com').count).to eq(2)
     end
   end
+
+  # A returning inbound inquiry that dedupes should NOT be a silent no-op:
+  # we enrich the matched lead and notify its owner, while still returning 202
+  # and never creating a duplicate.
+  describe 'dedupe enrichment + notification' do
+    let(:key) { make_key(webhook_config: { dedupe_enabled: true, default_source_id: fb_source.id }) }
+    let!(:existing) do
+      Lead.create!(company_id: company.id, first_name: 'Tom', last_name: 'Prior',
+                   email: 'ret@x.com', phone: nil, owner_id: owner_specific.id)
+    end
+
+    def post_repeat
+      post '/api/partner/v1/leads',
+           params: { first_name: 'Tom', last_name: 'New', email: 'ret@x.com',
+                     phone: '3035551212', interests_requirements: 'Wants a 3/2 single-wide' }.to_json,
+           headers: headers_for(key)
+    end
+
+    it 'still returns 202 and creates no duplicate' do
+      post_repeat
+      expect(response).to have_http_status(:accepted)
+      expect(JSON.parse(response.body)['deduped_to']).to include('type' => 'lead', 'id' => existing.id)
+      expect(Lead.where(email: 'ret@x.com').count).to eq(1)
+    end
+
+    it 'fills blank fields from the inquiry without overwriting existing data' do
+      post_repeat
+      existing.reload
+      expect(existing.phone).to eq('3035551212')                       # was blank → filled
+      expect(existing.interests_requirements).to eq('Wants a 3/2 single-wide')
+      expect(existing.last_name).to eq('Prior')                        # non-blank → NOT overwritten
+    end
+
+    it 'appends a timestamped note capturing the repeat inquiry' do
+      post_repeat
+      expect(existing.reload.notes.to_s).to include('Repeat inquiry')
+    end
+
+    it 'creates a high-priority reminder activity for the lead owner' do
+      expect { post_repeat }.to change {
+        LeadActivity.where(lead_id: existing.id, assigned_to_id: owner_specific.id).count
+      }.by(1)
+      activity = LeadActivity.where(lead_id: existing.id).order(:id).last
+      expect(activity.subject).to include('Repeat Inquiry on Existing Lead')
+      expect(activity.priority).to eq('high')
+    end
+  end
 end

@@ -86,6 +86,12 @@ module Api
           apply_location_config!(attrs, config)
 
           if config['dedupe_enabled'] && (match = dedupe_match(attrs))
+            # Don't create a duplicate — but a returning inquiry is NOT a no-op.
+            # Absorb any new details onto the matched record and notify its
+            # owner, so the dealer hears about the re-engagement instead of it
+            # vanishing silently. Best-effort: a notify failure never fails the
+            # request (Zapier still sees a clean 202).
+            absorb_inquiry_into_match!(match, attrs, config)
             return render json: {
               data: nil,
               deduped_to: { type: match.type.to_s, id: match.record.id, matched_on: match.matched.to_s }
@@ -261,6 +267,163 @@ module Api
           return nil if attrs[:email].blank? && attrs[:phone].blank?
           IdentityResolver.new(@current_company, email: attrs[:email], phone: attrs[:phone]).resolve
         end
+
+        # A returning inbound (Zapier/FB) inquiry matched an existing record.
+        # We don't duplicate it, but we DO want the dealer to know the person
+        # re-engaged — mirrors the intake form's :existing_lead "Repeat Inquiry"
+        # behavior. Scope: enrich + notify only when the match is a Lead
+        # (LeadActivity/owner are lead-specific). Contact/account matches keep
+        # the prior silent-202 semantics; we just log them.
+        #
+        # Entirely best-effort and self-contained in rescue: enrichment and
+        # notification failures must never turn a successful dedupe into an
+        # error for the caller.
+        def absorb_inquiry_into_match!(match, attrs, config)
+          unless match.type == :lead
+            Rails.logger.info "[Partner::Leads] Deduped to #{match.type} #{match.record.id}; no lead enrichment/notify"
+            return
+          end
+
+          lead = match.record
+          enriched = enrich_lead_from_inquiry!(lead, attrs)
+          notify_repeat_inquiry(lead, config)
+          Rails.logger.info "[Partner::Leads] Absorbed repeat inquiry into lead #{lead.id} (enriched=#{enriched}) via '#{current_api_key&.name}'"
+        rescue => e
+          Rails.logger.error "[Partner::Leads] absorb_inquiry_into_match! failed for #{match.type} #{match.record&.id}: #{e.class} - #{e.message}"
+          Rails.logger.error e.backtrace.first(5).join("\n")
+        end
+
+        # Fill any blank contact/qualification fields from the new payload
+        # (never overwrite existing data) and append a timestamped note
+        # capturing what came in. Saving fires the lead's normal
+        # emit_workflow_updated hook. Returns true if the record changed.
+        def enrich_lead_from_inquiry!(lead, attrs)
+          FILLABLE_FROM_INQUIRY.each do |field|
+            val = attrs[field]
+            lead[field] = val if val.present? && lead[field].blank?
+          end
+
+          summary = inbound_inquiry_summary(attrs)
+          if summary.present?
+            stamp = Time.current.strftime('%Y-%m-%d %H:%M %Z')
+            entry = "[#{stamp}] Repeat inquiry via #{current_api_key&.name || 'API'}\n#{summary}"
+            lead.notes = [lead.notes.presence, entry].compact.join("\n\n")
+          end
+
+          return false unless lead.changed?
+          lead.save
+          true
+        end
+
+        # Human-readable digest of the inbound payload for the note + email,
+        # including the raw form answers (e.g. Facebook lead-ad questions) that
+        # aren't mapped to columns.
+        def inbound_inquiry_summary(attrs)
+          lines = []
+          name = [attrs[:first_name], attrs[:last_name]].compact.join(' ').strip
+          lines << "Name: #{name}"                                   if name.present?
+          lines << "Email: #{attrs[:email]}"                         if attrs[:email].present?
+          lines << "Phone: #{attrs[:phone]}"                         if attrs[:phone].present?
+          lines << "Interest: #{attrs[:interests_requirements]}"     if attrs[:interests_requirements].present?
+          lines << "Timeframe: #{attrs[:purchase_timeframe]}"        if attrs[:purchase_timeframe].present?
+          lines << "Notes: #{attrs[:notes]}"                         if attrs[:notes].present?
+
+          raw = params[:raw]
+          raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+          if raw.is_a?(Hash)
+            skip = %w[full_name email phone]
+            raw.each do |k, v|
+              next if v.blank? || skip.include?(k.to_s.downcase)
+              lines << "#{k}: #{v}"
+            end
+          end
+
+          lines.join("\n")
+        rescue => e
+          Rails.logger.error "[Partner::Leads] inbound_inquiry_summary failed: #{e.message}"
+          nil
+        end
+
+        # Owner-facing notification for a repeat inquiry: in-app toast/bell via
+        # a LeadActivity + email, matching the intake :existing_lead path. Falls
+        # back to the key's assigned user when the lead has no owner.
+        def notify_repeat_inquiry(lead, config)
+          notify_user_id = lead.owner_id.presence || config['assigned_user_id']
+          return unless notify_user_id.present?
+
+          notify_user = User.find_by(id: notify_user_id, company_id: @current_company.id, status: 'active')
+          return unless notify_user
+
+          source_label = current_api_key&.name || 'API'
+          name = [lead.first_name, lead.last_name].compact.join(' ').strip
+
+          activity = LeadActivity.create!(
+            lead_id: lead.id,
+            user_id: notify_user.id,
+            assigned_to_id: notify_user.id,
+            activity_type: 'reminder',
+            subject: "Repeat Inquiry on Existing Lead: #{name}",
+            description: "Existing lead re-engaged via #{source_label}. Contact: #{lead.email || lead.phone || 'N/A'}",
+            priority: 'high',
+            status: 'pending',
+            reminder_time: Time.current,
+            reminder_sent: false
+          )
+          ActivityReminderService.send_reminder(activity)
+
+          send_repeat_inquiry_email(lead, notify_user, source_label)
+        rescue => e
+          Rails.logger.error "[Partner::Leads] notify_repeat_inquiry failed for lead #{lead.id}: #{e.class} - #{e.message}"
+        end
+
+        def send_repeat_inquiry_email(lead, user, source_label)
+          return unless user.email.present?
+
+          frontend_url = ENV['FRONTEND_URL'] || 'https://staging.crm.landlordinsight.com'
+          name = [lead.first_name, lead.last_name].compact.join(' ').strip
+          body = <<~HTML
+            <h2>Repeat Inquiry on Existing Lead</h2>
+            <p>An <strong>existing lead</strong> re-engaged via <strong>#{source_label}</strong>.
+            We filled in any missing details and logged the new inquiry as a note — no duplicate lead was created.</p>
+
+            <h3>Contact Information</h3>
+            <p>
+              <strong>Name:</strong> #{name.presence || 'Not provided'}<br>
+              <strong>Email:</strong> #{lead.email || 'Not provided'}<br>
+              <strong>Phone:</strong> #{lead.phone || 'Not provided'}
+            </p>
+
+            <p><a href="#{frontend_url}/crm/leads/#{lead.id}" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">View Lead in CRM</a></p>
+
+            <hr>
+            <p style="color: #6b7280; font-size: 12px;">#{@current_company&.name} - Automated Lead Notification</p>
+          HTML
+
+          CommunicationService.send_email(
+            communicable: lead,
+            to: user.email,
+            subject: "Repeat Inquiry: #{name.presence || lead.email || lead.phone} - #{source_label}",
+            body: body,
+            category: 'system',
+            content_type: 'text/html',
+            skip_preference_check: true,
+            metadata: {
+              source: 'partner_api',
+              api_key_name: source_label,
+              existing_lead_update: true
+            }
+          )
+          Rails.logger.info "[Partner::Leads] Sent repeat-inquiry email to #{user.email} for lead #{lead.id}"
+        rescue => e
+          Rails.logger.error "[Partner::Leads] send_repeat_inquiry_email failed for lead #{lead.id}: #{e.class} - #{e.message}"
+        end
+
+        # Blank-only fill list for repeat inquiries — never overwrites existing data.
+        FILLABLE_FROM_INQUIRY = %i[
+          first_name last_name email phone
+          budget_range purchase_timeframe rv_experience
+          preferred_contact_method interests_requirements
+        ].freeze
 
         def lead_json(lead, detailed: false)
           json = {
