@@ -520,7 +520,13 @@ class CalendarService
     when 'meeting'
       # Meetings: Use start_time and end_time
       if activity.start_time.present? && activity.end_time.present?
-        [activity.start_time, activity.end_time, false]
+        # Reschedules can leave end_time before the new start_time; a negative
+        # span renders as "all day" and trips the hide_past filter
+        if activity.end_time <= activity.start_time
+          [activity.start_time, activity.start_time + duration_hours.hours, false]
+        else
+          [activity.start_time, activity.end_time, false]
+        end
       elsif activity.due_date.present?
         # Fallback: use due_date with 1-hour duration
         start_time = activity.due_date.is_a?(DateTime) ? activity.due_date : activity.due_date.to_time.change(hour: 9)
@@ -660,15 +666,18 @@ class CalendarService
   def filter_out_past(events)
     now = Time.current
     events.select do |event|
-      ts = event[:end].presence || event[:start]
-      next true if ts.blank?
+      # Use the LATEST of start/end — corrupt records can carry an end before
+      # their start, and trusting end alone hides events that haven't happened
+      times = [event[:end], event[:start]].filter_map do |ts|
+        next if ts.blank?
 
-      begin
-        parsed = Time.zone.parse(ts.to_s)
-        parsed.nil? || parsed >= now
-      rescue ArgumentError, TypeError
-        true
+        begin
+          Time.zone.parse(ts.to_s)
+        rescue ArgumentError, TypeError
+          nil
+        end
       end
+      times.empty? || times.max >= now
     end
   end
 
