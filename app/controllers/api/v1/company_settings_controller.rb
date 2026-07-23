@@ -21,6 +21,14 @@ module Api
         :update_embed_inventory_config, :show_portal_modules, :update_portal_modules,
         :update_form_states, :update_project_management
       ]
+      # Communication settings get a SECOND, stricter gate on top of
+      # authorize_settings_update!. Everything else under company_settings:update
+      # is a preference; this one sets the mailbox and phone number the whole
+      # tenant sends as, so a non-admin holding company_settings:update must not
+      # reach it.
+      before_action :authorize_communication_admin!, only: [
+        :update_communication, :save_communication_settings, :clear_communication_settings
+      ]
       before_action :authorize_branding_read!, only: [:show_branding]
       before_action :authorize_branding_update!, only: [:update_branding]
       before_action :authorize_finance_manage!, only: [:show_loan, :update_loan]
@@ -728,6 +736,19 @@ module Api
           Rails.logger.warn "[RBAC] User #{current_user.id} denied UPDATE access to company_settings for company #{@company&.id}"
           render json: { error: 'Permission denied: You do not have permission to modify company settings' }, status: :forbidden
         end
+      end
+
+      # Company-admin-only gate for the shared sending identity. Intentionally
+      # checks effective_admin? directly rather than going through skip_rbac? /
+      # has_permission?, because the point is that a granted
+      # company_settings:update permission is NOT sufficient here.
+      def authorize_communication_admin!
+        return if current_user.effective_admin?
+
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied communication-settings update for company #{@company&.id} (not a company admin)"
+        render json: {
+          error: 'Permission denied: only company administrators can change communication settings'
+        }, status: :forbidden
       end
 
       # RBAC Authorization Methods for branding resource

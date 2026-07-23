@@ -13,6 +13,7 @@ class Api::V1::OauthEmailController < ApplicationController
 
   skip_before_action :authenticate, only: [:callback]
   before_action :set_company_scope, except: [:callback]
+  before_action :authorize_shared_scope!, only: [:authorize, :disconnect]
 
   # GET /api/v1/oauth-email/authorize
   def authorize
@@ -252,6 +253,38 @@ class Api::V1::OauthEmailController < ApplicationController
   end
 
   private
+
+  # Connecting a mailbox at platform/company/location scope makes that ONE
+  # person's inbox the From address for everything the tenant sends that falls
+  # through the waterfall — lead alerts, notifications, campaigns. That is an
+  # admin-level act, so it must not be reachable by any authenticated user.
+  # 'user_email_connection' scope stays open: that's a rep wiring up their own
+  # mailbox, and it only ever affects mail they personally send.
+  #
+  # Previously this controller had no authorization at all beyond
+  # set_company_scope, which is how a sales rep's personal mailbox ended up as
+  # a company-wide sender.
+  SHARED_SCOPES = %w[platform company location].freeze
+
+  def authorize_shared_scope!
+    scope_type = params[:scope_type].to_s
+    return unless SHARED_SCOPES.include?(scope_type)
+
+    if scope_type == 'platform'
+      return if current_user.platform_admin? || current_user.super_admin?
+      Rails.logger.warn "[OAuthEmail] User #{current_user.id} denied #{scope_type}-scope mailbox change"
+      return render json: {
+        error: 'Permission denied: only platform administrators can change the platform sending mailbox'
+      }, status: :forbidden
+    end
+
+    return if current_user.effective_admin?
+
+    Rails.logger.warn "[OAuthEmail] User #{current_user.id} denied #{scope_type}-scope mailbox change for company #{@company&.id}"
+    render json: {
+      error: 'Permission denied: only company administrators can change the shared sending mailbox'
+    }, status: :forbidden
+  end
 
   def upsert_user_email_connection(user_id:, company_id:, email:, provider:, access_token:, refresh_token:, expires_at:)
     user = User.find_by(id: user_id)

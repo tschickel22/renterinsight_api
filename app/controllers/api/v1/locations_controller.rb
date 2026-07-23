@@ -13,6 +13,10 @@ module Api
       before_action -> { authorize_rbac!('locations', 'update') }, only: [:update, :bulk_activate, :bulk_deactivate, :save_communication_settings, :clear_communication_settings]
       before_action -> { authorize_rbac!('locations', 'delete') }, only: [:destroy, :bulk_delete, :restore]
       before_action -> { authorize_rbac!('locations', 'assign') }, only: [:assign_user, :remove_user]
+      # Location communication settings set the From address / from number for
+      # everyone working that location, so locations:update alone is not enough
+      # — same company-admin bar as company-scope communication settings.
+      before_action :authorize_communication_admin!, only: [:save_communication_settings, :clear_communication_settings]
 
       # GET /api/v1/locations/accessible
       # Returns accessible locations for current user with selection requirement flag
@@ -507,6 +511,18 @@ module Api
       end
 
       private
+
+      # Mirrors CompanySettingsController#authorize_communication_admin!.
+      # A location manager with locations:update can rename the lot and set its
+      # hours, but cannot repoint the mailbox the tenant sends as.
+      def authorize_communication_admin!
+        return if current_user.effective_admin?
+
+        Rails.logger.warn "[RBAC] User #{current_user.id} denied communication-settings update for location #{params[:id]} (not a company admin)"
+        render json: {
+          error: 'Permission denied: only company administrators can change communication settings'
+        }, status: :forbidden
+      end
 
       def set_location
         @location = current_company.locations.find(params[:id])

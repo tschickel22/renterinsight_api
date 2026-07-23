@@ -444,9 +444,13 @@ class IntakeSubmission < ApplicationRecord
     # part of the customer's conversation — putting it on the customer's
     # timeline was confusing (looked like a failed email TO the customer).
     #
-    # Pass sending_user so the outbound uses THAT rep's credentials at the top
-    # of the waterfall (User → Location → Company → Platform). Matches the
-    # rule that outbound about a customer should come from their owner.
+    # Deliberately does NOT pass `user:`. This is a platform-generated
+    # notification TO a rep, not correspondence FROM one, so the sender must
+    # resolve Location → Company → Platform. Passing the recipient here made
+    # the user tier fire, which meant the From address swung around based on
+    # whether that rep happened to have a personal mailbox connected — and
+    # when they didn't, it fell to whichever individual's mailbox was wired
+    # into the company config. See send_intake_lead_email for the same rule.
     CommunicationService.send_email(
       communicable: user,
       to: user.email,
@@ -455,7 +459,6 @@ class IntakeSubmission < ApplicationRecord
       category: 'system',
       content_type: 'text/html',
       skip_preference_check: true,
-      user: user,
       metadata: {
         source: 'intake_form_existing_customer',
         form_id: form.id,
@@ -464,7 +467,7 @@ class IntakeSubmission < ApplicationRecord
         matched_entity_id: record.id
       }
     )
-    Rails.logger.info "[IntakeSubmission] ✅ Sent existing-customer inquiry email to #{user.email} (via #{user.email} credentials)"
+    Rails.logger.info "[IntakeSubmission] ✅ Sent existing-customer inquiry email to #{user.email} (company/platform sender)"
   end
 
   def create_activity_and_notify(lead, form, mode: :new_lead)
@@ -554,12 +557,13 @@ class IntakeSubmission < ApplicationRecord
     HTML
     
     begin
-      # Pass the notified user so the sender resolution starts at USER level.
-      # Waterfall: User's own email connection \u2192 Location \u2192 Company \u2192 Platform.
-      # Without this the user branch never fires, so a company-level admin's
-      # personal OAuth token (like Evangeline's Cody) ends up as the sender
-      # for every notification \u2014 confusing for the recipient, who thinks a
-      # coworker emailed them a lead alert.
+      # Deliberately does NOT pass `user:`. Sender resolves Location \u2192 Company
+      # \u2192 Platform only; the assigned rep decides WHO gets told about the lead,
+      # never who the mail comes FROM. Routing this through the user tier meant
+      # the From address depended on whether the assigned rep had a personal
+      # mailbox connected, and when they didn't it fell through to whatever
+      # individual mailbox was wired into the company config \u2014 so reps received
+      # lead alerts that appeared to be sent by a coworker.
       CommunicationService.send_email(
         communicable: lead,
         to: user.email,
@@ -568,7 +572,6 @@ class IntakeSubmission < ApplicationRecord
         category: 'system',
         content_type: 'text/html',
         skip_preference_check: true,
-        user: user,
         metadata: {
           source: 'intake_form',
           form_id: form.id,
@@ -601,42 +604,15 @@ class IntakeSubmission < ApplicationRecord
     nil
   end
   
-  def broadcast_new_lead_notification(lead, form)
-    # Get all active users in the company who should receive notifications
-    company = Company.find(form.company_id)
-    
-    # Broadcast notification data
-    notification_data = {
-      type: 'new_lead',
-      lead_id: lead.id,
-      lead_name: "#{lead.first_name} #{lead.last_name}".strip.presence || 'New Lead',
-      lead_email: lead.email,
-      lead_phone: lead.phone,
-      form_name: form.name,
-      form_id: form.id,
-      created_at: Time.current.iso8601
-    }
-    
-    # Broadcast to all users (matching the frontend subscription)
-    # The frontend subscribes with user_id parameter
-    # For testing, broadcast to user 1 which matches the frontend
-    ActionCable.server.broadcast(
-      "lead_notifications_1",
-      notification_data
-    )
-    
-    # Also broadcast to company channel for future multi-user support
-    ActionCable.server.broadcast(
-      "lead_notifications_company_#{company.id}",
-      notification_data
-    )
-    
-    Rails.logger.info "Broadcasted new lead notification for lead #{lead.id} to channels: lead_notifications_1, lead_notifications_company_#{company.id}"
-  rescue => e
-    Rails.logger.error "Failed to broadcast lead notification: #{e.message}"
-    Rails.logger.error e.backtrace.join("\n")
-  end
-  
+  # NOTE: broadcast_new_lead_notification was removed. It fanned every intake
+  # lead out to a hardcoded "lead_notifications_1" stream plus a company-wide
+  # stream, which would have shown one dealer's lead to every user at that
+  # company. It was never wired to a caller, so it never fired in production.
+  # Intake notification targeting is single-recipient by design: the form's
+  # notified_user gets the LeadActivity, the bell/popup (via
+  # ActivityReminderService, which resolves activity.assigned_to) and the
+  # email. Do not reintroduce a broadcast here.
+
   def extract_field(data, possible_keys)
     possible_keys.each do |key|
       value = data[key] || data[key.to_s]

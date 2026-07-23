@@ -180,10 +180,16 @@ class WorkflowRuleValidator
       when 'assign_owner'
         if cfg['strategy'].blank?
           add_error("Node '#{id}' (assign_owner) requires 'strategy'", step_id: id, step_type: type, field: 'strategy')
-        elsif !%w[specific_user round_robin load_balanced].include?(cfg['strategy'])
+        # 'round_robin_list' was missing from this list, so the one strategy
+        # backed by a real cursor (RoundRobinAssignmentList) failed validation
+        # and could never be saved from the UI — leaving 'round_robin' as the
+        # only reachable option even though it does not rotate on a cursor.
+        elsif !%w[specific_user round_robin round_robin_list load_balanced].include?(cfg['strategy'])
           add_error("Node '#{id}' (assign_owner) has invalid strategy '#{cfg['strategy']}'", step_id: id, step_type: type, field: 'strategy')
         elsif cfg['strategy'] == 'specific_user' && cfg['user_id'].blank?
           add_error("Node '#{id}' (assign_owner) specific_user requires 'user_id'", step_id: id, step_type: type, field: 'user_id')
+        elsif cfg['strategy'] == 'round_robin_list' && cfg['round_robin_list_id'].blank?
+          add_error("Node '#{id}' (assign_owner) round_robin_list requires 'round_robin_list_id'", step_id: id, step_type: type, field: 'round_robin_list_id')
         end
       when 'add_tag'
         if !cfg['tag_names'].is_a?(Array) || cfg['tag_names'].empty?
