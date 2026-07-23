@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_23_000000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_23_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6692,6 +6692,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_23_000000) do
     t.boolean "daily_digest_enabled", default: true
     t.integer "daily_digest_hour", default: 7
     t.datetime "daily_digest_last_sent_at"
+    t.jsonb "calendar_preferences", default: {}, null: false
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["custom_permissions"], name: "index_users_on_custom_permissions", using: :gin
     t.index ["deleted_at"], name: "index_users_on_deleted_at"

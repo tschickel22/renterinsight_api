@@ -17,6 +17,8 @@ module Api
       #   status: Filter by status
       #   priority: Filter by priority
       #   assigned_to: Filter by assigned user ID
+      #   hide_completed: 'true' to drop completed/cancelled events
+      #   hide_past: 'true' to drop events that have already ended
       #
       # Returns: Array of unified calendar events
       def events
@@ -189,7 +191,8 @@ module Api
       private
       
       def calendar_params
-        params.permit(:view, :start_date, :end_date, :status, :priority, :assigned_to, types: [], location_ids: [])
+        params.permit(:view, :start_date, :end_date, :status, :priority, :assigned_to,
+                      :hide_completed, :hide_past, types: [], location_ids: [])
       end
       
       def valid_view?(view)

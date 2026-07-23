@@ -19,6 +19,13 @@
 # Admins (platform_admin, super_admin, effective_admin) have full access to all views
 
 class CalendarService
+  # Activity-backed event types (CRM activities). service_ticket and standalone
+  # tasks are separate sources handled in aggregated_events.
+  ACTIVITY_EVENT_TYPES = %w[task meeting call reminder].freeze
+
+  # Statuses treated as "done" for the hide_completed filter.
+  COMPLETED_STATUSES = %w[completed cancelled done resolved closed].freeze
+
   attr_reader :user, :company, :params, :permission_service
   
   def initialize(user, company, params = {})
@@ -43,7 +50,7 @@ class CalendarService
     events = []
     
     # Add activities if requested
-    if include_type?('task') || include_type?('meeting') || include_type?('call') || include_type?('reminder')
+    if requested_activity_types.nil? || requested_activity_types.any?
       events += load_activities(view)
     end
     
@@ -59,7 +66,13 @@ class CalendarService
     
     # Apply date range filter
     events = filter_by_date_range(events)
-    
+
+    # Hide completed/cancelled events if requested
+    events = filter_out_completed(events) if boolean_param?(:hide_completed)
+
+    # Hide events that have already ended if requested
+    events = filter_out_past(events) if boolean_param?(:hide_past)
+
     # Apply status filter
     events = filter_by_status(events) if params[:status].present?
     
@@ -115,6 +128,18 @@ class CalendarService
   def include_type?(type)
     return true if params[:types].blank?
     Array(params[:types]).include?(type)
+  end
+
+  # Activity types the caller asked for. nil = no types filter (load all).
+  # An empty array means the caller filtered to non-activity types only
+  # (e.g. just service_ticket), so activity loading is skipped entirely.
+  def requested_activity_types
+    return nil if params[:types].blank?
+    @requested_activity_types ||= Array(params[:types]).map(&:to_s) & ACTIVITY_EVENT_TYPES
+  end
+
+  def boolean_param?(key)
+    ActiveModel::Type::Boolean.new.cast(params[key])
   end
   
   # Load activities from all modules (leads, accounts, contacts, deals)
@@ -236,6 +261,10 @@ class CalendarService
   # obey the same location boundary; `my` is intentionally location-agnostic
   # (your own assignments regardless of where the parent record lives).
   def filter_activities_by_view(activities, view)
+    # Honor the types[] filter at the query level — without this, requesting
+    # "meeting" still returned every task/call/reminder activity.
+    activities = activities.where(activity_type: requested_activity_types) if requested_activity_types.present?
+
     parent_table = get_parent_table_name(activities)
     scope = location_scope
 
@@ -620,6 +649,29 @@ class CalendarService
     end
   end
   
+  # Drop events whose status marks them as finished (hide_completed param)
+  def filter_out_completed(events)
+    events.reject { |event| COMPLETED_STATUSES.include?(event[:status].to_s.downcase) }
+  end
+
+  # Drop events that have already ended (hide_past param). An in-progress
+  # event (started but not yet ended) stays visible. Events with unparseable
+  # or missing times are kept rather than silently hidden.
+  def filter_out_past(events)
+    now = Time.current
+    events.select do |event|
+      ts = event[:end].presence || event[:start]
+      next true if ts.blank?
+
+      begin
+        parsed = Time.zone.parse(ts.to_s)
+        parsed.nil? || parsed >= now
+      rescue ArgumentError, TypeError
+        true
+      end
+    end
+  end
+
   # Filter events by status
   def filter_by_status(events)
     statuses = Array(params[:status])
