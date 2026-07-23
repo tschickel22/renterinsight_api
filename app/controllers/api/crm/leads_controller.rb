@@ -393,6 +393,68 @@ module Api
         render json: { updated_count: updated_count, assigned_to: { id: new_owner.id, name: new_owner.try(:full_name) || new_owner.email } }
       end
 
+      # POST /api/crm/leads/bulk_add_tags
+      # Adds one or more tags to a set of leads — the "select all matching" tagging
+      # path so a user can tag the whole filtered set, not just the visible page.
+      #
+      # Accepts EITHER:
+      #   lead_ids: [int]   — explicit selection (small batch from the visible page)
+      # OR
+      #   filter: { status_category, search, owner_id, health_band }
+      #                     — "select all matching" mode; backend re-runs the same
+      #                       scoping #index used so the user can't reach beyond
+      #                       what they can see.
+      # PLUS at least one of:
+      #   tag_ids:   [int]     — existing tags
+      #   tag_names: [string]  — resolved by name, created if new (mirrors the
+      #                          single-lead assign path)
+      def bulk_add_tags
+        return unless authorize_action!('leads', 'update')
+
+        tags = resolve_bulk_tags(params[:tag_ids], params[:tag_names])
+        return render(json: { error: 'tag_ids or tag_names required' }, status: :bad_request) if tags.empty?
+
+        scope = base_leads_scope
+        if params[:filter].present?
+          scope = apply_index_filters(scope, params[:filter])
+        elsif params[:lead_ids].is_a?(Array) && params[:lead_ids].any?
+          scope = scope.where(id: params[:lead_ids])
+        else
+          return render(json: { error: 'lead_ids or filter required' }, status: :bad_request)
+        end
+
+        lead_ids = scope.pluck(:id)
+        created = 0
+
+        tags.each do |tag|
+          # One query for who already has this tag, so re-tagging is a no-op and we
+          # only insert the gaps. create! (not insert_all) so TagAssignment's
+          # after_commit dynamic-campaign refresh still fires — it self-debounces,
+          # so a large batch enqueues at most one enroller per matching campaign.
+          already = TagAssignment.where(tag_id: tag.id, entity_type: 'Lead', entity_id: lead_ids)
+                                  .pluck(:entity_id).to_set
+          (lead_ids - already.to_a).each do |lead_id|
+            TagAssignment.create!(
+              company_id: @company.id,
+              tag: tag,
+              entity_type: 'Lead',
+              entity_id: lead_id,
+              assigned_by: current_user&.id&.to_s || 'system',
+              assigned_at: Time.current
+            )
+            created += 1
+          end
+        end
+
+        Rails.logger.info "[LeadsController#bulk_add_tags] user=#{current_user.email} tagged #{lead_ids.size} leads with #{tags.size} tag(s); #{created} new assignment(s)"
+
+        render json: {
+          tagged_count: lead_ids.size,
+          assignments_created: created,
+          tags: tags.map { |t| { id: t.id, name: t.name } }
+        }
+      end
+
       def notes
         return unless authorize_action!('leads', 'update')
         
@@ -891,6 +953,23 @@ module Api
         end
 
         scope
+      end
+
+      # Resolve a bulk tag request into Tag records. Existing tags by id, plus any
+      # names (found case-insensitively or created) — mirrors TagsController's
+      # single-lead resolve_tag! so the leads list and detail view create tags
+      # the same way. Deduped so passing an id + its name doesn't double-tag.
+      def resolve_bulk_tags(tag_ids, tag_names)
+        tags = []
+        tags.concat(Tag.where(id: Array(tag_ids).reject(&:blank?)).to_a) if tag_ids.present?
+
+        Array(tag_names).map { |n| n.to_s.strip }.reject(&:blank?).each do |name|
+          tags << (Tag.where('LOWER(name) = ?', name.downcase).first ||
+                   Tag.create!(name: name, color: '#6B7280', is_active: true,
+                               created_by: current_user&.id&.to_s || 'system'))
+        end
+
+        tags.uniq(&:id)
       end
 
       # Shape a cross-entity IdentityResolver match for the dedupe UI. entityType
