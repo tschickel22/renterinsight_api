@@ -17,6 +17,14 @@ module Messaging
       )
       MergeTagResolver.enrich_context(context, recipient: @recipient, company: @company)
 
+      # Raw-HTML step (Option A): the user pasted a complete, designed email.
+      # Send their document as-is — merge tags + link tracking only — bypassing
+      # the block layout pipeline (no 600px wrapper table, no branded header /
+      # sender CTA). Compliance unsubscribe is appended unless the design opts
+      # out via the block's append_unsubscribe toggle.
+      raw_block = Array(@step.body_blocks).find { |b| b.is_a?(Hash) && (b['type'] || b[:type]).to_s == 'raw_html' }
+      return render_raw_html_step(raw_block, context, urls) if raw_block
+
       inventory_units = nil
       blocks = Array(@step.body_blocks)
       inventory_block = blocks.find { |b| b.is_a?(Hash) && (b['type'] == 'inventory' || b[:type] == 'inventory') }
@@ -115,6 +123,63 @@ module Messaging
     end
 
     private
+
+    # Render a pasted, fully-designed HTML email as its own document. Applies
+    # only merge-tag resolution, an optional unsubscribe footer, tracked-link
+    # attachments, and link tokenization — no wrapper table, no injected header
+    # or CTA. Returns the same shape as #render so the send path is unchanged.
+    def render_raw_html_step(raw_block, context, urls)
+      subject = MergeTagResolver.resolve(@step.subject || @campaign.try(:subject_default), context)
+
+      html = (raw_block['html'] || raw_block[:html]).to_s
+      body = MergeTagResolver.resolve(html, context)
+
+      # Default ON for compliance; the design can opt out when it carries its
+      # own unsubscribe link.
+      append_unsub = if raw_block.key?('append_unsubscribe') || raw_block.key?(:append_unsubscribe)
+                       ActiveModel::Type::Boolean.new.cast(raw_block['append_unsubscribe'] || raw_block[:append_unsubscribe])
+                     else
+                       true
+                     end
+      if append_unsub
+        footer = UnsubscribeFooter.html_footer(company: @company, unsubscribe_url: urls[:unsubscribe_url])
+        body = inject_before_body_close(body, footer)
+      end
+
+      tracked_link_records, inline_uploads, attachment_metadata =
+        if @send && @send.persisted?
+          process_step_attachments
+        else
+          [[], [], []]
+        end
+      body = append_tracked_link_section(body, tracked_link_records) if tracked_link_records.any?
+
+      tokenized = if @send && @send.persisted?
+                    LinkTokenizer.new(campaign_send: @send, base_url: @base_url).tokenize_html(body)
+                  else
+                    body
+                  end
+
+      {
+        subject: subject,
+        html_body: tokenized,
+        inline_attachments: inline_uploads,
+        tracked_link_records: tracked_link_records,
+        attachment_metadata: attachment_metadata,
+        error: nil
+      }
+    end
+
+    # Insert a snippet just before </body> (case-insensitive) so appended chrome
+    # lands inside the document; falls back to appending when there's no body tag
+    # (a bare HTML fragment).
+    def inject_before_body_close(html, snippet)
+      if html =~ %r{</body>}i
+        html.sub(%r{</body>}i, "#{snippet}\n</body>")
+      else
+        "#{html}\n#{snippet}"
+      end
+    end
 
     # Ensures every rendered email has a branded_header at the top and a
     # sender_cta right before the unsubscribe footer, even if the plan
