@@ -18,8 +18,16 @@ RSpec.describe 'Import engine — default_values for unmapped fields', :aggregat
     )
   end
 
+  # Tempfile unlinks its backing file when the object is garbage collected.
+  # The importer resolves source_file_url through S3Helper, which only
+  # short-circuits to a local path while that file still exists — so hold a
+  # reference for the life of the example, or the import falls through to
+  # real S3 and dies on NoSuchKey (intermittently, per GC timing).
+  let(:tempfiles) { [] }
+
   def build_csv(headers, *rows)
     file = Tempfile.new(['defaults', '.csv'])
+    tempfiles << file
     CSV.open(file.path, 'w') do |csv|
       csv << headers
       rows.each { |r| csv << r }

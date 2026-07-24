@@ -19,8 +19,14 @@ RSpec.describe 'Import engine — side-effect suppression', :aggregate_failures 
     )
   end
 
+  # Hold Tempfile references for the life of the example — a collected
+  # Tempfile unlinks its backing file, and S3Helper only short-circuits to a
+  # local path while that file exists (otherwise the import hits real S3).
+  let(:tempfiles) { [] }
+
   def build_csv
     file = Tempfile.new(['suppress', '.csv'])
+    tempfiles << file
     CSV.open(file.path, 'w') do |csv|
       csv << ['First Name', 'Last Name', 'Email']
       csv << ['Ada',  'Lovelace',  "ada-#{SecureRandom.hex(3)}@example.com"]
@@ -97,6 +103,7 @@ RSpec.describe 'Import engine — side-effect suppression', :aggregate_failures 
     # Empty file → 0 rows imported, but the job still completes and the
     # summary line goes out so the user has a record of the attempt.
     empty_file = Tempfile.new(['empty', '.csv'])
+    tempfiles << empty_file
     CSV.open(empty_file.path, 'w') { |csv| csv << ['First Name', 'Last Name', 'Email'] }
     empty_job = ImportJob.create!(
       company:            company,
