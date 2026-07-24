@@ -2,6 +2,12 @@
 
 module ImportExport
   # Suggests a CSV-header → model-field mapping using normalized + alias matching.
+  #
+  # Matches are scored by confidence so that when two headers claim the same
+  # field, the stronger claim wins and the weaker header is left UNMAPPED
+  # rather than silently overwriting real data. (Importer#build_row_hash lets
+  # the last non-blank column win, so an unchecked weak match like
+  # "Email Follow Up" → email would clobber the actual "Email" column.)
   class FieldMapper
     ALIASES = {
       'first_name'    => %w[firstname first fname given_name],
@@ -37,19 +43,41 @@ module ImportExport
       'tags'              => %w[tag tags label labels tag_names],
     }.freeze
 
+    # Confidence tiers. Higher wins when two headers claim the same field.
+    STRENGTH_EXACT   = 3 # header == field key or label
+    STRENGTH_ALIAS   = 2 # header == a known alias
+    STRENGTH_PARTIAL = 1 # field name appears as whole word(s) inside the header
+
     def initialize(headers, fields)
       @headers = headers
       @fields  = fields
     end
 
     def call
-      mapping = {}
-      unmapped_headers = []
+      # field_key => { header:, strength: } — only the best claim survives.
+      claims = {}
 
       @headers.each do |header|
-        match = best_match(header)
-        if match
-          mapping[header] = match
+        key, strength = best_match(header)
+        next unless key
+
+        incumbent = claims[key]
+        # Ties go to the first header, matching the previous first-wins order.
+        next if incumbent && strength <= incumbent[:strength]
+
+        claims[key] = { header: header, strength: strength }
+      end
+
+      winners = claims.each_with_object({}) { |(key, claim), h| h[claim[:header]] = key }
+
+      # Rebuild in original header order; anything that lost a claim (or never
+      # matched) is reported as unmapped so the UI can offer skip / map-to-existing
+      # / create-custom-field for it.
+      mapping          = {}
+      unmapped_headers = []
+      @headers.each do |header|
+        if winners.key?(header)
+          mapping[header] = winners[header]
         else
           unmapped_headers << header
         end
@@ -63,20 +91,52 @@ module ImportExport
 
     private
 
+    # Returns [field_key, strength] or nil.
     def best_match(header)
       norm = normalize(header)
 
       exact = @fields.find { |f| normalize(f[:key]) == norm || normalize(f[:label]) == norm }
-      return exact[:key] if exact
+      return [exact[:key], STRENGTH_EXACT] if exact
 
       aliased = @fields.find do |f|
         aliases = ALIASES[f[:key]] || []
         aliases.any? { |a| normalize(a) == norm }
       end
-      return aliased[:key] if aliased
+      return [aliased[:key], STRENGTH_ALIAS] if aliased
 
-      contains = @fields.find { |f| normalize(f[:key]).include?(norm) || norm.include?(normalize(f[:key])) }
-      contains&.dig(:key)
+      # Word-boundary containment. Comparing on tokens (not raw substrings)
+      # keeps "Zip/Postal Code" → zip and "Note" → notes working while it no
+      # longer treats every "<field> <qualifier>" header as the field itself.
+      header_tokens = tokenize(header)
+      partial = @fields.find do |f|
+        token_run?(header_tokens, tokenize(f[:key])) ||
+          token_run?(header_tokens, tokenize(f[:label])) ||
+          token_run?(tokenize(f[:key]), header_tokens)
+      end
+      partial ? [partial[:key], STRENGTH_PARTIAL] : nil
+    end
+
+    # True when `needle` appears as a contiguous run of whole words in `haystack`.
+    def token_run?(haystack, needle)
+      return false if needle.empty? || haystack.empty? || needle.length > haystack.length
+
+      haystack.each_cons(needle.length).any? do |slice|
+        slice.each_with_index.all? { |tok, i| token_match?(tok, needle[i]) }
+      end
+    end
+
+    # Whole-word equality, tolerating simple singular/plural and short suffix
+    # drift ("note"/"notes", "tag"/"tags") but not arbitrary prefixes.
+    def token_match?(a, b)
+      return true if a == b
+      return false if a.length < 3 || b.length < 3
+      return false if (a.length - b.length).abs > 2
+
+      a.start_with?(b) || b.start_with?(a)
+    end
+
+    def tokenize(str)
+      str.to_s.downcase.split(/[^a-z0-9]+/).reject(&:empty?)
     end
 
     def normalize(str)

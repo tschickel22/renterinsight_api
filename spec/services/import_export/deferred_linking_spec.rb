@@ -36,8 +36,14 @@ RSpec.describe 'Import engine -- deferred linking', :aggregate_failures do
     )
   end
 
+  # Hold Tempfile references for the life of the example — a collected
+  # Tempfile unlinks its backing file, and S3Helper only short-circuits to a
+  # local path while that file exists (otherwise the import hits real S3).
+  let(:tempfiles) { [] }
+
   def run_job(module_type:, headers:, rows:, mapping:, strategy: 'create_new', default_values: {})
     file = Tempfile.new(["imp_#{module_type}", '.csv'])
+    tempfiles << file
     CSV.open(file.path, 'w') do |csv|
       csv << headers
       rows.each { |r| csv << r }

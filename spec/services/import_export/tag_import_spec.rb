@@ -8,6 +8,10 @@ require 'csv'
 # FieldMapper / ImportExport::Importer. Tests the three layers separately
 # (registry plumbing, header auto-mapping, end-to-end import + dedup).
 RSpec.describe 'Import engine — tag column support' do
+  # Hold Tempfile references for the life of the example — a collected
+  # Tempfile unlinks its backing file, and S3Helper only short-circuits to a
+  # local path while that file exists (otherwise the import hits real S3).
+  let(:tempfiles) { [] }
   let(:company) { Company.create!(name: 'TagSpec Co') }
   let(:user) do
     User.create!(
@@ -63,6 +67,7 @@ RSpec.describe 'Import engine — tag column support' do
   describe 'ImportExport::Importer with a Tags column', :aggregate_failures do
     let(:csv_path) do
       file = Tempfile.new(['tag_import', '.csv'])
+      tempfiles << file
       CSV.open(file.path, 'w') do |csv|
         csv << ['First Name', 'Last Name', 'Email', 'Tags']
         csv << ['Ada',  'Lovelace', "ada-#{SecureRandom.hex(3)}@example.com",  'VIP|Hot Lead, Trade Show']
@@ -107,6 +112,7 @@ RSpec.describe 'Import engine — tag column support' do
 
       let(:csv_path) do
         file = Tempfile.new(['tag_dedup', '.csv'])
+        tempfiles << file
         CSV.open(file.path, 'w') do |csv|
           csv << ['First Name', 'Last Name', 'Email', 'Tags']
           csv << ['Grace', 'Hopper', "grace-#{SecureRandom.hex(3)}@example.com", 'vip']
