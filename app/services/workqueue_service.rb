@@ -117,10 +117,69 @@ class WorkqueueService
     preload_activity_parents(records.select { |r| r.is_a?(WorkqueueActivity) })
     preload_location_names(records)
 
+    built = records.map { |r| [r, normalize(r).merge(location_fields_for(r))] }
+    enrich_message_targets(built)
+
     {
-      items: records.map { |r| normalize(r).merge(location_fields_for(r)) },
+      items: built.map(&:last),
       meta: { total: total, page: @page, per_page: @per_page, total_pages: total_pages },
     }
+  end
+
+  # Resolve the "messageable contact" for each row — the lead/contact a user
+  # would actually email/text — and expose it as message_entity_type /
+  # message_entity_id (+ entity_email/phone/name when not already set). Walks the
+  # chain: deal/ticket -> their contact; task/activity -> their parent, and if
+  # that parent is a deal/ticket, on to ITS contact. Batched (≤4 extra queries
+  # per page) so the FE can (a) hide the email/text icon when there's nobody to
+  # contact and (b) deep-link straight to that person's Communications tab.
+  def enrich_message_targets(pairs)
+    sources = pairs.map { |rec, item| message_source(rec, item) }
+
+    deal_ids   = sources.select { |s| s && s[0] == 'Deal' }.map { |s| s[1] }.compact.uniq
+    ticket_ids = sources.select { |s| s && s[0] == 'ServiceTicket' }.map { |s| s[1] }.compact.uniq
+    deal_contact   = deal_ids.any?   ? Deal.where(id: deal_ids).pluck(:id, :contact_id).to_h : {}
+    ticket_contact = ticket_ids.any? ? ServiceTicket.where(id: ticket_ids).pluck(:id, :contact_id).to_h : {}
+
+    targets = sources.map do |src|
+      next nil unless src
+      case src[0]
+      when 'Lead'          then ['lead', src[1]]
+      when 'Contact'       then ['contact', src[1]]
+      when 'Deal'          then (cid = deal_contact[src[1]])   ? ['contact', cid] : nil
+      when 'ServiceTicket' then (cid = ticket_contact[src[1]]) ? ['contact', cid] : nil
+      end
+    end
+
+    lead_ids    = targets.select { |t| t && t[0] == 'lead' }.map { |t| t[1] }.compact.uniq
+    contact_ids = targets.select { |t| t && t[0] == 'contact' }.map { |t| t[1] }.compact.uniq
+    leads    = lead_ids.any?    ? Lead.where(id: lead_ids).index_by(&:id) : {}
+    contacts = contact_ids.any? ? Contact.where(id: contact_ids).index_by(&:id) : {}
+
+    pairs.each_with_index do |(_rec, item), i|
+      t = targets[i]
+      next unless t
+      rec = t[0] == 'lead' ? leads[t[1]] : contacts[t[1]]
+      next unless rec
+      item[:message_entity_type] = t[0]
+      item[:message_entity_id]   = t[1]
+      item[:entity_email] = rec.email       if item[:entity_email].blank?
+      item[:entity_phone] = rec.try(:phone) if item[:entity_phone].blank?
+      item[:entity_name] ||= [rec.first_name, rec.last_name].compact.reject(&:blank?).join(' ').presence
+    end
+  end
+
+  # The record whose contact we message for a given item: self for lead/contact,
+  # the deal/ticket for those rows, and the polymorphic parent for task/activity.
+  def message_source(rec, item)
+    case item[:entity_type]
+    when 'lead'     then ['Lead', item[:entity_id]]
+    when 'contact'  then ['Contact', item[:entity_id]]
+    when 'deal'     then ['Deal', item[:entity_id]]
+    when 'ticket'   then ['ServiceTicket', item[:entity_id]]
+    when 'task'     then [rec.try(:taskable_type), rec.try(:taskable_id)]
+    when 'activity' then [rec.try(:parent_type), rec.try(:parent_id)]
+    end
   end
 
   # Batch-fetches location names for every location_id touched by the current
