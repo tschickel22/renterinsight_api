@@ -223,6 +223,51 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
     end
   end
 
+  describe 'unmapped inbound fields -> notes (safety net)' do
+    it 'appends Facebook qualifying answers (raw) to notes on a new lead' do
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: {
+             full_name: 'Joyce Davis', email: 'joyce@x.com', phone_number: '3185551234',
+             raw: {
+               'full_name' => 'Joyce Davis',
+               'what_price_range_were_you_looking_to_be_in?' => '$80,000-$120,000',
+               'how_many_bedrooms_were_you_wanting?' => '3 Bed',
+               'home_type' => 'Double'
+             }
+           }.to_json,
+           headers: headers_for(key)
+      expect(response).to have_http_status(:created)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.notes.to_s).to include('what price range were you looking to be in?: $80,000-$120,000')
+      expect(lead.notes.to_s).to include('home type: Double')
+    end
+
+    it 'does not put mapped fields (name/email/phone) or FB ad metadata into notes' do
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: {
+             full_name: 'Joyce Davis', email: 'joyce2@x.com', phone_number: '3185551234',
+             ad_id: '123', campaign_name: 'Green sterling ad', page_name: 'Evangeline Home Center',
+             raw: { 'full_name' => 'Joyce Davis', 'home_type' => 'Single' }
+           }.to_json,
+           headers: headers_for(key)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.notes.to_s).to include('home type: Single')
+      expect(lead.notes.to_s).not_to include('Joyce Davis')          # name is mapped
+      expect(lead.notes.to_s).not_to include('Green sterling ad')    # ad metadata is noise
+    end
+
+    it 'leaves notes untouched when everything maps' do
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: { first_name: 'Al', last_name: 'B', email: 'al@x.com', phone: '111' }.to_json,
+           headers: headers_for(key)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.notes).to be_blank
+    end
+  end
+
   describe 'Facebook / Zapier field aliases' do
     it 'maps full_name -> first_name + last_name when first/last are absent' do
       key = make_key

@@ -56,7 +56,9 @@ module Api
 
         # POST /api/partner/v1/deals
         def create
-          deal = company_scope(Deal).new(deal_params)
+          # Safety net: unmapped inbound fields go to notes instead of being dropped.
+          attrs = merge_inbound_note(deal_params.to_h, deal_params.keys)
+          deal = company_scope(Deal).new(attrs)
 
           if deal.save
             render json: { data: deal_json(deal, detailed: true) }, status: :created

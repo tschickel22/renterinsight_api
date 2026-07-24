@@ -55,7 +55,9 @@ module Api
 
         # POST /api/partner/v1/accounts
         def create
-          account = company_scope(Account).new(account_params)
+          # Safety net: unmapped inbound fields go to notes instead of being dropped.
+          attrs = merge_inbound_note(account_params.to_h, account_params.keys)
+          account = company_scope(Account).new(attrs)
 
           if account.save
             render json: { data: account_json(account, detailed: true) }, status: :created

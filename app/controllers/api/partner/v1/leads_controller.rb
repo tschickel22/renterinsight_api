@@ -107,6 +107,11 @@ module Api
 
           apply_owner_config!(attrs, config)
 
+          # Safety net: any inbound field the caller didn't map to a real attribute
+          # (e.g. Facebook qualifying questions) is appended to notes rather than
+          # dropped — mirrors the repeat-inquiry path so new leads keep the data too.
+          attrs = merge_inbound_note(attrs, attrs.keys)
+
           lead = company_scope(Lead).new(attrs)
 
           if lead.save
