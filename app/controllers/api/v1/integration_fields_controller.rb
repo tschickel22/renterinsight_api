@@ -66,9 +66,17 @@ module Api
           return render(json: { error: "Invalid module. One of: #{STANDARD_FIELDS.keys.join(', ')}" }, status: :bad_request)
         end
 
-        custom = @company.custom_fields.active.for_module(mod).ordered.map do |f|
-          { key: f.field_key, label: f.name, type: f.field_type, custom: true }
-        end
+        # Custom fields are per-company. Platform admins managing a specific
+        # company's keys pass company_id; otherwise scope to the caller's company.
+        company_id = params[:company_id].presence || @company&.id
+        custom =
+          if company_id
+            CustomField.active.for_module(mod).where(company_id: company_id).ordered.map do |f|
+              { key: f.field_key, label: f.name, type: f.field_type, custom: true }
+            end
+          else
+            []
+          end
 
         render json: {
           module: mod,
