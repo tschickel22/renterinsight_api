@@ -232,6 +232,9 @@ module Reports
         # the canonical scalar dimensions surfaced everywhere else.
         length: vehicle.length,
         width: vehicle.width,
+        # HUD wind zone (coastal exposure) captured on the home; surfaced as an
+        # optional Stock List column.
+        wind_zone: vehicle.try(:wind_zone),
         condition: vehicle.condition,
         flags: flags,
         floorplan: fp && {
