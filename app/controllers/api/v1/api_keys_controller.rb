@@ -435,7 +435,12 @@ module Api
             rate_limit: api_key.rate_limit,
             request_count: api_key.request_count,
             last_used_at: api_key.last_used_at&.iso8601,
-            created_by_user_id: api_key.created_by_user_id
+            created_by_user_id: api_key.created_by_user_id,
+            # Inbound-lead routing (location, source, rep assignment). Without
+            # this the edit view can't show — let alone change — where a key's
+            # leads land or who they're assigned to. Contains only ids/flags,
+            # no secrets; the key itself is masked above.
+            webhook_config: api_key.webhook_config || {}
           )
         end
 
