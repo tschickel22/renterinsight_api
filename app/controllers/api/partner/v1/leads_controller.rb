@@ -76,6 +76,13 @@ module Api
           attrs = lead_params.to_h.symbolize_keys
           config = webhook_config
 
+          # Facebook Lead Ads (and most Zapier FB payloads) use field keys like
+          # full_name / phone_number that don't match our first_name/last_name/
+          # phone. Fill our canonical fields from those aliases when the caller
+          # didn't map them, so an FB lead lands well-attributed even if the Zap
+          # wasn't perfectly configured.
+          apply_field_aliases!(attrs)
+
           # Default status to 'new' when the payload doesn't provide one so
           # inbound Zapier/FB leads always land on the "All Active" / "New"
           # tab instead of an empty pill that leaves dealers scratching
@@ -150,6 +157,42 @@ module Api
             :budget_range, :purchase_timeframe, :rv_experience,
             :preferred_contact_method, :interests_requirements, :notes
           )
+        end
+
+        # Map common inbound aliases (Facebook Lead Ads / Zapier field keys) onto
+        # our canonical fields, ONLY when the caller didn't already provide them.
+        # - full_name (any case) -> first_name + last_name (split on whitespace)
+        # - phone_number         -> phone
+        # - email_address        -> email
+        # Never overwrites a value the caller mapped correctly.
+        def apply_field_aliases!(attrs)
+          if attrs[:first_name].blank? && attrs[:last_name].blank?
+            full = first_present_param(:full_name, :fullName, :FULL_NAME, :name).to_s.strip
+            if full.present?
+              first, *rest = full.split(/\s+/)
+              attrs[:first_name] = first
+              attrs[:last_name]  = rest.join(' ').presence
+            end
+          end
+
+          if attrs[:phone].blank?
+            phone = first_present_param(:phone_number, :phoneNumber, :PHONE)
+            attrs[:phone] = phone if phone.present?
+          end
+
+          if attrs[:email].blank?
+            email = first_present_param(:email_address, :emailAddress, :EMAIL)
+            attrs[:email] = email if email.present?
+          end
+        end
+
+        # First non-blank value among the given raw param keys.
+        def first_present_param(*keys)
+          keys.each do |k|
+            v = params[k]
+            return v if v.respond_to?(:present?) ? v.present? : v.to_s.present?
+          end
+          nil
         end
 
         def webhook_config
