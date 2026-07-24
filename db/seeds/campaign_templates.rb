@@ -223,14 +223,24 @@ end
 # ============================================================
 # 6. budget-inventory-digest (recurring weekly digest)
 # ============================================================
-CampaignTemplate.find_or_create_by(slug: "budget-inventory-digest", company_id: nil) do |t|
+# Default audience: leads a dealer opts into the digest by tagging. The campaign
+# builder auto-creates the tag if it's missing, so shipping this filter pre-built
+# makes the template plug-and-play (no manual audience setup by the user).
+DIGEST_TAG_AUDIENCE = {
+  "source_type" => "Lead",
+  "filter_tree" => { "type" => "and", "children" => [
+    { "field" => "tags", "operator" => "tags_include", "value" => "weekly-digest-email" }
+  ] }
+}.freeze
+
+digest_template = CampaignTemplate.find_or_create_by(slug: "budget-inventory-digest", company_id: nil) do |t|
   t.name = "Weekly Inventory Digest (recurring)"
   t.description = "Tuesday-morning weekly digest of new inventory matched to each recipient's budget."
   t.category = "new_arrival_digest"
   t.vertical = "manufactured_home"
   t.is_seeded = true
   t.is_active = true
-  t.audience_hint = { "source_type" => "Lead", "filter_tree" => { "type" => "and", "children" => [{ "field" => "status", "operator" => "in", "value" => %w[new active] }] } }
+  t.audience_hint = DIGEST_TAG_AUDIENCE
   t.goal_config_template = { "primary_goal" => "clicked", "additional_goals" => ["replied"] }
   t.send_window_template = { "timezone" => "America/Chicago", "recurrence_cron" => "0 9 * * 2" }
   t.steps_template = [
@@ -239,6 +249,10 @@ CampaignTemplate.find_or_create_by(slug: "budget-inventory-digest", company_id: 
       "inventory_block_config" => { "mode" => "segment_based", "max_units" => 6, "sort" => "newest", "fallback" => "show_cta" } }
   ]
 end
+
+# Idempotent: bring an already-seeded template's default audience up to the
+# tag-based filter (find_or_create_by's block only runs on create).
+digest_template.update!(audience_hint: DIGEST_TAG_AUDIENCE) if digest_template.audience_hint != DIGEST_TAG_AUDIENCE
 
 # ============================================================
 # 7. factory-order-wait (factory order build cycle — 6-step)
