@@ -56,8 +56,11 @@ module Api
 
         # POST /api/partner/v1/deals
         def create
+          attrs = deal_params.to_h
+          cf_values, cf_consumed = extract_inbound_custom_fields('deals')
+          attrs['custom_field_values'] = (attrs['custom_field_values'] || {}).merge(cf_values) if cf_values.any?
           # Safety net: unmapped inbound fields go to notes instead of being dropped.
-          attrs = merge_inbound_note(deal_params.to_h, deal_params.keys)
+          attrs = merge_inbound_note(attrs, attrs.keys + cf_consumed)
           deal = company_scope(Deal).new(attrs)
 
           if deal.save

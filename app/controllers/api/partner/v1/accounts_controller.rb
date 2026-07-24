@@ -55,8 +55,11 @@ module Api
 
         # POST /api/partner/v1/accounts
         def create
+          attrs = account_params.to_h
+          cf_values, cf_consumed = extract_inbound_custom_fields('accounts')
+          attrs['custom_field_values'] = (attrs['custom_field_values'] || {}).merge(cf_values) if cf_values.any?
           # Safety net: unmapped inbound fields go to notes instead of being dropped.
-          attrs = merge_inbound_note(account_params.to_h, account_params.keys)
+          attrs = merge_inbound_note(attrs, attrs.keys + cf_consumed)
           account = company_scope(Account).new(attrs)
 
           if account.save

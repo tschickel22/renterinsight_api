@@ -107,10 +107,12 @@ module Api
 
           apply_owner_config!(attrs, config)
 
-          # Safety net: any inbound field the caller didn't map to a real attribute
-          # (e.g. Facebook qualifying questions) is appended to notes rather than
-          # dropped — mirrors the repeat-inquiry path so new leads keep the data too.
-          attrs = merge_inbound_note(attrs, attrs.keys)
+          # Map any inbound keys matching a dealer-defined custom field onto
+          # custom_field_values, then send everything still unmapped to notes so
+          # nothing (e.g. Facebook qualifying questions) is dropped.
+          cf_values, cf_consumed = extract_inbound_custom_fields('leads')
+          attrs[:custom_field_values] = (attrs[:custom_field_values] || {}).merge(cf_values) if cf_values.any?
+          attrs = merge_inbound_note(attrs, attrs.keys + cf_consumed)
 
           lead = company_scope(Lead).new(attrs)
 

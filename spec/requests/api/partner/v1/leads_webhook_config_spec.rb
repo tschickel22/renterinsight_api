@@ -223,6 +223,34 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
     end
   end
 
+  describe 'custom field mapping' do
+    it 'maps an inbound key matching a company custom field onto custom_field_values (not notes)' do
+      company.custom_fields.create!(name: 'Monthly Payment', field_key: 'monthly_payment',
+                                    field_type: 'text', module: 'leads', is_active: true)
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: { first_name: 'A', last_name: 'B', email: 'cf@x.com', monthly_payment: '$1,500' }.to_json,
+           headers: headers_for(key)
+      expect(response).to have_http_status(:created)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.custom_field_values['monthly_payment']).to eq('$1,500')
+      expect(lead.notes.to_s).not_to include('monthly payment') # consumed, not dumped to notes
+    end
+
+    it 'leaves a non-custom, unmapped key in notes' do
+      company.custom_fields.create!(name: 'Monthly Payment', field_key: 'monthly_payment',
+                                    field_type: 'text', module: 'leads', is_active: true)
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: { first_name: 'A', last_name: 'B', email: 'cf2@x.com',
+                     monthly_payment: '$1,500', some_other_q: 'blue' }.to_json,
+           headers: headers_for(key)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.custom_field_values['monthly_payment']).to eq('$1,500')
+      expect(lead.notes.to_s).to include('some other q: blue')
+    end
+  end
+
   describe 'unmapped inbound fields -> notes (safety net)' do
     it 'appends Facebook qualifying answers (raw) to notes on a new lead' do
       key = make_key
