@@ -107,6 +107,13 @@ module Api
 
           apply_owner_config!(attrs, config)
 
+          # Map any inbound keys matching a dealer-defined custom field onto
+          # custom_field_values, then send everything still unmapped to notes so
+          # nothing (e.g. Facebook qualifying questions) is dropped.
+          cf_values, cf_consumed = extract_inbound_custom_fields('leads')
+          attrs[:custom_field_values] = (attrs[:custom_field_values] || {}).merge(cf_values) if cf_values.any?
+          attrs = merge_inbound_note(attrs, attrs.keys + cf_consumed)
+
           lead = company_scope(Lead).new(attrs)
 
           if lead.save
@@ -151,12 +158,7 @@ module Api
         end
 
         def lead_params
-          params.permit(
-            :first_name, :last_name, :email, :phone, :status,
-            :source_id, :source, :owner_id, :location_id,
-            :budget_range, :purchase_timeframe, :rv_experience,
-            :preferred_contact_method, :interests_requirements, :notes
-          )
+          params.permit(*Integration::MappableFields.keys('leads'))
         end
 
         # Map common inbound aliases (Facebook Lead Ads / Zapier field keys) onto

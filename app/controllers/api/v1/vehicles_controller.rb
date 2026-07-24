@@ -1674,6 +1674,7 @@ module Api
           centralAir: :central_air,
           dateInStock: :date_in_stock,
           dateSold: :date_sold,
+          estimatedDeliveryDate: :estimated_delivery_date,
           inventoryId: :inventory_id,
           stockNumber: :inventory_id,
           mileageUnit: :mileage_unit,
@@ -1871,7 +1872,7 @@ module Api
           :location_type, :community_key, :community_name, :county_name,
           :address1, :address2,
           # Dates
-          :date_in_stock, :date_sold,
+          :date_in_stock, :date_sold, :estimated_delivery_date,
           # Custom fields
           :custom_field_values,
           # MH Standard Columns
@@ -1904,7 +1905,7 @@ module Api
           :sale_price, :rent_price, :rent_to_own_price, :deposit_amount,
           :description, :notes,
           :location_city, :location_state, :location_zip,
-          :date_in_stock, :date_sold, :inventory_id,
+          :date_in_stock, :date_sold, :estimated_delivery_date, :inventory_id,
           :vin, :mileage, :mileage_unit, :body_style, :fuel_type, :transmission,
           :condition, :length, :weight, :sleeps, :exterior_color, :interior_color,
           :vehicle_interior_type, :vehicle_configuration, :rv_type, :slide_outs,
@@ -2019,6 +2020,7 @@ module Api
           identifier: vehicle.identifier,
           dateInStock: vehicle.date_in_stock,
           dateSold: vehicle.date_sold,
+          estimatedDeliveryDate: vehicle.estimated_delivery_date,
           createdAt: vehicle.created_at,
           updatedAt: vehicle.updated_at,
           # Champion IMS lineage — used by FE to render Source badges and -C1 tooltips

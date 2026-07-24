@@ -48,9 +48,10 @@ module Reports
                                       can_view_costs: @can_view_costs, filters: @filters)
 
       open_deals = @query.open_deals_by_vehicle
+      selected = selected_statuses
 
       body_rows = @query.vehicles
-                        .select { |v| included_in_body?(v, open_deals[v.id] || []) }
+                        .select { |v| included_in_body?(v, open_deals[v.id] || [], selected) }
                         .map { |v| inventory_row(v, open_deals[v.id] || []) }
       body_rows = apply_filters(body_rows)
 
@@ -79,14 +80,30 @@ module Reports
 
     # ---- Inclusion -----------------------------------------------------------
 
-    def included_in_body?(vehicle, open_deals)
+    def included_in_body?(vehicle, open_deals, selected)
       status = vehicle.status
-      return true if %w[available reserved pending].include?(status)
-      return true if open_deals.any? # any status with an open deal
-      return vehicle.sold_via_deal_id.present? if status == 'available_to_order' # + funded
-      return vehicle.sold_via_deal_id.blank? if status == 'sold' # sold AND no deal
+      # Active work (has an open deal) always shows, regardless of the status filter.
+      return true if open_deals.any?
+      # Otherwise only the statuses the user selected (default excludes
+      # available_to_order + sold — see selected_statuses).
+      return false unless selected.include?(status)
+      # A sold unit tied to a deal is shown in the Closed/Funded section; keep it
+      # out of the body to avoid double-counting.
+      return vehicle.sold_via_deal_id.blank? if status == 'sold'
+      true
+    end
 
-      false # available_to_order with no deal, and everything else
+    # Statuses the report body shows. The multi-select filter drives this; when
+    # absent, default to everything EXCEPT available_to_order and sold (the prior
+    # "working inventory" default view).
+    DEFAULT_HIDDEN_STATUSES = %w[available_to_order sold].freeze
+
+    def selected_statuses
+      requested = @filters[:statuses]
+      requested = requested.split(',') if requested.is_a?(String)
+      requested = Array(requested).map { |s| s.to_s.strip }.reject(&:blank?)
+      return (Vehicle::STATUSES - DEFAULT_HIDDEN_STATUSES).to_set if requested.empty?
+      requested.to_set
     end
 
     # ---- Sectioning ----------------------------------------------------------
@@ -191,6 +208,8 @@ module Reports
 
     def apply_filters(rows)
       rows = rows.select { |r| r[:section] == @filters[:section] } if @filters[:section].present?
+      # Status is handled up front by selected_statuses / included_in_body? (multi-select);
+      # keep single-value :status support for any legacy caller.
       rows = rows.select { |r| r[:vehicle_status] == @filters[:status] } if @filters[:status].present?
       rows = rows.select { |r| r[:salesperson_id].to_s == @filters[:salesperson_id].to_s } if @filters[:salesperson_id].present?
       rows = rows.select { |r| r[:lender].to_s.casecmp?(@filters[:lender].to_s) } if @filters[:lender].present?

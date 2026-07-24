@@ -74,7 +74,7 @@ class Vehicle < ApplicationRecord
 
   # Vehicle types
   TYPES = %w[rv manufactured_home].freeze
-  STATUSES = %w[available reserved sold pending service available_to_order].freeze
+  STATUSES = %w[available reserved sold pending service available_to_order ordered rso on_order trade_in].freeze
   CONDITIONS = %w[new used].freeze
 
   # Champion IMS source values:
@@ -430,7 +430,10 @@ class Vehicle < ApplicationRecord
       'availabletoorder' => 'available_to_order',
       'to order' => 'available_to_order',
       'catalog' => 'available_to_order',
-      'on order' => 'available_to_order',
+      'on order' => 'available_to_order', # catalog rows (Champion) — kept for import back-compat
+      'retail sold order' => 'rso',
+      'trade in' => 'trade_in',
+      'trade-in' => 'trade_in',
     }
     downcased = raw.to_s.strip.downcase
     mapped[downcased] || (STATUSES.include?(downcased) ? downcased : 'available')

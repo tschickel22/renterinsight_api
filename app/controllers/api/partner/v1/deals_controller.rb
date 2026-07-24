@@ -56,7 +56,12 @@ module Api
 
         # POST /api/partner/v1/deals
         def create
-          deal = company_scope(Deal).new(deal_params)
+          attrs = deal_params.to_h
+          cf_values, cf_consumed = extract_inbound_custom_fields('deals')
+          attrs['custom_field_values'] = (attrs['custom_field_values'] || {}).merge(cf_values) if cf_values.any?
+          # Safety net: unmapped inbound fields go to notes instead of being dropped.
+          attrs = merge_inbound_note(attrs, attrs.keys + cf_consumed)
+          deal = company_scope(Deal).new(attrs)
 
           if deal.save
             render json: { data: deal_json(deal, detailed: true) }, status: :created
@@ -100,16 +105,7 @@ module Api
         end
 
         def deal_params
-          params.permit(
-            :name, :value, :stage, :probability, :expected_close_date,
-            :actual_close_date, :description, :notes, :customer_name,
-            :deal_type, :vertical, :quantity, :delivery_date,
-            :account_id, :contact_id, :owner_id, :location_id,
-            :vehicle_id, :source_id, :territory_id,
-            :selling_price, :unit_cost, :trade_allowance, :trade_payoff,
-            :doc_fee, :delivery_fee, :setup_fee, :skirting_fee,
-            :accessories_total, :pack_amount, :finance_reserve, :product_margin
-          )
+          params.permit(*Integration::MappableFields.keys('deals'))
         end
 
         def deal_json(deal, detailed: false)

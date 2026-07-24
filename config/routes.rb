@@ -1635,6 +1635,10 @@ Rails.application.routes.draw do
         end
       end
 
+      # Integration field map — mappable partner-API fields per module (+ custom
+      # fields) for the "Export field map" action next to the API keys.
+      get 'integration/field_map', to: 'integration_fields#field_map'
+
       # ==================== PARTNER API KEY MANAGEMENT ====================
       resources :api_keys, only: [:index, :show, :create, :update, :destroy], path: 'api-keys' do
         collection do
