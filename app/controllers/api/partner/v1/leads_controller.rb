@@ -158,12 +158,7 @@ module Api
         end
 
         def lead_params
-          params.permit(
-            :first_name, :last_name, :email, :phone, :status,
-            :source_id, :source, :owner_id, :location_id,
-            :budget_range, :purchase_timeframe, :rv_experience,
-            :preferred_contact_method, :interests_requirements, :notes
-          )
+          params.permit(*Integration::MappableFields.keys('leads'))
         end
 
         # Map common inbound aliases (Facebook Lead Ads / Zapier field keys) onto

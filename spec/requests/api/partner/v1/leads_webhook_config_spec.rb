@@ -223,6 +223,24 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
     end
   end
 
+  describe 'expanded standard fields (co-applicant, preferred_*) map to attributes' do
+    it 'accepts co-applicant + preference fields and does not dump them to notes' do
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: { first_name: 'A', last_name: 'B', email: 'exp@x.com',
+                     co_applicant_first_name: 'Sam', co_applicant_email: 'sam@x.com',
+                     preferred_home_type: 'double', company_name: 'Acme' }.to_json,
+           headers: headers_for(key)
+      expect(response).to have_http_status(:created)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.co_applicant_first_name).to eq('Sam')
+      expect(lead.co_applicant_email).to eq('sam@x.com')
+      expect(lead.preferred_home_type).to eq('double')
+      expect(lead.company_name).to eq('Acme')
+      expect(lead.notes).to be_blank # mapped to real fields, not notes
+    end
+  end
+
   describe 'custom field mapping' do
     it 'maps an inbound key matching a company custom field onto custom_field_values (not notes)' do
       company.custom_fields.create!(name: 'Monthly Payment', field_key: 'monthly_payment',

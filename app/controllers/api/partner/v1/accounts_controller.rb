@@ -104,14 +104,7 @@ module Api
         end
 
         def account_params
-          params.permit(
-            :name, :status, :account_type, :email, :phone, :website,
-            :industry, :rating, :ownership, :annual_revenue, :employee_count,
-            :description, :notes, :account_number,
-            :billing_street, :billing_city, :billing_state, :billing_postal_code, :billing_country,
-            :shipping_street, :shipping_city, :shipping_state, :shipping_postal_code, :shipping_country,
-            :owner_id, :location_id, :source_id, :parent_account_id
-          )
+          params.permit(*Integration::MappableFields.keys('accounts'))
         end
 
         def account_json(account, detailed: false)

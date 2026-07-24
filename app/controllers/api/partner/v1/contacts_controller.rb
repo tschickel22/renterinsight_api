@@ -101,11 +101,7 @@ module Api
         end
 
         def contact_params
-          params.permit(
-            :first_name, :last_name, :email, :phone, :title, :department,
-            :is_primary, :account_id, :location_id, :owner_id, :company_name,
-            :street, :city, :state, :zip, :country, :notes
-          )
+          params.permit(*Integration::MappableFields.keys('contacts'))
         end
 
         def contact_json(contact, detailed: false)

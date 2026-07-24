@@ -105,16 +105,7 @@ module Api
         end
 
         def deal_params
-          params.permit(
-            :name, :value, :stage, :probability, :expected_close_date,
-            :actual_close_date, :description, :notes, :customer_name,
-            :deal_type, :vertical, :quantity, :delivery_date,
-            :account_id, :contact_id, :owner_id, :location_id,
-            :vehicle_id, :source_id, :territory_id,
-            :selling_price, :unit_cost, :trade_allowance, :trade_payoff,
-            :doc_fee, :delivery_fee, :setup_fee, :skirting_fee,
-            :accessories_total, :pack_amount, :finance_reserve, :product_margin
-          )
+          params.permit(*Integration::MappableFields.keys('deals'))
         end
 
         def deal_json(deal, detailed: false)
