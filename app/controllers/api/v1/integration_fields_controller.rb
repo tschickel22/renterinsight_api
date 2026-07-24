@@ -54,6 +54,22 @@ module Api
           { key: 'billing_postal_code', label: 'Billing Postal Code' },
           { key: 'description', label: 'Description' },
           { key: 'notes', label: 'Notes' }
+        ],
+        'contacts' => [
+          { key: 'first_name', label: 'First Name' },
+          { key: 'last_name', label: 'Last Name' },
+          { key: 'email', label: 'Email' },
+          { key: 'phone', label: 'Phone' },
+          { key: 'title', label: 'Title' },
+          { key: 'department', label: 'Department' },
+          { key: 'company_name', label: 'Company Name' },
+          { key: 'account_id', label: 'Account ID' },
+          { key: 'street', label: 'Street' },
+          { key: 'city', label: 'City' },
+          { key: 'state', label: 'State' },
+          { key: 'zip', label: 'Zip' },
+          { key: 'country', label: 'Country' },
+          { key: 'notes', label: 'Notes' }
         ]
       }.freeze
 
