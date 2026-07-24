@@ -223,6 +223,41 @@ RSpec.describe 'Api::Partner::V1 Leads webhook_config', type: :request do
     end
   end
 
+  describe 'Facebook / Zapier field aliases' do
+    it 'maps full_name -> first_name + last_name when first/last are absent' do
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: { full_name: 'Jacob Andries', email: 'jacob@x.com', phone_number: '+13378961773' }.to_json,
+           headers: headers_for(key)
+      expect(response).to have_http_status(:created)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.first_name).to eq('Jacob')
+      expect(lead.last_name).to eq('Andries')
+      expect(lead.phone).to eq('+13378961773')
+    end
+
+    it 'handles a single-word full_name (first only, no last)' do
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: { full_name: 'Cher', email: 'cher@x.com' }.to_json, headers: headers_for(key)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.first_name).to eq('Cher')
+      expect(lead.last_name).to be_blank
+    end
+
+    it 'does NOT override an explicitly mapped first_name/phone' do
+      key = make_key
+      post '/api/partner/v1/leads',
+           params: { first_name: 'Mapped', last_name: 'Correctly', full_name: 'Ignored Alias',
+                     phone: '111', phone_number: '999', email: 'm@x.com' }.to_json,
+           headers: headers_for(key)
+      lead = Lead.find(JSON.parse(response.body).dig('data', 'id'))
+      expect(lead.first_name).to eq('Mapped')
+      expect(lead.last_name).to eq('Correctly')
+      expect(lead.phone).to eq('111')
+    end
+  end
+
   describe 'dedupe' do
     it 'returns 202 with deduped_to when an existing Lead matches on email' do
       existing = Lead.create!(company_id: company.id, first_name: 'Tom', last_name: 'Prior', email: 'dup@x.com')
