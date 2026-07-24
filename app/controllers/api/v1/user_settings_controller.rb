@@ -442,6 +442,13 @@ module Api
           result[:stock_list_hidden_columns] = arr.first(100)
         end
 
+        # Saved multi-select status filter on the stock list report (vehicle
+        # status keys). Same array-of-strings shape as the hidden-columns pref.
+        if raw.key?(:stock_list_status_filter)
+          arr = Array(raw[:stock_list_status_filter]).map(&:to_s)
+          result[:stock_list_status_filter] = arr.first(50)
+        end
+
         result
       end
 

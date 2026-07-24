@@ -41,9 +41,13 @@ class Api::V1::InventoryReportsController < ApplicationController
   private
 
   def report_filters
-    params.permit(
+    permitted = params.permit(
       :location_id, :section, :status, :salesperson_id, :lender, :aging_bucket, :search,
-      :funded_group_by, :closed_from, :closed_to
+      :funded_group_by, :closed_from, :closed_to,
+      statuses: []
     ).to_h.symbolize_keys
+    # Also accept a comma-separated string form of statuses.
+    permitted[:statuses] = params[:statuses] if permitted[:statuses].blank? && params[:statuses].is_a?(String)
+    permitted
   end
 end
