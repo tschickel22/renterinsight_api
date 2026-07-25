@@ -1,10 +1,11 @@
 module Messaging
   class BlockRenderer
-    def initialize(blocks:, context:, company:, unsubscribe_url:, inventory_units: nil, branding: nil, contact: nil)
+    def initialize(blocks:, context:, company:, unsubscribe_url:, inventory_units: nil, branding: nil, contact: nil, referral_url: nil)
       @blocks = Array(blocks)
       @context = context
       @company = company
       @unsubscribe_url = unsubscribe_url
+      @referral_url = referral_url
       @inventory_units = inventory_units || []
       @branding = branding || {}
       @contact  = contact  || {}
@@ -247,7 +248,7 @@ module Messaging
     end
 
     def render_footer
-      footer_html = UnsubscribeFooter.html_footer(company: @company, unsubscribe_url: @unsubscribe_url)
+      footer_html = UnsubscribeFooter.html_footer(company: @company, unsubscribe_url: @unsubscribe_url, referral_url: @referral_url)
       %(<tr><td>#{footer_html}</td></tr>)
     end
 

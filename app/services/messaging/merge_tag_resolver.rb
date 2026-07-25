@@ -32,6 +32,7 @@ module Messaging
         },
         'public_inventory_url' => urls[:public_inventory_url] || urls['public_inventory_url'],
         'unsubscribe_url'      => urls[:unsubscribe_url]      || urls['unsubscribe_url'],
+        'referral_url'         => urls[:referral_url]         || urls['referral_url'],
         'view_in_browser_url'  => urls[:view_in_browser_url]  || urls['view_in_browser_url'],
         'campaign_send_id'     => campaign_send&.id
       }

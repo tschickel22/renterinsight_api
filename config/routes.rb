@@ -2119,6 +2119,10 @@ Rails.application.routes.draw do
   get  '/u/:token',  to: 'campaign_tracking#unsubscribe_show', as: :campaign_unsubscribe_show
   post '/u/:token',  to: 'campaign_tracking#unsubscribe_confirm', as: :campaign_unsubscribe_confirm
 
+  # "Refer a friend" — public, no-auth (the React page lives at /r/:token on the FE).
+  get  '/api/referrals/:token', to: 'public/referrals#show',   as: :public_referral_show
+  post '/api/referrals/:token', to: 'public/referrals#create', as: :public_referral_create
+
   # One-time setup endpoint for Render free tier
   namespace :api do
     get 'setup', to: 'setup#create'

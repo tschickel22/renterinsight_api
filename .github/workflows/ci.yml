@@ -16,7 +16,9 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          # Read the pin from .ruby-version so it can't drift from the Gemfile.
+          # ('3.2' floated to 3.2.11 and broke bundle install against the 3.2.6 pin.)
+          ruby-version: .ruby-version
           bundler-cache: true
 
       - name: Bundle install

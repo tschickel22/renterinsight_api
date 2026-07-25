@@ -93,7 +93,7 @@ module Messaging
       raw_html = BlockRenderer.new(
         blocks: blocks, context: context, company: @company,
         unsubscribe_url: urls[:unsubscribe_url], inventory_units: inventory_units,
-        branding: branding, contact: contact
+        branding: branding, contact: contact, referral_url: urls[:referral_url]
       ).render
 
       # Process step attachments only on real sends (skip on preview where @send is unsaved).
@@ -142,7 +142,7 @@ module Messaging
                        true
                      end
       if append_unsub
-        footer = UnsubscribeFooter.html_footer(company: @company, unsubscribe_url: urls[:unsubscribe_url])
+        footer = UnsubscribeFooter.html_footer(company: @company, unsubscribe_url: urls[:unsubscribe_url], referral_url: urls[:referral_url])
         body = inject_before_body_close(body, footer)
       end
 
@@ -228,9 +228,19 @@ module Messaging
               else
                 "#{@base_url.to_s.chomp('/')}/u/preview"
               end
+      # "Refer a friend" — a per-send signed token so the referral is attributed
+      # to whoever forwarded it. Points at the FRONTEND host (it's a React page),
+      # like public_inventory_url — not the API host.
+      referral = if @send && @send.persisted?
+                   rtoken = Rails.application.message_verifier(:campaign_referral).generate({ 's' => @send.id })
+                   "#{frontend_base_url}/r/#{rtoken}"
+                 else
+                   "#{frontend_base_url}/r/preview"
+                 end
       {
         unsubscribe_url: unsub,
         public_inventory_url: public_inventory_url,
+        referral_url: referral,
         view_in_browser_url: nil
       }
     end
