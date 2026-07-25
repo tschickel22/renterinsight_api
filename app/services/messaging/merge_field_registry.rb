@@ -25,7 +25,8 @@ module Messaging
     SYSTEM_FIELDS = [
       { key: 'unsubscribe_url', label: 'Unsubscribe link', group: 'System', sample: 'https://app.example.com/u/abc123', available_for: %w[Lead Contact Account], channels: %w[email] },
       { key: 'view_in_browser_url', label: 'View in browser link', group: 'System', sample: 'https://app.example.com/v/abc123', available_for: %w[Lead Contact Account], channels: %w[email] },
-      { key: 'public_inventory_url', label: 'Public inventory link', group: 'System', sample: 'https://dealership.com/inventory', available_for: %w[Lead Contact Account], channels: %w[email sms] }
+      { key: 'public_inventory_url', label: 'Public inventory link', group: 'System', sample: 'https://dealership.com/inventory', available_for: %w[Lead Contact Account], channels: %w[email sms] },
+      { key: 'referral_url', label: 'Refer a friend link', group: 'System', sample: 'https://app.example.com/r/abc123', available_for: %w[Lead Contact Account], channels: %w[email] }
     ].freeze
 
     DEAL_FIELDS = [
