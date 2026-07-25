@@ -91,6 +91,14 @@ default: &default
     class: SendActivityRemindersJob
     queue: default
     schedule: every minute
+  harvest_campaign_bounces:
+    # Reads sending mailboxes' Inbox for NDR bounces + out-of-office replies.
+    # Campaigns send from owners' Gmail/Outlook, so these land in the sender's
+    # mailbox and never reach the reply+campaign-<id>@ inbound webhook.
+    # Feeds Campaigns::BounceHandler (stamps bounced_at, suppresses, flags email_invalid).
+    class: HarvestCampaignBouncesJob
+    queue: default
+    schedule: every 10 minutes
 
 production:
   <<: *default
