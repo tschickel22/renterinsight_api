@@ -13,25 +13,46 @@
       padding: 0;
     }
     .container { max-width: 640px; margin: 0 auto; padding: 24px 20px; }
-    .meta { color: #6b7280; font-size: 13px; margin-bottom: 4px; }
-    .meta strong { color: #374151; }
-    .body { white-space: pre-wrap; word-wrap: break-word; color: #1f2937; font-size: 15px; margin-top: 16px; }
-    .sep { border: none; border-top: 1px solid #e5e7eb; margin: 28px 0 14px; }
-    .footer { color: #9ca3af; font-size: 12px; }
+    .kicker { color: #6b7280; font-size: 13px; margin: 0 0 2px; }
+    .who { font-size: 17px; font-weight: 600; color: #111827; margin: 0 0 2px; }
+    .who a { color: #2563eb; text-decoration: none; }
+    .subject { color: #6b7280; font-size: 13px; margin: 0 0 18px; }
+    .btn {
+      display: inline-block; background: #2563eb; color: #ffffff !important;
+      text-decoration: none; font-size: 15px; font-weight: 600;
+      padding: 11px 20px; border-radius: 8px;
+    }
+    .btn-note { color: #9ca3af; font-size: 12px; margin: 8px 0 0; }
+    .reply { white-space: pre-wrap; word-wrap: break-word; color: #1f2937; font-size: 15px; margin: 22px 0 0; }
+    .sep { border: none; border-top: 1px solid #e5e7eb; margin: 26px 0 14px; }
+    .quoted-label { color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; margin: 0 0 8px; }
+    .quoted { white-space: pre-wrap; word-wrap: break-word; color: #9ca3af; font-size: 13px; border-left: 3px solid #e5e7eb; padding-left: 12px; }
+    .footer { color: #9ca3af; font-size: 12px; margin-top: 22px; }
     .footer a { color: #6b7280; }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="meta"><strong><%= @entity_name %></strong> &lt;<%= @from_address %>&gt;</div>
-    <div class="meta"><strong>Subject:</strong> <%= @subject %></div>
+    <p class="kicker">New reply from</p>
+    <p class="who"><%= @entity_name %> &nbsp;<a href="mailto:<%= @reply_to_email %>">&lt;<%= @reply_to_email %>&gt;</a></p>
+    <p class="subject"><%= @subject %></p>
 
-    <div class="body"><%= @reply_body %></div>
+    <% if @reply_mailto.present? %>
+      <a class="btn" href="<%= @reply_mailto %>">&#9993;&nbsp; Reply to <%= @entity_name %></a>
+      <p class="btn-note">Or just hit Reply — it goes straight to <%= @entity_name %>.</p>
+    <% end %>
+
+    <div class="reply"><%= @reply_clean %></div>
+
+    <% if @reply_quoted.present? %>
+      <hr class="sep">
+      <p class="quoted-label">Earlier in this thread</p>
+      <div class="quoted"><%= truncate(@reply_quoted, length: 900, separator: ' ') %></div>
+    <% end %>
 
     <hr class="sep">
     <p class="footer">
-      Reply to this email to respond to <%= @entity_name %>.
-      &nbsp;·&nbsp; <a href="<%= @full_link %>">Open in <%= brand.name %></a>
+      <a href="<%= @full_link %>">Open in <%= brand.name %></a>
     </p>
   </div>
 </body>
