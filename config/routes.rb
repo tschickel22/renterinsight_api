@@ -1519,6 +1519,8 @@ Rails.application.routes.draw do
           get    'callback',     to: 'facebook#callback'
           post   'connect_page', to: 'facebook#connect_page'
           get    'status',       to: 'facebook#status'
+          get    'ad_accounts',  to: 'facebook#ad_accounts'
+          post   'link_ad_account', to: 'facebook#link_ad_account'
           delete 'disconnect',   to: 'facebook#disconnect'
         end
       end

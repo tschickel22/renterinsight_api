@@ -48,7 +48,14 @@ class Api::V1::AdCampaignsController < ApplicationController
     ad_account_id = metadata['ad_account_id']
     return render json: { error: 'No ad account linked. Connect your Facebook Ads account in Settings.' }, status: :unprocessable_entity if ad_account_id.blank?
 
-    token = integration.page_access_token
+    # Ad-account endpoints (campaigns/adsets/creatives/ads) require a user token
+    # carrying ads_management — a Page token is only good for Page objects, and
+    # spending money on a call Meta will reject deserves a clear error up front.
+    token = integration.user_access_token
+    if token.blank?
+      return render json: { error: 'Reconnect Facebook in Settings to grant ads access — this connection has no user token.' },
+                    status: :unprocessable_entity
+    end
 
     # Extract wizard params
     primary_text     = params[:primary_text].to_s
@@ -186,7 +193,7 @@ class Api::V1::AdCampaignsController < ApplicationController
     integration = @company.facebook_integrations.active.order(:id).first
     if integration
       begin
-        MetaGraphApi.delete_campaign(@campaign.external_campaign_id, integration.page_access_token)
+        MetaGraphApi.delete_campaign(@campaign.external_campaign_id, ads_token_for(integration))
       rescue MetaGraphApi::Error => e
         Rails.logger.warn "[AdCampaigns#destroy] Meta delete failed (continuing): #{e.message}"
       end
@@ -277,12 +284,19 @@ class Api::V1::AdCampaignsController < ApplicationController
     render json: { error: 'Not found' }, status: :not_found unless @campaign
   end
 
+  # Ads live on the ad account, not the Page, so they need the user token.
+  # Fall back to the Page token for legacy connections rather than hard-failing
+  # status changes that may still work.
+  def ads_token_for(integration)
+    integration.user_access_token.presence || integration.page_access_token.presence
+  end
+
   def apply_status_change!(campaign, meta_status:, local_status:)
     integration = @company.facebook_integrations.active.order(:id).first
     return render json: { error: 'No active Facebook integration' }, status: :unprocessable_entity unless integration
 
     begin
-      MetaGraphApi.update_campaign_status(campaign.external_campaign_id, integration.page_access_token, status: meta_status)
+      MetaGraphApi.update_campaign_status(campaign.external_campaign_id, ads_token_for(integration), status: meta_status)
     rescue MetaGraphApi::ExpiredTokenError => e
       integration.update(status: 'expired')
       return render json: { error: "Facebook token expired: #{e.message}" }, status: :unprocessable_entity

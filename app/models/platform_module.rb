@@ -31,6 +31,12 @@ class PlatformModule
     'marketing.syndication' => { name: 'Listing Syndication', category: 'Marketing', icon: 'Share2', description: 'Syndicate listings to partner sites' },
     'marketing.social_media' => { name: 'Social Media & Ads', category: 'Marketing', icon: 'Share2', description: 'Social posts, scheduler, attribution, and Facebook ad builder' },
     'marketing.campaigns' => { name: 'Email Campaigns', category: 'Marketing', icon: 'Mail', description: 'Email campaign creation, sending, and tracking' },
+    # Paid per-location add-on — deliberately absent from every PLAN_TEMPLATE so
+    # landing on professional/enterprise doesn't grant it for free. Sold by
+    # enabling a TenantModuleOverride (or a dedicated add-on plan).
+    # The display name is registry data on purpose: renaming the product must not
+    # require a code sweep (same principle as the brand kernel in CLAUDE.md).
+    'marketing.automation' => { name: 'Campaign Desk', category: 'Marketing', icon: 'Wand2', description: 'One prompt to a full multi-channel campaign — email, SMS, social, landing page, and the follow-up workflow, drawn before you publish' },
 
     # Finance & Agreements
     'finance.loans' => { name: 'Finance Management', category: 'Finance & Agreements', icon: 'DollarSign', description: 'Loan and payment management' },
