@@ -1,8 +1,13 @@
-<%= @entity_name %> <<%= @from_address %>>
+New reply from <%= @entity_name %> <<%= @reply_to_email %>>
 Subject: <%= @subject %>
 
-<%= @reply_body %>
+Reply to them: <%= @reply_to_email %>
+(Or just hit Reply — it goes straight to <%= @entity_name %>.)
 
+<%= @reply_clean %>
+<% if @reply_quoted.present? %>
+--- Earlier in this thread ---
+<%= truncate(@reply_quoted, length: 900, separator: ' ') %>
+<% end %>
 ---
-Reply to this email to respond to <%= @entity_name %>.
 Open in <%= brand.name %>: <%= @full_link %>

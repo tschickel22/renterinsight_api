@@ -176,7 +176,10 @@ class Api::V1::CampaignAudiencesController < ApplicationController
   end
 
   def editable?
-    %w[draft scheduled].include?(@campaign.status)
+    # 'paused' MUST be editable — the lock error tells users to "Pause it to
+    # edit", so a paused campaign has to be unlocked or that instruction is a
+    # dead end (the exact bug this fixes).
+    %w[draft scheduled paused].include?(@campaign.status)
   end
 
   def audience_params

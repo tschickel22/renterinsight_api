@@ -106,7 +106,7 @@ class Api::V1::CampaignsController < ApplicationController
   def update
     return unless authorize_action!('campaigns', 'update')
 
-    unless %w[draft scheduled].include?(@campaign.status)
+    unless %w[draft scheduled paused].include?(@campaign.status)
       render json: { error: 'Most fields are locked once a campaign starts. Pause first to edit.' }, status: :unprocessable_entity
       return
     end

@@ -160,8 +160,73 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     integration.save!
 
     capture_instagram_business_account!(integration)
+    capture_ad_account!(integration)
 
     render json: { integration: serialize(integration).merge(metadata: integration.metadata) }, status: :ok
+  end
+
+  # GET /api/v1/integrations/facebook/ad_accounts
+  # Lists the Meta Ad Accounts this connection can advertise with, so the user
+  # can pick which one paid ads bill to.
+  def ad_accounts
+    return unless authorize_action!('integrations', 'read')
+
+    integration = @company.facebook_integrations.active.order(:id).first
+    return render json: { ad_accounts: [], error: 'No Facebook page connected' } unless integration
+
+    selected = integration.metadata.to_h.deep_stringify_keys['ad_account_id']
+
+    if integration.user_access_token.blank?
+      return render json: {
+        ad_accounts:            [],
+        selected_ad_account_id: selected,
+        error:                  'This connection has no user token. Reconnect Facebook to grant ads access.'
+      }
+    end
+
+    begin
+      accounts = fetch_ad_accounts(integration)
+    rescue MetaGraphApi::ExpiredTokenError => e
+      integration.update(status: 'expired')
+      return render json: { ad_accounts: [], selected_ad_account_id: selected, error: "Facebook token expired: #{e.message}" }
+    rescue MetaGraphApi::Error => e
+      return render json: { ad_accounts: [], selected_ad_account_id: selected, error: e.message }
+    end
+
+    render json: { ad_accounts: accounts, selected_ad_account_id: selected }
+  end
+
+  # POST /api/v1/integrations/facebook/link_ad_account
+  def link_ad_account
+    return unless authorize_action!('integrations', 'update')
+
+    ad_account_id = normalize_ad_account_id(params[:ad_account_id])
+    return render json: { error: 'ad_account_id required' }, status: :bad_request if ad_account_id.blank?
+
+    integration = @company.facebook_integrations.active.order(:id).first
+    return render json: { error: 'No Facebook page connected' }, status: :unprocessable_entity unless integration
+
+    ad_account_name = params[:ad_account_name].presence
+
+    # When we can enumerate the user's ad accounts, only accept one of them —
+    # a typo'd ID would otherwise fail much later, mid-launch.
+    if integration.user_access_token.present?
+      begin
+        available = fetch_ad_accounts(integration)
+        match = available.find { |a| a[:id] == ad_account_id }
+        unless match
+          return render json: { error: 'That ad account is not available on this Facebook connection.' },
+                        status: :unprocessable_entity
+        end
+        ad_account_name ||= match[:name]
+      rescue MetaGraphApi::Error => e
+        Rails.logger.info "[FacebookOAuth] ad account validation skipped: #{e.message}"
+      end
+    end
+
+    write_ad_account!(integration, ad_account_id, ad_account_name)
+
+    render json: { success: true, ad_account_id: ad_account_id, ad_account_name: ad_account_name }
   end
 
   # GET /api/v1/integrations/facebook/status
@@ -183,6 +248,9 @@ class Api::V1::Integrations::FacebookController < ApplicationController
       token_expired: first_integration&.token_expires_at.present? && first_integration.token_expires_at < Time.current,
       instagram_connected: ig_connected,
       instagram_username: ig_connected ? ig_meta['instagram_username'] : nil,
+      ad_account_id:      ig_meta['ad_account_id'],
+      ad_account_name:    ig_meta['ad_account_name'],
+      ads_ready:          ig_meta['ad_account_id'].present? && first_integration&.user_access_token.present?,
       integrations: integrations.map { |i| serialize(i) }
     }
   end
@@ -228,6 +296,48 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     integration.update!(metadata: merged)
   rescue MetaGraphApi::Error => e
     Rails.logger.info "[FacebookOAuth] no IG business account linked: #{e.message}"
+  end
+
+  # Discover the Meta Ad Accounts reachable from this connection. When exactly
+  # one is available the choice is unambiguous, so link it now — otherwise the
+  # user picks in Settings. Without this, metadata['ad_account_id'] is never
+  # populated and every paid-ad launch fails on "No ad account linked".
+  def capture_ad_account!(integration)
+    accounts = fetch_ad_accounts(integration)
+    return unless accounts.length == 1
+
+    write_ad_account!(integration, accounts.first[:id], accounts.first[:name])
+  rescue MetaGraphApi::Error => e
+    Rails.logger.info "[FacebookOAuth] could not list ad accounts: #{e.message}"
+  end
+
+  # /me/adaccounts needs the *user* token — a Page token can't read it.
+  def fetch_ad_accounts(integration)
+    return [] if integration.user_access_token.blank?
+
+    response = MetaGraphApi.get_user_ad_accounts(integration.user_access_token)
+    Array(response['data']).map do |a|
+      {
+        id:       normalize_ad_account_id(a['id']),
+        name:     a['name'],
+        status:   a['account_status'],
+        currency: a['currency']
+      }
+    end
+  end
+
+  def write_ad_account!(integration, ad_account_id, ad_account_name)
+    merged = integration.metadata.to_h.deep_stringify_keys.merge(
+      'ad_account_id'   => ad_account_id,
+      'ad_account_name' => ad_account_name
+    ).compact
+    integration.update!(metadata: merged)
+  end
+
+  # Graph returns "act_1234567890"; every ads endpoint we build re-adds the
+  # prefix, so store the bare numeric id.
+  def normalize_ad_account_id(value)
+    value.to_s.strip.sub(/\Aact_/, '').presence
   end
 
   def callback_redirect_uri

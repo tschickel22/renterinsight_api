@@ -63,6 +63,17 @@ class NotificationMailer < ApplicationMailer
     # The actual reply content to relay (falls back to the short preview).
     @reply_body = body_html.presence || preview
 
+    # Split the new text from the quoted original so the rep sees what the
+    # person actually wrote up top, with the (often security-rewritten) quoted
+    # thread tucked below. And give a one-click "Reply to <them>" mailto so the
+    # rep can respond without hunting — Reply-To makes plain Reply work too.
+    cleaned = InboundEmail::ReplyBodyCleaner.split(@reply_body)
+    @reply_clean = cleaned.reply
+    @reply_quoted = cleaned.quoted
+    @reply_to_email = reply_to_address.presence || from_address
+    reply_subject_line = @subject.to_s.match?(/\Are:/i) ? @subject.to_s : "Re: #{@subject}"
+    @reply_mailto = ("mailto:#{@reply_to_email}?subject=#{ERB::Util.url_encode(reply_subject_line)}" if @reply_to_email.present?)
+
     # Get frontend URL
     @frontend_url = ENV['FRONTEND_URL'] ||
                     (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://staging.crm.landlordinsight.com')

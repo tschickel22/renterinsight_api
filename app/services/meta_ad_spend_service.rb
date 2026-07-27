@@ -12,7 +12,9 @@ class MetaAdSpendService
       ad_account_id = metadata['ad_account_id']
       return { synced: 0, skipped: 'no_ad_account' } if ad_account_id.blank?
 
-      token = integration.page_access_token
+      # Insights on an ad account need a user token with ads_read; a Page token
+      # can't read /act_*. Fall back to the Page token for legacy connections.
+      token = integration.user_access_token.presence || integration.page_access_token
 
       begin
         response = MetaGraphApi.get_ad_campaigns(ad_account_id, token)
