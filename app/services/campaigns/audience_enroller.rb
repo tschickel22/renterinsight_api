@@ -73,6 +73,18 @@ module Campaigns
         @campaign.update_column(:audience_snapshot_at, Time.current)
       end
 
+      # Keep the audience count meaningful for dynamic campaigns. The stored
+      # estimated_count is a FilterCompiler estimate frozen at audience-edit
+      # time, so tagging a lead in (which enrolls it here) never moved the
+      # number — it sat at the launch value. For a dynamic campaign the true
+      # audience IS the live enrolled set, which grows as new records match,
+      # so mirror that count. (Recomputing the filter estimate instead would
+      # shrink it, since the audience excludes active-campaign enrollees.)
+      if @audience && @campaign.audience_mode == 'dynamic'
+        live = @campaign.campaign_enrollments.active.count
+        @audience.update_columns(estimated_count: live, estimated_at: Time.current)
+      end
+
       enrolled
     end
 

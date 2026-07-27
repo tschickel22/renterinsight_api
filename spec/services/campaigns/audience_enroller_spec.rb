@@ -69,4 +69,36 @@ RSpec.describe Campaigns::AudienceEnroller do
     described_class.new(campaign: campaign).enroll_all
     expect(campaign.campaign_enrollments.pluck(:recipient_id)).to contain_exactly(lead_a.id)
   end
+
+  describe 'dynamic audience estimated_count stays live' do
+    let(:dyn_campaign) do
+      c = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: 'D',
+                           campaign_type: 'blast', channel: 'email', audience_mode: 'dynamic',
+                           from_identity_type: 'User', from_identity_id: user.id, throttle_per_day: 100)
+      c.campaign_steps.create!(position: 0, channel: 'email', subject: 'Hi',
+                               body_blocks: [{ 'type' => 'text', 'html' => 'a' }], wait_days: 0, wait_hours: 0)
+      c.create_campaign_audience!(source_type: 'Lead', filter_tree: {}, estimated_count: 0)
+      c
+    end
+
+    it 'sets estimated_count to the live enrolled count after enrolling' do
+      described_class.new(campaign: dyn_campaign).enroll_all
+      expect(dyn_campaign.campaign_audience.reload.estimated_count).to eq(2)
+    end
+
+    it 'grows the count when a newly-matching lead is enrolled on a later run' do
+      described_class.new(campaign: dyn_campaign).enroll_all
+      expect(dyn_campaign.campaign_audience.reload.estimated_count).to eq(2)
+
+      Lead.create!(company: company, source: source, first_name: 'C', last_name: '3', email: 'c@x.com')
+      described_class.new(campaign: dyn_campaign).enroll_all
+      expect(dyn_campaign.campaign_audience.reload.estimated_count).to eq(3)
+    end
+
+    it 'does not touch estimated_count for static campaigns' do
+      campaign.campaign_audience.update!(estimated_count: 999)
+      described_class.new(campaign: campaign).enroll_all
+      expect(campaign.campaign_audience.reload.estimated_count).to eq(999)
+    end
+  end
 end
