@@ -11,7 +11,19 @@ class CampaignEnrollment < ApplicationRecord
   validate :contact_snapshot_present
 
   scope :active, -> { where(status: %w[pending active]) }
-  scope :due_for_send, -> { active.where('next_send_at <= ?', Time.current) }
+  # Only enrollments whose parent campaign is actually running are due. Without
+  # the join, pausing a campaign doesn't stop delivery — pause flips
+  # campaigns.status but leaves enrollments 'active' with next_send_at intact,
+  # so the scheduler keeps shipping the remaining drip steps on schedule.
+  # ProcessCampaignSendJob re-checks the same condition (that's the
+  # safety-critical guard — jobs can already be sitting in the queue when a
+  # pause lands); this scope stops the scheduler enqueuing no-ops at all.
+  scope :due_for_send, lambda {
+    active
+      .joins(:campaign)
+      .where(campaigns: { status: 'running' })
+      .where('campaign_enrollments.next_send_at <= ?', Time.current)
+  }
 
   # Test sends (CampaignsController#test_send) create a real enrollment with this metadata
   # flag so the sender pipeline works. They must be excluded from analytics and recipient

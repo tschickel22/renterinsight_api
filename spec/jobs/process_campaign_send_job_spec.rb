@@ -33,4 +33,38 @@ RSpec.describe ProcessCampaignSendJob do
     expect(Campaigns::CampaignSender).not_to receive(:new)
     described_class.perform_now(enrollment.id)
   end
+
+  # Pausing only flips campaigns.status; enrollments stay 'active' with their
+  # next_send_at intact. Without a campaign-status guard the remaining drip
+  # steps keep shipping after a pause.
+  %w[paused draft completed archived].each do |status|
+    it "no-ops when the campaign is #{status}, even for an active due enrollment" do
+      enrollment = CampaignEnrollment.create!(company_id: company.id, campaign_id: campaign.id,
+                                               recipient_type: 'Lead', recipient_id: lead.id,
+                                               email_address_snapshot: lead.email, status: 'active',
+                                               next_send_at: 1.minute.ago)
+      campaign.update_column(:status, status)
+
+      expect(Campaigns::CampaignSender).not_to receive(:new)
+      described_class.perform_now(enrollment.id)
+    end
+  end
+
+  describe 'CampaignEnrollment.due_for_send' do
+    let!(:enrollment) do
+      CampaignEnrollment.create!(company_id: company.id, campaign_id: campaign.id,
+                                 recipient_type: 'Lead', recipient_id: lead.id,
+                                 email_address_snapshot: lead.email, status: 'active',
+                                 next_send_at: 1.minute.ago)
+    end
+
+    it 'includes due enrollments on a running campaign' do
+      expect(CampaignEnrollment.due_for_send).to include(enrollment)
+    end
+
+    it 'excludes them once the campaign is paused' do
+      campaign.update_column(:status, 'paused')
+      expect(CampaignEnrollment.due_for_send).not_to include(enrollment)
+    end
+  end
 end
