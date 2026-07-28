@@ -10,7 +10,7 @@ class BrandHealthService
 
   class << self
     def fetch_for_company(company)
-      integration = company.facebook_integrations.active.order(:id).first
+      integration = FacebookIntegration.current_for(company)
       return nil unless integration
 
       token   = integration.page_access_token

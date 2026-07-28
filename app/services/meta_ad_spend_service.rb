@@ -5,7 +5,7 @@
 class MetaAdSpendService
   class << self
     def sync_for_company(company)
-      integration = company.facebook_integrations.active.order(:id).first
+      integration = FacebookIntegration.current_for(company)
       return { synced: 0, skipped: 'no_integration' } unless integration
 
       metadata = integration.metadata.to_h.deep_stringify_keys

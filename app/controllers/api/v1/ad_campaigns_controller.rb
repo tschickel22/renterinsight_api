@@ -41,7 +41,7 @@ class Api::V1::AdCampaignsController < ApplicationController
   def launch
     return unless authorize_action!('facebook_ads', 'create')
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     return render json: { error: 'Connect Facebook first in Settings > Integrations' }, status: :unprocessable_entity unless integration
 
     metadata = integration.metadata.to_h.deep_stringify_keys
@@ -190,7 +190,7 @@ class Api::V1::AdCampaignsController < ApplicationController
   def destroy
     return unless authorize_action!('facebook_ads', 'delete')
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     if integration
       begin
         MetaGraphApi.delete_campaign(@campaign.external_campaign_id, ads_token_for(integration))
@@ -208,7 +208,7 @@ class Api::V1::AdCampaignsController < ApplicationController
   def lead_forms
     return unless authorize_action!('facebook_ads', 'read')
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     return render json: { lead_forms: [], error: 'No Facebook page connected' } unless integration
 
     begin
@@ -292,7 +292,7 @@ class Api::V1::AdCampaignsController < ApplicationController
   end
 
   def apply_status_change!(campaign, meta_status:, local_status:)
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     return render json: { error: 'No active Facebook integration' }, status: :unprocessable_entity unless integration
 
     begin

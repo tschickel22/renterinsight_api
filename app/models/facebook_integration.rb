@@ -13,6 +13,19 @@ class FacebookIntegration < ApplicationRecord
   validates :page_id, presence: true
 
   scope :active, -> { where(status: 'active', is_deleted: [false, nil]) }
+  # Newest-first. Connecting a Page retires the company's previous one, so there
+  # is normally a single active row — but rows connected before that retirement
+  # existed must not outrank the Page the user just picked.
+  scope :current, -> { active.order(created_at: :desc, id: :desc) }
+
+  # The company's live Facebook connection. Every consumer (publisher, comment
+  # sync, ads, status tiles) must resolve through here so they all agree on
+  # which Page is "the" Page.
+  def self.current_for(company)
+    return nil if company.nil?
+
+    company.facebook_integrations.current.first
+  end
 
   def token_expired?
     token_expires_at.present? && token_expires_at <= Time.current
