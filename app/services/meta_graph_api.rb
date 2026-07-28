@@ -138,7 +138,15 @@ class MetaGraphApi
         status:                status,
         special_ad_categories: Array(special_ad_categories).to_json
       }
-      params[:daily_budget] = daily_budget_cents if daily_budget_cents
+      if daily_budget_cents
+        params[:daily_budget] = daily_budget_cents
+      else
+        # Budget lives on the ad set. Meta then demands an explicit answer on
+        # whether ad sets may pool 20% of their budgets, and rejects the whole
+        # campaign if the field is absent. false = each ad set keeps its own.
+        params[:is_adset_budget_sharing_enabled] = false
+      end
+
       post("/act_#{ad_account_id}/campaigns", access_token, **params)
     end
 
