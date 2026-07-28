@@ -262,6 +262,16 @@ class MetaGraphApi
           limit:  100)
     end
 
+    # Resolve a free-text interest to Meta's own targeting ids. flexible_spec
+    # rejects name-only entries, so without this an interest can't be targeted
+    # at all — it has to be looked up first.
+    def search_ad_interests(query, access_token, limit: 5)
+      get('/search', access_token,
+          type:  'adinterest',
+          q:     query,
+          limit: limit)
+    end
+
     def get_lead_forms(page_id, access_token)
       get("/#{page_id}/leadgen_forms", access_token,
           fields: 'id,name,status,created_time,leads_count',

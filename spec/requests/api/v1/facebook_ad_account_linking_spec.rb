@@ -277,14 +277,49 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       end
     end
 
-    # Meta needs its own interest ids; name-only entries fail the whole ad set.
-    it 'runs broad rather than sending unresolved interest names' do
-      launch_with(interests: ['manufactured housing', 'first time buyers'])
+    # Meta needs its own interest ids; name-only entries fail the whole ad set,
+    # so free text is resolved through the targeting-search endpoint first.
+    it 'resolves interest names to Meta targeting ids' do
+      allow(MetaGraphApi).to receive(:search_ad_interests)
+        .with('manufactured housing', anything, anything)
+        .and_return({ 'data' => [{ 'id' => '6003', 'name' => 'Manufactured housing' }] })
+
+      launch_with(interests: ['manufactured housing'], special_ad_categories: ['NONE'])
+
+      expect(MetaGraphApi).to have_received(:create_ad_set) do |_acct, _token, **kwargs|
+        expect(kwargs[:targeting][:flexible_spec])
+          .to eq([{ interests: [{ id: '6003', name: 'Manufactured housing' }] }])
+      end
+      expect(JSON.parse(response.body)['notes'].join(' ')).to match(/Targeting interests: Manufactured housing/)
+    end
+
+    it 'reports interests Meta has no match for instead of dropping them silently' do
+      allow(MetaGraphApi).to receive(:search_ad_interests).and_return({ 'data' => [] })
+
+      launch_with(interests: ['not a real interest'], special_ad_categories: ['NONE'])
 
       expect(MetaGraphApi).to have_received(:create_ad_set) do |_acct, _token, **kwargs|
         expect(kwargs[:targeting]).not_to have_key(:flexible_spec)
       end
-      expect(JSON.parse(response.body)['notes'].join(' ')).to match(/Interests were not applied/)
+      expect(JSON.parse(response.body)['notes'].join(' ')).to match(/No Facebook interest matched/)
+    end
+
+    # A lookup outage must not sink the launch — broad targeting still works.
+    it 'launches broad when the interest lookup errors' do
+      allow(MetaGraphApi).to receive(:search_ad_interests).and_raise(MetaGraphApi::Error, 'down')
+
+      launch_with(interests: ['manufactured housing'])
+
+      expect(response).to have_http_status(:created)
+    end
+
+    # Detailed targeting is forbidden outright in a special ad category.
+    it 'skips interest lookup entirely for a special ad category' do
+      expect(MetaGraphApi).not_to receive(:search_ad_interests)
+
+      launch_with(interests: ['manufactured housing'], special_ad_categories: ['HOUSING'])
+
+      expect(JSON.parse(response.body)['notes'].join(' ')).to match(/forbids detailed targeting/)
     end
 
     # Meta blocks ad creatives from an app that hasn't cleared App Review. That

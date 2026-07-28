@@ -23,12 +23,7 @@ module Api
         end
         
         deals = deals.includes(:account, :contact, :co_applicant_contact, :territory, :user, :location, :deal_products, :commission_plan)
-        # sort_by=name gives pickers a stable alphabetical list; default stays newest-first
-        deals = if params[:sort_by] == 'name'
-                  deals.order(Arel.sql('LOWER(deals.name) ASC'), :id)
-                else
-                  deals.order(created_at: :desc)
-                end
+        deals = apply_sort(deals)
 
         # Filter by account if provided (support both account_id and customer_id for backward compatibility)
         if params[:account_id].present?
@@ -626,6 +621,48 @@ module Api
       end
 
       private
+
+      # Sorting used to be client-side over the loaded page only, so on a
+      # multi-page list the "sorted" order was really just the current 50 rows
+      # rearranged. Whitelisted columns keep this injection-safe; anything
+      # unrecognised falls back to newest-first rather than erroring.
+      #
+      # Owner and location sort by the name shown in the table, not the id —
+      # ordering by owner_id would look arbitrary to anyone reading the column.
+      SORTABLE_COLUMNS = {
+        'name'              => 'LOWER(deals.name)',
+        'value'             => 'deals.value',
+        'stage'             => 'deals.stage',
+        'probability'       => 'deals.probability',
+        'expectedCloseDate' => 'deals.expected_close_date',
+        'expected_close_date' => 'deals.expected_close_date',
+        'customerName'      => 'LOWER(deals.customer_name)',
+        'lastActivity'      => 'deals.last_activity_at',
+        'last_activity_at'  => 'deals.last_activity_at',
+        'createdAt'         => 'deals.created_at',
+        'created_at'        => 'deals.created_at',
+        'owner'             => 'LOWER(sort_owners.first_name), LOWER(sort_owners.last_name)',
+        'location'          => 'LOWER(sort_locations.name)'
+      }.freeze
+
+      JOINED_SORTS = {
+        'owner'    => 'LEFT JOIN users AS sort_owners ON sort_owners.id = deals.owner_id',
+        'location' => 'LEFT JOIN locations AS sort_locations ON sort_locations.id = deals.location_id'
+      }.freeze
+
+      def apply_sort(scope)
+        key    = params[:sort_by].to_s
+        column = SORTABLE_COLUMNS[key]
+        return scope.order(created_at: :desc) if column.blank?
+
+        direction = params[:sort_dir].to_s.casecmp('desc').zero? ? 'DESC' : 'ASC'
+        scope = scope.joins(JOINED_SORTS[key]) if JOINED_SORTS.key?(key)
+
+        # NULLS LAST so empty owners/dates sink instead of leading the list, and
+        # :id last so paging can't reshuffle rows that tie.
+        ordered = column.split(', ').map { |c| "#{c} #{direction} NULLS LAST" }.join(', ')
+        scope.order(Arel.sql(ordered)).order(:id)
+      end
 
       # Company deals narrowed by RBAC location access + the active location
       # filter, WITHOUT the my/all owner scoping. Shared by #index and #owners

@@ -112,9 +112,11 @@ class Api::V1::AdCampaignsController < ApplicationController
     daily_budget_cents = (daily_budget * 100).to_i
     campaign_name = "RI: #{headline_text.presence&.truncate(40) || 'Ad'} - #{Date.current}"
 
-    campaign_id       = existing_campaign_id
-    created_campaign  = false
-    adset_id          = existing_adset_id
+    campaign_id           = existing_campaign_id
+    created_campaign      = false
+    adset_id              = existing_adset_id
+    resolved_interests    = []
+    unresolved_interests  = []
     # Four Meta calls behind one button — naming the failing step turns
     # "Failed to create ad" into something a user can act on.
     step = 'campaign'
@@ -133,9 +135,14 @@ class Api::V1::AdCampaignsController < ApplicationController
 
       if adset_id.blank?
         location = @company.locations.order(:id).first
+        if interests.any? && special_ad_categories.empty?
+          resolved_interests, unresolved_interests = resolve_interest_ids(interests, token)
+        end
+
         targeting = build_targeting(location: location, radius_miles: radius_miles,
                                     age_min: age_min, age_max: age_max, interests: interests,
-                                    special_ad_categories: special_ad_categories)
+                                    special_ad_categories: special_ad_categories,
+                                    interest_ids: resolved_interests)
 
         step = 'ad set (budget, schedule and targeting)'
         adset_result = MetaGraphApi.create_ad_set(
@@ -203,7 +210,12 @@ class Api::V1::AdCampaignsController < ApplicationController
       notes << 'Added to the existing campaign — its objective and special ad category apply.' if existing_campaign_id.present?
       notes << 'Added to the existing ad set, so it shares that budget, schedule and targeting.' if existing_adset_id.present?
       if interests.any? && existing_adset_id.blank?
-        notes << 'Interests were not applied — Meta needs its own interest IDs, so this ad set runs broad targeting.'
+        if special_ad_categories.any?
+          notes << "Interests were not applied — Meta forbids detailed targeting in the #{special_ad_categories.join(', ')} category."
+        else
+          notes << "Targeting interests: #{resolved_interests.map { |i| i[:name] }.join(', ')}." if resolved_interests.any?
+          notes << "No Facebook interest matched: #{unresolved_interests.join(', ')}." if unresolved_interests.any?
+        end
       end
       if special_ad_categories.any? && existing_adset_id.blank? &&
          (age_min != SPECIAL_CATEGORY_AGE_MIN || age_max != SPECIAL_CATEGORY_AGE_MAX)
@@ -494,7 +506,8 @@ class Api::V1::AdCampaignsController < ApplicationController
   SPECIAL_CATEGORY_AGE_MIN = 18
   SPECIAL_CATEGORY_AGE_MAX = 65
 
-  def build_targeting(location:, radius_miles:, age_min:, age_max:, interests:, special_ad_categories: [])
+  def build_targeting(location:, radius_miles:, age_min:, age_max:, interests:,
+                      special_ad_categories: [], interest_ids: [])
     lat = location.respond_to?(:latitude)  ? location.latitude  : nil
     lng = location.respond_to?(:longitude) ? location.longitude : nil
 
@@ -503,7 +516,7 @@ class Api::V1::AdCampaignsController < ApplicationController
       age_max = SPECIAL_CATEGORY_AGE_MAX
     end
 
-    {
+    targeting = {
       geo_locations: {
         custom_locations: [{
           latitude:      lat || 39.7392,
@@ -515,6 +528,14 @@ class Api::V1::AdCampaignsController < ApplicationController
       age_min: age_min,
       age_max: age_max
     }
+
+    # Detailed targeting is forbidden outright in a special ad category, so
+    # interests only ever apply to ordinary ads.
+    if interest_ids.any? && special_ad_categories.empty?
+      targeting[:flexible_spec] = [{ interests: interest_ids }]
+    end
+
+    targeting
     # Interests arrive as free text. Meta's flexible_spec needs interest *ids*
     # from its targeting-search endpoint and rejects name-only entries, so
     # sending them would fail the whole ad set. Broad targeting is the honest
@@ -572,6 +593,32 @@ class Api::V1::AdCampaignsController < ApplicationController
     DONATE_NOW GET_IN_TOUCH INQUIRE_NOW MAKE_AN_APPOINTMENT REGISTER_NOW
     BUY_NOW SEE_DETAILS TRY_NOW
   ].freeze
+
+  # Turn the wizard's free-text interests into Meta's targeting ids. Anything
+  # we can't match is reported rather than dropped silently — and a lookup
+  # failure must never sink the launch, so targeting just stays broad.
+  def resolve_interest_ids(interests, token)
+    resolved   = []
+    unresolved = []
+
+    interests.each do |name|
+      match = begin
+        response = MetaGraphApi.search_ad_interests(name, token, limit: 1)
+        Array(response['data']).first
+      rescue MetaGraphApi::Error => e
+        Rails.logger.info "[AdCampaigns#launch] interest lookup failed for #{name.inspect}: #{e.message}"
+        nil
+      end
+
+      if match && match['id'].present?
+        resolved << { id: match['id'], name: match['name'] }
+      else
+        unresolved << name
+      end
+    end
+
+    [resolved, unresolved]
+  end
 
   def normalize_cta_type(raw)
     value = raw.to_s.strip.upcase
