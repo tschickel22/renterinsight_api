@@ -125,16 +125,21 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(JSON.parse(response.body)['error']).to match(/No ad account linked/)
     end
 
-    it 'drives the Meta ad endpoints with the user token, not the Page token' do
-      integration.update!(metadata: { 'ad_account_id' => '111' })
-
-      expect(MetaGraphApi).to receive(:create_campaign)
-        .with('111', 'USER-TOKEN', hash_including(objective: 'OUTCOME_LEADS'))
-        .and_return({ 'id' => 'c1' })
+    def stub_successful_launch
+      allow(MetaGraphApi).to receive(:create_campaign).and_return({ 'id' => 'c1' })
       allow(MetaGraphApi).to receive(:create_ad_set).and_return({ 'id' => 'as1' })
       allow(MetaGraphApi).to receive(:create_ad_creative).and_return({ 'id' => 'cr1' })
       allow(MetaGraphApi).to receive(:create_ad).and_return({ 'id' => 'ad1' })
       allow(MetaGraphApi).to receive(:update_campaign_status).and_return({})
+    end
+
+    it 'drives the Meta ad endpoints with the user token, not the Page token' do
+      integration.update!(metadata: { 'ad_account_id' => '111' })
+      stub_successful_launch
+
+      expect(MetaGraphApi).to receive(:create_campaign)
+        .with('111', 'USER-TOKEN', hash_including(objective: 'OUTCOME_TRAFFIC'))
+        .and_return({ 'id' => 'c1' })
 
       post '/api/v1/ad-campaigns/launch', params: launch_params.to_json, headers: headers
 
@@ -149,6 +154,197 @@ RSpec.describe 'Facebook ad account linking', type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body)['error']).to match(/Reconnect Facebook/i)
+    end
+  end
+
+  # Regression: the wizard sent legacy objectives (LEAD_GENERATION, LINK_CLICKS,
+  # REACH). Meta rejects those on new campaigns with "(#100) Objective is
+  # invalid" — while listing the legacy names among the valid ones, which makes
+  # the error read like a contradiction.
+  describe 'objective normalisation on launch' do
+    let(:base_params) do
+      { primary_text: 'Hello', headline: 'One Platform', link_url: 'https://app.dealertide.com/f/abc',
+        daily_budget: 9, duration_days: 3 }
+    end
+
+    before do
+      integration.update!(metadata: { 'ad_account_id' => '111' })
+      allow(MetaGraphApi).to receive(:create_ad_set).and_return({ 'id' => 'as1' })
+      allow(MetaGraphApi).to receive(:create_ad_creative).and_return({ 'id' => 'cr1' })
+      allow(MetaGraphApi).to receive(:create_ad).and_return({ 'id' => 'ad1' })
+      allow(MetaGraphApi).to receive(:update_campaign_status).and_return({})
+    end
+
+    def launch_with(extra)
+      allow(MetaGraphApi).to receive(:create_campaign).and_return({ 'id' => 'c1' })
+      post '/api/v1/ad-campaigns/launch', params: base_params.merge(extra).to_json, headers: headers
+    end
+
+    it 'maps legacy REACH to OUTCOME_AWARENESS' do
+      launch_with(objective: 'REACH')
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(objective: 'OUTCOME_AWARENESS'))
+    end
+
+    it 'maps legacy LINK_CLICKS to OUTCOME_TRAFFIC' do
+      launch_with(objective: 'LINK_CLICKS')
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(objective: 'OUTCOME_TRAFFIC'))
+    end
+
+    it 'accepts the lowercase recommended_objective the AI settings return' do
+      launch_with(objective: 'lead_generation', lead_form_id: '999')
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(objective: 'OUTCOME_LEADS'))
+    end
+
+    it 'falls back to OUTCOME_LEADS for an unrecognised objective' do
+      launch_with(objective: 'NOT_A_REAL_OBJECTIVE', lead_form_id: '999')
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(objective: 'OUTCOME_LEADS'))
+    end
+
+    # Leads optimisation needs a form or a pixel; with only a website link Meta
+    # rejects the ad set, so the campaign has to run as traffic instead.
+    it 'downgrades leads to traffic when there is no native lead form' do
+      launch_with(objective: 'OUTCOME_LEADS')
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(objective: 'OUTCOME_TRAFFIC'))
+      expect(MetaGraphApi).to have_received(:create_ad_set)
+        .with('111', anything, hash_including(optimization_goal: 'LINK_CLICKS', promoted_object: nil))
+    end
+
+    it 'keeps leads optimisation and promotes the page when a lead form is attached' do
+      launch_with(objective: 'OUTCOME_LEADS', lead_form_id: '999')
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(objective: 'OUTCOME_LEADS'))
+      expect(MetaGraphApi).to have_received(:create_ad_set).with(
+        '111', anything,
+        hash_including(optimization_goal: 'LEAD_GENERATION',
+                       promoted_object: { page_id: integration.page_id })
+      )
+    end
+  end
+
+  # HOUSING used to be hardcoded on every launch. It cripples targeting when it
+  # doesn't apply (software, RV, storage) and is a fair-housing requirement when
+  # it does — so it's the user's choice, defaulted from the tenant's industry.
+  describe 'special ad categories on launch' do
+    let(:base_params) do
+      { primary_text: 'Hello', headline: 'One Platform', link_url: 'https://app.dealertide.com/f/abc',
+        daily_budget: 9, duration_days: 3 }
+    end
+
+    before do
+      integration.update!(metadata: { 'ad_account_id' => '111' })
+      allow(MetaGraphApi).to receive(:create_campaign).and_return({ 'id' => 'c1' })
+      allow(MetaGraphApi).to receive(:create_ad_set).and_return({ 'id' => 'as1' })
+      allow(MetaGraphApi).to receive(:create_ad_creative).and_return({ 'id' => 'cr1' })
+      allow(MetaGraphApi).to receive(:create_ad).and_return({ 'id' => 'ad1' })
+      allow(MetaGraphApi).to receive(:update_campaign_status).and_return({})
+    end
+
+    def launch_with(extra)
+      post '/api/v1/ad-campaigns/launch', params: base_params.merge(extra).to_json, headers: headers
+    end
+
+    it 'sends the category the user picked' do
+      launch_with(special_ad_categories: ['HOUSING'])
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(special_ad_categories: ['HOUSING']))
+    end
+
+    it 'sends no category when the user selects None' do
+      launch_with(special_ad_categories: ['NONE'])
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(special_ad_categories: []))
+    end
+
+    it 'accepts a bare string as well as an array' do
+      launch_with(special_ad_categories: 'employment')
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(special_ad_categories: ['EMPLOYMENT']))
+    end
+
+    it 'drops an unknown category rather than letting Meta reject the campaign' do
+      launch_with(special_ad_categories: %w[HOUSING NOT_A_CATEGORY])
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(special_ad_categories: ['HOUSING']))
+    end
+
+    it 'falls back to the industry suggestion when the client sends nothing' do
+      company.update!(industry: 'manufactured_housing')
+      launch_with({})
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(special_ad_categories: ['HOUSING']))
+    end
+
+    it 'suggests no category for a software tenant' do
+      company.update!(industry: 'saas')
+      launch_with({})
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+        .with('111', anything, hash_including(special_ad_categories: []))
+    end
+
+    it 'records Ad Builder campaigns as ours' do
+      launch_with(special_ad_categories: ['NONE'])
+
+      expect(@company_campaign = AdCampaign.find_by(external_campaign_id: 'c1').created_via).to eq('dealertide')
+    end
+  end
+
+  describe 'GET /api/v1/ad-campaigns/ad-options' do
+    it 'offers the category list and the industry-based suggestion' do
+      company.update!(industry: 'manufactured_housing')
+
+      get '/api/v1/ad-campaigns/ad-options', headers: headers
+
+      body = JSON.parse(response.body)
+      expect(body['suggested_special_ad_category']).to eq('HOUSING')
+      expect(body['special_ad_categories'].map { |c| c['value'] }).to include('HOUSING', 'EMPLOYMENT', 'CREDIT')
+    end
+
+    it 'suggests nothing for an RV dealer — vehicle sales are ordinary ads' do
+      company.update!(industry: 'rv')
+
+      get '/api/v1/ad-campaigns/ad-options', headers: headers
+
+      expect(JSON.parse(response.body)['suggested_special_ad_category']).to be_nil
+    end
+  end
+
+  describe 'POST /api/v1/ad-campaigns/sync' do
+    it 'pulls campaigns created outside the Ad Builder and marks them as Meta-sourced' do
+      integration.update!(metadata: { 'ad_account_id' => '111' })
+      allow(MetaGraphApi).to receive(:get_ad_campaigns).and_return(
+        { 'data' => [{ 'id' => 'ext-1', 'name' => 'MH Housing Lead Form',
+                       'objective' => 'OUTCOME_LEADS', 'status' => 'PAUSED' }] }
+      )
+
+      post '/api/v1/ad-campaigns/sync', headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)['synced']).to eq(1)
+      expect(AdCampaign.find_by(external_campaign_id: 'ext-1').created_via).to eq('meta')
+    end
+
+    it 'explains itself when no ad account is linked' do
+      post '/api/v1/ad-campaigns/sync', headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)['error']).to match(/No ad account linked/)
     end
   end
 end

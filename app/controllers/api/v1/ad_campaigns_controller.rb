@@ -69,7 +69,6 @@ class Api::V1::AdCampaignsController < ApplicationController
     age_min          = (params[:age_min] || 25).to_i
     age_max          = (params[:age_max] || 65).to_i
     interests        = Array(params[:interests])
-    objective        = params[:objective].presence || 'OUTCOME_LEADS'
     cta_type         = params[:cta_type].presence || 'LEARN_MORE'
 
     use_catalog   = ActiveModel::Type::Boolean.new.cast(params[:use_catalog])
@@ -81,6 +80,15 @@ class Api::V1::AdCampaignsController < ApplicationController
     if lead_form_id.present?
       cta_type = 'SIGN_UP'
     end
+
+    objective = normalize_objective(params[:objective])
+    special_ad_categories = normalize_special_ad_categories(params[:special_ad_categories])
+
+    # Optimising for leads needs somewhere to capture them — a native Facebook
+    # form, or a conversion pixel we don't provision. With only a website link
+    # Meta rejects the ad set, so send those to traffic, which is what the ad
+    # actually does: click through to the intake form.
+    objective = 'OUTCOME_TRAFFIC' if objective == 'OUTCOME_LEADS' && lead_form_id.blank?
 
     return render json: { error: 'primary_text is required' }, status: :bad_request if primary_text.blank?
     return render json: { error: 'link_url is required' }, status: :bad_request     if link_url.blank? && lead_form_id.blank?
@@ -96,7 +104,7 @@ class Api::V1::AdCampaignsController < ApplicationController
         name:                  campaign_name,
         objective:             objective,
         status:                'PAUSED',
-        special_ad_categories: ['HOUSING']
+        special_ad_categories: special_ad_categories
       )
       campaign_id = campaign_result['id']
 
@@ -111,6 +119,9 @@ class Api::V1::AdCampaignsController < ApplicationController
         daily_budget_cents: daily_budget_cents,
         targeting:          targeting,
         optimization_goal:  optimization_goal_for(objective),
+        # LEAD_GENERATION optimisation only validates when Meta knows which Page
+        # hosts the instant form.
+        promoted_object:    (lead_form_id.present? ? { page_id: integration.page_id } : nil),
         start_time:         Time.current.iso8601
       )
       adset_id = adset_result['id']
@@ -143,6 +154,7 @@ class Api::V1::AdCampaignsController < ApplicationController
         objective:            objective,
         status:               'ACTIVE',
         daily_budget:         daily_budget,
+        created_via:          'dealertide',
         synced_at:            Time.current
       )
 
@@ -254,6 +266,41 @@ class Api::V1::AdCampaignsController < ApplicationController
     }
   end
 
+  # GET /api/v1/ad-campaigns/ad_options
+  # Drives the Ad Builder's category picker: the full list plus what we suggest
+  # for this tenant's industry.
+  def ad_options
+    return unless authorize_action!('facebook_ads', 'read')
+
+    render json: {
+      special_ad_categories: Company::SPECIAL_AD_CATEGORIES.map { |value, label| { value: value, label: label } },
+      suggested_special_ad_category: @company.suggested_special_ad_category,
+      industry: @company.industry
+    }
+  end
+
+  # POST /api/v1/ad-campaigns/sync
+  # On-demand version of the nightly SyncAdSpendJob — pulls every campaign on the
+  # linked ad account, including ones created straight in Meta Ads Manager.
+  def sync
+    return unless authorize_action!('facebook_ads', 'read')
+
+    result = MetaAdSpendService.sync_for_company(@company)
+
+    if result[:skipped].present?
+      return render json: { synced: 0, error: sync_skip_message(result[:skipped], result[:error]) },
+                    status: :unprocessable_entity
+    end
+
+    @company.ad_campaigns.active.find_each do |campaign|
+      campaign.calculate_roi!
+    rescue => e
+      Rails.logger.error "[AdCampaigns#sync] roi recalc failed campaign=#{campaign.id}: #{e.message}"
+    end
+
+    render json: { synced: result[:synced].to_i, synced_at: Time.current }
+  end
+
   # GET /api/v1/ad-campaigns/roi_summary
   def roi_summary
     return unless authorize_action!('facebook_ads', 'read')
@@ -282,6 +329,15 @@ class Api::V1::AdCampaignsController < ApplicationController
   def set_campaign
     @campaign = @company.ad_campaigns.active.find_by(id: params[:id])
     render json: { error: 'Not found' }, status: :not_found unless @campaign
+  end
+
+  def sync_skip_message(reason, detail)
+    case reason.to_s
+    when 'no_integration' then 'Connect Facebook first in Settings > Integrations'
+    when 'no_ad_account'  then 'No ad account linked. Pick one in Settings > Integrations.'
+    when 'expired_token'  then 'Facebook token expired — reconnect in Settings > Integrations.'
+    else detail.presence || 'Could not reach Meta.'
+    end
   end
 
   # Ads live on the ad account, not the Page, so they need the user token.
@@ -331,12 +387,62 @@ class Api::V1::AdCampaignsController < ApplicationController
     end
   end
 
+  # Campaigns created on the current Graph API must use ODAX ("OUTCOME_*")
+  # objectives. The legacy names still appear in Meta's own error text, which is
+  # why sending LEAD_GENERATION comes back as the misleading "Objective is
+  # invalid" listing a set that appears to contain it.
+  LEGACY_OBJECTIVE_MAP = {
+    'LEAD_GENERATION'       => 'OUTCOME_LEADS',
+    'LINK_CLICKS'           => 'OUTCOME_TRAFFIC',
+    'TRAFFIC'               => 'OUTCOME_TRAFFIC',
+    'REACH'                 => 'OUTCOME_AWARENESS',
+    'BRAND_AWARENESS'       => 'OUTCOME_AWARENESS',
+    'LOCAL_AWARENESS'       => 'OUTCOME_AWARENESS',
+    'POST_ENGAGEMENT'       => 'OUTCOME_ENGAGEMENT',
+    'PAGE_LIKES'            => 'OUTCOME_ENGAGEMENT',
+    'EVENT_RESPONSES'       => 'OUTCOME_ENGAGEMENT',
+    'VIDEO_VIEWS'           => 'OUTCOME_ENGAGEMENT',
+    'MESSAGES'              => 'OUTCOME_ENGAGEMENT',
+    'CONVERSIONS'           => 'OUTCOME_SALES',
+    'PRODUCT_CATALOG_SALES' => 'OUTCOME_SALES',
+    'STORE_VISITS'          => 'OUTCOME_AWARENESS',
+    'APP_INSTALLS'          => 'OUTCOME_APP_PROMOTION'
+  }.freeze
+
+  VALID_OBJECTIVES = %w[
+    OUTCOME_AWARENESS OUTCOME_ENGAGEMENT OUTCOME_LEADS
+    OUTCOME_SALES OUTCOME_TRAFFIC OUTCOME_APP_PROMOTION
+  ].freeze
+
+  # Accepts an array, a single string, or 'NONE'/'' meaning "not a regulated
+  # vertical". Unknown values are dropped rather than forwarded — Meta rejects
+  # the whole campaign on a bad category.
+  def normalize_special_ad_categories(raw)
+    return Array(@company.suggested_special_ad_category) if raw.nil?
+
+    Array(raw)
+      .map { |v| v.to_s.strip.upcase }
+      .reject { |v| v.blank? || v == 'NONE' }
+      .select { |v| Company::SPECIAL_AD_CATEGORIES.key?(v) }
+      .uniq
+  end
+
+  def normalize_objective(raw)
+    value = raw.to_s.strip.upcase
+    return 'OUTCOME_LEADS' if value.blank?
+
+    mapped = LEGACY_OBJECTIVE_MAP[value] || value
+    VALID_OBJECTIVES.include?(mapped) ? mapped : 'OUTCOME_LEADS'
+  end
+
   def optimization_goal_for(objective)
     case objective.to_s
-    when 'OUTCOME_LEADS', 'LEAD_GENERATION' then 'LEAD_GENERATION'
-    when 'OUTCOME_TRAFFIC', 'TRAFFIC'       then 'LINK_CLICKS'
-    when 'OUTCOME_AWARENESS'                then 'REACH'
-    else 'LEAD_GENERATION'
+    when 'OUTCOME_LEADS'         then 'LEAD_GENERATION'
+    when 'OUTCOME_TRAFFIC'       then 'LINK_CLICKS'
+    when 'OUTCOME_AWARENESS'     then 'REACH'
+    when 'OUTCOME_ENGAGEMENT'    then 'POST_ENGAGEMENT'
+    when 'OUTCOME_SALES'         then 'OFFSITE_CONVERSIONS'
+    else 'LINK_CLICKS'
     end
   end
 
@@ -366,6 +472,7 @@ class Api::V1::AdCampaignsController < ApplicationController
       cost_per_lead:        c.cost_per_lead,
       cost_per_deal:        c.cost_per_deal,
       roi_percentage:       c.roi_percentage,
+      created_via:          c.created_via,
       synced_at:            c.synced_at,
       created_at:           c.created_at,
       updated_at:           c.updated_at

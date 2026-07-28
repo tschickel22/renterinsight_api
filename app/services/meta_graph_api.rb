@@ -143,16 +143,21 @@ class MetaGraphApi
     end
 
     def create_ad_set(ad_account_id, access_token, campaign_id:, name:, daily_budget_cents:, targeting:,
-                      billing_event: 'IMPRESSIONS', optimization_goal: 'LEAD_GENERATION', start_time: nil)
-      post("/act_#{ad_account_id}/adsets", access_token,
-           campaign_id:       campaign_id,
-           name:              name,
-           daily_budget:      daily_budget_cents,
-           billing_event:     billing_event,
-           optimization_goal: optimization_goal,
-           targeting:         targeting.to_json,
-           start_time:        start_time || Time.current.iso8601,
-           status:            'PAUSED')
+                      billing_event: 'IMPRESSIONS', optimization_goal: 'LEAD_GENERATION', start_time: nil,
+                      promoted_object: nil)
+      params = {
+        campaign_id:       campaign_id,
+        name:              name,
+        daily_budget:      daily_budget_cents,
+        billing_event:     billing_event,
+        optimization_goal: optimization_goal,
+        targeting:         targeting.to_json,
+        start_time:        start_time || Time.current.iso8601,
+        status:            'PAUSED'
+      }
+      params[:promoted_object] = promoted_object.to_json if promoted_object.present?
+
+      post("/act_#{ad_account_id}/adsets", access_token, **params)
     end
 
     def create_ad(ad_account_id, access_token, ad_set_id:, name:, creative_id:)

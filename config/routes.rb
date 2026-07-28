@@ -1594,7 +1594,9 @@ Rails.application.routes.draw do
         end
         collection do
           post :launch
+          post :sync
           get  :roi_summary
+          get  'ad-options',     action: :ad_options
           get  'lead-forms',     action: :lead_forms
           get  'catalog-status', action: :catalog_status
         end
