@@ -17,7 +17,8 @@ module InboundEmail
       /-{2,}\s*Original Message\s*-{2,}/i,              # Outlook (older)
       /_{5,}/,                                           # Outlook horizontal divider
       /\bOn .{0,120}?\bwrote:/im,                        # "On <date>, <name> wrote:"
-      /\bFrom:.{0,200}?\bSent:/im                        # Outlook header block
+      /\bFrom:.{0,200}?\bSent:/im,                       # Outlook header block
+      /\bFrom:.{0,200}?\bDate:.{0,200}?\bSubject:/im     # Gmail/Apple header block
     ].freeze
 
     Result = Struct.new(:reply, :quoted, keyword_init: true)

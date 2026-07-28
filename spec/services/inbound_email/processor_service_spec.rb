@@ -70,4 +70,52 @@ RSpec.describe InboundEmail::ProcessorService do
     expect(result[:success]).to be(true)
     expect(result[:source]).to eq('campaign_reply_handler')
   end
+
+  # Regression: a one-word reply was stored as the entire quoted thread plus
+  # Gmail's security banner, because tags were stripped before the quote
+  # markers (<blockquote>, gmail_quote) could be found. And the record was
+  # written with a null company_id, so company-scoped queries skipped it.
+  describe 'a reply to a lead' do
+    let(:lead_email) do
+      parsed(
+        to: "reply+lead-#{lead.id}@mail.renterinsight.com",
+        token: { prefix: 'reply', token: "lead-#{lead.id}" },
+        body_html: '<p>Thanks!</p><blockquote>Hi Henry, Welcome to Main Location! ' \
+                   'Be Careful With This Message. Newly Registered Domain.</blockquote>'
+      )
+    end
+
+    it 'stores only what the person actually wrote' do
+      described_class.new(lead_email).process
+
+      comm = Communication.where(communicable: lead, direction: 'inbound').last
+      expect(comm.body.strip).to eq('Thanks!')
+      expect(comm.body).not_to include('Be Careful With This Message')
+    end
+
+    # CLAUDE.md rule 5: symbol keys serialise as a Ruby hash literal the
+    # frontend can't parse.
+    it 'writes metadata with string keys' do
+      described_class.new(lead_email).process
+
+      comm = Communication.where(communicable: lead, direction: 'inbound').last
+      expect(comm.metadata.to_s).not_to include(':message_id=>')
+    end
+
+    it 'keeps the quoted thread rather than discarding it' do
+      described_class.new(lead_email).process
+
+      comm = Communication.where(communicable: lead, direction: 'inbound').last
+      # Asserted on the raw value: metadata is jsonb in deployed environments
+      # but text locally (schema.rb drift), so the serialised shape differs.
+      expect(comm.metadata.to_s).to include('Welcome to Main Location')
+    end
+
+    it 'stamps the company so company-scoped queries can see it' do
+      described_class.new(lead_email).process
+
+      comm = Communication.where(communicable: lead, direction: 'inbound').last
+      expect(comm.company_id).to eq(company.id)
+    end
+  end
 end

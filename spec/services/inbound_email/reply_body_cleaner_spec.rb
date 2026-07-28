@@ -44,3 +44,33 @@ RSpec.describe InboundEmail::ReplyBodyCleaner do
     expect(res.quoted).to be_nil
   end
 end
+
+# Regression: a one-word reply arrived in the CRM as the entire quoted thread
+# plus Gmail's "Be Careful With This Message" banner, flattened into a single
+# paragraph — the reply itself was the first word and easy to miss entirely.
+RSpec.describe InboundEmail::ReplyBodyCleaner, 'Gmail-style quote headers' do
+  it 'cuts at a From/Date/Subject header block' do
+    body = "Thanks!\n\nFrom: Tom Admin\nDate: Tuesday, July 28, 2026 at 3:57 PM\n" \
+           "To: t+hm75g@renterinsight.com\nSubject: Welcome to Main Location\n" \
+           'Be Careful With This Message ... Hi Henry, Welcome to Main Location!'
+
+    result = described_class.split(body)
+
+    expect(result.reply).to eq('Thanks!')
+    expect(result.quoted).to include('Be Careful With This Message')
+  end
+
+  it 'keeps the security banner out of the reply' do
+    body = "Sounds good.\n\nFrom: Sales\nDate: Monday\nSubject: Quote\n" \
+           'Newly Registered Domain The message was sent from a domain that...'
+
+    expect(described_class.split(body).reply).to eq('Sounds good.')
+  end
+
+  # Conservative by design: never hide content when unsure.
+  it 'leaves an ordinary reply mentioning dates alone' do
+    body = 'Can we move the date? Subject to your availability.'
+
+    expect(described_class.split(body).reply).to eq(body)
+  end
+end
