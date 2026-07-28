@@ -10,10 +10,27 @@ class MetaGraphApi
   API_VERSION = 'v21.0'
   BASE_URL    = "https://graph.facebook.com/#{API_VERSION}"
 
-  class Error < StandardError; end
+  # Carries Meta's structured fields, not just a sentence — callers need the
+  # subcode to tell an app-configuration gate (which the user must clear in the
+  # Meta dashboard) from a bad parameter (which is our bug).
+  class Error < StandardError
+    attr_reader :code, :subcode, :user_title, :user_msg
+
+    def initialize(message = nil, code: nil, subcode: nil, user_title: nil, user_msg: nil)
+      super(message)
+      @code       = code
+      @subcode    = subcode
+      @user_title = user_title
+      @user_msg   = user_msg
+    end
+  end
+
   class ExpiredTokenError < Error; end
   class RateLimitError < Error; end
   class NotFoundError < Error; end
+
+  # Meta rejects ad creatives from an app that hasn't passed App Review.
+  DEV_MODE_SUBCODE = 1_885_183
 
   # ------------------------------------------------------------------
   # Class-level helpers
@@ -316,14 +333,21 @@ class MetaGraphApi
 
         msg = error_message_for(err, response)
 
+        details = {
+          code:       code,
+          subcode:    subcode,
+          user_title: err.is_a?(Hash) ? err['error_user_title'] : nil,
+          user_msg:   err.is_a?(Hash) ? err['error_user_msg'] : nil
+        }
+
         if [190, 102, 463].include?(code) || [458, 460, 463, 467].include?(subcode)
-          raise ExpiredTokenError, msg
+          raise ExpiredTokenError.new(msg, **details)
         elsif code == 4 || code == 17 || code == 32 || code == 613
-          raise RateLimitError, msg
+          raise RateLimitError.new(msg, **details)
         elsif response.code.to_i == 404
-          raise NotFoundError, msg
+          raise NotFoundError.new(msg, **details)
         else
-          raise Error, "Meta Graph API error (#{code}): #{msg}"
+          raise Error.new("Meta Graph API error (#{code}): #{msg}", **details)
         end
       else
         Rails.logger.error "[MetaGraphApi] #{response.code} #{response.body.to_s.truncate(2000)}"

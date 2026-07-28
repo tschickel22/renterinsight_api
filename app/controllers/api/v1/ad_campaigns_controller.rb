@@ -228,7 +228,7 @@ class Api::V1::AdCampaignsController < ApplicationController
       Rails.logger.error "[AdCampaigns#launch] company=#{@company.id} step=#{step} " \
                          "objective=#{objective} categories=#{special_ad_categories.inspect} " \
                          "budget_cents=#{daily_budget_cents} error=#{e.message}"
-      render json: { error: "Failed at the #{step} step: #{e.message}" }, status: :unprocessable_entity
+      render json: launch_error_payload(e, step), status: :unprocessable_entity
     end
   end
 
@@ -428,6 +428,26 @@ class Api::V1::AdCampaignsController < ApplicationController
   def set_campaign
     @campaign = @company.ad_campaigns.active.find_by(id: params[:id])
     render json: { error: 'Not found' }, status: :not_found unless @campaign
+  end
+
+  # Translate only the gates we've positively identified, and only when Meta's
+  # own subcode says so. Anything unrecognised keeps Meta's wording verbatim —
+  # a friendly catch-all would have hidden the four real bugs behind this one.
+  def launch_error_payload(error, step)
+    if error.subcode == MetaGraphApi::DEV_MODE_SUBCODE
+      return {
+        error: 'Your Meta app is still in Development mode, so Facebook will not let it publish ads yet. ' \
+               'Nothing was charged and no ad was created — the campaign, audience and budget were all accepted. ' \
+               'This clears once the app passes Meta App Review.',
+        blocked_by: 'meta_app_development_mode',
+        # Everything short of publishing worked, which is the useful part for a
+        # reviewer watching a demo of the flow.
+        completed_steps: %w[campaign audience_and_budget],
+        meta_message: error.message
+      }
+    end
+
+    { error: "Failed at the #{step} step: #{error.message}", meta_message: error.message }
   end
 
   def sync_skip_message(reason, detail)

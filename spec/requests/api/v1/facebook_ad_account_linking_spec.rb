@@ -287,6 +287,47 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(JSON.parse(response.body)['notes'].join(' ')).to match(/Interests were not applied/)
     end
 
+    # Meta blocks ad creatives from an app that hasn't cleared App Review. That
+    # is an external gate, not a bad request, so say so plainly — while leaving
+    # every other error verbatim, since four real bugs hid behind vague ones.
+    context 'when the Meta app has not passed App Review' do
+      before do
+        allow(MetaGraphApi).to receive(:create_ad_creative).and_raise(
+          MetaGraphApi::Error.new(
+            'Meta Graph API error (100): Ads creative post was created by an app that is in development mode',
+            code: 100, subcode: MetaGraphApi::DEV_MODE_SUBCODE
+          )
+        )
+      end
+
+      it 'explains the gate instead of reading as a broken request' do
+        launch_with({})
+
+        body = JSON.parse(response.body)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(body['blocked_by']).to eq('meta_app_development_mode')
+        expect(body['error']).to match(/Development mode/i)
+        expect(body['error']).to match(/Nothing was charged/i)
+      end
+
+      it 'still returns Meta\'s own wording for the logs and support' do
+        launch_with({})
+
+        expect(JSON.parse(response.body)['meta_message']).to match(/development mode/i)
+      end
+    end
+
+    it 'leaves an unrecognised Meta error verbatim' do
+      allow(MetaGraphApi).to receive(:create_ad_creative)
+        .and_raise(MetaGraphApi::Error.new('Meta Graph API error (100): Some new thing', code: 100))
+
+      launch_with({})
+
+      body = JSON.parse(response.body)
+      expect(body['error']).to match(/Failed at the creative.*Some new thing/)
+      expect(body['blocked_by']).to be_nil
+    end
+
     it 'forces SIGN_UP when a native lead form is attached' do
       launch_with(cta_type: 'shop_now', lead_form_id: '999')
 
