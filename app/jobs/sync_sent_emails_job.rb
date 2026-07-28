@@ -158,6 +158,8 @@ class SyncSentEmailsJob < ApplicationJob
     # Create Communication record
     communication = Communication.create!(
       communicable: lead || contact,
+      # Without this the synced email is invisible to company-scoped queries.
+      company_id: (lead || contact).try(:company_id),
       user: connection.user,
       channel: 'email',
       direction: 'outbound',

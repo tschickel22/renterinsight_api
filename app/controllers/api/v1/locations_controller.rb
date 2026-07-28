@@ -3,6 +3,8 @@
 module Api
   module V1
     class LocationsController < ApplicationController
+      include CommunicationSecrets
+
       # Authentication inherited from ApplicationController
       before_action :set_location, only: [:show, :update, :destroy, :restore, :users, :available_users, :metrics, :stats, :activities, :assign_user, :remove_user, :save_communication_settings, :clear_communication_settings]
       before_action :authorize_company_access!
@@ -431,19 +433,22 @@ module Api
       # PATCH /api/v1/locations/:id/save_communication_settings
       # Save communication settings for THIS SPECIFIC LOCATION (with correct scope_id)
       def save_communication_settings
-        settings = params[:communication_settings] || params[:settings] || {}
-        
-        # Convert ActionController::Parameters to hash if needed
-        settings = settings.to_unsafe_h if settings.respond_to?(:to_unsafe_h)
-        
+        settings = normalize_settings_payload(params[:communication_settings] || params[:settings] || {})
+
         Rails.logger.info "[Location Settings] 💾 Saving communications settings for location #{@location.id} (#{@location.name})"
         Rails.logger.info "[Location Settings] Settings keys: #{settings.keys.join(', ')}"
-        
+
+        # Location secrets used to be written verbatim: stored in plaintext and
+        # clobbered whenever the form posted back a mask. Same pipeline as the
+        # company and platform scopes now.
+        existing = Setting.get('Location', @location.id, 'communications')
+        settings = encrypt_sensitive_fields(restore_masked_secrets(settings, existing))
+
         # CRITICAL: Save with THIS location's ID as scope_id
         Setting.set('Location', @location.id, 'communications', settings)
-        
+
         # Verify it was saved correctly
-        saved = Setting.get('Location', @location.id, 'communications')
+        saved = mask_sensitive_fields(Setting.get('Location', @location.id, 'communications'))
         Rails.logger.info "[Location Settings] ✅ Verified saved for location #{@location.id}: #{saved.present?}"
         
         # Log the activity
@@ -579,6 +584,15 @@ module Api
             whitelisted[:branding_settings] = normalize_branding_keys(whitelisted[:branding_settings])
             Rails.logger.info "🔧 [LocationsController] Normalized branding keys: #{whitelisted[:branding_settings].keys}"
           end
+
+          # This form round-trips the masked secrets it was shown, so run the same
+          # restore-then-encrypt pipeline the Setting-scoped save uses. Without it,
+          # editing a location's name would overwrite its Twilio token with bullets.
+          if whitelisted[:communication_settings].present?
+            whitelisted[:communication_settings] = encrypt_sensitive_fields(
+              restore_masked_secrets(whitelisted[:communication_settings], @location&.communication_settings)
+            )
+          end
         end
       end
 
@@ -640,11 +654,13 @@ module Api
           
           json.merge!({
             branding_settings: location.branding_settings,
-            communication_settings: location.communication_settings,
+            # Masked: these payloads carry the Twilio auth token and SMTP/SES
+            # secrets, and this endpoint is readable by anyone with locations:read.
+            communication_settings: mask_sensitive_fields(location.communication_settings),
             operational_settings: location.operational_settings,
             integration_settings: location.integration_settings,
             resolved_branding: location.resolved_branding_settings,
-            resolved_communication: location.resolved_communication_settings,
+            resolved_communication: mask_sensitive_fields(location.resolved_communication_settings),
             resolved_operational: location.resolved_operational_settings,
             resolved_integration: location.resolved_integration_settings,
             # Metadata for inheritance detection

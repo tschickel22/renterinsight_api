@@ -57,7 +57,7 @@ class Api::V1::SocialCommentsController < ApplicationController
     message = params[:message].to_s
     return render json: { error: 'Message is required' }, status: :bad_request if message.blank?
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     return render json: { error: 'No Facebook page connected' }, status: :unprocessable_entity unless integration
 
     begin
@@ -100,7 +100,7 @@ class Api::V1::SocialCommentsController < ApplicationController
   def destroy
     return unless authorize_action!('social_posts', 'delete')
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     if integration
       begin
         if @comment.is_from_page?
@@ -121,7 +121,7 @@ class Api::V1::SocialCommentsController < ApplicationController
   def hide
     return unless authorize_action!('social_posts', 'update')
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     if integration
       begin
         MetaGraphApi.hide_comment(@comment.external_comment_id, integration.page_access_token)

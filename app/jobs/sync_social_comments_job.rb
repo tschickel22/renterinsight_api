@@ -21,7 +21,7 @@ class SyncSocialCommentsJob < ApplicationJob
       settings = SocialMediaSettingsService.for_company(company)
       next unless settings['comment_sync_enabled']
 
-      integration = company.facebook_integrations.active.order(:id).first
+      integration = FacebookIntegration.current_for(company)
       next unless integration
 
       synced_count, new_count = sync_company(company, integration, settings)
@@ -115,7 +115,7 @@ class SyncSocialCommentsJob < ApplicationJob
   end
 
   def page_id_for(company)
-    company.facebook_integrations.active.order(:id).pluck(:page_id).first
+    FacebookIntegration.current_for(company)&.page_id
   end
 
   def parse_time(value)

@@ -31,6 +31,9 @@ class BuyerPortalService
     # Create Communication record
     communication = Communication.create!(
       communicable: buyer_access.buyer,
+      # Without this the record is invisible to every company-scoped query —
+      # CommunicationService sets it, these two direct creates did not.
+      company_id: buyer_access.buyer.try(:company_id),
       direction: 'outbound',
       channel: 'email',
       provider: 'smtp',
@@ -65,6 +68,7 @@ class BuyerPortalService
     # Create Communication record
     communication = Communication.create!(
       communicable: buyer_access.buyer,
+      company_id: buyer_access.buyer.try(:company_id),
       direction: 'outbound',
       channel: 'email',
       provider: 'smtp',

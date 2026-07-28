@@ -71,12 +71,21 @@ module InboundEmail
       # Create Communication record
       # Use body_html if available (contains HTML), otherwise fall back to body_text
       body_content = parsed_email[:body_html].presence || parsed_email[:body_text]
-      
-      # Strip HTML tags before saving to database (fix for displaying clean text)
-      clean_body = strip_html_tags(body_content)
-      
+
+      # Split the new reply from the quoted thread BEFORE stripping tags — the
+      # quote markers are HTML (<blockquote>, gmail_quote), so stripping first
+      # destroys them and leaves the whole thread flattened into one paragraph.
+      # A one-word reply was arriving as the full quoted history plus Gmail's
+      # security banner, which made the actual reply near-impossible to find.
+      split = InboundEmail::ReplyBodyCleaner.split(body_content)
+      clean_body = strip_html_tags(split.reply)
+      quoted_body = split.quoted.present? ? strip_html_tags(split.quoted) : nil
+
       communication = Communication.create!(
         communicable: entity,
+        # Inbound replies were being written with a null company_id, so any
+        # company-scoped query skipped them entirely.
+        company_id: entity.try(:company_id),
         channel: 'email',
         direction: 'inbound',
         from_address: parsed_email[:from],
@@ -85,11 +94,16 @@ module InboundEmail
         body: clean_body,
         sent_at: parsed_email[:timestamp],
         status: 'delivered',
+        # String keys per the house rule — symbol keys serialise as a Ruby hash
+        # literal (":message_id=>...") anywhere metadata isn't a jsonb column.
         metadata: {
           message_id: parsed_email[:message_id],
           reply_tracking_token: token,
-          source: 'aws_ses_inbound'
-        }
+          source: 'aws_ses_inbound',
+          # Kept rather than discarded — the thread is still there if anyone
+          # needs it, just not in the way of reading the reply.
+          quoted_thread: quoted_body
+        }.compact.deep_stringify_keys
       )
       
       Rails.logger.info "[ProcessorService] Created Communication ##{communication.id} for #{entity_type} ##{entity_id}"
@@ -144,7 +158,7 @@ module InboundEmail
           original_to: parsed_email[:to],
           captured_via: "crm+bcc-#{user_id}@mail.renterinsight.com",
           source: 'aws_ses_inbound'
-        }
+        }.deep_stringify_keys
       )
       
       Rails.logger.info "[ProcessorService] BCC Capture: Created Communication ##{communication.id} for User ##{user_id}"

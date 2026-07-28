@@ -4,6 +4,11 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   before_action :set_company_scope, except: [:callback]
   skip_before_action :authenticate, only: [:callback]
 
+  # pages_manage_ads is what lets the app act on ads attached to the Page —
+  # without it Meta answers ad-creative and lead-form calls with
+  # "(#200) Requires pages_manage_ads permission to manage the object".
+  # Adding a scope only takes effect on a fresh connection: existing tokens
+  # carry the scopes they were granted, so users must reconnect.
   SCOPES = %w[
     business_management
     leads_retrieval
@@ -11,6 +16,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     pages_manage_metadata
     pages_show_list
     pages_manage_posts
+    pages_manage_ads
     ads_management
     ads_read
   ].freeze
@@ -158,6 +164,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
       is_deleted:         false
     )
     integration.save!
+    retire_other_integrations!(integration)
 
     capture_instagram_business_account!(integration)
     capture_ad_account!(integration)
@@ -171,7 +178,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   def ad_accounts
     return unless authorize_action!('integrations', 'read')
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     return render json: { ad_accounts: [], error: 'No Facebook page connected' } unless integration
 
     selected = integration.metadata.to_h.deep_stringify_keys['ad_account_id']
@@ -203,7 +210,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     ad_account_id = normalize_ad_account_id(params[:ad_account_id])
     return render json: { error: 'ad_account_id required' }, status: :bad_request if ad_account_id.blank?
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     return render json: { error: 'No Facebook page connected' }, status: :unprocessable_entity unless integration
 
     ad_account_name = params[:ad_account_name].presence
@@ -218,7 +225,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
           return render json: { error: 'That ad account is not available on this Facebook connection.' },
                         status: :unprocessable_entity
         end
-        ad_account_name ||= match[:name]
+        ad_account_name ||= match[:label]
       rescue MetaGraphApi::Error => e
         Rails.logger.info "[FacebookOAuth] ad account validation skipped: #{e.message}"
       end
@@ -231,7 +238,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
 
   # GET /api/v1/integrations/facebook/status
   def status
-    integrations = @company.facebook_integrations.active
+    integrations = @company.facebook_integrations.current
 
     first_integration = integrations.first
 
@@ -259,9 +266,14 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   def disconnect
     return unless authorize_action!('integrations', 'delete')
 
-    integration = params[:id].present? ? 
-      @company.facebook_integrations.find_by(id: params[:id]) :
-      @company.facebook_integrations.where(is_deleted: [false, nil]).first
+    integration = if params[:id].present?
+                    @company.facebook_integrations.find_by(id: params[:id])
+                  else
+                    # No id means "disconnect what the UI is showing" — that is the
+                    # current connection, not whichever row happens to be oldest.
+                    FacebookIntegration.current_for(@company) ||
+                      @company.facebook_integrations.where(is_deleted: [false, nil]).order(created_at: :desc).first
+                  end
     return render json: { error: 'Integration not found' }, status: :not_found unless integration
 
     begin
@@ -275,6 +287,26 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   end
 
   private
+
+  # Connecting a Page replaces the company's previous one. Without this, picking
+  # a different Page left both rows active and every consumer resolved to the
+  # older one — status tiles, comment sync, and publishing all kept using the
+  # Page the user had just switched away from.
+  def retire_other_integrations!(kept)
+    stale = @company.facebook_integrations.active.where.not(id: kept.id)
+    return if stale.empty?
+
+    stale.each do |old|
+      begin
+        MetaGraphApi.unsubscribe_page_from_webhooks(old.page_id, old.page_access_token) if old.page_access_token.present?
+      rescue MetaGraphApi::Error => e
+        Rails.logger.warn "[FacebookOAuth] unsubscribe on replace failed for page #{old.page_id}: #{e.message}"
+      end
+
+      old.update!(status: 'disconnected', is_deleted: true)
+      Rails.logger.info "[FacebookOAuth] retired page #{old.page_id} (#{old.page_name}) — replaced by #{kept.page_id}"
+    end
+  end
 
   # Stash the linked Instagram Business Account on the integration metadata so
   # the publisher can later post to Instagram without an extra round-trip.
@@ -317,13 +349,30 @@ class Api::V1::Integrations::FacebookController < ApplicationController
 
     response = MetaGraphApi.get_user_ad_accounts(integration.user_access_token)
     Array(response['data']).map do |a|
+      id            = normalize_ad_account_id(a['id'])
+      business_name = a.dig('business', 'name').presence
+      name          = a['name'].presence
+
       {
-        id:       normalize_ad_account_id(a['id']),
-        name:     a['name'],
-        status:   a['account_status'],
-        currency: a['currency']
+        id:            id,
+        name:          name || business_name || "act_#{id}",
+        business_name: business_name,
+        # What the picker shows. Meta lets an account be named after its owner
+        # ("Tom Schickel") or nothing at all, so lead with the portfolio that
+        # owns it — that's the distinction a user with several accounts needs.
+        label:         ad_account_label(name: name, business_name: business_name, id: id),
+        status:        a['account_status'],
+        currency:      a['currency']
       }
     end
+  end
+
+  def ad_account_label(name:, business_name:, id:)
+    parts = []
+    parts << business_name if business_name
+    parts << name if name && name != business_name
+    parts << "act_#{id}"
+    parts.join(' · ')
   end
 
   def write_ad_account!(integration, ad_account_id, ad_account_name)

@@ -5,7 +5,7 @@
 class MetaAdSpendService
   class << self
     def sync_for_company(company)
-      integration = company.facebook_integrations.active.order(:id).first
+      integration = FacebookIntegration.current_for(company)
       return { synced: 0, skipped: 'no_integration' } unless integration
 
       metadata = integration.metadata.to_h.deep_stringify_keys
@@ -45,16 +45,32 @@ class MetaAdSpendService
           impressions:     insights['impressions'].to_i,
           clicks:          insights['clicks'].to_i,
           reach:           insights['reach'].to_i,
+          # Stamp the source account so switching accounts switches the list
+          # instead of stacking the new account's campaigns on the old ones.
+          ad_account_id:   ad_account_id,
+          # Bounds lead attribution — a stopped campaign shouldn't keep
+          # claiming leads that arrive months later.
+          started_at:      parse_time(raw['start_time']),
+          stopped_at:      parse_time(raw['stop_time']),
+          is_deleted:      false,
           synced_at:       Time.current
         )
         record.save!
         synced += 1
       end
 
-      { synced: synced }
+      { synced: synced, ad_account_id: ad_account_id }
     end
 
     private
+
+    def parse_time(value)
+      return nil if value.blank?
+
+      Time.zone.parse(value.to_s)
+    rescue ArgumentError
+      nil
+    end
 
     def cents_to_dollars(value)
       return nil if value.nil?

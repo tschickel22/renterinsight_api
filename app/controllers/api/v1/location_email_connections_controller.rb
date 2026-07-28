@@ -167,7 +167,7 @@ class Api::V1::LocationEmailConnectionsController < ApplicationController
   end
 
   def connection_params
-    params.require(:connection).permit(
+    permitted = params.require(:connection).permit(
       :location_id,
       :email_address,
       :display_name,
@@ -181,6 +181,12 @@ class Api::V1::LocationEmailConnectionsController < ApplicationController
       :smtp_enable_starttls,
       :is_active
     )
+
+    # Blank means "unchanged" — the form never receives the stored password, so
+    # posting the empty field back would erase it on any unrelated edit.
+    permitted.delete(:smtp_password) if permitted.key?(:smtp_password) && permitted[:smtp_password].blank?
+
+    permitted
   end
 
   def connection_json(connection, include_smtp_details: false)

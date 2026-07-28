@@ -6,11 +6,19 @@
 # Fails soft on insights / posts — if a token is missing a permission, we
 # still return whatever we successfully retrieved rather than 500ing.
 class BrandHealthService
-  METRICS = %w[page_impressions page_engaged_users page_fans page_views_total].freeze
+  # Meta rejects the whole insights call if any single metric is unknown, so a
+  # deprecated name silently zeroes the entire dashboard. `page_engaged_users`
+  # and `page_views_total` were both removed in Meta's 2024 Page Insights
+  # cull — page_post_engagements is the current stand-in for engagement.
+  METRICS = %w[page_impressions page_post_engagements page_fans].freeze
+
+  # Metric deprecation is continuous, so one bad name shouldn't cost us
+  # everything. If the batch is rejected, retry with the least likely to move.
+  FALLBACK_METRICS = %w[page_fans].freeze
 
   class << self
     def fetch_for_company(company)
-      integration = company.facebook_integrations.active.order(:id).first
+      integration = FacebookIntegration.current_for(company)
       return nil unless integration
 
       token   = integration.page_access_token
@@ -24,14 +32,7 @@ class BrandHealthService
         return nil
       end
 
-      insights_resp = begin
-        MetaGraphApi.get("/#{page_id}/insights", token,
-          metric: METRICS.join(','),
-          period: 'days_28')
-      rescue MetaGraphApi::Error => e
-        Rails.logger.warn "[BrandHealthService] company=#{company.id} insights skipped: #{e.message}"
-        { 'data' => [] }
-      end
+      insights_resp = fetch_insights(company, page_id, token)
 
       posts_resp = begin
         MetaGraphApi.get("/#{page_id}/posts", token,
@@ -50,6 +51,24 @@ class BrandHealthService
     end
 
     private
+
+    def fetch_insights(company, page_id, token)
+      request_insights(page_id, token, METRICS)
+    rescue MetaGraphApi::Error => e
+      Rails.logger.warn "[BrandHealthService] company=#{company.id} insights retry after: #{e.message}"
+      begin
+        request_insights(page_id, token, FALLBACK_METRICS)
+      rescue MetaGraphApi::Error => retry_error
+        Rails.logger.warn "[BrandHealthService] company=#{company.id} insights skipped: #{retry_error.message}"
+        { 'data' => [] }
+      end
+    end
+
+    def request_insights(page_id, token, metrics)
+      MetaGraphApi.get("/#{page_id}/insights", token,
+        metric: metrics.join(','),
+        period: 'days_28')
+    end
 
     def page_payload(page_data)
       {

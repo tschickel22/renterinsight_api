@@ -65,6 +65,9 @@ module Api
         
         communication = Communication.create!(
           communicable: current_portal_buyer.buyer,
+          # A buyer's portal reply was invisible to company-scoped queries,
+          # so the dealership could miss it entirely.
+          company_id: current_portal_buyer.buyer.try(:company_id),
           communication_thread: thread,
           direction: 'inbound',
           channel: 'portal_message',

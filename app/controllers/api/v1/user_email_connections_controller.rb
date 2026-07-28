@@ -27,9 +27,13 @@ class Api::V1::UserEmailConnectionsController < ApplicationController
     @connection = current_user.user_email_connections.build(connection_params)
     @connection.company = @company
     
-    # Check if this is a company domain email (auto-verify)
+    # A company-domain address needs no proof of ownership, so auto-verify it.
+    # Don't let that override an explicit SMTP setup, though: rewriting the
+    # provider stored the user's host, username, and password and then never
+    # used them (smtp_provider? goes false, so to_smtp_settings returns nil) —
+    # their mail quietly went out through the company sender instead.
     if @connection.email_matches_verified_domain?
-      @connection.provider = 'company_domain'
+      @connection.provider = 'company_domain' unless @connection.smtp_provider?
       @connection.verified_at = Time.current
     end
     
@@ -216,7 +220,7 @@ class Api::V1::UserEmailConnectionsController < ApplicationController
   end
 
   def connection_params
-    params.require(:connection).permit(
+    permitted = params.require(:connection).permit(
       :email_address,
       :display_name,
       :provider,
@@ -230,6 +234,14 @@ class Api::V1::UserEmailConnectionsController < ApplicationController
       :is_default,
       :is_active
     )
+
+    # The edit form can't pre-fill the stored password (we never return it), so
+    # it posts an empty field on every save. Blank means "unchanged" — assigning
+    # it through wiped smtp_password_encrypted, and since the presence check only
+    # runs on create, renaming a connection silently broke its SMTP sending.
+    permitted.delete(:smtp_password) if permitted.key?(:smtp_password) && permitted[:smtp_password].blank?
+
+    permitted
   end
 
   def connection_json(connection, include_smtp_details: false)

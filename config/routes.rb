@@ -1591,10 +1591,13 @@ Rails.application.routes.draw do
         member do
           post :pause
           post :resume
+          get  'ad-sets', action: :ad_sets
         end
         collection do
           post :launch
+          post :sync
           get  :roi_summary
+          get  'ad-options',     action: :ad_options
           get  'lead-forms',     action: :lead_forms
           get  'catalog-status', action: :catalog_status
         end

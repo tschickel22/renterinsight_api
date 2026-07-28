@@ -3,6 +3,8 @@
 module Api
   module Company
     class SettingsController < ApplicationController
+      include CommunicationSecrets
+
       before_action :authenticate_user!
       before_action :set_company_scope
 
@@ -529,41 +531,17 @@ module Api
         branding
       end
 
-      MASKED_PLACEHOLDER = '••••••••'
-
-      SENSITIVE_KEYS = {
-        'email' => %w[smtpPassword gmailClientSecret gmailRefreshToken sendgridApiKey awsSecretAccessKey],
-        'sms'   => %w[twilioAuthToken awsSecretAccessKey]
-      }.freeze
-
       def save_communications_settings(company, settings)
-        cleaned_settings = clean_stale_email_fields(settings)
-        restored_settings = restore_masked_secrets(company, cleaned_settings)
-        encrypted_settings = encrypt_sensitive_fields(restored_settings, :communications)
-        Setting.set('Company', company.id, 'communications', encrypted_settings)
-      end
-
-      # When the frontend sends back the masked placeholder, preserve the existing
-      # encrypted value from the DB so we don't overwrite secrets with "••••••••"
-      def restore_masked_secrets(company, settings)
         existing = fetch_communications_settings(company)
-        return settings unless existing.is_a?(Hash)
+        cleaned_settings = clean_stale_email_fields(normalize_settings_payload(settings))
+        # Section-granular merge: a channel the client omitted keeps its stored
+        # config instead of being deleted by a partial save. Within a section the
+        # client wins, so clean_stale_email_fields' provider-switch removals still apply.
+        cleaned_settings = normalize_settings_payload(existing).merge(cleaned_settings) if existing.is_a?(Hash)
 
-        restored = settings.deep_dup
-        SENSITIVE_KEYS.each do |section, keys|
-          next unless restored[section].is_a?(Hash)
-
-          keys.each do |key|
-            value = restored[section][key]
-            if value == MASKED_PLACEHOLDER || (value.present? && value.to_s.start_with?('encrypted:'))
-              # Preserve the existing encrypted value from DB
-              existing_value = existing.dig(section, key) || existing.dig(section.to_sym, key.to_sym)
-              restored[section][key] = existing_value if existing_value.present?
-            end
-          end
-        end
-
-        restored
+        restored_settings  = restore_masked_secrets(cleaned_settings, existing)
+        encrypted_settings = encrypt_sensitive_fields(restored_settings)
+        Setting.set('Company', company.id, 'communications', encrypted_settings)
       end
 
       # Remove stale fields from a previous provider when switching email providers
@@ -596,70 +574,6 @@ module Api
 
       def save_branding_settings(company, settings)
         Setting.set('Company', company.id, 'branding', settings)
-      end
-
-      def encrypt_sensitive_fields(settings, channel)
-        encrypted = settings.deep_dup
-        
-        case channel
-        when :communications
-          if encrypted.dig('email', 'smtpPassword').present?
-            encrypted['email']['smtpPassword'] = encrypt(encrypted['email']['smtpPassword'])
-          end
-          if encrypted.dig('email', 'gmailClientSecret').present?
-            encrypted['email']['gmailClientSecret'] = encrypt(encrypted['email']['gmailClientSecret'])
-          end
-          if encrypted.dig('email', 'gmailRefreshToken').present?
-            encrypted['email']['gmailRefreshToken'] = encrypt(encrypted['email']['gmailRefreshToken'])
-          end
-          if encrypted.dig('email', 'sendgridApiKey').present?
-            encrypted['email']['sendgridApiKey'] = encrypt(encrypted['email']['sendgridApiKey'])
-          end
-          if encrypted.dig('email', 'awsSecretAccessKey').present?
-            encrypted['email']['awsSecretAccessKey'] = encrypt(encrypted['email']['awsSecretAccessKey'])
-          end
-          
-          if encrypted.dig('sms', 'twilioAuthToken').present?
-            encrypted['sms']['twilioAuthToken'] = encrypt(encrypted['sms']['twilioAuthToken'])
-          end
-          if encrypted.dig('sms', 'awsSecretAccessKey').present?
-            encrypted['sms']['awsSecretAccessKey'] = encrypt(encrypted['sms']['awsSecretAccessKey'])
-          end
-        end
-        
-        encrypted
-      end
-
-      def encrypt(value)
-        return value if value.blank?
-        return value if value.start_with?('encrypted:')
-        
-        secret_key = ENV['SETTINGS_ENCRYPTION_KEY'] || Rails.application.secret_key_base
-        key = ActiveSupport::KeyGenerator.new(secret_key).generate_key('', 32)
-        crypt = ActiveSupport::MessageEncryptor.new(key)
-        "encrypted:#{crypt.encrypt_and_sign(value)}"
-      end
-
-      # Replace encrypted secret values with a masked placeholder for the frontend
-      # so the UI shows "••••••••" instead of a blank field or raw encrypted string
-      def mask_sensitive_fields(settings)
-        return settings unless settings.is_a?(Hash)
-
-        masked = settings.deep_dup
-        SENSITIVE_KEYS.each do |section, keys|
-          sub = masked[section] || masked[section.to_sym]
-          next unless sub.is_a?(Hash)
-
-          keys.each do |key|
-            value = sub[key] || sub[key.to_sym]
-            if value.present?
-              k = sub.key?(key) ? key : key.to_sym
-              sub[k] = MASKED_PLACEHOLDER
-            end
-          end
-        end
-
-        masked
       end
 
       def render_missing_settings(channel)

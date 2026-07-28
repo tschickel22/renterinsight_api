@@ -3,26 +3,48 @@
 module Api
   module Platform
     class SettingsController < ApplicationController
+      include CommunicationSecrets
+
       # Skip authentication for maintenance mode check (must work before login)
       skip_before_action :authenticate, only: [:show]
-      
+
+      # Everything except the pre-login brand kernel is platform-admin only.
+      # Writing these settings reconfigures email/SMS delivery for every tenant.
+      before_action :require_platform_admin!, except: [:show]
+
       # GET /api/platform/settings
+      #
+      # Three tiers, because three different callers need three different things:
+      #   public         → brand kernel + maintenance banner, for login/invite/portal
+      #   any signed-in  → whether platform email/SMS is configured, for the
+      #                    settings cascade and "can I send?" checks
+      #   platform admin → the full config
+      #
+      # The middle tier deliberately omits provider credentials AND the
+      # identifiers next to them (Twilio account SID, AWS access key ID, SMTP
+      # host/username): masking the secret is not enough when the account it
+      # belongs to is printed beside it.
       def show
-        render json: {
-          communications: mask_sensitive_fields(fetch_communications_settings),
-          notifications: fetch_notifications_settings,
+        payload = {
           general: fetch_general_settings,
-          branding: fetch_branding_settings,
-          warranty: fetch_warranty_settings
-        }, status: :ok
+          branding: fetch_branding_settings
+        }
+
+        if platform_admin_request?
+          payload[:communications] = mask_sensitive_fields(fetch_communications_settings)
+          payload[:notifications]  = fetch_notifications_settings
+          payload[:warranty]       = fetch_warranty_settings
+        elsif authenticated_request?
+          payload[:communications] = communications_summary(fetch_communications_settings)
+          payload[:notifications]  = fetch_notifications_settings
+        end
+
+        render json: payload, status: :ok
       rescue => e
         Rails.logger.error "[PlatformSettings#show] Error: #{e.message}"
         render json: {
-          communications: default_communications_settings,
-          notifications: default_notifications_settings,
           general: default_general_settings,
-          branding: default_branding_settings,
-          warranty: default_warranty_settings
+          branding: default_branding_settings
         }, status: :ok
       end
 
@@ -161,6 +183,49 @@ module Api
 
       private
 
+      # `authenticate` is skipped on #show so the login page can read the brand
+      # kernel, which means current_user is never populated for that action.
+      # Decode the bearer token here instead — absent, invalid, or non-admin all
+      # mean "public caller", and public callers get the brand kernel only.
+      def platform_admin_request?
+        user = bearer_token_user
+        user.present? && (user.platform_admin? || user.super_admin?)
+      end
+
+      def authenticated_request?
+        bearer_token_user.present?
+      end
+
+      def bearer_token_user
+        return @bearer_token_user if defined?(@bearer_token_user)
+
+        @bearer_token_user = begin
+          header = request.headers['Authorization']
+          decoded = header.present? ? JsonWebToken.decode(header.split(' ').last) : nil
+          decoded.present? ? User.find_by(id: decoded[:user_id]) : nil
+        end
+      end
+
+      # What a signed-in non-admin may know about platform delivery: which
+      # provider is in play, whether it is on, and the from-identity that will
+      # appear on their messages. No credentials, no account identifiers.
+      SUMMARY_KEYS = {
+        'email' => %w[provider fromEmail fromName isEnabled],
+        'sms'   => %w[provider fromNumber isEnabled]
+      }.freeze
+
+      def communications_summary(settings)
+        settings = normalize_settings_payload(settings)
+        return {} unless settings.is_a?(Hash)
+
+        SUMMARY_KEYS.each_with_object({}) do |(section, keys), summary|
+          sub = settings[section]
+          next unless sub.is_a?(Hash)
+
+          summary[section] = sub.slice(*keys)
+        end
+      end
+
       def fetch_communications_settings
         # Try database first, fall back to defaults
         stored = Setting.get('Platform', 0, 'communications')
@@ -210,88 +275,42 @@ module Api
         Setting.get_warranty_settings('Platform', 0)
       end
 
-      MASKED_PLACEHOLDER = '••••••••'
-      # Any field sent back as a run of common mask characters counts as "unchanged".
-      # Historically only the exact 8-bullet string was caught, but the FE renders
-      # a dot per character of the stored encrypted value (~110 chars), so re-saves
-      # were silently re-encrypting a long bullet string and corrupting the secret.
-      MASK_ONLY_REGEX = /\A[\u2022\*\u25CF\u00B7\u2219 ]+\z/.freeze
-
-      SENSITIVE_KEYS = {
-        'email' => %w[smtpPassword gmailClientSecret gmailRefreshToken sendgridApiKey awsSecretAccessKey],
-        'sms'   => %w[twilioAuthToken awsSecretAccessKey]
-      }.freeze
-
       def save_communications_settings(settings)
-        restored_settings = restore_masked_secrets(settings)
-        encrypted_settings = encrypt_sensitive_fields(restored_settings, :communications)
-        Setting.set('Platform', 0, 'communications', encrypted_settings)
-      end
-
-      # When the frontend sends back the masked placeholder (any length of bullets/stars)
-      # OR an already-encrypted value, preserve the existing stored value so we never
-      # overwrite a real secret with a masked display string.
-      def restore_masked_secrets(settings)
         existing = fetch_communications_settings
-        return settings unless existing.is_a?(Hash)
+        # A payload carrying only one channel must not delete the other. Saving
+        # just the SMS section used to leave {"sms" => {"fromNumber" => ...}}
+        # behind and take every email credential with it. Merge at section
+        # granularity: a section the client sent is authoritative, a section it
+        # omitted is untouched.
+        merged = existing.is_a?(Hash) ? normalize_settings_payload(existing).merge(normalize_settings_payload(settings)) : settings
 
-        restored = settings.deep_dup
-        SENSITIVE_KEYS.each do |section, keys|
-          next unless restored[section].is_a?(Hash)
-
-          keys.each do |key|
-            value = restored[section][key].to_s
-            next if value.blank?
-
-            masked    = value == MASKED_PLACEHOLDER || MASK_ONLY_REGEX.match?(value)
-            encrypted = value.start_with?('encrypted:')
-
-            if masked || encrypted
-              existing_value = existing.dig(section, key) || existing.dig(section.to_sym, key.to_sym)
-              restored[section][key] = existing_value if existing_value.present?
-            end
-          end
-        end
-
-        restored
+        restored_settings  = restore_masked_secrets(merged, existing)
+        encrypted_settings = encrypt_sensitive_fields(restored_settings)
+        Setting.set('Platform', 0, 'communications', encrypted_settings)
       end
 
       # Public-ish helper so the test_email / test_sms actions can swap masks in the
       # incoming form payload for the real decrypted value before calling the tester.
       def unmask_secrets_for_testing(section_name, section_hash)
-        return section_hash unless section_hash.is_a?(Hash)
+        merged = normalize_settings_payload(section_hash)
+        return section_hash unless merged.is_a?(Hash)
 
         existing = fetch_communications_settings || {}
         stored_section = existing[section_name] || existing[section_name.to_sym] || {}
         stored_section = stored_section.deep_stringify_keys if stored_section.is_a?(Hash)
 
-        merged = section_hash.deep_stringify_keys
         Array(SENSITIVE_KEYS[section_name.to_s]).each do |key|
           value = merged[key].to_s
           next if value.blank?
-
-          masked    = value == MASKED_PLACEHOLDER || MASK_ONLY_REGEX.match?(value)
-          encrypted = value.start_with?('encrypted:')
-          next unless masked || encrypted
+          next unless mask_only?(value) || value.start_with?('encrypted:')
 
           stored = stored_section[key]
           next if stored.blank?
 
-          decrypted = decrypt_if_needed(stored)
+          decrypted = decrypt_secret(stored)
           merged[key] = decrypted if decrypted.present?
         end
         merged
-      end
-
-      def decrypt_if_needed(value)
-        return value unless value.is_a?(String) && value.start_with?('encrypted:')
-        ciphertext = value.sub('encrypted:', '')
-        key_base = ENV['SETTINGS_ENCRYPTION_KEY'] || Rails.application.secret_key_base
-        key = ActiveSupport::KeyGenerator.new(key_base).generate_key('', 32)
-        ActiveSupport::MessageEncryptor.new(key).decrypt_and_verify(ciphertext)
-      rescue => e
-        Rails.logger.error "[PlatformSettings] decrypt_if_needed failed: #{e.message}"
-        nil
       end
 
       def save_notifications_settings(settings)
@@ -318,71 +337,6 @@ module Api
         Setting.set('Platform', 0, 'warranty', settings)
       end
 
-      def encrypt_sensitive_fields(settings, channel)
-        encrypted = settings.deep_dup
-        
-        case channel
-        when :communications
-          # Encrypt email credentials
-          if encrypted.dig('email', 'smtpPassword').present?
-            encrypted['email']['smtpPassword'] = encrypt(encrypted['email']['smtpPassword'])
-          end
-          if encrypted.dig('email', 'gmailClientSecret').present?
-            encrypted['email']['gmailClientSecret'] = encrypt(encrypted['email']['gmailClientSecret'])
-          end
-          if encrypted.dig('email', 'gmailRefreshToken').present?
-            encrypted['email']['gmailRefreshToken'] = encrypt(encrypted['email']['gmailRefreshToken'])
-          end
-          if encrypted.dig('email', 'sendgridApiKey').present?
-            encrypted['email']['sendgridApiKey'] = encrypt(encrypted['email']['sendgridApiKey'])
-          end
-          if encrypted.dig('email', 'awsSecretAccessKey').present?
-            encrypted['email']['awsSecretAccessKey'] = encrypt(encrypted['email']['awsSecretAccessKey'])
-          end
-          
-          # Encrypt SMS credentials
-          if encrypted.dig('sms', 'twilioAuthToken').present?
-            encrypted['sms']['twilioAuthToken'] = encrypt(encrypted['sms']['twilioAuthToken'])
-          end
-          if encrypted.dig('sms', 'awsSecretAccessKey').present?
-            encrypted['sms']['awsSecretAccessKey'] = encrypt(encrypted['sms']['awsSecretAccessKey'])
-          end
-        end
-        
-        encrypted
-      end
-
-      def encrypt(value)
-        return value if value.blank?
-        return value if value.start_with?('encrypted:')
-        
-        secret_key = ENV['SETTINGS_ENCRYPTION_KEY'] || Rails.application.secret_key_base
-        # Ensure key is exactly 32 bytes for AES-256
-        key = ActiveSupport::KeyGenerator.new(secret_key).generate_key('', 32)
-        crypt = ActiveSupport::MessageEncryptor.new(key)
-        "encrypted:#{crypt.encrypt_and_sign(value)}"
-      end
-
-      # Replace encrypted secret values with a masked placeholder for the frontend
-      def mask_sensitive_fields(settings)
-        return settings unless settings.is_a?(Hash)
-
-        masked = settings.deep_dup
-        SENSITIVE_KEYS.each do |section, keys|
-          sub = masked[section] || masked[section.to_sym]
-          next unless sub.is_a?(Hash)
-
-          keys.each do |key|
-            value = sub[key] || sub[key.to_sym]
-            if value.present?
-              k = sub.key?(key) ? key : key.to_sym
-              sub[k] = MASKED_PLACEHOLDER
-            end
-          end
-        end
-
-        masked
-      end
 
       def render_missing_settings(channel)
         render json: {

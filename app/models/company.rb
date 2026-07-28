@@ -248,7 +248,31 @@ class Company < ApplicationRecord
     'saas'                 => 'SaaS / Software'
   }.freeze
   validates :industry, inclusion: { in: INDUSTRIES }
-  
+
+  # Meta "special ad categories" — the regulated verticals that lose detailed
+  # targeting and get minimum-radius rules. Only these five exist; vehicle sales
+  # (RV, auto) are ordinary ads, so they map to no category. Declaring HOUSING
+  # when it doesn't apply needlessly cripples targeting; omitting it when it does
+  # apply is a fair-housing problem — hence a per-ad choice, suggested not forced.
+  SPECIAL_AD_CATEGORIES = {
+    'HOUSING'                    => 'Housing (homes for sale or rent)',
+    'EMPLOYMENT'                 => 'Employment (jobs, recruiting)',
+    'CREDIT'                     => 'Credit (loans, financing offers)',
+    'FINANCIAL_PRODUCTS_SERVICES' => 'Financial products & services',
+    'ISSUES_ELECTIONS_POLITICS'  => 'Social issues, elections or politics'
+  }.freeze
+
+  # What we default the Ad Builder to for this tenant. Selling or renting homes
+  # is housing; everything else starts at none and the user can opt in.
+  SUGGESTED_AD_CATEGORY_BY_INDUSTRY = {
+    'manufactured_housing' => 'HOUSING',
+    'property_management'  => 'HOUSING'
+  }.freeze
+
+  def suggested_special_ad_category
+    SUGGESTED_AD_CATEGORY_BY_INDUSTRY[industry]
+  end
+
   # SMS Provisioning Mode
   SMS_PROVISIONING_MODES = %w[platform dedicated disabled].freeze
   validates :sms_provisioning_mode, inclusion: { in: SMS_PROVISIONING_MODES }, allow_nil: false

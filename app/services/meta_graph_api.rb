@@ -10,10 +10,27 @@ class MetaGraphApi
   API_VERSION = 'v21.0'
   BASE_URL    = "https://graph.facebook.com/#{API_VERSION}"
 
-  class Error < StandardError; end
+  # Carries Meta's structured fields, not just a sentence — callers need the
+  # subcode to tell an app-configuration gate (which the user must clear in the
+  # Meta dashboard) from a bad parameter (which is our bug).
+  class Error < StandardError
+    attr_reader :code, :subcode, :user_title, :user_msg
+
+    def initialize(message = nil, code: nil, subcode: nil, user_title: nil, user_msg: nil)
+      super(message)
+      @code       = code
+      @subcode    = subcode
+      @user_title = user_title
+      @user_msg   = user_msg
+    end
+  end
+
   class ExpiredTokenError < Error; end
   class RateLimitError < Error; end
   class NotFoundError < Error; end
+
+  # Meta rejects ad creatives from an app that hasn't passed App Review.
+  DEV_MODE_SUBCODE = 1_885_183
 
   # ------------------------------------------------------------------
   # Class-level helpers
@@ -121,7 +138,16 @@ class MetaGraphApi
     # ------------------------------------------------------------------
     def get_ad_campaigns(ad_account_id, access_token)
       get("/act_#{ad_account_id}/campaigns", access_token,
-          fields: 'id,name,objective,status,daily_budget,lifetime_budget,insights{spend,impressions,clicks,reach}',
+          fields: 'id,name,objective,status,daily_budget,lifetime_budget,start_time,stop_time,' \
+                  'insights{spend,impressions,clicks,reach}',
+          limit:  100)
+    end
+
+    # Ad sets inside a campaign, for attaching a new creative to an existing one
+    # rather than spinning up a fresh campaign per ad.
+    def get_ad_sets(campaign_id, access_token)
+      get("/#{campaign_id}/adsets", access_token,
+          fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,billing_event',
           limit:  100)
     end
 
@@ -131,28 +157,54 @@ class MetaGraphApi
           date_preset: date_preset)
     end
 
-    def create_campaign(ad_account_id, access_token, name:, objective:, status: 'PAUSED', daily_budget_cents: nil, special_ad_categories: [])
+    def create_campaign(ad_account_id, access_token, name:, objective:, status: 'PAUSED', daily_budget_cents: nil,
+                        special_ad_categories: [], bid_strategy: 'LOWEST_COST_WITHOUT_CAP')
       params = {
         name:                  name,
         objective:             objective,
         status:                status,
         special_ad_categories: Array(special_ad_categories).to_json
       }
-      params[:daily_budget] = daily_budget_cents if daily_budget_cents
+      # bid_strategy only belongs here when the budget does. Setting it on a
+      # campaign with no budget earns "No Budget for Campaign — add a budget to
+      # edit the bid strategy"; with ad-set budgets the strategy rides on the
+      # ad set instead.
+      params[:bid_strategy] = bid_strategy if daily_budget_cents && bid_strategy
+      if daily_budget_cents
+        params[:daily_budget] = daily_budget_cents
+      else
+        # Budget lives on the ad set. Meta then demands an explicit answer on
+        # whether ad sets may pool 20% of their budgets, and rejects the whole
+        # campaign if the field is absent. false = each ad set keeps its own.
+        params[:is_adset_budget_sharing_enabled] = false
+      end
+
       post("/act_#{ad_account_id}/campaigns", access_token, **params)
     end
 
     def create_ad_set(ad_account_id, access_token, campaign_id:, name:, daily_budget_cents:, targeting:,
-                      billing_event: 'IMPRESSIONS', optimization_goal: 'LEAD_GENERATION', start_time: nil)
-      post("/act_#{ad_account_id}/adsets", access_token,
-           campaign_id:       campaign_id,
-           name:              name,
-           daily_budget:      daily_budget_cents,
-           billing_event:     billing_event,
-           optimization_goal: optimization_goal,
-           targeting:         targeting.to_json,
-           start_time:        start_time || Time.current.iso8601,
-           status:            'PAUSED')
+                      billing_event: 'IMPRESSIONS', optimization_goal: 'LEAD_GENERATION', start_time: nil,
+                      end_time: nil, promoted_object: nil, bid_strategy: 'LOWEST_COST_WITHOUT_CAP')
+      params = {
+        campaign_id:       campaign_id,
+        name:              name,
+        daily_budget:      daily_budget_cents,
+        billing_event:     billing_event,
+        optimization_goal: optimization_goal,
+        # The budget lives here, so the bid strategy does too.
+        # LOWEST_COST_WITHOUT_CAP is "most results for the budget" — the only
+        # strategy that needs no bid cap or ROAS floor from us.
+        bid_strategy:      bid_strategy,
+        targeting:         targeting.to_json,
+        start_time:        start_time || Time.current.iso8601,
+        status:            'PAUSED'
+      }
+      # Without an end_time a daily-budget ad set runs until manually paused —
+      # the wizard's "3 days / $27 total" would quietly keep spending.
+      params[:end_time]        = end_time if end_time.present?
+      params[:promoted_object] = promoted_object.to_json if promoted_object.present?
+
+      post("/act_#{ad_account_id}/adsets", access_token, **params)
     end
 
     def create_ad(ad_account_id, access_token, ad_set_id:, name:, creative_id:)
@@ -203,8 +255,22 @@ class MetaGraphApi
     end
 
     def get_user_ad_accounts(user_access_token)
+      # `business` names the owning portfolio. Without it an unnamed account
+      # renders as its bare id ("47496870"), which is indistinguishable from
+      # any other account when a user has several.
       get('/me/adaccounts', user_access_token,
-          fields: 'id,name,account_status,currency')
+          fields: 'id,account_id,name,account_status,currency,business{id,name}',
+          limit:  100)
+    end
+
+    # Resolve a free-text interest to Meta's own targeting ids. flexible_spec
+    # rejects name-only entries, so without this an interest can't be targeted
+    # at all — it has to be looked up first.
+    def search_ad_interests(query, access_token, limit: 5)
+      get('/search', access_token,
+          type:  'adinterest',
+          q:     query,
+          limit: limit)
     end
 
     def get_lead_forms(page_id, access_token)
@@ -278,23 +344,68 @@ class MetaGraphApi
       when 200..299
         body
       when 400..499
-        err = body.is_a?(Hash) ? body['error'] : nil
+        err     = body.is_a?(Hash) ? body['error'] : nil
         code    = err&.dig('code')
         subcode = err&.dig('error_subcode')
-        msg     = err&.dig('message') || response.body
+
+        # Log the whole payload — the useful detail (which field Meta objected
+        # to) never fits in a toast, but we need it when diagnosing.
+        Rails.logger.error "[MetaGraphApi] #{response.code} #{response.body.to_s.truncate(2000)}"
+
+        msg = error_message_for(err, response)
+
+        details = {
+          code:       code,
+          subcode:    subcode,
+          user_title: err.is_a?(Hash) ? err['error_user_title'] : nil,
+          user_msg:   err.is_a?(Hash) ? err['error_user_msg'] : nil
+        }
 
         if [190, 102, 463].include?(code) || [458, 460, 463, 467].include?(subcode)
-          raise ExpiredTokenError, msg
+          raise ExpiredTokenError.new(msg, **details)
         elsif code == 4 || code == 17 || code == 32 || code == 613
-          raise RateLimitError, msg
+          raise RateLimitError.new(msg, **details)
         elsif response.code.to_i == 404
-          raise NotFoundError, msg
+          raise NotFoundError.new(msg, **details)
         else
-          raise Error, "Meta Graph API error (#{code}): #{msg}"
+          raise Error.new("Meta Graph API error (#{code}): #{msg}", **details)
         end
       else
-        raise Error, "Meta Graph API error #{response.code}: #{response.body}"
+        Rails.logger.error "[MetaGraphApi] #{response.code} #{response.body.to_s.truncate(2000)}"
+        raise Error, "Meta returned an unexpected #{response.code} response."
       end
+    end
+
+    # Meta's `message` is often just "Invalid parameter". The actionable detail
+    # lives in error_user_msg and error_data.blame_field_specs, which name the
+    # field it objected to — so fold those in rather than making the user guess.
+    def error_message_for(err, response)
+      unless err.is_a?(Hash)
+        # Not a Graph error at all: Meta serves an HTML error page for some
+        # failures. Dumping that page into the UI is worse than useless.
+        return "Meta returned an unreadable #{response.code} response " \
+               '(often an ad account the connected user cannot access).'
+      end
+
+      parts = []
+      parts << err['error_user_title'].presence
+      parts << err['error_user_msg'].presence
+      parts << err['message'].presence if parts.compact.empty?
+
+      blamed = blame_fields(err['error_data'])
+      parts << "Field: #{blamed.join(', ')}" if blamed.any?
+
+      parts.compact.join(' — ').presence || "HTTP #{response.code}"
+    end
+
+    # error_data comes back as a Hash on some errors and as a JSON *string* on
+    # others. Treating it as one shape crashed the error handler itself, which
+    # turned a readable Meta rejection into a 500 and "Unable to launch ad".
+    def blame_fields(error_data)
+      data = error_data.is_a?(String) ? (JSON.parse(error_data) rescue nil) : error_data
+      return [] unless data.is_a?(Hash)
+
+      Array(data['blame_field_specs']).flatten.compact.uniq
     end
 
     def parse_body(raw)

@@ -50,12 +50,22 @@ class IntakeSubmission < ApplicationRecord
     source_id = resolved_source&.id
     Rails.logger.info "[IntakeSubmission] Resolved source_id=#{source_id} (#{resolved_source&.name})" if resolved_source
     
-    lead_data = { 
-      company_id: form.company_id, 
-      source_id: source_id, 
+    lead_data = {
+      company_id: form.company_id,
+      source_id: source_id,
       status: 'new'
     }
-    
+
+    # Carry campaign attribution through from the landing URL. Without this a
+    # lead from a paid-ad intake form is indistinguishable from a walk-in, and
+    # AdCampaign#matched_leads_scope (utm_campaign / utm_content) can never
+    # attribute it — the ad reports 0 leads and -100% ROI forever.
+    %w[utm_source utm_medium utm_campaign utm_content utm_term].each do |utm|
+      camel = utm.camelize(:lower)
+      value = submission_data[utm].presence || submission_data[camel].presence
+      lead_data[utm.to_sym] = value if value.present?
+    end
+
     # Resolve location so a lead is NEVER orphaned (location-null leads are
     # invisible to location-scoped users). Priority:
     #   1. explicit location_id from the form's location picker

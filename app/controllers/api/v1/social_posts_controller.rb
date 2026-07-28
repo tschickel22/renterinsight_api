@@ -138,7 +138,7 @@ class Api::V1::SocialPostsController < ApplicationController
       return render json: { error: 'This post has already been published.' }, status: :unprocessable_entity
     end
 
-    integration = @company.facebook_integrations.active.order(:id).first
+    integration = FacebookIntegration.current_for(@company)
     unless integration
       return render json: { error: 'No Facebook page connected. Go to Settings > Integrations to connect.' }, status: :unprocessable_entity
     end
