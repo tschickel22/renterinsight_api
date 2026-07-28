@@ -138,7 +138,8 @@ class MetaGraphApi
     # ------------------------------------------------------------------
     def get_ad_campaigns(ad_account_id, access_token)
       get("/act_#{ad_account_id}/campaigns", access_token,
-          fields: 'id,name,objective,status,daily_budget,lifetime_budget,insights{spend,impressions,clicks,reach}',
+          fields: 'id,name,objective,status,daily_budget,lifetime_budget,start_time,stop_time,' \
+                  'insights{spend,impressions,clicks,reach}',
           limit:  100)
     end
 

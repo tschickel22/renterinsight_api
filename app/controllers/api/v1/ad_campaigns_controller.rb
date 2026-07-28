@@ -203,6 +203,10 @@ class Api::V1::AdCampaignsController < ApplicationController
         daily_budget:  created_campaign ? daily_budget : ad_campaign.daily_budget,
         created_via:   ad_campaign.persisted? ? ad_campaign.created_via : 'dealertide',
         ad_account_id: ad_account_id,
+        # Bounds attribution from the moment it launches, rather than waiting
+        # for the nightly sync to backfill Meta's dates.
+        started_at:    created_campaign ? Time.current : ad_campaign.started_at,
+        stopped_at:    created_campaign ? duration_days.days.from_now : ad_campaign.stopped_at,
         is_deleted:    false,
         synced_at:     Time.current
       )
@@ -424,7 +428,11 @@ class Api::V1::AdCampaignsController < ApplicationController
       overall_cost_per_lead: total_leads.positive? ? (total_spend / total_leads).round(2) : 0,
       overall_cost_per_deal: total_deals.positive? ? (total_spend / total_deals).round(2) : 0,
       overall_roi:          total_spend.positive? ? (((total_revenue - total_spend) / total_spend) * 100).round(2) : 0,
-      campaign_count:       campaigns.count
+      campaign_count:       campaigns.count,
+      # Facebook leads no campaign accounted for. Not folded into the totals —
+      # crediting them would let every campaign claim the same leads — but
+      # surfaced so a broken UTM chain is visible instead of silent.
+      unattributed_facebook_leads: AdCampaign.unattributed_facebook_leads(@company).count
     }
   end
 

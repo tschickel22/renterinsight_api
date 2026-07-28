@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_28_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_28_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -307,6 +307,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_28_150000) do
     t.datetime "updated_at", null: false
     t.string "created_via", default: "meta", null: false
     t.string "ad_account_id"
+    t.datetime "started_at"
+    t.datetime "stopped_at"
     t.index ["company_id", "ad_account_id"], name: "index_ad_campaigns_on_company_id_and_ad_account_id"
     t.index ["company_id", "external_campaign_id"], name: "index_ad_campaigns_on_company_id_and_external_campaign_id", unique: true
     t.index ["company_id", "status"], name: "index_ad_campaigns_on_company_id_and_status"

@@ -48,6 +48,10 @@ class MetaAdSpendService
           # Stamp the source account so switching accounts switches the list
           # instead of stacking the new account's campaigns on the old ones.
           ad_account_id:   ad_account_id,
+          # Bounds lead attribution — a stopped campaign shouldn't keep
+          # claiming leads that arrive months later.
+          started_at:      parse_time(raw['start_time']),
+          stopped_at:      parse_time(raw['stop_time']),
           is_deleted:      false,
           synced_at:       Time.current
         )
@@ -59,6 +63,14 @@ class MetaAdSpendService
     end
 
     private
+
+    def parse_time(value)
+      return nil if value.blank?
+
+      Time.zone.parse(value.to_s)
+    rescue ArgumentError
+      nil
+    end
 
     def cents_to_dollars(value)
       return nil if value.nil?
