@@ -45,6 +45,37 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(body['selected_ad_account_id']).to be_nil
     end
 
+    # Meta lets an ad account be named after its owner, or left unnamed so it
+    # renders as a bare id. With several accounts on one login that's
+    # unidentifiable, so lead the label with the business portfolio.
+    it 'labels accounts by their owning business portfolio' do
+      allow(MetaGraphApi).to receive(:get_user_ad_accounts).and_return(
+        { 'data' => [
+          { 'id' => 'act_47496870', 'name' => '47496870', 'currency' => 'USD',
+            'business' => { 'id' => '9', 'name' => 'Renter Insight' } },
+          { 'id' => 'act_2057705311311123', 'name' => 'Tom Schickel', 'currency' => 'USD' }
+        ] }
+      )
+
+      get '/api/v1/integrations/facebook/ad_accounts', headers: headers
+
+      labels = JSON.parse(response.body)['ad_accounts'].map { |a| a['label'] }
+      expect(labels).to eq([
+        'Renter Insight · 47496870 · act_47496870',
+        'Tom Schickel · act_2057705311311123'
+      ])
+    end
+
+    it 'falls back to the id when an account has neither name nor portfolio' do
+      allow(MetaGraphApi).to receive(:get_user_ad_accounts).and_return(
+        { 'data' => [{ 'id' => 'act_555', 'currency' => 'USD' }] }
+      )
+
+      get '/api/v1/integrations/facebook/ad_accounts', headers: headers
+
+      expect(JSON.parse(response.body)['ad_accounts'].first['label']).to eq('act_555')
+    end
+
     it 'reports the missing user token instead of calling Graph with a Page token' do
       integration.update!(user_access_token: nil)
       expect(MetaGraphApi).not_to receive(:get_user_ad_accounts)
@@ -68,7 +99,7 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(response).to have_http_status(:ok)
       meta = integration.reload.metadata.deep_stringify_keys
       expect(meta['ad_account_id']).to eq('222')
-      expect(meta['ad_account_name']).to eq('Second Account')
+      expect(meta['ad_account_name']).to eq('Second Account · act_222')
     end
 
     it 'rejects an ad account the connection cannot reach' do

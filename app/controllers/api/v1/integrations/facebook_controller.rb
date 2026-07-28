@@ -219,7 +219,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
           return render json: { error: 'That ad account is not available on this Facebook connection.' },
                         status: :unprocessable_entity
         end
-        ad_account_name ||= match[:name]
+        ad_account_name ||= match[:label]
       rescue MetaGraphApi::Error => e
         Rails.logger.info "[FacebookOAuth] ad account validation skipped: #{e.message}"
       end
@@ -343,13 +343,30 @@ class Api::V1::Integrations::FacebookController < ApplicationController
 
     response = MetaGraphApi.get_user_ad_accounts(integration.user_access_token)
     Array(response['data']).map do |a|
+      id            = normalize_ad_account_id(a['id'])
+      business_name = a.dig('business', 'name').presence
+      name          = a['name'].presence
+
       {
-        id:       normalize_ad_account_id(a['id']),
-        name:     a['name'],
-        status:   a['account_status'],
-        currency: a['currency']
+        id:            id,
+        name:          name || business_name || "act_#{id}",
+        business_name: business_name,
+        # What the picker shows. Meta lets an account be named after its owner
+        # ("Tom Schickel") or nothing at all, so lead with the portfolio that
+        # owns it — that's the distinction a user with several accounts needs.
+        label:         ad_account_label(name: name, business_name: business_name, id: id),
+        status:        a['account_status'],
+        currency:      a['currency']
       }
     end
+  end
+
+  def ad_account_label(name:, business_name:, id:)
+    parts = []
+    parts << business_name if business_name
+    parts << name if name && name != business_name
+    parts << "act_#{id}"
+    parts.join(' · ')
   end
 
   def write_ad_account!(integration, ad_account_id, ad_account_name)

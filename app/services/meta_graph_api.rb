@@ -208,8 +208,12 @@ class MetaGraphApi
     end
 
     def get_user_ad_accounts(user_access_token)
+      # `business` names the owning portfolio. Without it an unnamed account
+      # renders as its bare id ("47496870"), which is indistinguishable from
+      # any other account when a user has several.
       get('/me/adaccounts', user_access_token,
-          fields: 'id,name,account_status,currency')
+          fields: 'id,account_id,name,account_status,currency,business{id,name}',
+          limit:  100)
     end
 
     def get_lead_forms(page_id, access_token)
