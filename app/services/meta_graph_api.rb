@@ -125,6 +125,14 @@ class MetaGraphApi
           limit:  100)
     end
 
+    # Ad sets inside a campaign, for attaching a new creative to an existing one
+    # rather than spinning up a fresh campaign per ad.
+    def get_ad_sets(campaign_id, access_token)
+      get("/#{campaign_id}/adsets", access_token,
+          fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,billing_event',
+          limit:  100)
+    end
+
     def get_campaign_insights(campaign_id, access_token, date_preset: 'last_30d')
       get("/#{campaign_id}/insights", access_token,
           fields:      'spend,impressions,clicks,reach,actions,cost_per_action_type',

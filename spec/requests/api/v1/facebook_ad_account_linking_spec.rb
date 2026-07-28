@@ -442,4 +442,100 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(JSON.parse(response.body)['campaigns'].length).to eq(2)
     end
   end
+
+  # Every ad getting its own campaign and ad set restarts Meta's learning phase
+  # and makes the budgets bid against each other. Let a new creative join one.
+  describe 'attaching an ad to an existing campaign or ad set' do
+    let(:launch_params) do
+      { primary_text: 'Hello', headline: 'One Platform', link_url: 'https://app.dealertide.com/f/abc',
+        daily_budget: 9, duration_days: 3 }
+    end
+
+    before do
+      integration.update!(metadata: { 'ad_account_id' => '111' })
+      allow(MetaGraphApi).to receive(:create_campaign).and_return({ 'id' => 'new-camp' })
+      allow(MetaGraphApi).to receive(:create_ad_set).and_return({ 'id' => 'new-adset' })
+      allow(MetaGraphApi).to receive(:create_ad_creative).and_return({ 'id' => 'cr1' })
+      allow(MetaGraphApi).to receive(:create_ad).and_return({ 'id' => 'ad1' })
+      allow(MetaGraphApi).to receive(:update_campaign_status).and_return({})
+      allow(MetaGraphApi).to receive(:delete_campaign).and_return({})
+    end
+
+    def launch(extra = {})
+      post '/api/v1/ad-campaigns/launch', params: launch_params.merge(extra).to_json, headers: headers
+    end
+
+    it 'creates a campaign and ad set when none is chosen' do
+      launch
+
+      expect(MetaGraphApi).to have_received(:create_campaign)
+      expect(MetaGraphApi).to have_received(:create_ad_set)
+    end
+
+    it 'reuses the chosen campaign and only builds a new ad set' do
+      launch(meta_campaign_id: 'existing-camp')
+
+      expect(MetaGraphApi).not_to have_received(:create_campaign)
+      expect(MetaGraphApi).to have_received(:create_ad_set)
+        .with('111', anything, hash_including(campaign_id: 'existing-camp'))
+    end
+
+    it 'skips both when an ad set is chosen, adding just the creative' do
+      launch(meta_campaign_id: 'existing-camp', meta_adset_id: 'existing-adset')
+
+      expect(MetaGraphApi).not_to have_received(:create_campaign)
+      expect(MetaGraphApi).not_to have_received(:create_ad_set)
+      expect(MetaGraphApi).to have_received(:create_ad)
+        .with('111', anything, hash_including(ad_set_id: 'existing-adset'))
+    end
+
+    it 'leaves an existing campaign\'s status alone' do
+      launch(meta_campaign_id: 'existing-camp')
+
+      expect(MetaGraphApi).not_to have_received(:update_campaign_status)
+    end
+
+    it 'activates a campaign it created itself' do
+      launch
+
+      expect(MetaGraphApi).to have_received(:update_campaign_status)
+        .with('new-camp', anything, hash_including(status: 'ACTIVE'))
+    end
+
+    # Rolling back someone else's campaign would delete their live ads.
+    it 'never deletes a campaign it did not create when a later step fails' do
+      allow(MetaGraphApi).to receive(:create_ad_creative).and_raise(MetaGraphApi::Error, 'boom')
+
+      launch(meta_campaign_id: 'existing-camp')
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(MetaGraphApi).not_to have_received(:delete_campaign)
+    end
+
+    it 'still rolls back a campaign it did create' do
+      allow(MetaGraphApi).to receive(:create_ad_creative).and_raise(MetaGraphApi::Error, 'boom')
+
+      launch
+
+      expect(MetaGraphApi).to have_received(:delete_campaign).with('new-camp', anything)
+    end
+
+    it 'does not require a budget when joining an existing ad set' do
+      launch(meta_adset_id: 'existing-adset', meta_campaign_id: 'existing-camp', daily_budget: 0)
+
+      expect(response).to have_http_status(:created)
+    end
+
+    it 'does not duplicate the local row when joining a synced campaign' do
+      company.ad_campaigns.create!(external_campaign_id: 'existing-camp', name: 'Synced Campaign',
+                                   status: 'ACTIVE', created_via: 'meta', ad_account_id: '111')
+
+      expect { launch(meta_campaign_id: 'existing-camp') }
+        .not_to change { company.ad_campaigns.where(external_campaign_id: 'existing-camp').count }
+
+      row = company.ad_campaigns.find_by(external_campaign_id: 'existing-camp')
+      expect(row.name).to eq('Synced Campaign')
+      expect(row.created_via).to eq('meta')
+    end
+  end
 end

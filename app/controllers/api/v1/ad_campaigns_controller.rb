@@ -2,7 +2,7 @@
 
 class Api::V1::AdCampaignsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_campaign, only: %i[show pause resume destroy]
+  before_action :set_campaign, only: %i[show pause resume destroy ad_sets]
 
   MAX_PER_PAGE = 100
 
@@ -97,45 +97,60 @@ class Api::V1::AdCampaignsController < ApplicationController
     # actually does: click through to the intake form.
     objective = 'OUTCOME_TRAFFIC' if objective == 'OUTCOME_LEADS' && lead_form_id.blank?
 
+    # Attach to an existing campaign/ad set instead of creating a new one. Every
+    # ad in its own ad set restarts Meta's learning phase and makes the budgets
+    # bid against each other, so reusing one is usually the better default.
+    existing_campaign_id = params[:meta_campaign_id].to_s.presence
+    existing_adset_id    = params[:meta_adset_id].to_s.presence
+
     return render json: { error: 'primary_text is required' }, status: :bad_request if primary_text.blank?
     return render json: { error: 'link_url is required' }, status: :bad_request     if link_url.blank? && lead_form_id.blank?
-    return render json: { error: 'daily_budget must be > 0' }, status: :bad_request if daily_budget <= 0
+    if existing_adset_id.blank? && daily_budget <= 0
+      return render json: { error: 'daily_budget must be > 0' }, status: :bad_request
+    end
 
     daily_budget_cents = (daily_budget * 100).to_i
     campaign_name = "RI: #{headline_text.presence&.truncate(40) || 'Ad'} - #{Date.current}"
 
-    campaign_id = nil
+    campaign_id       = existing_campaign_id
+    created_campaign  = false
+    adset_id          = existing_adset_id
     # Four Meta calls behind one button — naming the failing step turns
     # "Failed to create ad" into something a user can act on.
     step = 'campaign'
     begin
-      campaign_result = MetaGraphApi.create_campaign(
-        ad_account_id, token,
-        name:                  campaign_name,
-        objective:             objective,
-        status:                'PAUSED',
-        special_ad_categories: special_ad_categories
-      )
-      campaign_id = campaign_result['id']
+      if campaign_id.blank?
+        campaign_result = MetaGraphApi.create_campaign(
+          ad_account_id, token,
+          name:                  campaign_name,
+          objective:             objective,
+          status:                'PAUSED',
+          special_ad_categories: special_ad_categories
+        )
+        campaign_id      = campaign_result['id']
+        created_campaign = true
+      end
 
-      location = @company.locations.order(:id).first
-      targeting = build_targeting(location: location, radius_miles: radius_miles,
-                                  age_min: age_min, age_max: age_max, interests: interests)
+      if adset_id.blank?
+        location = @company.locations.order(:id).first
+        targeting = build_targeting(location: location, radius_miles: radius_miles,
+                                    age_min: age_min, age_max: age_max, interests: interests)
 
-      step = 'ad set (budget, schedule and targeting)'
-      adset_result = MetaGraphApi.create_ad_set(
-        ad_account_id, token,
-        campaign_id:        campaign_id,
-        name:               "RI AdSet: #{radius_miles}mi, #{age_min}-#{age_max}",
-        daily_budget_cents: daily_budget_cents,
-        targeting:          targeting,
-        optimization_goal:  optimization_goal_for(objective),
-        # LEAD_GENERATION optimisation only validates when Meta knows which Page
-        # hosts the instant form.
-        promoted_object:    (lead_form_id.present? ? { page_id: integration.page_id } : nil),
-        start_time:         Time.current.iso8601
-      )
-      adset_id = adset_result['id']
+        step = 'ad set (budget, schedule and targeting)'
+        adset_result = MetaGraphApi.create_ad_set(
+          ad_account_id, token,
+          campaign_id:        campaign_id,
+          name:               "RI AdSet: #{radius_miles}mi, #{age_min}-#{age_max}",
+          daily_budget_cents: daily_budget_cents,
+          targeting:          targeting,
+          optimization_goal:  optimization_goal_for(objective),
+          # LEAD_GENERATION optimisation only validates when Meta knows which Page
+          # hosts the instant form.
+          promoted_object:    (lead_form_id.present? ? { page_id: integration.page_id } : nil),
+          start_time:         Time.current.iso8601
+        )
+        adset_id = adset_result['id']
+      end
 
       step = 'creative (text, image and link)'
       creative_result = MetaGraphApi.create_ad_creative(
@@ -159,24 +174,30 @@ class Api::V1::AdCampaignsController < ApplicationController
         creative_id: creative_id
       )
 
-      MetaGraphApi.update_campaign_status(campaign_id, token, status: 'ACTIVE')
+      # Only activate a campaign we created. Joining an existing one must not
+      # flip a paused campaign live behind the user's back.
+      MetaGraphApi.update_campaign_status(campaign_id, token, status: 'ACTIVE') if created_campaign
 
-      ad_campaign = @company.ad_campaigns.create!(
-        external_campaign_id: campaign_id,
-        name:                 campaign_name,
-        objective:            objective,
-        status:               'ACTIVE',
-        daily_budget:         daily_budget,
-        created_via:          'dealertide',
-        ad_account_id:        ad_account_id,
-        synced_at:            Time.current
+      ad_campaign = @company.ad_campaigns.find_or_initialize_by(external_campaign_id: campaign_id)
+      ad_campaign.assign_attributes(
+        name:          created_campaign ? campaign_name : ad_campaign.name.presence || campaign_name,
+        objective:     created_campaign ? objective : ad_campaign.objective.presence || objective,
+        status:        created_campaign ? 'ACTIVE' : ad_campaign.status.presence || 'ACTIVE',
+        daily_budget:  created_campaign ? daily_budget : ad_campaign.daily_budget,
+        created_via:   ad_campaign.persisted? ? ad_campaign.created_via : 'dealertide',
+        ad_account_id: ad_account_id,
+        is_deleted:    false,
+        synced_at:     Time.current
       )
+      ad_campaign.save!
 
       notes = []
       if use_catalog
         notes << 'Catalog / Dynamic Ads selected. A static creative was launched for now — configure a product_catalog_id adset in Meta Ads Manager to switch to catalog-driven delivery.'
       end
       notes << "Attached Facebook Lead Form #{lead_form_id}." if lead_form_id.present?
+      notes << 'Added to the existing campaign — its objective and special ad category apply.' if existing_campaign_id.present?
+      notes << 'Added to the existing ad set, so it shares that budget, schedule and targeting.' if existing_adset_id.present?
 
       render json: {
         success:          true,
@@ -192,10 +213,12 @@ class Api::V1::AdCampaignsController < ApplicationController
 
     rescue MetaGraphApi::ExpiredTokenError => e
       integration.update(status: 'expired')
-      cleanup_campaign(campaign_id, token)
+      cleanup_campaign(campaign_id, token) if created_campaign
       render json: { error: "Facebook token expired: #{e.message}" }, status: :unprocessable_entity
     rescue MetaGraphApi::Error => e
-      cleanup_campaign(campaign_id, token)
+      # Only roll back a campaign this request created — deleting the campaign
+      # the user asked to join would destroy live ads.
+      cleanup_campaign(campaign_id, token) if created_campaign
       Rails.logger.error "[AdCampaigns#launch] company=#{@company.id} step=#{step} " \
                          "objective=#{objective} categories=#{special_ad_categories.inspect} " \
                          "budget_cents=#{daily_budget_cents} error=#{e.message}"
@@ -281,6 +304,41 @@ class Api::V1::AdCampaignsController < ApplicationController
       vehicle_count: vehicle_count,
       feed_url:      feed_url
     }
+  end
+
+  # GET /api/v1/ad-campaigns/:id/ad_sets
+  # Ad sets on an existing campaign, so a new creative can join one instead of
+  # every ad getting its own campaign (which restarts Meta's learning phase and
+  # splits the budget against itself).
+  def ad_sets
+    return unless authorize_action!('facebook_ads', 'read')
+
+    integration = FacebookIntegration.current_for(@company)
+    return render json: { ad_sets: [], error: 'Connect Facebook first' } unless integration
+
+    token = integration.user_access_token
+    return render json: { ad_sets: [], error: 'Reconnect Facebook to grant ads access.' } if token.blank?
+
+    begin
+      result = MetaGraphApi.get_ad_sets(@campaign.external_campaign_id, token)
+    rescue MetaGraphApi::ExpiredTokenError => e
+      integration.update(status: 'expired')
+      return render json: { ad_sets: [], error: "Facebook token expired: #{e.message}" }
+    rescue MetaGraphApi::Error => e
+      return render json: { ad_sets: [], error: e.message }
+    end
+
+    ad_sets = Array(result['data']).map do |a|
+      {
+        id:                a['id'],
+        name:              a['name'],
+        status:            a['status'],
+        daily_budget:      a['daily_budget'].present? ? (a['daily_budget'].to_f / 100.0) : nil,
+        optimization_goal: a['optimization_goal']
+      }
+    end
+
+    render json: { ad_sets: ad_sets, campaign_objective: @campaign.objective }
   end
 
   # GET /api/v1/ad-campaigns/ad_options
