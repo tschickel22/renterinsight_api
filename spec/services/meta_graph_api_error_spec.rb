@@ -44,6 +44,30 @@ RSpec.describe MetaGraphApi, '.handle_response' do
     )
   end
 
+  # Meta sends error_data as a Hash on some errors and a JSON string on others.
+  # Assuming one shape made the error handler itself raise, turning a readable
+  # rejection into a 500 and a useless "Unable to launch ad".
+  it 'reads blame fields when error_data arrives as a JSON string' do
+    body = {
+      error: {
+        code: 100,
+        message: 'Invalid parameter',
+        error_user_title: 'Special Ad Category Errors',
+        error_data: { blame_field_specs: [['Custom age selection is unavailable']] }.to_json
+      }
+    }.to_json
+
+    expect { handle(400, body) }.to raise_error(
+      MetaGraphApi::Error, /Field: Custom age selection is unavailable/
+    )
+  end
+
+  it 'survives error_data that is a string but not JSON' do
+    body = { error: { code: 100, message: 'Invalid parameter', error_data: 'nonsense' } }.to_json
+
+    expect { handle(400, body) }.to raise_error(MetaGraphApi::Error, /Invalid parameter/)
+  end
+
   it 'names the field Meta blamed' do
     body = {
       error: {

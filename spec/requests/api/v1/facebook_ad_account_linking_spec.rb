@@ -432,6 +432,27 @@ RSpec.describe 'Facebook ad account linking', type: :request do
         .with('111', anything, hash_including(special_ad_categories: []))
     end
 
+    # Meta forbids narrowing age in a special ad category; sending 25-65 with
+    # HOUSING failed the ad set with "Custom age selection is unavailable".
+    it 'widens age to 18-65+ when a special ad category applies' do
+      launch_with(special_ad_categories: ['HOUSING'], age_min: 25, age_max: 65)
+
+      expect(MetaGraphApi).to have_received(:create_ad_set) do |_acct, _token, **kwargs|
+        expect(kwargs[:targeting][:age_min]).to eq(18)
+        expect(kwargs[:targeting][:age_max]).to eq(65)
+      end
+      expect(JSON.parse(response.body)['notes'].join(' ')).to match(/Age was widened to 18-65/)
+    end
+
+    it 'keeps the chosen age range for an ordinary ad' do
+      launch_with(special_ad_categories: ['NONE'], age_min: 25, age_max: 54)
+
+      expect(MetaGraphApi).to have_received(:create_ad_set) do |_acct, _token, **kwargs|
+        expect(kwargs[:targeting][:age_min]).to eq(25)
+        expect(kwargs[:targeting][:age_max]).to eq(54)
+      end
+    end
+
     it 'records Ad Builder campaigns as ours' do
       launch_with(special_ad_categories: ['NONE'])
 

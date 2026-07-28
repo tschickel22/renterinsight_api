@@ -381,10 +381,20 @@ class MetaGraphApi
       parts << err['error_user_msg'].presence
       parts << err['message'].presence if parts.compact.empty?
 
-      blamed = Array(err.dig('error_data', 'blame_field_specs')).flatten.compact.uniq
+      blamed = blame_fields(err['error_data'])
       parts << "Field: #{blamed.join(', ')}" if blamed.any?
 
       parts.compact.join(' — ').presence || "HTTP #{response.code}"
+    end
+
+    # error_data comes back as a Hash on some errors and as a JSON *string* on
+    # others. Treating it as one shape crashed the error handler itself, which
+    # turned a readable Meta rejection into a 500 and "Unable to launch ad".
+    def blame_fields(error_data)
+      data = error_data.is_a?(String) ? (JSON.parse(error_data) rescue nil) : error_data
+      return [] unless data.is_a?(Hash)
+
+      Array(data['blame_field_specs']).flatten.compact.uniq
     end
 
     def parse_body(raw)

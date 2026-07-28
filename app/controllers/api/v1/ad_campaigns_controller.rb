@@ -134,7 +134,8 @@ class Api::V1::AdCampaignsController < ApplicationController
       if adset_id.blank?
         location = @company.locations.order(:id).first
         targeting = build_targeting(location: location, radius_miles: radius_miles,
-                                    age_min: age_min, age_max: age_max, interests: interests)
+                                    age_min: age_min, age_max: age_max, interests: interests,
+                                    special_ad_categories: special_ad_categories)
 
         step = 'ad set (budget, schedule and targeting)'
         adset_result = MetaGraphApi.create_ad_set(
@@ -203,6 +204,10 @@ class Api::V1::AdCampaignsController < ApplicationController
       notes << 'Added to the existing ad set, so it shares that budget, schedule and targeting.' if existing_adset_id.present?
       if interests.any? && existing_adset_id.blank?
         notes << 'Interests were not applied — Meta needs its own interest IDs, so this ad set runs broad targeting.'
+      end
+      if special_ad_categories.any? && existing_adset_id.blank? &&
+         (age_min != SPECIAL_CATEGORY_AGE_MIN || age_max != SPECIAL_CATEGORY_AGE_MAX)
+        notes << "Age was widened to 18-65+ — Meta does not allow age targeting in the #{special_ad_categories.join(', ')} category."
       end
 
       render json: {
@@ -483,9 +488,20 @@ class Api::V1::AdCampaignsController < ApplicationController
     render json: serialize(campaign)
   end
 
-  def build_targeting(location:, radius_miles:, age_min:, age_max:, interests:)
+  # Meta forbids narrowing age in a special ad category — housing, employment
+  # and credit ads must run the full 18-65+ range. Sending anything else fails
+  # the ad set outright, so widen rather than pass the user's choice through.
+  SPECIAL_CATEGORY_AGE_MIN = 18
+  SPECIAL_CATEGORY_AGE_MAX = 65
+
+  def build_targeting(location:, radius_miles:, age_min:, age_max:, interests:, special_ad_categories: [])
     lat = location.respond_to?(:latitude)  ? location.latitude  : nil
     lng = location.respond_to?(:longitude) ? location.longitude : nil
+
+    if special_ad_categories.any?
+      age_min = SPECIAL_CATEGORY_AGE_MIN
+      age_max = SPECIAL_CATEGORY_AGE_MAX
+    end
 
     {
       geo_locations: {
