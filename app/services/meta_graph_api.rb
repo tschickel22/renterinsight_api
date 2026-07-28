@@ -160,7 +160,7 @@ class MetaGraphApi
 
     def create_ad_set(ad_account_id, access_token, campaign_id:, name:, daily_budget_cents:, targeting:,
                       billing_event: 'IMPRESSIONS', optimization_goal: 'LEAD_GENERATION', start_time: nil,
-                      promoted_object: nil)
+                      end_time: nil, promoted_object: nil)
       params = {
         campaign_id:       campaign_id,
         name:              name,
@@ -171,6 +171,9 @@ class MetaGraphApi
         start_time:        start_time || Time.current.iso8601,
         status:            'PAUSED'
       }
+      # Without an end_time a daily-budget ad set runs until manually paused —
+      # the wizard's "3 days / $27 total" would quietly keep spending.
+      params[:end_time]        = end_time if end_time.present?
       params[:promoted_object] = promoted_object.to_json if promoted_object.present?
 
       post("/act_#{ad_account_id}/adsets", access_token, **params)

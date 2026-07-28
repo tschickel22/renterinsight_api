@@ -232,6 +232,59 @@ RSpec.describe 'Facebook ad account linking', type: :request do
         .with('111', anything, hash_including(objective: 'OUTCOME_LEADS'))
     end
 
+    # Meta's call_to_action types are upper-case constants; the wizard's option
+    # values were lower-case, which Meta rejected with a 200-item list.
+    it 'upcases a lower-case call to action' do
+      launch_with(cta_type: 'learn_more')
+
+      expect(MetaGraphApi).to have_received(:create_ad_creative)
+        .with('111', anything, hash_including(call_to_action_type: 'LEARN_MORE'))
+    end
+
+    it 'keeps a valid upper-case call to action' do
+      launch_with(cta_type: 'GET_QUOTE')
+
+      expect(MetaGraphApi).to have_received(:create_ad_creative)
+        .with('111', anything, hash_including(call_to_action_type: 'GET_QUOTE'))
+    end
+
+    it 'falls back to LEARN_MORE for a call to action Meta would reject' do
+      launch_with(cta_type: 'DO_A_BARREL_ROLL')
+
+      expect(MetaGraphApi).to have_received(:create_ad_creative)
+        .with('111', anything, hash_including(call_to_action_type: 'LEARN_MORE'))
+    end
+
+    # The wizard quotes "Total Spend" off duration, so an ad set with no stop
+    # date would keep billing the daily budget well past what the user agreed to.
+    it 'stops the ad set after the chosen duration' do
+      travel_to Time.utc(2026, 7, 28, 12, 0, 0) do
+        launch_with(duration_days: 3)
+
+        expect(MetaGraphApi).to have_received(:create_ad_set).with(
+          '111', anything,
+          hash_including(end_time: Time.utc(2026, 7, 31, 12, 0, 0).iso8601)
+        )
+      end
+    end
+
+    # Meta needs its own interest ids; name-only entries fail the whole ad set.
+    it 'runs broad rather than sending unresolved interest names' do
+      launch_with(interests: ['manufactured housing', 'first time buyers'])
+
+      expect(MetaGraphApi).to have_received(:create_ad_set) do |_acct, _token, **kwargs|
+        expect(kwargs[:targeting]).not_to have_key(:flexible_spec)
+      end
+      expect(JSON.parse(response.body)['notes'].join(' ')).to match(/Interests were not applied/)
+    end
+
+    it 'forces SIGN_UP when a native lead form is attached' do
+      launch_with(cta_type: 'shop_now', lead_form_id: '999')
+
+      expect(MetaGraphApi).to have_received(:create_ad_creative)
+        .with('111', anything, hash_including(call_to_action_type: 'SIGN_UP'))
+    end
+
     it 'falls back to OUTCOME_LEADS for an unrecognised objective' do
       launch_with(objective: 'NOT_A_REAL_OBJECTIVE', lead_form_id: '999')
 

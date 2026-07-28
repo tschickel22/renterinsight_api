@@ -76,7 +76,7 @@ class Api::V1::AdCampaignsController < ApplicationController
     age_min          = (params[:age_min] || 25).to_i
     age_max          = (params[:age_max] || 65).to_i
     interests        = Array(params[:interests])
-    cta_type         = params[:cta_type].presence || 'LEARN_MORE'
+    cta_type         = normalize_cta_type(params[:cta_type])
 
     use_catalog   = ActiveModel::Type::Boolean.new.cast(params[:use_catalog])
     lead_form_id  = params[:lead_form_id].to_s.presence
@@ -147,7 +147,10 @@ class Api::V1::AdCampaignsController < ApplicationController
           # LEAD_GENERATION optimisation only validates when Meta knows which Page
           # hosts the instant form.
           promoted_object:    (lead_form_id.present? ? { page_id: integration.page_id } : nil),
-          start_time:         Time.current.iso8601
+          start_time:         Time.current.iso8601,
+          # The wizard quotes a total spend off duration; without this the ad
+          # set has no stop date and bills daily until someone notices.
+          end_time:           duration_days.days.from_now.iso8601
         )
         adset_id = adset_result['id']
       end
@@ -198,6 +201,9 @@ class Api::V1::AdCampaignsController < ApplicationController
       notes << "Attached Facebook Lead Form #{lead_form_id}." if lead_form_id.present?
       notes << 'Added to the existing campaign — its objective and special ad category apply.' if existing_campaign_id.present?
       notes << 'Added to the existing ad set, so it shares that budget, schedule and targeting.' if existing_adset_id.present?
+      if interests.any? && existing_adset_id.blank?
+        notes << 'Interests were not applied — Meta needs its own interest IDs, so this ad set runs broad targeting.'
+      end
 
       render json: {
         success:          true,
@@ -472,12 +478,11 @@ class Api::V1::AdCampaignsController < ApplicationController
       },
       age_min: age_min,
       age_max: age_max
-    }.tap do |t|
-      # Interests come in as free-text; actual FB interest IDs would be
-      # resolved by an interest-search call. Leaving as empty targeting for
-      # now means Meta falls back to broad audience expansion.
-      t[:flexible_spec] = [{ interests: interests.map { |i| { name: i } } }] if interests.any?
-    end
+    }
+    # Interests arrive as free text. Meta's flexible_spec needs interest *ids*
+    # from its targeting-search endpoint and rejects name-only entries, so
+    # sending them would fail the whole ad set. Broad targeting is the honest
+    # fallback until interest lookup exists — launch surfaces a note saying so.
   end
 
   # Campaigns created on the current Graph API must use ODAX ("OUTCOME_*")
@@ -518,6 +523,25 @@ class Api::V1::AdCampaignsController < ApplicationController
       .reject { |v| v.blank? || v == 'NONE' }
       .select { |v| Company::SPECIAL_AD_CATEGORIES.key?(v) }
       .uniq
+  end
+
+  # Meta's call_to_action types are upper-case constants. The wizard sends
+  # lower-case option values, which Meta rejects with a 200-item list of what it
+  # would have accepted — so normalise here rather than trusting the client.
+  VALID_CTA_TYPES = %w[
+    LEARN_MORE GET_QUOTE CONTACT_US APPLY_NOW SHOP_NOW SIGN_UP SUBSCRIBE
+    BOOK_TRAVEL DOWNLOAD GET_DIRECTIONS GET_OFFER GET_SHOWTIMES LISTEN_NOW
+    MESSAGE_PAGE NO_BUTTON ORDER_NOW PLAY_GAME REQUEST_TIME SAY_THANKS
+    SEE_MORE SEND_MESSAGE WATCH_MORE WHATSAPP_MESSAGE BOOK_NOW CALL_NOW
+    DONATE_NOW GET_IN_TOUCH INQUIRE_NOW MAKE_AN_APPOINTMENT REGISTER_NOW
+    BUY_NOW SEE_DETAILS TRY_NOW
+  ].freeze
+
+  def normalize_cta_type(raw)
+    value = raw.to_s.strip.upcase
+    return 'LEARN_MORE' if value.blank?
+
+    VALID_CTA_TYPES.include?(value) ? value : 'LEARN_MORE'
   end
 
   def normalize_objective(raw)
