@@ -2,6 +2,8 @@
 
 module Api
   class SettingsController < ApplicationController
+    include CommunicationSecrets
+
     before_action :set_company
     
     # RBAC Authorization - tenant_basic is accessible by any authenticated company user
@@ -81,6 +83,9 @@ module Api
         end
       end
 
+      # Never ship the stored credentials to a client, encrypted or otherwise.
+      settings_hash[:communications] = mask_sensitive_fields(settings_hash[:communications])
+
       render json: settings_hash
     rescue => e
       Rails.logger.error "Platform settings error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
@@ -113,6 +118,7 @@ module Api
       end
 
       value = Setting.get(scope_type, scope_id, key)
+      value = mask_sensitive_fields(value) if key.to_s == 'communications'
       render json: { key: key, value: value }
     end
 
@@ -168,22 +174,24 @@ module Api
         end
         
         Rails.logger.info "✅ [SettingsController] Updating setting: scope=#{scope_type}:#{scope_id}, key=#{key}"
-        Setting.set(scope_type, scope_id, key, value)
-        
+        stored_value = prepare_setting_value(scope_type, scope_id, key, value)
+        Setting.set(scope_type, scope_id, key, stored_value)
+
         render json: {
           setting: {
             scope_type: scope_type,
             scope_id: scope_id,
             key: key,
-            value: value
+            # Echo the masked form, never the ciphertext we just wrote.
+            value: key.to_s == 'communications' ? mask_sensitive_fields(stored_value) : stored_value
           },
           message: 'Settings updated successfully'
         }
       elsif params[:settings].present?
         settings_params = params.require(:settings).permit!
-        
+
         settings_params.each do |key, value|
-          Setting.set('Company', @company.id, key, value)
+          Setting.set('Company', @company.id, key, prepare_setting_value('Company', @company.id, key, value))
         end
 
         render json: {
@@ -477,6 +485,19 @@ module Api
     # RBAC Authorization Methods
     # ============================================
     
+    # `communications` is the one generic setting that carries credentials, so it
+    # can't be written through here verbatim. Two things have to happen that the
+    # raw Setting.set path skipped entirely: the mask the client was shown has to
+    # be swapped back for the stored secret, and a genuinely new secret has to be
+    # encrypted at rest. This is the path the company Email/SMS screens actually
+    # save through, so without it a tenant's Twilio token was stored in plaintext.
+    def prepare_setting_value(scope_type, scope_id, key, value)
+      return value unless key.to_s == 'communications'
+
+      existing = Setting.get(scope_type, scope_id, 'communications')
+      encrypt_sensitive_fields(restore_masked_secrets(value, existing))
+    end
+
     def authorize_settings_read!
       return if skip_rbac?
       unless current_user.has_permission?('company_settings', 'read', 'all', @company&.id)
@@ -842,6 +863,10 @@ module Api
           Rails.logger.info "⚠️ [serialize_settings] Skipped _sources for #{key} (not a Hash)"
         end
       end
+
+      # The merged view carries whichever scope won the cascade, so it can hold
+      # platform, company, or location credentials. Mask before it leaves.
+      base_settings[:communications] = mask_sensitive_fields(base_settings[:communications])
 
       Rails.logger.info "🎯 [serialize_settings] Final settings keys: #{base_settings.keys}"
       if base_settings[:communications].is_a?(Hash)
