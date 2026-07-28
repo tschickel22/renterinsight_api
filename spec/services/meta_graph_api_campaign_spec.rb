@@ -22,6 +22,15 @@ RSpec.describe MetaGraphApi, '.create_campaign' do
     )
   end
 
+  # Regression: a campaign with no bid_strategy made Meta reject the *ad set*
+  # with "Bid Amount Or Bid Constraints Required For Bid Strategy" — which is
+  # why joining an existing campaign worked while creating one did not.
+  it 'sets a bid strategy that needs no bid cap' do
+    create
+
+    expect(posted.last[:params][:bid_strategy]).to eq('LOWEST_COST_WITHOUT_CAP')
+  end
+
   it 'declares ad-set budget sharing when the campaign carries no budget' do
     create
 

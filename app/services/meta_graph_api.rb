@@ -156,11 +156,17 @@ class MetaGraphApi
           date_preset: date_preset)
     end
 
-    def create_campaign(ad_account_id, access_token, name:, objective:, status: 'PAUSED', daily_budget_cents: nil, special_ad_categories: [])
+    def create_campaign(ad_account_id, access_token, name:, objective:, status: 'PAUSED', daily_budget_cents: nil,
+                        special_ad_categories: [], bid_strategy: 'LOWEST_COST_WITHOUT_CAP')
       params = {
         name:                  name,
         objective:             objective,
         status:                status,
+        # Without an explicit strategy Meta can't tell how to bid, and rejects
+        # the ad set with "Bid Amount Or Bid Constraints Required For Bid
+        # Strategy". LOWEST_COST_WITHOUT_CAP is "get the most results for the
+        # budget" — the only one that needs no bid cap or ROAS floor from us.
+        bid_strategy:          bid_strategy,
         special_ad_categories: Array(special_ad_categories).to_json
       }
       if daily_budget_cents
