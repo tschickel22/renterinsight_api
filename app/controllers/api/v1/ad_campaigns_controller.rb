@@ -10,7 +10,7 @@ class Api::V1::AdCampaignsController < ApplicationController
   def index
     return unless authorize_action!('facebook_ads', 'read')
 
-    campaigns = @company.ad_campaigns.active.order(created_at: :desc)
+    campaigns = for_linked_ad_account(@company.ad_campaigns.active).order(created_at: :desc)
     total     = campaigns.count
 
     page     = [(params[:page] || 1).to_i, 1].max
@@ -155,6 +155,7 @@ class Api::V1::AdCampaignsController < ApplicationController
         status:               'ACTIVE',
         daily_budget:         daily_budget,
         created_via:          'dealertide',
+        ad_account_id:        ad_account_id,
         synced_at:            Time.current
       )
 
@@ -305,7 +306,7 @@ class Api::V1::AdCampaignsController < ApplicationController
   def roi_summary
     return unless authorize_action!('facebook_ads', 'read')
 
-    campaigns = @company.ad_campaigns.active
+    campaigns = for_linked_ad_account(@company.ad_campaigns.active)
 
     total_spend   = campaigns.sum(:spend).to_f
     total_leads   = campaigns.sum(:leads_count).to_i
@@ -325,6 +326,24 @@ class Api::V1::AdCampaignsController < ApplicationController
   end
 
   private
+
+  # The Ads tab reports on the ad account that's currently linked. Campaigns
+  # stamped with a different account came from a previous selection and would
+  # otherwise linger forever — the sync upserts but never retires rows. Rows
+  # predating the stamp are null; the next sync re-stamps the real ones.
+  def for_linked_ad_account(scope)
+    ad_account_id = linked_ad_account_id
+    return scope if ad_account_id.blank?
+
+    scope.where(ad_account_id: ad_account_id)
+  end
+
+  def linked_ad_account_id
+    integration = FacebookIntegration.current_for(@company)
+    return nil unless integration
+
+    integration.metadata.to_h.deep_stringify_keys['ad_account_id'].presence
+  end
 
   def set_campaign
     @campaign = @company.ad_campaigns.active.find_by(id: params[:id])

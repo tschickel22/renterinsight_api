@@ -347,4 +347,68 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(JSON.parse(response.body)['error']).to match(/No ad account linked/)
     end
   end
+
+  # Regression: with two ad accounts on one Facebook login, switching the linked
+  # account in Settings left the previous account's campaigns in the Ads tab —
+  # the sync only ever upserts, so nothing retired them. It read as "the toggle
+  # isn't working" when the toggle had in fact saved.
+  describe 'switching the linked ad account' do
+    def link_account(id)
+      integration.update!(metadata: { 'ad_account_id' => id })
+    end
+
+    before do
+      company.ad_campaigns.create!(external_campaign_id: 'old-1', name: 'Renter Insight May 2024',
+                                   status: 'PAUSED', spend: 17.25, ad_account_id: 'OLD-ACCT')
+      company.ad_campaigns.create!(external_campaign_id: 'new-1', name: 'DealerTide Demo Push',
+                                   status: 'ACTIVE', spend: 4.00, ad_account_id: 'NEW-ACCT')
+    end
+
+    it 'lists only the campaigns belonging to the linked account' do
+      link_account('NEW-ACCT')
+
+      get '/api/v1/ad-campaigns', headers: headers
+
+      names = JSON.parse(response.body)['campaigns'].map { |c| c['name'] }
+      expect(names).to eq(['DealerTide Demo Push'])
+    end
+
+    it 'follows the toggle back to the other account' do
+      link_account('OLD-ACCT')
+
+      get '/api/v1/ad-campaigns', headers: headers
+
+      names = JSON.parse(response.body)['campaigns'].map { |c| c['name'] }
+      expect(names).to eq(['Renter Insight May 2024'])
+    end
+
+    it 'keeps the ROI tiles on the same account as the list' do
+      link_account('NEW-ACCT')
+
+      get '/api/v1/ad-campaigns/roi_summary', headers: headers
+
+      body = JSON.parse(response.body)
+      expect(body['total_spend']).to eq(4.0)
+      expect(body['campaign_count']).to eq(1)
+    end
+
+    it 'stamps the source account when syncing so the next switch is clean' do
+      link_account('NEW-ACCT')
+      allow(MetaGraphApi).to receive(:get_ad_campaigns).and_return(
+        { 'data' => [{ 'id' => 'new-2', 'name' => 'Another DealerTide Ad', 'status' => 'ACTIVE' }] }
+      )
+
+      post '/api/v1/ad-campaigns/sync', headers: headers
+
+      expect(AdCampaign.find_by(external_campaign_id: 'new-2').ad_account_id).to eq('NEW-ACCT')
+    end
+
+    it 'shows everything when no account is linked rather than hiding the lot' do
+      integration.update!(metadata: {})
+
+      get '/api/v1/ad-campaigns', headers: headers
+
+      expect(JSON.parse(response.body)['campaigns'].length).to eq(2)
+    end
+  end
 end

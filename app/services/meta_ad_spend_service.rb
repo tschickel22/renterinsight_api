@@ -45,13 +45,17 @@ class MetaAdSpendService
           impressions:     insights['impressions'].to_i,
           clicks:          insights['clicks'].to_i,
           reach:           insights['reach'].to_i,
+          # Stamp the source account so switching accounts switches the list
+          # instead of stacking the new account's campaigns on the old ones.
+          ad_account_id:   ad_account_id,
+          is_deleted:      false,
           synced_at:       Time.current
         )
         record.save!
         synced += 1
       end
 
-      { synced: synced }
+      { synced: synced, ad_account_id: ad_account_id }
     end
 
     private
