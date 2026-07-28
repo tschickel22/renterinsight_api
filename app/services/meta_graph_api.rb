@@ -162,13 +162,13 @@ class MetaGraphApi
         name:                  name,
         objective:             objective,
         status:                status,
-        # Without an explicit strategy Meta can't tell how to bid, and rejects
-        # the ad set with "Bid Amount Or Bid Constraints Required For Bid
-        # Strategy". LOWEST_COST_WITHOUT_CAP is "get the most results for the
-        # budget" — the only one that needs no bid cap or ROAS floor from us.
-        bid_strategy:          bid_strategy,
         special_ad_categories: Array(special_ad_categories).to_json
       }
+      # bid_strategy only belongs here when the budget does. Setting it on a
+      # campaign with no budget earns "No Budget for Campaign — add a budget to
+      # edit the bid strategy"; with ad-set budgets the strategy rides on the
+      # ad set instead.
+      params[:bid_strategy] = bid_strategy if daily_budget_cents && bid_strategy
       if daily_budget_cents
         params[:daily_budget] = daily_budget_cents
       else
@@ -183,13 +183,17 @@ class MetaGraphApi
 
     def create_ad_set(ad_account_id, access_token, campaign_id:, name:, daily_budget_cents:, targeting:,
                       billing_event: 'IMPRESSIONS', optimization_goal: 'LEAD_GENERATION', start_time: nil,
-                      end_time: nil, promoted_object: nil)
+                      end_time: nil, promoted_object: nil, bid_strategy: 'LOWEST_COST_WITHOUT_CAP')
       params = {
         campaign_id:       campaign_id,
         name:              name,
         daily_budget:      daily_budget_cents,
         billing_event:     billing_event,
         optimization_goal: optimization_goal,
+        # The budget lives here, so the bid strategy does too.
+        # LOWEST_COST_WITHOUT_CAP is "most results for the budget" — the only
+        # strategy that needs no bid cap or ROAS floor from us.
+        bid_strategy:      bid_strategy,
         targeting:         targeting.to_json,
         start_time:        start_time || Time.current.iso8601,
         status:            'PAUSED'
