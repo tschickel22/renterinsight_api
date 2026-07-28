@@ -363,6 +363,35 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       expect(body['blocked_by']).to be_nil
     end
 
+    # Without campaign UTMs on the destination, a lead arriving through the
+    # intake form is indistinguishable from a walk-in and the ad reports 0
+    # leads forever. utm_content carries the Meta campaign id because that's
+    # what AdCampaign#matched_leads_scope keys on, and it survives a rename.
+    it 'tags the destination link with campaign UTMs' do
+      launch_with({})
+
+      expect(MetaGraphApi).to have_received(:create_ad_creative) do |_acct, _token, **kwargs|
+        link = URI.parse(kwargs[:link])
+        query = Rack::Utils.parse_nested_query(link.query)
+        expect(query['utm_source']).to eq('facebook')
+        expect(query['utm_medium']).to eq('paid_social')
+        expect(query['utm_content']).to eq('c1')
+        expect(query['utm_campaign']).to be_present
+        expect(link.host).to eq('app.dealertide.com')
+        expect(link.path).to eq('/f/abc')
+      end
+    end
+
+    it 'keeps query params the destination already had' do
+      launch_with(link_url: 'https://app.dealertide.com/f/abc?ref=newsletter')
+
+      expect(MetaGraphApi).to have_received(:create_ad_creative) do |_acct, _token, **kwargs|
+        query = Rack::Utils.parse_nested_query(URI.parse(kwargs[:link]).query)
+        expect(query['ref']).to eq('newsletter')
+        expect(query['utm_content']).to eq('c1')
+      end
+    end
+
     it 'forces SIGN_UP when a native lead form is attached' do
       launch_with(cta_type: 'shop_now', lead_form_id: '999')
 

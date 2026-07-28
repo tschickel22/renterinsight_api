@@ -164,11 +164,17 @@ class Api::V1::AdCampaignsController < ApplicationController
       end
 
       step = 'creative (text, image and link)'
+      # Tag the destination so leads that arrive through it can be traced back
+      # to this campaign. Without it an intake-form lead lands with no UTMs and
+      # AdCampaign#matched_leads_scope can never attribute it — leaving the ad
+      # permanently reporting 0 leads and -100% ROI.
+      tagged_link = tag_link_with_campaign(link_url, campaign_id: campaign_id, campaign_name: campaign_name)
+
       creative_result = MetaGraphApi.create_ad_creative(
         ad_account_id, token,
         page_id:             integration.page_id,
         message:             primary_text,
-        link:                link_url.presence || "https://www.facebook.com/#{integration.page_id}",
+        link:                tagged_link.presence || "https://www.facebook.com/#{integration.page_id}",
         image_url:           image_url.presence,
         headline:            headline_text.presence,
         description:         description_text.presence,
@@ -593,6 +599,29 @@ class Api::V1::AdCampaignsController < ApplicationController
     DONATE_NOW GET_IN_TOUCH INQUIRE_NOW MAKE_AN_APPOINTMENT REGISTER_NOW
     BUY_NOW SEE_DETAILS TRY_NOW
   ].freeze
+
+  # Append campaign UTMs to the ad's destination. utm_content carries the Meta
+  # campaign id because that's the durable key — utm_campaign holds the name,
+  # which someone can rename in Ads Manager, orphaning older leads.
+  # Existing query params are preserved; ours win on conflict.
+  def tag_link_with_campaign(url, campaign_id:, campaign_name:)
+    return url if url.blank?
+
+    uri = URI.parse(url)
+    existing = Rack::Utils.parse_nested_query(uri.query)
+
+    uri.query = existing.merge(
+      'utm_source'   => 'facebook',
+      'utm_medium'   => 'paid_social',
+      'utm_campaign' => campaign_name.to_s,
+      'utm_content'  => campaign_id.to_s
+    ).compact_blank.to_query
+
+    uri.to_s
+  rescue URI::InvalidURIError
+    # A malformed link is the creative step's problem to report, not ours.
+    url
+  end
 
   # Turn the wizard's free-text interests into Meta's targeting ids. Anything
   # we can't match is reported rather than dropped silently — and a lookup
