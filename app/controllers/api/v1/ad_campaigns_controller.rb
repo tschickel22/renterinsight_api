@@ -105,6 +105,9 @@ class Api::V1::AdCampaignsController < ApplicationController
     campaign_name = "RI: #{headline_text.presence&.truncate(40) || 'Ad'} - #{Date.current}"
 
     campaign_id = nil
+    # Four Meta calls behind one button — naming the failing step turns
+    # "Failed to create ad" into something a user can act on.
+    step = 'campaign'
     begin
       campaign_result = MetaGraphApi.create_campaign(
         ad_account_id, token,
@@ -119,6 +122,7 @@ class Api::V1::AdCampaignsController < ApplicationController
       targeting = build_targeting(location: location, radius_miles: radius_miles,
                                   age_min: age_min, age_max: age_max, interests: interests)
 
+      step = 'ad set (budget, schedule and targeting)'
       adset_result = MetaGraphApi.create_ad_set(
         ad_account_id, token,
         campaign_id:        campaign_id,
@@ -133,6 +137,7 @@ class Api::V1::AdCampaignsController < ApplicationController
       )
       adset_id = adset_result['id']
 
+      step = 'creative (text, image and link)'
       creative_result = MetaGraphApi.create_ad_creative(
         ad_account_id, token,
         page_id:             integration.page_id,
@@ -146,6 +151,7 @@ class Api::V1::AdCampaignsController < ApplicationController
       )
       creative_id = creative_result['id']
 
+      step = 'ad'
       ad_result = MetaGraphApi.create_ad(
         ad_account_id, token,
         ad_set_id:   adset_id,
@@ -190,7 +196,10 @@ class Api::V1::AdCampaignsController < ApplicationController
       render json: { error: "Facebook token expired: #{e.message}" }, status: :unprocessable_entity
     rescue MetaGraphApi::Error => e
       cleanup_campaign(campaign_id, token)
-      render json: { error: "Failed to create ad: #{e.message}" }, status: :unprocessable_entity
+      Rails.logger.error "[AdCampaigns#launch] company=#{@company.id} step=#{step} " \
+                         "objective=#{objective} categories=#{special_ad_categories.inspect} " \
+                         "budget_cents=#{daily_budget_cents} error=#{e.message}"
+      render json: { error: "Failed at the #{step} step: #{e.message}" }, status: :unprocessable_entity
     end
   end
 

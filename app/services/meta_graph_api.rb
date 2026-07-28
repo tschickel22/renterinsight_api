@@ -287,10 +287,15 @@ class MetaGraphApi
       when 200..299
         body
       when 400..499
-        err = body.is_a?(Hash) ? body['error'] : nil
+        err     = body.is_a?(Hash) ? body['error'] : nil
         code    = err&.dig('code')
         subcode = err&.dig('error_subcode')
-        msg     = err&.dig('message') || response.body
+
+        # Log the whole payload — the useful detail (which field Meta objected
+        # to) never fits in a toast, but we need it when diagnosing.
+        Rails.logger.error "[MetaGraphApi] #{response.code} #{response.body.to_s.truncate(2000)}"
+
+        msg = error_message_for(err, response)
 
         if [190, 102, 463].include?(code) || [458, 460, 463, 467].include?(subcode)
           raise ExpiredTokenError, msg
@@ -302,8 +307,31 @@ class MetaGraphApi
           raise Error, "Meta Graph API error (#{code}): #{msg}"
         end
       else
-        raise Error, "Meta Graph API error #{response.code}: #{response.body}"
+        Rails.logger.error "[MetaGraphApi] #{response.code} #{response.body.to_s.truncate(2000)}"
+        raise Error, "Meta returned an unexpected #{response.code} response."
       end
+    end
+
+    # Meta's `message` is often just "Invalid parameter". The actionable detail
+    # lives in error_user_msg and error_data.blame_field_specs, which name the
+    # field it objected to — so fold those in rather than making the user guess.
+    def error_message_for(err, response)
+      unless err.is_a?(Hash)
+        # Not a Graph error at all: Meta serves an HTML error page for some
+        # failures. Dumping that page into the UI is worse than useless.
+        return "Meta returned an unreadable #{response.code} response " \
+               '(often an ad account the connected user cannot access).'
+      end
+
+      parts = []
+      parts << err['error_user_title'].presence
+      parts << err['error_user_msg'].presence
+      parts << err['message'].presence if parts.compact.empty?
+
+      blamed = Array(err.dig('error_data', 'blame_field_specs')).flatten.compact.uniq
+      parts << "Field: #{blamed.join(', ')}" if blamed.any?
+
+      parts.compact.join(' — ').presence || "HTTP #{response.code}"
     end
 
     def parse_body(raw)
