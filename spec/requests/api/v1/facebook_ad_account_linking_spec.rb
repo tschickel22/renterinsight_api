@@ -342,7 +342,8 @@ RSpec.describe 'Facebook ad account linking', type: :request do
         expect(response).to have_http_status(:unprocessable_entity)
         expect(body['blocked_by']).to eq('meta_app_development_mode')
         expect(body['error']).to match(/Development mode/i)
-        expect(body['error']).to match(/Nothing was charged/i)
+        expect(body['error']).to match(/nothing will be charged/i)
+        expect(body['error']).to match(/half-built campaign has been removed/i)
       end
 
       it 'still returns Meta\'s own wording for the logs and support' do
@@ -706,6 +707,23 @@ RSpec.describe 'Facebook ad account linking', type: :request do
       launch
 
       expect(MetaGraphApi).to have_received(:delete_campaign).with('new-camp', anything)
+    end
+
+    # Rolling back only on MetaGraphApi::Error meant a bug in our own error
+    # handler (a TypeError) stranded a campaign on Meta with no ad set or
+    # creative — it can never deliver, but it lists like a real campaign.
+    it 'rolls back when something other than a Meta error is raised' do
+      allow(MetaGraphApi).to receive(:create_ad_creative).and_raise(TypeError, 'String does not have #dig')
+
+      expect { launch }.to raise_error(TypeError)
+      expect(MetaGraphApi).to have_received(:delete_campaign).with('new-camp', anything)
+    end
+
+    it 'does not roll back someone else\'s campaign on an unexpected error' do
+      allow(MetaGraphApi).to receive(:create_ad_creative).and_raise(TypeError, 'boom')
+
+      expect { launch(meta_campaign_id: 'existing-camp') }.to raise_error(TypeError)
+      expect(MetaGraphApi).not_to have_received(:delete_campaign)
     end
 
     it 'does not require a budget when joining an existing ad set' do

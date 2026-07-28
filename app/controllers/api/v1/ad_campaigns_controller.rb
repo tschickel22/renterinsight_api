@@ -256,6 +256,16 @@ class Api::V1::AdCampaignsController < ApplicationController
                          "objective=#{objective} categories=#{special_ad_categories.inspect} " \
                          "budget_cents=#{daily_budget_cents} error=#{e.message}"
       render json: launch_error_payload(e, step), status: :unprocessable_entity
+    rescue StandardError => e
+      # Rolling back only on MetaGraphApi::Error meant any unexpected exception
+      # left a half-built campaign stranded on Meta — a bug in our own error
+      # handler did exactly that, orphaning a campaign with no ad set or
+      # creative. It can never deliver, but it shows up in the campaign list
+      # looking like a real one, so tear it down whatever went wrong.
+      cleanup_campaign(campaign_id, token) if created_campaign
+      Rails.logger.error "[AdCampaigns#launch] company=#{@company.id} step=#{step} " \
+                         "unexpected #{e.class}: #{e.message}"
+      raise
     end
   end
 
@@ -468,8 +478,9 @@ class Api::V1::AdCampaignsController < ApplicationController
     if error.subcode == MetaGraphApi::DEV_MODE_SUBCODE
       return {
         error: 'Your Meta app is still in Development mode, so Facebook will not let it publish ads yet. ' \
-               'Nothing was charged and no ad was created — the campaign, audience and budget were all accepted. ' \
-               'This clears once the app passes Meta App Review.',
+               'Facebook accepted the campaign, audience and budget, then refused the creative — so no ad ' \
+               'exists, nothing can be delivered and nothing will be charged. The half-built campaign has ' \
+               'been removed. This clears once the app passes Meta App Review.',
         blocked_by: 'meta_app_development_mode',
         # Everything short of publishing worked, which is the useful part for a
         # reviewer watching a demo of the flow.
@@ -685,7 +696,11 @@ class Api::V1::AdCampaignsController < ApplicationController
 
   def cleanup_campaign(campaign_id, token)
     return if campaign_id.blank?
+
     MetaGraphApi.delete_campaign(campaign_id, token)
+    # Log the success too — a silent cleanup is indistinguishable from one that
+    # never ran, which is how an orphaned campaign went unnoticed.
+    Rails.logger.info "[AdCampaigns#launch] rolled back campaign=#{campaign_id}"
   rescue => e
     Rails.logger.warn "[AdCampaigns#launch] cleanup failed for campaign=#{campaign_id}: #{e.message}"
   end
