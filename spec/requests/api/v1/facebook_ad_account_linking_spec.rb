@@ -33,6 +33,15 @@ RSpec.describe 'Facebook ad account linking', type: :request do
     ] }
   end
 
+  # Meta refused ad-creative calls with "(#200) Requires pages_manage_ads
+  # permission to manage the object" — the scope was simply never requested.
+  describe 'OAuth scopes' do
+    it 'requests every permission the ads flow depends on' do
+      expect(Api::V1::Integrations::FacebookController::SCOPES)
+        .to include('pages_manage_ads', 'ads_management', 'ads_read', 'leads_retrieval')
+    end
+  end
+
   describe 'GET /api/v1/integrations/facebook/ad_accounts' do
     it 'lists ad accounts with the act_ prefix stripped' do
       allow(MetaGraphApi).to receive(:get_user_ad_accounts).with('USER-TOKEN').and_return(graph_accounts)

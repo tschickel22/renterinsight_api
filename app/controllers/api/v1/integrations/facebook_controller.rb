@@ -4,6 +4,11 @@ class Api::V1::Integrations::FacebookController < ApplicationController
   before_action :set_company_scope, except: [:callback]
   skip_before_action :authenticate, only: [:callback]
 
+  # pages_manage_ads is what lets the app act on ads attached to the Page —
+  # without it Meta answers ad-creative and lead-form calls with
+  # "(#200) Requires pages_manage_ads permission to manage the object".
+  # Adding a scope only takes effect on a fresh connection: existing tokens
+  # carry the scopes they were granted, so users must reconnect.
   SCOPES = %w[
     business_management
     leads_retrieval
@@ -11,6 +16,7 @@ class Api::V1::Integrations::FacebookController < ApplicationController
     pages_manage_metadata
     pages_show_list
     pages_manage_posts
+    pages_manage_ads
     ads_management
     ads_read
   ].freeze
