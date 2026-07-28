@@ -71,6 +71,10 @@ module CommunicationSecrets
       next unless restored[section].is_a?(Hash)
 
       keys.each do |key|
+        # Absent means removed: a section the client sent is authoritative, so
+        # omitting a secret key deletes it (that is how switching email provider
+        # drops a stale SMTP password). Clients that mean "keep this" must send
+        # the mask back, not drop the field.
         next unless restored[section].key?(key)
 
         value          = restored[section][key].to_s
