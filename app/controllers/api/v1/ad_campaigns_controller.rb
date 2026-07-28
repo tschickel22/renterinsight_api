@@ -10,8 +10,9 @@ class Api::V1::AdCampaignsController < ApplicationController
   def index
     return unless authorize_action!('facebook_ads', 'read')
 
-    campaigns = for_linked_ad_account(@company.ad_campaigns.active).order(created_at: :desc)
-    total     = campaigns.count
+    all_for_company = @company.ad_campaigns.active
+    campaigns       = for_linked_ad_account(all_for_company).order(created_at: :desc)
+    total           = campaigns.count
 
     page     = [(params[:page] || 1).to_i, 1].max
     per_page = [[((params[:per_page] || 25).to_i), MAX_PER_PAGE].min, 1].max
@@ -24,7 +25,13 @@ class Api::V1::AdCampaignsController < ApplicationController
         total:       total,
         page:        page,
         per_page:    per_page,
-        total_pages: (total.to_f / per_page).ceil
+        total_pages: (total.to_f / per_page).ceil,
+        # An empty list means something different depending on whether we hold
+        # nothing at all or only rows from a previously-linked account. The tab
+        # can then say "sync" instead of "create your first ad".
+        ad_account_id:        linked_ad_account_id,
+        other_account_total:  total.zero? ? all_for_company.count : 0,
+        never_synced:         all_for_company.where.not(synced_at: nil).none?
       }
     }
   end
