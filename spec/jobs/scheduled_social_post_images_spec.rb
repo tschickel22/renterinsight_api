@@ -65,4 +65,55 @@ RSpec.describe GenerateScheduledSocialPostsJob, 'image resolution' do
   it 'returns nothing when the company has no logo set, even if opted in' do
     expect(resolve(schedule_with(use_logo_fallback: true), nil)).to eq([])
   end
+
+  # The model has to see the image it is writing about, otherwise the caption
+  # and the picture have nothing to do with each other.
+  describe 'images reach the generator' do
+    let(:approver) do
+      User.create!(company_id: company.id, email: "a-#{SecureRandom.hex(4)}@example.com",
+                   password: 'Password123!', first_name: 'A', last_name: 'B', role: 'admin')
+    end
+
+    def run(schedule)
+      allow(ScheduleIntentPicker).to receive(:next).and_return('education')
+      allow(PublishSocialPostJob).to receive(:perform_later)
+      job.send(:generate_for, schedule)
+    end
+
+    it 'passes the resolved images to the generator' do
+      schedule = schedule_with(image_pool: ['https://x/pool.jpg'], auto_approve: true,
+                               require_vehicle: false, notify_user_id: approver.id)
+
+      expect(SocialPostGeneratorService).to receive(:generate)
+        .with(hash_including(image_urls: ['https://x/pool.jpg']))
+        .and_return({ caption: 'c' })
+
+      run(schedule)
+    end
+
+    it 'attaches exactly the images the model saw' do
+      schedule = schedule_with(image_pool: ['https://x/pool.jpg'], auto_approve: true,
+                               require_vehicle: false, notify_user_id: approver.id)
+      allow(SocialPostGeneratorService).to receive(:generate).and_return({ caption: 'c' })
+
+      run(schedule)
+
+      expect(company.social_posts.last.image_urls).to eq(['https://x/pool.jpg'])
+    end
+
+    # Resolving advances the pool cursor, so doing it twice in one run would
+    # show the model one image and publish a different one.
+    it 'advances the pool by one per run, not two' do
+      schedule = schedule_with(image_pool: %w[https://x/a.jpg https://x/b.jpg],
+                               auto_approve: true, require_vehicle: false,
+                               notify_user_id: approver.id)
+      allow(SocialPostGeneratorService).to receive(:generate).and_return({ caption: 'c' })
+
+      run(schedule)
+      expect(company.social_posts.last.image_urls).to eq(['https://x/a.jpg'])
+
+      run(schedule.reload)
+      expect(company.social_posts.last.image_urls).to eq(['https://x/b.jpg'])
+    end
+  end
 end

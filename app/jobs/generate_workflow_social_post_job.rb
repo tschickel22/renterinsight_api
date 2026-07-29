@@ -28,6 +28,10 @@ class GenerateWorkflowSocialPostJob < ApplicationJob
 
     intake_form = company.intake_forms.order(:id).first if company.respond_to?(:intake_forms)
 
+    # Resolved before generating so the copy describes the picture that ships
+    # with it, rather than being written blind and having images bolted on.
+    images = extract_images(vehicle)
+
     result = SocialPostGeneratorService.generate(
       company:         company,
       intent_category: intent,
@@ -35,7 +39,8 @@ class GenerateWorkflowSocialPostJob < ApplicationJob
       platform:        schedule&.platform   || 'facebook',
       vehicle:         vehicle,
       tone:            schedule&.tone       || 'friendly',
-      intake_form_url: intake_form&.public_url
+      intake_form_url: intake_form&.public_url,
+      image_urls:      images
     )
 
     post = SocialPost.create!(
@@ -50,7 +55,7 @@ class GenerateWorkflowSocialPostJob < ApplicationJob
       headline:              result[:headline],
       description:           result[:description],
       cta_type:              result[:cta_type],
-      image_urls:            extract_images(vehicle),
+      image_urls:            images,
       utm_campaign:          intent,
       ai_generation_version: result[:ai_generation_version],
       generation_context:    (result[:generation_context] || {}).merge(

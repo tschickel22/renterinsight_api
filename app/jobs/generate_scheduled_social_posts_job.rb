@@ -43,6 +43,14 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
     user_note = (schedule.intent_notes || {})[intent].presence
     topic_details = user_note || (intent == 'seasonal' ? SeasonalContentService.topic_for_seasonal_post : nil)
 
+    # Resolve the images first so the model can see what will actually run
+    # alongside the copy. Generating first and attaching afterwards produced
+    # posts whose caption had nothing to do with the picture.
+    #
+    # Note this advances the image pool cursor, so it must happen exactly once
+    # per run — build_post_from_result takes the result rather than re-resolving.
+    images = resolve_images(schedule, vehicle)
+
     result = SocialPostGeneratorService.generate(
       company:         company,
       intent_category: intent,
@@ -52,10 +60,11 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       user:            schedule.notify_user,
       tone:            schedule.tone,
       intake_form_url: intake_form&.public_url,
-      topic_details:   topic_details
+      topic_details:   topic_details,
+      image_urls:      images
     )
 
-    post = build_post_from_result(schedule, intent, vehicle, intake_form, result)
+    post = build_post_from_result(schedule, intent, vehicle, intake_form, result, images)
     post.save!
 
     post.update_columns(
@@ -90,7 +99,7 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
     SchedulePreviewVehiclePicker.pick_for(schedule, intent: intent)
   end
 
-  def build_post_from_result(schedule, intent, vehicle, intake_form, result)
+  def build_post_from_result(schedule, intent, vehicle, intake_form, result, images)
     caption, headline, description = result.values_at(:caption, :headline, :description)
     hashtags = Array(result[:hashtags])
 
@@ -106,7 +115,7 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       caption:               caption,
       headline:              headline,
       description:           description,
-      image_urls:            resolve_images(schedule, vehicle),
+      image_urls:            images,
       cta_type:              result[:cta_type],
       utm_campaign:          intent,
       ai_generation_version: result[:ai_generation_version],
