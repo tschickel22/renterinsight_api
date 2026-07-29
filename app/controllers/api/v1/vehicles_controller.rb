@@ -90,6 +90,9 @@ module Api
         # Apply non-search filters
         vehicles = vehicles.by_type(params[:type]) if params[:type].present?
         vehicles = vehicles.by_status(params[:status]) if params[:status].present?
+        # Photo-bearing units only. Used by the social post builder, where a unit
+        # with no image makes a post that Instagram will reject outright.
+        vehicles = vehicles.with_images if params[:has_images].to_s == 'true'
         vehicles = vehicles.by_year(params[:year]) if params[:year].present?
         vehicles = vehicles.by_make(params[:make]) if params[:make].present?
         vehicles = vehicles.by_model(params[:model]) if params[:model].present?

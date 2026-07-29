@@ -4,13 +4,20 @@
 # scheduled-post job and the schedule preview endpoint.
 class SchedulePreviewVehiclePicker
   NO_VEHICLE_INTENTS = %w[social_proof education lifestyle seasonal financing].freeze
+  DEFAULT_STATUSES = %w[available].freeze
 
-  def self.pick(company:, intent:)
+  # statuses:       which inventory statuses are eligible. Defaults to
+  #                 'available' only, matching the original behavior.
+  # require_photos: skip units with no photo_url and no images.
+  def self.pick(company:, intent:, statuses: nil, require_photos: false)
     # Only inventory-centric (dealer) industries feature a specific vehicle/unit.
     # SaaS / generic industries never attach a vehicle.
     return nil unless SocialPostIntentCatalog.for_company(company).family == :dealer
     return nil if NO_VEHICLE_INTENTS.include?(intent.to_s)
-    scope = company.vehicles.where(is_deleted: false, status: 'available')
+
+    eligible = Array(statuses).map(&:to_s).select { |s| Vehicle::STATUSES.include?(s) }.presence || DEFAULT_STATUSES
+    scope = company.vehicles.where(is_deleted: false, status: eligible)
+    scope = scope.with_images if require_photos
 
     case intent.to_s
     when 'aged_inventory'
@@ -28,5 +35,16 @@ class SchedulePreviewVehiclePicker
     else
       scope.order(Arel.sql('RANDOM()')).first
     end
+  end
+
+  # Convenience wrapper so callers holding a schedule don't have to unpack its
+  # inventory options by hand.
+  def self.pick_for(schedule, intent:)
+    pick(
+      company:        schedule.company,
+      intent:         intent,
+      statuses:       schedule.selectable_inventory_statuses,
+      require_photos: schedule.require_photos
+    )
   end
 end

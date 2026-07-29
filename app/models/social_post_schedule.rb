@@ -9,6 +9,7 @@ class SocialPostSchedule < ApplicationRecord
   belongs_to :notify_user, class_name: 'User', foreign_key: :notify_user_id, optional: true
 
   validates :frequency, presence: true, inclusion: { in: VALID_FREQUENCIES }
+  validate  :inventory_statuses_are_known
 
   scope :active,   -> { where(active: true, is_deleted: [false, nil]) }
   scope :due,      ->(now = Time.current) { active.where('next_scheduled_at IS NULL OR next_scheduled_at <= ?', now).where('ends_at IS NULL OR ends_at > ?', now) }
@@ -40,7 +41,32 @@ class SocialPostSchedule < ApplicationRecord
     end
   end
 
+  # Statuses the vehicle picker may draw from. Falls back to 'available' so a
+  # schedule that predates the column behaves exactly as it did before.
+  def selectable_inventory_statuses
+    Array(inventory_statuses).map(&:to_s).select { |s| Vehicle::STATUSES.include?(s) }.presence || ['available']
+  end
+
+  # Next image from the operator-supplied pool, round-robin so a schedule with
+  # several images cycles through them instead of reusing the first one.
+  # Advances the cursor as a side effect; returns nil when the pool is empty.
+  def next_pool_image!
+    pool = Array(image_pool).map { |u| u.to_s.strip }.reject(&:blank?)
+    return nil if pool.empty?
+
+    idx = image_pool_cursor.to_i % pool.length
+    update_column(:image_pool_cursor, (idx + 1) % pool.length)
+    pool[idx]
+  end
+
   private
+
+  def inventory_statuses_are_known
+    unknown = Array(inventory_statuses).map(&:to_s) - Vehicle::STATUSES
+    return if unknown.empty?
+
+    errors.add(:inventory_statuses, "contains unknown status: #{unknown.join(', ')}")
+  end
 
   def next_slot_on_days(from:, times:, days:)
     times_of_day = times.map { |t| parse_time_of_day(t) }.compact.sort

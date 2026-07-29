@@ -75,7 +75,7 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
     return unless authorize_action!('social_posts', 'update')
 
     intent = ScheduleIntentPicker.next(rotation: Array(@schedule.intent_rotation), last: @schedule.last_intent_used)
-    vehicle = SchedulePreviewVehiclePicker.pick(company: @company, intent: intent)
+    vehicle = SchedulePreviewVehiclePicker.pick_for(@schedule, intent: intent)
 
     post = @company.social_posts.create!(
       platform:           @schedule.platform,
@@ -113,7 +113,7 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
 
     5.times do
       intent = ::ScheduleIntentPicker.next(rotation: Array(schedule.intent_rotation), last: last_intent)
-      vehicle = ::SchedulePreviewVehiclePicker.pick(company: @company, intent: intent)
+      vehicle = ::SchedulePreviewVehiclePicker.pick_for(schedule, intent: intent)
       previews << {
         scheduled_at:    next_at&.iso8601,
         intent_category: intent,
@@ -146,16 +146,21 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
     params.require(:social_post_schedule).permit(
       :name, :frequency, :auto_approve, :require_vehicle, :platform, :post_type,
       :tone, :intake_form_id, :notify_user_id, :location_id, :active, :ends_at,
-      preferred_times:  [],
-      preferred_days:   [],
-      intent_rotation:  [],
-      intent_notes:     {} # { intent => optional idea text }
+      :require_photos, :use_logo_fallback,
+      preferred_times:    [],
+      preferred_days:     [],
+      intent_rotation:    [],
+      inventory_statuses: [],
+      image_pool:         [],
+      intent_notes:       {} # { intent => optional idea text }
     )
   end
 
   def build_ephemeral_schedule_from_params
     raw = params.permit(:frequency, :platform, :post_type, :tone, :auto_approve,
-                        preferred_times: [], preferred_days: [], intent_rotation: [], intent_notes: {}).to_h
+                        :require_photos, :use_logo_fallback,
+                        preferred_times: [], preferred_days: [], intent_rotation: [],
+                        inventory_statuses: [], image_pool: [], intent_notes: {}).to_h
     return nil if raw[:frequency].blank?
     SocialPostSchedule.new(raw.merge(company_id: @company.id))
   end
@@ -177,6 +182,10 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
       active:             s.active,
       auto_approve:       s.auto_approve,
       require_vehicle:    s.require_vehicle,
+      require_photos:     s.require_photos,
+      inventory_statuses: s.selectable_inventory_statuses,
+      image_pool:         Array(s.image_pool),
+      use_logo_fallback:  s.use_logo_fallback,
       platform:           s.platform,
       post_type:          s.post_type,
       tone:               s.tone,

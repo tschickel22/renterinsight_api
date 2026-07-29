@@ -28,7 +28,7 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
   def generate_for(schedule)
     company = schedule.company
     intent  = ScheduleIntentPicker.next(rotation: schedule.intent_rotation, last: schedule.last_intent_used)
-    vehicle = SchedulePreviewVehiclePicker.pick(company: company, intent: intent)
+    vehicle = SchedulePreviewVehiclePicker.pick_for(schedule, intent: intent)
 
     return reschedule(schedule, last_intent: intent, reason: 'no_vehicle_available') if schedule.require_vehicle && vehicle.nil? && vehicle_required_for_intent?(company, intent)
 
@@ -85,7 +85,7 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       caption:               caption,
       headline:              headline,
       description:           description,
-      image_urls:            extract_vehicle_images(vehicle),
+      image_urls:            resolve_images(schedule, vehicle),
       cta_type:              result[:cta_type],
       utm_campaign:          intent,
       ai_generation_version: result[:ai_generation_version],
@@ -97,6 +97,25 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
         'ad_settings'  => result[:ad_settings]
       ).compact
     )
+  end
+
+  # Images for a generated post, most-specific source first:
+  #   1. photos on the featured unit
+  #   2. the schedule's image pool, rotated so repeat posts don't reuse one image
+  #   3. the company logo, but only if the schedule opted in
+  # When none of those produce anything the post stays imageless by design —
+  # we never invent an image for a listing.
+  def resolve_images(schedule, vehicle)
+    from_vehicle = extract_vehicle_images(vehicle)
+    return from_vehicle if from_vehicle.any?
+
+    pooled = schedule.next_pool_image!
+    return [pooled] if pooled.present?
+
+    return [] unless schedule.use_logo_fallback
+
+    logo = schedule.company.try(:logo)
+    logo.present? ? [logo] : []
   end
 
   def extract_vehicle_images(vehicle)

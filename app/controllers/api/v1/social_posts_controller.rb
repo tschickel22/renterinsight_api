@@ -291,6 +291,11 @@ class Api::V1::SocialPostsController < ApplicationController
       subject_label:    profile.subject_label,
       default_rotation: profile.default_rotation,
       requires_subject: profile.family == :dealer,
+      # The tenant's own logo, offered in the composer as an opt-in fallback when
+      # a post has no image. Deliberately the company logo and not the platform
+      # brand — a dealership's post must never carry DealerTide's mark.
+      logo_url:           @company.try(:logo).presence,
+      inventory_statuses: Vehicle::STATUSES,
       intents: profile.intents.map do |i|
         { value: i.value, label: i.label, cta: i.cta, requires_subject: i.requires_subject }
       end
