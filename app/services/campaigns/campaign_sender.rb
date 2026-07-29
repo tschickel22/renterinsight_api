@@ -20,9 +20,7 @@ module Campaigns
       @campaign = enrollment.campaign
       @company = @campaign.company
       # Must point to the Rails API server for tracked links, unsubscribe links, and pixel URLs
-      @base_url = base_url || ENV['DMS_API_URL'].presence ||
-                  ENV['CAMPAIGN_BASE_URL'].presence ||
-                  'https://renterinsight-api-staging.onrender.com'
+      @base_url = base_url || Messaging::TrackingUrl.base
     end
 
     def deliver_current_step
@@ -171,8 +169,10 @@ module Campaigns
 
       if result.is_a?(Hash) && result[:success]
         comm = result[:communication]
-        final_html = Messaging::PixelInjector.inject(rendered[:html_body], communication_id: comm.id, base_url: @base_url)
-        comm.update_column(:body, final_html) if final_html != rendered[:html_body]
+        # No pixel injection here. CommunicationService injects it *before* the
+        # provider reads the body, so it reaches the recipient. Re-injecting
+        # afterwards only rewrote the stored copy, which made the DB look
+        # instrumented while the delivered mail carried a different (dead) URL.
         comm.update_column(:campaign_send_id, send_record.id) if Communication.column_names.include?('campaign_send_id')
 
         tracked_link_records.each do |tl|

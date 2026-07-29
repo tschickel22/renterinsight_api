@@ -56,13 +56,7 @@ class TrackedLink < ApplicationRecord
   end
 
   def tracking_url
-    # Must point to the Rails API server (where /t/:token route lives), NOT the frontend app.
-    # RENDER_EXTERNAL_URL is auto-set by Render but may point to a custom domain (e.g. PM platform).
-    # Use DMS_API_URL (explicitly set to the DMS API domain) as the primary source.
-    base = (ENV['DMS_API_URL'].presence ||
-            ENV['CAMPAIGN_BASE_URL'].presence ||
-            'https://renterinsight-api-staging.onrender.com').to_s.chomp('/')
-    "#{base}/t/#{token}"
+    "#{Messaging::TrackingUrl.base}/t/#{token}"
   end
 
   def presigned_download_url(expires_in: 1.hour)

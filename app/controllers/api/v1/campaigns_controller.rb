@@ -380,7 +380,7 @@ class Api::V1::CampaignsController < ApplicationController
       campaign_step_id: step.id, campaign_enrollment_id: 0
     )
 
-    base_url = ENV['DMS_API_URL'].presence || ENV['CAMPAIGN_BASE_URL'].presence || 'https://renterinsight-api-staging.onrender.com'
+    base_url = Messaging::TrackingUrl.base
 
     if @campaign.email_channel?
       rendered = Messaging::EmailRenderer.new(
@@ -605,7 +605,7 @@ class Api::V1::CampaignsController < ApplicationController
       custom_field_values: {}, location: current_location, owner_id: nil, owner: nil
     )
 
-    base_url = ENV['DMS_API_URL'].presence || ENV['CAMPAIGN_BASE_URL'].presence || 'https://renterinsight-api-staging.onrender.com'
+    base_url = Messaging::TrackingUrl.base
     rendered = Messaging::EmailRenderer.new(
       step: step, recipient: recipient, campaign: campaign,
       campaign_send: fake_send, company: @company, base_url: base_url

@@ -380,7 +380,8 @@ class CommunicationService
     return unless communication&.email? && communication.outbound? && communication.id.present?
     return if communication.body.blank?
 
-    base_url = ENV['APP_BASE_URL'].presence || ENV['CAMPAIGN_BASE_URL'].presence || 'https://app.renterinsight.com'
+    # Must be the API host — the pixel route lives here, not on the frontend app.
+    base_url = Messaging::TrackingUrl.base
     pixeled  = Messaging::PixelInjector.inject(communication.body, communication_id: communication.id, base_url: base_url)
 
     return if pixeled == communication.body # already injected or no-op
