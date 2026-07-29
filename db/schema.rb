@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_29_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_29_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5910,6 +5910,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_29_120000) do
     t.jsonb "image_pool", default: [], null: false
     t.integer "image_pool_cursor", default: 0, null: false
     t.boolean "use_logo_fallback", default: false, null: false
+    t.integer "draft_retention_days", default: 7, null: false
     t.index ["company_id", "active"], name: "index_social_post_schedules_on_company_id_and_active"
   end
 

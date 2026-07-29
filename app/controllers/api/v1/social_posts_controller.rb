@@ -474,7 +474,11 @@ class Api::V1::SocialPostsController < ApplicationController
 
   def stats_payload(scope)
     {
-      total:       scope.count,
+      # "Total Posts" means posts that exist as real output — scheduled,
+      # published, or failed in the attempt. Drafts are work in progress, not
+      # posts, and auto-generated ones piled up fast enough to make this tile
+      # meaningless. They still have their own tile via by_status.
+      total:       scope.where.not(status: 'draft').count,
       by_status:   scope.group(:status).count,
       by_platform: scope.group(:platform).count,
       by_intent:   scope.group(:intent_category).count,

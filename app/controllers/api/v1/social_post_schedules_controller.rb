@@ -146,7 +146,7 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
     params.require(:social_post_schedule).permit(
       :name, :frequency, :auto_approve, :require_vehicle, :platform, :post_type,
       :tone, :intake_form_id, :notify_user_id, :location_id, :active, :ends_at,
-      :require_photos, :use_logo_fallback,
+      :require_photos, :use_logo_fallback, :draft_retention_days,
       preferred_times:    [],
       preferred_days:     [],
       intent_rotation:    [],
@@ -186,6 +186,7 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
       inventory_statuses: s.selectable_inventory_statuses,
       image_pool:         Array(s.image_pool),
       use_logo_fallback:  s.use_logo_fallback,
+      draft_retention_days: s.draft_retention_days,
       platform:           s.platform,
       post_type:          s.post_type,
       tone:               s.tone,

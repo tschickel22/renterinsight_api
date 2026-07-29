@@ -39,6 +39,10 @@ default: &default
   sync_social_post_metrics:
     class: SyncSocialPostMetricsJob
     schedule: every day at 3am
+  purge_stale_social_drafts:
+    class: PurgeStaleSocialDraftsJob
+    queue: default
+    schedule: every day at 3:30am
   vehicle_days_on_lot_check:
     class: VehicleDaysOnLotCheckJob
     schedule: every day at 4am

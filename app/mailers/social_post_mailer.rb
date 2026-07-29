@@ -11,7 +11,14 @@ class SocialPostMailer < ApplicationMailer
     @vehicle     = post.vehicle
 
     @approve_url = "#{api_base_url}/api/v1/social-posts/#{post.id}/email_approve?token=#{SocialPostMailer.signed_action_token(post_id: post.id, action: 'approve')}"
-    @edit_url    = "#{frontend_base_url}/marketing/social-media/compose/#{post.id}"
+    # Carry the tenant on the link. Without it the post opens against whatever
+    # company/location the recipient's session happened to be on, and a scoped
+    # lookup against the wrong tenant 404s — easy to hit when two companies have
+    # similar names. These are hints for the UI only; the API still authorizes
+    # the switch, so a recipient can't reach a company they don't belong to.
+    @edit_url = "#{frontend_base_url}/marketing/social-media/compose/#{post.id}" \
+                "?company_id=#{post.company_id}" \
+                "#{post.location_id.present? ? "&location_id=#{post.location_id}" : ''}"
     @decline_url = "#{api_base_url}/api/v1/social-posts/#{post.id}/email_decline?token=#{SocialPostMailer.signed_action_token(post_id: post.id, action: 'decline')}"
     @skip_url    = skip_url_for(post)
 
