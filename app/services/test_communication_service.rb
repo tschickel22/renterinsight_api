@@ -224,8 +224,13 @@ class TestCommunicationService
                 else return nil
                 end
 
-    client_id     = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
-    client_secret = Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
+    # Read from ENV first (production / dotenv-local), fall back to credentials —
+    # matches every other OAuth refresh site. Without this, a secret rotation that
+    # only lands in ENV leaves this path using a stale credentials value.
+    client_id     = ENV["#{provider.to_s.upcase}_OAUTH_CLIENT_ID"].presence ||
+                    Rails.application.credentials.dig(:oauth, provider.to_sym, :client_id)
+    client_secret = ENV["#{provider.to_s.upcase}_OAUTH_CLIENT_SECRET"].presence ||
+                    Rails.application.credentials.dig(:oauth, provider.to_sym, :client_secret)
 
     uri = URI(token_url)
     req = Net::HTTP::Post.new(uri)
