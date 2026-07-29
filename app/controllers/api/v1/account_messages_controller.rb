@@ -79,7 +79,7 @@ module Api
           status: 'sent',
           subject: email_params[:subject],
           body: email_params[:content],
-          from_address: email_config[:fromEmail] || 'noreply@renterinsight.com',
+          from_address: email_config[:fromEmail] || Brand.from_email,
           to_address: email_params[:to],
           sent_at: Time.current,
           metadata: build_email_metadata(email_params, email_config)

@@ -142,4 +142,33 @@ RSpec.describe Brand, type: :model do
       expect(Brand.app_url).not_to include('app.renterinsight.com')
     end
   end
+
+  # Mailers, jobs and services used to each carry their own
+  # 'noreply@renterinsight.com' literal, so changing the platform From
+  # address in Platform Admin left a dozen senders on the old brand.
+  describe '.from_email / .from_name' do
+    it 'returns the persisted platform sender identity' do
+      PlatformSetting.general = {
+        fromEmail: 'alerts@notifications.dealertide.com',
+        fromName: 'DealerTide'
+      }
+
+      expect(Brand.from_email).to eq('alerts@notifications.dealertide.com')
+      expect(Brand.from_name).to eq('DealerTide')
+    end
+
+    it 'falls back to the ENV-driven defaults when nothing is persisted' do
+      expect(Brand.from_email).to eq(PlatformSetting.default_general[:fromEmail])
+      expect(Brand.from_name).to eq(PlatformSetting.default_general[:fromName])
+    end
+
+    # The callers are password reset, MFA and transactional mailers — a
+    # settings failure must still yield a usable sender, not raise.
+    it 'still returns a usable sender when the settings lookup raises' do
+      allow(PlatformSetting).to receive(:general).and_raise(StandardError, 'db down')
+
+      expect(Brand.from_email).to be_present
+      expect(Brand.from_name).to be_present
+    end
+  end
 end

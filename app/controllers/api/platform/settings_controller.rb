@@ -349,8 +349,8 @@ module Api
         {
           email: {
             provider: ENV['EMAIL_PROVIDER'] || 'smtp',
-            fromEmail: ENV['EMAIL_FROM'] || 'platform@renterinsight.com',
-            fromName: ENV['EMAIL_FROM_NAME'] || 'RenterInsight Platform',
+            fromEmail: ENV['EMAIL_FROM'] || Brand.from_email,
+            fromName: ENV['EMAIL_FROM_NAME'] || Brand.from_name,
             smtpHost: ENV['SMTP_HOST'] || 'smtp.example.com',
             smtpPort: (ENV['SMTP_PORT'] || 587).to_i,
             smtpUsername: ENV['SMTP_USERNAME'],

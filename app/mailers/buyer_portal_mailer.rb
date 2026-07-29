@@ -180,20 +180,23 @@ class BuyerPortalMailer < ApplicationMailer
     nil
   end
   
+  # Only the *sender identity* falls back to the platform brand. This mailer's
+  # content stays dealership-branded (@company.name) by design — see the brand
+  # kernel notes in CLAUDE.md.
   def get_from_email
     settings = get_platform_settings
-    settings&.dig('communications', 'email', 'fromEmail') || 
-      ENV['PORTAL_FROM_EMAIL'] || 
-      ENV['MAILER_FROM'] || 
-      'noreply@renterinsight.com'
+    settings&.dig('communications', 'email', 'fromEmail') ||
+      ENV['PORTAL_FROM_EMAIL'] ||
+      ENV['MAILER_FROM'] ||
+      Brand.from_email
   end
-  
+
   def get_from_name
     settings = get_platform_settings
-    settings&.dig('communications', 'email', 'fromName') || 
-      ENV['EMAIL_FROM_NAME'] || 
-      ENV['COMPANY_NAME'] || 
-      'RenterInsight'
+    settings&.dig('communications', 'email', 'fromName') ||
+      ENV['EMAIL_FROM_NAME'] ||
+      ENV['COMPANY_NAME'] ||
+      Brand.from_name
   end
   
   def decrypt_setting(encrypted_value)

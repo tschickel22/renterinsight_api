@@ -53,6 +53,31 @@ class Brand
     Rails.env.production? ? 'https://app.dealertide.com' : 'https://localhost:5173'
   end
 
+  # Platform sender identity, for the last-resort fallback in mailers,
+  # services and jobs that first look for a company/location/platform
+  # communications config. Previously each of those hardcoded its own
+  # 'noreply@...' literal, so changing the platform From address in Platform
+  # Admin left a dozen of them still sending under the old brand.
+  #
+  # Falls back to PlatformSetting.default_general — which is pure ENV and
+  # never touches the database — so there is no new literal here and the
+  # rescue path stays safe when the settings lookup itself fails.
+  def self.from_email(company: nil)
+    current(company: company).from_email.presence || default_general_value(:fromEmail)
+  rescue StandardError
+    default_general_value(:fromEmail)
+  end
+
+  def self.from_name(company: nil)
+    current(company: company).from_name.presence || default_general_value(:fromName)
+  rescue StandardError
+    default_general_value(:fromName)
+  end
+
+  def self.default_general_value(key)
+    PlatformSetting.default_general[key]
+  end
+
   def initialize(company: nil)
     platform = PlatformSetting.general
     branding = platform_branding_hash

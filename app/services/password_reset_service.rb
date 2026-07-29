@@ -357,8 +357,8 @@ class PasswordResetService
     Rails.logger.warn("⚠️  Using ENV fallback for email settings")
     {
       'provider' => ENV['EMAIL_PROVIDER'] || 'smtp',
-      'fromEmail' => ENV['MAILER_FROM'] || 'noreply@renterinsight.com',
-      'fromName' => ENV['EMAIL_FROM_NAME'] || 'RenterInsight'
+      'fromEmail' => ENV['MAILER_FROM'] || Brand.from_email,
+      'fromName' => ENV['EMAIL_FROM_NAME'] || Brand.from_name
     }
   end
 

@@ -510,6 +510,6 @@ class WarrantyNotificationService
   def self.get_company_email(company)
     comm_settings = CommunicationSettingsService.for_company(company)
     email_config = comm_settings.email_config
-    email_config[:from_email] || 'noreply@renterinsight.com'
+    email_config[:from_email] || Brand.from_email
   end
 end

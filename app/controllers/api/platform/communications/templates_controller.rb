@@ -302,8 +302,8 @@ module Api
           # Convert to consistent format with defaults
           if channel == 'email'
             {
-              from_email: platform_settings[:fromEmail] || platform_settings[:from_email] || ENV['EMAIL_FROM'] || 'noreply@renterinsight.com',
-              from_name: platform_settings[:fromName] || platform_settings[:from_name] || ENV['EMAIL_FROM_NAME'] || 'RenterInsight',
+              from_email: platform_settings[:fromEmail] || platform_settings[:from_email] || ENV['EMAIL_FROM'] || Brand.from_email,
+              from_name: platform_settings[:fromName] || platform_settings[:from_name] || ENV['EMAIL_FROM_NAME'] || Brand.from_name,
               provider: platform_settings[:provider] || ENV['EMAIL_PROVIDER'] || 'smtp'
             }
           else # sms

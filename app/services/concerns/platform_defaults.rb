@@ -50,8 +50,8 @@ module PlatformDefaults
     
     result = {
       'smtp_provider' => email_provider,
-      'smtp_from_email' => email_settings['fromEmail'] || email_settings[:fromEmail] || 'noreply@renterinsight.com',
-      'smtp_from_name' => email_settings['fromName'] || email_settings[:fromName] || 'RenterInsight',
+      'smtp_from_email' => email_settings['fromEmail'] || email_settings[:fromEmail] || Brand.from_email,
+      'smtp_from_name' => email_settings['fromName'] || email_settings[:fromName] || Brand.from_name,
       'smtp_host' => email_settings['smtpHost'] || email_settings[:smtpHost],
       'smtp_port' => email_settings['smtpPort'] || email_settings[:smtpPort],
       'smtp_username' => email_settings['smtpUsername'] || email_settings[:smtpUsername],
@@ -68,8 +68,8 @@ module PlatformDefaults
     Rails.logger.error "Error loading platform communication settings: #{e.message}"
     {
       'smtp_provider' => 'sendgrid',
-      'smtp_from_email' => 'noreply@renterinsight.com',
-      'smtp_from_name' => 'RenterInsight',
+      'smtp_from_email' => Brand.from_email,
+      'smtp_from_name' => Brand.from_name,
       'smtp_host' => nil,
       'smtp_port' => nil,
       'smtp_username' => nil,

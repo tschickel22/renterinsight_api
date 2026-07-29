@@ -79,8 +79,10 @@ class PlatformSetting
       {
         email: {
           provider: ENV['EMAIL_PROVIDER'] || 'smtp',
-          fromEmail: ENV['EMAIL_FROM'] || 'platform@renterinsight.com',
-          fromName: ENV['EMAIL_FROM_NAME'] || 'RenterInsight Platform',
+          # Defer to the brand kernel's defaults rather than carrying a second
+          # sender literal that drifts from default_general.
+          fromEmail: ENV['EMAIL_FROM'] || default_general[:fromEmail],
+          fromName: ENV['EMAIL_FROM_NAME'] || default_general[:fromName],
           isEnabled: ENV['EMAIL_ENABLED'] != 'false'
         },
         sms: {

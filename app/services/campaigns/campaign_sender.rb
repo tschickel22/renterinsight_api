@@ -250,10 +250,10 @@ module Campaigns
 
     # From-address for test_platform_send. Uses the campaign's configured
     # display name (if any) wrapped around a platform-verified inbox. Falls
-    # back to a hardcoded no-reply so we always render a valid RFC-5322
-    # address even when the campaign has no display name set.
+    # back to the brand kernel's From address so we always render a valid
+    # RFC-5322 address even when the campaign has no display name set.
     def platform_test_from_address
-      base = ENV['PLATFORM_TEST_FROM'].presence || 'no-reply@renterinsight.com'
+      base = ENV['PLATFORM_TEST_FROM'].presence || Brand.from_email
       name = @campaign.try(:from_display_name).to_s.strip
       name.present? ? "#{name} <#{base}>" : base
     end
