@@ -53,9 +53,24 @@ RSpec.describe GenerateScheduledSocialPostsJob, 'one_time schedules' do
   end
 
   describe 'when it fires' do
-    it 'publishes without waiting on an approval email' do
-      schedule = one_time
-      expect(SocialPostMailer).not_to receive(:approval_needed)
+    # The post is generated at run time, so scheduling it is not the same as
+    # having seen it — approval still applies.
+    it 'sends the post for approval when auto-approve is off' do
+      approver = User.create!(
+        company_id: company.id, email: "a-#{SecureRandom.hex(4)}@example.com",
+        password: 'Password123!', first_name: 'A', last_name: 'Pprover', role: 'admin'
+      )
+      schedule = one_time(auto_approve: false, notify_user_id: approver.id)
+      mailer = double(deliver_later: true)
+      expect(SocialPostMailer).to receive(:approval_needed).and_return(mailer)
+
+      described_class.new.send(:generate_for, schedule)
+
+      expect(company.social_posts.last.status).to eq('draft')
+    end
+
+    it 'publishes straight away when auto-approve is on' do
+      schedule = one_time(auto_approve: true)
       expect(PublishSocialPostJob).to receive(:perform_later)
 
       described_class.new.send(:generate_for, schedule)
@@ -103,13 +118,6 @@ RSpec.describe GenerateScheduledSocialPostsJob, 'one_time schedules' do
   end
 
   describe 'recurring schedules' do
-    it 'still honors auto_approve rather than publishing unattended' do
-      schedule = company.social_post_schedules.create!(
-        frequency: 'weekly', auto_approve: false, require_vehicle: false
-      )
-      expect(schedule.effective_auto_approve?).to be(false)
-    end
-
     it 'keeps recurring after it fires' do
       schedule = company.social_post_schedules.create!(
         frequency: 'weekly', auto_approve: true, require_vehicle: false,

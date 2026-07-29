@@ -27,13 +27,6 @@ class SocialPostSchedule < ApplicationRecord
     frequency.to_s == 'one_time'
   end
 
-  # A one-time schedule is the user explicitly asking for this post at this
-  # time, so there is nobody left to approve it — it publishes on its own.
-  # Recurring schedules keep their auto_approve setting.
-  def effective_auto_approve?
-    one_time? || auto_approve
-  end
-
   scope :active,   -> { where(active: true, is_deleted: [false, nil]) }
   scope :due,      ->(now = Time.current) { active.where('next_scheduled_at IS NULL OR next_scheduled_at <= ?', now).where('ends_at IS NULL OR ends_at > ?', now) }
 
