@@ -91,6 +91,29 @@ RSpec.describe GenerateScheduledSocialPostsJob, 'image resolution' do
       run(schedule)
     end
 
+    # Only the first image publishes, so describing the rest would put details
+    # in the copy that nobody can see.
+    it 'shows the model only the image that will publish' do
+      vehicle = company.vehicles.create!(
+        inventory_id: "INV-#{SecureRandom.hex(4)}", listing_type: 'manufactured_home',
+        serial_number: "SN-#{SecureRandom.hex(4)}", year: 2024, make: 'Clayton',
+        model: 'Breeze', bedrooms: 3, bathrooms: 2, status: 'available',
+        photo_url: 'https://x/hero.jpg',
+        images: [{ 'url' => 'https://x/kitchen.jpg' }, { 'url' => 'https://x/bath.jpg' }]
+      )
+      schedule = schedule_with(auto_approve: true, require_vehicle: false,
+                               notify_user_id: approver.id, vehicle_id: vehicle.id)
+
+      expect(SocialPostGeneratorService).to receive(:generate)
+        .with(hash_including(image_urls: ['https://x/hero.jpg']))
+        .and_return({ caption: 'c' })
+
+      run(schedule)
+
+      # All of them stay attached for a future carousel; only one is described.
+      expect(company.social_posts.last.image_urls.length).to eq(3)
+    end
+
     it 'attaches exactly the images the model saw' do
       schedule = schedule_with(image_pool: ['https://x/pool.jpg'], auto_approve: true,
                                require_vehicle: false, notify_user_id: approver.id)

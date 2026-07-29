@@ -61,7 +61,10 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       tone:            schedule.tone,
       intake_form_url: intake_form&.public_url,
       topic_details:   topic_details,
-      image_urls:      images
+      # Only the first image is published — there is no carousel support — so
+      # that is the only one worth describing. Feeding the model all ten of a
+      # home's photos had it writing about details nobody would ever see.
+      image_urls:      images.first(1)
     )
 
     post = build_post_from_result(schedule, intent, vehicle, intake_form, result, images)

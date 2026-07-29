@@ -40,7 +40,8 @@ class GenerateWorkflowSocialPostJob < ApplicationJob
       vehicle:         vehicle,
       tone:            schedule&.tone       || 'friendly',
       intake_form_url: intake_form&.public_url,
-      image_urls:      images
+      # Only the first image publishes, so it is the only one to describe.
+      image_urls:      images.first(1)
     )
 
     post = SocialPost.create!(
