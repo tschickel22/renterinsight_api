@@ -28,9 +28,14 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
   def generate_for(schedule)
     company = schedule.company
     intent  = ScheduleIntentPicker.next(rotation: schedule.intent_rotation, last: schedule.last_intent_used)
-    vehicle = SchedulePreviewVehiclePicker.pick_for(schedule, intent: intent)
+    vehicle = pick_vehicle(schedule, intent)
 
-    return reschedule(schedule, last_intent: intent, reason: 'no_vehicle_available') if schedule.require_vehicle && vehicle.nil? && vehicle_required_for_intent?(company, intent)
+    if schedule.require_vehicle && vehicle.nil? && vehicle_required_for_intent?(company, intent)
+      # A one-time schedule's next run is its fixed run_at, so rescheduling it
+      # would re-fire every tick forever. Retire it instead.
+      return schedule.one_time? ? retire(schedule, last_intent: intent)
+                                : reschedule(schedule, last_intent: intent, reason: 'no_vehicle_available')
+    end
 
     intake_form = resolve_intake_form(schedule)
 
@@ -58,15 +63,29 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       tagged_url:  build_tagged_url(intake_form, post, result)
     )
 
-    if schedule.auto_approve
+    if schedule.effective_auto_approve?
       post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
       PublishSocialPostJob.perform_later(post.id)
     else
       send_approval_email(post, schedule)
     end
 
-    reschedule(schedule, last_intent: intent, last_generated: true)
+    if schedule.one_time?
+      retire(schedule, last_intent: intent)
+    else
+      reschedule(schedule, last_intent: intent, last_generated: true)
+    end
     post
+  end
+
+  # A schedule the user pinned to a specific unit features that unit, full stop.
+  # Everything else draws from inventory per the schedule's status/photo rules.
+  def pick_vehicle(schedule, intent)
+    if schedule.vehicle_id.present?
+      pinned = schedule.company.vehicles.where(is_deleted: false).find_by(id: schedule.vehicle_id)
+      return pinned if pinned
+    end
+    SchedulePreviewVehiclePicker.pick_for(schedule, intent: intent)
   end
 
   def build_post_from_result(schedule, intent, vehicle, intake_form, result)
@@ -167,6 +186,18 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
   def default_approver_for(company)
     User.where(company_id: company.id, role: 'admin').order(:id).first ||
       User.where(company_id: company.id).order(:id).first
+  end
+
+  # A one-time schedule has done its job. Deactivate rather than delete so the
+  # user can still see what ran and when.
+  def retire(schedule, last_intent:)
+    schedule.update_columns(
+      active:            false,
+      next_scheduled_at: nil,
+      last_intent_used:  last_intent,
+      last_generated_at: Time.current
+    )
+    Rails.logger.info "[GenerateScheduledSocialPostsJob] schedule=#{schedule.id} one_time fired, deactivated"
   end
 
   def reschedule(schedule, last_intent:, last_generated: false, reason: nil)

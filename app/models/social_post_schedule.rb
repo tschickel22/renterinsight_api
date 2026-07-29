@@ -1,15 +1,38 @@
 # frozen_string_literal: true
 
 class SocialPostSchedule < ApplicationRecord
-  VALID_FREQUENCIES = %w[daily three_per_week weekly biweekly].freeze
+  # one_time fires once at run_at and then deactivates itself. It exists so a
+  # user can schedule a single post for later — the composer could only publish
+  # now or save a draft, and every other frequency is a recurring cadence.
+  VALID_FREQUENCIES = %w[one_time daily three_per_week weekly biweekly].freeze
 
   belongs_to :company
   belongs_to :location,    optional: true
   belongs_to :intake_form, optional: true
   belongs_to :notify_user, class_name: 'User', foreign_key: :notify_user_id, optional: true
+  # Only set on one_time schedules, where the user picks the exact unit to
+  # feature instead of letting the picker draw from inventory.
+  belongs_to :vehicle,     optional: true
 
   validates :frequency, presence: true, inclusion: { in: VALID_FREQUENCIES }
+  validates :run_at, presence: true, if: :one_time?
   validate  :inventory_statuses_are_known
+
+  # `due` treats a null next_scheduled_at as "run now", so a one-time schedule
+  # created without one would fire on the next tick instead of at run_at. Pin it
+  # here rather than in the controller so every caller gets it right.
+  before_save :pin_one_time_next_run
+
+  def one_time?
+    frequency.to_s == 'one_time'
+  end
+
+  # A one-time schedule is the user explicitly asking for this post at this
+  # time, so there is nobody left to approve it — it publishes on its own.
+  # Recurring schedules keep their auto_approve setting.
+  def effective_auto_approve?
+    one_time? || auto_approve
+  end
 
   scope :active,   -> { where(active: true, is_deleted: [false, nil]) }
   scope :due,      ->(now = Time.current) { active.where('next_scheduled_at IS NULL OR next_scheduled_at <= ?', now).where('ends_at IS NULL OR ends_at > ?', now) }
@@ -22,6 +45,10 @@ class SocialPostSchedule < ApplicationRecord
   # Calculate the next scheduled time from `from` based on frequency / preferred_times / days.
   # Returns a Time in the current zone, always in the future relative to `from`.
   def calculate_next_scheduled_at(from: Time.current)
+    # A one-time schedule has an exact moment rather than a recurring slot, and
+    # never yields a next run — the job deactivates it once it has fired.
+    return run_at if one_time?
+
     times = Array(preferred_times).presence || ['10:00']
     days  = Array(preferred_days).map { |d| d.is_a?(Integer) || d.to_s =~ /\A\d+\z/ ? d.to_i : DAY_NAME_TO_WDAY[d.to_s.downcase] }.compact
 
@@ -60,6 +87,13 @@ class SocialPostSchedule < ApplicationRecord
   end
 
   private
+
+  def pin_one_time_next_run
+    return unless one_time? && active?
+    return unless will_save_change_to_run_at? || next_scheduled_at.blank?
+
+    self.next_scheduled_at = run_at
+  end
 
   def inventory_statuses_are_known
     unknown = Array(inventory_statuses).map(&:to_s) - Vehicle::STATUSES

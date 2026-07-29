@@ -38,7 +38,7 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
 
     if @schedule.update(permitted_params)
       # If frequency / preferred_times / days changed, recompute next_scheduled_at
-      if %w[frequency preferred_times preferred_days].any? { |k| @schedule.saved_change_to_attribute?(k) }
+      if %w[frequency preferred_times preferred_days run_at].any? { |k| @schedule.saved_change_to_attribute?(k) }
         @schedule.update_column(:next_scheduled_at, @schedule.calculate_next_scheduled_at)
       end
       render json: serialize(@schedule, detailed: true)
@@ -147,6 +147,7 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
       :name, :frequency, :auto_approve, :require_vehicle, :platform, :post_type,
       :tone, :intake_form_id, :notify_user_id, :location_id, :active, :ends_at,
       :require_photos, :use_logo_fallback, :draft_retention_days,
+      :run_at, :vehicle_id,
       preferred_times:    [],
       preferred_days:     [],
       intent_rotation:    [],
@@ -170,7 +171,8 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
       id: v.id, year: v.year, make: v.make, model: v.model,
       bedrooms: v.try(:bedrooms), bathrooms: v.try(:bathrooms),
       sale_price: v.try(:sale_price), photo_url: v.try(:photo_url),
-      stock_number: v.try(:stock_number)
+      stock_number: v.try(:stock_number), status: v.try(:status),
+      images: v.try(:images)
     }
   end
 
@@ -187,6 +189,9 @@ class Api::V1::SocialPostSchedulesController < ApplicationController
       image_pool:         Array(s.image_pool),
       use_logo_fallback:  s.use_logo_fallback,
       draft_retention_days: s.draft_retention_days,
+      run_at:             s.run_at,
+      vehicle_id:         s.vehicle_id,
+      vehicle:            s.vehicle ? preview_vehicle(s.vehicle) : nil,
       platform:           s.platform,
       post_type:          s.post_type,
       tone:               s.tone,
