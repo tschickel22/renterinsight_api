@@ -77,13 +77,27 @@ class PublishSocialPostJob < ApplicationJob
         image_url: image_url
       )
     else
-      MetaGraphApi.publish_page_post(
-        integration.page_id,
-        integration.page_access_token,
-        message:   build_caption(post),
-        link:      post.tagged_url,
-        photo_url: Array(post.image_urls).first
-      )
+      # Multiple images become a carousel; one or none takes the original path.
+      # Same pages_manage_posts permission either way.
+      images = Array(post.image_urls).map { |u| u.to_s.strip }.reject(&:blank?)
+
+      if images.length > 1
+        MetaGraphApi.publish_page_carousel(
+          integration.page_id,
+          integration.page_access_token,
+          message:    build_caption(post),
+          image_urls: images,
+          link:       post.tagged_url
+        )
+      else
+        MetaGraphApi.publish_page_post(
+          integration.page_id,
+          integration.page_access_token,
+          message:   build_caption(post),
+          link:      post.tagged_url,
+          photo_url: images.first
+        )
+      end
     end
   end
 

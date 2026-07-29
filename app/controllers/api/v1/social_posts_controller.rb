@@ -159,13 +159,26 @@ class Api::V1::SocialPostsController < ApplicationController
             image_url: image_url
           )
         else
-          MetaGraphApi.publish_page_post(
-            integration.page_id,
-            integration.page_access_token,
-            message:   build_post_caption(@post),
-            link:      @post.tagged_url,
-            photo_url: Array(@post.image_urls).first
-          )
+          # More than one image publishes as a carousel; same permission.
+          images = Array(@post.image_urls).map { |u| u.to_s.strip }.reject(&:blank?)
+
+          if images.length > 1
+            MetaGraphApi.publish_page_carousel(
+              integration.page_id,
+              integration.page_access_token,
+              message:    build_post_caption(@post),
+              image_urls: images,
+              link:       @post.tagged_url
+            )
+          else
+            MetaGraphApi.publish_page_post(
+              integration.page_id,
+              integration.page_access_token,
+              message:   build_post_caption(@post),
+              link:      @post.tagged_url,
+              photo_url: images.first
+            )
+          end
         end
     rescue MetaGraphApi::ExpiredTokenError => _e
       integration.update(status: 'expired')
