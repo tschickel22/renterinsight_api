@@ -33,6 +33,26 @@ class Brand
     new(company: company)
   end
 
+  # Frontend app URL for user-facing links (login, deep links, unsubscribe
+  # page). Resolves through the kernel, so ENV supplies the default and a
+  # Platform Admin override wins — one place to change, always accurate.
+  #
+  # This is the *frontend* host. Tracking endpoints (pixel, /t, /u) live on
+  # the API and must use Messaging::TrackingUrl instead; conflating the two
+  # is what silently killed open tracking.
+  #
+  # Rescues because callers are mailers and notification services where a
+  # settings-lookup failure must not take down the send.
+  def self.app_url(company: nil)
+    current(company: company).app_url.presence || default_app_url
+  rescue StandardError
+    default_app_url
+  end
+
+  def self.default_app_url
+    Rails.env.production? ? 'https://app.dealertide.com' : 'https://localhost:5173'
+  end
+
   def initialize(company: nil)
     platform = PlatformSetting.general
     branding = platform_branding_hash

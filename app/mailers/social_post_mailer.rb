@@ -59,8 +59,7 @@ class SocialPostMailer < ApplicationMailer
   end
 
   def frontend_base_url
-    ENV['FRONTEND_URL'].presence ||
-      (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://localhost:5173')
+    Brand.app_url
   end
 
   def skip_url_for(post)

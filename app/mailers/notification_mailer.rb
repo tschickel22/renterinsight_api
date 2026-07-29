@@ -9,9 +9,9 @@ class NotificationMailer < ApplicationMailer
     @company = Company.find_by(id: broadcasting_company_id) if broadcasting_company_id.present?
     @location = Location.find_by(id: notification.location_id) if notification.location_id.present?
     
-    # Get frontend URL for links - respects FRONTEND_URL env var for staging/production
-    @frontend_url = ENV['FRONTEND_URL'] || 
-                    (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://localhost:5173')
+    # Frontend URL for links — resolved through the brand kernel so ENV and
+    # Platform Admin overrides both reach every mailer. Never hardcode a host.
+    @frontend_url = Brand.app_url
     
     Rails.logger.info "[NotificationMailer] Frontend URL: #{@frontend_url}"
     Rails.logger.info "[NotificationMailer] Action URL: #{notification.action_url}"
@@ -74,9 +74,9 @@ class NotificationMailer < ApplicationMailer
     reply_subject_line = @subject.to_s.match?(/\Are:/i) ? @subject.to_s : "Re: #{@subject}"
     @reply_mailto = ("mailto:#{@reply_to_email}?subject=#{ERB::Util.url_encode(reply_subject_line)}" if @reply_to_email.present?)
 
-    # Get frontend URL
-    @frontend_url = ENV['FRONTEND_URL'] ||
-                    (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://staging.crm.landlordinsight.com')
+    # Frontend URL — see above. The old dev fallback here pointed at
+    # staging.crm.landlordinsight.com, a different product entirely.
+    @frontend_url = Brand.app_url
 
     # Full link with domain
     @full_link = "#{@frontend_url}#{@link}"

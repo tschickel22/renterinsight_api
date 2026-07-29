@@ -877,10 +877,7 @@ class ProjectNotificationService
     end
 
     def frontend_base_url
-      base = ENV['FRONTEND_URL'].presence ||
-             Rails.application.credentials.dig(:app, :frontend_url).presence ||
-             'https://app.renterinsight.com'
-      base.chomp('/')
+      Brand.app_url.chomp('/')
     end
 
     def create_bell_notification(recipient:, company:, type:, title:, message:, notifiable: nil, actor_type: nil, actor_id: nil)

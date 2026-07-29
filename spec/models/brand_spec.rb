@@ -104,4 +104,42 @@ RSpec.describe Brand, type: :model do
       expect(hash.keys).to match_array(Brand::ATTRIBUTES)
     end
   end
+
+  # Every user-facing frontend link (mailer deep links, notification "view in
+  # app", unsubscribe page) resolves here, so a single Platform Admin change
+  # or ENV var moves all of them together.
+  describe '.app_url' do
+    around do |example|
+      original = ENV['APP_URL']
+      ENV.delete('APP_URL')
+      example.run
+      original.nil? ? ENV.delete('APP_URL') : ENV['APP_URL'] = original
+    end
+
+    it 'reads APP_URL when no platform override is set' do
+      ENV['APP_URL'] = 'https://app.from-env.com'
+      expect(Brand.app_url).to eq('https://app.from-env.com')
+    end
+
+    it 'lets a Platform Admin override win over ENV' do
+      ENV['APP_URL'] = 'https://app.from-env.com'
+      PlatformSetting.general = { appUrl: 'https://app.from-admin.com' }
+      expect(Brand.app_url).to eq('https://app.from-admin.com')
+    end
+
+    it 'falls back to the environment default when nothing is configured' do
+      expect(Brand.app_url).to eq('https://localhost:5173')
+    end
+
+    # Callers are mailers and notification services — a settings-lookup
+    # failure must degrade to a usable URL, not blow up the send.
+    it 'returns a usable URL when the settings lookup raises' do
+      allow(PlatformSetting).to receive(:general).and_raise(StandardError, 'db down')
+      expect(Brand.app_url).to eq('https://localhost:5173')
+    end
+
+    it 'never returns the stale renterinsight app host as a default' do
+      expect(Brand.app_url).not_to include('app.renterinsight.com')
+    end
+  end
 end

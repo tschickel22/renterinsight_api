@@ -43,8 +43,7 @@ class SocialCommentMailer < ApplicationMailer
   private
 
   def frontend_base_url
-    ENV['FRONTEND_URL'].presence ||
-      (Rails.env.production? ? 'https://app.renterinsight.com' : 'https://localhost:5173')
+    Brand.app_url
   end
 
   # Facebook permalinks typically use "{page_id}_{post_id}" or the raw id.

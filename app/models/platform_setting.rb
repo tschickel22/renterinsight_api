@@ -62,7 +62,9 @@ class PlatformSetting
         fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@renterinsight.com',
         fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'RenterInsight',
         websiteUrl: ENV['PLATFORM_WEBSITE_URL'] || 'https://renterinsight.com',
-        appUrl: ENV['APP_URL'] || ENV['FRONTEND_URL'] || 'https://app.renterinsight.com',
+        # Last-resort only. app.renterinsight.com now resolves to a stale ELB,
+        # so an unset APP_URL/FRONTEND_URL used to send users to a dead host.
+        appUrl: ENV['APP_URL'] || ENV['FRONTEND_URL'] || 'https://app.dealertide.com',
         privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.renterinsight.com/privacy-policy/',
         termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.renterinsight.com/terms-of-use/',
         subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'renterinsight.com',
