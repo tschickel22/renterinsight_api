@@ -53,6 +53,11 @@
       <a href="<%= @skip_url %>" class="btn btn-skip" style="display:inline-block;padding:12px 0;margin-top:8px;text-decoration:none;font-weight:600;background:transparent;color:#6b7280 !important;">Skip this post</a>
     </div>
 
+    <div style="color:#6b7280;font-size:13px;margin-top:4px;">
+      Once approved, the post may take up to 5 minutes to appear on
+      <%= @post.platform.to_s.titleize %>.
+    </div>
+
     <div class="footer">
       You're receiving this because you're a designated approver for <%= @company.name %>. Approvers can always manage scheduled posts in Marketing → Social Media → Schedule.
     </div>

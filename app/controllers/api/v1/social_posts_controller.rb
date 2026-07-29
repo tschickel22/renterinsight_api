@@ -350,7 +350,11 @@ class Api::V1::SocialPostsController < ApplicationController
 
     post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
     PublishSocialPostJob.perform_later(post.id) if defined?(PublishSocialPostJob)
-    render_email_action_page('Post approved and publishing!', success: true)
+    render_email_action_page(
+      'Post approved and publishing!',
+      success: true,
+      note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
+    )
   end
 
   # GET /api/v1/social-posts/:id/email_decline  (token-based, no auth)
@@ -370,9 +374,10 @@ class Api::V1::SocialPostsController < ApplicationController
 
   private
 
-  def render_email_action_page(message, success: false, error: false, declined: false, already: false)
+  def render_email_action_page(message, success: false, error: false, declined: false, already: false, note: nil)
     icon = success ? '✅' : error ? '❌' : declined ? '🚫' : 'ℹ️'
     bg   = success ? '#dcfce7' : error ? '#fee2e2' : declined ? '#fff7ed' : '#dbeafe'
+    sub  = note.presence || 'You can close this tab.'
     html = <<~HTML
       <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Social Post Action</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -386,7 +391,7 @@ class Api::V1::SocialPostsController < ApplicationController
       <body><div class="card">
         <div class="icon">#{icon}</div>
         <div class="msg">#{ERB::Util.html_escape(message)}</div>
-        <div class="sub">You can close this tab.</div>
+        <div class="sub">#{ERB::Util.html_escape(sub)}</div>
       </div></body></html>
     HTML
     render html: html.html_safe, layout: false
