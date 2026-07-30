@@ -87,10 +87,12 @@ module Api
           },
           company: {
             name: company.name,
-            logo_url: branding.dig('logo_url') || company.logo_url,
+            # Company has no logo_url/website methods — logo lives in branding
+            # settings (Company#logo) and the web address is Company#domain.
+            logo_url: branding.dig('logo_url') || company.logo,
             phone: company.phone,
             email: company.email,
-            website: company.website
+            website: company.domain
           }
         }
       end

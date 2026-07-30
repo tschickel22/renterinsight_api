@@ -3,7 +3,9 @@ require 'rails_helper'
 RSpec.describe Communication, type: :model do
   # Associations
   describe 'associations' do
-    it { should belong_to(:communicable) }
+    # Optional by design: the inbound SMS webhook logs replies it cannot match to
+    # any record with communicable: nil, so requiring it would break that path.
+    it { should belong_to(:communicable).optional }
     it { should belong_to(:communication_thread).optional }
     it { should have_many(:communication_events).dependent(:destroy) }
   end
@@ -264,49 +266,6 @@ RSpec.describe Communication, type: :model do
       quote = create(:quote)
       communication = create(:communication, communicable: quote)
       expect(communication.communicable).to eq(quote)
-    end
-  end
-end
-
-# Factory for testing
-FactoryBot.define do
-  factory :communication do
-    association :communicable, factory: :lead
-    direction { 'outbound' }
-    channel { 'email' }
-    provider { 'smtp' }
-    status { 'pending' }
-    subject { 'Test Subject' }
-    body { 'Test email body' }
-    from_address { 'from@example.com' }
-    to_address { 'to@example.com' }
-    metadata { {} }
-    
-    trait :email do
-      channel { 'email' }
-      subject { 'Email Subject' }
-    end
-    
-    trait :sms do
-      channel { 'sms' }
-      subject { nil }
-    end
-    
-    trait :sent do
-      status { 'sent' }
-      sent_at { Time.current }
-    end
-    
-    trait :delivered do
-      status { 'delivered' }
-      sent_at { 1.hour.ago }
-      delivered_at { Time.current }
-    end
-    
-    trait :failed do
-      status { 'failed' }
-      failed_at { Time.current }
-      error_message { 'Test error' }
     end
   end
 end
