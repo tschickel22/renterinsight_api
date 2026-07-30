@@ -137,7 +137,7 @@ module Audiences
 
     def system_prompt_for(mode, source_type)
       base = <<~SYS
-        You are an expert audience-builder for RenterInsight (a CRM/DMS for manufactured-home and RV dealerships).
+        You are an expert audience-builder for #{Brand.current.name} (a CRM/DMS for manufactured-home and RV dealerships).
 
         Your job: convert a user's natural-language description of a recipient list into a structured filter tree.
 

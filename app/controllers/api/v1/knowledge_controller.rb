@@ -235,7 +235,7 @@ module Api
         platform_context = build_platform_context(mod, topic)
 
         system_prompt = <<~PROMPT
-          You are a technical writer for Renter Insight, a dealer management system (DMS) for manufactured home and RV dealers.
+          You are a technical writer for #{Brand.current.name}, a dealer management system (DMS) for manufactured home and RV dealers.
           Write a clear, practical help article in Markdown format.
           Guidelines:
           - Use ## for section headings (not #)
@@ -291,7 +291,7 @@ module Api
             title   = topic.titleize if title.empty?
             slug    = topic.parameterize
             first_p = generated_content.split("\n\n").find { |p| !p.start_with?('#') && p.strip.length > 20 }
-            excerpt = first_p ? first_p.strip[0..200] : "Learn about #{topic.downcase} in Renter Insight."
+            excerpt = first_p ? first_p.strip[0..200] : "Learn about #{topic.downcase} in #{Brand.current.name}."
 
             render json: { title: title, slug: slug, excerpt: excerpt, content: generated_content, generated: true }
           else
@@ -309,7 +309,7 @@ module Api
       def template_article_response(topic)
         {
           title: topic.titleize, slug: topic.parameterize,
-          excerpt: "Learn how to #{topic.downcase} in Renter Insight.",
+          excerpt: "Learn how to #{topic.downcase} in #{Brand.current.name}.",
           generated: false,
           note: 'AI generation unavailable - template provided.',
           content: "## Overview\n\n[Describe what #{topic} is]\n\n## Getting Started\n\n1. Navigate to the relevant module\n2. [Add steps]\n\n## Tips\n\n> **Tip:** [Add tips here]"

@@ -223,7 +223,7 @@ module Workflows
 
     def system_prompt_for(mode)
       base = <<~SYS
-        You are an expert workflow automation designer for RenterInsight, a Dealer Management System (DMS) used by manufactured home and RV dealers. You help dealers build automated workflows that fire when something happens to a Lead, Deal, Contact, Account, Quote, Invoice, Service Ticket, or Vehicle.
+        You are an expert workflow automation designer for #{Brand.current.name}, a Dealer Management System (DMS) used by manufactured home and RV dealers. You help dealers build automated workflows that fire when something happens to a Lead, Deal, Contact, Account, Quote, Invoice, Service Ticket, or Vehicle.
 
         OUTPUT RULES:
         - You MUST respond with a single JSON object, nothing else. No prose, no markdown, no explanation.
