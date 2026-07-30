@@ -17,6 +17,7 @@ class SocialPostSchedule < ApplicationRecord
   validates :frequency, presence: true, inclusion: { in: VALID_FREQUENCIES }
   validates :run_at, presence: true, if: :one_time?
   validate  :inventory_statuses_are_known
+  validate  :image_pool_holds_no_video
 
   # `due` treats a null next_scheduled_at as "run now", so a one-time schedule
   # created without one would fire on the next tick instead of at run_at. Pin it
@@ -86,6 +87,25 @@ class SocialPostSchedule < ApplicationRecord
     return unless will_save_change_to_run_at? || next_scheduled_at.blank?
 
     self.next_scheduled_at = run_at
+  end
+
+  # Generated posts publish their media as photos, so a video in the pool would
+  # be attached as an image and fail at publish time — hours after the mistake
+  # was made, in a job nobody is watching.
+  VIDEO_EXTENSIONS = %w[.mp4 .mov .m4v .avi .webm .mkv].freeze
+
+  def image_pool_holds_no_video
+    offenders = Array(image_pool).select do |url|
+      path = begin
+        URI.parse(url.to_s).path.to_s
+      rescue URI::InvalidURIError
+        url.to_s
+      end
+      VIDEO_EXTENSIONS.any? { |ext| path.downcase.end_with?(ext) }
+    end
+    return if offenders.empty?
+
+    errors.add(:image_pool, 'cannot contain video — scheduled posts publish photos')
   end
 
   def inventory_statuses_are_known

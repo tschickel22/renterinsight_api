@@ -117,6 +117,32 @@ RSpec.describe GenerateScheduledSocialPostsJob, 'one_time schedules' do
     end
   end
 
+  # The upload endpoint accepts video for the composer, but generated posts
+  # publish photos — a video here would fail hours later inside the job.
+  describe 'image pool' do
+    it 'rejects a video in the pool' do
+      schedule = company.social_post_schedules.new(
+        frequency: 'weekly', image_pool: ['https://x/clip.mp4']
+      )
+      expect(schedule).not_to be_valid
+      expect(schedule.errors[:image_pool].join).to match(/cannot contain video/)
+    end
+
+    it 'ignores case and query strings when checking the extension' do
+      schedule = company.social_post_schedules.new(
+        frequency: 'weekly', image_pool: ['https://x/Clip.MOV?sig=abc123']
+      )
+      expect(schedule).not_to be_valid
+    end
+
+    it 'accepts images' do
+      schedule = company.social_post_schedules.new(
+        frequency: 'weekly', image_pool: %w[https://x/a.jpg https://x/b.png]
+      )
+      expect(schedule).to be_valid
+    end
+  end
+
   describe 'recurring schedules' do
     it 'keeps recurring after it fires' do
       schedule = company.social_post_schedules.create!(
