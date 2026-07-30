@@ -13,7 +13,8 @@ module Catalog
       'manufacturedhomes_platform' => 'Catalog::Adapters::ManufacturedHomesPlatformAdapter',
       'avada_sitemap'              => 'Catalog::Adapters::AvadaSitemapAdapter',
       'tru_model_line'             => 'Catalog::Adapters::TruModelLineAdapter',
-      'clayton_epic_region'        => 'Catalog::Adapters::ClaytonEpicRegionAdapter'
+      'clayton_epic_region'        => 'Catalog::Adapters::ClaytonEpicRegionAdapter',
+      'clayton_retail_home_center' => 'Catalog::Adapters::ClaytonRetailHomeCenterAdapter'
     }.freeze
 
     module_function

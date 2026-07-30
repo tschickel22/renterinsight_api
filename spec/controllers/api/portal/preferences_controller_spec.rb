@@ -19,12 +19,17 @@ RSpec.describe Api::Portal::PreferencesController, type: :controller do
     )
   end
 
+  # Portal tokens are minted by JsonWebToken (ENV['JWT_SECRET']) and carry
+  # buyer_portal_access_id — the same shape Api::Portal::BaseController and the
+  # real /api/portal/auth/login flow use. The previous helper signed with
+  # Rails.application.secret_key_base and buyer_id/buyer_type claims, which no
+  # part of the app produces.
   let(:valid_token) do
-    JWT.encode({ buyer_id: lead.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i }, Rails.application.secret_key_base, 'HS256')
+    JsonWebToken.encode({ buyer_portal_access_id: portal_access.id }, 24.hours.from_now)
   end
 
   let(:expired_token) do
-    JWT.encode({ buyer_id: lead.id, buyer_type: 'Lead', exp: 1.hour.ago.to_i }, Rails.application.secret_key_base, 'HS256')
+    JsonWebToken.encode({ buyer_portal_access_id: portal_access.id }, 1.hour.ago)
   end
 
   let(:invalid_token) { 'invalid.token.here' }
@@ -71,9 +76,10 @@ RSpec.describe Api::Portal::PreferencesController, type: :controller do
       it 'returns error message' do
         get :show
         json = JSON.parse(response.body)
-        
-        expect(json['ok']).to eq(false)
-        expect(json['error']).to eq('Authentication required')
+
+        # Shared portal contract (Api::Portal::BaseController), same as quotes /
+        # invoices / documents / agreements.
+        expect(json['error']).to eq('Missing authorization header')
       end
     end
 
@@ -87,12 +93,16 @@ RSpec.describe Api::Portal::PreferencesController, type: :controller do
         expect(response).to have_http_status(:unauthorized)
       end
 
-      it 'returns expired token error' do
+      # Still a 401, but the message is the generic one: JsonWebToken.decode
+      # rescues JWT::ExpiredSignature internally and returns nil, so
+      # BaseController's own `rescue JWT::ExpiredSignature` branch never runs and
+      # an expired token falls through to the nil-payload check. That quirk is
+      # shared by every portal controller, so it is asserted, not "fixed" here.
+      it 'returns an invalid token error' do
         get :show
         json = JSON.parse(response.body)
-        
-        expect(json['ok']).to eq(false)
-        expect(json['error']).to eq('Invalid or expired token')
+
+        expect(json['error']).to eq('Invalid token')
       end
     end
 
@@ -107,27 +117,29 @@ RSpec.describe Api::Portal::PreferencesController, type: :controller do
       end
     end
 
-    context 'when portal access not found' do
-      let(:other_lead) { Lead.create!(first_name: 'Other', last_name: 'User', email: 'other@test.com', phone: '555-5678', source: source, company: company) }
-      let(:other_token) do
-        JWT.encode({ buyer_id: other_lead.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i }, Rails.application.secret_key_base, 'HS256')
+    # A token naming an access record that no longer exists is rejected by
+    # BaseController before the action runs, so this is a 401 rather than the
+    # 404 the old bespoke auth returned. That 404 was unreachable in practice —
+    # every request to this controller 401'd — so nothing depends on it.
+    context 'when the portal access no longer exists' do
+      let(:orphan_token) do
+        JsonWebToken.encode({ buyer_portal_access_id: portal_access.id + 10_000 })
       end
 
       before do
-        request.headers['Authorization'] = "Bearer #{other_token}"
+        request.headers['Authorization'] = "Bearer #{orphan_token}"
       end
 
-      it 'returns not_found status' do
+      it 'returns unauthorized status' do
         get :show
-        expect(response).to have_http_status(:not_found)
+        expect(response).to have_http_status(:unauthorized)
       end
 
       it 'returns error message' do
         get :show
         json = JSON.parse(response.body)
-        
-        expect(json['ok']).to eq(false)
-        expect(json['error']).to eq('Portal access not found')
+
+        expect(json['error']).to eq('Portal access disabled')
       end
     end
   end

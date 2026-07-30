@@ -12,6 +12,15 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   before_action :require_platform_admin
   before_action :set_source, only: %i[show update destroy test run_now runs]
 
+  # Clayton publishes neither a series nor an on-page description for retail
+  # home center models, so both would sit at 0% extraction and trip the
+  # degradation threshold. Marked untracked at creation (same escape hatch Tru
+  # uses) so a healthy Clayton dealer source can reach a clean "success".
+  CLAYTON_UNTRACKED_FIELDS = %w[series description].freeze
+
+  # Debounces directory rebuilds across typeahead keystrokes.
+  CLAYTON_REFRESH_LOCK = 'clayton_directory_refresh_enqueued'
+
   # GET /api/v1/admin/catalog_sources
   def index
     sources = CatalogSource.active.order(:name)
@@ -33,9 +42,53 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     render json: serialize(@source, include_latest_run: true)
   end
 
+  # GET /api/admin/catalog_sources/clayton_home_centers?q=tyler&state=TX
+  # Typeahead behind the "Add Clayton Dealer" flow. Serves the cached national
+  # directory of Clayton retailers so the admin picks a dealer by name instead
+  # of hand-building a base_url.
+  def clayton_home_centers
+    directory = Catalog::ClaytonHomeCenterDirectory
+    # Crawling ~43 state pages takes minutes, so the cache is only ever built by
+    # a job. On a cold or stale cache we kick one off and tell the UI to poll.
+    ensure_clayton_directory_fresh!
+
+    unless directory.loaded?
+      return render json: { items: [], refreshing: true,
+                            message: 'Loading Clayton home centers — try again in a minute.' },
+                    status: :accepted
+    end
+
+    entries = directory.search(params[:q], state: params[:state],
+                                          limit: (params[:limit] || 25).to_i.clamp(1, 100))
+    taken = CatalogSource.active
+                         .where(adapter_type: 'clayton_retail_home_center')
+                         .pluck(:base_url, :id).to_h
+
+    render json: {
+      items:     entries.map { |e| e.merge('existing_source_id' => taken[e['url']]) },
+      fetchedAt: directory.fetched_at,
+      refreshing: false
+    }
+  end
+
+  # POST /api/admin/catalog_sources/refresh_clayton_directory
+  def refresh_clayton_directory
+    ClaytonDirectoryRefreshJob.perform_later
+    render json: { refreshing: true,
+                   fetchedAt: Catalog::ClaytonHomeCenterDirectory.fetched_at },
+           status: :accepted
+  end
+
   # POST /api/v1/admin/catalog_sources
+  #
+  # Accepts either a full catalog_source payload or, for the Add Clayton Dealer
+  # flow, just { home_center_slug: "mobile-home-masters-inc" } — name, base_url
+  # and config are derived from the directory so the admin can't mistype a URL.
   def create
-    source = CatalogSource.new(source_params)
+    attrs = params[:home_center_slug].present? ? clayton_source_attrs : source_params
+    return if performed?
+
+    source = CatalogSource.new(attrs)
     if source.save
       render json: serialize(source), status: :created
     else
@@ -76,7 +129,25 @@ class Api::Admin::CatalogSourcesController < ApplicationController
         base_url_template: 'https://claytonepicexperience.com/homes/?region={region_id}',
         regions: Catalog::Adapters::ClaytonEpicRegionAdapter::REGIONS.map do |id, label|
           { id: id, label: label }
-        end
+        end,
+        # Epic Experience is a narrow promotional line — 7 distinct floor plans
+        # published as 37 SKUs (the leading 2 digits are a plant code). Where a
+        # retailer carries it, those models ALREADY appear in their home center
+        # catalog, so running both sources double-ingests the same model_id.
+        advisory: 'Prefer a Clayton dealer source. Retailers who carry the Epic line ' \
+                  'already list those models in their own catalog — enabling both ' \
+                  'ingests them twice.'
+      },
+      clayton_retail_home_center: {
+        # base_url is derived from the picked home center; admins never type it.
+        picker_endpoint:  '/api/admin/catalog_sources/clayton_home_centers',
+        refresh_endpoint: '/api/admin/catalog_sources/refresh_clayton_directory',
+        untracked_fields: CLAYTON_UNTRACKED_FIELDS,
+        options: [
+          { key: 'include_starting_price', label: 'Pull starting price', type: 'boolean', default: true,
+            help: "Adds this market's starting price to each model. Stored as a suggestion — " \
+                  'it never overwrites the dealer\'s own price. Costs ~7 extra requests per run.' }
+        ]
       }
     }
   end
@@ -187,6 +258,64 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     )
   end
 
+  # Enqueue a rebuild when the cache is empty or past its TTL. Guarded so rapid
+  # typeahead keystrokes don't pile up duplicate crawls.
+  def ensure_clayton_directory_fresh!
+    return unless Catalog::ClaytonHomeCenterDirectory.stale?
+    return if Rails.cache.exist?(CLAYTON_REFRESH_LOCK)
+
+    Rails.cache.write(CLAYTON_REFRESH_LOCK, true, expires_in: 10.minutes)
+    ClaytonDirectoryRefreshJob.perform_later
+  end
+
+  # Build a Clayton dealer source from a directory slug. Renders an error and
+  # returns nil when the slug is unknown or already registered — callers must
+  # check `performed?`.
+  def clayton_source_attrs
+    slug  = params[:home_center_slug].to_s.strip
+    entry = Catalog::ClaytonHomeCenterDirectory.find_by_slug(slug)
+    if entry.nil?
+      render json: { error: "Unknown Clayton home center: #{slug}" }, status: :unprocessable_entity
+      return nil
+    end
+
+    existing = CatalogSource.active.find_by(adapter_type: 'clayton_retail_home_center',
+                                            base_url: entry['url'])
+    if existing
+      render json: { error: "#{entry['name']} is already registered", sourceId: existing.id },
+             status: :conflict
+      return nil
+    end
+
+    overrides = params.fetch(:catalog_source, {}).permit(:schedule, :extraction_threshold).to_h
+    {
+      name:         clayton_source_name(entry),
+      adapter_type: 'clayton_retail_home_center',
+      base_url:     entry['url'],
+      schedule:     'weekly',
+      config: {
+        'untracked_fields'       => CLAYTON_UNTRACKED_FIELDS,
+        'include_starting_price' => include_starting_price?,
+        'home_center'            => entry.slice('slug', 'dealer_id', 'dealer_number', 'brand',
+                                                'city', 'state', 'postal_code')
+      }
+    }.merge(overrides.symbolize_keys)
+  end
+
+  # "Clayton — Mobile Home Masters Inc (Tyler, TX)"
+  def clayton_source_name(entry)
+    where = [entry['city'], entry['state']].compact_blank.join(', ')
+    base  = "Clayton — #{entry['name']}"
+    where.present? ? "#{base} (#{where})" : base
+  end
+
+  # Defaults ON: starting price costs ~7 extra requests per run and dealers who
+  # don't want it can turn it off rather than discover it missing.
+  def include_starting_price?
+    raw = params[:include_starting_price]
+    raw.nil? ? true : ActiveModel::Type::Boolean.new.cast(raw) != false
+  end
+
   def enabling?(attrs)
     ActiveModel::Type::Boolean.new.cast(attrs[:enabled]) == true && !@source.enabled
   end
@@ -259,7 +388,11 @@ class Api::Admin::CatalogSourcesController < ApplicationController
       sqft:        home.square_feet,
       dimensions:  home.dimensions,
       imageCount:  home.images.size,
-      validSmoke:  home.valid_smoke?
+      validSmoke:  home.valid_smoke?,
+      # Clayton retail sources only — lets the admin confirm the starting-price
+      # toggle actually produced prices before enabling. nil for other adapters.
+      startingPrice: home.raw.is_a?(Hash) ? home.raw['starting_price'] : nil,
+      inStock:       home.raw.is_a?(Hash) ? home.raw['in_stock'] : nil
     }
   end
 end
