@@ -64,6 +64,13 @@ class PublishSocialPostJob < ApplicationJob
 
   def publish_via_meta(post, integration)
     if post.platform.to_s == 'instagram'
+      # Instagram video is Reels — a different container flow with its own
+      # aspect-ratio and duration rules. Fail loudly rather than dropping the
+      # video and publishing a bare caption.
+      if post.video_url.present?
+        raise MetaGraphApi::Error, 'Instagram video posting is not supported yet. Publish this to Facebook instead.'
+      end
+
       image_url = Array(post.image_urls).first
       raise MetaGraphApi::Error, 'Instagram posts require at least one image.' if image_url.blank?
 
@@ -75,6 +82,15 @@ class PublishSocialPostJob < ApplicationJob
         integration.page_access_token,
         caption:   build_caption(post),
         image_url: image_url
+      )
+    elsif post.video_url.present?
+      # Facebook can't mix a video with photos in one post, so video wins and
+      # any attached images are ignored rather than silently half-published.
+      MetaGraphApi.publish_page_video(
+        integration.page_id,
+        integration.page_access_token,
+        message:   build_caption(post),
+        video_url: post.video_url
       )
     else
       # Multiple images become a carousel; one or none takes the original path.

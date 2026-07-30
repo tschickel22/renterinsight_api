@@ -146,6 +146,11 @@ class Api::V1::SocialPostsController < ApplicationController
     begin
       result =
         if @post.platform.to_s == 'instagram'
+          # Instagram video is Reels — a separate flow with its own rules.
+          if @post.video_url.present?
+            return render json: { error: 'Instagram video posting is not supported yet. Publish this to Facebook instead.' }, status: :unprocessable_entity
+          end
+
           image_url = Array(@post.image_urls).first
           return render json: { error: 'Instagram posts require at least one image.' }, status: :unprocessable_entity if image_url.blank?
 
@@ -157,6 +162,14 @@ class Api::V1::SocialPostsController < ApplicationController
             integration.page_access_token,
             caption:   build_post_caption(@post),
             image_url: image_url
+          )
+        elsif @post.video_url.present?
+          # Facebook can't mix a video with photos, so video wins outright.
+          MetaGraphApi.publish_page_video(
+            integration.page_id,
+            integration.page_access_token,
+            message:   build_post_caption(@post),
+            video_url: @post.video_url
           )
         else
           # More than one image publishes as a carousel; same permission.
@@ -422,7 +435,7 @@ class Api::V1::SocialPostsController < ApplicationController
       :caption, :headline, :description, :cta_type,
       :tagged_url, :utm_campaign, :utm_content,
       :scheduled_at, :nurture_approved, :nurture_sequence_id,
-      :ai_generation_version,
+      :ai_generation_version, :video_url,
       image_urls: [],
       hashtags: [],
       generation_context: {}
@@ -567,6 +580,7 @@ class Api::V1::SocialPostsController < ApplicationController
       caption:            p.caption,
       headline:           p.headline,
       image_urls:         p.image_urls,
+      video_url:          p.video_url,
       cta_type:           p.cta_type,
       scheduled_at:       p.scheduled_at,
       published_at:       p.published_at,

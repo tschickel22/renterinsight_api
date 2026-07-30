@@ -118,6 +118,22 @@ class MetaGraphApi
       post("/#{page_id}/feed", access_token, **params)
     end
 
+    # Publish a video to a Facebook Page.
+    #
+    # Meta pulls the file from `video_url` itself rather than us streaming bytes
+    # up, so the request returns as soon as it accepts the job — the video is
+    # still transcoding when the id comes back, and won't appear on the Page for
+    # a minute or two. The URL has to be publicly reachable for the pull to work.
+    #
+    # Videos take `description`, not `message`, and cannot carry photos.
+    # Same pages_manage_posts permission as a photo post.
+    def publish_page_video(page_id, access_token, message:, video_url:, title: nil)
+      params = { file_url: video_url, description: message }
+      params[:title] = title if title.present?
+
+      post("/#{page_id}/videos", access_token, **params)
+    end
+
     # Uploads a photo without publishing it and returns its media id. Returns
     # nil rather than raising so one unreachable image can't sink the whole
     # post — the caller publishes whatever succeeded.
