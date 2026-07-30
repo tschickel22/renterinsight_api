@@ -423,6 +423,13 @@ module Campaigns
         Brand voice: #{profile['brand_voice'] || 'professional'}
         #{sender_context_block}
 
+        COPY STYLE:
+        - Never use an em dash (—) or en dash (–) in any subject line, body copy, or
+          description you write. They are a well-known tell that text was written by AI,
+          and this copy goes out under the dealer's name. Use a period, comma, colon, or
+          parentheses instead. Ordinary hyphens in compound words (single-wide, move-in)
+          are fine.
+
         OUTPUT RULES:
         - You MUST respond with a single JSON object, nothing else. No prose, no markdown, no explanation.
         - The JSON shape:

@@ -31,6 +31,12 @@ class AiDraftService
 
   private
 
+  # Applied to every draft this service produces. Em dashes read as machine-written,
+  # and these drafts go out under the dealer's name. See WRITING STYLE in CLAUDE.md.
+  NO_DASH_RULE = 'Never use an em dash (—) or en dash (–). They are a well-known tell ' \
+                 'that text was written by AI. Use a period, comma, colon, or parentheses ' \
+                 'instead. Ordinary hyphens in compound words are fine.'
+
   def email_prompt(params, context)
     company = context[:company_name] || 'our dealership'
     <<~PROMPT
@@ -40,7 +46,8 @@ class AiDraftService
       - Keep it concise (3-4 short paragraphs max)
       - Manufactured housing/RV dealership tone
       - Include subject line as first line prefixed with "Subject: "
-      - Do not include placeholder brackets like [Name] — use the actual name provided
+      - Do not include placeholder brackets like [Name]. Use the actual name provided.
+      - #{NO_DASH_RULE}
     PROMPT
   end
 
@@ -50,11 +57,13 @@ class AiDraftService
       Summarize this #{params['entity_type']} record in 2-3 sentences for a dealership manager.
       Focus on: current status, key dates, value, and any action needed.
       Record data: #{record_data.to_json}
+      #{NO_DASH_RULE}
     PROMPT
   end
 
   def note_prompt(params, context)
-    "Write a brief professional CRM note about: #{params['context']}. Keep it under 3 sentences."
+    "Write a brief professional CRM note about: #{params['context']}. " \
+      "Keep it under 3 sentences. #{NO_DASH_RULE}"
   end
 
   def call_claude(prompt)
