@@ -424,7 +424,7 @@ class ProjectPdfGenerator
         pdf.stroke_horizontal_rule
         pdf.move_down 5
         pdf.font_size(7) do
-          pdf.text "Generated #{Time.current.strftime('%m/%d/%Y %I:%M %p')}  |  Powered by Renter Insight",
+          pdf.text "Generated #{Time.current.strftime('%m/%d/%Y %I:%M %p')}  |  Powered by #{Brand.current.name}",
                    align: :center, color: '999999'
         end
       end

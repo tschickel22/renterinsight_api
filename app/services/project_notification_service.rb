@@ -777,7 +777,7 @@ class ProjectNotificationService
       return body if body.to_s.include?('<html') || body.to_s.include?('<body')
 
       login_url, button_text = if audience == :dealer
-        [dealer_login_url, 'Login to Renter Insight']
+        [dealer_login_url, "Login to #{Brand.current.name}"]
       else
         [contractor_portal_url, 'Login to Contractor Portal']
       end

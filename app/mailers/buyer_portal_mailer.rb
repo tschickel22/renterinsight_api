@@ -7,7 +7,7 @@ class BuyerPortalMailer < ApplicationMailer
   def welcome_email(buyer_access)
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = dealership_name(buyer_access)
     @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
     
     message = mail(
@@ -23,7 +23,7 @@ class BuyerPortalMailer < ApplicationMailer
   def magic_link_email(buyer_access)
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = dealership_name(buyer_access)
     
     # Get the frontend URL - use 5173 for Vite dev server
     frontend_url = ENV['FRONTEND_URL'] || 'http://localhost:5173'
@@ -48,7 +48,7 @@ class BuyerPortalMailer < ApplicationMailer
   def password_reset_email(buyer_access)
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = dealership_name(buyer_access)
     @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
     @reset_link = "#{@portal_url}/auth/reset-password?token=#{buyer_access.reset_token}"
     @expires_in = '1 hour'
@@ -64,7 +64,7 @@ class BuyerPortalMailer < ApplicationMailer
     @quote = quote
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = dealership_name(buyer_access)
     @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
     @quote_url = "#{@portal_url}/quotes/#{quote.id}"
     
@@ -79,7 +79,7 @@ class BuyerPortalMailer < ApplicationMailer
     @quote = quote
     @buyer_access = buyer_access
     @buyer = buyer_access.buyer
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = dealership_name(buyer_access)
     @admin_url = ENV.fetch('ADMIN_URL', 'https://admin.renterinsight.com')
     @quote_url = "#{@admin_url}/quotes/#{quote.id}"
     
@@ -94,7 +94,7 @@ class BuyerPortalMailer < ApplicationMailer
     @loan = loan
     @payment = payment
     @buyer = loan.borrower
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = dealership_name(loan)
     @portal_url = ENV.fetch('PORTAL_URL', 'https://portal.renterinsight.com')
     @loan_url = "#{@portal_url}/loans/#{loan.id}"
     
@@ -123,7 +123,7 @@ class BuyerPortalMailer < ApplicationMailer
     @communication = communication
     @buyer = communication.communicable
     @thread = communication.communication_thread
-    @company_name = ENV.fetch('COMPANY_NAME', 'RenterInsight')
+    @company_name = dealership_name(communication)
     @admin_url = ENV.fetch('ADMIN_URL', 'https://admin.renterinsight.com')
     @thread_url = "#{@admin_url}/communications/threads/#{@thread.id}"
     
@@ -139,7 +139,24 @@ class BuyerPortalMailer < ApplicationMailer
   end
   
   private
-  
+
+  # The dealership's name, not the platform's. A buyer bought their home from a
+  # specific dealer, so portal mail has to carry that dealer's brand. See the
+  # BRAND KERNEL section of CLAUDE.md, which deliberately exempts customer facing
+  # mail from the platform kernel. Falls back to the platform brand only when no
+  # company can be resolved, which should not happen: every buyer_portal_accesses
+  # row in production has a company_id.
+  def dealership_name(record)
+    company =
+      if record.respond_to?(:company) && record.company.present?
+        record.company
+      elsif record.respond_to?(:buyer) && record.buyer.respond_to?(:company)
+        record.buyer.company
+      end
+
+    company&.name.presence || Brand.current.name
+  end
+
   # Configure ActionMailer SMTP from platform settings
   def configure_mailer_from_settings
     settings = get_platform_settings

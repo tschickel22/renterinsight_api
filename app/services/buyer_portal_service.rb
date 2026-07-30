@@ -1,6 +1,17 @@
 # frozen_string_literal: true
 
 class BuyerPortalService
+  # Mirrors BuyerPortalMailer#dealership_name so the logged Communication subject
+  # matches the subject the buyer actually received. Portal mail carries the
+  # dealership's brand, not the platform's, per BRAND KERNEL in CLAUDE.md.
+  def self.dealership_name(buyer_access)
+    company = buyer_access.company.presence ||
+              (buyer_access.buyer.company if buyer_access.buyer.respond_to?(:company))
+
+    company&.name.presence || Brand.current.name
+  end
+  private_class_method :dealership_name
+
   # Create portal access for a buyer with optional welcome email
   def self.create_portal_access(buyer, email, send_welcome: true)
     # Generate a secure random password
@@ -38,7 +49,7 @@ class BuyerPortalService
       channel: 'email',
       provider: 'smtp',
       status: 'sent',
-      subject: "Welcome to #{ENV.fetch('COMPANY_NAME', 'RenterInsight')} Buyer Portal",
+      subject: "Welcome to #{dealership_name(buyer_access)} Buyer Portal",
       body: "Welcome email sent to #{buyer_access.email}",
       from_address: ENV.fetch('PORTAL_FROM_EMAIL', 'portal@renterinsight.com'),
       to_address: buyer_access.email,
@@ -73,7 +84,7 @@ class BuyerPortalService
       channel: 'email',
       provider: 'smtp',
       status: 'sent',
-      subject: "Your Magic Link to #{ENV.fetch('COMPANY_NAME', 'RenterInsight')} Portal",
+      subject: "Your Magic Link to #{dealership_name(buyer_access)} Portal",
       body: "Magic link email sent to #{buyer_access.email}. Link expires in 15 minutes.",
       from_address: ENV.fetch('PORTAL_FROM_EMAIL', 'portal@renterinsight.com'),
       to_address: buyer_access.email,
@@ -109,7 +120,7 @@ class BuyerPortalService
       channel: 'email',
       provider: 'smtp',
       status: 'sent',
-      subject: "Reset Your #{ENV.fetch('COMPANY_NAME', 'RenterInsight')} Portal Password",
+      subject: "Reset Your #{dealership_name(buyer_access)} Portal Password",
       body: "Password reset email sent to #{buyer_access.email}. Link expires in 1 hour.",
       from_address: ENV.fetch('PORTAL_FROM_EMAIL', 'portal@renterinsight.com'),
       to_address: buyer_access.email,

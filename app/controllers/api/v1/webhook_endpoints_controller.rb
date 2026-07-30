@@ -124,7 +124,7 @@ module Api
         end
 
         test_payload = WebhookService.build_envelope("test.ping", {
-          message: "This is a test webhook from Renter Insight",
+          message: "This is a test webhook from #{Brand.current.name}",
           triggered_by: current_user.email,
           timestamp: Time.current.iso8601
         })
