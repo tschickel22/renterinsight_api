@@ -31,7 +31,7 @@ module Catalog
     # merchandise in that market simply carry no starting price — they still
     # ingest, so price is deliberately NOT a tracked extraction field.
     class ClaytonRetailHomeCenterAdapter < BaseAdapter
-      include Catalog::ClaytonFlightPayload
+      include Catalog::NextFlightPayload
 
       SITE_ROOT       = 'https://www.claytonhomes.com'
       CLAYTON_IMG_RE  = %r{\Ahttps?://(?:media\.ffycdn\.net|api\.claytonhomes\.com)/}i

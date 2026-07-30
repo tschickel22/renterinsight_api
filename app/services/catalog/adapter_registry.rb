@@ -14,7 +14,8 @@ module Catalog
       'avada_sitemap'              => 'Catalog::Adapters::AvadaSitemapAdapter',
       'tru_model_line'             => 'Catalog::Adapters::TruModelLineAdapter',
       'clayton_epic_region'        => 'Catalog::Adapters::ClaytonEpicRegionAdapter',
-      'clayton_retail_home_center' => 'Catalog::Adapters::ClaytonRetailHomeCenterAdapter'
+      'clayton_retail_home_center' => 'Catalog::Adapters::ClaytonRetailHomeCenterAdapter',
+      'trove_catalog'              => 'Catalog::Adapters::TroveCatalogAdapter'
     }.freeze
 
     module_function

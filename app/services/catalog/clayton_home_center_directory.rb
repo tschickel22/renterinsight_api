@@ -15,7 +15,7 @@ module Catalog
   #   Catalog::ClaytonHomeCenterDirectory.search('tyler', state: 'TX')
   #   #=> [{ 'slug' => 'mobile-home-masters-inc', 'name' => 'MOBILE HOME MASTERS INC', ... }]
   class ClaytonHomeCenterDirectory
-    include ClaytonFlightPayload
+    include NextFlightPayload
 
     SITE_ROOT    = 'https://www.claytonhomes.com'
     SITEMAP_URL  = "#{SITE_ROOT}/sitemap.xml"

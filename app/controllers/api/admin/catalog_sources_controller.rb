@@ -17,6 +17,9 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # degradation threshold. Marked untracked at creation (same escape hatch Tru
   # uses) so a healthy Clayton dealer source can reach a clean "success".
   CLAYTON_UNTRACKED_FIELDS = %w[series description].freeze
+  # Trove exposes series (it leads the model name) but publishes the description
+  # scaffold with empty bodies on every record, so only description is excused.
+  TROVE_UNTRACKED_FIELDS   = %w[description].freeze
 
   # Debounces directory rebuilds across typeahead keystrokes.
   CLAYTON_REFRESH_LOCK = 'clayton_directory_refresh_enqueued'
@@ -148,6 +151,26 @@ class Api::Admin::CatalogSourcesController < ApplicationController
             help: "Adds this market's starting price to each model. Stored as a suggestion — " \
                   'it never overwrites the dealer\'s own price. Costs ~7 extra requests per run.' }
         ]
+      },
+      trove_catalog: {
+        base_url_template: 'https://trove.{manufacturer}.com',
+        untracked_fields: TROVE_UNTRACKED_FIELDS,
+        snapshots: Catalog::TroveSnapshot.keys.map do |key|
+          snap = Catalog::TroveSnapshot.read(key) || {}
+          { key: key, label: snap['supplier_name'].presence || key,
+            captured_at: snap['captured_at'], home_count: Array(snap['homes']).size }
+        end,
+        options: [
+          { key: 'snapshot_key', label: 'Run from snapshot', type: 'select', default: nil,
+            help: 'Trove answers 429 to any non-browser client, so a live crawl needs the host ' \
+                  'to allowlist us first. A snapshot runs the same parsing path against a ' \
+                  'captured catalog. Clear this to go live once allowlisted.' }
+        ],
+        # Per-dealer Trove storefronts republish the manufacturer catalog with
+        # their own markup, and are Disallow: / in robots.txt. Point sources at
+        # manufacturer hosts; retail price stays dealer-owned in DealerTide.
+        advisory: 'Use the manufacturer host (trove.<maker>.com). Dealer storefronts ' \
+                  '(*.buildtrove.com) disallow crawling and add nothing but their own markup.'
       }
     }
   end

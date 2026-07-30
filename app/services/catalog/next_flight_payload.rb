@@ -4,21 +4,24 @@ require 'net/http'
 require 'uri'
 
 module Catalog
-  # Shared parsing for claytonhomes.com, a Next.js App Router site.
+  # Shared parsing for Next.js App Router sites that ship their data as an RSC
+  # "flight" payload. Used by claytonhomes.com and by Trove-hosted catalogs
+  # (trove.legacyhousing.com and friends) — same framework, same extraction.
   #
-  # The site server-renders everything and makes NO client-side data calls, so
-  # the complete dataset ships inside the initial HTML as an RSC "flight"
-  # payload — a series of `self.__next_f.push([1,"<json fragment>"])` script
-  # tags whose string arguments must be concatenated (a single JSON object is
-  # routinely split across pushes) and JS-unescaped before parsing.
+  # These sites server-render everything and make NO client-side data calls, so
+  # the complete dataset ships inside the initial HTML as a series of
+  # `self.__next_f.push([1,"<json fragment>"])` script tags whose string
+  # arguments must be concatenated (a single JSON object is routinely split
+  # across pushes) and JS-unescaped before parsing.
   #
-  # This matters because the rendered DOM is a SUBSET of the payload: a home
-  # center page renders ~12 <article> cards but carries all 200+ models in the
-  # flight data. Parse the payload, not the DOM.
+  # This matters because the rendered DOM is a SUBSET of the payload: a Clayton
+  # home center page renders ~12 <article> cards but carries all 200+ models in
+  # the flight data. Parse the payload, not the DOM.
   #
-  # robots.txt allows /locations/ and /homes-for-sale/ while disallowing /api/,
-  # so these HTML surfaces are the sanctioned path — there is no API call to make.
-  module ClaytonFlightPayload
+  # Clayton's robots.txt allows /locations/ and /homes-for-sale/ while
+  # disallowing /api/, so these HTML surfaces are the sanctioned path there.
+  # Per-site crawl rights are the caller's responsibility, not this module's.
+  module NextFlightPayload
     FLIGHT_RE  = /self\.__next_f\.push\(\[1,"(.*?)"\]\)/m
     USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' \
                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -121,11 +124,11 @@ module Catalog
 
         http_get(URI.join(url, loc).to_s, accept: accept, redirects: redirects - 1)
       else
-        Rails.logger.warn "[ClaytonFlightPayload] HTTP #{res.code} for #{url}"
+        Rails.logger.warn "[NextFlightPayload] HTTP #{res.code} for #{url}"
         nil
       end
     rescue StandardError => e
-      Rails.logger.warn "[ClaytonFlightPayload] HTTP error for #{url}: #{e.class}: #{e.message}"
+      Rails.logger.warn "[NextFlightPayload] HTTP error for #{url}: #{e.class}: #{e.message}"
       nil
     end
   end
