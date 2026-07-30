@@ -11,10 +11,12 @@ RSpec.describe Brand, type: :model do
     it 'exposes the ENV-fallback kernel from PlatformSetting.general' do
       brand = Brand.current
 
-      expect(brand.name).to eq('RenterInsight')
+      # Name defaults to DealerTide; the addresses and URLs below still default to
+      # the old domain and are tracked separately as part of the cutover.
+      expect(brand.name).to eq('DealerTide')
       expect(brand.support_email).to eq('support@renterinsight.com')
       expect(brand.from_email).to eq('noreply@renterinsight.com')
-      expect(brand.from_name).to eq('RenterInsight')
+      expect(brand.from_name).to eq('DealerTide')
       expect(brand.website_url).to eq('https://renterinsight.com')
       expect(brand.privacy_url).to eq('https://www.renterinsight.com/privacy-policy/')
       expect(brand.terms_url).to eq('https://www.renterinsight.com/terms-of-use/')
@@ -22,7 +24,7 @@ RSpec.describe Brand, type: :model do
     end
 
     it 'falls back short_name to name when not set' do
-      expect(Brand.current.short_name).to eq('RenterInsight')
+      expect(Brand.current.short_name).to eq('DealerTide')
     end
   end
 

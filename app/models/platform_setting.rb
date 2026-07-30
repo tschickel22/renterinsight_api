@@ -56,11 +56,15 @@ class PlatformSetting
     # read them without reaching for `send(:default_general)`.
     def default_general
       {
-        platformName: ENV['PLATFORM_NAME'] || 'RenterInsight',
+        # The brand kernel's root default. Every `|| 'RenterInsight'` fallback
+        # scattered through the app inherits from here, and Brand.current.name
+        # resolves through it, so this is the one literal that decides what an
+        # environment without a Platform settings row calls itself.
+        platformName: ENV['PLATFORM_NAME'] || 'DealerTide',
         supportEmail: ENV['SUPPORT_EMAIL'] || 'support@renterinsight.com',
         salesEmail: ENV['SALES_EMAIL'] || 'sales@renterinsight.com',
         fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@renterinsight.com',
-        fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'RenterInsight',
+        fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'DealerTide',
         websiteUrl: ENV['PLATFORM_WEBSITE_URL'] || 'https://renterinsight.com',
         # Last-resort only. app.renterinsight.com now resolves to a stale ELB,
         # so an unset APP_URL/FRONTEND_URL used to send users to a dead host.
