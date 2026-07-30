@@ -63,6 +63,16 @@ module Webhooks
 
       Rails.logger.info "[TwilioWebhook] Inbound SMS from #{from_number} to #{to_number}: #{body&.truncate(100)}"
 
+      # Resolve the owning tenant from the number that RECEIVED the message, before
+      # any phone-number matching happens. Every lookup below keys off a contact's
+      # phone, which is not unique across tenants — two companies can hold the same
+      # customer. Without this scope a reply to company A's number can match company
+      # B's records and forward the customer's message to the wrong company's rep.
+      twilio_account = TwilioAccount.active.find_by(
+        phone_number: Campaigns::SmsInboundHandler.normalize_phone(to_number)
+      )
+      company = twilio_account&.company
+
       # Campaign STOP/HELP/START handler (Phase A.5). Runs before the legacy
       # opt-out logic below — only handles inbound messages whose number ever
       # appeared as a campaign recipient. Returns handled=false otherwise.
@@ -94,9 +104,13 @@ module Webhooks
       # currently enrolled in a campaign pauses those enrollments so the rep can
       # take over the conversation. Runs additively: the reply still flows through
       # to the logging + forwarding code below.
+      # Scoped to the receiving number's company: pausing is a write, and campaign
+      # outbound always sends from a dedicated company number (never master), so an
+      # unresolved company means there is nothing here to pause.
       from_digits_10 = from_number.to_s.gsub(/\D/, '').last(10)
-      if from_digits_10.present?
+      if from_digits_10.present? && company
         matching_enrollments = CampaignEnrollment
+          .where(company_id: company.id)
           .where(status: %w[pending active])
           .where(
             "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sms_phone_snapshot, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?",
@@ -141,8 +155,21 @@ module Webhooks
       if stop_keywords.include?(stripped_body) || start_keywords.include?(stripped_body)
         # Match on last 10 digits to handle format variations
         stop_digits = from_number.to_s.gsub(/\D/, '').last(10)
-        recipient = Contact.where("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?", "%#{stop_digits}").first ||
-                   Lead.where("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?", "%#{stop_digits}").first
+        phone_match = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?"
+
+        # Scope to the receiving number's company so a STOP does not opt out a
+        # different tenant's contact who happens to share the phone number. On the
+        # shared platform number there is no company to scope to, so fall back to
+        # the legacy company-wide search rather than silently ignoring a STOP —
+        # honoring the opt-out matters more than attributing it perfectly.
+        contact_scope = company ? company.contacts : Contact.all
+        lead_scope    = company ? company.leads    : Lead.all
+        unless company
+          Rails.logger.warn "[TwilioWebhook] #{stripped_body} from #{from_number} to unmatched number #{to_number} — searching all tenants"
+        end
+
+        recipient = contact_scope.where(phone_match, "%#{stop_digits}").first ||
+                    lead_scope.where(phone_match, "%#{stop_digits}").first
 
         if recipient
           pref = CommunicationPreference.find_or_create_for(recipient: recipient, channel: 'sms')
@@ -159,10 +186,7 @@ module Webhooks
         end
       end
 
-      # Match receiving number to a dedicated TwilioAccount
-      twilio_account = TwilioAccount.active.find_by(phone_number: to_number)
-      company = twilio_account&.company
-
+      # twilio_account / company were resolved from the receiving number at the top.
       unless company
         platform_number = ENV['TWILIO_PHONE_NUMBER']
         if to_number == platform_number
@@ -177,11 +201,22 @@ module Webhooks
       # conversation, communicable entity, and the user who originally sent the message.
       # Phone numbers may be stored in various formats (E.164, 10-digit, dashes, etc.)
       # so we strip to digits and match on the last 10.
+      #
+      # Scoped to the company that owns the receiving number. Contact phone numbers
+      # are not unique across tenants, so an unscoped match can select another
+      # company's outbound and forward this customer's message to that company's rep.
       from_digits = from_number.to_s.gsub(/\D/, '').last(10)
-      original_communication = Communication.where(
-        channel: 'sms',
-        direction: 'outbound'
-      ).where(
+      outbound_scope = Communication.where(channel: 'sms', direction: 'outbound')
+
+      if company
+        outbound_scope = outbound_scope.where(company_id: company.id)
+      else
+        # Shared platform number — no owning company to scope to.
+        Rails.logger.warn "[TwilioWebhook] Matching reply from #{from_number} across all tenants " \
+                          "(platform number #{to_number} has no owning company)"
+      end
+
+      original_communication = outbound_scope.where(
         "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(to_address, '+', ''), '-', ''), '(', ''), ')', ''), ' ', '') LIKE ?",
         "%#{from_digits}"
       ).order(created_at: :desc).first
