@@ -39,6 +39,9 @@ module Catalog
       SKU_RE          = /(?<width>\d{2})(?<length>\d{2})(?<beds>\d)(?<suffix>[A-Z]{2})\z/
       TOUR_HOSTS_RE   = %r{https?://(?:my\.)?(?:matterport\.com|momento360\.com)/[^\s"'<>)]+}i
       GEO_PAGE_LIMIT  = 15 # safety stop; ~24 results/page
+      FEATURES_HEADING = '"children":"Home features"'
+      FEATURES_WINDOW  = 8_000
+      FEATURE_ITEM_RE  = /\["\$","li","([^"]+)"/
 
       def crawl_delay
         Integer(source.config['crawl_delay'] || 5)
@@ -95,8 +98,10 @@ module Catalog
           bathrooms:        baths,
           dimensions:       dec && dec[:dimensions],
           square_feet:      sqft,
+          # Clayton publishes no prose blurb for retail models: the detail page
+          # goes straight from the spec line to "Home features".
           description:      nil,
-          features:         {},
+          features:         extract_features(raw[:html]),
           images:           extract_images(prod, card),
           virtual_tour_url: scan_regex(raw[:html].to_s, TOUR_HOSTS_RE),
           video_url:        nil,
@@ -354,6 +359,29 @@ module Catalog
           }
         end
         seen.values
+      end
+
+      # "Home features" (Kitchen island, Split bedroom, ...) is client-rendered,
+      # so it exists only in the flight payload, not the served DOM. Each entry
+      # is a list item keyed by its own label: ["$","li","Kitchen island",{...}].
+      # Scan from the section heading to the next heading so unrelated <li> keys
+      # elsewhere on the page can't bleed in.
+      def extract_features(html)
+        flight = flight_payload(html)
+        return {} if flight.blank?
+
+        start = flight.index(FEATURES_HEADING)
+        return {} unless start
+
+        window = flight[start, FEATURES_WINDOW].to_s
+        stop   = window.index('"h2"', FEATURES_HEADING.length)
+        window = window[0, stop] if stop
+
+        items = window.scan(FEATURE_ITEM_RE).flatten.map(&:strip).reject(&:empty?).uniq
+        items.any? ? { 'Home features' => items } : {}
+      rescue StandardError => e
+        Rails.logger.warn "[#{self.class.name}] feature extraction failed: #{e.class}: #{e.message}"
+        {}
       end
 
       def strip_query(src)

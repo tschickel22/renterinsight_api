@@ -84,8 +84,19 @@ RSpec.describe Catalog::Adapters::ClaytonRetailHomeCenterAdapter do
         { '@type' => 'PropertyValue', 'name' => 'Square feet', 'value' => 1400 }
       ]
     }.to_json
+    # "Home features" is client-rendered, so it lives only in the flight payload.
+    # The trailing "h2" stands in for the next section, bounding the scan.
+    features_flight =
+      '["$","h2",null,{"children":"Home features"}],' \
+      '["$","ul",null,{"children":[' \
+      '["$","li","Kitchen island",{"children":"Kitchen island"}],' \
+      '["$","li","Split bedroom",{"children":"Split bedroom"}]]}],' \
+      '["$","h2",null,{"children":"Explore the layout"}],' \
+      '["$","li","Not A Feature",{}]'
+
     %(<html><head><script type="application/ld+json">#{product}</script></head>
-      <body><a href="https://my.matterport.com/show/?m=abc123">tour</a></body></html>)
+      <body><a href="https://my.matterport.com/show/?m=abc123">tour</a>
+      #{flight_script(features_flight)}</body></html>)
   end
 
   let(:geo_html) do
@@ -172,6 +183,14 @@ RSpec.describe Catalog::Adapters::ClaytonRetailHomeCenterAdapter do
       expect(home.virtual_tour_url).to start_with('https://my.matterport.com/show/')
     end
 
+    it 'extracts Home features from the flight payload' do
+      expect(home.features).to eq('Home features' => ['Kitchen island', 'Split bedroom'])
+    end
+
+    it 'stops at the next heading so unrelated list items are excluded' do
+      expect(home.features['Home features']).not_to include('Not A Feature')
+    end
+
     it 'joins the starting price from this market on a normalized model name' do
       expect(home.raw['starting_price']).to eq(108_000)
     end
@@ -197,6 +216,11 @@ RSpec.describe Catalog::Adapters::ClaytonRetailHomeCenterAdapter do
 
     it 'falls back to card thumbnails when the detail page is unavailable' do
       expect(home.image_source_urls).to eq(['https://media.ffycdn.net/us/clayton-homes/ccc.jpg'])
+    end
+
+    # Plenty of Clayton models genuinely publish no features section.
+    it 'returns no features rather than failing' do
+      expect(home.features).to eq({})
     end
   end
 

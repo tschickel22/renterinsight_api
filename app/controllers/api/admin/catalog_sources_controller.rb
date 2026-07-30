@@ -105,7 +105,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                     status: :unprocessable_entity
     end
 
-    if @source.update(source_params)
+    if @source.update(preserve_derived_config(source_params))
       render json: serialize(@source)
     else
       render json: { errors: @source.errors.full_messages }, status: :unprocessable_entity
@@ -161,6 +161,14 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                   status: :unprocessable_entity) if adapter.nil?
 
     limit    = (params[:limit] || 5).to_i.clamp(1, 20)
+    # Test is a SAMPLE capped at 20, so report the full catalog size alongside it
+    # or "Discovered: 10" reads as "this source only has 10 homes". Adapters
+    # memoize their listing fetch, so this adds no extra request.
+    available = begin
+      Array(adapter.discover).size
+    rescue StandardError
+      nil
+    end
     homes    = adapter.sample(limit: limit)
     rates    = Catalog::ExtractionStats.rates(homes)
     degraded = Catalog::ExtractionStats.degraded?(rates, @source.extraction_threshold, untracked: @source.untracked_fields)
@@ -177,6 +185,8 @@ class Api::Admin::CatalogSourcesController < ApplicationController
 
     payload = {
       discovered:             homes.size,
+      available:              available,
+      sampled:                homes.size < available.to_i,
       passed:                 passed,
       warnings:               warnings,
       field_extraction_rates: rates,
@@ -314,6 +324,26 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   def include_starting_price?
     raw = params[:include_starting_price]
     raw.nil? ? true : ActiveModel::Type::Boolean.new.cast(raw) != false
+  end
+
+  # Some config keys are derived by the server at creation, not typed by the
+  # admin: home_center identity and the untracked_fields that let a Clayton
+  # source reach a clean run. A client that PATCHes config without echoing them
+  # back would silently drop them, which flips the source to permanently
+  # degraded. Re-merge anything the payload doesn't explicitly set.
+  DERIVED_CONFIG_KEYS = %w[home_center untracked_fields test_passed_at].freeze
+
+  def preserve_derived_config(attrs)
+    incoming = attrs[:config]
+    return attrs if incoming.nil?
+
+    existing = @source.config.is_a?(Hash) ? @source.config : {}
+    merged   = incoming.to_h.stringify_keys
+    DERIVED_CONFIG_KEYS.each do |key|
+      merged[key] = existing[key] if !merged.key?(key) && existing.key?(key)
+    end
+
+    attrs.merge(config: merged)
   end
 
   def enabling?(attrs)
