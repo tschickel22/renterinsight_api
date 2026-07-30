@@ -34,19 +34,23 @@ class BrandHealthService
 
       insights_resp = fetch_insights(company, page_id, token)
 
+      # 25 rather than 10 so the 30-day count below is right for an active page;
+      # the dashboard still only renders the first handful.
       posts_resp = begin
         MetaGraphApi.get("/#{page_id}/posts", token,
           fields: 'id,message,created_time,full_picture,likes.summary(true),comments.summary(true),shares',
-          limit:  10)
+          limit:  25)
       rescue MetaGraphApi::Error => e
         Rails.logger.warn "[BrandHealthService] company=#{company.id} posts skipped: #{e.message}"
         { 'data' => [] }
       end
 
+      posts = Array(posts_resp['data'])
+
       {
         page:         page_payload(page_data),
-        insights:     extract_insights(insights_resp),
-        recent_posts: Array(posts_resp['data']).map { |p| post_payload(p) }
+        insights:     extract_insights(insights_resp).merge('posts_30d' => count_last_30_days(posts)),
+        recent_posts: posts.map { |p| post_payload(p) }
       }
     end
 
@@ -81,22 +85,55 @@ class BrandHealthService
       }
     end
 
+    # Daily counters — the number people mean by "reach" or "engagement" is the
+    # sum across the window, not the last day's reading. page_fans is a running
+    # total instead, so its latest value is the answer.
+    CUMULATIVE_METRICS = %w[page_impressions page_post_engagements].freeze
+
+    # Returns plain numbers keyed by metric name. This used to return
+    # { latest:, total_28d: } per metric, which the dashboard read straight into
+    # Number() — every tile rendered NaN and displayed as 0 no matter what Meta
+    # actually returned.
     def extract_insights(response)
       rows = Array(response['data'])
       METRICS.each_with_object({}) do |metric, out|
         row = rows.find { |r| r['name'] == metric }
         values = Array(row && row['values'])
-        latest = values.last.is_a?(Hash) ? values.last['value'] : nil
 
-        total = values.sum do |v|
-          case (val = v.is_a?(Hash) ? v['value'] : nil)
-          when Numeric then val
-          when Hash    then val.values.select { |x| x.is_a?(Numeric) }.sum
-          else 0
+        out[metric] =
+          if CUMULATIVE_METRICS.include?(metric)
+            values.sum { |v| numeric_value(v) }
+          else
+            values.last.is_a?(Hash) ? numeric_value(values.last) : 0
           end
+      end
+    end
+
+    # A metric value is either a number or a breakdown hash keyed by segment.
+    def numeric_value(entry)
+      val = entry.is_a?(Hash) ? entry['value'] : entry
+      case val
+      when Numeric then val
+      when Hash    then val.values.select { |x| x.is_a?(Numeric) }.sum
+      else 0
+      end
+    end
+
+    def count_last_30_days(posts)
+      cutoff = 30.days.ago
+      posts.count do |p|
+        created = p['created_time']
+        next false if created.blank?
+
+        # Time.zone.parse returns nil for unparseable input rather than raising,
+        # so nil has to be handled as well as the exception.
+        parsed = begin
+          Time.zone.parse(created.to_s)
+        rescue ArgumentError, TypeError
+          nil
         end
 
-        out[metric] = { latest: latest, total_28d: total }
+        parsed.present? && parsed >= cutoff
       end
     end
 
