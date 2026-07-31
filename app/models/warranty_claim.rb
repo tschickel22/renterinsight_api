@@ -240,18 +240,20 @@ class WarrantyClaim < ApplicationRecord
   end
   
   # Status Transitions
-  def submit!(submitted_by_user)
+  # cc_emails: addresses copied on the manufacturer email. The dealer asks for
+  # this ("CC me") so they hold a sent copy of exactly what the factory got.
+  def submit!(submitted_by_user, cc_emails: [])
     return false unless can_be_submitted?
-    
+
     update!(
       status: 'submitted',
       submitted_at: Time.current,
       submitted_by: submitted_by_user
     )
-    
+
     # Send email to manufacturer
-    send_manufacturer_notification
-    
+    send_manufacturer_notification(cc_emails: cc_emails)
+
     true
   end
   
@@ -286,7 +288,7 @@ class WarrantyClaim < ApplicationRecord
     )
   end
   
-  def resubmit!(resubmitted_by_user)
+  def resubmit!(resubmitted_by_user, cc_emails: [])
     return false unless can_be_resubmitted?
 
     attrs = {
@@ -311,10 +313,10 @@ class WarrantyClaim < ApplicationRecord
     end
 
     update!(attrs)
-    
+
     # Send email to manufacturer again
-    send_manufacturer_notification
-    
+    send_manufacturer_notification(cc_emails: cc_emails)
+
     true
   end
   
@@ -534,9 +536,9 @@ class WarrantyClaim < ApplicationRecord
     )
   end
   
-  def send_manufacturer_notification
+  def send_manufacturer_notification(cc_emails: [])
     begin
-      WarrantyNotificationService.notify_manufacturer(self)
+      WarrantyNotificationService.notify_manufacturer(self, cc_emails: cc_emails)
       Rails.logger.info("✅ Email sent: Warranty claim #{claim_number} submitted to #{manufacturer.name}")
     rescue WarrantyNotificationService::TemplateNotFoundError => e
       Rails.logger.error("❌ Email failed for claim #{claim_number}: #{e.message}")

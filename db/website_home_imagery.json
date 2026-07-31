@@ -1,0 +1,182 @@
+{
+  "champion": {
+    "exteriors": [
+      {
+        "source": "https://s7d9.scene7.com/is/image/championhomes/233-embrace-space-233-exterior-rendering",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/champion/exteriors-01a64a43259ce5f5.jpg",
+        "model": "Embrace Space 233"
+      },
+      {
+        "source": "https://s7d9.scene7.com/is/image/championhomes/233-embrace-space-233-entry",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/champion/exteriors-cd761176a6d589cb.jpg",
+        "model": "Embrace Space 233"
+      },
+      {
+        "source": "https://s7d9.scene7.com/is/image/championhomes/233-embrace-space-233-dining-1",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/champion/exteriors-d817c6cfc978ae47.jpg",
+        "model": "Embrace Space 233"
+      }
+    ],
+    "interiors": [
+      {
+        "source": "https://s7d9.scene7.com/is/image/championhomes/233-embrace-space-233-kitchen-1",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/champion/interiors-5046261515f3d3a3.jpg",
+        "model": "Embrace Space 233"
+      },
+      {
+        "source": "https://s7d9.scene7.com/is/image/championhomes/233-embrace-space-233-primary-bath-1",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/champion/interiors-d0cbca3fbe767908.jpg",
+        "model": "Embrace Space 233"
+      },
+      {
+        "source": "https://s7d9.scene7.com/is/image/championhomes/233-embrace-space-233-living-room-1",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/champion/interiors-6c328d22f1a91020.jpg",
+        "model": "Embrace Space 233"
+      }
+    ]
+  },
+  "clayton": {
+    "floorplans": [
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/flp/75e55eb2-f00a-45b0-8ee4-a1e187edb4f0.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/floorplans-d682de7195f25d35.jpg",
+        "model": "TIDE"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/flp/7e2d5f13-41a1-4ac7-b21a-a894abebea17.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/floorplans-9397b023ce64d866.jpg",
+        "model": "TIDE"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/flp/77d0379d-6941-4993-ae81-d5642a881262.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/floorplans-90e64bbbe0fbf48f.jpg",
+        "model": "MARINER"
+      }
+    ],
+    "exteriors": [
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/ext/5f216a21-948c-4a23-82d7-6bc809499f2e.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/exteriors-0860d1833b54bdce.jpg",
+        "model": "TIDE"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/ext/b75a23ff-2b06-41eb-887e-8515129c6a72.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/exteriors-228c1f5ca4be599c.jpg",
+        "model": "TIDE"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/ext/54310e75-6df3-414b-b110-df0219c236b6.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/exteriors-786de7dc0cd794c7.jpg",
+        "model": "TIDE"
+      }
+    ],
+    "interiors": [
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/int/14824dba-d579-4395-8fe7-b22fe1417658.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/interiors-b951139d09571067.jpg",
+        "model": "MARINER"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/int/4bbebae0-e9fd-44cd-87de-60ba5e52c1a1.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/interiors-d839cae41bceae46.jpg",
+        "model": "MARINER"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/int/44a73fc5-d08f-4881-8bdc-d4c1df5df91a.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/clayton/interiors-45d22a6a814f9d71.jpg",
+        "model": "MARINER"
+      }
+    ]
+  },
+  "legacy": {
+    "exteriors": [
+      {
+        "source": "https://trove.b-cdn.net/images/fkenx5mqx6m.jpeg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/legacy/exteriors-6e508c075fe02b9a.jpeg",
+        "model": "Heritage H-3256-42A"
+      },
+      {
+        "source": "https://trove.b-cdn.net/images/vmyssacc74d.jpeg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/legacy/exteriors-3298f62e6499a81a.jpeg",
+        "model": "Heritage H-3256-42A"
+      },
+      {
+        "source": "https://trove.b-cdn.net/images/t4ug71s544i.jpeg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/legacy/exteriors-ae717c3a3ea9606d.jpeg",
+        "model": "Heritage H-3256-42A"
+      }
+    ]
+  },
+  "sunshine": {
+    "floorplans": [
+      {
+        "source": "https://d132mt2yijm03y.cloudfront.net/manufacturer/2459/floorplan/231913/SH_The%20Show%20Stopper_PRI3284-2058.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/sunshine/floorplans-f5145c4940100ee6.jpg",
+        "model": "The Show Stopper"
+      },
+      {
+        "source": "https://d132mt2yijm03y.cloudfront.net/manufacturer/2459/floorplan/231913/SH_The%20Show%20Stopper_PRI3284-2058_thumb_xxl.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/sunshine/floorplans-f437ea9684e6da95.jpg",
+        "model": "The Show Stopper"
+      },
+      {
+        "source": "https://d132mt2yijm03y.cloudfront.net/manufacturer/2459/floorplan/231913/PRI3284-2058-kit-1_thumb_xxl.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/sunshine/floorplans-70b7b33d6b6dce86.jpg",
+        "model": "The Show Stopper"
+      }
+    ]
+  },
+  "tru": {
+    "floorplans": [
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/flp/9100cf40-f6b8-4d89-be1d-46b086b4d1e8.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/floorplans-aa0a9e6a50929466.jpg",
+        "model": "BUTTERCUP"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/flp/1f72c341-3686-44cc-88ac-706708b51ccc.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/floorplans-c422581e49873710.jpg",
+        "model": "TULIP"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/flp/26de0c9c-9081-4d04-bab5-74b8d2a4b571.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/floorplans-39568ea24f6a0c2e.jpg",
+        "model": "MAPLE"
+      }
+    ],
+    "exteriors": [
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/ext/9be7e44c-bf1b-4281-8a80-fdab64a07135.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/exteriors-9fbe1bccb7fa0661.jpg",
+        "model": "BUTTERCUP"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/ext/78245a95-726c-41a2-a359-99575118929b.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/exteriors-c80516a45a379211.jpg",
+        "model": "TULIP"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/ext/db3ce0ae-3e43-4ff9-b555-bf7cc43e1a1a.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/exteriors-a98985abb0ff8b09.jpg",
+        "model": "ELM"
+      }
+    ],
+    "interiors": [
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/int/bb0c6813-aa25-4bbc-b063-6e2554955a24.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/interiors-b7cdfeca0d3ce565.jpg",
+        "model": "BUTTERCUP"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/int/d74db5da-fee3-4fac-8d50-3e69de8eea4a.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/interiors-a957c03743bd917e.jpg",
+        "model": "BUTTERCUP"
+      },
+      {
+        "source": "https://api.claytonhomes.com/images/mfg/int/1e60a205-3574-4e0b-8fda-dd1e11563442.jpg",
+        "url": "https://renterinsight-website-assets-staging.s3.us-west-2.amazonaws.com/brand/homes/tru/interiors-cbf60fbd33d65693.jpg",
+        "model": "BUTTERCUP"
+      }
+    ]
+  }
+}

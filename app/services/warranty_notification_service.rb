@@ -24,11 +24,14 @@ class WarrantyNotificationService
   # Notify manufacturer when dealer submits a warranty claim
   #
   # @param warranty_claim [WarrantyClaim] The warranty claim being submitted
+  # @param cc_emails [Array<String>, String, nil] addresses copied on the email
+  #   (e.g. the submitting user, via "CC me"). Blank entries are dropped rather
+  #   than failing the send — a bad CC must never cost the manufacturer their copy.
   # @return [Communication, nil] The created communication record or nil if disabled
   #
-  def self.notify_manufacturer(warranty_claim)
+  def self.notify_manufacturer(warranty_claim, cc_emails: [])
     return nil unless should_notify?('notifyManufacturerOnSubmission', warranty_claim.company)
-    
+
     # Find template (company-specific or platform default)
     template = find_template('warranty_submitted_to_manufacturer', warranty_claim.company_id)
     raise TemplateNotFoundError, 'Warranty submission template not found' unless template
@@ -40,18 +43,24 @@ class WarrantyNotificationService
     # Build template context
     context = build_claim_context(warranty_claim)
 
+    cc = normalize_cc_addresses(cc_emails, exclude: recipient_email)
+    body = render_template(template.body, context)
+
     # Send via existing CommunicationService
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
+      cc: cc,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: body,
+      content_type: content_type_for(body),
       category: 'warranty',
       template: template.id,
       metadata: {
         warranty_claim_id: warranty_claim.id,
         manufacturer_id: warranty_claim.manufacturer_id,
-        notification_type: 'manufacturer_submission'
+        notification_type: 'manufacturer_submission',
+        cc_emails: cc
       }
     )
   rescue => e
@@ -98,6 +107,7 @@ class WarrantyNotificationService
       to: recipient_email,
       subject: subject,
       body: body,
+      content_type: content_type_for(body),
       category: 'warranty',
       template: template&.id,
       metadata: {
@@ -127,12 +137,14 @@ class WarrantyNotificationService
     raise MissingRecipientError, 'No company notification email found' if recipient_email.blank?
     
     context = build_claim_context(warranty_claim)
-    
+    rendered_body = render_template(template.body, context)
+
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: rendered_body,
+      content_type: content_type_for(rendered_body),
       category: 'warranty',
       template: template.id,
       metadata: {
@@ -161,12 +173,14 @@ class WarrantyNotificationService
     return nil if recipient_email.blank? # Don't fail if no client email
     
     context = build_claim_context(warranty_claim)
-    
+    rendered_body = render_template(template.body, context)
+
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: rendered_body,
+      content_type: content_type_for(rendered_body),
       category: 'warranty',
       template: template.id,
       portal_visible: true, # Show in client portal
@@ -196,12 +210,14 @@ class WarrantyNotificationService
     return nil if recipient_email.blank?
     
     context = build_claim_context(warranty_claim)
-    
+    rendered_body = render_template(template.body, context)
+
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: rendered_body,
+      content_type: content_type_for(rendered_body),
       category: 'warranty',
       template: template.id,
       portal_visible: true,
@@ -366,8 +382,32 @@ class WarrantyNotificationService
     context['customer_responsibility_section'] = warranty_claim.estimated_amount.present? ? 
     "Estimated repair cost: #{format_currency(warranty_claim.estimated_amount)}" : ''
     context['next_steps'] = 'We will schedule the repair and keep you updated on progress.'
-    
+
+    # HTML-safe twins of the multi-line values, for templates whose body is real
+    # HTML. The plain-text keys are unchanged so existing templates render
+    # exactly as before; an HTML template that used them would collapse the
+    # parts list onto one line, which is the bug this pair exists to avoid.
+    context['parts_list_html']    = to_html_lines(context['parts_list'])
+    context['labor_details_html'] = to_html_lines(context['labor_details'])
+    context['claim_notes_html']   = to_html_lines(context['claim_notes'].presence || 'None')
+
     context
+  end
+
+  # Escape a plain-text value and keep its line breaks visible in HTML.
+  def self.to_html_lines(text)
+    ERB::Util.html_escape(text.to_s).to_s.gsub(/\r?\n/, '<br>')
+  end
+
+  # Warranty templates are seeded as plain text, but every email in this app is
+  # delivered as text/html by default — and HTML collapses whitespace, so those
+  # bodies arrived as one unbroken paragraph. Send a body that carries no markup
+  # as text/plain so its line breaks survive. Templates that ARE html (the
+  # manufacturer claim email, and anything a dealer writes in the editor) are
+  # unaffected.
+  def self.content_type_for(body)
+    markup = body.to_s.match?(/<(a|br|div|p|table|td|tr|span|h[1-6]|strong|em|ul|ol|li)\b[^>]*>/i)
+    markup ? 'text/html' : 'text/plain'
   end
   
   # Render template with variable substitution
@@ -464,6 +504,30 @@ class WarrantyNotificationService
     company_manufacturer&.claim_email.presence ||
       warranty_claim.manufacturer&.claim_email.presence ||
       warranty_claim.manufacturer&.contact_email
+  end
+
+  # Normalize a CC list into the single comma-joined string the Communication
+  # record and the mail gem both expect. Accepts an array or a comma/semicolon
+  # separated string. Drops blanks, anything that isn't shaped like an address,
+  # duplicates, and the primary recipient (nobody needs two copies). Returns nil
+  # when nothing survives, so the send behaves exactly as it did before CC.
+  def self.normalize_cc_addresses(cc_emails, exclude: nil)
+    # Split on the entry level too: a single "a@x.com, b@x.com" string is a
+    # perfectly ordinary way for a caller to pass two addresses.
+    list = Array(cc_emails).flat_map { |entry| entry.to_s.split(/[,;]/) }
+
+    excluded = exclude.to_s.strip.downcase
+    seen = []
+    list.each do |raw|
+      address = raw.to_s.strip
+      next if address.blank?
+      next unless address.match?(URI::MailTo::EMAIL_REGEXP)
+      next if address.downcase == excluded
+      next if seen.any? { |kept| kept.downcase == address.downcase }
+      seen << address
+    end
+
+    seen.presence&.join(', ')
   end
 
   # Get dealer code from location or company manufacturer relationship

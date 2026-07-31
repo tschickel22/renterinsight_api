@@ -137,7 +137,14 @@ module Catalog
       # forces every row to re-ingest when the column MAPPING changes (even
       # though the scraped content didn't).
       if !is_new && vehicle.catalog_content_hash == content_signature(home)
-        vehicle.update_columns(catalog_last_seen_at: Time.current, is_deleted: false, deleted_at: nil)
+        columns = { catalog_last_seen_at: Time.current, is_deleted: false, deleted_at: nil }
+        # content_hash is computed from SOURCE urls, deliberately, so rehosting
+        # imagery never looks like a content change. The flip side is that an
+        # otherwise-unchanged home takes this branch and would throw away the
+        # local_url the archiver just produced — one Kabco run archived 184
+        # images and persisted none of them. Carry them through.
+        columns.merge!(rehosted_columns(vehicle, home))
+        vehicle.update_columns(columns)
         return :unchanged
       end
 
@@ -249,6 +256,33 @@ module Catalog
         count += 1
       end
       count
+    end
+
+    # Columns to rewrite when the ONLY thing that moved is where an image is
+    # hosted. Returns {} when nothing was rehosted, so an unchanged home stays a
+    # single cheap update. Only ever swaps a URL for our own copy of the same
+    # picture — it can't introduce or drop images, because it maps over what the
+    # catalog produced this run.
+    def rehosted_columns(vehicle, home)
+      gallery = self.class.url_images(gallery_images_for(home))
+      plans   = self.class.url_images(home.floorplan_images)
+
+      columns = {}
+      columns[:images] = gallery if url_list(vehicle.images) != url_list(gallery)
+      columns[:floor_plan_images] = plans if url_list(vehicle.floor_plan_images) != url_list(plans)
+      primary = gallery.first&.dig('url')
+      columns[:photo_url] = primary if primary.present? && vehicle.photo_url != primary
+      columns
+    end
+
+    # Mirrors catalog_attrs_from's gallery choice so the two cannot diverge.
+    def gallery_images_for(home)
+      gallery = home.images.reject { |i| (i['is_floorplan'] == true) || (i['is_floorplan'].to_s == 'true') }
+      gallery.presence || home.images
+    end
+
+    def url_list(images)
+      Array(images).map { |i| i.is_a?(Hash) ? (i['url'] || i['source_url']) : i }
     end
 
     def content_signature(home)

@@ -1,7 +1,10 @@
 class WebsiteMedia < ApplicationRecord
   # Associations
   belongs_to :company
-  belongs_to :website
+  # Optional: a site import copies imagery onto S3 before any Website exists,
+  # and those rows still need to be tracked. The column has always been
+  # nullable; only the association was stricter than the schema.
+  belongs_to :website, optional: true
   
   # Enums - Rails 8 syntax
   enum :file_type, { image: 0, video: 1, document: 2, other: 3 }, default: :other

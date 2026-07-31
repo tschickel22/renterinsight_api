@@ -738,10 +738,27 @@ module Api
         data[:customerInvoice] = invoices.find { |i| i.billing_category == 'customer' }&.then do |inv|
           serialize_invoice(inv)
         end
-        data[:warrantyInvoice] = invoices.find { |i| i.billing_category == 'warranty' }&.then do |inv|
-          serialize_invoice(inv)
+
+        # The warranty invoice is sourced from the CLAIM, not the ticket
+        # (ServiceTicketInvoiceService#generate_warranty_invoice sets
+        # source: warranty_claim). Looking only under source_type 'ServiceTicket'
+        # meant it never came back, so a ticket with a claim and a WRN invoice
+        # rendered as "no invoices" and pressing Generate again appeared to do
+        # nothing. Look under the claim first, keeping the ticket-sourced lookup
+        # as a fallback for older rows written the other way.
+        warranty_invoice = nil
+        if ticket.warranty_claim_owned
+          warranty_invoice = @company.invoices
+                                     .not_deleted
+                                     .where(source_type: 'WarrantyClaim', source_id: ticket.warranty_claim_owned.id)
+                                     .where(billing_category: 'warranty')
+                                     .order(:id)
+                                     .first
         end
-        
+        warranty_invoice ||= invoices.find { |i| i.billing_category == 'warranty' }
+        data[:warrantyInvoice] = warranty_invoice ? serialize_invoice(warranty_invoice) : nil
+
+
         # Include warranty claim details if present
         data[:warrantyClaim] = ticket.warranty_claim_owned ? serialize_warranty_claim(ticket.warranty_claim_owned) : nil
 

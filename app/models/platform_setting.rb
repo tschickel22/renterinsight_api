@@ -61,17 +61,17 @@ class PlatformSetting
         # resolves through it, so this is the one literal that decides what an
         # environment without a Platform settings row calls itself.
         platformName: ENV['PLATFORM_NAME'] || 'DealerTide',
-        supportEmail: ENV['SUPPORT_EMAIL'] || 'support@renterinsight.com',
-        salesEmail: ENV['SALES_EMAIL'] || 'sales@renterinsight.com',
-        fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@renterinsight.com',
+        supportEmail: ENV['SUPPORT_EMAIL'] || 'support@dealertide.com',
+        salesEmail: ENV['SALES_EMAIL'] || 'sales@dealertide.com',
+        fromEmail: ENV['MAILER_FROM'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@dealertide.com',
         fromName: ENV['EMAIL_FROM_NAME'] || ENV['PLATFORM_NAME'] || 'DealerTide',
-        websiteUrl: ENV['PLATFORM_WEBSITE_URL'] || 'https://renterinsight.com',
+        websiteUrl: ENV['PLATFORM_WEBSITE_URL'] || 'https://dealertide.com',
         # Last-resort only. app.renterinsight.com now resolves to a stale ELB,
         # so an unset APP_URL/FRONTEND_URL used to send users to a dead host.
         appUrl: ENV['APP_URL'] || ENV['FRONTEND_URL'] || 'https://app.dealertide.com',
-        privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.renterinsight.com/privacy-policy/',
-        termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.renterinsight.com/terms-of-use/',
-        subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'renterinsight.com',
+        privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.dealertide.com/privacy-policy/',
+        termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.dealertide.com/terms-of-use/',
+        subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'dealertide.com',
         maintenanceMode: false,
         maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
       }

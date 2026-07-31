@@ -25,14 +25,20 @@ class S3UploadService
   # @param file [ActionDispatch::Http::UploadedFile, File] The file to upload
   # @param folder [String] Optional folder path (e.g., 'websites/123/media')
   # @return [Hash] { url: String, key: String, size: Integer }
-  def upload(file, folder: 'media')
-    # Generate unique filename with timestamp
-    timestamp = Time.now.to_i
-    extension = File.extname(file.original_filename || file.path)
-    filename = "#{timestamp}_#{SecureRandom.hex(8)}#{extension}"
-    
-    # S3 key (path in bucket)
-    key = "#{folder}/#{filename}"
+  # @param key [String, nil] Optional deterministic key. Omit for the default
+  #   timestamped-random name (correct for user uploads, where two uploads of
+  #   the same file are two distinct assets). Pass one when re-running an import
+  #   should reuse the existing object instead of piling up duplicates.
+  def upload(file, folder: 'media', key: nil)
+    if key.nil?
+      # Generate unique filename with timestamp
+      timestamp = Time.now.to_i
+      extension = File.extname(file.original_filename || file.path)
+      filename = "#{timestamp}_#{SecureRandom.hex(8)}#{extension}"
+
+      # S3 key (path in bucket)
+      key = "#{folder}/#{filename}"
+    end
     
     # Determine content type
     content_type = file.content_type || 'application/octet-stream'
@@ -114,16 +120,34 @@ class S3UploadService
     false
   end
   
-  # List all files in a folder
+  # List all files in a folder.
+  #
+  # Pages through the whole prefix. list_objects_v2 caps a response at 1,000
+  # keys, so the previous single call silently truncated — a caller using this
+  # to answer "have I uploaded this already?" got `false` for everything past
+  # the first thousand and re-uploaded it. The catalog folder alone holds
+  # several thousand images.
+  #
   # @param folder [String] Folder path (e.g., 'websites/123')
   # @return [Array<String>] Array of S3 keys
   def list_files(folder)
-    response = s3_client.list_objects_v2(
-      bucket: bucket_name,
-      prefix: folder
-    )
-    
-    response.contents.map(&:key)
+    keys  = []
+    token = nil
+
+    loop do
+      response = s3_client.list_objects_v2(
+        bucket: bucket_name,
+        prefix: folder,
+        continuation_token: token
+      )
+      keys.concat(response.contents.map(&:key))
+      break unless response.is_truncated
+
+      token = response.next_continuation_token
+      break if token.blank?
+    end
+
+    keys
   rescue Aws::S3::Errors::ServiceError => e
     Rails.logger.error("S3 list failed: #{e.message}")
     []

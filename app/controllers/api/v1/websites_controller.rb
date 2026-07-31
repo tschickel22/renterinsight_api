@@ -522,6 +522,25 @@ class Api::V1::WebsitesController < ApplicationController
     render json: branding_data
   end
 
+  # GET /api/v1/websites/showcase_inventory
+  #
+  # Inventory config for the design showcase. A company with an account shows
+  # its OWN inventory or none — never a borrowed lot. Their real homes are the
+  # most convincing thing on the page, and someone else's would misrepresent
+  # what they would actually get.
+  #
+  # If it comes back nil the answer is "switch public inventory on", not
+  # "substitute someone else's".
+  def showcase_inventory
+    return unless authorize_action!('websites', 'read')
+
+    config = SiteProfiles::DemoInventoryResolver.config_for(@company, allow_fallback: false)
+    render json: {
+      inventory_embed_config: config,
+      public_inventory_enabled: @company.try(:public_inventory_enabled) || false
+    }
+  end
+
   private
 
   def set_company_scope
@@ -577,11 +596,24 @@ class Api::V1::WebsitesController < ApplicationController
     pages.each_with_index do |page_data, index|
       page_data = page_data.with_indifferent_access if page_data.is_a?(Hash)
       
+      visible = page_data[:is_visible].nil? ? true : page_data[:is_visible]
+
+      # show_in_nav was never carried across, so it fell to the column default
+      # of true — which put Terms, Privacy and Blog (all is_visible: false in
+      # the templates) straight into the site header. A hidden page defaults to
+      # hidden in navigation; an explicit value in the template still wins.
+      show_in_nav = page_data[:show_in_nav].nil? ? visible : page_data[:show_in_nav]
+      show_in_footer = page_data[:show_in_footer].nil? ? true : page_data[:show_in_footer]
+
       website.website_pages.create!(
         title: page_data[:title] || page_data[:name],
         path: page_data[:path] || "/#{(page_data[:title] || page_data[:name]).to_s.parameterize}",
         order: page_data[:order] || index,
-        is_visible: page_data[:is_visible].nil? ? true : page_data[:is_visible],
+        is_visible: visible,
+        show_in_nav: show_in_nav,
+        show_in_footer: show_in_footer,
+        seo_title: page_data.dig(:seo, :title),
+        seo_description: page_data.dig(:seo, :description),
         blocks: page_data[:blocks] || []
       )
     end

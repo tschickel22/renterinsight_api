@@ -7,11 +7,45 @@ class ServiceTicketInvoiceService
   
   def generate_customer_invoice
     return nil unless @ticket.has_customer_items?
-    
+
     # Get tax rate from company settings or default to 0
     tax_rate = @ticket.company.respond_to?(:tax_rate) ? @ticket.company.tax_rate : 0
     tax_rate ||= 0
-    
+
+    # One customer invoice per ticket, same rule the warranty side already
+    # follows. Generating is the ordinary way to re-sync a ticket's billing, so
+    # pressing it twice must not mint a second INV for the same work. A draft is
+    # restated from the current lines; anything already sent or paid is a record
+    # of what the customer was billed, so it is handed back untouched.
+    existing = Invoice.where(source: @ticket, billing_category: 'customer')
+                      .where(is_deleted: [false, nil])
+                      .order(:id)
+                      .first
+
+    if existing
+      return existing unless existing.status == 'draft'
+
+      existing.invoice_items.destroy_all
+      existing.update!(
+        contact_id: @ticket.contact_id,
+        recipient_id: @ticket.contact_id,
+        tax_rate: tax_rate
+      )
+      create_customer_invoice_items(existing)
+
+      existing.reload
+      subtotal = existing.invoice_items.sum { |item| item.amount.to_f }
+      tax_amount = (subtotal * tax_rate / 100).round(2)
+      total = subtotal + tax_amount
+      existing.update!(
+        subtotal: subtotal,
+        tax_amount: tax_amount,
+        total: total,
+        amount_due: total
+      )
+      return existing
+    end
+
     invoice = Invoice.create!(
       company_id: @ticket.company_id,
       location_id: @ticket.location_id,
