@@ -36,9 +36,20 @@ module Catalog
     # small as a failed fetch so source_url survives and the next run retries.
     MIN_BYTES = 2_048
     # Politeness between DOWNLOADS only; skipped images cost nothing.
-    DEFAULT_DELAY = 0
+    #
+    # NOT zero. A full Kabco run with no delay fired ~1,100 requests at their
+    # WordPress site as fast as the network allowed and was rate-limited into
+    # the ground: 184 archived, 839 refused with 429. These are manufacturer
+    # marketing sites, not CDNs built for that.
+    DEFAULT_DELAY = 1
 
-    Result = Struct.new(:archived, :reused, :failed, :skipped, keyword_init: true)
+    # Once a host starts refusing, continuing is both pointless and rude — the
+    # run above kept going for 839 more requests after the first 429. Stop
+    # archiving for the remainder of the run instead, and leave source_url on
+    # everything untouched so nothing is lost but time.
+    RATE_LIMIT_TRIP = 3
+
+    Result = Struct.new(:archived, :reused, :failed, :skipped, :rate_limited, keyword_init: true)
 
     attr_reader :result
 
@@ -46,7 +57,8 @@ module Catalog
       @crawl_delay = crawl_delay.to_i
       @folder      = folder
       @uploader    = uploader || S3UploadService.new
-      @result      = Result.new(archived: 0, reused: 0, failed: 0, skipped: 0)
+      @result      = Result.new(archived: 0, reused: 0, failed: 0, skipped: 0, rate_limited: false)
+      @consecutive_rate_limits = 0
     end
 
     # S3UploadService falls back to a bucket literally named "...-staging" when
@@ -82,6 +94,13 @@ module Catalog
         source_url = record['source_url'] || record['url']
 
         if record['local_url'].present? || source_url.blank?
+          @result.skipped += 1
+          next record
+        end
+
+        # Backed off for this host — leave the rest alone rather than adding to
+        # the pile of refusals.
+        if @result.rate_limited
           @result.skipped += 1
           next record
         end
@@ -154,10 +173,28 @@ module Catalog
         filename: File.basename(key),
         type:     io.respond_to?(:content_type) ? io.content_type : nil
       )
-      @uploader.upload(file, folder: @folder, key: key)[:url]
+      url = @uploader.upload(file, folder: @folder, key: key)[:url]
+      @consecutive_rate_limits = 0
+      url
     rescue StandardError => e
+      if rate_limited?(e)
+        @consecutive_rate_limits += 1
+        if @consecutive_rate_limits >= RATE_LIMIT_TRIP
+          @result.rate_limited = true
+          Rails.logger.warn "[Catalog::ImageArchiver] #{URI.parse(source_url).host} is refusing " \
+                            "requests (#{@consecutive_rate_limits} consecutive 429s) — backing off " \
+                            'for the rest of this run. Raise image_crawl_delay on the source.'
+        end
+      else
+        @consecutive_rate_limits = 0
+      end
+
       Rails.logger.warn "[Catalog::ImageArchiver] archive failed for #{source_url}: #{e.class}: #{e.message}"
       nil
+    end
+
+    def rate_limited?(error)
+      error.is_a?(OpenURI::HTTPError) && error.message.to_s.start_with?('429')
     end
 
     # Manufacturer URLs carry cache-busting queries and the odd uppercase

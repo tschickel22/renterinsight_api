@@ -199,4 +199,47 @@ RSpec.describe Catalog::ImageArchiver do
       expect(archiver.archive([image(photo)]).first['local_url']).to be_present
     end
   end
+
+  # A full Kabco run with no delay fired ~1,100 requests at their WordPress
+  # site and was rate-limited into the ground: 184 archived, 839 refused. It
+  # kept going for all 839 after the first refusal.
+  describe 'backing off when a host refuses' do
+    def too_many_requests
+      OpenURI::HTTPError.new('429 Too Many Requests', StringIO.new)
+    end
+
+    it 'stops archiving once a host refuses repeatedly' do
+      allow(archiver).to receive(:open_source).and_raise(too_many_requests)
+
+      urls = (1..20).map { |i| image("https://kabcobuilders.com/wp-content/uploads/#{i}.jpg") }
+      archiver.archive(urls)
+
+      expect(archiver.result.rate_limited).to be(true)
+      # Three strikes, then it stops trying rather than grinding through the rest.
+      expect(archiver.result.failed).to eq(described_class::RATE_LIMIT_TRIP)
+      expect(archiver.result.skipped).to eq(20 - described_class::RATE_LIMIT_TRIP)
+    end
+
+    it 'leaves every source_url intact so nothing is lost but time' do
+      allow(archiver).to receive(:open_source).and_raise(too_many_requests)
+
+      urls = (1..10).map { |i| image("https://kabcobuilders.com/#{i}.jpg") }
+      out = archiver.archive(urls)
+
+      expect(out.map { |i| i['local_url'] }).to all(be_nil)
+      expect(out.map { |i| i['source_url'] }).to eq(urls.map { |i| i['source_url'] })
+    end
+
+    it 'does not trip on unrelated failures' do
+      allow(archiver).to receive(:open_source).and_raise(StandardError, 'connection reset')
+
+      archiver.archive((1..10).map { |i| image("https://kabcobuilders.com/#{i}.jpg") })
+      expect(archiver.result.rate_limited).to be(false)
+      expect(archiver.result.failed).to eq(10)
+    end
+
+    it 'defaults to a real delay rather than hammering a marketing site' do
+      expect(described_class::DEFAULT_DELAY).to be > 0
+    end
+  end
 end
