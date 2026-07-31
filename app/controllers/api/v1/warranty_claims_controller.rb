@@ -49,7 +49,9 @@ module Api
               'OR service_tickets.title ILIKE :t OR service_tickets.ticket_number ILIKE :t',
               t: term
             )
-            .distinct
+          # Both joins are belongs_to, so no duplicates to collapse. Dropping
+          # .distinct also keeps this off the trap that broke the ticket search:
+          # SELECT DISTINCT raises on a json (as opposed to jsonb) column.
         end
 
         # Apply sort across the full result set (before pagination) so sorting
