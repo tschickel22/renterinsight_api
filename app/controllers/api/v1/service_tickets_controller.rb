@@ -385,6 +385,15 @@ module Api
                 estimated_amount: @service_ticket.warranty_total,
                 notes_to_manufacturer: params[:notes_to_manufacturer]
               )
+            else
+              # Previously this fell straight through and reported success while
+              # changing nothing, so generating against an already-submitted
+              # claim looked like the totals simply refused to update. Say what
+              # happened and point at the action that does work.
+              return render json: {
+                error: "#{claim.claim_number} has already been submitted, so its contents are locked to what the manufacturer received. Use Resubmit to Manufacturer to send this ticket's current parts, labor and estimate.",
+                claim: serialize_warranty_claim(claim)
+              }, status: :unprocessable_entity
             end
           else
             claim = WarrantyClaim.create!(
