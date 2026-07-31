@@ -596,11 +596,24 @@ class Api::V1::WebsitesController < ApplicationController
     pages.each_with_index do |page_data, index|
       page_data = page_data.with_indifferent_access if page_data.is_a?(Hash)
       
+      visible = page_data[:is_visible].nil? ? true : page_data[:is_visible]
+
+      # show_in_nav was never carried across, so it fell to the column default
+      # of true — which put Terms, Privacy and Blog (all is_visible: false in
+      # the templates) straight into the site header. A hidden page defaults to
+      # hidden in navigation; an explicit value in the template still wins.
+      show_in_nav = page_data[:show_in_nav].nil? ? visible : page_data[:show_in_nav]
+      show_in_footer = page_data[:show_in_footer].nil? ? true : page_data[:show_in_footer]
+
       website.website_pages.create!(
         title: page_data[:title] || page_data[:name],
         path: page_data[:path] || "/#{(page_data[:title] || page_data[:name]).to_s.parameterize}",
         order: page_data[:order] || index,
-        is_visible: page_data[:is_visible].nil? ? true : page_data[:is_visible],
+        is_visible: visible,
+        show_in_nav: show_in_nav,
+        show_in_footer: show_in_footer,
+        seo_title: page_data.dig(:seo, :title),
+        seo_description: page_data.dig(:seo, :description),
         blocks: page_data[:blocks] || []
       )
     end

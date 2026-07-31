@@ -28,6 +28,9 @@ module SiteProfiles
 
     MAX_ITEMS_PER_SECTION = 12
 
+    # What a model says when it does not know. Never a real value.
+    PLACEHOLDER_VALUE = /\A(unknown|n\/?a|none|null|undefined|not (?:found|specified|available)|tbd|-)\z/i
+
     module_function
 
     def empty
@@ -56,10 +59,21 @@ module SiteProfiles
 
       out['brand'] = slice_strings(raw['brand'], %w[name tagline logo_url])
       if raw.dig('brand', 'colors').is_a?(Hash)
-        out['brand']['colors'] = slice_strings(raw['brand']['colors'], %w[primary secondary accent])
+        colors = slice_strings(raw['brand']['colors'], %w[primary secondary accent])
+        # The model answers "unknown" when it cannot tell, and a bare string
+        # check let that through — a real site shipped with primary_color
+        # "#unknown" after the backend prefixed it. Anything that is not a hex
+        # colour is dropped so the template's own palette survives.
+        rejected = colors.reject { |_, v| hex_colour?(v) }
+        warnings << "dropped non-colour brand values: #{rejected.values.join(', ')}" if rejected.any?
+        out['brand']['colors'] = colors.select { |_, v| hex_colour?(v) }.presence
+        out['brand'].delete('colors') if out['brand']['colors'].nil?
       end
       if raw.dig('brand', 'fonts').is_a?(Hash)
-        out['brand']['fonts'] = slice_strings(raw['brand']['fonts'], %w[heading body])
+        fonts = slice_strings(raw['brand']['fonts'], %w[heading body])
+        fonts = fonts.reject { |_, v| PLACEHOLDER_VALUE.match?(v) }
+        out['brand']['fonts'] = fonts.presence
+        out['brand'].delete('fonts') if out['brand']['fonts'].nil?
       end
 
       out['contact'] = slice_strings(raw['contact'], %w[phone email address hours])
@@ -140,10 +154,19 @@ module SiteProfiles
       profile
     end
 
+    def hex_colour?(value)
+      /\A#?(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})\z/i.match?(value.to_s.strip)
+    end
+
     def slice_strings(hash, keys)
       return {} unless hash.is_a?(Hash)
 
-      keys.index_with { |k| hash[k].is_a?(String) ? hash[k].strip.presence : nil }.compact
+      keys.index_with do |k|
+        next nil unless hash[k].is_a?(String)
+
+        value = hash[k].strip.presence
+        value unless value.nil? || PLACEHOLDER_VALUE.match?(value)
+      end.compact
     end
 
     def string_array(value)
