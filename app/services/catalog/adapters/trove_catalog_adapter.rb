@@ -401,8 +401,20 @@ module Catalog
         source.config.is_a?(Hash) ? source.config['snapshot_key'].presence : nil
       end
 
+      # Trove serves the catalog from the host root, so only scheme + host
+      # matter. Admins reasonably paste the URL they were looking at
+      # ("…/catalog", "…/homes"), which would otherwise build "/catalog/homes"
+      # and silently discover nothing. Normalize to the origin.
       def site_root
-        (snapshot && snapshot['base_url'].presence || source.base_url).to_s.chomp('/')
+        raw = (snapshot && snapshot['base_url'].presence || source.base_url).to_s.strip
+        return '' if raw.blank?
+
+        uri = URI.parse(raw)
+        return raw.chomp('/') if uri.host.blank?
+
+        "#{uri.scheme || 'https'}://#{uri.host}#{uri.port && ![80, 443].include?(uri.port) ? ":#{uri.port}" : ''}"
+      rescue URI::InvalidURIError
+        raw.chomp('/')
       end
 
       def home_index_url
