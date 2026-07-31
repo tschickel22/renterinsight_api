@@ -20,6 +20,8 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # Trove exposes series (it leads the model name) but publishes the description
   # scaffold with empty bodies on every record, so only description is excused.
   TROVE_UNTRACKED_FIELDS   = %w[description].freeze
+  # Cavco publishes series and full specs, but no prose description on floorplans.
+  CAVCO_UNTRACKED_FIELDS   = %w[description].freeze
 
   # Debounces directory rebuilds across typeahead keystrokes.
   CLAYTON_REFRESH_LOCK = 'clayton_directory_refresh_enqueued'
@@ -88,7 +90,13 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # flow, just { home_center_slug: "mobile-home-masters-inc" } — name, base_url
   # and config are derived from the directory so the admin can't mistype a URL.
   def create
-    attrs = params[:home_center_slug].present? ? clayton_source_attrs : source_params
+    attrs = if params[:home_center_slug].present?
+              clayton_source_attrs
+            elsif params[:cavco_retailer_id].present?
+              cavco_source_attrs
+            else
+              source_params
+            end
     return if performed?
 
     attrs = apply_adapter_defaults(attrs, attrs[:adapter_type])
@@ -155,6 +163,18 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                   'it never overwrites the dealer\'s own price. Costs ~7 extra requests per run.' }
         ]
       },
+      cavco_retailer: {
+        picker_endpoint:  '/api/admin/catalog_sources/cavco_retailers',
+        refresh_endpoint: '/api/admin/catalog_sources/refresh_cavco_directory',
+        untracked_fields: CAVCO_UNTRACKED_FIELDS,
+        options: [],
+        # Cavco already resolves which models a retailer may sell, and that
+        # assignment spans the whole family of brands, so there is nothing to
+        # filter. The brand sites link back to this same directory.
+        advisory: 'Cavco assigns each dealer their own model list, already spanning every ' \
+                  'brand they carry (Cavco, Palm Harbor, Fleetwood, Solitaire and the rest). ' \
+                  'No separate source per brand is needed.'
+      },
       trove_catalog: {
         base_url_template: 'https://trove.{manufacturer}.com',
         untracked_fields: TROVE_UNTRACKED_FIELDS,
@@ -176,6 +196,41 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                   '(*.buildtrove.com) disallow crawling and add nothing but their own markup.'
       }
     }
+  end
+
+  # GET /api/admin/catalog_sources/cavco_retailers?q=amarillo&state=TX
+  # Typeahead behind "Add Cavco Dealer". Cavco indexes retailers as documents in
+  # the same engine as the homes, so unlike Clayton's 43-page crawl a refresh is
+  # a handful of queries — quick enough to build inline on a cold cache.
+  def cavco_retailers
+    directory = Catalog::CavcoRetailerDirectory
+    directory.refresh! if !directory.loaded? || directory.stale?
+
+    entries = directory.search(params[:q], state: params[:state],
+                                           limit: (params[:limit] || 25).to_i.clamp(1, 100))
+    taken = CatalogSource.active
+                         .where(adapter_type: 'cavco_retailer')
+                         .filter_map { |s| [s.config.is_a?(Hash) ? s.config['retailer_id'] : nil, s.id] }
+                         .to_h
+
+    render json: {
+      items:      entries.map { |e| e.merge('existing_source_id' => taken[e['id']]) },
+      fetchedAt:  directory.fetched_at,
+      refreshing: false
+    }
+  rescue StandardError => e
+    Rails.logger.error "[CatalogSources] cavco_retailers failed: #{e.class}: #{e.message}"
+    render json: { items: [], error: 'Could not reach the Cavco retailer directory' },
+           status: :service_unavailable
+  end
+
+  # POST /api/admin/catalog_sources/refresh_cavco_directory
+  def refresh_cavco_directory
+    entries = Catalog::CavcoRetailerDirectory.refresh!
+    render json: { refreshing: false, count: entries.size,
+                   fetchedAt: Catalog::CavcoRetailerDirectory.fetched_at }
+  rescue StandardError => e
+    render json: { error: "Refresh failed: #{e.message}" }, status: :service_unavailable
   end
 
   # POST /api/admin/catalog_sources/upload_snapshot
@@ -388,6 +443,44 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   end
 
   # "Clayton — Mobile Home Masters Inc (Tyler, TX)"
+  def cavco_source_attrs
+    id    = params[:cavco_retailer_id].to_s.strip
+    entry = Catalog::CavcoRetailerDirectory.find_by_id(id)
+    if entry.nil?
+      render json: { error: "Unknown Cavco retailer: #{id}" }, status: :unprocessable_entity
+      return nil
+    end
+
+    existing = CatalogSource.active.where(adapter_type: 'cavco_retailer').find do |s|
+      s.config.is_a?(Hash) && s.config['retailer_id'] == id
+    end
+    if existing
+      render json: { error: "#{entry['name']} is already registered", sourceId: existing.id },
+             status: :conflict
+      return nil
+    end
+
+    overrides = params.fetch(:catalog_source, {}).permit(:schedule, :extraction_threshold).to_h
+    {
+      name:         cavco_source_name(entry),
+      adapter_type: 'cavco_retailer',
+      base_url:     entry['url'],
+      schedule:     'weekly',
+      config: {
+        'retailer_id'      => id,
+        'untracked_fields' => CAVCO_UNTRACKED_FIELDS,
+        'retailer'         => entry.slice('id', 'name', 'location_id', 'city', 'state',
+                                          'postal_code', 'location_type')
+      }
+    }.merge(overrides.symbolize_keys)
+  end
+
+  # "Cavco - Amarillo Home Center, LLC (Amarillo, TX)"
+  def cavco_source_name(entry)
+    place = [entry['city'], entry['state']].compact.join(', ')
+    place.present? ? "Cavco - #{entry['name']} (#{place})" : "Cavco - #{entry['name']}"
+  end
+
   def clayton_source_name(entry)
     where = [entry['city'], entry['state']].compact_blank.join(', ')
     base  = "Clayton — #{entry['name']}"

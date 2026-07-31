@@ -2694,6 +2694,8 @@ Rails.application.routes.draw do
           get  :clayton_home_centers        # typeahead for the Add Clayton Dealer picker
           post :refresh_clayton_directory   # force re-crawl of the Clayton retailer directory
           post :upload_snapshot             # load a captured Trove catalog without shell access
+          get  :cavco_retailers             # typeahead for the Add Cavco Dealer picker
+          post :refresh_cavco_directory     # rebuild the Cavco retailer directory
         end
         member do
           post :test     # dry-run discover+parse, inline extraction rates (no ingest)
