@@ -53,6 +53,8 @@ module SiteProfiles
         output_tokens: usage[:output_tokens],
         report: build_report(digests, integrations, links)
       )
+
+      import_assets
       @record
     rescue StandardError => e
       @record.update!(status: 'failed', error_message: e.message.truncate(500))
@@ -131,6 +133,26 @@ module SiteProfiles
 
     def raw_html_cache
       @raw_html_cache ||= {}
+    end
+
+    # Rehost imagery onto our S3 so a preview does not depend on the client's
+    # old host staying up. Non-fatal: a scan whose images stayed hotlinked
+    # still demos fine, so a failure here is a warning rather than a dead scan.
+    def import_assets
+      result = AssetImporter.new(@record).call
+      report = @record.report.to_h
+      report['assets_imported'] = result.imported
+      report['assets_skipped'] = result.skipped
+      report['warnings'] = (Array(report['warnings']) + result.warnings).uniq
+      @record.update!(report: report)
+    rescue StandardError => e
+      Rails.logger.warn("[SiteProfiles::Orchestrator] asset import failed: #{e.message}")
+      @record.update!(
+        report: @record.report.to_h.merge(
+          'warnings' => (Array(@record.report['warnings']) +
+            ['Images could not be copied; the preview links to the original site.']).uniq
+        )
+      )
     end
 
     def build_report(digests, integrations, links)
