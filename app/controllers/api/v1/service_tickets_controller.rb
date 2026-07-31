@@ -377,24 +377,20 @@ module Api
           # create. The DB unique index also guarantees one active claim/ticket.
           claim = @service_ticket.warranty_claim_owned
           if claim
-            if claim.draft?
-              claim.update!(
-                manufacturer_id: params[:manufacturer_id],
-                parts: @service_ticket.warranty_parts,
-                labor: @service_ticket.warranty_labor,
-                estimated_amount: @service_ticket.warranty_total,
-                notes_to_manufacturer: params[:notes_to_manufacturer]
-              )
-            else
-              # Previously this fell straight through and reported success while
-              # changing nothing, so generating against an already-submitted
-              # claim looked like the totals simply refused to update. Say what
-              # happened and point at the action that does work.
-              return render json: {
-                error: "#{claim.claim_number} has already been submitted, so its contents are locked to what the manufacturer received. Use Resubmit to Manufacturer to send this ticket's current parts, labor and estimate.",
-                claim: serialize_warranty_claim(claim)
-              }, status: :unprocessable_entity
-            end
+            # Generating means "make the claim match the ticket". It never
+            # notifies anyone; submitting is a separate, explicit action. An
+            # already-submitted claim comes back to draft carrying the ticket's
+            # current lines, so the dealer reads the numbers over before
+            # deciding to send. submitted_at, views_count and the manufacturer
+            # thread are left alone, so the earlier send is still on record.
+            claim.update!(
+              status: 'draft',
+              manufacturer_id: params[:manufacturer_id],
+              parts: @service_ticket.warranty_parts,
+              labor: @service_ticket.warranty_labor,
+              estimated_amount: @service_ticket.warranty_total,
+              notes_to_manufacturer: params[:notes_to_manufacturer]
+            )
           else
             claim = WarrantyClaim.create!(
               company_id: @service_ticket.company_id,

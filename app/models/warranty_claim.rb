@@ -201,7 +201,15 @@ class WarrantyClaim < ApplicationRecord
   end
   
   def can_be_submitted?
-    draft? && parts.present? && manufacturer_id.present? && manufacturer_claim_email.present?
+    draft? && line_items? && manufacturer_id.present? && manufacturer_claim_email.present?
+  end
+
+  # Labor-only claims are ordinary warranty work (drive time, mileage, hours
+  # with no parts consumed). Gating on parts alone blocked them while the
+  # message told the dealer labor counted, so the claim could never be sent and
+  # the reason given was wrong.
+  def line_items?
+    parts.present? || labor.present?
   end
 
   # Human-readable reason a draft can't yet be submitted (for FE badges).
@@ -211,7 +219,7 @@ class WarrantyClaim < ApplicationRecord
     return nil if can_be_submitted?
     return 'Already submitted' unless draft?
     return 'No manufacturer selected' if manufacturer_id.blank?
-    return 'Claim must have parts or labor added to the service ticket to submit' unless parts.present?
+    return 'Claim must have parts or labor added to the service ticket to submit' unless line_items?
     if manufacturer_claim_email.blank?
       return 'Manufacturer has no claim email on file — add one on the manufacturer record or company-manufacturer override before submitting'
     end
