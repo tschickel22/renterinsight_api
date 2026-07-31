@@ -101,33 +101,14 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     profile.profile.slice('schema_version', 'brand', 'contact', 'copy', 'media', 'links', 'integrations', 'seo')
   end
 
-  # A prospect has no inventory with us, so their demo would render the
-  # inventory block's "not configured" placeholder — the most prominent thing on
-  # the page, blank, mid-pitch. Fall back to a seeded demo dealer whose lot is
-  # ingested from the Cavco feed (Catalog Sources -> cavco_retailer ->
-  # Catalog::CavcoInventorySeeder), so the homes are real rather than lorem.
-  #
-  # Set DEMO_INVENTORY_COMPANY_ID to that company. Unset = no fallback, and the
-  # block is simply omitted rather than shown broken.
+  # Memoised per request: #index renders many rows and the resolver would
+  # otherwise run its lookup for each one.
   def inventory_config_for(company)
-    own = usable_inventory_config(company)
-    return own if own
+    @inventory_configs ||= {}
+    key = company&.id
+    return @inventory_configs[key] if @inventory_configs.key?(key)
 
-    demo_id = ENV['DEMO_INVENTORY_COMPANY_ID'].presence
-    return nil if demo_id.blank? || demo_id.to_i == company&.id
-
-    demo = Company.find_by(id: demo_id)
-    config = usable_inventory_config(demo)
-    config&.merge('is_sample' => true)
-  end
-
-  def usable_inventory_config(company)
-    return nil if company.nil?
-
-    token = company.try(:public_inventory_token)
-    return nil if token.blank? || !company.try(:public_inventory_enabled)
-
-    { 'token' => token, 'company_id' => company.id, 'enabled' => true }
+    @inventory_configs[key] = SiteProfiles::DemoInventoryResolver.config_for(company)
   end
 
   def summary(profile)

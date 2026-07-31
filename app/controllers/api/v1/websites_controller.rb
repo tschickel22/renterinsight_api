@@ -522,6 +522,18 @@ class Api::V1::WebsitesController < ApplicationController
     render json: branding_data
   end
 
+  # GET /api/v1/websites/showcase_inventory
+  #
+  # Inventory config for the design showcase. Returns the company's own when
+  # they have public inventory switched on, otherwise a seeded demo lot marked
+  # is_sample — a customer being shown how websites work should not be looking
+  # at the inventory block's "not configured" placeholder.
+  def showcase_inventory
+    return unless authorize_action!('websites', 'read')
+
+    render json: { inventory_embed_config: SiteProfiles::DemoInventoryResolver.config_for(@company) }
+  end
+
   private
 
   def set_company_scope
