@@ -227,10 +227,22 @@ RSpec.describe 'Api::V1::CatalogSubscriptions', type: :request do
       expect { subscribe! }.to have_enqueued_job(CatalogSourceRunJob)
     end
 
-    it 'crawls rather than serving a stale cache' do
+    # Weekly sources keep their parse for the full week, so a day-3 subscribe
+    # reuses it rather than paying a full crawl for barely newer data.
+    it 'reuses the parse within the schedule window' do
+      source.update!(schedule: 'weekly')
       Catalog::ParsedHomeCache.write(source, [cached_home])
 
       travel_to(3.days.from_now) do
+        expect { subscribe! }.not_to have_enqueued_job(CatalogSourceRunJob)
+      end
+    end
+
+    it 'crawls once the parse is older than the schedule window' do
+      source.update!(schedule: 'weekly')
+      Catalog::ParsedHomeCache.write(source, [cached_home])
+
+      travel_to(8.days.from_now) do
         expect { subscribe! }.to have_enqueued_job(CatalogSourceRunJob)
       end
     end

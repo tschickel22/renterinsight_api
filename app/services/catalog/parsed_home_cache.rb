@@ -24,10 +24,32 @@ module Catalog
     KEY_PREFIX  = 'catalog_parsed_homes'
     DEFAULT_TTL = 24.hours
 
+    # How long a parse stays usable, mirroring CatalogSource#due? — crawling to
+    # backfill a dealer more often than the source refreshes itself contradicts
+    # the schedule. A weekly source asked to backfill on day 3 would otherwise
+    # pay a full crawl (716s on Kabco) to produce data barely newer than the
+    # cache.
+    #
+    # `manual` has no cadence at all: the admin has decided refreshes happen
+    # when they say so, and Run Now always rewrites the cache. Capped anyway so
+    # a forgotten source can't serve a year-old parse in silence.
+    SCHEDULE_TTL = {
+      'daily'  => 20.hours,
+      'weekly' => 6.days,
+      'manual' => 30.days
+    }.freeze
+
     class << self
+      def max_age_for(source)
+        SCHEDULE_TTL.fetch(source.schedule.to_s, DEFAULT_TTL)
+      end
+
+      # @param max_age [ActiveSupport::Duration, nil] nil derives it from the
+      #   source's own schedule.
       # @return [Array<NormalizedHome>, nil] nil when absent, stale, or parsed
       #   under different source settings.
-      def read(source, max_age: DEFAULT_TTL)
+      def read(source, max_age: nil)
+        max_age ||= max_age_for(source)
         payload = raw(source)
         return nil if payload.blank?
         return nil unless payload['fingerprint'] == fingerprint(source)
