@@ -166,9 +166,17 @@ class Api::V1::SearchController < ApplicationController
     
     # Service - Service Tickets (has title NOT subject; NO is_deleted; has ticket_number)
     begin
+      # Match the customer's name too. Tickets are found by who they are for far
+      # more often than by number, and without the account join searching a
+      # surname returned nothing here while the same term found the account.
+      # No .distinct: :account is a belongs_to, and this table's json columns
+      # have no equality operator for SELECT DISTINCT anyway.
       tickets = @company.service_tickets
-                       .where("ticket_number ILIKE ? OR title ILIKE ? OR description ILIKE ? OR CAST(id AS TEXT) ILIKE ?", 
-                              "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                       .left_joins(:account)
+                       .where("service_tickets.ticket_number ILIKE :t OR service_tickets.title ILIKE :t " \
+                              "OR service_tickets.description ILIKE :t OR accounts.name ILIKE :t " \
+                              "OR CAST(service_tickets.id AS TEXT) ILIKE :t",
+                              t: "%#{query}%")
                        .limit(5)
       
       results += tickets.map do |ticket|
