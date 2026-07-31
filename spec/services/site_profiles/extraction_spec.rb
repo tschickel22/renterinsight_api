@@ -128,6 +128,20 @@ RSpec.describe 'SiteProfiles extraction' do
         expect(d.images.map { |i| i[:src] }).to eq(['https://sunshinehomes.example/img/real-home.jpg'])
       end
 
+      # A real scan pulled several 4KB WordPress thumbnails, which would look
+      # awful stretched across a hero band.
+      it 'skips generated thumbnails' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <img src="/img/home-150x150.jpg" alt="a">
+            <img src="/img/plans-small_thumb.jpg" alt="b">
+            <img src="/img/real-hero-photo.jpg" alt="c">
+          </body></html>
+        HTML
+
+        expect(d.images.map { |i| File.basename(i[:src]) }).to eq(['real-hero-photo.jpg'])
+      end
+
       it 'takes the widest candidate from srcset' do
         d = digest_for(<<~HTML)
           <html><body><img srcset="/img/small.jpg 400w, /img/large.jpg 1600w" alt="Home"></body></html>

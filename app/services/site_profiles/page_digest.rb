@@ -37,7 +37,15 @@ module SiteProfiles
     ].join(', ')
 
     # Logos, flags, spacers, share icons — never the photography we want.
-    JUNK_IMAGE = /logo|icon|sprite|spacer|placeholder|avatar|badge|flag|arrow|bullet|favicon|1x1|blank/i
+    #
+    # Also excludes thumbnails: WordPress generates -150x150 style derivatives
+    # and _thumb files, and a real scan pulled several 4KB thumbs that would
+    # look awful stretched across a hero band.
+    JUNK_IMAGE = /
+      logo|icon|sprite|spacer|placeholder|avatar|badge|flag|arrow|bullet|favicon|1x1|blank
+      |_thumb|-thumb|thumbnail
+      |-\d{2,3}x\d{2,3}\.        # WordPress size derivatives: name-150x150.jpg
+    /xi
 
     # Matching "background…url(…)" in one pass proved fragile — shorthand and
     # longhand backtrack differently. Collect style values first, then read any

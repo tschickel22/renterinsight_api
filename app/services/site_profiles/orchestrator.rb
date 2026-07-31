@@ -65,7 +65,7 @@ module SiteProfiles
 
     def collect_digests(root)
       root_digest = PageDigest.new(root).call
-      pages = { root.url => root }
+      pages = { normalize_url(root.url) || root.url => root }
 
       discover(root, root_digest).each do |url|
         break if pages.size >= MAX_PAGES
@@ -91,28 +91,67 @@ module SiteProfiles
       end
     end
 
-    # sitemap.xml first, then same-origin nav links, prioritised by role so a
-    # 10-page budget is spent on the pages that carry content.
+    # Picks the pages worth spending a 10-fetch budget on.
+    #
+    # Round-robin across roles rather than sorting by role rank. Sorting put all
+    # 29 pages that classify as "inventory" ahead of the single /about-us, so a
+    # real scan visited six product pages and never saw about, contact or faq —
+    # which is why the first run came back with no team and no testimonials.
+    # One page per role, then a second of each, and so on.
     def discover(root, root_digest)
       base_host = host_of(root.url)
-      from_sitemap = sitemap_urls(root.url)
-      from_links = root_digest.links.map { |l| l[:href] }
-
-      candidates = (from_sitemap + from_links).uniq.select do |url|
-        host_of(url) == base_host
-      end
+      candidates = (sitemap_urls(root.url) + root_digest.links.map { |l| l[:href] })
+                   .filter_map { |url| normalize_url(url) }
+                   .uniq
+                   .select { |url| host_of(url) == base_host }
 
       inventory = LinkInventory.new([root_digest], base_url: root.url).call
       role_by_path = inventory['internal'].to_h { |e| [e['path'], e['page_role']] }
 
-      candidates.sort_by do |url|
-        path = begin
-          URI.parse(url).path.to_s.chomp('/')
-        rescue StandardError
-          ''
-        end
-        ROLE_PRIORITY.index(role_by_path[path.presence || '/']) || ROLE_PRIORITY.size
+      by_role = candidates.group_by do |url|
+        role_by_path[path_of(url)] || 'other'
       end
+
+      interleave(by_role)
+    end
+
+    # Take the first of each role in priority order, then the second of each,
+    # until the candidates run out. Unknown roles go last but are not dropped —
+    # a dealer's best page is sometimes called something we do not recognise.
+    def interleave(by_role)
+      ordered_roles = ROLE_PRIORITY + (by_role.keys - ROLE_PRIORITY)
+      queues = ordered_roles.filter_map { |role| by_role[role]&.dup }
+
+      result = []
+      until queues.all?(&:empty?)
+        queues.each do |queue|
+          url = queue.shift
+          result << url if url
+        end
+      end
+      result
+    end
+
+    # Trailing slashes and fragments produced duplicates that silently ate
+    # three of the ten fetch slots on the first real scan.
+    def normalize_url(url)
+      uri = URI.parse(url.to_s)
+      return nil if uri.host.blank?
+
+      uri.fragment = nil
+      # Chomp unconditionally so "/" and "" unify — otherwise the bare domain
+      # and the trailing-slash root count as two different pages.
+      uri.path = uri.path.to_s.chomp('/')
+      uri.to_s
+    rescue StandardError
+      nil
+    end
+
+    def path_of(url)
+      path = URI.parse(url).path.to_s.chomp('/')
+      path.presence || '/'
+    rescue StandardError
+      '/'
     end
 
     def sitemap_urls(base)
