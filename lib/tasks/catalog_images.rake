@@ -42,8 +42,12 @@ namespace :catalog do
       hosts.sort_by { |_, v| -v }.each { |host, n| puts format('   %-40s %d', host, n) }
     end
 
-    desc 'Rehost imagery for catalog vehicles [source_id]'
-    task :backfill, [:source_id] => :environment do |_t, args|
+    desc 'Rehost imagery for catalog vehicles [source_id,limit]'
+    task :backfill, %i[source_id limit] => :environment do |_t, args|
+      # A first run should be inspectable. Without a limit the smallest real
+      # source is still ~1,100 images, which is minutes of downloading before
+      # you can look at a single result and confirm the URLs actually resolve.
+      limit = args[:limit].presence&.to_i
       sources = if args[:source_id].present?
                   CatalogSource.where(id: args[:source_id])
                 else
@@ -57,16 +61,21 @@ namespace :catalog do
       end
 
       sources.each do |source|
-        vehicles = Vehicle.where(catalog_source_id: source.id, is_deleted: [false, nil])
+        vehicles = Vehicle.where(catalog_source_id: source.id, is_deleted: [false, nil]).order(:id)
+        vehicles = vehicles.limit(limit) if limit
         next if vehicles.empty?
 
-        puts "#{source.name} — #{vehicles.count} vehicles"
+        puts "#{source.name} — #{vehicles.count} vehicles#{limit ? " (limited to #{limit})" : ''}"
         # One archiver per source: it lists the bucket once and carries that
         # set across every vehicle, so the whole backfill costs one listing.
         archiver = Catalog::ImageArchiver.new(crawl_delay: source.config.to_h['image_crawl_delay'].to_i)
         touched = 0
 
-        vehicles.find_each do |vehicle|
+        # find_each ignores a scoped limit (and says so in a warning), so a
+        # limited run has to iterate normally. The row count is small by
+        # definition in that case.
+        iterator = limit ? vehicles.to_a : vehicles
+        iterator.each do |vehicle|
           gallery = archiver.archive(normalize(images_of(vehicle)))
           plans   = archiver.archive(normalize(images_of(vehicle, :floor_plan_images)))
 
