@@ -522,6 +522,25 @@ class Api::V1::WebsitesController < ApplicationController
     render json: branding_data
   end
 
+  # GET /api/v1/websites/showcase_inventory
+  #
+  # Inventory config for the design showcase. A company with an account shows
+  # its OWN inventory or none — never a borrowed lot. Their real homes are the
+  # most convincing thing on the page, and someone else's would misrepresent
+  # what they would actually get.
+  #
+  # If it comes back nil the answer is "switch public inventory on", not
+  # "substitute someone else's".
+  def showcase_inventory
+    return unless authorize_action!('websites', 'read')
+
+    config = SiteProfiles::DemoInventoryResolver.config_for(@company, allow_fallback: false)
+    render json: {
+      inventory_embed_config: config,
+      public_inventory_enabled: @company.try(:public_inventory_enabled) || false
+    }
+  end
+
   private
 
   def set_company_scope
