@@ -282,7 +282,10 @@ class Api::V1::SearchController < ApplicationController
       pos = @company.purchase_orders
                    .left_joins(:supplier)
                    .where(is_deleted: [false, nil])
-                   .where("purchase_orders.po_number ILIKE ? OR suppliers.name ILIKE ? OR suppliers.code ILIKE ? OR suppliers.account_number ILIKE ?", 
+                   # Supplier is an alias subclass of Vendor, so the join lands
+                   # on the vendors table. Referencing suppliers.* raised
+                   # PG::UndefinedTable and dropped POs from every search.
+                   .where("purchase_orders.po_number ILIKE ? OR vendors.name ILIKE ? OR vendors.code ILIKE ? OR vendors.account_number ILIKE ?",
                           "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
                    .limit(5)
       

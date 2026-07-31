@@ -22,7 +22,7 @@ RSpec.describe 'SiteProfiles extraction' do
           <h2>Why Buy From Us</h2>
           <p>We have served Colorado families for over thirty years with quality homes and honest pricing.</p>
           <p>Short</p>
-          <img src="/img/logo.png" alt="Sunshine Homes logo">
+          <img src="/img/lot-photo.jpg" alt="Homes on our lot">
           <a href="/inventory">Browse Homes</a>
           <form action="/contact" method="post">
             <input name="full_name" type="text" placeholder="Your name" required>
@@ -51,7 +51,7 @@ RSpec.describe 'SiteProfiles extraction' do
 
     it 'resolves relative urls against the page' do
       d = digest_for(html)
-      expect(d.images.first[:src]).to eq('https://sunshinehomes.example/img/logo.png')
+      expect(d.images.first[:src]).to eq('https://sunshinehomes.example/img/lot-photo.jpg')
       expect(d.links.first[:href]).to eq('https://sunshinehomes.example/inventory')
     end
 
@@ -76,6 +76,65 @@ RSpec.describe 'SiteProfiles extraction' do
       HTML
       expect(spa).to be_likely_client_rendered
       expect(digest_for(html)).not_to be_likely_client_rendered
+    end
+
+    describe 'tuning against real dealer markup' do
+      # ~75% of <li> on a dealer home page are menu items, so reading "every p
+      # and li" yields mostly navigation.
+      it 'ignores navigation when reading prose' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <nav><ul><li>Floor Plans</li><li>Singlewides</li><li>Doublewides</li></ul></nav>
+            <footer><p>Builders Clayton Homes TRU Homes Champion Homes Legacy Homes Marathon</p></footer>
+            <div><p>We have served East Texas families since 1999 with quality manufactured homes.</p></div>
+          </body></html>
+        HTML
+
+        expect(d.paragraphs.size).to eq(1)
+        expect(d.paragraphs.first).to match(/East Texas families/)
+      end
+
+      # Nokogiri's #text runs adjacent elements together: "WELCOME TO" +
+      # "MOBILE HOME MASTERS" became "WELCOME TOMOBILE HOME MASTERS".
+      it 'separates nested heading elements instead of running them together' do
+        d = digest_for('<html><body><h1><span>WELCOME TO</span><span>MOBILE HOME MASTERS</span></h1></body></html>')
+        expect(d.headings.first[:text]).to eq('WELCOME TO MOBILE HOME MASTERS')
+      end
+
+      # Elementor and friends put the good photography in CSS, not <img>.
+      it 'collects hero imagery from inline background-image' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/hero-lot.jpg')"></div>
+            <section style='background:#fff url("/img/section.jpg") no-repeat'></section>
+          </body></html>
+        HTML
+
+        expect(d.background_images).to include('https://sunshinehomes.example/img/hero-lot.jpg')
+        expect(d.background_images).to include('https://sunshinehomes.example/img/section.jpg')
+        expect(d.candidate_hero_images.first).to eq('https://sunshinehomes.example/img/hero-lot.jpg')
+      end
+
+      it 'skips logos, icons and spacers when collecting photography' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <img src="/img/header-logo.png" alt="Logo">
+            <img src="/img/facebook-icon.svg" alt="Social">
+            <img src="/img/spacer.gif" width="1">
+            <img src="/img/real-home.jpg" alt="A home">
+          </body></html>
+        HTML
+
+        expect(d.images.map { |i| i[:src] }).to eq(['https://sunshinehomes.example/img/real-home.jpg'])
+      end
+
+      it 'takes the widest candidate from srcset' do
+        d = digest_for(<<~HTML)
+          <html><body><img srcset="/img/small.jpg 400w, /img/large.jpg 1600w" alt="Home"></body></html>
+        HTML
+
+        expect(d.images.first[:src]).to eq('https://sunshinehomes.example/img/large.jpg')
+      end
     end
   end
 

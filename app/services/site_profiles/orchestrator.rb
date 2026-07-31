@@ -35,10 +35,11 @@ module SiteProfiles
       brand = BrandExtractor.new(pages_for_brand(digests)).call
       links = LinkInventory.new(digests, base_url: @record.source_url).call
       integrations = VendorDetector.new(digests, source_host: host_of(@record.source_url)).call
+      contact = ContactExtractor.new(digests, pages_html: raw_html_cache).call
 
       profile, schema_warnings, usage = ProfileBuilder.new(
         company: @record.company, user: @record.created_by
-      ).call(digests:, brand:, links:, integrations:, source_url: @record.source_url)
+      ).call(digests:, brand:, links:, integrations:, contact:, source_url: @record.source_url)
 
       @warnings.concat(schema_warnings)
 

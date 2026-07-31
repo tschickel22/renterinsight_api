@@ -85,11 +85,14 @@ module SiteProfiles
       http.request(request)
     end
 
+    # Net::HTTP hands back ASCII-8BIT, which explodes the moment it is joined
+    # with UTF-8 text elsewhere in the pipeline. Normalise once, here, rather
+    # than at every consumer.
     def truncate(body)
       return '' if body.nil?
-      return body if body.bytesize <= MAX_BODY_BYTES
 
-      body.byteslice(0, MAX_BODY_BYTES).force_encoding(body.encoding).scrub
+      body = body.byteslice(0, MAX_BODY_BYTES) if body.bytesize > MAX_BODY_BYTES
+      body.dup.force_encoding(Encoding::UTF_8).scrub('')
     end
   end
 

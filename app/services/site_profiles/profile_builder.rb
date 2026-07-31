@@ -24,7 +24,7 @@ module SiteProfiles
 
     # digests: [PageDigest::Digest], brand/links/integrations from the
     # deterministic pass. Returns [profile_hash, warnings, usage].
-    def call(digests:, brand: {}, links: {}, integrations: [], source_url: nil)
+    def call(digests:, brand: {}, links: {}, integrations: [], contact: {}, source_url: nil)
       started = Time.current
       response = call_claude(
         system_prompt: system_prompt,
@@ -36,7 +36,7 @@ module SiteProfiles
       raw = parse_json(response[:text])
       profile, warnings = ProfileSchema.coerce(raw)
 
-      profile = merge_deterministic(profile, brand:, links:, integrations:, digests:, source_url:)
+      profile = merge_deterministic(profile, brand:, links:, integrations:, contact:, digests:, source_url:)
       log_usage(response, source_url, started)
 
       [profile, warnings, response]
@@ -46,9 +46,19 @@ module SiteProfiles
 
     # The deterministic extractors are authoritative — the model's guesses at
     # brand colour or integrations lose to what we actually parsed.
-    def merge_deterministic(profile, brand:, links:, integrations:, digests:, source_url:)
+    def merge_deterministic(profile, brand:, links:, integrations:, contact:, digests:, source_url:)
       profile['brand'] = profile['brand'].to_h.merge(brand.to_h.compact) { |_k, ai, det| det.presence || ai }
+      # Parsed tel:/mailto: beats anything the model inferred from prose.
+      profile['contact'] = profile['contact'].to_h.merge(contact.to_h.compact) { |_k, ai, det| det.presence || ai }
       profile['links'] = links.presence || profile['links']
+
+      # Background images are where dealer sites keep their photography, so
+      # seed hero/gallery from them when the model did not pick any.
+      candidates = digests.flat_map(&:candidate_hero_images).uniq
+      media = profile['media'].to_h
+      media['hero_images'] = (Array(media['hero_images']) + candidates).uniq.first(12)
+      media['gallery'] = (Array(media['gallery']) + candidates).uniq.first(24)
+      profile['media'] = media
       profile['integrations'] = integrations.map { |d| detection_to_h(d) }
       profile['source'] = {
         'url' => source_url,
@@ -99,6 +109,7 @@ module SiteProfiles
             headings: d.headings,
             paragraphs: d.paragraphs,
             images: d.images&.first(20),
+            background_images: d.background_images&.first(12),
             forms: d.forms
           }.compact
         end
