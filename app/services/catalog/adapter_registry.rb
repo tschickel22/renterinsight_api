@@ -15,7 +15,8 @@ module Catalog
       'tru_model_line'             => 'Catalog::Adapters::TruModelLineAdapter',
       'clayton_epic_region'        => 'Catalog::Adapters::ClaytonEpicRegionAdapter',
       'clayton_retail_home_center' => 'Catalog::Adapters::ClaytonRetailHomeCenterAdapter',
-      'trove_catalog'              => 'Catalog::Adapters::TroveCatalogAdapter'
+      'trove_catalog'              => 'Catalog::Adapters::TroveCatalogAdapter',
+      'cavco_retailer'             => 'Catalog::Adapters::CavcoRetailerAdapter'
     }.freeze
 
     module_function
