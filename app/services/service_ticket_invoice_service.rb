@@ -54,7 +54,40 @@ class ServiceTicketInvoiceService
   
   def generate_warranty_invoice(warranty_claim)
     return nil unless @ticket.has_warranty_items?
-    
+
+    # One warranty invoice per claim. This used to create unconditionally, so
+    # every press of Generate minted another WRN for the same work: ticket 321
+    # accumulated four identical $477.50 invoices in one afternoon. Now that
+    # generating is the ordinary way to re-sync a claim, that has to be
+    # idempotent.
+    existing = Invoice.where(source: warranty_claim, billing_category: 'warranty')
+                      .where(is_deleted: [false, nil])
+                      .order(:id)
+                      .first
+
+    if existing
+      # Only refresh one that has not left the building. A sent or paid invoice
+      # is a record of what the manufacturer was billed, so leave it alone and
+      # hand it back rather than quietly restating it.
+      return existing unless existing.status == 'draft'
+
+      existing.invoice_items.destroy_all
+      existing.update!(
+        recipient_id: warranty_claim.manufacturer_id,
+        subtotal: @ticket.warranty_total,
+        tax_rate: 0,
+        tax_amount: 0,
+        total: @ticket.warranty_total,
+        amount_due: @ticket.warranty_total
+      )
+      create_warranty_invoice_items(existing)
+
+      existing.reload
+      subtotal = existing.invoice_items.sum { |item| item.amount.to_f }
+      existing.update!(subtotal: subtotal, tax_amount: 0, total: subtotal, amount_due: subtotal)
+      return existing
+    end
+
     invoice = Invoice.create!(
       company_id: @ticket.company_id,
       location_id: @ticket.location_id,
