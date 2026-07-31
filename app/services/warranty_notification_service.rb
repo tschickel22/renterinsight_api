@@ -44,6 +44,7 @@ class WarrantyNotificationService
     context = build_claim_context(warranty_claim)
 
     cc = normalize_cc_addresses(cc_emails, exclude: recipient_email)
+    body = render_template(template.body, context)
 
     # Send via existing CommunicationService
     CommunicationService.send_email(
@@ -51,7 +52,8 @@ class WarrantyNotificationService
       to: recipient_email,
       cc: cc,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: body,
+      content_type: content_type_for(body),
       category: 'warranty',
       template: template.id,
       metadata: {
@@ -105,6 +107,7 @@ class WarrantyNotificationService
       to: recipient_email,
       subject: subject,
       body: body,
+      content_type: content_type_for(body),
       category: 'warranty',
       template: template&.id,
       metadata: {
@@ -134,12 +137,14 @@ class WarrantyNotificationService
     raise MissingRecipientError, 'No company notification email found' if recipient_email.blank?
     
     context = build_claim_context(warranty_claim)
-    
+    rendered_body = render_template(template.body, context)
+
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: rendered_body,
+      content_type: content_type_for(rendered_body),
       category: 'warranty',
       template: template.id,
       metadata: {
@@ -168,12 +173,14 @@ class WarrantyNotificationService
     return nil if recipient_email.blank? # Don't fail if no client email
     
     context = build_claim_context(warranty_claim)
-    
+    rendered_body = render_template(template.body, context)
+
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: rendered_body,
+      content_type: content_type_for(rendered_body),
       category: 'warranty',
       template: template.id,
       portal_visible: true, # Show in client portal
@@ -203,12 +210,14 @@ class WarrantyNotificationService
     return nil if recipient_email.blank?
     
     context = build_claim_context(warranty_claim)
-    
+    rendered_body = render_template(template.body, context)
+
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
       subject: render_template(template.subject, context),
-      body: render_template(template.body, context),
+      body: rendered_body,
+      content_type: content_type_for(rendered_body),
       category: 'warranty',
       template: template.id,
       portal_visible: true,
@@ -373,8 +382,32 @@ class WarrantyNotificationService
     context['customer_responsibility_section'] = warranty_claim.estimated_amount.present? ? 
     "Estimated repair cost: #{format_currency(warranty_claim.estimated_amount)}" : ''
     context['next_steps'] = 'We will schedule the repair and keep you updated on progress.'
-    
+
+    # HTML-safe twins of the multi-line values, for templates whose body is real
+    # HTML. The plain-text keys are unchanged so existing templates render
+    # exactly as before; an HTML template that used them would collapse the
+    # parts list onto one line, which is the bug this pair exists to avoid.
+    context['parts_list_html']    = to_html_lines(context['parts_list'])
+    context['labor_details_html'] = to_html_lines(context['labor_details'])
+    context['claim_notes_html']   = to_html_lines(context['claim_notes'].presence || 'None')
+
     context
+  end
+
+  # Escape a plain-text value and keep its line breaks visible in HTML.
+  def self.to_html_lines(text)
+    ERB::Util.html_escape(text.to_s).to_s.gsub(/\r?\n/, '<br>')
+  end
+
+  # Warranty templates are seeded as plain text, but every email in this app is
+  # delivered as text/html by default — and HTML collapses whitespace, so those
+  # bodies arrived as one unbroken paragraph. Send a body that carries no markup
+  # as text/plain so its line breaks survive. Templates that ARE html (the
+  # manufacturer claim email, and anything a dealer writes in the editor) are
+  # unaffected.
+  def self.content_type_for(body)
+    markup = body.to_s.match?(/<(a|br|div|p|table|td|tr|span|h[1-6]|strong|em|ul|ol|li)\b[^>]*>/i)
+    markup ? 'text/html' : 'text/plain'
   end
   
   # Render template with variable substitution
