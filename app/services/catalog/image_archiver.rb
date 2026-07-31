@@ -41,9 +41,34 @@ module Catalog
       @result      = Result.new(archived: 0, reused: 0, failed: 0, skipped: 0)
     end
 
+    # S3UploadService falls back to a bucket literally named "...-staging" when
+    # AWS_S3_BUCKET is unset. For transient uploads that is merely untidy; here
+    # it is not, because the archived URL is written into every vehicle row.
+    # Production imagery would be permanently pinned to the staging bucket, and
+    # whatever retention or clean-up applies there would govern live dealer
+    # listings.
+    #
+    # Scoped to this service on purpose: the dozen existing upload paths keep
+    # their current behaviour, so nothing that works today can start failing.
+    def misconfigured_bucket?
+      Rails.env.production? && @uploader.bucket_name.to_s.include?('staging')
+    end
+
+    def bucket_warning
+      "Refusing to archive: production is pointed at #{@uploader.bucket_name.inspect}. " \
+        'Set AWS_S3_BUCKET to the production bucket first — archived URLs are stored ' \
+        'on every vehicle, so this is not something a later env change can undo.'
+    end
+
     # @param images [Array<Hash>] NormalizedHome image records
     # @return [Array<Hash>] same records with local_url filled where possible
     def archive(images)
+      if misconfigured_bucket?
+        Rails.logger.error "[Catalog::ImageArchiver] #{bucket_warning}"
+        @result.skipped += Array(images).size
+        return Array(images)
+      end
+
       Array(images).map do |img|
         record = img.dup
         source_url = record['source_url'] || record['url']

@@ -141,4 +141,35 @@ RSpec.describe Catalog::ImageArchiver do
       expect(archiver.result.skipped).to eq(1)
     end
   end
+
+  # The archived URL is written into every vehicle row, so a wrong bucket is not
+  # something a later env change can undo. S3UploadService falls back to a
+  # bucket literally named "...-staging" when AWS_S3_BUCKET is unset.
+  describe 'production bucket guard' do
+    before { allow(Rails.env).to receive(:production?).and_return(true) }
+
+    it 'refuses to archive when production is pointed at a staging bucket' do
+      allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-staging')
+
+      expect(uploader).not_to receive(:upload)
+      out = described_class.new(uploader: uploader).archive([image(photo)])
+
+      expect(out.first['local_url']).to be_nil
+      expect(out.first['source_url']).to eq(photo)
+    end
+
+    it 'archives normally against a production bucket' do
+      allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-prod')
+
+      arch = described_class.new(uploader: uploader)
+      allow(arch).to receive(:open_source).and_return(StringIO.new('bytes'))
+
+      expect(arch.archive([image(photo)]).first['local_url']).to be_present
+    end
+  end
+
+  it 'does not block a staging bucket outside production' do
+    allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-staging')
+    expect(archiver.archive([image(photo)]).first['local_url']).to be_present
+  end
 end
