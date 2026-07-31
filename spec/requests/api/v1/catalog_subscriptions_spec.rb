@@ -182,4 +182,66 @@ RSpec.describe 'Api::V1::CatalogSubscriptions', type: :request do
       expect(response).to have_http_status(:ok)
     end
   end
+
+  # Subscribing used to enqueue a FULL re-crawl just to backfill one dealer —
+  # 716s for Kabco, 408s for Sunshine Homes, 375s for Clayton in production, for
+  # data the source had already parsed.
+  describe 'backfill on subscribe' do
+    let(:source) { selectable_source('Sunshine') }
+
+    def cached_home(key = 'model-a')
+      Catalog::NormalizedHome.new(
+        source_key: key, source_url: "https://example.com/homes/#{key}",
+        model_name: 'The Colossal', model_id: 'ABC123', series: 'Heritage',
+        property_type: ['Double Wide'], bedrooms: 3, bathrooms: 2,
+        dimensions: '32x60', square_feet: 1600,
+        images: [{ 'source_url' => 'https://cdn.example.com/a.jpg', 'is_floorplan' => false }]
+      )
+    end
+
+    def subscribe!
+      post '/api/v1/catalog_subscriptions',
+           params: { catalog_subscription: { catalog_source_id: source.id } }.to_json,
+           headers: headers
+    end
+
+    it 'ingests straight from cache instead of queueing a crawl' do
+      Catalog::ParsedHomeCache.write(source, [cached_home])
+
+      expect { subscribe! }.not_to have_enqueued_job(CatalogSourceRunJob)
+
+      expect(JSON.parse(response.body).dig('backfill', 'mode')).to eq('cache')
+      expect(company.vehicles.where(catalog_source_id: source.id).count).to eq(1)
+    end
+
+    it 'falls back to a crawl when nothing is cached' do
+      expect { subscribe! }.to have_enqueued_job(CatalogSourceRunJob)
+      expect(JSON.parse(response.body).dig('backfill', 'mode')).to eq('crawl_queued')
+    end
+
+    # Homes parsed under different settings are worse than no cache.
+    it 'crawls rather than serving a cache from different source settings' do
+      Catalog::ParsedHomeCache.write(source, [cached_home])
+      source.update!(base_url: 'https://changed.example.com')
+
+      expect { subscribe! }.to have_enqueued_job(CatalogSourceRunJob)
+    end
+
+    it 'crawls rather than serving a stale cache' do
+      Catalog::ParsedHomeCache.write(source, [cached_home])
+
+      travel_to(3.days.from_now) do
+        expect { subscribe! }.to have_enqueued_job(CatalogSourceRunJob)
+      end
+    end
+
+    # Never leave a dealer subscribed to an empty inventory.
+    it 'falls back to a crawl if cache ingestion blows up' do
+      Catalog::ParsedHomeCache.write(source, [cached_home])
+      allow(Catalog::SubscriptionIngestor).to receive(:call).and_raise(StandardError, 'boom')
+
+      expect { subscribe! }.to have_enqueued_job(CatalogSourceRunJob)
+      expect(JSON.parse(response.body).dig('backfill', 'mode')).to eq('crawl_queued')
+    end
+  end
 end
