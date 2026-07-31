@@ -31,6 +31,17 @@ module Catalog
       @raw           ||= {}
     end
 
+    # Round-trip for ParsedHomeCache, so a second dealer subscribing does not
+    # force a fresh crawl of data we already parsed. Plain data both ways — no
+    # behaviour rides along.
+    def to_h
+      ATTRS.index_with { |attr| public_send(attr) }.deep_stringify_keys
+    end
+
+    def self.from_h(hash)
+      new(**hash.to_h.symbolize_keys.slice(*ATTRS))
+    end
+
     # Stable hash over the meaningful content — drives change detection between
     # runs (only re-ingest / flag when content actually changed).
     def content_hash

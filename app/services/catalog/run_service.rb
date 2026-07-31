@@ -45,6 +45,12 @@ module Catalog
       ingest = ingest_into_subscribers(homes, degraded: degraded)
 
       status = run_status(homes:, errors:, degraded:)
+
+      # Keep what we parsed so the next dealer to subscribe can be backfilled
+      # without another full crawl. Best-effort by design — never let a cache
+      # write turn a good run into a failed one.
+      ParsedHomeCache.write(@source, homes, degraded: degraded) if status != 'failed' && homes.any?
+
       finalize!(run, homes:, errors:, rates:, degraded:, status:, ingest:)
 
       DegradationAlerter.call(source: @source, run: run) if degraded || status == 'failed'
@@ -101,18 +107,11 @@ module Catalog
         next if sub.company.nil?
 
         target_locations = sub.ingest_location_ids # [nil] for company-wide, else [ids]
-        target_locations.each do |loc|
-          result = IngestionService.new(
-            company:        sub.company,
-            source:         @source,
-            location_id:    loc,
-            protect_blanks: degraded
-          ).call(homes)
 
-          totals[:added]       += result.added
-          totals[:updated]     += result.updated
-          totals[:inactivated] += result.inactivated
-        end
+        result = SubscriptionIngestor.call(subscription: sub, homes: homes, degraded: degraded)
+        totals[:added]       += result.added
+        totals[:updated]     += result.updated
+        totals[:inactivated] += result.inactivated
 
         totals[:inactivated] += inactivate_deselected_locations(sub.company, target_locations)
       end

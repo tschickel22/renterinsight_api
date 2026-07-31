@@ -48,11 +48,10 @@ module Api
         sub.location_ids = permitted_location_ids
         sub.save!
 
-        # Backfill the dealer's inventory now instead of waiting for the nightly
-        # run (re-crawls the source; the in-progress guard prevents stacking).
-        enqueue_run(source)
+        backfilled = backfill(sub, source)
 
-        render json: { subscription: subscription_json(sub) }, status: (was_new ? :created : :ok)
+        render json: { subscription: subscription_json(sub), backfill: backfilled },
+               status: (was_new ? :created : :ok)
       rescue ActiveRecord::RecordNotUnique
         existing = @company.dealer_catalog_subscriptions.find_by(catalog_source_id: source&.id)
         render json: { subscription: subscription_json(existing) }, status: :ok
@@ -108,6 +107,36 @@ module Api
         return [] if requested.empty?
 
         @company.locations.where(id: requested).pluck(:id)
+      end
+
+      # Fill the dealer's inventory now rather than waiting for the nightly run.
+      #
+      # Prefer the homes the source already parsed: re-crawling to backfill one
+      # subscriber costs a full pass over the vendor's site — 716s for Kabco,
+      # 408s for Sunshine Homes, 375s for Clayton in production — for data we
+      # have. Falls back to a crawl when nothing usable is cached.
+      def backfill(subscription, source)
+        homes = Catalog::ParsedHomeCache.read(source)
+
+        if homes.blank?
+          enqueue_run(source)
+          return { mode: 'crawl_queued' }
+        end
+
+        totals = Catalog::SubscriptionIngestor.call(
+          subscription: subscription,
+          homes:        homes,
+          degraded:     Catalog::ParsedHomeCache.degraded?(source)
+        )
+
+        { mode: 'cache', added: totals.added, updated: totals.updated,
+          cachedAt: Catalog::ParsedHomeCache.cached_at(source)&.iso8601 }
+      rescue StandardError => e
+        # Never leave a dealer subscribed with nothing: fall back to a crawl.
+        Rails.logger.warn "[CatalogSubscriptions] cache backfill failed for source " \
+                          "#{source.id}: #{e.class}: #{e.message}"
+        enqueue_run(source)
+        { mode: 'crawl_queued' }
       end
 
       def enqueue_run(source)
