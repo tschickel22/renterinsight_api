@@ -2,7 +2,12 @@ module Api
   module V1
     class ReportAiController < ApplicationController
       before_action :set_company_scope
-      before_action :check_ai_enabled
+      # usage and suggested are read-only status endpoints that the AI panel calls
+      # on mount. Answering "is this enabled for me?" with a 403 made the global
+      # apiClient interceptor fire a "Permission Denied" toast on every page load
+      # for tenants without the module. They stay behind RBAC (reports:read) and
+      # report the disabled state in their payload instead.
+      before_action :check_ai_enabled, except: %i[usage suggested]
 
       # POST /api/v1/report-ai/ask
       def ask
