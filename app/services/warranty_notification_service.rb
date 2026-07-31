@@ -24,11 +24,14 @@ class WarrantyNotificationService
   # Notify manufacturer when dealer submits a warranty claim
   #
   # @param warranty_claim [WarrantyClaim] The warranty claim being submitted
+  # @param cc_emails [Array<String>, String, nil] addresses copied on the email
+  #   (e.g. the submitting user, via "CC me"). Blank entries are dropped rather
+  #   than failing the send — a bad CC must never cost the manufacturer their copy.
   # @return [Communication, nil] The created communication record or nil if disabled
   #
-  def self.notify_manufacturer(warranty_claim)
+  def self.notify_manufacturer(warranty_claim, cc_emails: [])
     return nil unless should_notify?('notifyManufacturerOnSubmission', warranty_claim.company)
-    
+
     # Find template (company-specific or platform default)
     template = find_template('warranty_submitted_to_manufacturer', warranty_claim.company_id)
     raise TemplateNotFoundError, 'Warranty submission template not found' unless template
@@ -40,10 +43,13 @@ class WarrantyNotificationService
     # Build template context
     context = build_claim_context(warranty_claim)
 
+    cc = normalize_cc_addresses(cc_emails, exclude: recipient_email)
+
     # Send via existing CommunicationService
     CommunicationService.send_email(
       communicable: warranty_claim,
       to: recipient_email,
+      cc: cc,
       subject: render_template(template.subject, context),
       body: render_template(template.body, context),
       category: 'warranty',
@@ -51,7 +57,8 @@ class WarrantyNotificationService
       metadata: {
         warranty_claim_id: warranty_claim.id,
         manufacturer_id: warranty_claim.manufacturer_id,
-        notification_type: 'manufacturer_submission'
+        notification_type: 'manufacturer_submission',
+        cc_emails: cc
       }
     )
   rescue => e
@@ -464,6 +471,30 @@ class WarrantyNotificationService
     company_manufacturer&.claim_email.presence ||
       warranty_claim.manufacturer&.claim_email.presence ||
       warranty_claim.manufacturer&.contact_email
+  end
+
+  # Normalize a CC list into the single comma-joined string the Communication
+  # record and the mail gem both expect. Accepts an array or a comma/semicolon
+  # separated string. Drops blanks, anything that isn't shaped like an address,
+  # duplicates, and the primary recipient (nobody needs two copies). Returns nil
+  # when nothing survives, so the send behaves exactly as it did before CC.
+  def self.normalize_cc_addresses(cc_emails, exclude: nil)
+    # Split on the entry level too: a single "a@x.com, b@x.com" string is a
+    # perfectly ordinary way for a caller to pass two addresses.
+    list = Array(cc_emails).flat_map { |entry| entry.to_s.split(/[,;]/) }
+
+    excluded = exclude.to_s.strip.downcase
+    seen = []
+    list.each do |raw|
+      address = raw.to_s.strip
+      next if address.blank?
+      next unless address.match?(URI::MailTo::EMAIL_REGEXP)
+      next if address.downcase == excluded
+      next if seen.any? { |kept| kept.downcase == address.downcase }
+      seen << address
+    end
+
+    seen.presence&.join(', ')
   end
 
   # Get dealer code from location or company manufacturer relationship

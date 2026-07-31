@@ -138,7 +138,7 @@ module Api
           return render json: { errors: [blocked] }, status: :unprocessable_entity
         end
 
-        if @warranty_claim.submit!(current_user.name || current_user.email)
+        if @warranty_claim.submit!(current_user.name || current_user.email, cc_emails: requested_cc_emails)
           render json: {
             data: @warranty_claim.as_json,
             message: 'Warranty claim submitted successfully'
@@ -194,7 +194,7 @@ module Api
           }, status: :unprocessable_entity
         end
         
-        if @warranty_claim.resubmit!(current_user.name || current_user.email)
+        if @warranty_claim.resubmit!(current_user.name || current_user.email, cc_emails: requested_cc_emails)
           render json: { 
             data: @warranty_claim.as_json,
             message: 'Warranty claim resubmitted successfully'
@@ -388,6 +388,18 @@ module Api
       end
       
       private
+
+      # Who to copy on the manufacturer email. `cc_me` resolves server-side to
+      # the signed-in user's address rather than trusting one off the wire, so
+      # the checkbox can never be used to mail a claim to an arbitrary party.
+      # `cc_emails` is still accepted for explicit extra recipients; the service
+      # validates and de-dupes whatever comes through.
+      def requested_cc_emails
+        emails = []
+        emails << current_user.email if ActiveModel::Type::Boolean.new.cast(params[:cc_me])
+        emails.concat(Array(params[:cc_emails])) if params[:cc_emails].present?
+        emails
+      end
 
       # Columns the client is allowed to sort by. Maps to real DB columns so
       # arbitrary/unsafe sort_by values can never reach the SQL ORDER BY.
