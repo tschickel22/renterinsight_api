@@ -37,6 +37,21 @@ module Api
         @warranty_claims = @warranty_claims.by_status(params[:status]) if params[:status].present?
         @warranty_claims = @warranty_claims.by_manufacturer(params[:manufacturer_id]) if params[:manufacturer_id].present?
 
+        # Search the whole result set. This list paginates at 50 and search ran
+        # in the browser over the loaded page only, so a claim a few pages deep
+        # was unfindable even when you knew its number.
+        if params[:search].present?
+          term = "%#{params[:search].to_s.strip}%"
+          @warranty_claims = @warranty_claims
+            .left_joins(:manufacturer, :service_ticket)
+            .where(
+              'warranty_claims.claim_number ILIKE :t OR manufacturers.name ILIKE :t ' \
+              'OR service_tickets.title ILIKE :t OR service_tickets.ticket_number ILIKE :t',
+              t: term
+            )
+            .distinct
+        end
+
         # Apply sort across the full result set (before pagination) so sorting
         # spans all pages, not just the current page.
         @warranty_claims = apply_sort(@warranty_claims)
