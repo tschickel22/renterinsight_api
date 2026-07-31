@@ -52,12 +52,36 @@ RSpec.describe Catalog::ParsedHomeCache do
       expect(described_class.read(source)).to be_nil
     end
 
-    it 'returns nil once past the max age' do
+    it 'returns nil once past an explicit max age' do
       described_class.write(source, [home])
       expect(described_class.read(source, max_age: 1.hour)).to be_present
 
       travel_to(3.hours.from_now) do
         expect(described_class.read(source, max_age: 1.hour)).to be_nil
+      end
+    end
+
+    # Crawling to backfill a dealer more often than the source refreshes itself
+    # contradicts the schedule — a weekly source would pay a full crawl on day 3
+    # to produce data barely newer than the cache.
+    describe 'default window follows the source schedule' do
+      {
+        'daily'  => [19.hours, 21.hours],
+        'weekly' => [5.days, 7.days],
+        'manual' => [20.days, 31.days]
+      }.each do |schedule, (still_fresh, now_stale)|
+        it "keeps a #{schedule} source's parse for its own cadence" do
+          source.update!(schedule: schedule)
+          described_class.write(source, [home])
+
+          travel_to(still_fresh.from_now) { expect(described_class.read(source)).to be_present }
+          travel_to(now_stale.from_now)   { expect(described_class.read(source)).to be_nil }
+        end
+      end
+
+      it 'exposes the window it derived' do
+        source.update!(schedule: 'weekly')
+        expect(described_class.max_age_for(source)).to eq(6.days)
       end
     end
 
