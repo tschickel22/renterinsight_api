@@ -200,7 +200,12 @@ class ActivityReminderService
         id: activity.id,
         type: activity.activity_type,
         subject: activity.subject,
-        description: activity.description || activity.notes,
+        # No activity class has a notes column, so the old `|| activity.notes`
+        # fallback could only ever raise NoMethodError, killing the whole
+        # broadcast whenever description was blank. Guard it like the
+        # entity_id lookup above does.
+        description: activity.description.presence ||
+                     (activity.respond_to?(:notes) ? activity.notes : nil),
         priority: activity.priority,
         due_date: activity.due_date || activity.reminder_time,
         # Old format (for backward compatibility)

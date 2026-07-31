@@ -94,7 +94,11 @@ class MailerDeliveryConfigurator
       SENSITIVE_FIELDS.each do |key|
         val = out[key]
         next unless val.is_a?(String) && val.start_with?('encrypted:')
-        out[key] = decrypt(val.sub('encrypted:', '')) || val
+        # Falling back to `val` handed the raw ciphertext to the provider as if
+        # it were the credential, which SES reports as SignatureDoesNotMatch and
+        # sends you hunting a secret that was never wrong. Drop it instead so
+        # the caller's own ENV fallback can supply a coherent credential.
+        out[key] = decrypt(val.sub('encrypted:', ''))
       end
       out
     end
