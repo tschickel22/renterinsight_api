@@ -59,7 +59,10 @@ module Api
               'OR accounts.name ILIKE :t OR CAST(service_tickets.id AS TEXT) ILIKE :t',
               t: term
             )
-            .distinct
+          # No .distinct here: :account is a belongs_to so the join cannot
+          # duplicate rows, and SELECT DISTINCT over this table is not even
+          # legal — parts, labor and custom_fields are json (not jsonb), which
+          # has no equality operator, so Postgres raises on the record load.
         end
 
         # Pagination
