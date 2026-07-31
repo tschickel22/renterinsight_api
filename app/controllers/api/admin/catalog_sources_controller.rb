@@ -10,7 +10,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   RUN_STALE_AFTER = 30.minutes
 
   before_action :require_platform_admin
-  before_action :set_source, only: %i[show update destroy test run_now runs]
+  before_action :set_source, only: %i[show update destroy test run_now runs seed_inventory]
 
   # Clayton publishes neither a series nor an on-page description for retail
   # home center models, so both would sit at 0% extraction and trip the
@@ -231,6 +231,57 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                    fetchedAt: Catalog::CavcoRetailerDirectory.fetched_at }
   rescue StandardError => e
     render json: { error: "Refresh failed: #{e.message}" }, status: :service_unavailable
+  end
+
+  # POST /api/admin/catalog_sources/:id/seed_inventory
+  # One-time onboarding import of a Cavco dealer's ACTUAL lot. Deliberately a
+  # button rather than an automatic side effect of subscribing: it writes real
+  # inventory rows (including sold and pending homes) into a dealer's account,
+  # which should be a decision someone makes, not a surprise.
+  #
+  # Safe to press twice — the seeder is write-once on Cavco's inventory UUID, so
+  # a re-run adds nothing and never overwrites a status the dealer has changed.
+  def seed_inventory
+    adapter = @source.adapter
+    unless adapter.respond_to?(:inventory_documents)
+      return render json: { error: "#{@source.adapter_type} does not publish dealer inventory" },
+                    status: :unprocessable_entity
+    end
+
+    subs = @source.dealer_catalog_subscriptions.enabled.includes(:company)
+    subs = subs.where(company_id: params[:company_id]) if params[:company_id].present?
+    if subs.empty?
+      return render json: { error: 'No dealer is subscribed to this source yet' },
+                    status: :unprocessable_entity
+    end
+
+    documents = adapter.inventory_documents
+    if documents.empty?
+      return render json: { error: 'The manufacturer reports no inventory for this dealership' },
+                    status: :unprocessable_entity
+    end
+
+    results = subs.filter_map do |sub|
+      next if sub.company.nil?
+
+      totals = Hash.new(0)
+      sub.ingest_location_ids.each do |location_id|
+        r = Catalog::CavcoInventorySeeder.new(company: sub.company, source: @source,
+                                              location_id: location_id).call(documents)
+        totals[:created]          += r.created
+        totals[:skipped_existing] += r.skipped_existing
+        totals[:skipped]          += r.skipped_unmappable
+      end
+
+      { companyId: sub.company_id, companyName: sub.company.name,
+        created: totals[:created], alreadyPresent: totals[:skipped_existing],
+        skipped: totals[:skipped] }
+    end
+
+    render json: { available: documents.size, results: results }
+  rescue StandardError => e
+    Rails.logger.error "[CatalogSources] seed_inventory failed for #{@source.id}: #{e.class}: #{e.message}"
+    render json: { error: "Seeding failed: #{e.message}" }, status: :unprocessable_entity
   end
 
   # POST /api/admin/catalog_sources/upload_snapshot
