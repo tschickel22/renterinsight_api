@@ -287,6 +287,18 @@ RSpec.describe Catalog::Adapters::TroveCatalogAdapter do
     it 'honours the limit' do
       expect(adapter.discover(limit: 0)).to eq([])
     end
+
+    # Admins paste the URL they were looking at. Without normalizing, a base of
+    # ".../catalog" builds ".../catalog/homes" and discovers nothing, with no
+    # obvious cause in the UI.
+    ['https://trove.legacyhousing.com/catalog',
+     'https://trove.legacyhousing.com/homes',
+     'https://trove.legacyhousing.com/'].each do |pasted|
+      it "normalizes a pasted base URL (#{pasted}) to the site root" do
+        source.base_url = pasted
+        expect(adapter.discover).to eq(['legacy-housing-heritage-collection-h-3260-32a'])
+      end
+    end
   end
 
   describe 'registry wiring' do
