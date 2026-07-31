@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_30_120000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_30_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1867,7 +1867,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_30_120000) do
     t.datetime "delivered_at"
     t.datetime "failed_at"
     t.text "error_message"
-    t.jsonb "metadata", default: {}
+    t.text "metadata"
     t.string "external_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
@@ -5800,6 +5800,52 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_30_120000) do
     t.index ["scope_type", "scope_id"], name: "index_settings_on_scope_type_and_scope_id"
   end
 
+  create_table "site_content_profiles", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.bigint "created_by_id"
+    t.string "source_url", null: false
+    t.string "display_name"
+    t.string "status", default: "pending", null: false
+    t.jsonb "profile", default: {}, null: false
+    t.jsonb "report", default: {}, null: false
+    t.integer "schema_version", default: 1, null: false
+    t.string "model_version"
+    t.integer "input_tokens"
+    t.integer "output_tokens"
+    t.text "error_message"
+    t.boolean "robots_allowed", default: true
+    t.string "preview_token"
+    t.datetime "preview_expires_at"
+    t.string "preview_template_ids", default: [], array: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_site_content_profiles_on_company_id_and_status"
+    t.index ["company_id"], name: "index_site_content_profiles_on_company_id"
+    t.index ["created_by_id"], name: "index_site_content_profiles_on_created_by_id"
+    t.index ["location_id"], name: "index_site_content_profiles_on_location_id"
+    t.index ["preview_token"], name: "index_site_content_profiles_on_preview_token", unique: true
+  end
+
+  create_table "site_profile_projections", force: :cascade do |t|
+    t.bigint "site_content_profile_id", null: false
+    t.bigint "website_id"
+    t.bigint "parent_id"
+    t.string "template_id", null: false
+    t.jsonb "projected_template", default: {}, null: false
+    t.jsonb "report", default: {}, null: false
+    t.boolean "polished", default: false, null: false
+    t.string "model_version"
+    t.integer "input_tokens"
+    t.integer "output_tokens"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["parent_id"], name: "index_site_profile_projections_on_parent_id"
+    t.index ["site_content_profile_id", "template_id"], name: "idx_projections_on_profile_and_template"
+    t.index ["site_content_profile_id"], name: "idx_projections_on_profile"
+    t.index ["website_id"], name: "index_site_profile_projections_on_website_id"
+  end
+
   create_table "sms_reply_tokens", force: :cascade do |t|
     t.string "token", null: false
     t.bigint "company_id", null: false
@@ -7948,6 +7994,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_30_120000) do
   add_foreign_key "service_tickets", "locations"
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "service_tickets", "warranty_claims", on_delete: :nullify
+  add_foreign_key "site_content_profiles", "companies"
+  add_foreign_key "site_content_profiles", "locations"
+  add_foreign_key "site_content_profiles", "users", column: "created_by_id"
+  add_foreign_key "site_profile_projections", "site_content_profiles"
+  add_foreign_key "site_profile_projections", "site_profile_projections", column: "parent_id"
+  add_foreign_key "site_profile_projections", "websites"
   add_foreign_key "sms_reply_tokens", "companies"
   add_foreign_key "sms_usage_logs", "companies"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade

@@ -659,6 +659,18 @@ Rails.application.routes.draw do
       end
       
       # ==================== WEBSITE BUILDER ====================
+      # Site Content Profiles — scan a client's existing site into reusable
+      # content. Projection into templates happens on the frontend, where the
+      # templates live.
+      resources :site_content_profiles, only: %i[index show create update destroy] do
+        member do
+          post :rotate_preview_token
+        end
+        collection do
+          get 'by_token/:token', action: :by_token  # PUBLIC - shareable preview
+        end
+      end
+
       resources :websites do
         member do
           post :publish
