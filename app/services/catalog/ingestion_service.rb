@@ -11,6 +11,11 @@ module Catalog
   # wipe good data.
   class IngestionService
     VEHICLE_SOURCE = 'catalog_import'
+    # Onboarding seed rows (Cavco inventory): real dealer vehicles carrying real
+    # statuses, NOT catalog rows. Vehicle#catalog_row? keys off `source`, so this
+    # keeps them out of the "must stay available_to_order / clone on status
+    # change" rule and inside in_inventory counts, where they belong.
+    SEEDED_VEHICLE_SOURCE = 'catalog_inventory'
 
     # Bump when the column MAPPING below changes (not the scraper) so existing
     # rows re-ingest on the next run even though the scraped content is identical.
@@ -235,6 +240,10 @@ module Catalog
         # that we attached catalog data to. Catalog dropping the model just
         # means the dealer keeps it as-is.
         next if self.class.supplemented?(vehicle)
+        # Nor a seeded inventory row. Those are the dealer's own homes, imported
+        # once at onboarding; a floorplan run must not tombstone them, and a
+        # home leaving the manufacturer's index does not un-sell it.
+        next if vehicle.source == SEEDED_VEHICLE_SOURCE
 
         vehicle.update_columns(is_deleted: true, deleted_at: Time.current)
         count += 1

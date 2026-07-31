@@ -95,6 +95,27 @@ module Catalog
         nil
       end
 
+      # Cavco genuinely knows what is on the dealer's lot — 5,149 units across
+      # the network, each with a status and a link back to its floorplan. These
+      # are NOT floorplans and must not ride the catalog path; see
+      # CavcoInventorySeeder.
+      def inventory_documents
+        return [] if retailer_id.blank?
+
+        docs = []
+        client.each_document(
+          filters: { 'all' => [{ 'type' => 'inventory' }, { 'retailer_ids' => retailer_id }] }
+        ) { |doc| docs << doc }
+        docs
+      rescue StandardError => e
+        Rails.logger.warn "[#{self.class.name}] inventory load failed: #{e.class}: #{e.message}"
+        []
+      end
+
+      def include_inventory?
+        source.config.is_a?(Hash) && source.config['include_inventory'] == true
+      end
+
       def discovery_hint
         return 'No retailer is bound to this source — re-pick the dealership.' if retailer_id.blank?
 
