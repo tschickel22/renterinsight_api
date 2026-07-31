@@ -94,6 +94,20 @@ module Catalog
         snapshot.present? ? 0 : super
       end
 
+      # Why a run found nothing. Trove answers 429 to non-browser clients, so
+      # "0 homes" from a live crawl is the expected outcome today, not a mystery
+      # — an empty error log left admins re-running it hoping for a different
+      # result.
+      def discovery_hint
+        if snapshot.blank?
+          'This source is set to live crawl, which Trove blocks until it allowlists us. ' \
+            'Pick a captured snapshot under "Catalog source".'
+        else
+          "Snapshot '#{snapshot_key}' is bound but contains no homes — reload it with " \
+            'catalog:snapshot:load.'
+        end
+      end
+
       # Surfaced to the admin Test action so a snapshot-backed run is never
       # mistaken for a live one.
       def snapshot_info

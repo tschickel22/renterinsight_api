@@ -61,6 +61,15 @@ module Catalog
       homes  = []
       errors = []
 
+      # A run that discovers nothing otherwise finishes "failed" with an empty
+      # error log, which tells the admin nothing about why. Say so explicitly,
+      # and let the adapter explain itself when it can.
+      if keys.empty?
+        reason = adapter.respond_to?(:discovery_hint) ? adapter.discovery_hint : nil
+        errors << { 'url' => @source.base_url.to_s,
+                    'message' => ['Discovery returned 0 homes.', reason].compact.join(' ') }
+      end
+
       keys.each do |key|
         raw  = adapter.fetch(key)
         home = raw && adapter.parse(raw)
