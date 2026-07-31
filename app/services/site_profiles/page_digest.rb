@@ -50,6 +50,16 @@ module SiteProfiles
     # Matching "background…url(…)" in one pass proved fragile — shorthand and
     # longhand backtrack differently. Collect style values first, then read any
     # url() out of them, and keep only things that look like images.
+    # Seasonal and promotional graphics: a 4th-of-July banner is the first
+    # background on many dealer home pages, and taking hero_images[0] blindly
+    # put fireworks behind "WELCOME TO MOBILE HOME MASTERS". These are still
+    # worth keeping for galleries, so they are demoted rather than dropped.
+    PROMOTIONAL = /
+      july|4th|fourth|memorial|veterans|labor[-_]?day|christmas|holiday|halloween
+      |thanksgiving|new[-_]?year|black[-_]?friday|easter|valentine
+      |\bsale\b|promo|banner|event|special|clearance|coupon|flyer
+    /xi
+
     CSS_URL = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/i
     IMAGE_EXTENSION = /\.(jpe?g|png|webp|avif|gif)(\?|#|\z)/i
 
@@ -68,9 +78,13 @@ module SiteProfiles
       end
 
       # Best-guess hero imagery, most promising first. Backgrounds outrank
-      # <img> because that is where dealer sites put their photography.
+      # <img> because that is where dealer sites put their photography, and
+      # anything that looks seasonal or promotional sinks to the bottom — it is
+      # fine in a gallery, wrong behind a headline.
       def candidate_hero_images
-        (Array(background_images) + Array(images).map { |i| i[:src] }).uniq
+        all = (Array(background_images) + Array(images).map { |i| i[:src] }).uniq
+        photos, promos = all.partition { |url| !PROMOTIONAL.match?(url) }
+        photos + promos
       end
     end
 

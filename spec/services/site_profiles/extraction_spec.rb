@@ -142,6 +142,21 @@ RSpec.describe 'SiteProfiles extraction' do
         expect(d.images.map { |i| File.basename(i[:src]) }).to eq(['real-hero-photo.jpg'])
       end
 
+      # A 4th-of-July banner was the first background on a real dealer home
+      # page, so hero_images[0] put fireworks behind the headline.
+      it 'demotes seasonal and promotional graphics below real photography' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/july4-sale-banner.jpg')"></div>
+            <div style="background-image: url('/img/lot-exterior.jpg')"></div>
+          </body></html>
+        HTML
+
+        expect(d.candidate_hero_images.first).to match(/lot-exterior/)
+        # still available for galleries, just not first
+        expect(d.candidate_hero_images.join).to match(/july4/)
+      end
+
       it 'takes the widest candidate from srcset' do
         d = digest_for(<<~HTML)
           <html><body><img srcset="/img/small.jpg 400w, /img/large.jpg 1600w" alt="Home"></body></html>
