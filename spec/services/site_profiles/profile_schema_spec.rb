@@ -90,4 +90,46 @@ RSpec.describe SiteProfiles::ProfileSchema do
       end
     end
   end
+
+  describe '.from_manual' do
+    # A prospect with no website has nothing to scan, and the in-app showcase
+    # cannot be emailed to them — without this the only way to demo is creating
+    # a real company and Website record.
+    let(:built) do
+      described_class.from_manual(
+        business_name: 'Sunshine Homes',
+        tagline: 'Colorado homes since 1992',
+        primary_color: '#b91c1c',
+        phone: '303-555-0100',
+        headline: 'Your dream home awaits',
+        subhead: 'Quality homes, honest pricing'
+      )
+    end
+
+    it 'maps form fields onto the same shape a scan produces' do
+      expect(built['brand']['name']).to eq('Sunshine Homes')
+      expect(built['brand']['colors']['primary']).to eq('#b91c1c')
+      expect(built['contact']['phone']).to eq('303-555-0100')
+      expect(built['copy']['hero'].first['headline']).to eq('Your dream home awaits')
+      expect(built['copy']['hero'].first['subhead']).to eq('Quality homes, honest pricing')
+      expect(built['seo']['title']).to eq('Sunshine Homes')
+    end
+
+    it 'marks the profile as hand-entered so the model skips the URL requirement' do
+      expect(built.dig('source', 'entered_manually')).to be(true)
+    end
+
+    it 'leaves blanks out rather than filling them with placeholder text' do
+      thin = described_class.from_manual(business_name: 'Just A Name')
+      expect(thin['copy']['hero']).to eq([])
+      expect(thin['contact']).to eq({})
+      expect(thin['brand']).to eq('name' => 'Just A Name')
+    end
+
+    it 'produces something the coercer accepts unchanged' do
+      coerced, warnings = described_class.coerce(built)
+      expect(warnings).to be_empty
+      expect(coerced['brand']['name']).to eq('Sunshine Homes')
+    end
+  end
 end

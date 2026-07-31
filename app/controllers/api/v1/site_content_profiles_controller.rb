@@ -26,8 +26,12 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     render json: detail(@profile)
   end
 
-  # POST /api/v1/site_content_profiles  { source_url:, display_name? }
+  # POST /api/v1/site_content_profiles
+  #   { source_url: }  -> scan an existing site (async)
+  #   { manual: {...} } -> build from a short form, ready immediately
   def create
+    return create_manual if params[:manual].present?
+
     url = params[:source_url].to_s.strip
 
     # Fail fast on an unsafe URL so the admin sees a real error now, rather than
@@ -49,6 +53,31 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     )
 
     SiteProfileScanJob.perform_later(profile.id)
+    render json: detail(profile), status: :created
+  end
+
+  # No crawl and no AI call — the content came straight from the admin, so the
+  # profile is shareable the moment it is saved.
+  def create_manual
+    attrs = params.require(:manual).permit(
+      :business_name, :tagline, :logo_url, :primary_color, :font,
+      :phone, :email, :address, :headline, :subhead, :about_heading, :about
+    )
+
+    built = SiteProfiles::ProfileSchema.from_manual(attrs)
+
+    profile = SiteContentProfile.create!(
+      company_id: @company.id,
+      location_id: params[:location_id].presence,
+      created_by: current_user,
+      source_url: nil,
+      display_name: params[:display_name].presence || attrs[:business_name].presence,
+      preview_template_ids: Array(params[:preview_template_ids]).map(&:to_s),
+      profile: built,
+      schema_version: SiteProfiles::ProfileSchema::VERSION,
+      status: 'ready'
+    )
+
     render json: detail(profile), status: :created
   end
 

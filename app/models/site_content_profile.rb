@@ -14,7 +14,9 @@ class SiteContentProfile < ApplicationRecord
 
   STATUSES = %w[pending fetching extracting ready failed].freeze
 
-  validates :source_url, presence: true
+  # source_url is blank for hand-entered demos — a prospect with no website
+  # still needs a shareable preview.
+  validates :source_url, presence: true, unless: :entered_manually?
   validates :status, inclusion: { in: STATUSES }
 
   before_create :generate_preview_token
@@ -23,6 +25,10 @@ class SiteContentProfile < ApplicationRecord
 
   def ready?
     status == 'ready'
+  end
+
+  def entered_manually?
+    profile.is_a?(Hash) && profile.dig('source', 'entered_manually') == true
   end
 
   def preview_expired?

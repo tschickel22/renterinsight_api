@@ -98,6 +98,48 @@ module SiteProfiles
       [out, warnings]
     end
 
+    # Builds a profile from a short admin-entered form instead of a scan.
+    #
+    # A prospect with no website yet has nothing to scan, and the in-app design
+    # showcase cannot be emailed to them — so without this the only way to demo
+    # is creating a real company and Website record, which is exactly what the
+    # profile model exists to avoid.
+    def from_manual(attrs)
+      attrs = attrs.to_h.with_indifferent_access
+      profile = empty
+
+      profile['brand'] = {
+        'name' => attrs[:business_name].presence,
+        'tagline' => attrs[:tagline].presence,
+        'logo_url' => attrs[:logo_url].presence,
+        'colors' => { 'primary' => attrs[:primary_color].presence }.compact.presence,
+        'fonts' => { 'heading' => attrs[:font].presence, 'body' => attrs[:font].presence }.compact.presence
+      }.compact
+
+      profile['contact'] = {
+        'phone' => attrs[:phone].presence,
+        'email' => attrs[:email].presence,
+        'address' => attrs[:address].presence
+      }.compact
+
+      hero = {
+        'headline' => attrs[:headline].presence,
+        'subhead' => attrs[:subhead].presence
+      }.compact
+      profile['copy']['hero'] = [hero] if hero.present?
+
+      about = { 'heading' => attrs[:about_heading].presence, 'body' => attrs[:about].presence }.compact
+      profile['copy']['about'] = [about] if about['body'].present?
+
+      profile['seo'] = {
+        'title' => attrs[:business_name].presence,
+        'description' => attrs[:tagline].presence
+      }.compact
+
+      profile['source'] = { 'entered_manually' => true, 'warnings' => [] }
+      profile
+    end
+
     def slice_strings(hash, keys)
       return {} unless hash.is_a?(Hash)
 
