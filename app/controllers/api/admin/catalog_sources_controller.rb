@@ -91,6 +91,7 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     attrs = params[:home_center_slug].present? ? clayton_source_attrs : source_params
     return if performed?
 
+    attrs = apply_adapter_defaults(attrs, attrs[:adapter_type])
     source = CatalogSource.new(attrs)
     if source.save
       render json: serialize(source), status: :created
@@ -108,7 +109,9 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                     status: :unprocessable_entity
     end
 
-    if @source.update(preserve_derived_config(source_params))
+    attrs = apply_adapter_defaults(preserve_derived_config(source_params),
+                                   source_params[:adapter_type] || @source.adapter_type)
+    if @source.update(attrs)
       render json: serialize(@source)
     else
       render json: { errors: @source.errors.full_messages }, status: :unprocessable_entity
@@ -354,7 +357,40 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # source reach a clean run. A client that PATCHes config without echoing them
   # back would silently drop them, which flips the source to permanently
   # degraded. Re-merge anything the payload doesn't explicitly set.
-  DERIVED_CONFIG_KEYS = %w[home_center untracked_fields test_passed_at].freeze
+  # snapshot_key is here so a form that round-trips config without it (or opens
+  # before adapter options load) cannot silently un-bind a snapshot and send the
+  # source back to live crawling. Clearing it — the go-live step — is still
+  # possible: send snapshot_key explicitly as null, which counts as "set".
+  DERIVED_CONFIG_KEYS = %w[home_center untracked_fields test_passed_at snapshot_key].freeze
+
+  # Config an admin should not have to know to type. Trove publishes the
+  # description scaffold with empty bodies on EVERY record, so without this a
+  # UI-created source scores 0% on description, lands "partial" on an otherwise
+  # perfect 93/93 run, and can never be enabled.
+  ADAPTER_CONFIG_DEFAULTS = {
+    'trove_catalog' => { 'untracked_fields' => TROVE_UNTRACKED_FIELDS }
+  }.freeze
+
+  def apply_adapter_defaults(attrs, adapter_type)
+    defaults = ADAPTER_CONFIG_DEFAULTS[adapter_type.to_s]
+    return attrs if defaults.blank?
+
+    config = config_hash(attrs[:config])
+    defaults.each { |key, value| config[key] = value unless config[key].present? }
+    attrs.merge(config: config)
+  end
+
+  # attrs may already have been through preserve_derived_config, whose
+  # Parameters#merge re-wraps the nested config as UNPERMITTED Parameters —
+  # so a plain #to_h on it raises. These values are ours, not user input we
+  # still need to filter, hence to_unsafe_h.
+  def config_hash(raw)
+    case raw
+    when ActionController::Parameters then raw.to_unsafe_h.stringify_keys
+    when Hash then raw.stringify_keys
+    else {}
+    end
+  end
 
   def preserve_derived_config(attrs)
     incoming = attrs[:config]
