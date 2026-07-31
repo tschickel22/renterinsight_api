@@ -69,9 +69,9 @@ class CommunicationSettingsService
       smtp_domain: config['smtpDomain'] || ENV['SMTP_DOMAIN'],
       smtp_authentication: config['smtpAuthentication'] || ENV['SMTP_AUTHENTICATION'] || 'plain',
       
-      # AWS SES fields
-      aws_access_key_id: config['awsAccessKeyId'] || ENV['AWS_ACCESS_KEY_ID'],
-      aws_secret_access_key: decrypt_value(config['awsSecretAccessKey']) || ENV['AWS_SECRET_ACCESS_KEY'],
+      # AWS SES fields (key id and secret resolve together, never half and half)
+      aws_access_key_id: aws_credentials(config)[:access_key_id],
+      aws_secret_access_key: aws_credentials(config)[:secret_access_key],
       aws_region: config['awsRegion'] || ENV['AWS_REGION'] || 'us-east-1',
       
       # SendGrid fields
@@ -187,8 +187,8 @@ class CommunicationSettingsService
         smtp_username: company_config['smtpUsername'] || ENV['SMTP_USERNAME'],
         smtp_password: decrypt_value(company_config['smtpPassword']) || ENV['SMTP_PASSWORD'],
         smtp_authentication: company_config['smtpAuthentication'] || ENV['SMTP_AUTHENTICATION'] || 'plain',
-        aws_access_key_id: company_config['awsAccessKeyId'] || ENV['AWS_ACCESS_KEY_ID'],
-        aws_secret_access_key: decrypt_value(company_config['awsSecretAccessKey']) || ENV['AWS_SECRET_ACCESS_KEY'],
+        aws_access_key_id: aws_credentials(company_config)[:access_key_id],
+        aws_secret_access_key: aws_credentials(company_config)[:secret_access_key],
         aws_region: company_config['awsRegion'] || ENV['AWS_REGION'] || 'us-east-1'
       )
     when 'oauth_gmail', 'oauth_outlook'
@@ -444,6 +444,31 @@ class CommunicationSettingsService
     return ['Platform', 0] if plat.is_a?(Hash) && plat.dig('email', 'oauthProvider').present?
 
     nil
+  end
+
+  # An AWS key id and its secret are one credential, so they have to come from
+  # one place. Resolving each half with its own `|| ENV[...]` meant a stored
+  # secret that failed to decrypt fell back to the ENV secret while the key id
+  # still came from the DB. The halves then belonged to different credentials
+  # and SES rejected every send with SignatureDoesNotMatch, pointing at a
+  # secret that was in fact perfectly valid. Re-entering the secret in the UI
+  # re-paired them, which is why this kept looking like a forgotten secret.
+  def aws_credentials(config)
+    stored_key    = config['awsAccessKeyId'].presence
+    stored_secret = decrypt_value(config['awsSecretAccessKey'])
+
+    if stored_key.present? && stored_secret.present?
+      return { access_key_id: stored_key, secret_access_key: stored_secret }
+    end
+
+    if stored_key.present? && config['awsSecretAccessKey'].present?
+      Rails.logger.error(
+        '[CommunicationSettingsService] stored AWS secret could not be decrypted; ' \
+        'falling back to the ENV credential pair rather than mixing sources'
+      )
+    end
+
+    { access_key_id: ENV['AWS_ACCESS_KEY_ID'], secret_access_key: ENV['AWS_SECRET_ACCESS_KEY'] }
   end
 
   def decrypt_value(value)
