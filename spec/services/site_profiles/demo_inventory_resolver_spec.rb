@@ -91,8 +91,8 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
     end
 
     # An earlier version fell back to "whichever company has the most
-    # inventory", which meant a prospect demo could display a real customer's
-    # actual homes to an unrelated third party.
+    # inventory", which would drop an unrelated dealer's homes into a pitch
+    # without anyone choosing to.
     it 'never borrows an arbitrary customer lot when nothing is ours' do
       allow(PlatformSetting).to receive(:general).and_return({})
       allow(described_class).to receive(:internal_tenant_id).and_return(nil)
@@ -104,6 +104,57 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
       allow(PlatformSetting).to receive(:general).and_raise(StandardError)
       allow(described_class).to receive(:internal_tenant_id).and_return(61)
       expect(described_class.send(:discover_company_id)).to eq(61)
+    end
+  end
+
+  describe '.config_for_profile' do
+    def profile(company_id:, inventory_company: nil)
+      instance_double(
+        'SiteContentProfile', company_id: company_id, inventory_company: inventory_company
+      )
+    end
+
+    # profile.company is only the tenant the admin was switched to when
+    # creating the demo, so inheriting it would show an unrelated dealer's
+    # homes as though the prospect would be getting them.
+    it 'ignores the creating tenant entirely' do
+      allow(described_class).to receive(:demo_company).and_return(nil)
+      expect(described_class.config_for_profile(profile(company_id: 47))).to be_nil
+    end
+
+    it 'uses the nominated demo lot when nothing is chosen, flagged as sample' do
+      allow(described_class).to receive(:demo_company).and_return(company(id: 61, token: 'demo'))
+
+      config = described_class.config_for_profile(profile(company_id: 47))
+      expect(config['company_id']).to eq(61)
+      expect(config['is_sample']).to be(true)
+    end
+
+    it 'uses an explicitly chosen lot over the default, flagged as sample' do
+      allow(described_class).to receive(:demo_company).and_return(company(id: 61, token: 'demo'))
+
+      config = described_class.config_for_profile(
+        profile(company_id: 47, inventory_company: company(id: 88, token: 'chosen'))
+      )
+      expect(config['company_id']).to eq(88)
+      expect(config['token']).to eq('chosen')
+      expect(config['is_sample']).to be(true)
+    end
+
+    # Rebuilding an existing customer's own site: the homes really are theirs.
+    it 'does not flag the lot as sample when the demo is about that company' do
+      config = described_class.config_for_profile(
+        profile(company_id: 47, inventory_company: company(id: 47, token: 'theirs'))
+      )
+      expect(config['company_id']).to eq(47)
+      expect(config['is_sample']).to be_nil
+    end
+
+    it 'omits the block when the chosen lot is not actually usable' do
+      config = described_class.config_for_profile(
+        profile(company_id: 47, inventory_company: company(id: 88, enabled: false))
+      )
+      expect(config).to be_nil
     end
   end
 end

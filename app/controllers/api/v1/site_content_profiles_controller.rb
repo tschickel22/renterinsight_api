@@ -49,6 +49,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       source_url: url,
       display_name: params[:display_name].presence,
       preview_template_ids: Array(params[:preview_template_ids]).map(&:to_s),
+      inventory_company_id: params[:inventory_company_id].presence,
       status: 'pending'
     )
 
@@ -73,6 +74,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       source_url: nil,
       display_name: params[:display_name].presence || attrs[:business_name].presence,
       preview_template_ids: Array(params[:preview_template_ids]).map(&:to_s),
+      inventory_company_id: params[:inventory_company_id].presence,
       profile: built,
       schema_version: SiteProfiles::ProfileSchema::VERSION,
       status: 'ready'
@@ -87,7 +89,8 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     @profile.update!(
       display_name: params.fetch(:display_name, @profile.display_name),
       preview_template_ids: params.key?(:preview_template_ids) ? Array(params[:preview_template_ids]).map(&:to_s) : @profile.preview_template_ids,
-      preview_expires_at: params.fetch(:preview_expires_at, @profile.preview_expires_at)
+      preview_expires_at: params.fetch(:preview_expires_at, @profile.preview_expires_at),
+      inventory_company_id: params.key?(:inventory_company_id) ? params[:inventory_company_id].presence : @profile.inventory_company_id
     )
     render json: detail(@profile)
   end
@@ -114,7 +117,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       display_name: profile.display_name,
       profile: public_profile(profile),
       template_ids: profile.visible_template_ids,
-      inventory_embed_config: inventory_config_for(profile.company)
+      inventory_embed_config: inventory_config_for(profile)
     }
   end
 
@@ -132,12 +135,12 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
   # Memoised per request: #index renders many rows and the resolver would
   # otherwise run its lookup for each one.
-  def inventory_config_for(company)
+  def inventory_config_for(profile)
     @inventory_configs ||= {}
-    key = company&.id
+    key = profile.inventory_company_id || :default
     return @inventory_configs[key] if @inventory_configs.key?(key)
 
-    @inventory_configs[key] = SiteProfiles::DemoInventoryResolver.config_for(company)
+    @inventory_configs[key] = SiteProfiles::DemoInventoryResolver.config_for_profile(profile)
   end
 
   def summary(profile)
@@ -151,7 +154,8 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       preview_template_ids: profile.preview_template_ids,
       created_at: profile.created_at,
       page_count: profile.report['page_count'],
-      inventory_is_sample: inventory_config_for(profile.company)&.dig('is_sample') || false
+      inventory_company_id: profile.inventory_company_id,
+      inventory_is_sample: inventory_config_for(profile)&.dig('is_sample') || false
     }
   end
 
@@ -162,7 +166,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       schema_version: profile.schema_version,
       robots_allowed: profile.robots_allowed,
       error_message: profile.error_message,
-      inventory_embed_config: inventory_config_for(profile.company)
+      inventory_embed_config: inventory_config_for(profile)
     )
   end
 end

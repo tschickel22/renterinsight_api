@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_31_090000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_31_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5820,9 +5820,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_31_090000) do
     t.string "preview_template_ids", default: [], array: true
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "inventory_company_id"
     t.index ["company_id", "status"], name: "index_site_content_profiles_on_company_id_and_status"
     t.index ["company_id"], name: "index_site_content_profiles_on_company_id"
     t.index ["created_by_id"], name: "index_site_content_profiles_on_created_by_id"
+    t.index ["inventory_company_id"], name: "index_site_content_profiles_on_inventory_company_id"
     t.index ["location_id"], name: "index_site_content_profiles_on_location_id"
     t.index ["preview_token"], name: "index_site_content_profiles_on_preview_token", unique: true
   end
@@ -7995,6 +7997,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_31_090000) do
   add_foreign_key "service_tickets", "vehicles"
   add_foreign_key "service_tickets", "warranty_claims", on_delete: :nullify
   add_foreign_key "site_content_profiles", "companies"
+  add_foreign_key "site_content_profiles", "companies", column: "inventory_company_id"
   add_foreign_key "site_content_profiles", "locations"
   add_foreign_key "site_content_profiles", "users", column: "created_by_id"
   add_foreign_key "site_profile_projections", "site_content_profiles"

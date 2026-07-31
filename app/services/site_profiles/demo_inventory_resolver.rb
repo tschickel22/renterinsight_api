@@ -8,17 +8,18 @@ module SiteProfiles
   # all it takes and it flows through automatically. Borrowing is reserved for
   # prospect demos, where there is no account and therefore nothing real to show.
   #
-  # Deliberately will NOT borrow an arbitrary customer's lot. An earlier version
-  # fell back to "whichever company has the most available inventory", which
-  # meant a prospect demo could display a real customer's actual homes to an
-  # unrelated third party. Only a lot we own or have explicitly nominated is
-  # eligible; otherwise the block is omitted.
+  # Borrows only from a lot we own or have explicitly nominated. The stock
+  # itself is public — that is what the public inventory embed is for — but
+  # showing an arbitrary customer's homes on someone else's demo implies the
+  # prospect would be getting those homes, which they would not. One nominated
+  # demo lot keeps the pitch honest and predictable.
   class DemoInventoryResolver
     CACHE_KEY = 'site_profiles/demo_inventory_company'
     CACHE_TTL = 10.minutes
 
     class << self
-      # @return [Hash, nil] { 'token', 'company_id', 'enabled', 'is_sample' }
+      # For a company that has an account: its own lot, or nothing.
+      # @return [Hash, nil] { 'token', 'company_id', 'enabled' }
       def config_for(company, allow_fallback: true)
         own = usable_config(company)
         return own if own
@@ -26,6 +27,33 @@ module SiteProfiles
 
         demo = demo_company
         return nil if demo.nil? || demo.id == company&.id
+
+        usable_config(demo)&.merge('is_sample' => true)
+      end
+
+      # For a demo profile, where the lot is CHOSEN rather than inherited.
+      #
+      # Deliberately ignores profile.company: that is only the tenant the admin
+      # happened to be switched to when creating the demo, so inheriting it
+      # would put an unrelated dealer's homes in front of the prospect.
+      #
+      #   explicit choice -> that lot, flagged sample unless it is the subject's
+      #   no choice       -> the nominated demo lot
+      #   neither         -> nil, and the block is omitted
+      def config_for_profile(profile)
+        chosen = profile.try(:inventory_company)
+        if chosen
+          config = usable_config(chosen)
+          return nil if config.nil?
+
+          # Their own homes only when the demo is actually about them.
+          return config if chosen.id == profile.company_id
+
+          return config.merge('is_sample' => true)
+        end
+
+        demo = demo_company
+        return nil if demo.nil?
 
         usable_config(demo)&.merge('is_sample' => true)
       end
@@ -70,8 +98,9 @@ module SiteProfiles
       # 2. Our own internal tenant, if a demo lot was seeded onto it. Also ours,
       #    also deliberate.
       #
-      # There is no rule 3. Anything further would mean picking a real
-      # customer's lot without their knowledge.
+      # There is no rule 3. Auto-picking "whichever company has the most
+      # inventory" would put an unrelated dealer's stock in a sales pitch
+      # without anyone deciding to.
       def internal_tenant_id
         candidates(Company.where(industry: 'saas')).first
       end

@@ -10,6 +10,9 @@ class SiteContentProfile < ApplicationRecord
   belongs_to :company
   belongs_to :location, optional: true
   belongs_to :created_by, class_name: 'User', optional: true
+  # Chosen explicitly. Never inferred from `company`, which is only the tenant
+  # the admin was switched to when the profile was created.
+  belongs_to :inventory_company, class_name: 'Company', optional: true
   has_many :site_profile_projections, dependent: :destroy
 
   STATUSES = %w[pending fetching extracting ready failed].freeze
