@@ -178,6 +178,55 @@ class Api::Admin::CatalogSourcesController < ApplicationController
     }
   end
 
+  # POST /api/admin/catalog_sources/upload_snapshot
+  # Loads a catalog captured by db/catalog_snapshots/capture_trove.js. Until
+  # Trove allowlists us, refreshing inventory means re-capturing, and that
+  # should not require a production shell — this is the whole self-service
+  # path for "Legacy added models, pull them in".
+  #
+  # Re-uploading the same key overwrites it. That is intended: the next run
+  # diffs each home's catalog_content_hash, so only genuinely changed models
+  # are updated and dealer edits are still protected.
+  def upload_snapshot
+    payload = params[:snapshot]
+    payload = payload.to_unsafe_h if payload.is_a?(ActionController::Parameters)
+
+    unless payload.is_a?(Hash)
+      return render json: { error: 'Expected a snapshot object' }, status: :unprocessable_entity
+    end
+
+    payload = payload.deep_stringify_keys
+    key     = params[:key].presence || derive_snapshot_key(payload)
+
+    if key.blank?
+      return render json: { error: 'Could not determine a snapshot key — pass `key`' },
+                    status: :unprocessable_entity
+    end
+
+    homes = Array(payload['homes'])
+    if homes.empty?
+      return render json: { error: 'Snapshot contains no homes' }, status: :unprocessable_entity
+    end
+
+    previous = Catalog::TroveSnapshot.read(key)
+    Catalog::TroveSnapshot.write(key, payload)
+
+    render json: {
+      key: key,
+      supplier_name: payload['supplier_name'],
+      captured_at: payload['captured_at'],
+      home_count: homes.size,
+      image_count: homes.sum { |h| Array(h['images']).size },
+      homes_without_images: homes.count { |h| Array(h['images']).empty? },
+      replaced: previous.present?,
+      # So the admin can see at a glance whether the re-capture actually moved.
+      previous_home_count: previous ? Array(previous['homes']).size : nil,
+      previous_captured_at: previous&.dig('captured_at')
+    }
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # POST /api/admin/catalog_sources/:id/test
   # Dry-run: discover + parse the first page, return extraction rates inline.
   # Never ingests. This IS the onboarding flow for a known platform.
@@ -384,6 +433,25 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # Parameters#merge re-wraps the nested config as UNPERMITTED Parameters —
   # so a plain #to_h on it raises. These values are ours, not user input we
   # still need to filter, hence to_unsafe_h.
+  # "Legacy Housing" -> "legacy_housing", matching what catalog:snapshot:load
+  # produces. Deriving from the host instead would yield "legacyhousing", which
+  # would NOT match an already-bound source — the upload would quietly create a
+  # second snapshot and refresh nothing. The host is only a fallback.
+  #
+  # The UI passes `key` explicitly when re-capturing for an existing source, so
+  # this only runs for a first upload.
+  def derive_snapshot_key(payload)
+    from_name = payload['supplier_name'].to_s.parameterize(separator: '_')
+    return from_name if from_name.present?
+
+    host = begin
+      URI.parse(payload['base_url'].to_s).host
+    rescue URI::InvalidURIError
+      nil
+    end
+    host.to_s.split('.').reject { |p| %w[www trove com net org].include?(p) }.join('_').presence
+  end
+
   def config_hash(raw)
     case raw
     when ActionController::Parameters then raw.to_unsafe_h.stringify_keys

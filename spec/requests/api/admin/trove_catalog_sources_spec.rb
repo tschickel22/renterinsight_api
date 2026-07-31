@@ -117,4 +117,80 @@ RSpec.describe 'Api::Admin::CatalogSources Trove config', type: :request do
       expect(Catalog::ExtractionStats.degraded?(rates, 0.7, untracked: ['description'])).to be(false)
     end
   end
+
+  # Until Trove allowlists us, refreshing inventory means re-capturing in a
+  # browser. Requiring a production shell for that makes "Legacy added models"
+  # an engineering task instead of an admin one.
+  describe 'POST upload_snapshot' do
+    let(:home) do
+      { 'short_id' => 'legacy-housing-classic-collection-c-1660-21fka',
+        'name' => 'Classic C-1660-21FKA', 'supplier_sku' => 'C-1660-21FKA',
+        'price' => { 'retail_micros' => 5_590_000 },
+        'details' => { 'width_inches' => 192, 'length_inches' => 720, 'square_feet' => 880,
+                       'bedrooms' => 2, 'bathrooms' => 1, 'sections' => 1 },
+        'images' => [{ 'image_url' => 'https://trove.b-cdn.net/images/a.png',
+                       'image_tags' => ['floor_plan'] }] }
+    end
+    let(:payload) do
+      { 'schema' => Catalog::TroveSnapshot::SCHEMA,
+        'base_url' => 'https://trove.legacyhousing.com',
+        'supplier_name' => 'Legacy Housing',
+        'captured_at' => '2026-08-01T00:00:00Z',
+        'homes' => [home] }
+    end
+
+    it 'stores the capture and derives the key from the host' do
+      post '/api/admin/catalog_sources/upload_snapshot',
+           params: { snapshot: payload }.to_json, headers: admin_headers
+
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+      expect(body['key']).to eq('legacy_housing')
+      expect(body['home_count']).to eq(1)
+      expect(body['image_count']).to eq(1)
+      expect(body['replaced']).to be(false)
+      expect(Catalog::TroveSnapshot.read('legacy_housing')['homes'].size).to eq(1)
+    end
+
+    # The point of re-uploading: show whether the capture actually moved.
+    it 'reports what it replaced' do
+      Catalog::TroveSnapshot.write('legacy_housing', payload.merge('homes' => [home, home.merge('short_id' => 'x')]))
+
+      post '/api/admin/catalog_sources/upload_snapshot',
+           params: { snapshot: payload, key: 'legacy_housing' }.to_json, headers: admin_headers
+
+      body = JSON.parse(response.body)
+      expect(body['replaced']).to be(true)
+      expect(body['previous_home_count']).to eq(2)
+      expect(body['home_count']).to eq(1)
+    end
+
+    it 'rejects a payload from a different tool' do
+      post '/api/admin/catalog_sources/upload_snapshot',
+           params: { snapshot: payload.merge('schema' => 'something/else') }.to_json,
+           headers: admin_headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'rejects an empty capture rather than wiping a good one' do
+      Catalog::TroveSnapshot.write('legacy_housing', payload)
+
+      post '/api/admin/catalog_sources/upload_snapshot',
+           params: { snapshot: payload.merge('homes' => []) }.to_json, headers: admin_headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(Catalog::TroveSnapshot.read('legacy_housing')['homes'].size).to eq(1)
+    end
+
+    it 'is platform-admin only' do
+      user = user_with('sales')
+      token = JsonWebToken.encode(user_id: user.id, company_id: company.id)
+      post '/api/admin/catalog_sources/upload_snapshot',
+           params: { snapshot: payload }.to_json,
+           headers: { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' }
+
+      expect(response.status).to be_in([401, 403])
+    end
+  end
 end
