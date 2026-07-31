@@ -16,21 +16,10 @@ module Api
       def index
         # STRICT TENANT ISOLATION: Only return land parcels from current user's company
         # RBAC: Location-tier users only see their assigned locations
-        parcels = if current_user.uses_rbac?
-          if current_user.effective_admin?  # Use RBAC-aware admin check
-            @company.land_parcels.active
-          else
-            location_ids = permission_service.accessible_location_ids
-            if location_ids.any?
-              # Include parcels in assigned locations OR unassigned parcels (NULL location_id)
-              @company.land_parcels.active.where("location_id IN (?) OR location_id IS NULL", location_ids)
-            else
-              @company.land_parcels.active
-            end
-          end
-        else
-          @company.land_parcels.active
-        end
+        # land_parcels has no location_id column, so parcels are company-scoped
+        # only. The previous per-location filter referenced that missing column
+        # and 500'd for every non-admin RBAC user with assigned locations.
+        parcels = @company.land_parcels.active
         
         # Filters
         parcels = parcels.by_status(params[:status]) if params[:status].present?
@@ -82,12 +71,6 @@ module Api
         
         parcel = @company.land_parcels.new(permitted_params)
         parcel.created_by = current_user&.id
-        
-        # RBAC: Location-tier users auto-assign to their location
-        if current_user.uses_rbac? && !current_user.effective_admin?
-          location_ids = permission_service.accessible_location_ids
-          parcel.location_id ||= location_ids.first if location_ids.any?
-        end
         
         if parcel.save
           render json: { parcel: parcel_json(parcel) }, status: :created
@@ -218,17 +201,8 @@ module Api
       def set_land_parcel
         # STRICT TENANT ISOLATION: Only find parcels within company
         # RBAC: Location-tier users only access their assigned locations
-        @parcel = if current_user.uses_rbac? && !current_user.effective_admin?  # Use RBAC-aware admin check
-          location_ids = permission_service.accessible_location_ids
-          if location_ids.any?
-            # Include parcels in assigned locations OR unassigned parcels (NULL location_id)
-            @company.land_parcels.active.where("location_id IN (?) OR location_id IS NULL", location_ids).find(params[:id])
-          else
-            @company.land_parcels.active.find(params[:id])
-          end
-        else
-          @company.land_parcels.active.find(params[:id])
-        end
+        # No location_id column on land_parcels, so company scope is the filter.
+        @parcel = @company.land_parcels.active.find(params[:id])
       rescue ActiveRecord::RecordNotFound
         render json: { error: 'Land parcel not found or access denied' }, status: :not_found
         return
