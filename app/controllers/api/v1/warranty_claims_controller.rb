@@ -43,10 +43,14 @@ module Api
         if params[:search].present?
           term = "%#{params[:search].to_s.strip}%"
           @warranty_claims = @warranty_claims
-            .left_joins(:manufacturer, :service_ticket)
+            # Reaches through the ticket to the customer: claims get hunted for
+            # by whose home they are for, and a surname matched nothing here
+            # because the ticket title carries the factory, not the customer.
+            .left_joins(:manufacturer, service_ticket: :account)
             .where(
               'warranty_claims.claim_number ILIKE :t OR manufacturers.name ILIKE :t ' \
-              'OR service_tickets.title ILIKE :t OR service_tickets.ticket_number ILIKE :t',
+              'OR service_tickets.title ILIKE :t OR service_tickets.ticket_number ILIKE :t ' \
+              'OR accounts.name ILIKE :t',
               t: term
             )
           # Both joins are belongs_to, so no duplicates to collapse. Dropping
