@@ -2701,6 +2701,7 @@ Rails.application.routes.draw do
           post :test     # dry-run discover+parse, inline extraction rates (no ingest)
           post :run_now  # enqueue an immediate run
           get  :runs     # scrape_runs history for this source
+          post :seed_inventory # one-time onboarding import of a Cavco dealer's real lot
         end
       end
 
