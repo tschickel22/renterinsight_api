@@ -11,6 +11,14 @@ module Api
     # company_id is NEVER read from params; location_ids are validated to belong
     # to the current company.
     class CatalogSubscriptionsController < ApplicationController
+      # Platform-admin only. Subscribing a catalog writes available-to-order homes
+      # into a dealer's inventory at chosen locations, and a wrong choice puts
+      # another manufacturer's homes in front of that location's buyers. Dealer
+      # staff previously reached this with inventory:manage; catalog assignment is
+      # now something we do for them, alongside the per-dealer Clayton sources.
+      #
+      # Uses original_user, so it still works while impersonating a tenant.
+      before_action :require_platform_admin!
       before_action :set_company_scope
 
       # GET /api/v1/catalog_subscriptions

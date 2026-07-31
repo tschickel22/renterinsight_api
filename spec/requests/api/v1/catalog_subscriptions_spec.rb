@@ -6,16 +6,21 @@ RSpec.describe 'Api::V1::CatalogSubscriptions', type: :request do
   let(:company)       { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
   let(:other_company) { Company.create!(name: "Co-#{SecureRandom.hex(4)}") }
 
-  def user_for(co)
+  # Catalog assignment is platform-admin only: subscribing writes
+  # available-to-order homes into a dealer's inventory at chosen locations, and
+  # a wrong choice surfaces another manufacturer's homes to that location's
+  # buyers. The company scoping below still matters — a platform admin acting
+  # inside a tenant must not be able to reach another tenant's rows.
+  def user_for(co, role: 'platform_admin')
     User.create!(
       email: "u-#{SecureRandom.hex(4)}@example.com",
       first_name: 'T', last_name: 'U',
-      password: 'Pass1234!', company_id: co.id, role: 'sales'
+      password: 'Pass1234!', company_id: co.id, role: role
     )
   end
 
-  def headers_for(co)
-    token = JsonWebToken.encode(user_id: user_for(co).id, company_id: co.id)
+  def headers_for(co, role: 'platform_admin')
+    token = JsonWebToken.encode(user_id: user_for(co, role: role).id, company_id: co.id)
     { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' }
   end
 
@@ -133,6 +138,48 @@ RSpec.describe 'Api::V1::CatalogSubscriptions', type: :request do
     it 'requires authentication' do
       get '/api/v1/catalog_subscriptions'
       expect(response).to have_http_status(:unauthorized)
+    end
+  end
+
+  # Dealer staff previously reached this with inventory:manage, so a rep could
+  # attach any catalog to any of their locations. Hiding the tab alone would
+  # not have stopped a direct call.
+  describe 'access control' do
+    let(:source) { selectable_source('Sunshine') }
+
+    %w[sales admin company_admin].each do |role|
+      it "rejects #{role} with 403" do
+        get '/api/v1/catalog_subscriptions', headers: headers_for(company, role: role)
+        expect(response).to have_http_status(:forbidden)
+      end
+    end
+
+    it 'rejects a non-admin trying to subscribe directly' do
+      post '/api/v1/catalog_subscriptions',
+           params: { catalog_subscription: { catalog_source_id: source.id } }.to_json,
+           headers: headers_for(company, role: 'admin')
+
+      expect(response).to have_http_status(:forbidden)
+      expect(DealerCatalogSubscription.count).to eq(0)
+    end
+
+    it 'rejects a non-admin trying to unsubscribe directly' do
+      sub = DealerCatalogSubscription.create!(company: company, catalog_source: source, enabled: true)
+
+      delete "/api/v1/catalog_subscriptions/#{sub.id}", headers: headers_for(company, role: 'admin')
+
+      expect(response).to have_http_status(:forbidden)
+      expect(DealerCatalogSubscription.exists?(sub.id)).to be(true)
+    end
+
+    it 'allows platform_admin' do
+      get '/api/v1/catalog_subscriptions', headers: headers_for(company)
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'allows super_admin' do
+      get '/api/v1/catalog_subscriptions', headers: headers_for(company, role: 'super_admin')
+      expect(response).to have_http_status(:ok)
     end
   end
 end
