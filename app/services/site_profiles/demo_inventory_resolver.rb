@@ -1,18 +1,18 @@
 # frozen_string_literal: true
 
 module SiteProfiles
-  # Finds inventory to show in a showcase when the viewer has none of their own.
+  # Finds inventory for a showcase.
   #
-  # Needed in two places, both of which would otherwise render the inventory
-  # block's "not configured" placeholder — the most prominent thing on the page,
-  # blank, in front of a customer:
-  #   * a prospect demo account, which has no inventory at all
-  #   * an existing customer being shown how websites work, who may not have
-  #     switched public inventory on yet
+  # A company with an account ALWAYS shows its own inventory — a seeded demo
+  # account is just a normal company, so switching public inventory on there is
+  # all it takes and it flows through automatically. Borrowing is reserved for
+  # prospect demos, where there is no account and therefore nothing real to show.
   #
-  # Resolution order, most-specific first. No ENV var: an admin who wants to
-  # pin a particular demo lot sets it in Platform Settings, and otherwise it
-  # finds one on its own so this keeps working without configuration.
+  # Deliberately will NOT borrow an arbitrary customer's lot. An earlier version
+  # fell back to "whichever company has the most available inventory", which
+  # meant a prospect demo could display a real customer's actual homes to an
+  # unrelated third party. Only a lot we own or have explicitly nominated is
+  # eligible; otherwise the block is omitted.
   class DemoInventoryResolver
     CACHE_KEY = 'site_profiles/demo_inventory_company'
     CACHE_TTL = 10.minutes
@@ -55,10 +55,11 @@ module SiteProfiles
       private
 
       def discover_company_id
-        explicit_id || internal_tenant_id || best_stocked_id
+        explicit_id || internal_tenant_id
       end
 
-      # 1. Explicitly pinned in Platform Settings -> general.
+      # 1. Explicitly nominated in Platform Settings -> general. Someone chose
+      #    this lot on purpose, so it is fair game.
       def explicit_id
         id = PlatformSetting.general[:demoInventoryCompanyId].presence
         id&.to_i
@@ -66,15 +67,13 @@ module SiteProfiles
         nil
       end
 
-      # 2. Our own internal tenant, if someone seeded a demo lot onto it.
+      # 2. Our own internal tenant, if a demo lot was seeded onto it. Also ours,
+      #    also deliberate.
+      #
+      # There is no rule 3. Anything further would mean picking a real
+      # customer's lot without their knowledge.
       def internal_tenant_id
         candidates(Company.where(industry: 'saas')).first
-      end
-
-      # 3. Otherwise whichever company has the most published inventory —
-      #    a real, full-looking lot beats an enabled-but-bare one.
-      def best_stocked_id
-        candidates(Company.all).first
       end
 
       def candidates(scope)

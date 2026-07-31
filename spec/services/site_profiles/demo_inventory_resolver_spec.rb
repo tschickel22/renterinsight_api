@@ -65,6 +65,17 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
       allow(described_class).to receive(:demo_company).and_return(company(id: 61))
       expect(described_class.config_for(company(id: 99, enabled: false), allow_fallback: false)).to be_nil
     end
+
+    # A seeded demo account is just a normal company: switch public inventory on
+    # and its real stock flows through, with no borrowing and no sample flag.
+    it 'uses a real account\'s own inventory even when a demo lot exists' do
+      allow(described_class).to receive(:demo_company).and_return(company(id: 61, token: 'demo'))
+
+      config = described_class.config_for(company(id: 47, token: 'their_tok'))
+      expect(config['company_id']).to eq(47)
+      expect(config['token']).to eq('their_tok')
+      expect(config['is_sample']).to be_nil
+    end
   end
 
   describe 'resolution order' do
@@ -73,10 +84,20 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
       expect(described_class.send(:discover_company_id)).to eq(123)
     end
 
-    it 'falls through to auto-detection when nothing is pinned' do
+    it 'falls through to our own internal tenant when nothing is pinned' do
       allow(PlatformSetting).to receive(:general).and_return({})
       allow(described_class).to receive(:internal_tenant_id).and_return(61)
       expect(described_class.send(:discover_company_id)).to eq(61)
+    end
+
+    # An earlier version fell back to "whichever company has the most
+    # inventory", which meant a prospect demo could display a real customer's
+    # actual homes to an unrelated third party.
+    it 'never borrows an arbitrary customer lot when nothing is ours' do
+      allow(PlatformSetting).to receive(:general).and_return({})
+      allow(described_class).to receive(:internal_tenant_id).and_return(nil)
+      expect(described_class.send(:discover_company_id)).to be_nil
+      expect(described_class).not_to respond_to(:best_stocked_id)
     end
 
     it 'survives a Platform Settings read failing' do

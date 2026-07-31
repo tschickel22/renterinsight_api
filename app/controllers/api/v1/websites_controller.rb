@@ -524,14 +524,21 @@ class Api::V1::WebsitesController < ApplicationController
 
   # GET /api/v1/websites/showcase_inventory
   #
-  # Inventory config for the design showcase. Returns the company's own when
-  # they have public inventory switched on, otherwise a seeded demo lot marked
-  # is_sample — a customer being shown how websites work should not be looking
-  # at the inventory block's "not configured" placeholder.
+  # Inventory config for the design showcase. A company with an account shows
+  # its OWN inventory or none — never a borrowed lot. Their real homes are the
+  # most convincing thing on the page, and showing someone else's would both
+  # mislead them and expose another customer's stock.
+  #
+  # If it comes back nil the answer is "switch public inventory on", not
+  # "substitute someone else's".
   def showcase_inventory
     return unless authorize_action!('websites', 'read')
 
-    render json: { inventory_embed_config: SiteProfiles::DemoInventoryResolver.config_for(@company) }
+    config = SiteProfiles::DemoInventoryResolver.config_for(@company, allow_fallback: false)
+    render json: {
+      inventory_embed_config: config,
+      public_inventory_enabled: @company.try(:public_inventory_enabled) || false
+    }
   end
 
   private
