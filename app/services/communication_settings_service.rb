@@ -58,8 +58,8 @@ class CommunicationSettingsService
 
     {
       provider: config['provider'] || ENV['DEFAULT_EMAIL_PROVIDER'] || 'smtp',
-      from_email: config['fromEmail'] || ENV['DEFAULT_FROM_EMAIL'] || 'noreply@platformdms.com',
-      from_name: config['fromName'] || ENV['DEFAULT_FROM_NAME'] || 'Platform DMS',
+      from_email: config['fromEmail'] || ENV['DEFAULT_FROM_EMAIL'] || Brand.from_email,
+      from_name: config['fromName'] || ENV['DEFAULT_FROM_NAME'] || Brand.from_name,
       
       # SMTP fields
       smtp_host: config['smtpHost'] || ENV['SMTP_ADDRESS'],

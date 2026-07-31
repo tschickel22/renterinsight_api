@@ -1,6 +1,10 @@
 # app/mailers/user_mailer.rb (or create if doesn't exist)
 class UserMailer < ApplicationMailer
-  default from: ENV.fetch('DEFAULT_FROM_EMAIL', 'noreply@renterinsight.com')
+  # Lambda, not a literal: `default` is evaluated at class-load time, so a
+  # bare value would freeze whatever the From address was at boot and ignore
+  # later Platform Admin changes. This previously read ENV only and never
+  # consulted the brand kernel at all.
+  default from: -> { Brand.from_email }
 
   def activity_reminder(activity, user)
     @activity = activity

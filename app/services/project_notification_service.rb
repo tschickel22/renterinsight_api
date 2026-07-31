@@ -777,7 +777,7 @@ class ProjectNotificationService
       return body if body.to_s.include?('<html') || body.to_s.include?('<body')
 
       login_url, button_text = if audience == :dealer
-        [dealer_login_url, 'Login to Renter Insight']
+        [dealer_login_url, "Login to #{Brand.current.name}"]
       else
         [contractor_portal_url, 'Login to Contractor Portal']
       end
@@ -877,10 +877,7 @@ class ProjectNotificationService
     end
 
     def frontend_base_url
-      base = ENV['FRONTEND_URL'].presence ||
-             Rails.application.credentials.dig(:app, :frontend_url).presence ||
-             'https://app.renterinsight.com'
-      base.chomp('/')
+      Brand.app_url.chomp('/')
     end
 
     def create_bell_notification(recipient:, company:, type:, title:, message:, notifiable: nil, actor_type: nil, actor_id: nil)

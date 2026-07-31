@@ -2,8 +2,13 @@
 
 module Api
   module Portal
-    class PreferencesController < ApplicationController
-      before_action :authenticate_portal_user!
+    # Inherits BaseController for portal auth. It previously subclassed
+    # ApplicationController directly, which meant the global
+    # `before_action :authenticate` was never skipped AND its own auth verified
+    # against Rails.application.secret_key_base while every token is signed with
+    # JsonWebToken (ENV['JWT_SECRET']). Both layers rejected, so every request
+    # here 401'd regardless of credentials.
+    class PreferencesController < BaseController
       before_action :load_portal_access
 
       # GET /api/portal/preferences
@@ -81,33 +86,11 @@ module Api
 
       private
 
-      def authenticate_portal_user!
-        token = request.headers['Authorization']&.split(' ')&.last
-
-        unless token
-          return render json: {
-            ok: false,
-            error: 'Authentication required'
-          }, status: :unauthorized
-        end
-
-        begin
-          decoded = JWT.decode(token, Rails.application.secret_key_base, true, { algorithm: 'HS256' })
-          @current_buyer_id = decoded[0]['buyer_id']
-          @current_buyer_type = decoded[0]['buyer_type']
-        rescue JWT::DecodeError, JWT::ExpiredSignature
-          render json: {
-            ok: false,
-            error: 'Invalid or expired token'
-          }, status: :unauthorized
-        end
-      end
-
+      # BaseController has already resolved and authorized the portal session,
+      # so the access record comes straight from it rather than being looked up
+      # again from token claims.
       def load_portal_access
-        @portal_access = BuyerPortalAccess.find_by(
-          buyer_id: @current_buyer_id,
-          buyer_type: @current_buyer_type
-        )
+        @portal_access = current_buyer_access
 
         unless @portal_access
           render json: {

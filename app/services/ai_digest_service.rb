@@ -100,6 +100,10 @@ class AiDigestService
       Tone: direct, actionable, like a trusted advisor. Highlight the 1-2 most important things
       to focus on. If leads haven't been contacted, make that urgent. If deals are closing soon, note it.
       End with one clear action recommendation.
+
+      Never use an em dash (—) or en dash (–). They are a well-known tell that text was
+      written by AI. Use a period, comma, colon, or parentheses instead. Ordinary hyphens
+      in compound words are fine.
     PROMPT
   end
 

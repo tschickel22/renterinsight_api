@@ -28,15 +28,28 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
   def generate_for(schedule)
     company = schedule.company
     intent  = ScheduleIntentPicker.next(rotation: schedule.intent_rotation, last: schedule.last_intent_used)
-    vehicle = SchedulePreviewVehiclePicker.pick(company: company, intent: intent)
+    vehicle = pick_vehicle(schedule, intent)
 
-    return reschedule(schedule, last_intent: intent, reason: 'no_vehicle_available') if schedule.require_vehicle && vehicle.nil? && vehicle_required_for_intent?(company, intent)
+    if schedule.require_vehicle && vehicle.nil? && vehicle_required_for_intent?(company, intent)
+      # A one-time schedule's next run is its fixed run_at, so rescheduling it
+      # would re-fire every tick forever. Retire it instead.
+      return schedule.one_time? ? retire(schedule, last_intent: intent)
+                                : reschedule(schedule, last_intent: intent, reason: 'no_vehicle_available')
+    end
 
     intake_form = resolve_intake_form(schedule)
 
     # User's per-intent idea wins; else seasonal auto-topic; else context-only (today's behavior).
     user_note = (schedule.intent_notes || {})[intent].presence
     topic_details = user_note || (intent == 'seasonal' ? SeasonalContentService.topic_for_seasonal_post : nil)
+
+    # Resolve the images first so the model can see what will actually run
+    # alongside the copy. Generating first and attaching afterwards produced
+    # posts whose caption had nothing to do with the picture.
+    #
+    # Note this advances the image pool cursor, so it must happen exactly once
+    # per run — build_post_from_result takes the result rather than re-resolving.
+    images = resolve_images(schedule, vehicle)
 
     result = SocialPostGeneratorService.generate(
       company:         company,
@@ -47,10 +60,14 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       user:            schedule.notify_user,
       tone:            schedule.tone,
       intake_form_url: intake_form&.public_url,
-      topic_details:   topic_details
+      topic_details:   topic_details,
+      # Only the first image is published — there is no carousel support — so
+      # that is the only one worth describing. Feeding the model all ten of a
+      # home's photos had it writing about details nobody would ever see.
+      image_urls:      images.first(1)
     )
 
-    post = build_post_from_result(schedule, intent, vehicle, intake_form, result)
+    post = build_post_from_result(schedule, intent, vehicle, intake_form, result, images)
     post.save!
 
     post.update_columns(
@@ -58,6 +75,8 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       tagged_url:  build_tagged_url(intake_form, post, result)
     )
 
+    # One-time schedules approve like any other. The post is AI-generated at run
+    # time, so the user has not seen it — scheduling it is not approving it.
     if schedule.auto_approve
       post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
       PublishSocialPostJob.perform_later(post.id)
@@ -65,11 +84,25 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       send_approval_email(post, schedule)
     end
 
-    reschedule(schedule, last_intent: intent, last_generated: true)
+    if schedule.one_time?
+      retire(schedule, last_intent: intent)
+    else
+      reschedule(schedule, last_intent: intent, last_generated: true)
+    end
     post
   end
 
-  def build_post_from_result(schedule, intent, vehicle, intake_form, result)
+  # A schedule the user pinned to a specific unit features that unit, full stop.
+  # Everything else draws from inventory per the schedule's status/photo rules.
+  def pick_vehicle(schedule, intent)
+    if schedule.vehicle_id.present?
+      pinned = schedule.company.vehicles.where(is_deleted: false).find_by(id: schedule.vehicle_id)
+      return pinned if pinned
+    end
+    SchedulePreviewVehiclePicker.pick_for(schedule, intent: intent)
+  end
+
+  def build_post_from_result(schedule, intent, vehicle, intake_form, result, images)
     caption, headline, description = result.values_at(:caption, :headline, :description)
     hashtags = Array(result[:hashtags])
 
@@ -85,7 +118,7 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
       caption:               caption,
       headline:              headline,
       description:           description,
-      image_urls:            extract_vehicle_images(vehicle),
+      image_urls:            images,
       cta_type:              result[:cta_type],
       utm_campaign:          intent,
       ai_generation_version: result[:ai_generation_version],
@@ -97,6 +130,25 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
         'ad_settings'  => result[:ad_settings]
       ).compact
     )
+  end
+
+  # Images for a generated post, most-specific source first:
+  #   1. photos on the featured unit
+  #   2. the schedule's image pool, rotated so repeat posts don't reuse one image
+  #   3. the company logo, but only if the schedule opted in
+  # When none of those produce anything the post stays imageless by design —
+  # we never invent an image for a listing.
+  def resolve_images(schedule, vehicle)
+    from_vehicle = extract_vehicle_images(vehicle)
+    return from_vehicle if from_vehicle.any?
+
+    pooled = schedule.next_pool_image!
+    return [pooled] if pooled.present?
+
+    return [] unless schedule.use_logo_fallback
+
+    logo = schedule.company.try(:logo)
+    logo.present? ? [logo] : []
   end
 
   def extract_vehicle_images(vehicle)
@@ -148,6 +200,18 @@ class GenerateScheduledSocialPostsJob < ApplicationJob
   def default_approver_for(company)
     User.where(company_id: company.id, role: 'admin').order(:id).first ||
       User.where(company_id: company.id).order(:id).first
+  end
+
+  # A one-time schedule has done its job. Deactivate rather than delete so the
+  # user can still see what ran and when.
+  def retire(schedule, last_intent:)
+    schedule.update_columns(
+      active:            false,
+      next_scheduled_at: nil,
+      last_intent_used:  last_intent,
+      last_generated_at: Time.current
+    )
+    Rails.logger.info "[GenerateScheduledSocialPostsJob] schedule=#{schedule.id} one_time fired, deactivated"
   end
 
   def reschedule(schedule, last_intent:, last_generated: false, reason: nil)

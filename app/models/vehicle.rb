@@ -147,6 +147,17 @@ class Vehicle < ApplicationRecord
   scope :pending, -> { active.where(status: 'pending') }
   scope :available_to_order, -> { active.where(status: 'available_to_order') }
   scope :in_inventory, -> { active.where.not(status: 'available_to_order') }  # Exclude catalog items from inventory counts
+  # Units that actually have a picture — either a primary photo_url or at least
+  # one entry in the images array. `images` is a json (not jsonb) column, so it
+  # is cast before use, and jsonb_typeof guards rows holding a non-array value.
+  scope :with_images, -> {
+    where(<<~SQL.squish)
+      (vehicles.photo_url IS NOT NULL AND vehicles.photo_url <> '')
+      OR (vehicles.images IS NOT NULL
+          AND jsonb_typeof(vehicles.images::jsonb) = 'array'
+          AND jsonb_array_length(vehicles.images::jsonb) > 0)
+    SQL
+  }
   scope :by_type, ->(type) { where(listing_type: type) }
   scope :by_status, ->(status) {
     # Support comma-separated status values (e.g., 'available,available_to_order')

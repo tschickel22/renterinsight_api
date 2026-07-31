@@ -361,13 +361,8 @@ class NotificationService
   def self.frontend_url
     # Route through the brand kernel so notification links (Champion lead
     # accept/decline, SMS notification URLs, "View in app" links) track
-    # whatever Platform Admin → General → App URL is set to. ENV wins if
-    # explicitly set; brand kernel wins next; local dev fallback last.
-    ENV['FRONTEND_URL'].presence ||
-      Brand.current.app_url.presence ||
-      (Rails.env.production? ? 'https://app.dealertide.com' : 'https://localhost:5173')
-  rescue StandardError
-    ENV['FRONTEND_URL'].presence || 'https://localhost:5173'
+    # whatever Platform Admin → General → App URL is set to.
+    Brand.app_url
   end
   
   def self.send_sms(notification, user)

@@ -278,6 +278,12 @@ class Api::V1::CampaignsController < ApplicationController
     if defined?(WebhookService)
       WebhookService.fire(company_id: @company.id, event: 'campaign.resumed', payload: { campaign_id: @campaign.id })
     end
+
+    # Pausing is how you edit a running campaign, so an audience widened while
+    # paused is the common case — and the enroller refuses to run on a non-running
+    # campaign, so nothing enrolled those new matches at edit time. Re-enroll on
+    # the way back up rather than making the user wait for the scheduler tick.
+    CampaignAudienceEnrollerJob.perform_later(@campaign.id) if defined?(CampaignAudienceEnrollerJob)
     render json: campaign_json(@campaign, full: true)
   end
 

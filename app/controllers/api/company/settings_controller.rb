@@ -112,7 +112,7 @@ module Api
 
         email_params = params[:email] || {}
         to = email_params[:to]
-        subject = email_params[:subject] || 'Test Email from RenterInsight'
+        subject = email_params[:subject] || "Test Email from #{Brand.current.name}"
         body = email_params[:body] || 'This is a test email to verify your email configuration.'
         
         if to.blank?

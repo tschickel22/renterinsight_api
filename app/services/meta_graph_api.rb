@@ -69,6 +69,9 @@ class MetaGraphApi
       get('/me/accounts', user_access_token, fields: 'id,name,access_token,category,tasks')
     end
 
+    # Facebook renders at most 10 attachments on a feed post.
+    MAX_CAROUSEL_IMAGES = 10
+
     # Publish a post to a Facebook Page. Photo-posts take precedence (higher
     # engagement); if a photo_url is provided we use /photos, otherwise /feed.
     def publish_page_post(page_id, access_token, message:, link: nil, photo_url: nil)
@@ -83,6 +86,63 @@ class MetaGraphApi
       else
         post("/#{page_id}/feed", access_token, message: message)
       end
+    end
+
+    # Multi-photo Page post. Each image is uploaded unpublished to get a media
+    # id, then all of them are attached to a single feed post.
+    #
+    # Uses the same pages_manage_posts permission as a single-photo post, so it
+    # needs nothing extra from App Review.
+    #
+    # Falls back to a single-photo post when only one image survives upload —
+    # a feed post with one attachment renders worse than a native photo post.
+    def publish_page_carousel(page_id, access_token, message:, image_urls:, link: nil)
+      urls = Array(image_urls).map { |u| u.to_s.strip }.reject(&:blank?).first(MAX_CAROUSEL_IMAGES)
+      return publish_page_post(page_id, access_token, message: message, link: link, photo_url: urls.first) if urls.length <= 1
+
+      media_ids = urls.filter_map { |url| upload_unpublished_photo(page_id, access_token, url) }
+      return nil if media_ids.empty?
+
+      if media_ids.length == 1
+        return publish_page_post(page_id, access_token, message: message, link: link, photo_url: urls.first)
+      end
+
+      # Graph takes the attachments as indexed form fields, not a JSON array.
+      # `link` is deliberately omitted: Facebook ignores a link preview on a
+      # post that already carries attachments, same as the single-photo path.
+      params = { message: message }
+      media_ids.each_with_index do |id, i|
+        params[:"attached_media[#{i}]"] = { media_fbid: id }.to_json
+      end
+
+      post("/#{page_id}/feed", access_token, **params)
+    end
+
+    # Publish a video to a Facebook Page.
+    #
+    # Meta pulls the file from `video_url` itself rather than us streaming bytes
+    # up, so the request returns as soon as it accepts the job — the video is
+    # still transcoding when the id comes back, and won't appear on the Page for
+    # a minute or two. The URL has to be publicly reachable for the pull to work.
+    #
+    # Videos take `description`, not `message`, and cannot carry photos.
+    # Same pages_manage_posts permission as a photo post.
+    def publish_page_video(page_id, access_token, message:, video_url:, title: nil)
+      params = { file_url: video_url, description: message }
+      params[:title] = title if title.present?
+
+      post("/#{page_id}/videos", access_token, **params)
+    end
+
+    # Uploads a photo without publishing it and returns its media id. Returns
+    # nil rather than raising so one unreachable image can't sink the whole
+    # post — the caller publishes whatever succeeded.
+    def upload_unpublished_photo(page_id, access_token, image_url)
+      result = post("/#{page_id}/photos", access_token, url: image_url, published: false)
+      result.is_a?(Hash) ? result['id'] : nil
+    rescue Error => e
+      Rails.logger.warn "[MetaGraphApi] carousel image skipped (#{image_url}): #{e.message}"
+      nil
     end
 
     # Publish to an Instagram Business Account. Two-step: create media

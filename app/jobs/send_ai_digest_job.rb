@@ -145,8 +145,8 @@ class SendAiDigestJob < ApplicationJob
               else                                            Providers::Email::SmtpProvider
               end
 
-              from_email = email_cfg[:from_email].presence || 'noreply@renterinsight.com'
-              from_name  = email_cfg[:from_name].presence  || 'RenterInsight'
+              from_email = email_cfg[:from_email].presence || Brand.from_email
+              from_name  = email_cfg[:from_name].presence  || Brand.from_name
 
               provider_instance = provider_class.new(company: company)
               provider_instance.send_message(

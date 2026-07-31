@@ -37,6 +37,12 @@ class PlatformModule
     # The display name is registry data on purpose: renaming the product must not
     # require a code sweep (same principle as the brand kernel in CLAUDE.md).
     'marketing.automation' => { name: 'Campaign Desk', category: 'Marketing', icon: 'Wand2', description: 'One prompt to a full multi-channel campaign — email, SMS, social, landing page, and the follow-up workflow, drawn before you publish' },
+    # Paid add-on, same shape as Campaign Desk above: absent from every
+    # PLAN_TEMPLATE on purpose so professional/enterprise don't grant it free.
+    # Sell it by attaching it to a plan (SubscriptionPlanModule) or to a single
+    # tenant (TenantModuleOverride). Config keys live on those rows — see
+    # PLAN_CONFIG_DEFAULTS for the marketing.website precedent.
+    'marketing.text_us' => { name: 'Text Us Widget', category: 'Marketing', icon: 'MessageSquare', description: 'Web-to-text widget for any dealer site — visitors send a text, replies route to a rep or round-robin queue through the existing SMS pipeline' },
 
     # Finance & Agreements
     'finance.loans' => { name: 'Finance Management', category: 'Finance & Agreements', icon: 'DollarSign', description: 'Loan and payment management' },

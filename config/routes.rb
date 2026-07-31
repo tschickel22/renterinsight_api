@@ -2691,6 +2691,8 @@ Rails.application.routes.draw do
       resources :catalog_sources do
         collection do
           get :adapter_options  # per-adapter form metadata (e.g. Clayton Epic regions)
+          get  :clayton_home_centers        # typeahead for the Add Clayton Dealer picker
+          post :refresh_clayton_directory   # force re-crawl of the Clayton retailer directory
         end
         member do
           post :test     # dry-run discover+parse, inline extraction rates (no ingest)

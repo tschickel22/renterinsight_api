@@ -29,4 +29,35 @@ RSpec.describe CampaignSchedulerJob do
 
     expect { described_class.perform_now }.to have_enqueued_job(ProcessCampaignSendJob).with(enrollment.id)
   end
+
+  # Regression: a running dynamic campaign that already had enrollments never
+  # re-enrolled, so widening its audience showed new recipients on screen who
+  # never received a step.
+  it 're-enrolls running dynamic campaigns that already have enrollments' do
+    campaign = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: 'Dyn',
+                                campaign_type: 'drip', from_identity_type: 'User', from_identity_id: user.id,
+                                throttle_per_day: 100, status: 'running', audience_mode: 'dynamic')
+    source = Source.find_or_create_by!(name: 'Web') { |s| s.source_type = 'web' }
+    lead = Lead.create!(company: company, source: source, first_name: 'C', last_name: 'D', email: 'c@d.com')
+    CampaignEnrollment.create!(company_id: company.id, campaign_id: campaign.id,
+                               recipient_type: 'Lead', recipient_id: lead.id,
+                               email_address_snapshot: 'c@d.com',
+                               status: 'active', next_send_at: 1.day.from_now)
+
+    expect { described_class.perform_now }.to have_enqueued_job(CampaignAudienceEnrollerJob).with(campaign.id)
+  end
+
+  it 'does not re-enroll running static campaigns that already have enrollments' do
+    campaign = Campaign.create!(company_id: company.id, created_by_user_id: user.id, name: 'Stat',
+                                campaign_type: 'drip', from_identity_type: 'User', from_identity_id: user.id,
+                                throttle_per_day: 100, status: 'running', audience_mode: 'static')
+    source = Source.find_or_create_by!(name: 'Web') { |s| s.source_type = 'web' }
+    lead = Lead.create!(company: company, source: source, first_name: 'E', last_name: 'F', email: 'e@f.com')
+    CampaignEnrollment.create!(company_id: company.id, campaign_id: campaign.id,
+                               recipient_type: 'Lead', recipient_id: lead.id,
+                               email_address_snapshot: 'e@f.com',
+                               status: 'active', next_send_at: 1.day.from_now)
+
+    expect { described_class.perform_now }.not_to have_enqueued_job(CampaignAudienceEnrollerJob).with(campaign.id)
+  end
 end

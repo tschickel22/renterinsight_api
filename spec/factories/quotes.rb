@@ -2,6 +2,7 @@
 
 FactoryBot.define do
   factory :quote do
+    association :company, factory: :company
     sequence(:quote_number) { |n| "Q#{1000 + n}" }
     total { 1000.00 }
     status { 'draft' }

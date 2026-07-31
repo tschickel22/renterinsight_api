@@ -196,7 +196,10 @@ class CommunicationPreferenceService
       category: category
     )
     
-    base_url ||= ENV['APP_BASE_URL'] || 'https://app.platformdms.com'
+    # /unsubscribe/:token is a frontend SPA route, so this is the app host,
+    # not the API host. (Campaign unsubscribes use /u/:token on the API via
+    # Messaging::TrackingUrl — different link, different host.)
+    base_url ||= Brand.app_url
     preference.unsubscribe_url(base_url)
   end
   

@@ -69,6 +69,7 @@ class Api::V1::CampaignAudiencesController < ApplicationController
 
     if audience.update(update_attrs)
       recompute_estimate(audience)
+      enroll_new_matches
       render json: audience_json(audience)
     else
       render json: { errors: audience.errors.full_messages }, status: :unprocessable_entity
@@ -162,12 +163,26 @@ class Api::V1::CampaignAudiencesController < ApplicationController
     # Use the same filtered FilterCompiler count as create/update — NOT a raw base.count,
     # which ignored the filter and reported the company's entire lead/contact/account total.
     recompute_estimate(audience)
+    enroll_new_matches
     render json: { count: audience.estimated_count, estimated_at: audience.estimated_at }
   rescue Audiences::FilterCompiler::CompilationError => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
   private
+
+  # Recalculating only ever rewrote estimated_count, so a widened audience on a
+  # live dynamic campaign showed the new recipients on screen while none of them
+  # got an enrollment row — and therefore no email. Enroll them here so the number
+  # the user just saw is backed by real enrollments. No-op while the campaign is
+  # paused (the enroller only runs on 'running'); CampaignsController#resume
+  # re-fires for that case.
+  def enroll_new_matches
+    return unless @campaign.audience_mode == 'dynamic' && @campaign.status == 'running'
+    return unless defined?(CampaignAudienceEnrollerJob)
+
+    CampaignAudienceEnrollerJob.perform_later(@campaign.id)
+  end
 
   def set_campaign
     @campaign = @company.campaigns.active.find(params[:campaign_id])

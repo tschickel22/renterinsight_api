@@ -361,17 +361,28 @@ RSpec.describe CommunicationPreferenceService, type: :service do
       expect(url).to include(CommunicationPreference.find_by(recipient: lead).unsubscribe_token)
     end
     
-    it 'uses default base URL from environment' do
-      ENV['APP_BASE_URL'] = 'https://app.platformdms.com'
-      
+    it 'falls back to the brand kernel app URL' do
+      allow(Brand).to receive(:app_url).and_return('https://app.example-brand.com')
+
       url = described_class.unsubscribe_url(
         recipient: lead,
         channel: 'email'
       )
-      
-      expect(url).to include('https://app.platformdms.com')
-      
-      ENV['APP_BASE_URL'] = nil
+
+      expect(url).to include('https://app.example-brand.com/unsubscribe/')
+    end
+
+    # APP_BASE_URL used to drive this, which meant the unsubscribe host drifted
+    # from every other user-facing link. It is no longer consulted.
+    it 'ignores APP_BASE_URL' do
+      ENV['APP_BASE_URL'] = 'https://stale.example.com'
+      allow(Brand).to receive(:app_url).and_return('https://app.example-brand.com')
+
+      url = described_class.unsubscribe_url(recipient: lead, channel: 'email')
+
+      expect(url).not_to include('stale.example.com')
+    ensure
+      ENV.delete('APP_BASE_URL')
     end
   end
   

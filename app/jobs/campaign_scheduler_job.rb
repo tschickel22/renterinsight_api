@@ -4,6 +4,7 @@ class CampaignSchedulerJob < ApplicationJob
   def perform
     promote_scheduled_to_running
     enroll_running_without_enrollments
+    enroll_running_dynamic
     dispatch_due_enrollments
     finalize_completed_campaigns
   end
@@ -20,12 +21,32 @@ class CampaignSchedulerJob < ApplicationJob
     end
   end
 
+  # Static campaigns only — dynamic ones are swept unconditionally below, so
+  # leaving them here too would just enqueue the same job twice per tick.
   def enroll_running_without_enrollments
     Campaign.running
+            .where.not(audience_mode: 'dynamic')
             .left_joins(:campaign_enrollments)
             .group('campaigns.id')
             .having('COUNT(campaign_enrollments.id) = 0')
             .find_each do |c|
+      CampaignAudienceEnrollerJob.perform_later(c.id)
+    end
+  end
+
+  # A dynamic audience means "whoever matches the filter, whenever they match" —
+  # but the only paths that ever re-enrolled were the zero-enrollment sweep above
+  # and TagAssignment's on-tag refresh. So editing a running campaign's audience
+  # (adding a tag to the filter, widening a condition) moved the estimated_count
+  # on screen and enrolled nobody: the new matches got no enrollment row and
+  # therefore no email, while the UI showed them as recipients. Same gap for a
+  # record that starts matching for any non-tag reason (new lead, status change).
+  # Sweeping every running dynamic campaign each tick closes both. AudienceEnroller
+  # seeds its dedupe set from existing enrollment snapshots, so already-enrolled
+  # recipients are skipped in memory — a re-run over an unchanged audience costs
+  # one scope query, not one lookup per member.
+  def enroll_running_dynamic
+    Campaign.running.where(audience_mode: 'dynamic').find_each do |c|
       CampaignAudienceEnrollerJob.perform_later(c.id)
     end
   end

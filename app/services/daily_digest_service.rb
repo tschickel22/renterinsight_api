@@ -31,8 +31,8 @@ class DailyDigestService
     summary = WorkqueueService.new(company: company, user: @user).summary
     total = total_item_count(summary)
 
-    company_name = company.name.presence || 'Renter Insight'
-    subject = "[#{company_name}] Your Daily Workqueue Summary — #{Date.current.strftime('%B %-d, %Y')}"
+    company_name = company.name.presence || Brand.current.name
+    subject = "[#{company_name}] Your Daily Workqueue Summary, #{Date.current.strftime('%B %-d, %Y')}"
     html_body = build_html(summary, total)
 
     send_result = case connection.provider.to_s
@@ -139,7 +139,7 @@ class DailyDigestService
                       Disable daily digests in Account Settings.
                     </p>
                     <p style="margin:12px 0 0 0;color:#9ca3af;font-size:12px;line-height:1.5;">
-                      Powered by <a href="https://renterinsight.com" style="color:#9ca3af;text-decoration:none;">Renter Insight</a>
+                      Powered by <a href="#{Brand.current.website_url}" style="color:#9ca3af;text-decoration:none;">#{Brand.current.name}</a>
                     </p>
                   </td>
                 </tr>

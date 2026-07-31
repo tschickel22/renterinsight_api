@@ -67,4 +67,89 @@ RSpec.describe BrandHealthService do
     expect(result).not_to be_nil
     expect(result[:page][:name]).to eq('DealerTide')
   end
+
+  # The dashboard reads these straight into Number(). Returning a nested hash
+  # made every tile NaN, which rendered as 0 no matter what Meta sent — reach
+  # and engagement read zero on a page that had both.
+  describe 'insight shape' do
+    def extract(data)
+      described_class.send(:extract_insights, { 'data' => data })
+    end
+
+    it 'returns plain numbers rather than nested hashes' do
+      result = extract([
+        { 'name' => 'page_impressions', 'values' => [{ 'value' => 10 }, { 'value' => 15 }] }
+      ])
+
+      expect(result['page_impressions']).to be_a(Numeric)
+      expect(Float(result['page_impressions'])).to eq(25)
+    end
+
+    it 'sums daily counters across the window' do
+      result = extract([
+        { 'name' => 'page_post_engagements',
+          'values' => [{ 'value' => 3 }, { 'value' => 4 }, { 'value' => 5 }] }
+      ])
+      expect(result['page_post_engagements']).to eq(12)
+    end
+
+    it 'takes the latest reading for a running total' do
+      result = extract([
+        { 'name' => 'page_fans', 'values' => [{ 'value' => 100 }, { 'value' => 112 }] }
+      ])
+      expect(result['page_fans']).to eq(112)
+    end
+
+    it 'flattens a breakdown hash into one number' do
+      result = extract([
+        { 'name' => 'page_impressions',
+          'values' => [{ 'value' => { 'organic' => 5, 'paid' => 7 } }] }
+      ])
+      expect(result['page_impressions']).to eq(12)
+    end
+
+    it 'reports zero for a metric Meta omitted, not nil' do
+      result = extract([])
+      expect(result['page_impressions']).to eq(0)
+      expect(result['page_fans']).to eq(0)
+    end
+  end
+
+  # Posts (30d) read zero because no key by that name was ever returned.
+  describe 'posts in the last 30 days' do
+    def count(posts)
+      described_class.send(:count_last_30_days, posts)
+    end
+
+    it 'counts only posts inside the window' do
+      expect(count([
+        { 'created_time' => 2.days.ago.iso8601 },
+        { 'created_time' => 29.days.ago.iso8601 },
+        { 'created_time' => 45.days.ago.iso8601 }
+      ])).to eq(2)
+    end
+
+    it 'ignores a missing or unparseable timestamp' do
+      expect(count([
+        { 'created_time' => 1.day.ago.iso8601 },
+        { 'created_time' => nil },
+        { 'created_time' => 'not-a-date' },
+        {}
+      ])).to eq(1)
+    end
+
+    it 'is included in the payload the dashboard reads' do
+      stub_graph(insights: ->(_m) { { 'data' => [] } })
+      allow(MetaGraphApi).to receive(:get).and_call_original
+      allow(MetaGraphApi).to receive(:get).with('/page-1', anything, any_args).and_return(page_data)
+      allow(MetaGraphApi).to receive(:get).with('/page-1/insights', anything, any_args)
+                                          .and_return({ 'data' => [] })
+      allow(MetaGraphApi).to receive(:get).with('/page-1/posts', anything, any_args)
+                                          .and_return({ 'data' => [{ 'id' => '1', 'created_time' => 1.day.ago.iso8601 }] })
+
+      result = described_class.fetch_for_company(company)
+
+      expect(result[:insights]['posts_30d']).to eq(1)
+    end
+  end
 end

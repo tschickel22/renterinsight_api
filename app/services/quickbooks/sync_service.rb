@@ -228,7 +228,7 @@ class Quickbooks::SyncService
       'DueDate'     => (invoice.try(:due_date) || invoice.created_at.to_date + 30.days).strftime('%Y-%m-%d'),
       'Line'        => lines,
       'DocNumber'   => invoice.try(:invoice_number),
-      'PrivateNote' => 'Synced from RenterInsight DMS'
+      'PrivateNote' => "Synced from #{Brand.current.name} DMS"
     }
   end
 

@@ -146,6 +146,11 @@ class Api::V1::SocialPostsController < ApplicationController
     begin
       result =
         if @post.platform.to_s == 'instagram'
+          # Instagram video is Reels — a separate flow with its own rules.
+          if @post.video_url.present?
+            return render json: { error: 'Instagram video posting is not supported yet. Publish this to Facebook instead.' }, status: :unprocessable_entity
+          end
+
           image_url = Array(@post.image_urls).first
           return render json: { error: 'Instagram posts require at least one image.' }, status: :unprocessable_entity if image_url.blank?
 
@@ -158,14 +163,35 @@ class Api::V1::SocialPostsController < ApplicationController
             caption:   build_post_caption(@post),
             image_url: image_url
           )
-        else
-          MetaGraphApi.publish_page_post(
+        elsif @post.video_url.present?
+          # Facebook can't mix a video with photos, so video wins outright.
+          MetaGraphApi.publish_page_video(
             integration.page_id,
             integration.page_access_token,
             message:   build_post_caption(@post),
-            link:      @post.tagged_url,
-            photo_url: Array(@post.image_urls).first
+            video_url: @post.video_url
           )
+        else
+          # More than one image publishes as a carousel; same permission.
+          images = Array(@post.image_urls).map { |u| u.to_s.strip }.reject(&:blank?)
+
+          if images.length > 1
+            MetaGraphApi.publish_page_carousel(
+              integration.page_id,
+              integration.page_access_token,
+              message:    build_post_caption(@post),
+              image_urls: images,
+              link:       @post.tagged_url
+            )
+          else
+            MetaGraphApi.publish_page_post(
+              integration.page_id,
+              integration.page_access_token,
+              message:   build_post_caption(@post),
+              link:      @post.tagged_url,
+              photo_url: images.first
+            )
+          end
         end
     rescue MetaGraphApi::ExpiredTokenError => _e
       integration.update(status: 'expired')
@@ -291,6 +317,11 @@ class Api::V1::SocialPostsController < ApplicationController
       subject_label:    profile.subject_label,
       default_rotation: profile.default_rotation,
       requires_subject: profile.family == :dealer,
+      # The tenant's own logo, offered in the composer as an opt-in fallback when
+      # a post has no image. Deliberately the company logo and not the platform
+      # brand — a dealership's post must never carry DealerTide's mark.
+      logo_url:           @company.try(:logo).presence,
+      inventory_statuses: Vehicle::STATUSES,
       intents: profile.intents.map do |i|
         { value: i.value, label: i.label, cta: i.cta, requires_subject: i.requires_subject }
       end
@@ -345,7 +376,11 @@ class Api::V1::SocialPostsController < ApplicationController
 
     post.update!(status: 'approved', approved_at: Time.current, nurture_approved: true)
     PublishSocialPostJob.perform_later(post.id) if defined?(PublishSocialPostJob)
-    render_email_action_page('Post approved and publishing!', success: true)
+    render_email_action_page(
+      'Post approved and publishing!',
+      success: true,
+      note: "It may take up to 5 minutes to appear on #{post.platform.to_s.titleize}. You can close this tab."
+    )
   end
 
   # GET /api/v1/social-posts/:id/email_decline  (token-based, no auth)
@@ -365,9 +400,10 @@ class Api::V1::SocialPostsController < ApplicationController
 
   private
 
-  def render_email_action_page(message, success: false, error: false, declined: false, already: false)
+  def render_email_action_page(message, success: false, error: false, declined: false, already: false, note: nil)
     icon = success ? '✅' : error ? '❌' : declined ? '🚫' : 'ℹ️'
     bg   = success ? '#dcfce7' : error ? '#fee2e2' : declined ? '#fff7ed' : '#dbeafe'
+    sub  = note.presence || 'You can close this tab.'
     html = <<~HTML
       <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Social Post Action</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -381,7 +417,7 @@ class Api::V1::SocialPostsController < ApplicationController
       <body><div class="card">
         <div class="icon">#{icon}</div>
         <div class="msg">#{ERB::Util.html_escape(message)}</div>
-        <div class="sub">You can close this tab.</div>
+        <div class="sub">#{ERB::Util.html_escape(sub)}</div>
       </div></body></html>
     HTML
     render html: html.html_safe, layout: false
@@ -399,7 +435,7 @@ class Api::V1::SocialPostsController < ApplicationController
       :caption, :headline, :description, :cta_type,
       :tagged_url, :utm_campaign, :utm_content,
       :scheduled_at, :nurture_approved, :nurture_sequence_id,
-      :ai_generation_version,
+      :ai_generation_version, :video_url,
       image_urls: [],
       hashtags: [],
       generation_context: {}
@@ -469,7 +505,11 @@ class Api::V1::SocialPostsController < ApplicationController
 
   def stats_payload(scope)
     {
-      total:       scope.count,
+      # "Total Posts" means posts that exist as real output — scheduled,
+      # published, or failed in the attempt. Drafts are work in progress, not
+      # posts, and auto-generated ones piled up fast enough to make this tile
+      # meaningless. They still have their own tile via by_status.
+      total:       scope.where.not(status: 'draft').count,
       by_status:   scope.group(:status).count,
       by_platform: scope.group(:platform).count,
       by_intent:   scope.group(:intent_category).count,
@@ -540,6 +580,7 @@ class Api::V1::SocialPostsController < ApplicationController
       caption:            p.caption,
       headline:           p.headline,
       image_urls:         p.image_urls,
+      video_url:          p.video_url,
       cta_type:           p.cta_type,
       scheduled_at:       p.scheduled_at,
       published_at:       p.published_at,

@@ -137,7 +137,7 @@ class TemplateRenderingService
         'rep_phone' => rep_user&.phone || '',
         
         # 🔧 FIX: Website URL from Company Settings > Domain
-        'website_url' => company&.domain || company&.website || ''
+        'website_url' => company&.domain || ''
       }
     end
     
@@ -167,7 +167,7 @@ class TemplateRenderingService
         'rep_phone' => rep_user&.phone || '',
         
         # 🔧 FIX: Website URL from Company Settings > Domain
-        'website_url' => company&.domain || company&.website || ''
+        'website_url' => company&.domain || ''
       }
     end
     
@@ -199,14 +199,15 @@ class TemplateRenderingService
         'rep_phone' => rep_user&.phone || '',
         
         # 🔧 FIX: Website URL from Company Settings > Domain
-        'website_url' => company&.domain || company&.website || ''
+        'website_url' => company&.domain || ''
       }
     end
     
     # Build context for Quote
     def build_quote_context(quote, sending_user: nil)
-      # Get rep user from sending_user or quote owner
-      rep_user = sending_user || quote.owner || quote.company&.users&.active&.first
+      # Get rep user from sending_user or the quote's sales rep. Quote has no
+      # `owner` association (unlike Lead/Account/Contact) — sales_rep is its equivalent.
+      rep_user = sending_user || quote.sales_rep || quote.company&.users&.active&.first
       location = quote.location || rep_user&.location
       company = quote.company
       
@@ -222,7 +223,7 @@ class TemplateRenderingService
         'rep_name' => rep_user ? "#{rep_user.first_name} #{rep_user.last_name}".strip : '',
         'rep_email' => rep_user&.email || '',
         'rep_phone' => rep_user&.phone || '',
-        'website_url' => company&.domain || company&.website || ''
+        'website_url' => company&.domain || ''
       }
     end
     

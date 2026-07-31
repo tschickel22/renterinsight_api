@@ -322,6 +322,14 @@ class SocialPostGeneratorService
         lines << "You will see past posts from this business under \"Past posts from this business\". Match their voice, cadence, sentence length, emoji usage, and hashtag style. Do NOT copy their content — write something new for the current subject."
       end
       lines << ctx[:compliance] if ctx[:compliance].present?
+      # Em dashes read as machine-written to customers. See WRITING STYLE in CLAUDE.md.
+      lines << <<~STYLE.strip
+        Never use an em dash (—) or en dash (–) anywhere in your output. They are a
+        well-known tell that text was written by AI, and this copy is published under
+        the dealership's name. Use a period, comma, colon, or parentheses instead.
+        Ordinary hyphens inside compound words (single-wide, move-in, three-bedroom)
+        are fine and should be kept.
+      STYLE
       lines << <<~OUT.strip
         Return ONLY valid JSON — no prose, no markdown, no code fences — with keys:
         caption (string), headline (string, under 80 chars), description (string),
