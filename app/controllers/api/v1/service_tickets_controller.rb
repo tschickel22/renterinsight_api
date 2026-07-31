@@ -566,6 +566,10 @@ module Api
           open: tickets.open.count,
           in_progress: tickets.in_progress.count,
           waiting_on_manufacturer: tickets.waiting_on_manufacturer.count,
+          # Distinct from waiting_on_manufacturer: both statuses are in use, so
+          # the Waiting Parts tile needs its own count rather than borrowing the
+          # manufacturer one and reporting a number for a different status.
+          waiting_parts: tickets.where(status: 'waiting_parts').count,
           completed: tickets.completed.count,
           overdue: tickets.where('scheduled_date < ? AND status != ?', Date.today, 'completed').count,
           warranty_suspected: tickets.warranty_suspected.count,
