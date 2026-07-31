@@ -42,6 +42,11 @@ module Catalog
       rates    = ExtractionStats.rates(homes)
       degraded = ExtractionStats.degraded?(rates, @source.extraction_threshold, untracked: @source.untracked_fields)
 
+      # Rehost imagery BEFORE ingestion so every subscriber records our own URL
+      # rather than the manufacturer's CDN. Runs once per source, not once per
+      # dealer, and IngestionService#url_images already prefers local_url.
+      archive_images!(homes)
+
       ingest = ingest_into_subscribers(homes, degraded: degraded)
 
       status = run_status(homes:, errors:, degraded:)
@@ -61,6 +66,30 @@ module Catalog
     end
 
     private
+
+    # Opt-in per source (config archive_images), so enabling it is a decision
+    # rather than something that silently changes every existing source's first
+    # run into a multi-thousand-image download.
+    #
+    # Best-effort by construction: the archiver swallows per-image failures and
+    # leaves source_url intact, and this rescue means a bucket outage cannot
+    # turn a good crawl into a failed run.
+    def archive_images!(homes)
+      return unless @source.config.is_a?(Hash) && @source.config['archive_images'] == true
+      return if homes.empty?
+
+      archiver = ImageArchiver.new(crawl_delay: @source.config['image_crawl_delay'].to_i)
+      homes.each do |home|
+        home.images = archiver.archive(home.images)
+      end
+
+      r = archiver.result
+      Rails.logger.info "[Catalog::RunService] source #{@source.id} imagery: " \
+                        "#{r.archived} archived, #{r.reused} already held, #{r.failed} failed"
+    rescue StandardError => e
+      Rails.logger.error "[Catalog::RunService] image archiving failed for source " \
+                         "#{@source.id}: #{e.class}: #{e.message}"
+    end
 
     def collect_homes(adapter)
       keys   = Array(adapter.discover)

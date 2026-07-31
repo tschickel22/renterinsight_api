@@ -120,16 +120,34 @@ class S3UploadService
     false
   end
   
-  # List all files in a folder
+  # List all files in a folder.
+  #
+  # Pages through the whole prefix. list_objects_v2 caps a response at 1,000
+  # keys, so the previous single call silently truncated — a caller using this
+  # to answer "have I uploaded this already?" got `false` for everything past
+  # the first thousand and re-uploaded it. The catalog folder alone holds
+  # several thousand images.
+  #
   # @param folder [String] Folder path (e.g., 'websites/123')
   # @return [Array<String>] Array of S3 keys
   def list_files(folder)
-    response = s3_client.list_objects_v2(
-      bucket: bucket_name,
-      prefix: folder
-    )
-    
-    response.contents.map(&:key)
+    keys  = []
+    token = nil
+
+    loop do
+      response = s3_client.list_objects_v2(
+        bucket: bucket_name,
+        prefix: folder,
+        continuation_token: token
+      )
+      keys.concat(response.contents.map(&:key))
+      break unless response.is_truncated
+
+      token = response.next_continuation_token
+      break if token.blank?
+    end
+
+    keys
   rescue Aws::S3::Errors::ServiceError => e
     Rails.logger.error("S3 list failed: #{e.message}")
     []
