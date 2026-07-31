@@ -280,14 +280,29 @@ class WarrantyClaim < ApplicationRecord
   
   def resubmit!(resubmitted_by_user)
     return false unless can_be_resubmitted?
-    
-    update!(
+
+    attrs = {
       status: 'resubmitted',
       submitted_at: Time.current,
       submitted_by: resubmitted_by_user,
       denied_at: nil,
       denial_reason: nil
-    )
+    }
+
+    # Pick up whatever the ticket says now. ServiceTicket#resync_draft_claim! is
+    # deliberately draft-only so a submitted claim stays frozen at what the
+    # manufacturer received, but that left no way at all to get later ticket
+    # edits to them: resubmitting re-sent the identical figures. Claims imported
+    # straight to submitted never held line items to begin with, so they resent
+    # $0.00 no matter how the ticket was tagged. Resubmission is the explicit
+    # "send my updates" action, so refresh here.
+    if service_ticket&.has_warranty_items?
+      attrs[:parts]            = service_ticket.warranty_parts
+      attrs[:labor]            = service_ticket.warranty_labor
+      attrs[:estimated_amount] = service_ticket.warranty_total
+    end
+
+    update!(attrs)
     
     # Send email to manufacturer again
     send_manufacturer_notification

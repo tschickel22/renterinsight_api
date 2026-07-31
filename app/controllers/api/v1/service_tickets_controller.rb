@@ -44,7 +44,24 @@ module Api
         @service_tickets = @service_tickets.customer_facing if params[:dealer_only] == 'false'
         @service_tickets = @service_tickets.warranty_suspected if params[:warranty_suspected] == 'true'
         @service_tickets = @service_tickets.warranty_confirmed if params[:warranty_confirmed] == 'true'
-        
+
+        # Search across the whole result set, not just the page the client is
+        # holding. The list is paginated at 50, and search used to run in the
+        # browser over the loaded page only, so a ticket on page 2 could not be
+        # found at all — it looked like the ticket did not exist.
+        if params[:search].present?
+          term = "%#{params[:search].to_s.strip}%"
+          @service_tickets = @service_tickets
+            .left_joins(:account)
+            .where(
+              'service_tickets.ticket_number ILIKE :t OR service_tickets.title ILIKE :t ' \
+              'OR service_tickets.description ILIKE :t OR service_tickets.assigned_to ILIKE :t ' \
+              'OR accounts.name ILIKE :t OR CAST(service_tickets.id AS TEXT) ILIKE :t',
+              t: term
+            )
+            .distinct
+        end
+
         # Pagination
         page = (params[:page] || 1).to_i
         per_page = (params[:per_page] || 50).to_i
