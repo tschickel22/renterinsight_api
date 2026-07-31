@@ -27,6 +27,14 @@ module Catalog
     HASH_LENGTH = 16
     ALLOWED_EXT = %w[.jpg .jpeg .png .webp .gif].freeze
     DEFAULT_EXT = '.jpg'
+
+    # Manufacturer sites answer 200 with a placeholder rather than 404 when an
+    # image is missing — Kabco returned 348-byte PNGs for two of the first three
+    # we tried, alongside a genuine 698 KB one. Archiving those is worse than
+    # hot-linking: it freezes an error into the listing AND replaces the source
+    # URL that might have worked on a later attempt. Treat anything implausibly
+    # small as a failed fetch so source_url survives and the next run retries.
+    MIN_BYTES = 2_048
     # Politeness between DOWNLOADS only; skipped images cost nothing.
     DEFAULT_DELAY = 0
 
@@ -131,9 +139,18 @@ module Catalog
     def upload(source_url, key)
       sleep(@crawl_delay) if @crawl_delay.positive? && !Rails.env.test?
 
-      io = open_source(source_url)
+      io    = open_source(source_url)
+      bytes = io.read
+      io.close if io.respond_to?(:close)
+
+      if bytes.to_s.bytesize < MIN_BYTES
+        Rails.logger.warn "[Catalog::ImageArchiver] #{source_url} returned only " \
+                          "#{bytes.to_s.bytesize} bytes — treating as a placeholder, not archiving"
+        return nil
+      end
+
       file = ActionDispatch::Http::UploadedFile.new(
-        tempfile: io,
+        tempfile: StringIO.new(bytes),
         filename: File.basename(key),
         type:     io.respond_to?(:content_type) ? io.content_type : nil
       )

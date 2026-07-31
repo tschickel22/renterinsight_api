@@ -21,7 +21,8 @@ RSpec.describe Catalog::ImageArchiver do
       { url: "https://assets.s3.us-east-1.amazonaws.com/#{key}", key: key }
     end
     # Stand in for the network so specs never reach a CDN.
-    allow(archiver).to receive(:open_source).and_return(StringIO.new('bytes'))
+    # A fresh IO per call — the archiver reads each one to completion.
+    allow(archiver).to receive(:open_source) { StringIO.new('x' * 50_000) }
   end
 
   describe 'content addressing' do
@@ -121,7 +122,7 @@ RSpec.describe Catalog::ImageArchiver do
         call += 1
         raise StandardError, 'boom' if call == 1
 
-        StringIO.new('bytes')
+        StringIO.new('x' * 50_000)
       end
 
       out = archiver.archive([image(photo), image(plan)])
@@ -162,7 +163,7 @@ RSpec.describe Catalog::ImageArchiver do
       allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-prod')
 
       arch = described_class.new(uploader: uploader)
-      allow(arch).to receive(:open_source).and_return(StringIO.new('bytes'))
+      allow(arch).to receive(:open_source) { StringIO.new('x' * 50_000) }
 
       expect(arch.archive([image(photo)]).first['local_url']).to be_present
     end
@@ -171,5 +172,31 @@ RSpec.describe Catalog::ImageArchiver do
   it 'does not block a staging bucket outside production' do
     allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-staging')
     expect(archiver.archive([image(photo)]).first['local_url']).to be_present
+  end
+
+  # Manufacturer sites answer 200 with a placeholder rather than 404 when an
+  # image is missing. Kabco returned 348-byte PNGs for two of the first three
+  # we archived, alongside a genuine 698 KB one.
+  describe 'placeholder responses' do
+    it 'does not archive an implausibly small response' do
+      allow(archiver).to receive(:open_source) { StringIO.new('x' * 348) }
+
+      out = archiver.archive([image(photo)]).first
+      expect(out['local_url']).to be_nil
+      expect(archiver.result.failed).to eq(1)
+    end
+
+    # Freezing an error is worse than hot-linking: the origin might serve the
+    # real file on a later attempt, and it can only do that if we kept the URL.
+    it 'keeps source_url so the next run can retry' do
+      allow(archiver).to receive(:open_source) { StringIO.new('x' * 348) }
+
+      expect(archiver.archive([image(photo)]).first['source_url']).to eq(photo)
+    end
+
+    it 'still archives a genuine image' do
+      allow(archiver).to receive(:open_source) { StringIO.new('x' * 698_116) }
+      expect(archiver.archive([image(photo)]).first['local_url']).to be_present
+    end
   end
 end
