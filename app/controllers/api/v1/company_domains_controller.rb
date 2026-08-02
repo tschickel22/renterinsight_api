@@ -4,7 +4,7 @@ class Api::V1::CompanyDomainsController < ApplicationController
 
   before_action :set_company_scope
   before_action :set_domain, only: [:show, :update, :destroy, :verify, :check_dns, :activate, :deactivate,
-                                    :enable_email, :check_email, :disable_email]
+                                    :enable_email, :check_email, :disable_email, :domain_connect]
   
   # GET /api/v1/company_domains
   def index
@@ -340,6 +340,38 @@ class Api::V1::CompanyDomainsController < ApplicationController
                else
                  'Not verified yet. Confirm the DNS records are published exactly as shown.'
                end
+    }
+  end
+
+  # GET /api/v1/company_domains/:id/domain_connect
+  #
+  # Whether this domain's DNS provider can apply our records automatically, and the link to
+  # send the admin to if so. Always safe to call: an unsupported provider (Cloudflare does
+  # not implement Domain Connect at all) simply reports supported: false and the tenant
+  # publishes the records by hand.
+  def domain_connect
+    return unless authorize_action!('company_settings', 'read')
+
+    unless @domain.email_enabled?
+      return render json: { supported: false, reason: 'Email sending is not enabled for this domain' }
+    end
+
+    discovery = DomainConnect::Discovery.call(@domain.hostname)
+    apply_url = DomainConnect::ApplyLink.for(domain: @domain, discovery: discovery)
+
+    render json: {
+      supported: discovery.supported? && apply_url.present?,
+      provider_name: discovery.provider_name,
+      apply_url: apply_url,
+      width: discovery.width,
+      height: discovery.height,
+      # Distinguishes "your registrar cannot do this" from "we have not finished onboarding
+      # with your registrar yet", which are different problems for the tenant.
+      reason: if !discovery.supported?
+                discovery.error
+              elsif apply_url.blank?
+                'Automatic setup is not available for this provider yet'
+              end
     }
   end
 

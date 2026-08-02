@@ -951,6 +951,7 @@ Rails.application.routes.draw do
           post :enable_email, path: 'enable-email'
           post :check_email, path: 'check-email'
           post :disable_email, path: 'disable-email'
+          get  :domain_connect, path: 'domain-connect'
         end
       end
       
