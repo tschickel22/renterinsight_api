@@ -36,10 +36,8 @@ module Campaigns
       ).evaluate
       return reschedule_to(window) if window.is_a?(Time)
 
-      throttle = Messaging::ThrottleChecker.new(campaign: @campaign).check
-      return reschedule_to(1.hour.from_now) if throttle == :throttled
-
       step_channel = step.effective_channel
+      connection_key = nil
       if step_channel == 'email'
         # test_platform_send lets an admin dry-run an Owner-mode campaign
         # without binding to a real Lead/Contact/Account: the test routes
@@ -51,14 +49,24 @@ module Campaigns
           # not a global campaign-wide one.
           conn_preflight = @campaign.resolve_email_connection_for_step(recipient: recipient)
           return mark_failed('no_valid_email_connection') if conn_preflight.nil?
+          connection_key = Campaign.connection_key_for(conn_preflight)
         end
       else
         return mark_failed('no_valid_sms_sender') if @campaign.resolve_sms_sender_for_step.nil?
       end
 
+      # Runs AFTER connection resolution now. Rate limits are counted per mailbox,
+      # so the check needs to know which mailbox this send would use; when it ran
+      # first it could only see the campaign, which is exactly why two campaigns
+      # sharing a mailbox could each spend a full daily budget against it.
+      remember_connection_key(connection_key)
+      throttle = Messaging::ThrottleChecker.new(campaign: @campaign, connection_key: connection_key).check
+      return reschedule_to(throttle.retry_at) if throttle.throttled?
+
       send_record = CampaignSend.create!(
         company_id: @company.id, campaign_id: @campaign.id,
-        campaign_step_id: step.id, campaign_enrollment_id: @enrollment.id
+        campaign_step_id: step.id, campaign_enrollment_id: @enrollment.id,
+        sending_connection_key: connection_key
       )
 
       result = step_channel == 'email' ? deliver_email(step, send_record) : deliver_sms(step, send_record)
@@ -336,6 +344,16 @@ module Campaigns
     def reschedule_to(time)
       @enrollment.update!(next_send_at: time) unless test_send?
       false
+    end
+
+    # Persist the resolved mailbox on the enrollment so SendPacer can see what a
+    # mailbox already has queued when allocating future slots. Matters most for
+    # Owner-mode campaigns (the mailbox is only known per recipient) and for
+    # enrollments created before pacing existed.
+    def remember_connection_key(key)
+      return if key.blank? || test_send?
+      return if @enrollment.sending_connection_key == key
+      @enrollment.update_column(:sending_connection_key, key)
     end
 
     def mark_failed(reason)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_31_140000) do
+ActiveRecord::Schema[8.0].define(version: 2026_07_31_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1259,10 +1259,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_31_140000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "sms_phone_snapshot"
+    t.string "sending_connection_key"
     t.index ["campaign_id", "recipient_type", "recipient_id"], name: "idx_campaign_enrollments_unique", unique: true
     t.index ["campaign_id", "status", "next_send_at"], name: "idx_campaign_enrollments_due"
     t.index ["company_id"], name: "index_campaign_enrollments_on_company_id"
     t.index ["recipient_type", "recipient_id"], name: "index_campaign_enrollments_on_recipient_type_and_recipient_id"
+    t.index ["sending_connection_key", "next_send_at"], name: "idx_campaign_enrollments_connection_slot"
   end
 
   create_table "campaign_events", force: :cascade do |t|
@@ -1314,10 +1316,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_31_140000) do
     t.jsonb "metadata", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "sending_connection_key"
     t.index ["campaign_enrollment_id"], name: "index_campaign_sends_on_campaign_enrollment_id"
     t.index ["campaign_id", "sent_at"], name: "index_campaign_sends_on_campaign_id_and_sent_at"
     t.index ["communication_id"], name: "index_campaign_sends_on_communication_id"
     t.index ["company_id"], name: "index_campaign_sends_on_company_id"
+    t.index ["sending_connection_key", "sent_at"], name: "idx_campaign_sends_connection_rate"
   end
 
   create_table "campaign_steps", force: :cascade do |t|

@@ -177,6 +177,22 @@ class Campaign < ApplicationRecord
     UserEmailConnection.where(company_id: company_id, user_id: owner_id, is_active: true).first
   end
 
+  # Stable identifier for the mailbox a send goes out through, e.g.
+  # "UserEmailConnection:35". Send rate limits are counted against this rather
+  # than against the campaign, because two campaigns pointed at one mailbox have
+  # to share its budget. Owner-mode campaigns resolve a different mailbox per
+  # recipient, which is why this takes the recipient rather than reading the
+  # campaign's from_identity_* columns.
+  def sending_connection_key(recipient: nil)
+    return nil unless email_channel?
+    self.class.connection_key_for(resolve_email_connection_for_step(recipient: recipient))
+  end
+
+  def self.connection_key_for(connection)
+    return nil if connection.nil?
+    "#{connection.class.name}:#{connection.id}"
+  end
+
   # Step-level SMS resolver — bypasses campaign-channel guard for mixed-channel
   # drips. Used by CampaignSender#deliver_sms when sending an individual step.
   # Always queries company-scoped TwilioAccount (SMS identity is always Company-level,

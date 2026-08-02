@@ -10,7 +10,17 @@ module Campaigns
 
       first_step = @campaign.campaign_steps.active.ordered.first
       first_wait_seconds = ((first_step&.wait_days || 0) * 86400) + ((first_step&.wait_hours || 0) * 3600)
-      next_send_at = Time.current + first_wait_seconds.seconds
+      earliest_send_at = Time.current + first_wait_seconds.seconds
+
+      # Every enrollment used to get an IDENTICAL next_send_at, so enrolling 490
+      # recipients made 490 sends due in the same instant and the scheduler
+      # dispatched them as fast as the queue drained: 225 in one minute, which
+      # got the mailbox blocked by Microsoft. Slots are now spread at the
+      # mailbox's configured rate. One pacer per mailbox, since Owner-mode
+      # campaigns enroll across many mailboxes and each has its own budget.
+      pacers = Hash.new do |cache, key|
+        cache[key] = Messaging::SendPacer.new(connection_key: key, earliest: earliest_send_at)
+      end
 
       # Contact-value dedupe set — so an email that exists on BOTH a Lead
       # row and a Contact row for the same person only sends once for this
@@ -33,8 +43,7 @@ module Campaigns
           attrs = {
             company_id: @campaign.company_id, campaign_id: @campaign.id,
             recipient_type: source_type, recipient_id: record.id,
-            status: 'pending', current_step_index: 0,
-            next_send_at: next_send_at
+            status: 'pending', current_step_index: 0
           }
           if @campaign.email_channel?
             attrs[:email_address_snapshot] = contact_value
@@ -48,6 +57,12 @@ module Campaigns
             recipient_id: attrs[:recipient_id]
           )
           next if existing
+
+          # Claimed only once the record is definitely being enrolled, so skipped
+          # duplicates don't burn slots and leave dead air in the schedule.
+          connection_key = connection_key_for(record)
+          attrs[:sending_connection_key] = connection_key
+          attrs[:next_send_at] = pacers[connection_key].next_slot
 
           enrollment = CampaignEnrollment.create(attrs)
           next unless enrollment.persisted?
@@ -107,6 +122,22 @@ module Campaigns
     end
 
     private
+
+    # Which mailbox this recipient's sends will go through, used to pick the
+    # right pacer. Memoized hard: for every identity type except Owner the
+    # answer is the same for the whole audience, and Owner mode repeats per
+    # owner, so this stays at a handful of queries rather than one per record.
+    def connection_key_for(record)
+      if @campaign.from_identity_type == 'Owner'
+        owner_id = record.try(:owner_id) || record.try(:owner)&.id
+        @owner_connection_keys ||= {}
+        return @owner_connection_keys[owner_id] if @owner_connection_keys.key?(owner_id)
+        @owner_connection_keys[owner_id] = @campaign.sending_connection_key(recipient: record)
+      else
+        return @fixed_connection_key if defined?(@fixed_connection_key)
+        @fixed_connection_key = @campaign.sending_connection_key
+      end
+    end
 
     # The exact audience set — the SAME Audiences::FilterCompiler the count/preview/members
     # use — so who gets enrolled matches what the audience screen shows. This applies the
