@@ -157,6 +157,60 @@ RSpec.describe 'Public::Sites', type: :request do
     end
   end
 
+  describe 'edge caching' do
+    # Without these, every visitor page view reaches Rails and dealer traffic becomes an
+    # origin scaling problem instead of something Cloudflare absorbs.
+    it 'lets Cloudflare cache the page and serve stale while revalidating' do
+      get_site('/about')
+
+      cache_control = response.headers['Cache-Control']
+      expect(cache_control).to include('public')
+      expect(cache_control).to include('s-maxage=300')
+      expect(cache_control).to include('stale-while-revalidate=')
+    end
+
+    it 'sends no Set-Cookie, which would make the response uncacheable' do
+      get_site('/about')
+
+      expect(response.headers['Set-Cookie']).to be_nil
+    end
+
+    it 'returns 304 when the page has not changed' do
+      get_site('/about')
+      etag = response.headers['ETag']
+      expect(etag).to be_present
+
+      get '/about', headers: { 'HTTP_HOST' => 'sunshine-rv.test', 'HTTP_IF_NONE_MATCH' => etag }
+
+      expect(response).to have_http_status(:not_modified)
+    end
+
+    it 'changes the ETag when the dealer edits the page' do
+      get_site('/about')
+      before = response.headers['ETag']
+
+      about.update!(title: 'About Our Dealership')
+      get_site('/about')
+
+      expect(response.headers['ETag']).not_to eq(before)
+    end
+
+    it 'caches robots.txt and the sitemap for longer than a page' do
+      get_site('/robots.txt')
+
+      expect(response.headers['Cache-Control']).to include('s-maxage=3600')
+    end
+
+    it 'never caches an error' do
+      allow(Websites::SpaShell).to receive(:fetch)
+        .and_raise(Websites::SpaShell::ShellUnavailable, 'origin down')
+
+      get_site('/about')
+
+      expect(response.headers['Cache-Control']).to eq('no-store')
+    end
+  end
+
   describe 'route precedence' do
     it 'does not shadow the API on the platform host' do
       get '/api/v1/leads', headers: { 'HTTP_HOST' => 'renterinsight-api-prod.onrender.com' }

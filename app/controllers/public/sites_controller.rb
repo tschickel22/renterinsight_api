@@ -16,12 +16,31 @@ module Public
   class SitesController < ActionController::Base
     skip_before_action :verify_authenticity_token
 
+    # Dealer site traffic is public visitor traffic, and at scale it will dwarf API
+    # traffic. Without these headers every page view reaches Rails, and the origin has to
+    # be scaled to handle a load that is almost entirely identical repeated responses.
+    #
+    # Browsers hold a page briefly; Cloudflare holds it longer and, once stale, serves the
+    # stale copy while fetching a fresh one behind it. So a dealer publishing a change is
+    # visible within minutes, no visitor ever waits on our origin, and the origin sees a
+    # trickle rather than the full firehose.
+    BROWSER_MAX_AGE = 1.minute.to_i
+    EDGE_MAX_AGE = 5.minutes.to_i
+    STALE_WHILE_REVALIDATE = 1.day.to_i
+    CRAWLER_FILE_EDGE_MAX_AGE = 1.hour.to_i
+
     before_action :resolve_site
+    after_action :strip_session_cookie
 
     def show
       html = prerendered_body || spa_shell
       return render_unavailable if html.nil?
 
+      # Conditional GET. Cloudflare and browsers revalidate with the ETag once the cached
+      # copy goes stale, so an unchanged page costs a 304 instead of a full render.
+      return if stale_check_passes?
+
+      cache_publicly(EDGE_MAX_AGE)
       render html: inject_head(html).html_safe, content_type: 'text/html' # rubocop:disable Rails/OutputSafety
     end
 
@@ -30,6 +49,8 @@ module Public
     # Served per site rather than from a static file: an unpublished or noindex site must
     # not invite crawlers, and the sitemap line has to point at the dealer's own host.
     def robots
+      cache_publicly(CRAWLER_FILE_EDGE_MAX_AGE)
+
       if @metadata[:robots].to_s.start_with?('noindex')
         return render plain: "User-agent: *\nDisallow: /\n", content_type: 'text/plain'
       end
@@ -45,6 +66,7 @@ module Public
     end
 
     def sitemap
+      cache_publicly(CRAWLER_FILE_EDGE_MAX_AGE)
       pages = visible_pages
 
       xml = +%(<?xml version="1.0" encoding="UTF-8"?>\n)
@@ -61,6 +83,36 @@ module Public
     end
 
     private
+
+    def cache_publicly(edge_max_age)
+      response.headers['Cache-Control'] =
+        "public, max-age=#{BROWSER_MAX_AGE}, s-maxage=#{edge_max_age}, " \
+        "stale-while-revalidate=#{STALE_WHILE_REVALIDATE}"
+    end
+
+    # Rails sets a session cookie on any response that touches the session, and a response
+    # carrying Set-Cookie is treated as private: Cloudflare will not cache it. These pages
+    # are wholly public and stateless, so the cookie has no purpose and its presence would
+    # silently disable edge caching entirely.
+    def strip_session_cookie
+      response.headers.delete('Set-Cookie')
+    end
+
+    # Changes whenever the site, the page, or the frontend bundle changes, so a publish is
+    # picked up on the next revalidation rather than waiting for the TTL to lapse.
+    #
+    # The records go in whole rather than their updated_at values: a bare Time renders at
+    # second precision inside a cache key, so two edits in the same second produced an
+    # identical ETag and the stale copy stayed served. Rails builds a record's cache key at
+    # microsecond precision.
+    def cache_subject
+      [@website, @page, Websites::SpaShell.version].compact
+    end
+
+    def stale_check_passes?
+      !stale?(etag: cache_subject, last_modified: [@website&.updated_at, @page&.updated_at].compact.max,
+              public: true)
+    end
 
     def resolve_site
       resolution = Websites::HostResolver.call(request.host)
@@ -169,11 +221,15 @@ module Public
       %(<link rel="#{rel}" href="#{ERB::Util.html_escape(href)}">)
     end
 
+    # Errors are never cached. A site that is briefly unreachable, or one whose domain was
+    # just wired up, must not have that failure pinned at the edge for minutes afterwards.
     def render_not_found
+      response.headers['Cache-Control'] = 'no-store'
       render plain: 'Site not found', status: :not_found
     end
 
     def render_unavailable
+      response.headers['Cache-Control'] = 'no-store'
       render plain: 'Site temporarily unavailable', status: :service_unavailable
     end
   end

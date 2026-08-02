@@ -24,6 +24,15 @@ module Websites
       new.fetch
     end
 
+    # Digest of the current shell, used in page ETags. A frontend deploy changes the asset
+    # filenames in the shell, which changes this, which invalidates cached HTML that would
+    # otherwise keep pointing at the previous bundle.
+    def self.version
+      Digest::SHA256.hexdigest(fetch.to_s)[0, 16]
+    rescue ShellUnavailable
+      'unavailable'
+    end
+
     def fetch
       cached = Rails.cache.read(CACHE_KEY)
       return cached if cached.present?
