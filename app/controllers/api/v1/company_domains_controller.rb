@@ -413,9 +413,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
   end
 
   def cloudflare_enabled?
-    # Check if Cloudflare credentials are configured
-    Rails.application.credentials.dig(:cloudflare, :zone_id).present? &&
-    Rails.application.credentials.dig(:cloudflare, :api_token).present?
+    # Ask the service rather than re-reading config here. This used to check encrypted
+    # credentials directly, so setting the env vars would leave the UI reporting Cloudflare
+    # as unavailable while the service itself worked fine.
+    CloudflareSaasService.configured?
   end
   
   def domain_json(domain)

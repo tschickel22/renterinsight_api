@@ -63,7 +63,7 @@ module Providers
         {
           access_key_id: config[:aws_access_key_id],
           secret_access_key: config[:aws_secret_access_key],
-          region: config[:aws_region] || 'us-west-2',
+          region: config[:aws_region] || Ses::Region.current,
           configuration_set: config[:ses_configuration_set] || ENV['SES_CONFIGURATION_SET']
         }
       end

@@ -189,7 +189,7 @@ class CompanyDomain < ApplicationRecord
   private
 
   def ses_region
-    ENV['AWS_REGION'].presence || 'us-west-2'
+    Ses::Region.current
   end
 
   def extract_domain_root

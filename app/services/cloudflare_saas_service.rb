@@ -1,24 +1,38 @@
 # Service for managing Cloudflare for SaaS custom hostnames
 # Handles domain verification, SSL provisioning, and status monitoring
 #
-# Requires credentials in Rails.application.credentials:
-#   cloudflare:
-#     zone_id: "your-zone-id"
-#     api_token: "your-api-token"
-#     custom_hostname_fallback_origin: "fallback.yourdomain.com"
+# Configuration comes from environment variables, falling back to Rails encrypted
+# credentials for anyone already using them:
+#
+#   CLOUDFLARE_ZONE_ID
+#   CLOUDFLARE_API_TOKEN                       (needs SSL and Certificates: Edit)
+#   CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN
+#
+# ENV wins because that is what our host actually offers. Encrypted credentials require
+# RAILS_MASTER_KEY and a redeploy to change, which makes rotating an API token a code
+# change rather than a settings change.
 
 class CloudflareSaasService
   include HTTParty
   base_uri 'https://api.cloudflare.com/v4'
-  
+
   class CloudflareError < StandardError; end
-  
+
   def initialize
-    @zone_id = Rails.application.credentials.dig(:cloudflare, :zone_id)
-    @api_token = Rails.application.credentials.dig(:cloudflare, :api_token)
-    @fallback_origin = Rails.application.credentials.dig(:cloudflare, :custom_hostname_fallback_origin)
-    
+    @zone_id = setting(:zone_id, 'CLOUDFLARE_ZONE_ID')
+    @api_token = setting(:api_token, 'CLOUDFLARE_API_TOKEN')
+    @fallback_origin = setting(:custom_hostname_fallback_origin, 'CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN')
+
     validate_credentials!
+  end
+
+  # True when Cloudflare for SaaS is configured, without raising. Lets callers offer or
+  # hide custom-domain features rather than discovering the gap through an exception.
+  def self.configured?
+    new
+    true
+  rescue CloudflareError
+    false
   end
   
   # Add a custom hostname to Cloudflare for SaaS
@@ -137,10 +151,20 @@ class CloudflareSaasService
     }
   end
   
+  def setting(credential_key, env_key)
+    ENV[env_key].presence || Rails.application.credentials.dig(:cloudflare, credential_key)
+  end
+
   def validate_credentials!
-    if @zone_id.blank? || @api_token.blank? || @fallback_origin.blank?
-      raise CloudflareError, "Cloudflare credentials not configured in credentials.yml"
-    end
+    missing = {
+      'CLOUDFLARE_ZONE_ID' => @zone_id,
+      'CLOUDFLARE_API_TOKEN' => @api_token,
+      'CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN' => @fallback_origin
+    }.select { |_k, v| v.blank? }.keys
+
+    return if missing.empty?
+
+    raise CloudflareError, "Cloudflare for SaaS not configured. Missing: #{missing.join(', ')}"
   end
   
   def handle_response(response)

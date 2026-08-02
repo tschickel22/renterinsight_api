@@ -88,7 +88,7 @@ module DomainConnect
     end
 
     def ses_region
-      ENV['AWS_REGION'].presence || 'us-west-2'
+      Ses::Region.current
     end
 
     # Signature covers the query string exactly as sent, in order, excluding key and sig.
