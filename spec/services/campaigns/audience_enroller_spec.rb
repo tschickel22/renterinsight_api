@@ -101,4 +101,48 @@ RSpec.describe Campaigns::AudienceEnroller do
       expect(campaign.campaign_audience.reload.estimated_count).to eq(999)
     end
   end
+
+  # Direct regression for the 2026-07-31 incident: enrolling 490 recipients gave
+  # every one of them an identical next_send_at, so they all came due at once and
+  # 225 went out in a single minute. Microsoft blocked the mailbox.
+  describe 'send pacing' do
+    let!(:connection) do
+      UserEmailConnection.create!(user_id: user.id, company_id: company.id, provider: 'oauth_outlook',
+                                  email_address: "s-#{SecureRandom.hex(3)}@example.com", is_active: true)
+    end
+
+    before do
+      25.times do |i|
+        Lead.create!(company: company, source: source, first_name: 'P', last_name: i.to_s,
+                     email: "paced-#{i}@x.com")
+      end
+    end
+
+    it 'spreads next_send_at across the audience instead of stacking it' do
+      described_class.new(campaign: campaign).enroll_all
+      times = campaign.campaign_enrollments.pluck(:next_send_at).compact.sort
+
+      expect(times.size).to be >= 25
+      expect(times.uniq.size).to eq(times.size)
+
+      gaps = times.each_cons(2).map { |a, b| (b - a).round }
+      expect(gaps).to all(eq(18))
+    end
+
+    it 'never schedules more than the per-minute limit into any one minute' do
+      described_class.new(campaign: campaign).enroll_all
+      per_minute = campaign.campaign_enrollments
+                           .pluck(:next_send_at).compact
+                           .group_by { |t| t.change(sec: 0) }
+                           .transform_values(&:size)
+
+      expect(per_minute.values.max).to be <= 10
+    end
+
+    it 'records which mailbox each enrollment will send through' do
+      described_class.new(campaign: campaign).enroll_all
+      keys = campaign.campaign_enrollments.pluck(:sending_connection_key).uniq
+      expect(keys).to eq(["UserEmailConnection:#{connection.id}"])
+    end
+  end
 end

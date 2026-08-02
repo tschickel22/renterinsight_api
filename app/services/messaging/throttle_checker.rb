@@ -1,28 +1,94 @@
+# frozen_string_literal: true
+
 module Messaging
+  # Runtime backstop for send pacing.
+  #
+  # Messaging::SendPacer does the real work by spreading next_send_at at
+  # scheduling time. This catches what pacing cannot: two campaigns enrolling
+  # into the same mailbox at once, concurrent advance_to_next_step calls, and
+  # enrollments scheduled before pacing existed.
+  #
+  # The windows are measured per MAILBOX. Measuring per campaign (the previous
+  # behaviour, and the whole of it) meant two campaigns on one mailbox each got
+  # their own throttle_per_day budget, so the mailbox absorbed both.
   class ThrottleChecker
-    def initialize(campaign:, now: Time.current)
+    Result = Struct.new(:status, :reason, :retry_at, keyword_init: true) do
+      def throttled?
+        status == :throttled
+      end
+
+      def ok?
+        status == :ok
+      end
+    end
+
+    # [limit key, window length in seconds]
+    WINDOWS = [
+      ['per_minute', 60],
+      ['per_hour', 3_600],
+      ['per_day', 86_400]
+    ].freeze
+
+    def initialize(campaign:, connection_key: nil, now: Time.current)
       @campaign = campaign
+      @connection_key = connection_key.presence
       @now = now
     end
 
     def check
-      cap = (@campaign.throttle_per_day || 500).to_i
-      sent_today_count = CampaignSend
-        .where(campaign_id: @campaign.id)
-        .where('sent_at >= ?', @now - 24.hours)
-        .count
+      if @connection_key
+        WINDOWS.each do |limit_key, seconds|
+          cap = limits[limit_key].to_i
+          next unless cap.positive?
 
-      return :throttled if cap > 0 && sent_today_count >= cap
+          scope = mailbox_sends_since(@now - seconds.seconds)
+          next if scope.count < cap
+
+          return throttled("mailbox_#{limit_key}", scope.minimum(:sent_at), seconds)
+        end
+      end
+
+      cap = (@campaign.throttle_per_day || 500).to_i
+      if cap.positive?
+        scope = CampaignSend.where(campaign_id: @campaign.id).where('sent_at >= ?', @now - 24.hours)
+        return throttled('campaign_per_day', scope.minimum(:sent_at), 86_400) if scope.count >= cap
+      end
 
       if @campaign.sms_channel?
         begin
           SmsCapService.check!(company: @campaign.company, source: 'campaign')
         rescue SmsCapService::CapExceededError
-          return :throttled
+          return throttled('sms_cap', nil, 3_600)
         end
       end
 
-      :ok
+      Result.new(status: :ok)
+    end
+
+    private
+
+    def limits
+      @limits ||= Messaging::SendRateLimits.for(connection_key: @connection_key)
+    end
+
+    def mailbox_sends_since(time)
+      CampaignSend.where(sending_connection_key: @connection_key).where('sent_at >= ?', time)
+    end
+
+    # These are rolling windows, so capacity frees the moment the oldest send in
+    # the window ages out of it. Retrying then is both the earliest correct time
+    # and far more accurate than the flat 1-hour backoff this replaces, which
+    # turned a 6-second per-minute trip into an hour of dead time.
+    def throttled(reason, oldest_in_window, window_seconds)
+      base = oldest_in_window ? oldest_in_window + window_seconds.seconds : @now + window_seconds.seconds
+      base = @now + 5.seconds if base <= @now
+      Result.new(status: :throttled, reason: reason, retry_at: base + jitter(window_seconds))
+    end
+
+    # Without jitter every enrollment throttled in the same window retries at the
+    # same instant and the burst simply repeats one window later.
+    def jitter(window_seconds)
+      rand(0..[(window_seconds * 0.1).round, 5].max).seconds
     end
   end
 end
