@@ -10,20 +10,22 @@ module Webhooks
   # a SubscriptionConfirmation pointing at a URL of their choosing and make our server
   # fetch it.
   class SesEventsController < ActionController::Base
+    include SnsMessageVerification
+
     skip_before_action :verify_authenticity_token
 
     # POST /webhooks/ses/events
     def receive
       message = JSON.parse(request.body.read)
 
-      unless verified?(message)
+      unless sns_message_authentic?(message)
         Rails.logger.warn('[Webhooks::Ses] rejected message with invalid SNS signature')
         return render json: { error: 'Invalid signature' }, status: :forbidden
       end
 
       case message['Type']
       when 'SubscriptionConfirmation'
-        confirm_subscription(message)
+        confirm_sns_subscription(message, log_tag: '[Webhooks::Ses]')
         render json: { success: true, message: 'Subscription confirmed' }
       when 'UnsubscribeConfirmation'
         Rails.logger.warn("[Webhooks::Ses] unsubscribed from topic #{message['TopicArn']}")
@@ -46,32 +48,5 @@ module Webhooks
       render json: { success: false }, status: :ok
     end
 
-    private
-
-    def verified?(message)
-      Aws::SNS::MessageVerifier.new.authentic?(message.to_json)
-    rescue => e
-      Rails.logger.error("[Webhooks::Ses] signature verification failed: #{e.message}")
-      false
-    end
-
-    def confirm_subscription(message)
-      url = message['SubscribeURL'].to_s
-      uri = URI.parse(url)
-
-      # Signature verification already proves Amazon sent this, but pin the host anyway so
-      # a confirmed-authentic message can never point us at an arbitrary origin.
-      unless uri.scheme == 'https' && uri.host.to_s.end_with?('.amazonaws.com')
-        Rails.logger.error("[Webhooks::Ses] refusing to confirm subscription at #{uri.host}")
-        return
-      end
-
-      response = Net::HTTP.get_response(uri)
-      if response.is_a?(Net::HTTPSuccess)
-        Rails.logger.info("[Webhooks::Ses] confirmed subscription to #{message['TopicArn']}")
-      else
-        Rails.logger.error("[Webhooks::Ses] subscription confirmation returned #{response.code}")
-      end
-    end
   end
 end
