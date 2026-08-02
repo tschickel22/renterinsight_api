@@ -1,5 +1,22 @@
 # frozen_string_literal: true
 Rails.application.routes.draw do
+  # ==================== TENANT WEBSITES (CUSTOM HOSTNAMES) ====================
+  #
+  # FIRST on purpose. Cloudflare for SaaS forwards the visitor's original Host, so a dealer
+  # site arrives on the dealer's own hostname and has to win the root path, which the API
+  # root below would otherwise claim.
+  #
+  # Safe to sit here because the constraint is doubly restrictive: it matches only hosts
+  # that resolve to a published tenant website, and it refuses reserved path prefixes
+  # (/api, /webhooks, /rails, tracking links) so a dealer hostname can never swallow API or
+  # webhook traffic. Platform hostnames short-circuit before any database lookup.
+  constraints(Constraints::TenantWebsiteHost) do
+    get '/robots.txt', to: 'public/sites#robots', format: false
+    get '/sitemap.xml', to: 'public/sites#sitemap', format: false
+    get '/', to: 'public/sites#show', as: :tenant_website_root
+    get '*path', to: 'public/sites#show', format: false, as: :tenant_website_page
+  end
+
   # Health check
   get 'up', to: 'rails/health#show', as: :rails_health_check
 
