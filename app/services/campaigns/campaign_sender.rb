@@ -147,6 +147,9 @@ module Campaigns
                        case conn.try(:provider).to_s
                        when 'oauth_gmail'   then :oauth_google
                        when 'oauth_outlook' then :oauth_microsoft
+                       # A verified tenant sending domain. Still the tenant's own identity
+                       # and DKIM, not the shared platform one.
+                       when 'aws_ses'       then :aws_ses
                        else :smtp
                        end
                      end

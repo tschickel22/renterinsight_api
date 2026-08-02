@@ -85,6 +85,12 @@ module Messaging
     def provider_from_key
       return nil if @connection_key.blank?
       klass_name, id = @connection_key.split(':', 2)
+
+      # A verified tenant sending domain is always SES. Without this it would fall through
+      # to FALLBACK and crawl at mailbox speed, which is the opposite of why a tenant
+      # verified a domain.
+      return 'aws_ses' if klass_name == 'CompanyDomain'
+
       return nil unless %w[UserEmailConnection LocationEmailConnection CompanyEmailConnection].include?(klass_name)
       klass_name.constantize.where(id: id).pick(:provider)
     rescue StandardError => e
