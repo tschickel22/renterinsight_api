@@ -96,6 +96,10 @@ gem 'httparty'
 
 # AWS SDK for SES email sending
 gem 'aws-sdk-ses', '~> 1.0'
+# SESv2 for per-tenant sending identities: CreateEmailIdentity returns the DKIM CNAME
+# tokens directly and MAIL FROM is a first-class attribute, neither of which v1 exposes
+# cleanly. Sending itself still goes through the v1 send_raw_email shim.
+gem 'aws-sdk-sesv2', '~> 1.0'
 # AWS SDK for S3 file storage
 gem 'aws-sdk-s3', '~> 1.0'
 

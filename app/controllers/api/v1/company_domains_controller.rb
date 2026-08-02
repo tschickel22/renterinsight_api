@@ -1,7 +1,8 @@
 # API controller for managing custom domains via Cloudflare for SaaS
 class Api::V1::CompanyDomainsController < ApplicationController
   before_action :set_company_scope
-  before_action :set_domain, only: [:show, :update, :destroy, :verify, :check_dns, :activate, :deactivate]
+  before_action :set_domain, only: [:show, :update, :destroy, :verify, :check_dns, :activate, :deactivate,
+                                    :enable_email, :check_email, :disable_email]
   
   # GET /api/v1/company_domains
   def index
@@ -25,29 +26,40 @@ class Api::V1::CompanyDomainsController < ApplicationController
   end
   
   # POST /api/v1/company_domains
+  #
+  # purpose: 'web' (default), 'email', or 'both'. An email-only domain needs no Cloudflare
+  # custom hostname, so requiring Cloudflare for every domain would block sending setup on
+  # an installation that only ever wanted to send mail.
   def create
     return unless authorize_action!('company_settings', 'update')
-    
-    unless cloudflare_enabled?
-      return render json: { 
-        error: 'Cloudflare for SaaS is not enabled for this installation' 
+
+    purpose = params[:purpose].presence || 'web'
+    unless %w[web email both].include?(purpose)
+      return render json: { error: "Unknown purpose #{purpose}" }, status: :unprocessable_entity
+    end
+
+    wants_web = %w[web both].include?(purpose)
+
+    if wants_web && !cloudflare_enabled?
+      return render json: {
+        error: 'Cloudflare for SaaS is not enabled for this installation'
       }, status: :forbidden
     end
-    
+
     hostname = params[:hostname]&.strip
-    
+
     if hostname.blank?
       return render json: { error: 'Hostname is required' }, status: :unprocessable_entity
     end
-    
+
     # Check if domain already exists
     existing = CompanyDomain.find_by(hostname: hostname)
     if existing
-      return render json: { 
-        error: "Domain #{hostname} is already registered" 
+      return render json: {
+        error: "Domain #{hostname} is already registered"
       }, status: :unprocessable_entity
     end
-    
+
     # Create domain record
     domain = @company.company_domains.build(
       hostname: hostname,
@@ -57,13 +69,20 @@ class Api::V1::CompanyDomainsController < ApplicationController
       redirect_type: params[:redirect_type] || 'none',
       verification_status: 'pending'
     )
-    
+
     unless domain.save
-      return render json: { 
-        error: domain.errors.full_messages.join(', ') 
+      return render json: {
+        error: domain.errors.full_messages.join(', ')
       }, status: :unprocessable_entity
     end
-    
+
+    unless wants_web
+      return render json: {
+        domain: domain_json(domain),
+        message: 'Domain added. Enable email sending to get the DNS records to publish.'
+      }, status: :created
+    end
+
     # Add to Cloudflare
     begin
       cloudflare_service = CloudflareSaasService.new
@@ -264,8 +283,78 @@ class Api::V1::CompanyDomainsController < ApplicationController
     }
   end
   
+  # POST /api/v1/company_domains/:id/enable_email
+  # Registers the domain as an SES sending identity and returns the DNS records to publish.
+  def enable_email
+    return unless authorize_action!('company_settings', 'update')
+
+    begin
+      Ses::IdentityManager.new(@domain).create_identity!
+    rescue Ses::IdentityManager::SesError => e
+      return render json: { error: e.message }, status: :unprocessable_entity
+    end
+
+    render json: {
+      domain: domain_json(@domain.reload),
+      message: 'Publish these DNS records, then check status. Verification usually takes ' \
+               'a few minutes but can take up to 72 hours.'
+    }
+  end
+
+  # POST /api/v1/company_domains/:id/check_email
+  # Asks SES whether it can sign for this domain yet. SES is the authority here; we never
+  # infer verification from our own DNS lookups.
+  def check_email
+    return unless authorize_action!('company_settings', 'read')
+
+    unless @domain.email_enabled?
+      return render json: { error: 'Email sending is not enabled for this domain' },
+                    status: :unprocessable_entity
+    end
+
+    begin
+      Ses::IdentityManager.new(@domain).refresh_status!
+    rescue Ses::IdentityManager::SesError => e
+      return render json: { error: e.message, verified: false }, status: :unprocessable_entity
+    end
+
+    @domain.reload
+
+    render json: {
+      domain: domain_json(@domain),
+      verified: @domain.email_verified?,
+      message: if @domain.email_verified?
+                 'Domain verified. Campaigns can now send from this domain.'
+               else
+                 'Not verified yet. Confirm the DNS records are published exactly as shown.'
+               end
+    }
+  end
+
+  # POST /api/v1/company_domains/:id/disable_email
+  def disable_email
+    return unless authorize_action!('company_settings', 'update')
+
+    Ses::IdentityManager.new(@domain).delete_identity!
+
+    @domain.update!(
+      email_enabled: false,
+      email_verified_at: nil,
+      ses_identity_status: nil,
+      ses_dkim_tokens: [],
+      ses_mail_from_domain: nil,
+      ses_mail_from_status: nil,
+      ses_error: nil
+    )
+
+    render json: {
+      domain: domain_json(@domain),
+      message: 'Email sending disabled. Campaigns fall back to connected mailboxes.'
+    }
+  end
+
   private
-  
+
   def set_domain
     @domain = @company.company_domains.find(params[:id])
   rescue ActiveRecord::RecordNotFound
@@ -300,6 +389,18 @@ class Api::V1::CompanyDomainsController < ApplicationController
       # SSL certificate
       ssl_issued_at: domain.ssl_issued_at,
       ssl_expires_at: domain.ssl_expires_at,
+
+      # Email sending (SES identity)
+      email_enabled: domain.email_enabled,
+      email_status: domain.email_status,
+      email_verified: domain.email_verified?,
+      email_verified_at: domain.email_verified_at,
+      email_dns_records: domain.email_dns_records,
+      ses_identity_status: domain.ses_identity_status,
+      ses_mail_from_domain: domain.ses_mail_from_domain,
+      ses_mail_from_status: domain.ses_mail_from_status,
+      ses_checked_at: domain.ses_checked_at,
+      ses_error: domain.ses_error,
       
       # Settings
       force_ssl: domain.force_ssl,

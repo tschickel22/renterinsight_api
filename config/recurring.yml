@@ -103,6 +103,13 @@ default: &default
     class: HarvestCampaignBouncesJob
     queue: default
     schedule: every 10 minutes
+  refresh_ses_domain_status:
+    # Polls SES for tenant sending domains awaiting DKIM verification, so a domain whose
+    # DNS records propagate overnight is verified without the tenant coming back to press
+    # a button. SES is the only authority on verification.
+    class: RefreshSesDomainStatusJob
+    queue: default
+    schedule: every 15 minutes
 
 production:
   <<: *default

@@ -53,6 +53,11 @@ class CompanyDomain < ApplicationRecord
   scope :pending_verification, -> { where(verification_status: 'pending') }
   scope :verified, -> { where(verification_status: 'active') }
   scope :ssl_active, -> { where(ssl_status: 'active') }
+
+  # Email sending
+  scope :email_enabled, -> { where(email_enabled: true) }
+  scope :email_verified, -> { email_enabled.where.not(email_verified_at: nil) }
+  scope :email_pending, -> { email_enabled.where(email_verified_at: nil) }
   
   # Callbacks
   before_validation :extract_domain_root
@@ -118,8 +123,75 @@ class CompanyDomain < ApplicationRecord
     end
   end
   
+  # ==================== EMAIL SENDING ====================
+
+  # True only when SES itself reports DKIM success. Never inferred from our own DNS
+  # lookups: the old companies.email_domain path called a domain verified whenever any SPF
+  # and any DMARC record resolved, which reported success for domains configured entirely
+  # for someone else.
+  def email_verified?
+    email_enabled? && email_verified_at.present?
+  end
+
+  def email_pending?
+    email_enabled? && email_verified_at.nil?
+  end
+
+  # The records a tenant publishes to let us sign as them. Three DKIM CNAMEs from SES,
+  # plus the MAIL FROM MX and SPF pair that make SPF align with the From header instead of
+  # falling through to amazonses.com.
+  def email_dns_records
+    return [] unless email_enabled?
+
+    records = Array(ses_dkim_tokens).map do |token|
+      {
+        type: 'CNAME',
+        name: "#{token}._domainkey.#{hostname}",
+        value: "#{token}.dkim.amazonses.com",
+        ttl: 1800,
+        purpose: 'DKIM signature. Required before any mail can be sent from this domain.',
+        required: true
+      }
+    end
+
+    if ses_mail_from_domain.present?
+      records << {
+        type: 'MX',
+        name: ses_mail_from_domain,
+        value: "feedback-smtp.#{ses_region}.amazonses.com",
+        priority: 10,
+        ttl: 1800,
+        purpose: 'Routes bounce and complaint reports back to us.',
+        required: false
+      }
+      records << {
+        type: 'TXT',
+        name: ses_mail_from_domain,
+        value: 'v=spf1 include:amazonses.com ~all',
+        ttl: 1800,
+        purpose: 'SPF alignment for the bounce domain.',
+        required: false
+      }
+    end
+
+    records
+  end
+
+  # Human-facing summary of where verification stands, for the settings screen.
+  def email_status
+    return 'disabled' unless email_enabled?
+    return 'failed'   if ses_error.present? && email_verified_at.nil?
+    return 'verified' if email_verified_at.present?
+
+    'pending'
+  end
+
   private
-  
+
+  def ses_region
+    ENV['AWS_REGION'].presence || 'us-west-2'
+  end
+
   def extract_domain_root
     return if hostname.blank?
     

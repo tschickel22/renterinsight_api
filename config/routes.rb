@@ -947,6 +947,10 @@ Rails.application.routes.draw do
           post :check_dns, path: 'check-dns'
           post :activate
           post :deactivate
+          # SES sending identity
+          post :enable_email, path: 'enable-email'
+          post :check_email, path: 'check-email'
+          post :disable_email, path: 'disable-email'
         end
       end
       
