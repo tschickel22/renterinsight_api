@@ -50,6 +50,54 @@ RSpec.describe AwsSesDelivery do
     expect(mail['X-SES-CONFIGURATION-SET'].to_s).to eq('dealertide-events')
   end
 
+  context 'when the configuration set does not exist in SES' do
+    let(:missing_set_error) do
+      Aws::SES::Errors::ServiceError.new(nil, 'Configuration set <dealertide-events> does not exist.')
+    end
+
+    # A typo or an uncreated set would otherwise take down ALL outbound mail, including
+    # password resets and MFA codes, not just the campaign traffic it was added for.
+    it 'retries once without the header rather than failing the send' do
+      call = 0
+      allow(ses_client).to receive(:send_raw_email) do
+        call += 1
+        raise missing_set_error if call == 1
+
+        response
+      end
+
+      delivery = described_class.new(settings.merge(configuration_set: 'dealertide-events'))
+      result = delivery.deliver!(mail)
+
+      expect(call).to eq(2)
+      expect(result).to eq(response)
+      expect(delivery.ses_message_id).to eq('0100018f-ses-assigned-id')
+    end
+
+    it 'drops the header on the retry' do
+      headers_seen = []
+      allow(ses_client).to receive(:send_raw_email) do
+        headers_seen << mail['X-SES-CONFIGURATION-SET']&.to_s
+        raise missing_set_error if headers_seen.length == 1
+
+        response
+      end
+
+      described_class.new(settings.merge(configuration_set: 'dealertide-events')).deliver!(mail)
+
+      expect(headers_seen.first).to eq('dealertide-events')
+      expect(headers_seen.last).to be_blank
+    end
+
+    it 'still raises other SES errors instead of retrying blindly' do
+      other = Aws::SES::Errors::ServiceError.new(nil, 'Email address is not verified')
+      allow(ses_client).to receive(:send_raw_email).and_raise(other)
+
+      expect { described_class.new(settings.merge(configuration_set: 'x')).deliver!(mail) }
+        .to raise_error(Aws::SES::Errors::ServiceError, /not verified/)
+    end
+  end
+
   it 'omits the header when no configuration set is configured' do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with('SES_CONFIGURATION_SET').and_return(nil)

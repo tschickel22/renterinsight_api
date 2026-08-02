@@ -36,6 +36,30 @@ class AwsSesDelivery
       mail.header['X-SES-CONFIGURATION-SET'] = configuration_set
     end
 
+    send_with_ses(mail)
+  rescue Aws::SES::Errors::ServiceError => e
+    # SES rejects the whole message when the named configuration set does not exist. Since
+    # this setting is an environment variable, a typo or a set that was never created would
+    # otherwise take down ALL outbound mail, including password resets and MFA codes, not
+    # just the campaign traffic it was added for.
+    #
+    # Retry once without it: losing delivery events is a reporting gap, losing transactional
+    # mail is an outage. The failure is logged loudly so the misconfiguration still gets fixed.
+    if configuration_set_missing?(e) && mail['X-SES-CONFIGURATION-SET'].present?
+      Rails.logger.error(
+        "[AwsSesDelivery] SES configuration set #{configuration_set.inspect} does not exist. " \
+        'Sending without it; bounce and delivery events will NOT be recorded until it is created.'
+      )
+      mail.header['X-SES-CONFIGURATION-SET'] = nil
+      return send_with_ses(mail)
+    end
+
+    raise
+  end
+
+  private
+
+  def send_with_ses(mail)
     # Build the raw email message
     raw_message = {
       data: mail.to_s
@@ -72,7 +96,12 @@ class AwsSesDelivery
     raise
   end
 
-  private
+  # Matched on code and message rather than a rescue of a named error class: SESv1 reports
+  # this as a generic ServiceError in some SDK versions, so keying on the class alone would
+  # miss it and let the outage through.
+  def configuration_set_missing?(error)
+    "#{error.code} #{error.message}".match?(/ConfigurationSetDoesNotExist|Configuration set .* does not exist/i)
+  end
 
   def configuration_set
     settings[:configuration_set].presence || ENV['SES_CONFIGURATION_SET'].presence
