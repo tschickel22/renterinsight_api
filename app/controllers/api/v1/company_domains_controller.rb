@@ -1,5 +1,7 @@
 # API controller for managing custom domains via Cloudflare for SaaS
 class Api::V1::CompanyDomainsController < ApplicationController
+  SENDING_DOMAIN_MODULE = 'marketing.sending_domain'
+
   before_action :set_company_scope
   before_action :set_domain, only: [:show, :update, :destroy, :verify, :check_dns, :activate, :deactivate,
                                     :enable_email, :check_email, :disable_email]
@@ -288,6 +290,16 @@ class Api::V1::CompanyDomainsController < ApplicationController
   def enable_email
     return unless authorize_action!('company_settings', 'update')
 
+    # Gates verifying a new domain, not sending. A tenant who downgrades keeps any domain
+    # they already verified and keeps sending through it; revoking mid-campaign would
+    # silently reroute live sends back through personal mailboxes.
+    unless sending_domain_module_enabled?
+      return render json: {
+        error: 'Sending Domain is not enabled for this account.',
+        module_key: SENDING_DOMAIN_MODULE
+      }, status: :forbidden
+    end
+
     begin
       Ses::IdentityManager.new(@domain).create_identity!
     rescue Ses::IdentityManager::SesError => e
@@ -361,6 +373,13 @@ class Api::V1::CompanyDomainsController < ApplicationController
     render json: { error: 'Domain not found' }, status: :not_found
   end
   
+  def sending_domain_module_enabled?
+    ModuleAccessService.new(@company).module_enabled?(SENDING_DOMAIN_MODULE)
+  rescue StandardError => e
+    Rails.logger.error "[CompanyDomains] module check failed: #{e.message}"
+    false
+  end
+
   def cloudflare_enabled?
     # Check if Cloudflare credentials are configured
     Rails.application.credentials.dig(:cloudflare, :zone_id).present? &&

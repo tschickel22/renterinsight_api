@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_02_150000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_02_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1960,6 +1960,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_02_150000) do
     t.jsonb "deal_desk_settings", default: {}, null: false
     t.string "account_number"
     t.jsonb "tracking_settings", default: {}, null: false
+    t.integer "email_monthly_limit", default: 10000, null: false
     t.index ["account_number"], name: "index_companies_on_account_number", unique: true
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"

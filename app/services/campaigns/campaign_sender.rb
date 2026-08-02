@@ -63,6 +63,23 @@ module Campaigns
       throttle = Messaging::ThrottleChecker.new(campaign: @campaign, connection_key: connection_key).check
       return reschedule_to(throttle.retry_at) if throttle.throttled?
 
+      # Monthly volume ceiling, separate from the per-mailbox rate check above. Rate is a
+      # deliverability limit; this is a billing limit.
+      #
+      # Over cap the enrollment is pushed to the start of next month rather than failed.
+      # Failing it would permanently kill every queued recipient the moment a company hit
+      # its allowance, and retrying in minutes would churn for weeks without ever
+      # succeeding. Pushing to the reset matches what the cap notification tells the tenant:
+      # automated sends are paused, not cancelled.
+      if step_channel == 'email' && !test_send?
+        begin
+          EmailCapService.check!(company: @company, source: 'campaign')
+        rescue EmailCapService::CapExceededError => e
+          Rails.logger.warn "[CampaignSender] #{e.message} (campaign #{@campaign.id})"
+          return reschedule_to(Time.current.next_month.beginning_of_month)
+        end
+      end
+
       send_record = CampaignSend.create!(
         company_id: @company.id, campaign_id: @campaign.id,
         campaign_step_id: step.id, campaign_enrollment_id: @enrollment.id,

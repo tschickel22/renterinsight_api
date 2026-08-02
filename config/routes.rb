@@ -2792,6 +2792,10 @@ Rails.application.routes.draw do
       get   'sms_usage/:company_id',            to: 'sms_usage#show'
       patch 'sms_usage/:company_id/set_limit',  to: 'sms_usage#set_limit'
 
+      get   'email_usage',                       to: 'email_usage#index'
+      get   'email_usage/:company_id',           to: 'email_usage#show'
+      patch 'email_usage/:company_id/set_limit', to: 'email_usage#set_limit'
+
       resource :settings, only: %i[show update] do
         post :test_email, on: :collection
         post :test_sms, on: :collection
