@@ -17,6 +17,13 @@ RSpec.describe Ses::IdentityManager do
     double(mail_from_domain: domain_name, mail_from_domain_status: status)
   end
 
+  # Default: the MAIL FROM subdomain is free. Collision behaviour is covered separately.
+  before do
+    dns = instance_double(Resolv::DNS)
+    allow(Resolv::DNS).to receive(:open).and_yield(dns)
+    allow(dns).to receive(:getresources).and_return([])
+  end
+
   describe '#create_identity!' do
     before do
       allow(client).to receive(:create_email_identity)
@@ -42,13 +49,13 @@ RSpec.describe Ses::IdentityManager do
     it 'configures a custom MAIL FROM subdomain that rejects on MX failure' do
       expect(client).to receive(:put_email_identity_mail_from_attributes).with(
         email_identity: domain.hostname,
-        mail_from_domain: "mail.#{domain.hostname}",
+        mail_from_domain: "bounce.#{domain.hostname}",
         behavior_on_mx_failure: 'REJECT_MESSAGE'
       )
 
       described_class.new(domain, client: client).create_identity!
 
-      expect(domain.reload.ses_mail_from_domain).to eq("mail.#{domain.hostname}")
+      expect(domain.reload.ses_mail_from_domain).to eq("bounce.#{domain.hostname}")
     end
 
     it 'still records the identity when MAIL FROM setup fails' do
@@ -66,7 +73,7 @@ RSpec.describe Ses::IdentityManager do
       allow(client).to receive(:get_email_identity).and_return(
         double(
           dkim_attributes: dkim_attributes(status: 'SUCCESS', tokens: tokens),
-          mail_from_attributes: mail_from_attributes(domain_name: "mail.#{domain.hostname}", status: 'SUCCESS')
+          mail_from_attributes: mail_from_attributes(domain_name: "bounce.#{domain.hostname}", status: 'SUCCESS')
         )
       )
 
@@ -86,6 +93,52 @@ RSpec.describe Ses::IdentityManager do
     end
   end
 
+  # Regression guard. The MAIL FROM subdomain used to default to "mail", and
+  # mail.dealertide.com already carries the inbound campaign reply MX. Following the
+  # generated records would have replaced it and silently killed inbound replies. Dealers
+  # commonly point mail.<domain> at webmail, so this is not specific to us.
+  describe 'when the MAIL FROM subdomain already receives mail' do
+    let(:mx) { instance_double(Resolv::DNS::Resource::IN::MX) }
+
+    before do
+      allow(client).to receive(:create_email_identity)
+        .and_return(double(dkim_attributes: dkim_attributes(status: 'PENDING', tokens: tokens)))
+      allow(client).to receive(:put_email_identity_mail_from_attributes)
+
+      dns = instance_double(Resolv::DNS)
+      allow(Resolv::DNS).to receive(:open).and_yield(dns)
+      allow(dns).to receive(:getresources).and_return([mx])
+    end
+
+    it 'refuses to claim the subdomain' do
+      expect(client).not_to receive(:put_email_identity_mail_from_attributes)
+
+      described_class.new(domain, client: client).create_identity!
+    end
+
+    it 'does not tell the tenant to publish records that would break their mail' do
+      described_class.new(domain, client: client).create_identity!
+
+      records = domain.reload.email_dns_records
+      expect(records.map { |r| r[:type] }).to all(eq('CNAME'))
+      expect(domain.ses_mail_from_domain).to be_nil
+    end
+
+    it 'still completes DKIM setup, which is what actually enables sending' do
+      described_class.new(domain, client: client).create_identity!
+
+      expect(domain.reload.ses_dkim_tokens).to eq(tokens)
+      expect(domain.email_enabled).to be true
+    end
+
+    it 'treats a failed DNS lookup as occupied rather than assuming it is free' do
+      allow(Resolv::DNS).to receive(:open).and_raise(Resolv::ResolvError)
+      expect(client).not_to receive(:put_email_identity_mail_from_attributes)
+
+      described_class.new(domain, client: client).create_identity!
+    end
+  end
+
   describe '#refresh_status!' do
     before { domain.update!(email_enabled: true, ses_dkim_tokens: tokens) }
 
@@ -93,7 +146,7 @@ RSpec.describe Ses::IdentityManager do
       allow(client).to receive(:get_email_identity).and_return(
         double(
           dkim_attributes: dkim_attributes(status: 'SUCCESS', tokens: tokens),
-          mail_from_attributes: mail_from_attributes(domain_name: "mail.#{domain.hostname}", status: 'SUCCESS')
+          mail_from_attributes: mail_from_attributes(domain_name: "bounce.#{domain.hostname}", status: 'SUCCESS')
         )
       )
 
@@ -107,7 +160,7 @@ RSpec.describe Ses::IdentityManager do
       allow(client).to receive(:get_email_identity).and_return(
         double(
           dkim_attributes: dkim_attributes(status: 'PENDING', tokens: tokens),
-          mail_from_attributes: mail_from_attributes(domain_name: "mail.#{domain.hostname}", status: 'PENDING')
+          mail_from_attributes: mail_from_attributes(domain_name: "bounce.#{domain.hostname}", status: 'PENDING')
         )
       )
 
@@ -175,7 +228,7 @@ RSpec.describe Ses::IdentityManager do
     it 'includes the MAIL FROM MX and SPF pair' do
       records = domain.email_dns_records
 
-      expect(records.find { |r| r[:type] == 'MX' }[:name]).to eq("mail.#{domain.hostname}")
+      expect(records.find { |r| r[:type] == 'MX' }[:name]).to eq("bounce.#{domain.hostname}")
       expect(records.find { |r| r[:type] == 'TXT' }[:value]).to eq('v=spf1 include:amazonses.com ~all')
     end
 

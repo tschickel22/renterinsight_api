@@ -17,7 +17,18 @@ module Ses
     # SES sends bounces for the MAIL FROM domain, and using a subdomain we control the SPF
     # for is what makes SPF align with the From header rather than defaulting to
     # amazonses.com.
-    MAIL_FROM_PREFIX = 'mail'
+    #
+    # Deliberately NOT "mail". AWS docs use mail.<domain> in examples, but that subdomain is
+    # already taken on real domains far too often: our own mail.dealertide.com carries the
+    # inbound campaign reply MX, and dealers commonly point mail.<domain> at webmail. A
+    # MAIL FROM MX published there would silently replace the record that receives their
+    # mail. "bounce" describes what the subdomain is actually for and collides with almost
+    # nothing.
+    DEFAULT_MAIL_FROM_PREFIX = 'bounce'
+
+    def self.mail_from_prefix
+      ENV['SES_MAIL_FROM_PREFIX'].presence || DEFAULT_MAIL_FROM_PREFIX
+    end
 
     def initialize(domain, client: nil)
       @domain = domain
@@ -33,8 +44,9 @@ module Ses
         dkim_signing_attributes: { next_signing_key_length: 'RSA_2048_BIT' }
       )
       tokens = Array(response.dkim_attributes&.tokens)
-      apply_mail_from!
-      persist_identity(tokens: tokens, status: response.dkim_attributes&.status)
+      mail_from_applied = apply_mail_from!
+      persist_identity(tokens: tokens, status: response.dkim_attributes&.status,
+                       mail_from_applied: mail_from_applied)
       domain
     rescue Aws::SESV2::Errors::AlreadyExistsException
       # Identity already registered, most likely by an earlier attempt. Adopt it.
@@ -103,6 +115,18 @@ module Ses
     end
 
     def apply_mail_from!
+      # Never claim a subdomain that already receives mail. Publishing our MAIL FROM MX
+      # over an existing one would silently break whatever was using it, and a tenant
+      # following our instructions has no way to know that is what they are doing.
+      if subdomain_already_receives_mail?
+        Rails.logger.warn(
+          "[Ses::IdentityManager] #{mail_from_domain} already has MX records; skipping custom " \
+          'MAIL FROM. Bounces route via amazonses.com and SPF alignment is weaker, but no ' \
+          'existing mail is broken.'
+        )
+        return false
+      end
+
       client.put_email_identity_mail_from_attributes(
         email_identity: domain.hostname,
         mail_from_domain: mail_from_domain,
@@ -110,23 +134,41 @@ module Ses
         # SPF alignment the custom MAIL FROM exists to provide, without telling anyone.
         behavior_on_mx_failure: 'REJECT_MESSAGE'
       )
+      true
     rescue Aws::SESV2::Errors::ServiceError => e
       # A missing MAIL FROM weakens alignment but does not stop DKIM verification, so this
-      # is logged rather than fatal. The tenant still sees the record in their record list.
+      # is logged rather than fatal. DKIM alone still lets the domain send.
       Rails.logger.warn("[Ses::IdentityManager] MAIL FROM setup failed for #{domain.hostname}: #{e.message}")
+      false
+    end
+
+    def subdomain_already_receives_mail?
+      require 'resolv'
+      Resolv::DNS.open(timeouts: 3) do |dns|
+        dns.getresources(mail_from_domain, Resolv::DNS::Resource::IN::MX).any?
+      end
+    rescue StandardError => e
+      # An unresolvable lookup must not read as "safe to overwrite". Treat it as occupied
+      # so the worst case is a weaker MAIL FROM, never a broken inbound mail flow.
+      Rails.logger.warn("[Ses::IdentityManager] MX check failed for #{mail_from_domain}: #{e.message}")
+      true
     end
 
     def mail_from_domain
-      "#{MAIL_FROM_PREFIX}.#{domain.hostname}"
+      "#{self.class.mail_from_prefix}.#{domain.hostname}"
     end
 
-    def persist_identity(tokens:, status:)
+    # ses_mail_from_domain is only recorded when SES actually accepted it, because the DNS
+    # record list shown to the tenant is derived from it. Advertising records for a MAIL
+    # FROM we declined to configure would ask them to publish an MX that does nothing, and
+    # in the collision case would ask them to break their own inbound mail.
+    def persist_identity(tokens:, status:, mail_from_applied: true)
       domain.update!(
         email_enabled: true,
         ses_identity_status: status || 'PENDING',
         ses_dkim_tokens: tokens,
-        ses_mail_from_domain: mail_from_domain,
-        ses_mail_from_status: 'PENDING',
+        ses_mail_from_domain: mail_from_applied ? mail_from_domain : nil,
+        ses_mail_from_status: mail_from_applied ? 'PENDING' : nil,
         email_verified_at: nil,
         ses_checked_at: Time.current,
         ses_error: nil
