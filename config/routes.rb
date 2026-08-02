@@ -73,6 +73,9 @@ Rails.application.routes.draw do
     # Facebook Lead Ads webhooks
     get  'facebook/leads', to: 'facebook_leads#verify'
     post 'facebook/leads', to: 'facebook_leads#receive'
+
+    # SES bounce/complaint/delivery notifications via SNS (signature-verified, no auth)
+    post 'ses/events', to: 'ses_events#receive'
   end
 
   # ==================== PUBLIC INTAKE FORMS ====================
@@ -2766,9 +2769,6 @@ Rails.application.routes.draw do
           get :check_domain_dns
           post :verify_domain
           post :generate_domain_token
-          get :check_email_dns
-          post :generate_email_dns_records
-          post :verify_email_domain
           post :send_owner_invitation  # NEW: Send tenant owner invitation
           patch :update_owner_invitation  # NEW: Update owner invitation details
         end

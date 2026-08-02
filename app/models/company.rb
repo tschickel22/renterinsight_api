@@ -325,6 +325,14 @@ class Company < ApplicationRecord
     false
   end
   
+  # TXT record prefix a tenant publishes to prove they control a custom domain.
+  # Derived from the brand kernel so a rebrand is a data change, not a code sweep.
+  def self.domain_verification_prefix
+    root = Brand.current.subdomain_root.to_s.split('.').first
+    root = Brand.current.short_name.to_s.parameterize if root.blank?
+    "#{root.presence || 'platform'}-verification"
+  end
+
   # Check if domain verification TXT record exists
   def check_domain_verification
     return { success: false, error: 'No custom domain configured' } if custom_domain.blank?
@@ -345,7 +353,7 @@ class Company < ApplicationRecord
       end
       
       # Look for our verification token in TXT records
-      expected_value = "landlordinsight-verification=#{domain_verification_token}"
+      expected_value = "#{self.class.domain_verification_prefix}=#{domain_verification_token}"
       found = txt_records.any? { |record| record.data == expected_value }
       
       if found
@@ -381,87 +389,11 @@ class Company < ApplicationRecord
     { success: false, error: e.message }
   end
   
-  # Check email domain DNS records (SPF, DKIM, DMARC)
-  def check_email_dns_records
-    return { success: false, error: 'No email domain configured' } if email_domain.blank?
-    
-    require 'resolv'
-    
-    begin
-      resolver = Resolv::DNS.new
-      results = {
-        spf: { status: 'not_found', record: nil },
-        dkim: { status: 'not_found', record: nil },
-        dmarc: { status: 'not_found', record: nil }
-      }
-      
-      # Check SPF record
-      begin
-        spf_records = resolver.getresources(email_domain, Resolv::DNS::Resource::IN::TXT)
-        spf_record = spf_records.find { |r| r.data.start_with?('v=spf1') }
-        if spf_record
-          results[:spf] = { status: 'found', record: spf_record.data }
-        end
-      rescue => e
-        results[:spf] = { status: 'error', error: e.message }
-      end
-      
-      # Check DKIM record (using default selector)
-      begin
-        dkim_domain = "default._domainkey.#{email_domain}"
-        dkim_records = resolver.getresources(dkim_domain, Resolv::DNS::Resource::IN::TXT)
-        dkim_record = dkim_records.find { |r| r.data.include?('k=rsa') }
-        if dkim_record
-          results[:dkim] = { status: 'found', record: dkim_record.data }
-        end
-      rescue => e
-        results[:dkim] = { status: 'error', error: e.message }
-      end
-      
-      # Check DMARC record
-      begin
-        dmarc_domain = "_dmarc.#{email_domain}"
-        dmarc_records = resolver.getresources(dmarc_domain, Resolv::DNS::Resource::IN::TXT)
-        dmarc_record = dmarc_records.find { |r| r.data.start_with?('v=DMARC1') }
-        if dmarc_record
-          results[:dmarc] = { status: 'found', record: dmarc_record.data }
-        end
-      rescue => e
-        results[:dmarc] = { status: 'error', error: e.message }
-      end
-      
-      { success: true, results: results }
-    rescue => e
-      Rails.logger.error "Email DNS check error for Company #{id}: #{e.message}"
-      { success: false, error: e.message }
-    end
-  end
-  
-  # Verify email domain by checking DNS records
-  def verify_email_domain!
-    dns_results = check_email_dns_records
-    
-    if dns_results[:success]
-      results = dns_results[:results]
-      # Require at least SPF and DMARC to be configured
-      if results[:spf][:status] == 'found' && results[:dmarc][:status] == 'found'
-        update!(email_domain_verified_at: Time.current)
-        { success: true, message: 'Email domain verified successfully', details: results }
-      else
-        { 
-          success: false, 
-          error: 'Required DNS records not found. Please configure SPF and DMARC records.',
-          details: results 
-        }
-      end
-    else
-      { success: false, error: dns_results[:error] }
-    end
-  rescue => e
-    Rails.logger.error "Error verifying email domain for Company #{id}: #{e.message}"
-    { success: false, error: e.message }
-  end
-  
+  # Email sending domains live on CompanyDomain, verified against SES DKIM rather than
+  # against "some SPF record exists". The old check_email_dns_records / verify_email_domain!
+  # pair reported a domain verified whenever any SPF and any DMARC record resolved, even
+  # when both pointed at an unrelated provider. Removed deliberately.
+
   # Get domain for routing (prefer custom domain over subdomain)
   def primary_domain
     custom_domain.presence || subdomain_with_base_domain
