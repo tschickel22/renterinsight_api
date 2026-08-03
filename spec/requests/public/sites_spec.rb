@@ -428,6 +428,30 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(response.headers['ETag']).not_to eq(before)
     end
 
+    # The embedded payload carries the whole site, so the header nav and footer links on
+    # /about are built from every other page's title and flags. Keying only on the page
+    # being served meant renaming a page left the old label in the nav of every page except
+    # the one that was edited.
+    it 'changes the ETag when a different page is renamed' do
+      get_site('/about')
+      before = response.headers['ETag']
+
+      home.update!(title: 'Welcome')
+      get_site('/about')
+
+      expect(response.headers['ETag']).not_to eq(before)
+    end
+
+    it 'changes the ETag when a different page leaves the nav' do
+      get_site('/about')
+      before = response.headers['ETag']
+
+      home.update!(show_in_nav: false)
+      get_site('/about')
+
+      expect(response.headers['ETag']).not_to eq(before)
+    end
+
     it 'caches robots.txt and the sitemap for longer than a page' do
       get_site('/robots.txt')
 

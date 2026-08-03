@@ -111,7 +111,26 @@ module Public
     # identical ETag and the stale copy stayed served. Rails builds a record's cache key at
     # microsecond precision.
     def cache_subject
-      [@website, @page, Websites::SpaShell.version].compact
+      [@website, @page, pages_version, Websites::SpaShell.version].compact
+    end
+
+    # Every page's timestamp, not just the one being served.
+    #
+    # The embedded payload carries the whole site: the header nav and footer links are built
+    # from every page's title and flags. So renaming a page, or toggling it out of the nav,
+    # changes what /about renders while touching only that other page's row. Without this
+    # the ETag for /about was unchanged, it answered 304, and the old nav stayed on every
+    # page except the one that was edited.
+    #
+    # website_pages does not touch: true its parent, so @website.updated_at cannot stand in
+    # for this. A publish does bump the website, which is why the stale nav corrected itself
+    # on the next publish and looked intermittent rather than broken.
+    #
+    # Microseconds, for the same reason the records above go in whole: a bare Time renders
+    # at second precision in a cache key, so two edits in the same second produced an
+    # identical ETag and the stale copy stayed served.
+    def pages_version
+      @website.website_pages.maximum(:updated_at)&.utc&.iso8601(6)
     end
 
     # A strong ETag, and deliberately no Last-Modified.

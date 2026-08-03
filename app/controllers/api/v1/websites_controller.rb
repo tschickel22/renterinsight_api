@@ -177,16 +177,28 @@ class Api::V1::WebsitesController < ApplicationController
   def publish
     return unless authorize_action!('websites', 'update')
 
-    @website.update(status: 'published', published_at: Time.current)
-    render json: @website
+    # Checked, because update without the bang returns false on a validation failure and
+    # this rendered 200 with an unchanged record either way: a publish that did not happen
+    # reported success and the dealer had no way to tell.
+    unless @website.update(status: 'published', published_at: Time.current)
+      return render json: { error: @website.errors.full_messages.to_sentence }, status: :unprocessable_entity
+    end
+
+    # domain_status so the builder can show whether publishing actually made the site
+    # reachable. Published and reachable are different things: a site with no verified
+    # domain is published and still has no address.
+    render json: @website.as_json(methods: [:domain_status])
   end
 
   # POST /api/v1/websites/:id/unpublish
   def unpublish
     return unless authorize_action!('websites', 'update')
 
-    @website.update(status: 'unpublished')
-    render json: @website
+    unless @website.update(status: 'unpublished')
+      return render json: { error: @website.errors.full_messages.to_sentence }, status: :unprocessable_entity
+    end
+
+    render json: @website.as_json(methods: [:domain_status])
   end
 
   # POST /api/v1/websites/:id/sync_branding
