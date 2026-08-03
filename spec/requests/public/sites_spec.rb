@@ -148,17 +148,53 @@ RSpec.describe 'Public::Sites', type: :request do
   # previous ones 404, the host serves index.html for them, and the browser refuses an HTML
   # response for a module script — a blank page until caches turn over.
   describe 'stale shell recovery' do
-    it 'reloads once if the app never mounts' do
+    it 'retries once if the app never mounts' do
       get_site('/about')
 
       expect(response.body).to include('dt-shell-retry')
-      expect(response.body).to include('location.reload()')
+      expect(response.body).to include('window.location.replace')
+    end
+
+    # The whole point of the recovery. A plain location.reload() is normally answered from
+    # the browser's own copy, so it returned the same dead HTML, spent the one allowed
+    # attempt, and left the visitor on a blank page permanently. Requesting a URL neither
+    # the browser nor Cloudflare has seen is what actually reaches the origin.
+    it 'retries against a URL no cache has seen' do
+      get_site('/about')
+
+      expect(response.body).to include('searchParams.set(PARAM')
+      expect(response.body).not_to include('location.reload()')
+    end
+
+    it 'clears the recovery parameter once the app mounts' do
+      get_site('/about')
+
+      expect(response.body).to include('searchParams.delete(PARAM)')
+      expect(response.body).to include('history.replaceState')
+    end
+
+    # A module script that 404s can fire its error event while the parser is still in the
+    # head. A listener registered after the bundle tags would miss it and the page would sit
+    # blank for the four second timeout instead of recovering immediately.
+    it 'registers the listener ahead of the bundle tags' do
+      get_site('/about')
+
+      expect(response.body.index('dt-shell-retry')).to be < response.body.index('/assets/index-abc.js')
+    end
+
+    # A dealer's tracking pixel failing, or an ad blocker killing a third-party script, is
+    # not a stale shell. Reloading over it would be a self-inflicted outage on a page that
+    # was rendering perfectly well.
+    it 'only treats the apps own bundle as a stale shell' do
+      get_site('/about')
+
+      expect(response.body).to include("indexOf('/assets/')")
     end
 
     it 'guards the retry so a persistent failure cannot loop' do
       get_site('/about')
 
-      expect(response.body).to include("sessionStorage.getItem(KEY)")
+      expect(response.body).to include('sessionStorage.getItem(KEY)')
       expect(response.body).to include("sessionStorage.setItem(KEY, '1')")
     end
   end

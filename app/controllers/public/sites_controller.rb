@@ -227,36 +227,89 @@ module Public
       doc = html.sub(%r{<title>.*?</title>}im, '')
                 .sub(%r{<meta\s+name=["']description["'][^>]*>}i, '')
 
-      doc = doc.sub(%r{<head([^>]*)>}i) { "<head#{Regexp.last_match(1)}>\n#{head_tags}" }
+      # The recovery script goes first, ahead of every asset tag in the document. A module
+      # script that 404s can fire its error event while the parser is still working through
+      # the head, so a listener registered at the end of the head would miss it and fall
+      # back to the slow timeout.
+      doc = doc.sub(%r{<head([^>]*)>}i) do
+        "<head#{Regexp.last_match(1)}>\n#{stale_shell_recovery_tag}\n#{head_tags}"
+      end
 
       # Before the app's own scripts, so the payload exists by the time it boots and it
       # never has to render an empty frame first.
-      doc.sub(%r{</head>}i) { "#{site_payload_tag}\n#{stale_shell_recovery_tag}\n</head>" }
+      doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
     end
 
-    # Reloads once if the app never mounts.
+    # Recovers a page whose cached copy points at a bundle that no longer exists.
     #
     # The shell references content-hashed asset filenames. A frontend deploy makes the
     # previous ones 404, the host serves index.html in their place, and the browser refuses
-    # an HTML response for a module script — leaving a dealer with a blank page until the
-    # caches turn over. Short TTLs narrow that window but cannot close it, because the
-    # response was already cached before the deploy happened.
+    # an HTML response for a module script — leaving a dealer with a blank page. Short TTLs
+    # narrow that window but cannot close it: the response was cached before the deploy.
     #
-    # A single guarded reload turns a blank page into a brief flash. sessionStorage guards
-    # it: if the reload does not help, the second attempt renders nothing rather than
-    # looping, which is the same outcome but without hammering the origin.
+    # location.reload() is not enough on its own, and that is why the first version of this
+    # did not work. A reload revalidates at best and is usually served straight from the
+    # browser's own copy, so it returns the same dead HTML, the guard below then marks the
+    # attempt as spent, and the visitor is left on the blank page for good. Recovery has to
+    # request a URL neither the browser nor Cloudflare has seen, which is what the
+    # cache-busting parameter is for.
+    #
+    # Two triggers: an asset that fails to load fires immediately, and a four second check
+    # catches the case where the scripts loaded but nothing mounted. One attempt only,
+    # tracked in sessionStorage, so a genuinely broken deploy renders nothing rather than
+    # reloading forever.
+    #
+    # The parameter is stripped once the app mounts, so it never reaches a shared link or a
+    # crawler's canonical URL.
+    RECOVERY_PARAM = '__dt_reload'
+
     def stale_shell_recovery_tag
       <<~SCRIPT.html_safe # rubocop:disable Rails/OutputSafety
         <script>
         (function () {
           var KEY = 'dt-shell-retry';
+          var PARAM = '#{RECOVERY_PARAM}';
+
+          function mounted() {
+            var root = document.getElementById('root');
+            return !!root && root.childElementCount > 0;
+          }
+
+          function recover() {
+            if (sessionStorage.getItem(KEY)) return;
+            sessionStorage.setItem(KEY, '1');
+            var url = new URL(window.location.href);
+            url.searchParams.set(PARAM, Date.now().toString(36));
+            window.location.replace(url.toString());
+          }
+
+          // An asset 404 comes back as index.html, which the browser rejects as a module
+          // script. That error does not bubble, so the listener has to capture.
+          //
+          // Restricted to the app's own bundle. A dealer's tracking pixel or an ad blocker
+          // killing a third-party script is not a stale shell, and reloading the page over
+          // it would be a self-inflicted outage on a site that was rendering fine.
+          window.addEventListener('error', function (e) {
+            var el = e.target;
+            if (!el || (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK')) return;
+            var src = el.src || el.href || '';
+            if (src.indexOf('/assets/') === -1) return;
+            if (mounted()) return;
+            recover();
+          }, true);
+
           window.addEventListener('load', function () {
             setTimeout(function () {
-              var root = document.getElementById('root');
-              if (root && root.childElementCount > 0) { sessionStorage.removeItem(KEY); return; }
-              if (sessionStorage.getItem(KEY)) return;
-              sessionStorage.setItem(KEY, '1');
-              location.reload();
+              if (mounted()) {
+                sessionStorage.removeItem(KEY);
+                var url = new URL(window.location.href);
+                if (url.searchParams.has(PARAM)) {
+                  url.searchParams.delete(PARAM);
+                  window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+                }
+                return;
+              }
+              recover();
             }, 4000);
           });
         })();
