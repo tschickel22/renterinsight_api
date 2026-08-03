@@ -58,7 +58,24 @@ class CloudflareSaasService
       response = post_custom_hostname(hostname, custom_origin: false)
     end
 
+    # Cloudflare refuses a hostname it already holds. That happens whenever a previous
+    # attempt provisioned successfully and then failed on our side, which strands the
+    # tenant: the hostname is unusable here and invisible to them, and no amount of
+    # retrying clears it. Adopt the existing one instead of reporting a duplicate.
+    return adopt_existing_hostname(hostname) if duplicate_hostname?(response)
+
     handle_response(response)
+  end
+
+  # Finds a hostname Cloudflare already holds and returns it in the same shape as a fresh
+  # create, so callers cannot tell the difference.
+  def adopt_existing_hostname(hostname)
+    Rails.logger.info "[CloudflareSaaS] Adopting existing custom hostname: #{hostname}"
+
+    existing = list_custom_hostnames.find { |h| h[:hostname].to_s.casecmp?(hostname.to_s) }
+    raise CloudflareError, "Duplicate hostname reported but #{hostname} was not found" if existing.nil?
+
+    { success: true, result: existing }
   end
   
   # Check the status of a custom hostname
@@ -162,6 +179,14 @@ class CloudflareSaasService
     body[:custom_origin_server] = @fallback_origin if custom_origin
 
     self.class.post("/zones/#{@zone_id}/custom_hostnames", headers: headers, body: body.to_json)
+  end
+
+  def duplicate_hostname?(response)
+    return false if response.success?
+
+    response.body.to_s.match?(/duplicate custom hostname/i)
+  rescue StandardError
+    false
   end
 
   # Cloudflare reports an unavailable field as a 4xx with an error mentioning it, rather

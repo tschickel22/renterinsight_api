@@ -88,6 +88,45 @@ RSpec.describe CloudflareSaasService do
       expect(bodies.last).not_to have_key('custom_origin_server')
     end
 
+    # Cloudflare holds a hostname whenever a previous attempt provisioned and then failed on
+    # our side. That stranded the tenant permanently: the hostname was unusable here,
+    # invisible to them, and no amount of retrying cleared it.
+    it 'adopts a hostname Cloudflare already holds' do
+      duplicate = instance_double(HTTParty::Response, success?: false,
+                                                      body: '{"errors":[{"code":1406,"message":"Duplicate custom hostname found."}]}')
+      allow(described_class).to receive(:post).and_return(duplicate)
+      allow_any_instance_of(described_class).to receive(:list_custom_hostnames).and_return(
+        [{ hostname: 'other.example', id: 'cf-other' },
+         { hostname: 'www.sunshine-rv.com', id: 'cf-existing' }]
+      )
+
+      result = described_class.new.add_custom_hostname('www.sunshine-rv.com')
+
+      expect(result[:result][:id]).to eq('cf-existing')
+    end
+
+    it 'matches the existing hostname case-insensitively' do
+      duplicate = instance_double(HTTParty::Response, success?: false,
+                                                      body: '{"errors":[{"message":"Duplicate custom hostname found."}]}')
+      allow(described_class).to receive(:post).and_return(duplicate)
+      allow_any_instance_of(described_class).to receive(:list_custom_hostnames).and_return(
+        [{ hostname: 'WWW.Sunshine-RV.com', id: 'cf-existing' }]
+      )
+
+      expect(described_class.new.add_custom_hostname('www.sunshine-rv.com')[:result][:id])
+        .to eq('cf-existing')
+    end
+
+    it 'raises when Cloudflare reports a duplicate it cannot produce' do
+      duplicate = instance_double(HTTParty::Response, success?: false,
+                                                      body: '{"errors":[{"message":"Duplicate custom hostname found."}]}')
+      allow(described_class).to receive(:post).and_return(duplicate)
+      allow_any_instance_of(described_class).to receive(:list_custom_hostnames).and_return([])
+
+      expect { described_class.new.add_custom_hostname('www.sunshine-rv.com') }
+        .to raise_error(described_class::CloudflareError, /was not found/)
+    end
+
     it 'does not retry on an unrelated failure' do
       other = instance_double(HTTParty::Response, success?: false, body: '{"errors":[{"message":"zone not found"}]}')
       allow(described_class).to receive(:post).and_return(other)
