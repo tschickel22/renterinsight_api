@@ -63,11 +63,23 @@ module Websites
 
       raise ShellUnavailable, "SPA origin returned #{response.code}" unless response.is_a?(Net::HTTPSuccess)
 
-      self.class.absolutize(response.body, origin.chomp('/'))
+      self.class.absolutize(utf8(response.body), origin.chomp('/'))
     rescue ShellUnavailable
       raise
     rescue StandardError => e
       raise ShellUnavailable, "Could not fetch SPA shell: #{e.message}"
+    end
+
+    # Net::HTTP hands back ASCII-8BIT unless the response declares a charset it recognises.
+    # Every page then died with Encoding::CompatibilityError the moment the binary body met
+    # the UTF-8 string literals used to inject the head tags, which surfaced as a bare 500
+    # with nothing pointing at encoding.
+    #
+    # scrub rather than raise on invalid bytes: a stray byte in the shell should not take
+    # every dealer site down.
+    def utf8(body)
+      text = body.to_s.dup.force_encoding(Encoding::UTF_8)
+      text.valid_encoding? ? text : text.scrub
     end
 
     def origin
