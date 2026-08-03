@@ -48,13 +48,78 @@
  * anything.
  */
 
+/**
+ * CACHING
+ *
+ * Cache Rules on the zone cannot do this. The route is star-slash-star, so this Worker owns
+ * every request, and the origin it fetches is a Render hostname outside the zone. Cloudflare's
+ * cache never sees it, which is why dealer pages answered cf-cache-status: DYNAMIC and every
+ * single page view reached Rails.
+ *
+ * The cache key is the VISITOR's URL and never the outbound one. The Host rewrite below points
+ * every dealer at the same Render hostname, so keying on the outbound URL would make
+ * tomshotsauce.com/about and any other dealer's /about the same entry, and one dealer would be
+ * served another's site under their own domain. That is the trap in switching on cacheEverything
+ * here, and it is the reason this is hand-rolled rather than delegated to a Cache Rule.
+ *
+ * Freshness is tracked here rather than left to the Cache API, because the Cache API honours
+ * max-age but not stale-if-error: it drops an entry the moment it expires, which is precisely
+ * when an outage needs it. Entries are stored with a long TTL and their real age checked on
+ * read, so an expired copy is still on hand when the origin is unreachable.
+ *
+ * Dealer sites are served by the same Rails process as the API, so an API deploy or restart is
+ * also a dealer site restart. That is what STALE_IF_ERROR_SECONDS covers.
+ */
+
+// Matches s-maxage in Public::SitesController. Kept in step by hand: they describe the same
+// intent from two sides, and the controller's value is the one that documents why.
+const FRESH_SECONDS = 300;
+// How long an expired copy is kept for use during an outage. Matches stale-if-error there.
+const STALE_IF_ERROR_SECONDS = 86400;
+// Our own timestamp rather than the Age header, so freshness does not depend on how a
+// particular edge location accounts for time.
+const CACHED_AT = 'x-dt-cached-at';
+
+function ageOf(response) {
+  const stamp = Number(response.headers.get(CACHED_AT));
+  if (!stamp) return Infinity;
+  return (Date.now() - stamp) / 1000;
+}
+
+// Marks where the response came from, so a HIT can be told from a STALE without reading logs.
+function served(response, status) {
+  const headers = new Headers(response.headers);
+  headers.set('X-DT-Cache', status);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    const visitorHost = url.hostname;
+  async fetch(request, env, ctx) {
+    const visitorUrl = new URL(request.url);
+    const visitorHost = visitorUrl.hostname;
+
+    // GET only. A form post must never be answered from cache, and HEAD is rare enough here
+    // that special-casing it earns nothing.
+    const cacheable = request.method === 'GET';
+    const cache = caches.default;
+    // Built from the URL alone. Passing the original request would fold its headers into the
+    // key and fragment the cache per visitor.
+    const cacheKey = cacheable ? new Request(visitorUrl.toString(), { method: 'GET' }) : null;
+
+    let cached = null;
+    if (cacheable) {
+      try {
+        cached = (await cache.match(cacheKey)) || null;
+      } catch (err) {
+        // A cache failure must never take a dealer site down. Fall through and proxy.
+        cached = null;
+      }
+      if (cached && ageOf(cached) < FRESH_SECONDS) return served(cached, 'HIT');
+    }
 
     // Changing the URL's hostname is what changes the outbound Host header. Setting a Host
     // header directly is ignored by the Workers runtime.
+    const url = new URL(request.url);
     url.hostname = env.ORIGIN_HOST;
 
     const headers = new Headers(request.headers);
@@ -64,14 +129,25 @@ export default {
     // visitor actually used or every generated URL comes back as http.
     headers.set('X-Forwarded-Proto', 'https');
 
-    const response = await fetch(new URL(url).toString(), {
-      method: request.method,
-      headers,
-      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
-      // Redirects belong to the visitor. Following them here would resolve a dealer's
-      // canonical-host redirect against the origin hostname instead of theirs.
-      redirect: 'manual',
-    });
+    let response;
+    try {
+      response = await fetch(new URL(url).toString(), {
+        method: request.method,
+        headers,
+        body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+        // Redirects belong to the visitor. Following them here would resolve a dealer's
+        // canonical-host redirect against the origin hostname instead of theirs.
+        redirect: 'manual',
+      });
+    } catch (err) {
+      // Origin unreachable: mid-restart, mid-deploy, or down. An expired copy of a page that
+      // has not changed in days beats an error page, for the visitor and for a crawler
+      // deciding whether the site is healthy.
+      if (cached) return served(cached, 'STALE-ORIGIN-UNREACHABLE');
+      throw err;
+    }
+
+    if (response.status >= 500 && cached) return served(cached, 'STALE-ORIGIN-ERROR');
 
     // Rewrite any Location pointing at the origin back to the visitor's own hostname, so a
     // redirect never leaks the Render hostname into a dealer's address bar.
@@ -84,6 +160,36 @@ export default {
         statusText: response.statusText,
         headers: fixed,
       });
+    }
+
+    // Only plain successful pages are stored. A Set-Cookie means the response was meant for
+    // one visitor, and storing it would hand their session to the next person. Rails already
+    // strips the session cookie from these responses; this is the second lock on that door.
+    const storable =
+      cacheable && response.status === 200 && !response.headers.get('Set-Cookie');
+
+    if (storable) {
+      const toStore = new Headers(response.headers);
+      toStore.set(CACHED_AT, String(Date.now()));
+      // Overrides the origin's s-maxage so the entry survives past its freshness window and
+      // is still there for the outage case above. Freshness is enforced by ageOf, not by this.
+      toStore.set('Cache-Control', `public, max-age=${FRESH_SECONDS + STALE_IF_ERROR_SECONDS}`);
+
+      const body = await response.arrayBuffer();
+      ctx.waitUntil(cache.put(cacheKey, new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: toStore,
+      })));
+
+      // Rebuilt from the buffer because the body was consumed reading it. The visitor gets the
+      // origin's own Cache-Control, not the long one written above, so their browser still
+      // revalidates on the intended schedule.
+      return served(new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      }), 'MISS');
     }
 
     return response;
