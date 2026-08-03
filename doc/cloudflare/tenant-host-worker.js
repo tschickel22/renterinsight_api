@@ -25,10 +25,23 @@
  *
  *   1. Workers & Pages > Create > Worker. Paste this in.
  *   2. Settings > Variables, add (encrypt both):
- *        ORIGIN_HOST    = renterinsight-api-prod.onrender.com
- *        PROXY_SECRET   = <generate: openssl rand -hex 32>
- *   3. Set the same value as TENANT_PROXY_SECRET in Render.
+ *        ORIGIN_HOST    = the Render service for THIS zone's environment
+ *                         staging: renterinsight-api-staging.onrender.com
+ *                         prod:    renterinsight-api-prod.onrender.com
+ *        PROXY_SECRET   = openssl rand -hex 32   (run it; paste the output)
+ *   3. Set that same value as TENANT_PROXY_SECRET on the matching Render service.
  *   4. Workers Routes: add  *\/*  on the zone, or a route per custom hostname.
+ *
+ * ORIGIN_HOST must match the zone's fallback origin. They are the same server described
+ * twice, and pointing them at different environments sends traffic somewhere the code is
+ * not deployed while every setting still looks correct.
+ *
+ * ONE ZONE PER ENVIRONMENT
+ *
+ * A Cloudflare zone has exactly one fallback origin, so a single zone cannot serve staging
+ * and production at once. Two Workers do not help: they would share that fallback origin,
+ * and dealer hostnames are arbitrary custom hostnames rather than subdomains a route could
+ * separate by environment. Use a separate cheap domain as a second zone instead.
  *
  * Until TENANT_PROXY_SECRET is set in Render, Rails ignores the header and falls back to
  * request.host, so deploying this half-configured changes nothing rather than breaking
