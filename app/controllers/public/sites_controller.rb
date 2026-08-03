@@ -223,7 +223,32 @@ module Public
       doc = html.sub(%r{<title>.*?</title>}im, '')
                 .sub(%r{<meta\s+name=["']description["'][^>]*>}i, '')
 
-      doc.sub(%r{<head([^>]*)>}i) { "<head#{Regexp.last_match(1)}>\n#{head_tags}" }
+      doc = doc.sub(%r{<head([^>]*)>}i) { "<head#{Regexp.last_match(1)}>\n#{head_tags}" }
+
+      # Before the app's own scripts, so the payload exists by the time it boots and it
+      # never has to render an empty frame first.
+      doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
+    end
+
+    # The site's content, embedded so the app can render it without a second round trip and
+    # without needing to know how to resolve a hostname. Rails has already done that
+    # resolution; repeating it client-side would be a second code path to keep in step.
+    #
+    # JSON inside a script tag, so "</script>" appearing in any dealer's copy cannot end the
+    # tag early and inject markup. The forward slash escape is what prevents that.
+    def site_payload_tag
+      json = Websites::PublicPayload.for(@website).to_json
+      # Cannot close the script tag early, whatever a dealer wrote in their copy.
+      json = json.gsub('</', '<\\/')
+      # Valid inside JSON strings, but a literal line break in JavaScript source.
+      json = json.gsub("\u2028", '\\u2028').gsub("\u2029", '\\u2029')
+
+      %(<script id="dealertide-site" type="application/json">#{json}</script>)
+    rescue StandardError => e
+      # A missing payload costs the rendered body, not the page: the head tags a crawler
+      # reads are already correct.
+      Rails.logger.error("[Public::Sites] payload build failed for #{@website&.id}: #{e.message}")
+      ''
     end
 
     def head_tags

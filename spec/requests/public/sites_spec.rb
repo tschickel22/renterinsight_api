@@ -97,6 +97,53 @@ RSpec.describe 'Public::Sites', type: :request do
     end
   end
 
+  # The app boots on a dealer hostname with no idea which site it is meant to render.
+  # Rails has already resolved that, so the content ships with the page rather than being
+  # fetched again — no second round trip, and no second resolution path to drift.
+  describe 'embedded site payload' do
+    it 'embeds the site content in the page' do
+      get_site('/about')
+
+      expect(response.body).to include('<script id="dealertide-site" type="application/json">')
+      expect(response.body).to include('Sunshine RV')
+    end
+
+    it 'is valid JSON carrying the pages' do
+      get_site('/about')
+
+      json = response.body[%r{<script id="dealertide-site"[^>]*>(.*?)</script>}m, 1]
+      payload = JSON.parse(json.gsub('<\\/', '</'))
+
+      expect(payload['id']).to eq(website.id)
+      expect(payload['website_pages'].map { |p| p['path'] }).to include('/about')
+    end
+
+    # Dealer copy is arbitrary text. An unescaped closing tag inside it would end the script
+    # early and turn the rest of the payload into markup.
+    it 'cannot be closed early by content containing a script tag' do
+      about.update!(title: 'Sneaky </script><img src=x onerror=alert(1)>')
+
+      get_site('/about')
+
+      json = response.body[%r{<script id="dealertide-site"[^>]*>(.*?)</script>}m, 1]
+
+      # Rails escapes HTML entities in JSON, so the angle brackets arrive as < and the
+      # tag cannot terminate. Asserting the property rather than the mechanism, so this
+      # still fails loudly if escape_html_entities_in_json is ever turned off.
+      expect(json).not_to include('</script>')
+      expect(JSON.parse(json.gsub('<\\/', '</'))['website_pages'].map { |p| p['title'] })
+        .to include(a_string_including('Sneaky'))
+    end
+
+    it 'sits before the closing head tag so it exists when the app boots' do
+      get_site('/about')
+
+      payload_at = response.body.index('id="dealertide-site"')
+      head_end_at = response.body.index('</head>')
+      expect(payload_at).to be < head_end_at
+    end
+  end
+
   describe 'crawler directives' do
     it 'serves robots.txt pointing at the dealers own sitemap' do
       get_site('/robots.txt')
