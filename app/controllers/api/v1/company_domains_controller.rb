@@ -448,6 +448,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
       email_verified: domain.email_verified?,
       email_verified_at: domain.email_verified_at,
       email_dns_records: domain.email_dns_records,
+      # Where this domain's DNS is actually managed, so the screen can give instructions for
+      # that provider rather than generic ones. Only looked up when there are records to
+      # publish; it costs an NS query and is useless otherwise.
+      dns_registrar: domain.email_enabled? && !domain.email_verified? ? Dns::Registrar.for(domain.hostname) : nil,
       ses_identity_status: domain.ses_identity_status,
       ses_mail_from_domain: domain.ses_mail_from_domain,
       ses_mail_from_status: domain.ses_mail_from_status,

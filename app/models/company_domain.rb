@@ -147,6 +147,7 @@ class CompanyDomain < ApplicationRecord
       {
         type: 'CNAME',
         name: "#{token}._domainkey.#{hostname}",
+        host: "#{token}._domainkey",
         value: "#{token}.dkim.amazonses.com",
         ttl: 1800,
         purpose: 'DKIM signature. Required before any mail can be sent from this domain.',
@@ -158,6 +159,7 @@ class CompanyDomain < ApplicationRecord
       records << {
         type: 'MX',
         name: ses_mail_from_domain,
+        host: relative_host(ses_mail_from_domain),
         value: "feedback-smtp.#{ses_region}.amazonses.com",
         priority: 10,
         ttl: 1800,
@@ -167,6 +169,7 @@ class CompanyDomain < ApplicationRecord
       records << {
         type: 'TXT',
         name: ses_mail_from_domain,
+        host: relative_host(ses_mail_from_domain),
         value: 'v=spf1 include:amazonses.com ~all',
         ttl: 1800,
         purpose: 'SPF alignment for the bounce domain.',
@@ -187,6 +190,14 @@ class CompanyDomain < ApplicationRecord
   end
 
   private
+
+  # Nearly every DNS provider treats the host field as relative to the zone, so pasting the
+  # fully qualified name creates token._domainkey.example.com.example.com and the record
+  # never verifies. Both spellings are exposed so the UI can show whichever the tenant's
+  # provider actually wants.
+  def relative_host(fqdn)
+    fqdn.to_s.delete_suffix(".#{hostname}").presence || '@'
+  end
 
   def ses_region
     Ses::Region.current
