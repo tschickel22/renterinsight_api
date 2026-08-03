@@ -35,14 +35,17 @@ class CompanyDomain < ApplicationRecord
     with: /\A[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}\z/i,
     message: 'must be a valid domain name'
   }
-  validates :verification_status, inclusion: { 
-    in: %w[pending active moved deleted failed], 
-    allow_nil: true 
-  }
-  validates :ssl_status, inclusion: { 
-    in: %w[pending active expired failed], 
-    allow_nil: true 
-  }
+  # verification_status and ssl_status hold whatever Cloudflare reports, deliberately
+  # unvalidated. They are a third party's vocabulary, not ours, and it is far larger than it
+  # looks: SSL alone can be initializing, pending_validation, pending_issuance,
+  # pending_deployment, staging_deployment, holding_deployment, several *_timed_out values
+  # and more, and Cloudflare adds to the list over time.
+  #
+  # These used to be validated against four values each. A successful provisioning then
+  # failed on our own validation, leaving the hostname live in Cloudflare and the record
+  # half-written, so the retry reported the domain as already registered. Rejecting a status
+  # a vendor legitimately returned buys nothing: the code that cares compares against
+  # 'active' and treats everything else as not ready.
   validates :redirect_type, inclusion: {
     in: %w[www_to_non_www non_www_to_www none],
     allow_nil: true

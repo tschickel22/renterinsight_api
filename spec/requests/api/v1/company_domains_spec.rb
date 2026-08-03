@@ -11,6 +11,59 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
   let(:token) { JsonWebToken.encode(user_id: user.id, company_id: company.id) }
   let(:auth_headers) { { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' } }
 
+  describe 'POST /api/v1/company-domains' do
+    before do
+      allow(CloudflareSaasService).to receive(:configured?).and_return(true)
+    end
+
+    # Cloudflare's SSL vocabulary is far wider than the four values the model used to
+    # allow. A successful provisioning failed on our own validation, leaving the hostname
+    # live in Cloudflare and a half-written row here, so the retry reported the domain as
+    # already registered and there was no way forward.
+    it 'accepts the status values Cloudflare actually returns' do
+      service = instance_double(CloudflareSaasService)
+      allow(CloudflareSaasService).to receive(:new).and_return(service)
+      allow(service).to receive(:add_custom_hostname).and_return({})
+      allow(service).to receive(:parse_custom_hostname_response).and_return(
+        custom_hostname_id: 'cf-abc123',
+        verification_status: 'pending_validation',
+        verification_records: [],
+        ssl_status: 'initializing',
+        cname_target: 'connect.mydealertide.com'
+      )
+
+      post '/api/v1/company-domains',
+           params: { hostname: 'www.dealer.example', purpose: 'web' }.to_json,
+           headers: auth_headers
+
+      expect(response).to have_http_status(:created)
+      domain = CompanyDomain.find_by(hostname: 'www.dealer.example')
+      expect(domain.cloudflare_custom_hostname_id).to eq('cf-abc123')
+      expect(domain.ssl_status).to eq('initializing')
+    end
+
+    it 'leaves nothing behind when the write fails after provisioning' do
+      service = instance_double(CloudflareSaasService)
+      allow(CloudflareSaasService).to receive(:new).and_return(service)
+      allow(service).to receive(:add_custom_hostname).and_return({})
+      allow(service).to receive(:parse_custom_hostname_response).and_return(
+        custom_hostname_id: 'cf-orphan', verification_status: 'pending',
+        verification_records: [], ssl_status: 'pending', cname_target: nil
+      )
+      allow_any_instance_of(CompanyDomain).to receive(:update!).and_raise(ActiveRecord::RecordInvalid.new(CompanyDomain.new))
+      # The hostname is live in Cloudflare at this point, so it has to be released or the
+      # tenant can never add that domain again.
+      expect(service).to receive(:delete_custom_hostname).with('cf-orphan')
+
+      post '/api/v1/company-domains',
+           params: { hostname: 'www.doomed.example', purpose: 'web' }.to_json,
+           headers: auth_headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(CompanyDomain.find_by(hostname: 'www.doomed.example')).to be_nil
+    end
+  end
+
   describe 'DELETE /api/v1/company-domains/:id' do
     # One record serves the website and email independently. Destroying it outright took a
     # verified sending domain with it, which happened for real on staging: removing what

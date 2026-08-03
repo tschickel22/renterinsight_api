@@ -87,12 +87,16 @@ class Api::V1::CompanyDomainsController < ApplicationController
     end
 
     # Add to Cloudflare
+    provisioned_hostname_id = nil
     begin
       cloudflare_service = CloudflareSaasService.new
       cf_response = cloudflare_service.add_custom_hostname(hostname)
-      
+
       # Parse response and update domain
       parsed = cloudflare_service.parse_custom_hostname_response(cf_response)
+      # Held separately so cleanup can still reach it if the write below fails, which is
+      # exactly when the hostname is live in Cloudflare but unrecorded here.
+      provisioned_hostname_id = parsed[:custom_hostname_id]
       domain.update!(
         cloudflare_custom_hostname_id: parsed[:custom_hostname_id],
         verification_status: parsed[:verification_status],
@@ -112,6 +116,15 @@ class Api::V1::CompanyDomainsController < ApplicationController
       domain.destroy
       Rails.logger.error "[CompanyDomains] Cloudflare error: #{e.message}"
       render json: { error: "Cloudflare error: #{e.message}" }, status: :unprocessable_entity
+    rescue StandardError => e
+      # Anything after a successful Cloudflare call leaves a hostname live there and a
+      # half-written record here. Without this the row survived, so retrying reported the
+      # domain as already registered and the tenant was stuck with no way forward.
+      Rails.logger.error "[CompanyDomains] Failed after provisioning #{hostname}: #{e.class}: #{e.message}"
+      release_custom_hostname(provisioned_hostname_id)
+      domain.destroy
+      render json: { error: 'Could not finish setting up this domain. Please try again.' },
+             status: :unprocessable_entity
     end
   end
   
@@ -431,6 +444,16 @@ class Api::V1::CompanyDomainsController < ApplicationController
     render json: { error: 'Domain not found' }, status: :not_found
   end
   
+  # Best-effort cleanup so a failed setup does not strand a hostname in Cloudflare that
+  # blocks the tenant from ever adding that domain again.
+  def release_custom_hostname(id)
+    return if id.blank?
+
+    CloudflareSaasService.new.delete_custom_hostname(id)
+  rescue StandardError => e
+    Rails.logger.warn "[CompanyDomains] Could not release Cloudflare hostname #{id}: #{e.message}"
+  end
+
   def sending_domain_module_enabled?
     ModuleAccessService.new(@company).module_enabled?(SENDING_DOMAIN_MODULE)
   rescue StandardError => e
