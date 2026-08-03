@@ -366,6 +366,27 @@ class Api::V1::CompanyDomainsController < ApplicationController
     }
   end
 
+  # GET /api/v1/company-domains/hostname-advice?hostname=example.com
+  #
+  # Checked before a tenant commits, because a bare domain fails in the least helpful way
+  # possible: every step succeeds, ownership verifies, and then the certificate silently
+  # never issues because DNS forbids a CNAME at a zone apex.
+  def hostname_advice
+    return unless authorize_action!('company_settings', 'read')
+
+    advice = Dns::ApexAdvisor.for(params[:hostname])
+
+    render json: {
+      apex: advice.apex?,
+      workable: advice.workable?,
+      strategy: advice.strategy,
+      headline: advice.headline,
+      detail: advice.detail,
+      suggested_hostname: advice.suggested_hostname,
+      registrar_name: advice.registrar_name
+    }
+  end
+
   # GET /api/v1/company_domains/:id/domain_connect
   #
   # Whether this domain's DNS provider can apply our records automatically, and the link to

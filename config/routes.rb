@@ -959,6 +959,9 @@ Rails.application.routes.draw do
       
       # ==================== COMPANY DOMAINS (CUSTOM DOMAINS) ====================
       resources :company_domains, path: 'company-domains' do
+        collection do
+          get :hostname_advice, path: 'hostname-advice'
+        end
         member do
           post :verify
           post :check_dns, path: 'check-dns'

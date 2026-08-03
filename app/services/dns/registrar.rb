@@ -42,12 +42,24 @@ module Dns
       'digitalocean.com' => :digitalocean
     }.freeze
 
+    # Whether the provider can point a bare domain (example.com, no subdomain) at a CNAME
+    # target. DNS forbids a CNAME at the zone apex, so this only works where the provider
+    # offers ALIAS, ANAME or CNAME flattening. Everywhere else the dealer has to put the
+    # site on www and forward the apex to it.
+    APEX_ALIAS_SUPPORT = %i[cloudflare route53 namecheap netlify vercel].freeze
+
+    def self.supports_apex_alias?(key)
+      APEX_ALIAS_SUPPORT.include?(key&.to_sym)
+    end
+
     DETAILS = {
       godaddy: {
         name: 'GoDaddy',
         url: 'https://dcc.godaddy.com/manage/dns',
         field_label: 'Name',
         relative: true,
+        forwarding_hint: 'In GoDaddy, open your domain and use Forwarding to send the bare ' \
+                         'domain to the www version.',
         steps: [
           'Sign in to GoDaddy and open My Products.',
           'Find your domain and click DNS, then Manage Zones.',
@@ -271,6 +283,7 @@ module Dns
       details = DETAILS[key.presence&.to_sym] || GENERIC
       details.merge(
         key: key.presence,
+        supports_apex_alias: self.class.supports_apex_alias?(key.presence),
         # The relative/absolute distinction is the one that actually breaks verification, so
         # it is surfaced as data rather than buried in prose.
         example_host: example_host(details)
@@ -280,7 +293,7 @@ module Dns
     private
 
     def generic
-      GENERIC.merge(key: nil, example_host: example_host(GENERIC))
+      GENERIC.merge(key: nil, supports_apex_alias: false, example_host: example_host(GENERIC))
     end
 
     def provider_key_from_nameservers
