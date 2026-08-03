@@ -1,0 +1,51 @@
+# Deploy config for the tenant website host-rewriting Worker.
+#
+#   npx wrangler@4.118.0 deploy --config doc/cloudflare/wrangler.toml
+#
+# Exists so the Worker stops being a file someone pastes into a dashboard textarea. Pasting
+# means the deployed code and the code in this repo drift silently, with no diff to review
+# and no way to tell which version is live.
+
+name = "tenant-host-proxy"
+main = "tenant-host-worker.js"
+
+# Matches what is already deployed. Deliberately not "today's date": moving this changes
+# runtime semantics, and a deploy meant to change code should change only code. Bump it on
+# purpose, alone, when there is a reason to.
+compatibility_date = "2026-08-03"
+
+# ROUTES ARE NOT DECLARED HERE, AND MUST NOT BE.
+#
+# Routes are created per dealer hostname by the application, in
+# CloudflareSaasService#create_worker_route, when a domain is provisioned. The live route
+# today is www.tomshotsauce.com/*, not a catch-all: each hostname needs its own or the Worker
+# never runs and Render answers 403 for that dealer.
+#
+# wrangler replaces a Worker's routes with whatever the config says. Listing them here would
+# mean every code deploy silently deletes the routes the app has created since, taking every
+# dealer added after this file was last edited offline at once.
+
+# Keeps the plain-text variables already set on the Worker.
+#
+# ORIGIN_HOST is plain_text, not a secret, and without this a deploy would delete it: the
+# Worker would then set url.hostname = undefined and fail on every request. PROXY_SECRET is
+# secret_text and survives a deploy either way, so this exists specifically for ORIGIN_HOST.
+#
+# ORIGIN_HOST is intentionally not duplicated here. It differs per environment
+# (renterinsight-api-staging.onrender.com on this zone) and a stale copy in a shared config
+# is how staging code ends up serving production traffic while every setting still reads
+# correctly.
+keep_vars = true
+
+# No workers.dev subdomain. Dealer sites are reached through their own hostnames, and a
+# second public URL serving the same content is duplicate content a crawler can find.
+workers_dev = false
+
+# Logging was already on before this file existed, and keep_vars does not cover it: the first
+# deploy from here turned it off. Declared so it stays on, and so the next person can see that
+# it is meant to be on rather than rediscovering it from a silent diff.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true

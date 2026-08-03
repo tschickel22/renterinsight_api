@@ -79,6 +79,9 @@ const STALE_IF_ERROR_SECONDS = 86400;
 // Our own timestamp rather than the Age header, so freshness does not depend on how a
 // particular edge location accounts for time.
 const CACHED_AT = 'x-dt-cached-at';
+// The origin's real Cache-Control, parked while the stored copy carries the long retention
+// TTL instead. See served().
+const ORIGIN_CC = 'x-dt-origin-cache-control';
 
 function ageOf(response) {
   const stamp = Number(response.headers.get(CACHED_AT));
@@ -87,9 +90,22 @@ function ageOf(response) {
 }
 
 // Marks where the response came from, so a HIT can be told from a STALE without reading logs.
+//
+// Also puts the origin's Cache-Control back. Stored copies deliberately carry a ~24h TTL so
+// they survive past their freshness window and are still on hand during an outage, but that
+// value must never reach a visitor: their browser would hold the page for a day, and a page
+// held that long points at a bundle that no longer exists after the next frontend deploy.
+// That is the blank-dealer-site failure this whole design exists to avoid, reintroduced one
+// layer further out.
 function served(response, status) {
   const headers = new Headers(response.headers);
   headers.set('X-DT-Cache', status);
+
+  const originCacheControl = headers.get(ORIGIN_CC);
+  if (originCacheControl) headers.set('Cache-Control', originCacheControl);
+  headers.delete(ORIGIN_CC);
+  headers.delete(CACHED_AT);
+
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -171,6 +187,10 @@ export default {
     if (storable) {
       const toStore = new Headers(response.headers);
       toStore.set(CACHED_AT, String(Date.now()));
+      // Parked so served() can put it back. Without this the long retention TTL below is what
+      // the visitor's browser sees on every HIT.
+      const originCacheControl = response.headers.get('Cache-Control');
+      if (originCacheControl) toStore.set(ORIGIN_CC, originCacheControl);
       // Overrides the origin's s-maxage so the entry survives past its freshness window and
       // is still there for the outage case above. Freshness is enforced by ageOf, not by this.
       toStore.set('Cache-Control', `public, max-age=${FRESH_SECONDS + STALE_IF_ERROR_SECONDS}`);
