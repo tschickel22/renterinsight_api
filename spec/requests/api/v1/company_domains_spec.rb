@@ -64,6 +64,62 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
     end
   end
 
+  describe 'POST /api/v1/company-domains/:id/check-dns' do
+    let!(:domain) do
+      company.company_domains.create!(
+        hostname: 'dealer.example', web_enabled: true,
+        verification_records: [
+          { 'type' => 'TXT', 'name' => '_cf-custom-hostname.dealer.example',
+            'value' => 'abc-123-token', 'ttl' => 3600 }
+        ]
+      )
+    end
+
+    def stub_txt(values)
+      dns = instance_double(Resolv::DNS)
+      allow(Resolv::DNS).to receive(:open).and_yield(dns)
+      records = values.map { |v| instance_double(Resolv::DNS::Resource::IN::TXT, strings: [v]) }
+      allow(dns).to receive(:getresources).and_return(records)
+    end
+
+    # This used to look only for a CNAME on the hostname itself, so a correctly published
+    # TXT ownership record reported "CNAME record not found" — telling a tenant who had
+    # done everything right that they had done nothing.
+    it 'finds a published TXT ownership record' do
+      stub_txt(['abc-123-token'])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      body = JSON.parse(response.body)
+      expect(body['configured']).to be true
+      expect(body['records'].first['found']).to be true
+    end
+
+    it 'reports not found when the value differs' do
+      stub_txt(['some-other-token'])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      expect(JSON.parse(response.body)['configured']).to be false
+    end
+
+    it 'reports not found when nothing resolves' do
+      stub_txt([])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      expect(JSON.parse(response.body)['configured']).to be false
+    end
+
+    it 'says so plainly when no records have been issued yet' do
+      domain.update!(verification_records: [])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      expect(JSON.parse(response.body)['message']).to match(/no dns records issued/i)
+    end
+  end
+
   describe 'DELETE /api/v1/company-domains/:id' do
     # One record serves the website and email independently. Destroying it outright took a
     # verified sending domain with it, which happened for real on staging: removing what

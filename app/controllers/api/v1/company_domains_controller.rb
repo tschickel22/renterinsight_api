@@ -244,54 +244,38 @@ class Api::V1::CompanyDomainsController < ApplicationController
   end
   
   # POST /api/v1/company_domains/:id/check_dns
+  #
+  # Checks the records Cloudflare actually issued for this hostname, whatever their type.
+  # This used to look only for a CNAME on the hostname itself, so a correctly published
+  # TXT ownership record reported "CNAME record not found" — telling a tenant who had done
+  # everything right that they had done nothing. Cloudflare issues TXT ownership
+  # verification for apex hostnames, where a CNAME is not even legal.
   def check_dns
     return unless authorize_action!('company_settings', 'read')
-    
-    unless @domain.cname_target.present?
-      return render json: { 
-        configured: false, 
-        message: 'No CNAME target available yet' 
-      }
+
+    expected = Array(@domain.verification_records)
+    if expected.empty?
+      return render json: { configured: false, message: 'No DNS records issued for this domain yet' }
     end
-    
-    # Check if DNS is configured correctly
-    begin
-      require 'resolv'
-      resolver = Resolv::DNS.new
-      
-      # Look up CNAME record
-      cname_records = []
-      begin
-        cname_records = resolver.getresources(@domain.hostname, Resolv::DNS::Resource::IN::CNAME)
-      rescue Resolv::ResolvError
-        # No CNAME found, that's okay
-      end
-      
-      configured = cname_records.any? { |r| r.name.to_s.include?('cloudflare') || r.name.to_s == @domain.cname_target }
-      
-      if configured
-        @domain.update(dns_checked_at: Time.current, dns_error: nil)
-        render json: { 
-          configured: true,
-          message: 'DNS is configured correctly',
-          records_found: cname_records.map { |r| r.name.to_s }
-        }
-      else
-        render json: { 
-          configured: false,
-          message: 'CNAME record not found or incorrect. Please add the DNS record.',
-          expected: @domain.cname_target,
-          records_found: cname_records.map { |r| r.name.to_s }
-        }
-      end
-      
-    rescue => e
-      Rails.logger.error "[CompanyDomains] DNS check failed: #{e.message}"
-      render json: { 
-        configured: false, 
-        message: "DNS lookup failed: #{e.message}" 
-      }, status: :unprocessable_entity
-    end
+
+    results = expected.map { |record| check_expected_record(record) }
+    configured = results.all? { |r| r[:found] }
+
+    @domain.update(dns_checked_at: Time.current, dns_error: configured ? nil : 'Verification records not resolving')
+
+    render json: {
+      configured: configured,
+      message: if configured
+                 'DNS records found. Verify and activate to finish setup.'
+               else
+                 'Not all records are visible yet. DNS can take up to an hour to propagate.'
+               end,
+      records: results
+    }
+  rescue StandardError => e
+    Rails.logger.error "[CompanyDomains] DNS check failed: #{e.message}"
+    render json: { configured: false, message: "DNS lookup failed: #{e.message}" },
+           status: :unprocessable_entity
   end
   
   # POST /api/v1/company_domains/:id/activate
@@ -444,6 +428,40 @@ class Api::V1::CompanyDomainsController < ApplicationController
     render json: { error: 'Domain not found' }, status: :not_found
   end
   
+  # Resolves one expected record and reports whether it is live. Compares against the value
+  # Cloudflare issued rather than looking for our own hostname, because for TXT ownership
+  # the value is an opaque token that appears nowhere else.
+  def check_expected_record(record)
+    require 'resolv'
+
+    name = record['name'].to_s
+    type = record['type'].to_s.upcase
+    expected_value = record['value'].to_s
+
+    found_values =
+      Resolv::DNS.open(timeouts: 3) do |dns|
+        case type
+        when 'TXT'
+          dns.getresources(name, Resolv::DNS::Resource::IN::TXT).map { |r| r.strings.join }
+        when 'CNAME'
+          dns.getresources(name, Resolv::DNS::Resource::IN::CNAME).map { |r| r.name.to_s }
+        else
+          []
+        end
+      end
+
+    {
+      type: type,
+      name: name,
+      expected: expected_value,
+      found: found_values.any? { |v| v.to_s.chomp('.').casecmp?(expected_value.chomp('.')) },
+      found_values: found_values
+    }
+  rescue StandardError => e
+    Rails.logger.warn "[CompanyDomains] lookup failed for #{record['name']}: #{e.message}"
+    { type: record['type'], name: record['name'], expected: record['value'], found: false, found_values: [] }
+  end
+
   # Best-effort cleanup so a failed setup does not strand a hostname in Cloudflare that
   # blocks the tenant from ever adding that domain again.
   def release_custom_hostname(id)
