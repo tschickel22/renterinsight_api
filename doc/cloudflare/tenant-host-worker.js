@@ -83,10 +83,62 @@ const CACHED_AT = 'x-dt-cached-at';
 // TTL instead. See served().
 const ORIGIN_CC = 'x-dt-origin-cache-control';
 
+// Headers worth keeping on a snapshot. Deliberately a short allow-list rather than the whole
+// set: KV metadata is capped at 1024 bytes, and most of what an origin sends (request ids,
+// timing, nel reports) describes one particular response rather than the page.
+const SNAPSHOT_HEADERS = ['content-type', 'content-language', 'cache-control', 'link'];
+
 function ageOf(response) {
   const stamp = Number(response.headers.get(CACHED_AT));
   if (!stamp) return Infinity;
   return (Date.now() - stamp) / 1000;
+}
+
+/**
+ * Last known good copy of a page, kept at the edge with no expiry.
+ *
+ * The edge cache cannot cover an outage on its own. Entries expire, they are per colo, and a
+ * URL nobody has requested recently is not in the cache at all, so the first visitor to a
+ * quiet page during a restart still meets a dead origin. Once a page has been served
+ * successfully even once, this keeps it reachable.
+ *
+ * Written only on a cache miss, which the 24h edge entry already throttles. At a few dealers
+ * that is a handful of writes a day. At a few hundred it would want a content hash to skip
+ * rewriting unchanged pages, since KV's free tier allows 1000 writes a day and a miss happens
+ * once per colo.
+ */
+function snapshotWrite(env, ctx, key, response, body) {
+  if (!env.TENANT_SNAPSHOTS) return;
+
+  const metadata = { stored_at: Date.now() };
+  for (const name of SNAPSHOT_HEADERS) {
+    const value = response.headers.get(name);
+    if (value) metadata[name] = value;
+  }
+
+  // Never blocks the response, and never fails one. A snapshot is a safety net; a broken net
+  // must not take down the thing it was meant to catch.
+  ctx.waitUntil(env.TENANT_SNAPSHOTS.put(key, body, { metadata }).catch(() => {}));
+}
+
+async function snapshotRead(env, key) {
+  if (!env.TENANT_SNAPSHOTS) return null;
+
+  try {
+    const { value, metadata } = await env.TENANT_SNAPSHOTS.getWithMetadata(key, { type: 'arrayBuffer' });
+    if (!value) return null;
+
+    const headers = new Headers();
+    for (const name of SNAPSHOT_HEADERS) {
+      if (metadata && metadata[name]) headers.set(name, metadata[name]);
+    }
+    // The origin's own Cache-Control rides along in metadata, so a visitor served a snapshot
+    // still revalidates on the normal schedule and picks up the real page as soon as the
+    // origin is back.
+    return new Response(value, { status: 200, headers });
+  } catch (err) {
+    return null;
+  }
 }
 
 // Marks where the response came from, so a HIT can be told from a STALE without reading logs.
@@ -160,10 +212,21 @@ export default {
       // has not changed in days beats an error page, for the visitor and for a crawler
       // deciding whether the site is healthy.
       if (cached) return served(cached, 'STALE-ORIGIN-UNREACHABLE');
+
+      // Nothing in this colo's cache. The snapshot is what makes a quiet page survive an
+      // outage rather than only the pages that happened to be busy beforehand.
+      const snapshot = cacheable ? await snapshotRead(env, visitorUrl.toString()) : null;
+      if (snapshot) return served(snapshot, 'SNAPSHOT-ORIGIN-UNREACHABLE');
+
       throw err;
     }
 
-    if (response.status >= 500 && cached) return served(cached, 'STALE-ORIGIN-ERROR');
+    if (response.status >= 500) {
+      if (cached) return served(cached, 'STALE-ORIGIN-ERROR');
+
+      const snapshot = cacheable ? await snapshotRead(env, visitorUrl.toString()) : null;
+      if (snapshot) return served(snapshot, 'SNAPSHOT-ORIGIN-ERROR');
+    }
 
     // Rewrite any Location pointing at the origin back to the visitor's own hostname, so a
     // redirect never leaks the Render hostname into a dealer's address bar.
@@ -201,6 +264,11 @@ export default {
         statusText: response.statusText,
         headers: toStore,
       })));
+
+      // Refresh the last known good copy on the way past. Writing here rather than on a hit
+      // means the snapshot is only rewritten when a colo actually went to the origin, which
+      // is what keeps the write volume down.
+      snapshotWrite(env, ctx, visitorUrl.toString(), response, body);
 
       // Rebuilt from the buffer because the body was consumed reading it. The visitor gets the
       // origin's own Cache-Control, not the long one written above, so their browser still

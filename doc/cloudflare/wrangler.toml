@@ -49,3 +49,16 @@ enabled = true
 
 [observability.logs]
 enabled = true
+
+# Last known good copy of every dealer page, kept at the edge.
+#
+# The edge cache alone cannot cover an outage: entries expire, and a URL nobody has requested
+# recently is not in it at all. KV has no expiry here, so once a page has been served
+# successfully even once it stays reachable while the origin is down.
+#
+# Storing this in Postgres instead, which is what the prerendered_html seam in
+# Public::SitesController would do, does not help: serving it would still need the Rails
+# process that is the thing being unavailable.
+[[kv_namespaces]]
+binding = "TENANT_SNAPSHOTS"
+id = "75abe71f0459443286ef5cc8c6afe0dd"
