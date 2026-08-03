@@ -114,9 +114,23 @@ module Public
       [@website, @page, Websites::SpaShell.version].compact
     end
 
+    # A strong ETag, and deliberately no Last-Modified.
+    #
+    # This pairing is what took dealer sites down, so both halves matter:
+    #
+    # `etag:` produces a WEAK validator (W/"..."), and Cloudflare strips weak ETags on every
+    # plan below Enterprise. The response reached the browser carrying only Last-Modified.
+    #
+    # Last-Modified can only describe the site record, and a frontend deploy changes the
+    # page without touching it. So a browser holding a copy from before a deploy revalidated
+    # with If-Modified-Since, got a 304, and kept reusing HTML that pointed at a bundle which
+    # no longer existed. Permanently: every subsequent revalidation 304'd too. That is a
+    # blank dealer site that no amount of reloading fixes.
+    #
+    # The ETag covers the shell version, so it does change on a frontend deploy. Making it
+    # strong is what lets it survive Cloudflare and actually be used.
     def stale_check_passes?
-      !stale?(etag: cache_subject, last_modified: [@website&.updated_at, @page&.updated_at].compact.max,
-              public: true)
+      !stale?(strong_etag: cache_subject, public: true)
     end
 
     def resolve_site

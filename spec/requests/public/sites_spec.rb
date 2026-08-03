@@ -367,6 +367,53 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(response.headers['ETag']).not_to eq(before)
     end
 
+    # Cloudflare strips weak ETags on every plan below Enterprise, so a weak validator never
+    # reached a visitor's browser. The response arrived carrying only Last-Modified, and the
+    # consequences of that are covered by the Last-Modified example below.
+    it 'sends a strong ETag, because Cloudflare drops weak ones' do
+      get_site('/about')
+
+      expect(response.headers['ETag']).to be_present
+      expect(response.headers['ETag']).not_to start_with('W/')
+    end
+
+    # This is the bug that blanked live dealer sites.
+    #
+    # Last-Modified can only describe the site record. A frontend deploy changes the page
+    # (the bundle filenames are content hashed) without touching the record, so a browser
+    # holding a copy from before a deploy revalidated with If-Modified-Since, got a 304, and
+    # went on reusing HTML pointing at a bundle that no longer existed. Every later
+    # revalidation 304'd too, so the page stayed blank permanently.
+    #
+    # The ETag covers the shell version and does change on a deploy, so it is the only
+    # validator this response may carry.
+    it 'sends no Last-Modified, which cannot express a frontend deploy' do
+      get_site('/about')
+
+      expect(response.headers['Last-Modified']).to be_nil
+    end
+
+    it 'does not honour If-Modified-Since as proof the page is unchanged' do
+      get_site('/about')
+
+      get '/about', headers: { 'HTTP_HOST' => 'sunshine-rv.test',
+                               'HTTP_IF_MODIFIED_SINCE' => 1.minute.from_now.httpdate }
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    # The frontend deploying has to invalidate every cached page, or visitors keep being
+    # handed asset filenames that 404.
+    it 'changes the ETag when the frontend bundle changes' do
+      get_site('/about')
+      before = response.headers['ETag']
+
+      allow(Websites::SpaShell).to receive(:version).and_return('deploy-two')
+      get_site('/about')
+
+      expect(response.headers['ETag']).not_to eq(before)
+    end
+
     it 'caches robots.txt and the sitemap for longer than a page' do
       get_site('/robots.txt')
 
