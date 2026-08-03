@@ -157,6 +157,76 @@ RSpec.describe 'Public::Sites', type: :request do
     end
   end
 
+  # These settings were stored and shown in Company Settings but read by nothing, so the
+  # toggles saved a value and changed no behaviour.
+  describe 'canonical host redirects' do
+    it 'sends non-www to www when the domain asks for it' do
+      domain.update!(redirect_type: 'non_www_to_www')
+
+      get_site('/about')
+
+      expect(response).to have_http_status(:moved_permanently)
+      expect(response.headers['Location']).to eq('http://www.sunshine-rv.test/about')
+    end
+
+    it 'sends www to non-www when the domain asks for it' do
+      domain.update!(redirect_type: 'www_to_non_www')
+
+      get_site('/about', host: 'www.sunshine-rv.test')
+
+      expect(response).to have_http_status(:moved_permanently)
+      expect(response.headers['Location']).to eq('http://sunshine-rv.test/about')
+    end
+
+    it 'uses a 301 so search engines consolidate on one host' do
+      domain.update!(redirect_type: 'non_www_to_www')
+
+      get_site('/about')
+
+      expect(response).to have_http_status(301)
+    end
+
+    it 'preserves the path and query string' do
+      domain.update!(redirect_type: 'non_www_to_www')
+
+      get '/inventory?make=clayton', headers: { 'HTTP_HOST' => 'sunshine-rv.test' }
+
+      expect(response.headers['Location']).to eq('http://www.sunshine-rv.test/inventory?make=clayton')
+    end
+
+    it 'does not redirect when already on the canonical host' do
+      domain.update!(redirect_type: 'www_to_non_www')
+
+      get_site('/about')
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'does not redirect when no rule is set' do
+      domain.update!(redirect_type: 'none', force_www: false)
+
+      get_site('/about')
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it 'honours the older force_www flag when no redirect_type is chosen' do
+      domain.update!(redirect_type: nil, force_www: true)
+
+      get_site('/about')
+
+      expect(response.headers['Location']).to eq('http://www.sunshine-rv.test/about')
+    end
+
+    it 'lets an explicit redirect_type override the older force_www flag' do
+      domain.update!(redirect_type: 'www_to_non_www', force_www: true)
+
+      get_site('/about', host: 'www.sunshine-rv.test')
+
+      expect(response.headers['Location']).to eq('http://sunshine-rv.test/about')
+    end
+  end
+
   describe 'edge caching' do
     # Without these, every visitor page view reaches Rails and dealer traffic becomes an
     # origin scaling problem instead of something Cloudflare absorbs.

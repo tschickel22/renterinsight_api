@@ -30,6 +30,7 @@ module Public
     CRAWLER_FILE_EDGE_MAX_AGE = 1.hour.to_i
 
     before_action :resolve_site
+    before_action :enforce_canonical_host
     after_action :strip_session_cookie
 
     def show
@@ -115,15 +116,58 @@ module Public
     end
 
     def resolve_site
-      resolution = Websites::HostResolver.call(request.host)
-      return render_not_found if resolution.nil?
+      @resolution = Websites::HostResolver.call(request.host)
+      return render_not_found if @resolution.nil?
 
-      @website = resolution.website
-      @canonical_host = resolution.canonical_host
+      @website = @resolution.website
+      @canonical_host = @resolution.canonical_host
       @page = find_page
       @metadata = Websites::PageMetadata.new(
         website: @website, page: @page, canonical_host: @canonical_host
       ).to_h
+    end
+
+    # Applies the domain's force_ssl / force_www / redirect_type settings.
+    #
+    # These were stored and shown in Company Settings but read by nothing, so the toggles
+    # saved a value and changed no behaviour. Now that Rails serves tenant sites it can
+    # honour them directly, which is also better for the dealer than leaving both spellings
+    # of their domain live: duplicate content splits search ranking between them.
+    #
+    # 301 rather than 302 so search engines consolidate on the canonical host.
+    def enforce_canonical_host
+      target = canonical_redirect_target
+      return if target.nil?
+
+      redirect_to target, status: :moved_permanently, allow_other_host: true
+    end
+
+    # Host only. force_ssl is deliberately NOT enforced here: Cloudflare terminates TLS and
+    # forwards to the origin over http, so a scheme redirect in Rails would fire on every
+    # request that Cloudflare already served over HTTPS, producing an infinite loop. HTTPS
+    # is Cloudflare's job and it already does it.
+    def canonical_redirect_target
+      domain = @resolution&.company_domain
+      return nil if domain.nil?
+
+      host = request.host.to_s.downcase
+      wanted_host = canonical_host_for(domain, host)
+      return nil if wanted_host == host
+
+      "#{request.scheme}://#{wanted_host}#{request.fullpath}"
+    end
+
+    def canonical_host_for(domain, host)
+      # force_www predates redirect_type and means the same thing as non_www_to_www. The
+      # explicit selector wins; the older flag only applies when no selector is set.
+      rule = domain.redirect_type.presence
+      rule = domain.force_www ? 'non_www_to_www' : 'none' if rule.blank? || rule == 'none'
+
+      case rule
+      when 'non_www_to_www' then host.start_with?('www.') ? host : "www.#{host}"
+      when 'www_to_non_www' then host.delete_prefix('www.')
+      else host
+      end
     end
 
     def find_page
