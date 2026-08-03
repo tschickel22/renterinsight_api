@@ -31,6 +31,17 @@ module Public
     # renders blank. A day of that is not a trade worth making for origin protection, and
     # revalidating every couple of minutes still absorbs almost all traffic.
     STALE_WHILE_REVALIDATE = 2.minutes.to_i
+    # Dealer sites are served by this same Rails process, so an API deploy or restart is
+    # also a dealer site restart. Without this, a cached page that happened to expire during
+    # that window has no permission to be reused and the visitor gets a 502 from a site that
+    # has not changed in days.
+    #
+    # Long, deliberately. During an outage the choice is a stale dealer page or an error
+    # page, and a day-old page is the better answer for both the visitor and the crawler
+    # deciding whether the site is healthy. This is not the same trade as the short
+    # stale-while-revalidate above: that one governs the normal path, where a stale copy
+    # pointing at a deployed-away bundle would blank a working site.
+    STALE_IF_ERROR = 1.day.to_i
     CRAWLER_FILE_EDGE_MAX_AGE = 1.hour.to_i
 
     before_action :resolve_site
@@ -92,7 +103,7 @@ module Public
     def cache_publicly(edge_max_age)
       response.headers['Cache-Control'] =
         "public, max-age=#{BROWSER_MAX_AGE}, s-maxage=#{edge_max_age}, " \
-        "stale-while-revalidate=#{STALE_WHILE_REVALIDATE}"
+        "stale-while-revalidate=#{STALE_WHILE_REVALIDATE}, stale-if-error=#{STALE_IF_ERROR}"
     end
 
     # Rails sets a session cookie on any response that touches the session, and a response

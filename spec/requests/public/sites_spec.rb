@@ -355,6 +355,15 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(cache_control).to include('stale-while-revalidate=')
     end
 
+    # Dealer sites run in this same Rails process, so an API deploy or restart takes them
+    # with it. Without this a cached page that happened to expire during that window has no
+    # permission to be reused, and a site that has not changed in days answers 502.
+    it 'lets the edge keep serving a cached page while the origin is down' do
+      get_site('/about')
+
+      expect(response.headers['Cache-Control']).to include('stale-if-error=')
+    end
+
     it 'sends no Set-Cookie, which would make the response uncacheable' do
       get_site('/about')
 
