@@ -499,6 +499,25 @@ class Api::V1::CompanyDomainsController < ApplicationController
     Rails.logger.warn "[CompanyDomains] Could not release Cloudflare hostname #{id}: #{e.message}"
   end
 
+  # Only while something still needs publishing. The lookup costs a DNS query and is noise
+  # once a domain is finished.
+  def domain_needs_dns_help?(domain)
+    (domain.email_enabled? && !domain.email_verified?) ||
+      (domain.web_enabled? && !domain.ready_for_use?)
+  end
+
+  def apex_forwarding_advice(domain)
+    apex = domain.apex_needing_forwarding
+    return nil if apex.blank?
+    return nil unless domain_needs_dns_help?(domain)
+
+    {
+      apex: apex,
+      target: "https://#{domain.hostname}",
+      hint: Dns::Registrar.for(domain.hostname)[:forwarding_hint]
+    }
+  end
+
   def sending_domain_module_enabled?
     ModuleAccessService.new(@company).module_enabled?(SENDING_DOMAIN_MODULE)
   rescue StandardError => e
@@ -552,7 +571,11 @@ class Api::V1::CompanyDomainsController < ApplicationController
       # Where this domain's DNS is actually managed, so the screen can give instructions for
       # that provider rather than generic ones. Only looked up when there are records to
       # publish; it costs an NS query and is useless otherwise.
-      dns_registrar: domain.email_enabled? && !domain.email_verified? ? Dns::Registrar.for(domain.hostname) : nil,
+      dns_registrar: domain_needs_dns_help?(domain) ? Dns::Registrar.for(domain.hostname) : nil,
+      # Forwarding the bare domain is a registrar setting, not a DNS record, so it cannot
+      # appear in the record list. Left unsaid, a dealer whose www site works finds their
+      # bare domain still on a parking page and concludes the setup failed.
+      apex_forwarding: apex_forwarding_advice(domain),
       ses_identity_status: domain.ses_identity_status,
       ses_mail_from_domain: domain.ses_mail_from_domain,
       ses_mail_from_status: domain.ses_mail_from_status,

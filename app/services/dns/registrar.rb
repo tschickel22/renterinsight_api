@@ -70,6 +70,7 @@ module Dns
       cloudflare: {
         name: 'Cloudflare',
         url: 'https://dash.cloudflare.com',
+        forwarding_hint: 'In Cloudflare, use Rules > Redirect Rules to send the bare domain to the www version.',
         field_label: 'Name',
         relative: true,
         steps: [
@@ -86,6 +87,7 @@ module Dns
       namecheap: {
         name: 'Namecheap',
         url: 'https://ap.www.namecheap.com/domains/list',
+        forwarding_hint: 'In Namecheap\'s Advanced DNS, add a URL Redirect record on the bare domain pointing to the www version.',
         field_label: 'Host',
         relative: true,
         steps: [
@@ -98,6 +100,7 @@ module Dns
       route53: {
         name: 'AWS Route 53',
         url: 'https://console.aws.amazon.com/route53/v2/hostedzones',
+        forwarding_hint: 'In Route 53, point the bare domain at an S3 redirect bucket or a CloudFront redirect function.',
         field_label: 'Record name',
         relative: true,
         steps: [
@@ -110,6 +113,7 @@ module Dns
       google: {
         name: 'Google Domains / Squarespace',
         url: 'https://domains.squarespace.com',
+        forwarding_hint: 'Under your domain\'s settings, add a forward from the bare domain to the www version.',
         field_label: 'Host name',
         relative: true,
         steps: [
@@ -121,6 +125,7 @@ module Dns
       squarespace: {
         name: 'Squarespace',
         url: 'https://account.squarespace.com/domains',
+        forwarding_hint: 'Under Domains > DNS Settings, add a forwarding rule from the bare domain to the www version.',
         field_label: 'Host',
         relative: true,
         steps: [
@@ -165,6 +170,7 @@ module Dns
       ionos: {
         name: 'IONOS',
         url: 'https://my.ionos.com/domains',
+        forwarding_hint: 'In IONOS, open the domain and use Redirect to send the bare domain to the www version.',
         field_label: 'Host name',
         relative: true,
         steps: [
@@ -176,6 +182,7 @@ module Dns
       network_solutions: {
         name: 'Network Solutions',
         url: 'https://www.networksolutions.com/my-account',
+        forwarding_hint: 'Use Domain Forwarding in your account to send the bare domain to the www version.',
         field_label: 'Host',
         relative: true,
         steps: [
@@ -187,6 +194,7 @@ module Dns
       name_com: {
         name: 'Name.com',
         url: 'https://www.name.com/account/domain',
+        forwarding_hint: 'Open your domain and use URL Forwarding to send the bare domain to the www version.',
         field_label: 'Host',
         relative: true,
         steps: [
@@ -198,6 +206,7 @@ module Dns
       hover: {
         name: 'Hover',
         url: 'https://hover.com/control_panel',
+        forwarding_hint: 'In Hover, open the domain and use Forwards to send the bare domain to the www version.',
         field_label: 'Hostname',
         relative: true,
         steps: [
@@ -209,6 +218,7 @@ module Dns
       dreamhost: {
         name: 'DreamHost',
         url: 'https://panel.dreamhost.com/index.cgi?tree=domain.manage',
+        forwarding_hint: 'In the DreamHost panel, set the bare domain to Redirect to the www version.',
         field_label: 'Name',
         relative: true,
         steps: [
@@ -220,6 +230,7 @@ module Dns
       bluehost: {
         name: 'Bluehost',
         url: 'https://my.bluehost.com/hosting/domains',
+        forwarding_hint: 'In Bluehost, use Domains > Redirects to send the bare domain to the www version.',
         field_label: 'Host Record',
         relative: true,
         steps: [
@@ -231,6 +242,7 @@ module Dns
       hostgator: {
         name: 'HostGator',
         url: 'https://portal.hostgator.com',
+        forwarding_hint: 'In the Customer Portal, use Domains > Redirects to send the bare domain to the www version.',
         field_label: 'Host Record',
         relative: true,
         steps: [
@@ -306,8 +318,20 @@ module Dns
       nil
     end
 
+    # NS records live at the zone apex, so asking about www.dealer.com returns nothing and
+    # every www hostname would silently fall back to generic instructions. Walk up until a
+    # zone answers.
     def nameservers
-      Dns::Lookup.ns(@hostname, timeout: DNS_TIMEOUT)
+      labels = @hostname.split('.')
+
+      while labels.length >= 2
+        found = Dns::Lookup.ns(labels.join('.'), timeout: DNS_TIMEOUT)
+        return found if found.any?
+
+        labels.shift
+      end
+
+      []
     end
 
     # Shows the tenant what the field should contain for their provider, using a DKIM record

@@ -222,6 +222,19 @@ class CompanyDomain < ApplicationRecord
     records
   end
 
+  # The bare domain a visitor might type instead of this hostname.
+  #
+  # Publishing a www hostname leaves the bare domain wherever it already pointed, usually a
+  # registrar parking page. That is not a DNS record we can hand over: a CNAME is illegal at
+  # a zone apex, which is why the site is on www at all. It is a forwarding setting at the
+  # registrar, so it needs saying separately or a dealer reasonably concludes their domain
+  # is broken.
+  def apex_needing_forwarding
+    return nil unless hostname.to_s.start_with?('www.')
+
+    hostname.delete_prefix('www.')
+  end
+
   # Human-facing summary of where verification stands, for the settings screen.
   def email_status
     return 'disabled' unless email_enabled?

@@ -9,6 +9,24 @@ RSpec.describe Dns::Registrar do
 
   before { Rails.cache.clear }
 
+  # NS records live at the zone apex, so asking about www.dealer.com returns nothing and
+  # every www hostname silently fell back to generic instructions — which is most dealer
+  # website domains, since apex hostnames cannot be used at all.
+  it 'walks up to the zone when the hostname itself has no NS records' do
+    allow(Dns::Lookup).to receive(:ns).with('www.dealer.example', anything).and_return([])
+    allow(Dns::Lookup).to receive(:ns).with('dealer.example', anything)
+                                      .and_return(['ns57.domaincontrol.com'])
+
+    expect(described_class.for('www.dealer.example')[:key]).to eq('godaddy')
+  end
+
+  it 'gives up rather than querying past the registrable domain' do
+    allow(Dns::Lookup).to receive(:ns).and_return([])
+
+    expect(described_class.for('shop.www.dealer.example')[:key]).to be_nil
+    expect(Dns::Lookup).to have_received(:ns).exactly(3).times
+  end
+
   it 'detects GoDaddy from its nameservers' do
     stub_nameservers('ns57.domaincontrol.com', 'ns58.domaincontrol.com')
 
