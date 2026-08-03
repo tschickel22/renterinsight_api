@@ -563,21 +563,21 @@ class Api::V1::WebsitesController < ApplicationController
 
   private
 
-  def set_company_scope
-    company_id = request.headers['X-Company-ID'] || params[:company_id]
-    
-    if company_id.blank?
-      render json: { error: 'Missing company context' }, status: :unauthorized
-      return
-    end
-    
-    @company = Company.find_by(id: company_id)
-    
-    unless @company
-      render json: { error: 'Company not found' }, status: :not_found
-      return
-    end
-  end
+  # set_company_scope is deliberately NOT overridden here. It used to be, and the override
+  # took the company from the X-Company-ID header or a company_id request param with no
+  # check of who was asking:
+  #
+  #   company_id = request.headers['X-Company-ID'] || params[:company_id]
+  #   @company = Company.find_by(id: company_id)
+  #
+  # Any authenticated user could name any company and read or write that tenant's websites.
+  # ApplicationController's version honours the header only for platform and super admins
+  # and otherwise takes the company from the JWT, which is what every other controller in
+  # api/v1 already does.
+  #
+  # It also fixes an ordinary bug: the override 401'd with "Missing company context" when no
+  # header was present, and the frontend only sends that header when a platform admin has
+  # switched companies.
 
   # Build public-safe calculator settings from company loan_settings JSONB
   def build_calculator_settings(company)

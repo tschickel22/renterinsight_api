@@ -10,12 +10,7 @@ RSpec.describe 'Api::V1::Websites publishing', type: :request do
                  password: 'Pass1234!', company_id: company.id, role: 'platform_admin')
   end
   let(:token) { JsonWebToken.encode(user_id: user.id, company_id: company.id) }
-  # This controller overrides set_company_scope and reads X-Company-ID rather than the
-  # company already carried in the JWT, so the header is required here specifically.
-  let(:auth_headers) do
-    { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json',
-      'X-Company-ID' => company.id.to_s }
-  end
+  let(:auth_headers) { { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' } }
 
   let(:website) do
     company.websites.create!(location_id: location.id, name: 'Sunshine RV',
@@ -80,6 +75,71 @@ RSpec.describe 'Api::V1::Websites publishing', type: :request do
       body = JSON.parse(response.body)
       expect(body).not_to have_key('website')
       expect(body['status']).to eq('unpublished')
+    end
+  end
+
+  # This controller used to override set_company_scope with
+  #
+  #   company_id = request.headers['X-Company-ID'] || params[:company_id]
+  #
+  # and no check of who was asking, so any authenticated user could name any company and
+  # operate on that tenant's websites. It now inherits ApplicationController's version.
+  describe 'tenant isolation' do
+    let(:other_company) { Company.create!(name: "Other-#{SecureRandom.hex(4)}") }
+    let(:other_location) { other_company.locations.create!(name: 'Austin') }
+    let!(:other_website) do
+      other_company.websites.create!(location_id: other_location.id, name: 'Not Yours',
+                                     slug: "s-#{SecureRandom.hex(4)}")
+    end
+    let(:tenant_user) do
+      User.create!(email: "t-#{SecureRandom.hex(4)}@example.com", first_name: 'T', last_name: 'U',
+                   password: 'Pass1234!', company_id: company.id, role: 'admin')
+    end
+    let(:tenant_token) { JsonWebToken.encode(user_id: tenant_user.id, company_id: company.id) }
+
+    it 'refuses a company named in the X-Company-ID header by a non platform admin' do
+      post "/api/v1/websites/#{other_website.id}/publish",
+           headers: { 'Authorization' => "Bearer #{tenant_token}",
+                      'X-Company-ID' => other_company.id.to_s }
+
+      expect(response).not_to have_http_status(:ok)
+      expect(other_website.reload.status).not_to eq('published')
+    end
+
+    it 'refuses a company named in a request param' do
+      post "/api/v1/websites/#{other_website.id}/publish?company_id=#{other_company.id}",
+           headers: { 'Authorization' => "Bearer #{tenant_token}" }
+
+      expect(response).not_to have_http_status(:ok)
+      expect(other_website.reload.status).not_to eq('published')
+    end
+
+    it 'never returns another tenants website in a listing' do
+      get '/api/v1/websites', headers: { 'Authorization' => "Bearer #{tenant_token}",
+                                         'X-Company-ID' => other_company.id.to_s }
+
+      expect(response.body).not_to include('Not Yours')
+    end
+
+    # A platform admin naming another company IS allowed to, and that is the whole reason
+    # the header exists. Asserted so the fix above is not mistaken for closing it off.
+    it 'still lets a platform admin switch companies with the header' do
+      get '/api/v1/websites', headers: { 'Authorization' => "Bearer #{token}",
+                                         'X-Company-ID' => other_company.id.to_s }
+
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)['items'].map { |w| w['id'] }).to include(other_website.id)
+    end
+
+    # The override answered 401 "Missing company context" whenever X-Company-ID was absent,
+    # and the frontend only sends that header once a platform admin has switched companies.
+    # Reaching the permission check at all is the point here: it means the company resolved
+    # from the JWT.
+    it 'resolves the company from the JWT when no company header is sent' do
+      get '/api/v1/websites', headers: { 'Authorization' => "Bearer #{tenant_token}" }
+
+      expect(response).not_to have_http_status(:unauthorized)
+      expect(response.body).not_to include('Missing company context')
     end
   end
 end
