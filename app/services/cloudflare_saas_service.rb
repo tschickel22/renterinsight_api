@@ -40,25 +40,21 @@ class CloudflareSaasService
   # @return [Hash] Response with custom_hostname_id and verification records
   def add_custom_hostname(hostname)
     Rails.logger.info "[CloudflareSaaS] Adding custom hostname: #{hostname}"
-    
-    response = self.class.post(
-      "/zones/#{@zone_id}/custom_hostnames",
-      headers: headers,
-      body: {
-        hostname: hostname,
-        ssl: {
-          method: 'http',
-          type: 'dv',
-          settings: {
-            http2: 'on',
-            min_tls_version: '1.2',
-            tls_1_3: 'on'
-          }
-        },
-        custom_origin_server: @fallback_origin
-      }.to_json
-    )
-    
+
+    response = post_custom_hostname(hostname, custom_origin: true)
+
+    # custom_origin_server has restricted availability on some Cloudflare plans. Without
+    # this, a plan that rejects it would fail every dealer domain outright, when the
+    # zone-level fallback origin does the same job for our purposes: we point every custom
+    # hostname at the one origin anyway.
+    if rejected_custom_origin?(response)
+      Rails.logger.warn(
+        "[CloudflareSaaS] custom_origin_server rejected for #{hostname}; retrying with the " \
+        'zone fallback origin. Confirm the fallback origin is set under SSL/TLS > Custom Hostnames.'
+      )
+      response = post_custom_hostname(hostname, custom_origin: false)
+    end
+
     handle_response(response)
   end
   
@@ -151,6 +147,32 @@ class CloudflareSaasService
     }
   end
   
+  def post_custom_hostname(hostname, custom_origin:)
+    body = {
+      hostname: hostname,
+      ssl: {
+        method: 'http',
+        type: 'dv',
+        settings: { http2: 'on', min_tls_version: '1.2', tls_1_3: 'on' }
+      }
+    }
+    body[:custom_origin_server] = @fallback_origin if custom_origin
+
+    self.class.post("/zones/#{@zone_id}/custom_hostnames", headers: headers, body: body.to_json)
+  end
+
+  # Cloudflare reports an unavailable field as a 4xx with an error mentioning it, rather
+  # than a distinct status, so the message is what we have to key on.
+  def rejected_custom_origin?(response)
+    return false if response.success?
+
+    body = response.body.to_s
+    body.match?(/custom_origin_server/i) ||
+      body.match?(/not (available|entitled|authorized)/i)
+  rescue StandardError
+    false
+  end
+
   def setting(credential_key, env_key)
     ENV[env_key].presence || Rails.application.credentials.dig(:cloudflare, credential_key)
   end
