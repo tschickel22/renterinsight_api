@@ -96,7 +96,11 @@ class Api::V1::WebsitesController < ApplicationController
       include: {
         website_pages: { only: [:id, :title, :slug, :is_visible, :page_order] },
         blog_posts: { only: [:id, :title, :slug, :status, :published_at] }
-      }
+      },
+      # The builder's publish panel needs the real address. Without this it fell back to
+      # inventing one from the slug, and showed the dealer a hostname that has never existed
+      # in DNS.
+      methods: [:domain_status]
     )
 
     # Include inventory embed config so website builder can auto-configure inventory blocks
