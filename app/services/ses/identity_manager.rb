@@ -49,8 +49,19 @@ module Ses
                        mail_from_applied: mail_from_applied)
       domain
     rescue Aws::SESV2::Errors::AlreadyExistsException
-      # Identity already registered, most likely by an earlier attempt. Adopt it.
+      # Identity already registered — by an earlier attempt, or by another environment
+      # sharing this AWS account, since SES identities are account-level rather than
+      # per-environment. Adopt it.
+      #
+      # refresh_status! deliberately does not touch email_enabled, because disabling is an
+      # explicit separate action and a status poll must never silently re-enable a domain a
+      # tenant turned off. Enabling is this method's job, so it is done here. Without this
+      # the domain verifies in SES and records email_verified_at while email_enabled stays
+      # false, and email_verified? requires both — so a fully working domain reads as
+      # pending forever.
       refresh_status!
+      domain.update!(email_enabled: true) unless domain.email_enabled?
+      domain
     rescue Aws::SESV2::Errors::ServiceError => e
       record_error(e)
       raise SesError, "Could not create SES identity for #{domain.hostname}: #{e.message}"

@@ -67,20 +67,42 @@ RSpec.describe Ses::IdentityManager do
       expect(domain.reload.ses_dkim_tokens).to eq(tokens)
     end
 
-    it 'adopts an existing identity instead of failing' do
-      allow(client).to receive(:create_email_identity)
-        .and_raise(Aws::SESV2::Errors::AlreadyExistsException.new(nil, 'exists'))
-      allow(client).to receive(:get_email_identity).and_return(
-        double(
-          dkim_attributes: dkim_attributes(status: 'SUCCESS', tokens: tokens),
-          mail_from_attributes: mail_from_attributes(domain_name: "bounce.#{domain.hostname}", status: 'SUCCESS')
+    context 'when SES already has the identity' do
+      # SES identities are account-level, so a domain registered from any environment
+      # sharing the account comes back as AlreadyExists here.
+      before do
+        allow(client).to receive(:create_email_identity)
+          .and_raise(Aws::SESV2::Errors::AlreadyExistsException.new(nil, 'exists'))
+        allow(client).to receive(:get_email_identity).and_return(
+          double(
+            dkim_attributes: dkim_attributes(status: 'SUCCESS', tokens: tokens),
+            mail_from_attributes: mail_from_attributes(domain_name: "bounce.#{domain.hostname}", status: 'SUCCESS')
+          )
         )
-      )
+      end
 
-      described_class.new(domain, client: client).create_identity!
+      it 'adopts it instead of failing' do
+        described_class.new(domain, client: client).create_identity!
 
-      expect(domain.reload.ses_dkim_tokens).to eq(tokens)
-      expect(domain.email_verified_at).to be_present
+        expect(domain.reload.ses_dkim_tokens).to eq(tokens)
+        expect(domain.email_verified_at).to be_present
+      end
+
+      # Regression guard. Adopting used to leave email_enabled false, and email_verified?
+      # requires both, so a domain SES had fully verified read as pending forever.
+      it 'enables sending, not just records the verification' do
+        described_class.new(domain, client: client).create_identity!
+
+        expect(domain.reload.email_enabled).to be true
+        expect(domain.email_verified?).to be true
+        expect(domain.email_status).to eq('verified')
+      end
+
+      it 'shows the DNS records, which are hidden while sending is disabled' do
+        described_class.new(domain, client: client).create_identity!
+
+        expect(domain.reload.email_dns_records).not_to be_empty
+      end
     end
 
     it 'raises a SesError on an SES service failure' do
