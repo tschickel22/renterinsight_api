@@ -71,4 +71,105 @@ RSpec.describe Messaging::SendWindowCalculator do
     expect(out).to be_a(Time)
     expect(out.in_time_zone('America/Denver').hour).to eq(9)
   end
+
+  # Older campaigns store the window as hour_start/hour_end/days/timezone. Nothing read those
+  # keys, so seven live production campaigns had no window at all while their settings screen
+  # showed weekdays nine to four.
+  describe 'legacy hour_start/hour_end/days/timezone shape' do
+    let(:recipient) { Struct.new(:state).new('NY') }
+    let(:window) do
+      { 'days' => %w[mon tue wed thu], 'hour_start' => 9, 'hour_end' => 16, 'timezone' => 'America/Chicago' }
+    end
+
+    def evaluate_at(now, send_window: window, channel: 'email')
+      described_class.new(send_window: send_window, channel: channel, recipient: recipient,
+                          company: company, now: now).evaluate
+    end
+
+    it 'sends inside the window' do
+      now = Time.use_zone('America/Chicago') { Time.zone.local(2026, 8, 3, 10, 0, 0) } # Monday
+      expect(evaluate_at(now)).to eq(:ok)
+    end
+
+    # The case that shipped: 22:11 UTC on a Monday is 17:11 Central, past hour_end.
+    it 'defers a send past hour_end to the next allowed morning' do
+      now = Time.utc(2026, 8, 3, 22, 11)
+      out = evaluate_at(now)
+
+      expect(out).to be_a(Time)
+      local = out.in_time_zone('America/Chicago')
+      expect(local.hour).to eq(9)
+      expect(local.day).to eq(4) # Tuesday
+    end
+
+    # The window's own timezone wins over the recipient's. 8:30 Central is before the window;
+    # read as Eastern it would be 9:30 and wrongly allowed.
+    it 'evaluates hours in the window timezone, not the recipient timezone' do
+      now = Time.use_zone('America/Chicago') { Time.zone.local(2026, 8, 3, 8, 30, 0) }
+      out = evaluate_at(now)
+
+      expect(out).to be_a(Time)
+      expect(out.in_time_zone('America/Chicago').hour).to eq(9)
+    end
+
+    it 'skips days that are not in the list' do
+      friday = Time.use_zone('America/Chicago') { Time.zone.local(2026, 8, 7, 10, 0, 0) }
+      out = evaluate_at(friday)
+
+      expect(out).to be_a(Time)
+      expect(out.in_time_zone('America/Chicago').wday).to eq(1) # Monday
+    end
+
+    it 'accepts full day names as well as abbreviations' do
+      sunday = Time.use_zone('America/Chicago') { Time.zone.local(2026, 8, 2, 10, 0, 0) }
+      out = evaluate_at(sunday, send_window: window.merge('days' => %w[Monday Tuesday]))
+
+      expect(out.in_time_zone('America/Chicago').wday).to eq(1)
+    end
+
+    it 'ignores a timezone Rails does not recognise rather than raising' do
+      now = Time.use_zone('America/Chicago') { Time.zone.local(2026, 8, 3, 10, 0, 0) }
+      expect { evaluate_at(now, send_window: window.merge('timezone' => 'Mars/Olympus')) }.not_to raise_error
+    end
+
+    # A day list nobody can parse would otherwise match no day and defer the enrollment
+    # forever, one day at a time.
+    it 'treats an unparseable day list as no restriction' do
+      now = Time.use_zone('America/Chicago') { Time.zone.local(2026, 8, 2, 10, 0, 0) } # Sunday
+      expect(evaluate_at(now, send_window: window.merge('days' => %w[funday]))).to eq(:ok)
+    end
+
+    # Same trap from the other direction: hours that cannot both be satisfied.
+    it 'ignores hours that end before they start' do
+      now = Time.use_zone('America/Chicago') { Time.zone.local(2026, 8, 3, 20, 0, 0) }
+      out = evaluate_at(now, send_window: { 'hour_start' => 17, 'hour_end' => 9 })
+
+      expect(out).to eq(:ok)
+    end
+
+    it 'leaves TCPA on the recipient clock even when the window names another timezone' do
+      # 22:30 Eastern is inside 9-16 Central by the clock the window names, but it is still
+      # after 9pm where the recipient lives.
+      now = Time.use_zone('Eastern Time (US & Canada)') { Time.zone.local(2026, 8, 3, 22, 30, 0) }
+      out = evaluate_at(now, send_window: window.merge('hour_end' => 23), channel: 'sms')
+
+      expect(out).to be_a(Time)
+      expect(out.in_time_zone('Eastern Time (US & Canada)').hour).to eq(8)
+    end
+  end
+
+  describe 'business_hours_only explicitly off' do
+    # The toggle writes false but leaves the hours behind. Honouring those hours would
+    # enforce a window the tenant just turned off.
+    it 'does not enforce hours left over in the row' do
+      recipient = Struct.new(:state).new('NY')
+      now = Time.use_zone('Eastern Time (US & Canada)') { Time.zone.local(2026, 8, 3, 6, 0, 0) }
+      out = described_class.new(
+        send_window: { 'business_hours_only' => false, 'start_hour' => 9, 'end_hour' => 17 },
+        channel: 'email', recipient: recipient, company: company, now: now
+      ).evaluate
+
+      expect(out).to eq(:ok)
+    end
+  end
 end

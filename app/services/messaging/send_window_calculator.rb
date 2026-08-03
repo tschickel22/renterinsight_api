@@ -43,6 +43,8 @@ module Messaging
       tz = recipient_timezone
       now_local = @now.in_time_zone(tz)
 
+      # TCPA is a legal floor on the RECIPIENT's local clock, so it is evaluated before and
+      # independently of the tenant's own window and never uses the window's timezone.
       if @channel == 'sms'
         if now_local.hour < TCPA_START_HOUR
           return next_send_time(now_local, TCPA_START_HOUR, tz)
@@ -51,25 +53,101 @@ module Messaging
         end
       end
 
-      if @send_window['business_hours_only']
-        start_h = (@send_window['start_hour'] || (@channel == 'sms' ? TCPA_START_HOUR : 9)).to_i
-        end_h = (@send_window['end_hour'] || (@channel == 'sms' ? TCPA_END_HOUR : 18)).to_i
-        if now_local.hour < start_h
-          return next_send_time(now_local, start_h, tz)
-        elsif now_local.hour >= end_h
-          return next_send_time(now_local + 1.day, start_h, tz)
-        end
-        if @send_window['skip_weekends'] && now_local.saturday?
-          return next_send_time(now_local + 2.days, start_h, tz)
-        elsif @send_window['skip_weekends'] && now_local.sunday?
-          return next_send_time(now_local + 1.day, start_h, tz)
-        end
-      end
+      return :ok unless business_window?
 
-      :ok
+      window_tz = window_time_zone || tz
+      local = @now.in_time_zone(window_tz)
+      start_h = window_start_hour
+      end_h = window_end_hour
+
+      candidate =
+        if hours_bounded?(start_h, end_h) && local.hour < start_h
+          local.change(hour: start_h, min: 0, sec: 0)
+        elsif hours_bounded?(start_h, end_h) && local.hour >= end_h
+          (local + 1.day).change(hour: start_h, min: 0, sec: 0)
+        else
+          local
+        end
+
+      candidate = next_allowed_day(candidate, allowed_days, start_h)
+      return :ok if candidate == local
+
+      candidate.in_time_zone(window_tz)
     end
 
     private
+
+    # Two vocabularies reached this column. The campaign UI writes business_hours_only with
+    # start_hour/end_hour/skip_weekends; older rows carry hour_start/hour_end/days/timezone.
+    # Only the first was ever read, so every campaign configured the older way had no window
+    # at all: seven of them were live in production, sending at any hour on any day while
+    # their settings screen showed weekdays nine to four.
+    LEGACY_KEYS = %w[hour_start hour_end days start_hour end_hour].freeze
+
+    DAY_NUMBERS = {
+      'sun' => 0, 'mon' => 1, 'tue' => 2, 'wed' => 3, 'thu' => 4, 'fri' => 5, 'sat' => 6
+    }.freeze
+
+    def business_window?
+      flag = @send_window['business_hours_only']
+      # An explicit false is the UI's "no window" toggle and outranks any hours left behind
+      # in the row from when it was on.
+      return false if flag == false
+      return true if flag
+
+      LEGACY_KEYS.any? { |key| @send_window[key].present? }
+    end
+
+    def window_start_hour
+      (@send_window['start_hour'] || @send_window['hour_start'] ||
+        (@channel == 'sms' ? TCPA_START_HOUR : 9)).to_i
+    end
+
+    def window_end_hour
+      (@send_window['end_hour'] || @send_window['hour_end'] ||
+        (@channel == 'sms' ? TCPA_END_HOUR : 18)).to_i
+    end
+
+    # A window that ends before it starts cannot be satisfied, and enforcing it would defer
+    # every enrollment forever, one day at a time. Treat the hours as unset and let any day
+    # restriction stand on its own.
+    def hours_bounded?(start_h, end_h)
+      end_h > start_h
+    end
+
+    # @return [Array<Integer>, nil] weekday numbers that are allowed, or nil for no restriction
+    def allowed_days
+      raw = @send_window['days']
+      if raw.is_a?(Array) && raw.any?
+        # Unparseable names produce an empty list, which would block every day of the week.
+        # Falling back to no restriction keeps a typo from silently freezing a campaign.
+        return raw.filter_map { |d| DAY_NUMBERS[d.to_s.strip.downcase[0, 3]] }.uniq.presence
+      end
+
+      return [1, 2, 3, 4, 5] if @send_window['skip_weekends']
+
+      nil
+    end
+
+    def next_allowed_day(time, days, start_hour)
+      return time if days.blank?
+
+      7.times do
+        return time if days.include?(time.wday)
+
+        time = (time + 1.day).change(hour: start_hour, min: 0, sec: 0)
+      end
+      time
+    end
+
+    # Only honoured when it is a timezone Rails actually knows; an unrecognised string would
+    # otherwise raise deep inside in_time_zone and take the send with it.
+    def window_time_zone
+      name = @send_window['timezone'].presence
+      return nil if name.blank?
+
+      ActiveSupport::TimeZone[name] ? name : nil
+    end
 
     def recipient_timezone
       tz = @recipient&.try(:time_zone)
