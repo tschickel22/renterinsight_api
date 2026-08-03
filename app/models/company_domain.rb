@@ -115,7 +115,7 @@ class CompanyDomain < ApplicationRecord
   
   def dns_records_for_display
     return [] unless verification_records.present?
-    
+
     verification_records.map do |record|
       {
         type: record['type'],
@@ -124,6 +124,40 @@ class CompanyDomain < ApplicationRecord
         ttl: record['ttl'] || 3600
       }
     end
+  end
+
+  # Everything a tenant has to publish for the website to work: Cloudflare's ownership
+  # records, plus the CNAME that actually routes traffic.
+  #
+  # The CNAME is the one that matters and the one Cloudflare never mentions. Showing only
+  # the ownership record produced a domain that verified ownership, reported success at
+  # every step, and then sat forever without a certificate, because nothing pointed at us.
+  def web_dns_records
+    # Ownership records are optional, not a second hurdle. They exist so a domain can be
+    # pre-validated before its traffic moves; once the CNAME below points at us, ownership
+    # is proven by HTTP validation instead. Marking them required would block a tenant whose
+    # setup is already complete.
+    records = dns_records_for_display.map do |r|
+      r.merge(
+        purpose: 'Optional. Proves you control this domain before you move traffic, so the ' \
+                 'certificate is ready the moment you switch over.',
+        required: false
+      )
+    end
+
+    if cname_target.present?
+      records << {
+        type: 'CNAME',
+        name: hostname,
+        value: cname_target,
+        ttl: 3600,
+        purpose: 'Points your domain at us. Without this the site never loads and the ' \
+                 'certificate cannot be issued.',
+        required: true
+      }
+    end
+
+    records
   end
   
   # ==================== EMAIL SENDING ====================

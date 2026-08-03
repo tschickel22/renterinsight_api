@@ -24,6 +24,7 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       service = instance_double(CloudflareSaasService)
       allow(CloudflareSaasService).to receive(:new).and_return(service)
       allow(service).to receive(:add_custom_hostname).and_return({})
+      allow(service).to receive(:cname_target).and_return('connect.mydealertide.com')
       allow(service).to receive(:parse_custom_hostname_response).and_return(
         custom_hostname_id: 'cf-abc123',
         verification_status: 'pending_validation',
@@ -46,6 +47,7 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       service = instance_double(CloudflareSaasService)
       allow(CloudflareSaasService).to receive(:new).and_return(service)
       allow(service).to receive(:add_custom_hostname).and_return({})
+      allow(service).to receive(:cname_target).and_return('connect.mydealertide.com')
       allow(service).to receive(:parse_custom_hostname_response).and_return(
         custom_hostname_id: 'cf-orphan', verification_status: 'pending',
         verification_records: [], ssl_status: 'pending', cname_target: nil
@@ -68,6 +70,7 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
     let!(:domain) do
       company.company_domains.create!(
         hostname: 'dealer.example', web_enabled: true,
+        cname_target: 'connect.mydealertide.com',
         verification_records: [
           { 'type' => 'TXT', 'name' => '_cf-custom-hostname.dealer.example',
             'value' => 'abc-123-token', 'ttl' => 3600 }
@@ -77,6 +80,7 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
 
     def stub_txt(values)
       allow(Dns::Lookup).to receive(:txt).and_return(values)
+      allow(Dns::Lookup).to receive(:cname).and_return(['connect.mydealertide.com'])
     end
 
     # This used to look only for a CNAME on the hostname itself, so a correctly published
@@ -92,24 +96,38 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       expect(body['records'].first['found']).to be true
     end
 
-    it 'reports not found when the value differs' do
-      stub_txt(['some-other-token'])
+    # The ownership TXT exists so a domain can be pre-validated before its traffic moves.
+    # Once the CNAME points at us, ownership is proven by HTTP validation instead, so
+    # gating on the TXT would block a tenant whose setup is already complete.
+    it 'is satisfied by the routing CNAME even without the optional ownership record' do
+      allow(Dns::Lookup).to receive(:txt).and_return([])
+      allow(Dns::Lookup).to receive(:cname).and_return(['connect.mydealertide.com'])
+
+      post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
+
+      expect(JSON.parse(response.body)['configured']).to be true
+    end
+
+    it 'is not satisfied when the routing CNAME is missing' do
+      allow(Dns::Lookup).to receive(:txt).and_return(['abc-123-token'])
+      allow(Dns::Lookup).to receive(:cname).and_return([])
 
       post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
 
       expect(JSON.parse(response.body)['configured']).to be false
     end
 
-    it 'reports not found when nothing resolves' do
-      stub_txt([])
+    it 'tells the tenant to point the domain at us, which Cloudflare never mentions' do
+      stub_txt(['abc-123-token'])
 
       post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
 
-      expect(JSON.parse(response.body)['configured']).to be false
+      cname = JSON.parse(response.body)['records'].find { |r| r['type'] == 'CNAME' }
+      expect(cname['expected']).to eq('connect.mydealertide.com')
     end
 
-    it 'says so plainly when no records have been issued yet' do
-      domain.update!(verification_records: [])
+    it 'says so plainly when nothing has been issued yet' do
+      domain.update!(verification_records: [], cname_target: nil)
 
       post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
 

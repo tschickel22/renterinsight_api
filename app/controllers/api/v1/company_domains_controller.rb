@@ -102,7 +102,9 @@ class Api::V1::CompanyDomainsController < ApplicationController
         verification_status: parsed[:verification_status],
         verification_records: parsed[:verification_records],
         ssl_status: parsed[:ssl_status],
-        cname_target: parsed[:cname_target]
+        # Our configured target, not parsed[:cname_target]. That field carried Cloudflare's
+        # ownership token, which is a TXT value and not something anyone can CNAME to.
+        cname_target: cloudflare_service.cname_target
       )
       
       Rails.logger.info "[CompanyDomains] Created domain #{hostname} for company #{@company.id}"
@@ -253,20 +255,26 @@ class Api::V1::CompanyDomainsController < ApplicationController
   def check_dns
     return unless authorize_action!('company_settings', 'read')
 
-    expected = Array(@domain.verification_records)
+    # Checks the routing CNAME as well as Cloudflare's ownership records. Verifying only
+    # ownership reported success while the site was still unreachable.
+    expected = @domain.web_dns_records.map(&:stringify_keys)
     if expected.empty?
       return render json: { configured: false, message: 'No DNS records issued for this domain yet' }
     end
 
-    results = expected.map { |record| check_expected_record(record) }
-    configured = results.all? { |r| r[:found] }
+    results = expected.map { |record| check_expected_record(record).merge(required: record['required'] != false) }
+    # Gated on the required records only. The optional ownership record is reported so a
+    # tenant can see it landed, but its absence does not mean the setup is incomplete.
+    configured = results.select { |r| r[:required] }.all? { |r| r[:found] }
 
-    @domain.update(dns_checked_at: Time.current, dns_error: configured ? nil : 'Verification records not resolving')
+    @domain.update(dns_checked_at: Time.current,
+                   dns_error: configured ? nil : 'Waiting on DNS records')
 
     render json: {
       configured: configured,
       message: if configured
-                 'DNS records found. Verify and activate to finish setup.'
+                 'DNS is pointing at us. The certificate is issued automatically and usually ' \
+                 'takes a few minutes.'
                else
                  'Not all records are visible yet. DNS can take up to an hour to propagate.'
                end,
@@ -521,6 +529,9 @@ class Api::V1::CompanyDomainsController < ApplicationController
       # DNS configuration
       cname_target: domain.cname_target,
       verification_records: domain.dns_records_for_display,
+      # Ownership records plus the CNAME that actually routes traffic. The latter is our
+      # configuration, so Cloudflare never includes it and it would otherwise never be shown.
+      web_dns_records: domain.web_dns_records,
       dns_checked_at: domain.dns_checked_at,
       dns_error: domain.dns_error,
       

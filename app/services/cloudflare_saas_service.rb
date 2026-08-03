@@ -29,6 +29,20 @@ class CloudflareSaasService
     validate_credentials!
   end
 
+  # The hostname a tenant points their domain at. Cloudflare never returns this — it is our
+  # configuration, and it is the single record without which nothing works: ownership can
+  # verify from a TXT record while traffic still has nowhere to go and the certificate
+  # never issues.
+  #
+  # Falls back to the fallback origin, which is also proxied and therefore also routes,
+  # so a missing CLOUDFLARE_CNAME_TARGET degrades rather than leaving tenants with no
+  # target at all.
+  def cname_target
+    ENV['CLOUDFLARE_CNAME_TARGET'].presence ||
+      Rails.application.credentials.dig(:cloudflare, :cname_target).presence ||
+      @fallback_origin
+  end
+
   # True when Cloudflare for SaaS is configured, without raising. Lets callers offer or
   # hide custom-domain features rather than discovering the gap through an exception.
   def self.configured?
