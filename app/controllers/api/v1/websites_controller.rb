@@ -69,11 +69,15 @@ class Api::V1::WebsitesController < ApplicationController
 
     # Return with dual meta
     render json: {
-      items: @websites.as_json(
+      items: @websites.includes(:company_domains).as_json(
         include: {
           website_pages: { only: [:id, :title, :slug, :is_visible] },
           blog_posts: { only: [:id, :title, :slug, :status] }
-        }
+        },
+        # So someone who has just built a site can tell whether anyone can reach it. A site
+        # with no address, or a published address pointing at an unpublished site, both look
+        # finished from here otherwise.
+        methods: [:domain_status]
       ),
       meta: {
         total: filtered_count,

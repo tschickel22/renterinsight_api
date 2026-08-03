@@ -9,7 +9,30 @@ class Website < ApplicationRecord
   has_many :blog_posts, dependent: :destroy
   has_many :blog_categories, dependent: :destroy
   has_many :website_versions, dependent: :destroy
-  
+
+  # The address visitors type to reach this site. Assigned on the domain screen, where the
+  # DNS records and verification state live, and surfaced here so someone who has just
+  # finished building a site can tell whether anyone can actually reach it.
+  #
+  # nullify rather than destroy: deleting a site must not silently take a verified domain
+  # with it, along with its certificate and the DNS the dealer published by hand.
+  has_many :company_domains, dependent: :nullify
+
+  # What to tell the builder about reachability. Serving requires the domain to be wired up
+  # AND the site to be published, and either one missing produces an address that resolves
+  # to nothing, so both are reported rather than a single boolean.
+  def domain_status
+    domain = company_domains.detect(&:web_enabled?)
+    return { state: 'none' } if domain.nil?
+
+    {
+      state: domain.ready_for_use? ? (published? ? 'live' : 'awaiting_publish') : 'awaiting_dns',
+      hostname: domain.hostname,
+      url: "https://#{domain.hostname}"
+    }
+  end
+
+
   # Enums - Rails 8 syntax (only status for Phase 1, others can be added later with prefixes)
   enum :status, { draft: 0, published: 1, unpublished: 2 }, default: :draft
   
