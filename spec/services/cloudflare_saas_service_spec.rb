@@ -1,0 +1,101 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+RSpec.describe CloudflareSaasService do
+  around do |example|
+    original = ENV.to_h.slice('CLOUDFLARE_ZONE_ID', 'CLOUDFLARE_API_TOKEN',
+                              'CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN')
+    example.run
+    %w[CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN].each do |k|
+      original.key?(k) ? ENV[k] = original[k] : ENV.delete(k)
+    end
+  end
+
+  def configure!
+    ENV['CLOUDFLARE_ZONE_ID'] = 'zone123'
+    ENV['CLOUDFLARE_API_TOKEN'] = 'token123'
+    ENV['CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN'] = 'origin.mydealertide.com'
+  end
+
+  # Regression guard. This was https://api.cloudflare.com/v4, which makes every call return
+  # {"code":10404,"message":"No route for that URI"} — an error that reads like a bad
+  # endpoint or a permissions problem rather than a wrong base path.
+  it 'points at Cloudflare\'s real REST base' do
+    expect(described_class.base_uri).to eq('https://api.cloudflare.com/client/v4')
+  end
+
+  describe '.configured?' do
+    it 'is false when nothing is set' do
+      %w[CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN]
+        .each { |k| ENV.delete(k) }
+      allow(Rails.application.credentials).to receive(:dig).and_return(nil)
+
+      expect(described_class.configured?).to be false
+    end
+
+    it 'is true once all three are set' do
+      configure!
+
+      expect(described_class.configured?).to be true
+    end
+
+    it 'is false when only some are set, and names what is missing' do
+      ENV['CLOUDFLARE_ZONE_ID'] = 'zone123'
+      ENV.delete('CLOUDFLARE_API_TOKEN')
+      ENV.delete('CLOUDFLARE_CUSTOM_HOSTNAME_FALLBACK_ORIGIN')
+      allow(Rails.application.credentials).to receive(:dig).and_return(nil)
+
+      expect(described_class.configured?).to be false
+      expect { described_class.new }
+        .to raise_error(described_class::CloudflareError, /CLOUDFLARE_API_TOKEN/)
+    end
+  end
+
+  describe '#add_custom_hostname' do
+    before { configure! }
+
+    let(:success) { instance_double(HTTParty::Response, success?: true, body: '{}', parsed_response: { 'success' => true, 'result' => {} }) }
+
+    it 'posts to the custom_hostnames endpoint with the fallback origin' do
+      expect(described_class).to receive(:post) do |path, opts|
+        expect(path).to eq('/zones/zone123/custom_hostnames')
+        expect(JSON.parse(opts[:body])).to include(
+          'hostname' => 'www.sunshine-rv.com',
+          'custom_origin_server' => 'origin.mydealertide.com'
+        )
+        success
+      end
+      allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
+
+      described_class.new.add_custom_hostname('www.sunshine-rv.com')
+    end
+
+    it 'retries without custom_origin_server when the plan rejects it' do
+      rejected = instance_double(HTTParty::Response, success?: false,
+                                                     body: '{"errors":[{"message":"custom_origin_server is not available"}]}')
+      bodies = []
+      allow(described_class).to receive(:post) do |_path, opts|
+        bodies << JSON.parse(opts[:body])
+        bodies.length == 1 ? rejected : success
+      end
+      allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
+
+      described_class.new.add_custom_hostname('www.sunshine-rv.com')
+
+      expect(bodies.length).to eq(2)
+      expect(bodies.first).to have_key('custom_origin_server')
+      expect(bodies.last).not_to have_key('custom_origin_server')
+    end
+
+    it 'does not retry on an unrelated failure' do
+      other = instance_double(HTTParty::Response, success?: false, body: '{"errors":[{"message":"zone not found"}]}')
+      allow(described_class).to receive(:post).and_return(other)
+      allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
+
+      described_class.new.add_custom_hostname('www.sunshine-rv.com')
+
+      expect(described_class).to have_received(:post).once
+    end
+  end
+end

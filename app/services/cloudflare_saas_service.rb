@@ -14,7 +14,10 @@
 
 class CloudflareSaasService
   include HTTParty
-  base_uri 'https://api.cloudflare.com/v4'
+  # Cloudflare's REST base is /client/v4, not /v4. Getting this wrong returns
+  # {"code":10404,"message":"No route for that URI"} on every call, which reads like a bad
+  # endpoint or a permissions problem rather than a wrong base path.
+  base_uri 'https://api.cloudflare.com/client/v4'
 
   class CloudflareError < StandardError; end
 
