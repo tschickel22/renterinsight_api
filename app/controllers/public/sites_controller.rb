@@ -205,9 +205,18 @@ module Public
       path.presence || '/'
     end
 
+    # Every page that exists, because every page that exists is reachable: find_page routes
+    # by path and only excludes deleted pages, so a page left out of here was live and simply
+    # undiscoverable.
+    #
+    # is_visible used to filter this. It was set by templates, written by no UI, and also
+    # read as a nav veto, so pages ended up orphaned from the header, the footer and the
+    # sitemap at once with no way for a dealer to change any of it. Placement is now
+    # show_in_nav / show_in_footer, and listing is simply existence. Keeping a specific page
+    # out of search is a per-page robots concern, which is a separate thing this never was.
     def visible_pages
       @website.website_pages
-              .where(is_deleted: [false, nil], is_visible: true)
+              .where(is_deleted: [false, nil])
               .order(:order)
     end
 

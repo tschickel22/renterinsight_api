@@ -207,7 +207,7 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(response.body).to include('Allow: /')
     end
 
-    it 'lists visible pages in the sitemap' do
+    it 'lists the sites pages in the sitemap' do
       get_site('/sitemap.xml')
 
       expect(response.media_type).to eq('application/xml')
@@ -215,12 +215,26 @@ RSpec.describe 'Public::Sites', type: :request do
       expect(response.body).to include('<loc>https://sunshine-rv.test</loc>')
     end
 
-    it 'omits hidden pages from the sitemap' do
-      website.website_pages.create!(title: 'Secret', path: '/secret', order: 2, is_visible: false, blocks: [])
+    # A page that is not in the nav is still a live URL: find_page routes by path and only
+    # excludes deleted pages. Leaving it out of the sitemap did not hide it, it just made it
+    # undiscoverable, which is the worst of both. Placement is show_in_nav / show_in_footer;
+    # the sitemap lists what exists.
+    it 'lists a page that is linked from neither the header nor the footer' do
+      website.website_pages.create!(title: 'Blog', path: '/blog', order: 2, is_visible: false,
+                                    show_in_nav: false, show_in_footer: false, blocks: [])
 
       get_site('/sitemap.xml')
 
-      expect(response.body).not_to include('/secret')
+      expect(response.body).to include('<loc>https://sunshine-rv.test/blog</loc>')
+    end
+
+    it 'omits a deleted page from the sitemap' do
+      website.website_pages.create!(title: 'Retired', path: '/retired', order: 3, is_deleted: true,
+                                    blocks: [])
+
+      get_site('/sitemap.xml')
+
+      expect(response.body).not_to include('/retired')
     end
   end
 
