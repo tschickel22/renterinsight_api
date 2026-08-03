@@ -23,8 +23,13 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # Cavco publishes series and full specs, but no prose description on floorplans.
   CAVCO_UNTRACKED_FIELDS   = %w[description].freeze
 
+  # Timber Creek publishes series, a prose description and full specs on every
+  # floor plan, so nothing needs excusing.
+  TIMBER_CREEK_UNTRACKED_FIELDS = [].freeze
+
   # Debounces directory rebuilds across typeahead keystrokes.
-  CLAYTON_REFRESH_LOCK = 'clayton_directory_refresh_enqueued'
+  CLAYTON_REFRESH_LOCK      = 'clayton_directory_refresh_enqueued'
+  TIMBER_CREEK_REFRESH_LOCK = 'timber_creek_directory_refresh_enqueued'
 
   # GET /api/v1/admin/catalog_sources
   def index
@@ -94,6 +99,8 @@ class Api::Admin::CatalogSourcesController < ApplicationController
               clayton_source_attrs
             elsif params[:cavco_retailer_id].present?
               cavco_source_attrs
+            elsif params[:timber_creek_dealer_id].present?
+              timber_creek_source_attrs
             else
               source_params
             end
@@ -163,6 +170,25 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                   'it never overwrites the dealer\'s own price. Costs ~7 extra requests per run.' }
         ]
       },
+      manufacturedhomes_platform: {
+        # The manufacturer-wide shape: base_url is a floor plan grid, typed by
+        # hand. For ONE retailer's inventory use timber_creek_dealer instead.
+        base_url_template: 'https://www.{manufacturer}.com/manufactured-home-floor-plans/',
+        options: [],
+        advisory: 'This ingests a manufacturer\'s ENTIRE catalog. To give a dealer only ' \
+                  'their own homes, add a Timber Creek dealer source instead.'
+      },
+      timber_creek_dealer: {
+        # base_url is derived from the picked dealer; admins never type it. Same
+        # adapter as manufacturedhomes_platform — the platform scopes a
+        # retailer's page to their own inventory, so no filtering is needed here.
+        picker_endpoint:  '/api/admin/catalog_sources/timber_creek_dealers',
+        refresh_endpoint: '/api/admin/catalog_sources/refresh_timber_creek_directory',
+        untracked_fields: TIMBER_CREEK_UNTRACKED_FIELDS,
+        options: [],
+        advisory: 'Returns only this retailer\'s homes — Timber Creek scopes their dealer ' \
+                  'page for us, so there is no radius or filtering to configure.'
+      },
       cavco_retailer: {
         picker_endpoint:  '/api/admin/catalog_sources/cavco_retailers',
         refresh_endpoint: '/api/admin/catalog_sources/refresh_cavco_directory',
@@ -231,6 +257,44 @@ class Api::Admin::CatalogSourcesController < ApplicationController
                    fetchedAt: Catalog::CavcoRetailerDirectory.fetched_at }
   rescue StandardError => e
     render json: { error: "Refresh failed: #{e.message}" }, status: :service_unavailable
+  end
+
+  # GET /api/admin/catalog_sources/timber_creek_dealers?q=atchafalaya&state=LA
+  # Typeahead behind "Add Timber Creek Dealer". Walking ~14 state pages takes
+  # ~45s, which is too long to hold a web request open, so this follows the
+  # Clayton pattern: a job builds the cache and the UI polls.
+  def timber_creek_dealers
+    directory = Catalog::TimberCreekDealerDirectory
+    ensure_timber_creek_directory_fresh!
+
+    unless directory.loaded?
+      return render json: { items: [], refreshing: true,
+                            message: 'Loading Timber Creek retailers — try again in a minute.' },
+                    status: :accepted
+    end
+
+    entries = directory.search(params[:q], state: params[:state],
+                                           limit: (params[:limit] || 25).to_i.clamp(1, 100))
+    # Keyed on base_url, which for this adapter is the dealer's own page and so
+    # is unique per dealership — the slug is not (five separate Marty Wright
+    # locations share one).
+    taken = CatalogSource.active
+                         .where(adapter_type: %w[timber_creek_dealer manufacturedhomes_platform])
+                         .pluck(:base_url, :id).to_h
+
+    render json: {
+      items:      entries.map { |e| e.merge('existing_source_id' => taken[e['url']]) },
+      fetchedAt:  directory.fetched_at,
+      refreshing: false
+    }
+  end
+
+  # POST /api/admin/catalog_sources/refresh_timber_creek_directory
+  def refresh_timber_creek_directory
+    TimberCreekDirectoryRefreshJob.perform_later
+    render json: { refreshing: true,
+                   fetchedAt: Catalog::TimberCreekDealerDirectory.fetched_at },
+           status: :accepted
   end
 
   # POST /api/admin/catalog_sources/:id/seed_inventory
@@ -457,6 +521,61 @@ class Api::Admin::CatalogSourcesController < ApplicationController
 
     Rails.cache.write(CLAYTON_REFRESH_LOCK, true, expires_in: 10.minutes)
     ClaytonDirectoryRefreshJob.perform_later
+  end
+
+  def ensure_timber_creek_directory_fresh!
+    return unless Catalog::TimberCreekDealerDirectory.stale?
+    return if Rails.cache.exist?(TIMBER_CREEK_REFRESH_LOCK)
+
+    Rails.cache.write(TIMBER_CREEK_REFRESH_LOCK, true, expires_in: 10.minutes)
+    TimberCreekDirectoryRefreshJob.perform_later
+  end
+
+  # Build a Timber Creek dealer source from a directory dealer id. Renders an
+  # error and returns nil when the id is unknown or already registered — callers
+  # must check `performed?`.
+  #
+  # base_url is the dealer's own page, which the platform already scopes to that
+  # retailer's inventory, so the adapter needs no dealer filtering config beyond
+  # what it infers from the URL.
+  def timber_creek_source_attrs
+    id    = params[:timber_creek_dealer_id].to_s.strip
+    entry = Catalog::TimberCreekDealerDirectory.find_by_dealer_id(id)
+    if entry.nil?
+      render json: { error: "Unknown Timber Creek dealer: #{id}" }, status: :unprocessable_entity
+      return nil
+    end
+
+    existing = CatalogSource.active.find_by(
+      adapter_type: %w[timber_creek_dealer manufacturedhomes_platform],
+      base_url: entry['url']
+    )
+    if existing
+      render json: { error: "#{entry['name']} is already registered", sourceId: existing.id },
+             status: :conflict
+      return nil
+    end
+
+    overrides = params.fetch(:catalog_source, {}).permit(:schedule, :extraction_threshold).to_h
+    {
+      name:         timber_creek_source_name(entry),
+      adapter_type: 'timber_creek_dealer',
+      base_url:     entry['url'],
+      schedule:     'weekly',
+      config: {
+        'untracked_fields' => TIMBER_CREEK_UNTRACKED_FIELDS,
+        'dealer_id'        => entry['dealer_id'].to_s,
+        'dealer'           => entry.slice('dealer_id', 'slug', 'name', 'city', 'state',
+                                          'postal_code', 'phone', 'website_url')
+      }
+    }.merge(overrides.symbolize_keys)
+  end
+
+  # "Timber Creek — Atchafalaya Homes (Carencro, LA)"
+  def timber_creek_source_name(entry)
+    where = [entry['city'], entry['state']].compact_blank.join(', ')
+    base  = "Timber Creek — #{entry['name']}"
+    where.present? ? "#{base} (#{where})" : base
   end
 
   # Build a Clayton dealer source from a directory slug. Renders an error and

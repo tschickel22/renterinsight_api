@@ -12,6 +12,20 @@ module Catalog
     # is the stable source_key. The trailing dealerId is retailer context, NOT
     # identity, and is stashed in `raw` only.
     #
+    # TWO PERMALINK BASES, ONE PLATFORM. Sites are free to mount the platform's
+    # floor plan pages wherever they like: Sunshine uses /floor-plan-detail/,
+    # Timber Creek uses /floorplan/. The markup underneath is identical (the
+    # same fp-card-* classes, the same specification_tabs widget, the same
+    # CloudFront media host), so both are matched rather than forked into a
+    # second adapter.
+    #
+    # DEALER-SCOPED SOURCES. base_url may be a manufacturer's full floor plan
+    # grid OR one retailer's page (/dealer/{dealerId}/{slug}/{city}/). The
+    # latter is the ManufacturedHomes.com equivalent of a Clayton home center:
+    # the platform itself decides which homes that retailer offers, so a dealer
+    # subscribed to their own page gets their inventory and nobody else's with
+    # no radius math on our side. See #dealer_scoped? for what changes.
+    #
     # CALIBRATION NOTE: selectors below are anchored on og:/meta tags and
     # labeled text (resilient) with grid-derived fallbacks, but the exact label
     # strings and the detail-page feature/section markup must be verified
@@ -19,7 +33,10 @@ module Catalog
     # so a miss shows up as one dropped extraction rate — not a failed run.
     class ManufacturedHomesPlatformAdapter < BaseAdapter
       GRID_PATH        = '/manufactured-home-floor-plans/'
-      DETAIL_PATH_RE   = %r{/floor-plan-detail/(\d+)-(\d+)/}i
+      DETAIL_PATH_RE   = %r{/(?:floor-plan-detail|floorplan)/(\d+)-(\d+)(?:/|\z)}i
+      DETAIL_SELECTOR  = 'a[href*="/floor-plan-detail/"], a[href*="/floorplan/"]'
+      CARD_SELECTOR    = '.fp-card-container, .floorplan-default'
+      DEALER_PATH_RE   = %r{/dealer/(\d+)(?:/|\z)}i
       CLOUDFRONT_HOST  = 'd132mt2yijm03y.cloudfront.net'
       MATTERPORT_RE    = %r{https?://(?:my\.)?matterport\.com/show/\?[^\s"'<>)]*m=[A-Za-z0-9]+[^\s"'<>)]*}i
       MAX_PAGES        = 25
@@ -39,9 +56,24 @@ module Catalog
       def discover(limit: nil)
         @cards       ||= {}
         @detail_urls ||= {}
-        keys = discover_via_sitemap
+        # A sitemap is site-wide by definition, so for a dealer-scoped source it
+        # would quietly return every retailer's homes — exactly the leak this
+        # source shape exists to prevent. Only the grid is dealer-scoped.
+        keys = dealer_scoped? ? [] : discover_via_sitemap
         keys = discover_via_grid(limit: limit) if keys.blank?
         limit ? keys.first(limit) : keys
+      end
+
+      # This source is one retailer's page rather than a manufacturer-wide grid.
+      # Set explicitly via config { "dealer_id": "1982" }, or inferred from a
+      # /dealer/{id}/ base_url.
+      def dealer_scoped?
+        dealer_id.present?
+      end
+
+      def dealer_id
+        @dealer_id ||= source.config['dealer_id'].presence ||
+                       base_url[DEALER_PATH_RE, 1]
       end
 
       def fetch(key)
@@ -71,7 +103,7 @@ module Catalog
           square_feet:      to_int(extract_sqft(doc, card)),
           description:      extract_description(doc, card),
           features:         extract_features(doc),
-          images:           extract_images(doc, html, card),
+          images:           extract_images(doc, html, card, raw[:key]),
           virtual_tour_url: scan_regex(html, MATTERPORT_RE),
           video_url:        extract_video(html),
           price_quote_url:  extract_quote_url(doc, raw[:url]),
@@ -96,7 +128,8 @@ module Catalog
 
         if probe[:body].present?
           doc = Nokogiri::HTML(probe[:body])
-          out[:detail_links]   = doc.css('a[href*="/floor-plan-detail/"]').size
+          out[:detail_links]   = doc.css(DETAIL_SELECTOR).size
+          out[:dealer_id]      = dealer_id if dealer_scoped?
           out[:cloudfront_imgs] = probe[:body].scan(CLOUDFRONT_HOST).size
           out[:page_title]     = doc.at_css('title')&.text.to_s.strip[0, 80]
           out[:looks_blocked]  = looks_blocked?(probe[:body])
@@ -159,43 +192,73 @@ module Catalog
       # card's quick-fields (name/series/beds/baths/sqft/dimensions/image).
       def harvest_grid_cards(doc)
         keys = []
-        doc.css('a[href*="/floor-plan-detail/"]').each do |link|
-          href = link['href'].to_s
-          key  = href[DETAIL_PATH_RE, 1]
+        doc.css(DETAIL_SELECTOR).each do |link|
+          href  = link['href'].to_s
+          match = href.match(DETAIL_PATH_RE)
+          next if match.nil?
+
+          key = match[1]
           next if key.blank? || keys.include?(key)
+          # Belt and braces on top of the dealer-scoped grid: the detail URL
+          # carries the dealer id, so anything offered by a different retailer
+          # is dropped even if the page ever starts cross-linking them.
+          next if dealer_scoped? && match[2] != dealer_id.to_s
 
           keys << key
           @detail_urls[key] ||= absolute_url(href, URI.parse(site_root))
-          card_root = link.ancestors('.fp-card-container').first ||
+          card_root = link.ancestors(CARD_SELECTOR).first ||
                       link.ancestors('article, li, div').first || link
           @cards[key] ||= parse_grid_card(card_root)
         end
         keys
       end
 
-      # The grid card (.fp-card-container) carries the specs as an ICON row that
-      # renders to a number-only run in text order beds / baths / sqft / dims,
-      # e.g. "… Lifeway Homes of Tulsa 4 2.00 2400 ft² 32'0\" x 84'0\" The Show…".
-      # This is the RELIABLE spec source — it's in the discovery HTML (which works
-      # everywhere), whereas the detail-page spec summary is location-aware and
-      # gets stripped for some server IPs.
+      # The grid card (.fp-card-container / .floorplan-default) carries the specs
+      # as an ICON row that renders to a number-only run in text order beds /
+      # baths / sqft / dims, e.g. "… Lifeway Homes of Tulsa 4 2.00 2400 ft²
+      # 32'0\" x 84'0\" The Show…". This is the RELIABLE spec source — it's in
+      # the discovery HTML (which works everywhere), whereas the detail-page spec
+      # summary is location-aware and gets stripped for some server IPs.
       def parse_grid_card(node)
         text  = node.text.gsub(/\s+/, ' ').strip
         specs = text.match(/(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+([\d,]{3,6})\s*ft/i)
+        title = node.at_css('.home-name, h4, h3')&.text.to_s.gsub(/\s+/, ' ').strip
         {
-          'series'     => text[/\b(Prime|ARC|Velocity|Innovation)\b/i, 1],
+          'title'      => title.presence,
+          'series'     => series_from_heading(title),
           'beds'       => specs && specs[1],
           'baths'      => specs && specs[2],
           'sqft'       => specs && specs[3],
           'dimensions' => text[DIMENSIONS_RE],
-          'image'      => node.css('img').map { |i| first_attr(i, %w[data-src data-lazy-src src]) }
-                              .compact.find { |u| u.to_s.include?(CLOUDFRONT_HOST) }
+          'image'      => card_image(node)
         }.compact
+      end
+
+      # The card thumbnail is a CSS background, not an <img>: Sunshine inlines it
+      # as style="background-image: url(…)", Timber Creek defers it to a
+      # lazyload data-bg. Check both, and keep the <img> sweep for any site that
+      # renders a real element.
+      def card_image(node)
+        node.css('[data-bg], [style*="background-image"], img').each do |el|
+          candidate = first_attr(el, %w[data-bg data-src data-lazy-src src]) ||
+                      el['style'].to_s[/url\(\s*['"]?([^'")]+)/, 1]
+          return candidate if candidate.to_s.include?(CLOUDFRONT_HOST)
+        end
+        nil
       end
 
       # --- Field extractors (anchor on meta/labels, fall back to grid card) --
 
-      MODEL_ID_RE = /\b([A-Z]{2,4}\d{3,4}(?:-\d+)?)\b/
+      # "PRI3268-2004" (Sunshine) and "CS-1604" (Timber Creek) — the hyphen
+      # between the letters and the first number group is optional.
+      MODEL_ID_RE = /\b([A-Z]{2,4}-?\d{3,4}(?:-\d+)?)\b/
+
+      # Heading shape is "<Series><sep><Name> <ModelId>". The separator is "/" on
+      # the grid card and on Sunshine's H1, "|" on Timber Creek's H1, and the
+      # series itself may be more than one word ("Creekside Series").
+      SERIES_SPLIT_RE = %r{\A([A-Za-z][A-Za-z0-9&'’. -]{0,40}?)\s*[/|]\s*(?=\S)}
+      # Sunshine names its series inline with no separator at all.
+      SUNSHINE_SERIES_RE = /\A(Prime|ARC|Velocity|Innovation)\b/i
 
       # The H1 ("Prime / The Show Stopper PRI3284-2058") is the clean, reliable
       # source for name/series/model_id. og:title on this platform is a generic
@@ -211,25 +274,34 @@ module Catalog
       end
 
       def extract_name(doc, card)
-        h = heading(doc)
+        h = heading(doc).presence || card['title'].to_s
         return card['name'] if h.blank?
 
-        h.sub(%r{\A[A-Za-z]+\s*/\s*}, '')                     # "Prime / X" -> "X"
-         .sub(/\A(?:Prime|ARC|Velocity|Innovation)\s+/i, '')  # "Prime X"   -> "X"
-         .sub(/\s*#{MODEL_ID_RE}\s*\z/, '')                   # drop trailing model id
-         .strip.presence || card['name']
+        name_from_heading(h) || card['name']
+      end
+
+      # "Creekside Series | The Cahaba CS-1604" -> "The Cahaba"
+      # "Prime / The Show Stopper PRI3284-2058" -> "The Show Stopper"
+      def name_from_heading(heading)
+        heading.sub(SERIES_SPLIT_RE, '')
+               .sub(/\A(?:Prime|ARC|Velocity|Innovation)\s+/i, '')
+               .sub(/\s*#{MODEL_ID_RE}\s*\z/, '')
+               .strip.presence
+      end
+
+      def series_from_heading(heading)
+        return nil if heading.blank?
+
+        (heading[SERIES_SPLIT_RE, 1] || heading[SUNSHINE_SERIES_RE, 1])&.strip.presence
       end
 
       def extract_model_id(doc, card)
-        heading(doc)[MODEL_ID_RE, 1] || card['model_id']
+        heading(doc)[MODEL_ID_RE, 1] || card['title'].to_s[MODEL_ID_RE, 1] || card['model_id']
       end
 
       def extract_series(doc, card)
-        h = heading(doc)
-        # "Prime / The Show Stopper" (slug) or "Prime The Show Stopper …" (title).
-        series = h[%r{\A([A-Za-z]+)\s*/}, 1] ||
-                 h[/\A(Prime|ARC|Velocity|Innovation)\b/i, 1]
-        series.presence || card['series'] || extract_spec(doc, card, %w[series collection])
+        series_from_heading(heading(doc)) || card['series'] ||
+          extract_spec(doc, card, %w[series collection])
       end
 
       def extract_property_type(doc, _card)
@@ -303,11 +375,40 @@ module Catalog
         nil
       end
 
+      # Some sites never fill the Elementor template's own og:description, so the
+      # tag ships with the UNRENDERED placeholder copy ("Spec 1 Spec 2 Key 1:
+      # value 1 … Read More... from Floorplan"). That is worse than no
+      # description at all, because it looks populated. Prefer the on-page
+      # "Description" section, and reject the placeholder when falling back.
+      BOILERPLATE_DESC_RE = /key 1:\s*value 1|spec 1\s+spec 2|read more\.{2,}\s*from floorplan/i
+
       def extract_description(doc, card)
-        meta = doc&.at_css('meta[property="og:description"], meta[name="description"]')&.[]('content')
-        meta.presence ||
-          doc&.at_css('.home-description, [class*="description"] p, article p')&.text&.strip ||
+        section_description(doc).presence ||
+          meta_description(doc).presence ||
+          doc&.at_css('.home-description, [class*="description"] p, article p')&.text&.strip.presence ||
           card['description']
+      end
+
+      # The description is a text-editor widget sitting after a "Description"
+      # heading, with no class of its own to anchor on.
+      def section_description(doc)
+        return nil if doc.nil?
+
+        heading = doc.css('h1, h2, h3, h4').find { |h| h.text.to_s.strip.casecmp?('description') }
+        return nil unless heading
+
+        block = heading.ancestors('.elementor-widget, section, div').first
+        text  = block&.next_element&.text.to_s.gsub(/\s+/, ' ').strip
+        text = heading.xpath('following::*[self::p or self::div][1]')
+                      .first&.text.to_s.gsub(/\s+/, ' ').strip if text.blank?
+        text.presence
+      end
+
+      def meta_description(doc)
+        meta = doc&.at_css('meta[property="og:description"], meta[name="description"]')&.[]('content')
+        return nil if meta.blank? || meta.match?(BOILERPLATE_DESC_RE)
+
+        meta
       end
 
       # Detail-page "Specifications" tabs (Construction / Exterior / Interior /
@@ -364,7 +465,7 @@ module Catalog
 
       # Full gallery from the detail page plus the grid floorplan image. Prefer
       # CloudFront-hosted assets (the manufacturer's own media); tag floorplans.
-      def extract_images(doc, html, card)
+      def extract_images(doc, html, card, key = nil)
         urls = []
         if doc
           doc.css('img').each do |img|
@@ -378,7 +479,38 @@ module Catalog
         end
         urls << { url: card['image'], alt: 'floorplan' } if card['image'].present?
 
-        dedupe_images(urls)
+        drop_thumbnails(dedupe_images(scope_to_home(urls, key)))
+      end
+
+      # Detail pages carry a "similar homes" rail whose imagery belongs to OTHER
+      # floor plans (and other manufacturers entirely). CloudFront paths are
+      # segmented .../floorplan/{floorplanId}/..., so keep only this home's own
+      # media. Applied only when the page actually yields matches, so a site that
+      # ever files media differently degrades to the old behaviour rather than
+      # returning a home with no pictures.
+      def scope_to_home(urls, key)
+        return urls if key.blank?
+
+        segment = "/floorplan/#{key}/"
+        scoped  = urls.select { |i| i[:url].to_s.include?(segment) }
+        scoped.any? ? scoped : urls
+      end
+
+      # The gallery publishes each shot twice, as "Cahaba-1.jpg" and
+      # "Cahaba-1_thumb_xxl.jpg". Both render, but keeping the thumbnail doubles
+      # the gallery, doubles what the image archiver downloads and stores, and
+      # puts a half-size copy in the listing.
+      THUMB_SUFFIX_RE = /_(?:thumb[a-z_]*|card[a-z_]*|small|medium)(?=\.[a-z]{3,4}\z)/i
+
+      def drop_thumbnails(images)
+        full = images.reject { |i| i['source_url'].to_s.match?(THUMB_SUFFIX_RE) }
+        return images if full.empty?
+
+        originals = full.map { |i| i['source_url'] }.to_set
+        images.reject do |img|
+          url = img['source_url'].to_s
+          url.match?(THUMB_SUFFIX_RE) && originals.include?(url.sub(THUMB_SUFFIX_RE, ''))
+        end
       end
 
       def extract_quote_url(doc, page_url)
@@ -435,10 +567,25 @@ module Catalog
 
       # Fallback only — discovery normally caches the full slugged URL from the
       # grid. The id-and-dealer form 301s to the canonical, which http_get follows.
+      # The permalink base differs per site, so prefer one observed during
+      # discovery; config { "detail_path": "/floorplan/" } pins it when a source
+      # is fetched without a preceding discover.
       def detail_url(key)
-        dealer = source.config['dealer_id'] || source.manufacturer_id
+        dealer = dealer_id || source.manufacturer_id
         suffix = dealer.present? ? "#{key}-#{dealer}" : key.to_s
-        "#{site_root}/floor-plan-detail/#{suffix}/"
+        "#{site_root}#{detail_path}#{suffix}/"
+      end
+
+      def detail_path
+        path = source.config['detail_path'].presence ||
+               observed_detail_path ||
+               '/floor-plan-detail/'
+        "/#{path.to_s.strip.delete_prefix('/').delete_suffix('/')}/"
+      end
+
+      def observed_detail_path
+        url = (@detail_urls || {}).values.first
+        url.to_s[%r{(/(?:floor-plan-detail|floorplan)/)}i, 1]
       end
 
       # The listing page URL (base_url, normalized to a single trailing slash).
