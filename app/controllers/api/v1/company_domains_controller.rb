@@ -107,6 +107,11 @@ class Api::V1::CompanyDomainsController < ApplicationController
         cname_target: cloudflare_service.cname_target
       )
       
+      # Without a route the Worker never runs for this hostname and Render answers 403.
+      # Best effort: a domain that provisioned is still worth keeping, and the route can be
+      # added later, so this does not fail the request.
+      cloudflare_service.create_worker_route(hostname)
+
       Rails.logger.info "[CompanyDomains] Created domain #{hostname} for company #{@company.id}"
       
       render json: { 
@@ -163,6 +168,9 @@ class Api::V1::CompanyDomainsController < ApplicationController
       begin
         cloudflare_service = CloudflareSaasService.new
         cloudflare_service.delete_custom_hostname(@domain.cloudflare_custom_hostname_id)
+        # Otherwise the zone accumulates a route per domain ever removed, each still sending
+        # that hostname through the Worker.
+        cloudflare_service.delete_worker_route(hostname)
       rescue CloudflareSaasService::CloudflareError => e
         Rails.logger.warn "[CompanyDomains] Failed to delete from Cloudflare: #{e.message}"
         # Continue with local removal anyway
@@ -201,52 +209,32 @@ class Api::V1::CompanyDomainsController < ApplicationController
       return render json: { error: 'Domain not registered with Cloudflare' }, status: :unprocessable_entity
     end
     
-    begin
-      cloudflare_service = CloudflareSaasService.new
-      # Prompt a recheck before reading. Reading alone triggers nothing, so a tenant who has
-      # just published the missing record would see a stale "pending" and have no way to ask
-      # Cloudflare to look again.
-      cloudflare_service.revalidate_custom_hostname(@domain.cloudflare_custom_hostname_id)
-      cf_response = cloudflare_service.check_custom_hostname_status(@domain.cloudflare_custom_hostname_id)
-      
-      # Parse and update status
-      parsed = cloudflare_service.parse_custom_hostname_response(cf_response)
-      @domain.update!(
-        verification_status: parsed[:verification_status],
-        ssl_status: parsed[:ssl_status],
-        ssl_issued_at: parsed[:ssl_status] == 'active' ? Time.current : @domain.ssl_issued_at,
-        dns_checked_at: Time.current,
-        dns_error: nil
-      )
-      
-      if @domain.verified? && @domain.ssl_active?
-        @domain.activate! unless @domain.active?
-        
-        render json: { 
-          domain: domain_json(@domain.reload),
-          message: 'Domain verified and SSL certificate issued! Your custom domain is ready to use.',
-          verified: true
-        }
-      elsif @domain.verified?
-        render json: { 
-          domain: domain_json(@domain.reload),
-          message: 'Domain verified. Waiting for SSL certificate...',
-          verified: true,
-          ssl_pending: true
-        }
-      else
-        render json: { 
-          domain: domain_json(@domain.reload),
-          message: 'Domain verification pending. Please check DNS configuration.',
-          verified: false
-        }
-      end
-      
-    rescue CloudflareSaasService::CloudflareError => e
-      @domain.update(dns_error: e.message, dns_checked_at: Time.current)
-      Rails.logger.error "[CompanyDomains] Verification failed: #{e.message}"
-      render json: { error: e.message, verified: false }, status: :unprocessable_entity
+    # Shares one implementation with the background poller, so pressing this and waiting for
+    # the sweep can never disagree about what Cloudflare said.
+    result = Websites::CloudflareStatusRefresher.call(@domain)
+
+    unless result.updated
+      Rails.logger.error "[CompanyDomains] Verification failed: #{result.error}"
+      return render json: { error: result.error, verified: false }, status: :unprocessable_entity
     end
+
+    @domain.reload
+
+    message =
+      if result.ready?
+        'Domain verified and SSL certificate issued. Your custom domain is ready to use.'
+      elsif result.verified
+        'Domain verified. The certificate usually takes a few more minutes.'
+      else
+        'Verification pending. Confirm the DNS records below are published.'
+      end
+
+    render json: {
+      domain: domain_json(@domain),
+      message: message,
+      verified: result.verified,
+      ssl_pending: result.verified && !result.ssl_active
+    }
   end
   
   # POST /api/v1/company_domains/:id/check_dns
@@ -258,6 +246,18 @@ class Api::V1::CompanyDomainsController < ApplicationController
   # verification for apex hostnames, where a CNAME is not even legal.
   def check_dns
     return unless authorize_action!('company_settings', 'read')
+
+    # A domain Cloudflare has already verified and issued a certificate for is finished, so
+    # say so rather than re-deriving it from DNS. This reported "not ready" for a domain
+    # that was serving traffic, because it was still demanding a stale ownership token
+    # Cloudflare had long since stopped caring about.
+    if @domain.verified? && @domain.ssl_active?
+      return render json: {
+        configured: true,
+        message: 'This domain is set up and serving.',
+        records: []
+      }
+    end
 
     # Checks the routing CNAME as well as Cloudflare's ownership records. Verifying only
     # ownership reported success while the site was still unreachable.

@@ -133,14 +133,19 @@ class CompanyDomain < ApplicationRecord
   # the ownership record produced a domain that verified ownership, reported success at
   # every step, and then sat forever without a certificate, because nothing pointed at us.
   def web_dns_records
-    # Required, despite the theory that a CNAME pointing at us proves ownership on its own.
-    # Measured on a real hostname: with the CNAME live and resolving to Cloudflare, HTTP
-    # returned 409 (custom hostname not active) and no certificate issued until the
-    # ownership record was published. HTTP validation cannot bootstrap ownership, because
-    # Cloudflare will not serve the hostname before ownership exists.
-    records = dns_records_for_display.map do |r|
+    # Ownership records only while ownership is still outstanding. Cloudflare reissues a
+    # fresh token every time a hostname is created, so once it has verified, the token on
+    # file is stale: showing it asks a tenant to publish something nobody will ever check
+    # and makes a working domain read as unfinished.
+    #
+    # It is genuinely required beforehand, though. Measured on a real hostname: created
+    # before its CNAME existed, HTTP returned 409 and no certificate issued until the record
+    # was published. Created after the CNAME was already live, Cloudflare validated over
+    # HTTP and never needed it. Both observations were real, in different orders.
+    records = verified? ? [] : dns_records_for_display.map do |r|
       r.merge(
-        purpose: 'Proves you control this domain. The certificate cannot be issued without it.',
+        purpose: 'Proves you control this domain. Not needed if your domain already points ' \
+                 'at us before you add it here.',
         required: true
       )
     end

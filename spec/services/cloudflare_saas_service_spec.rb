@@ -77,6 +77,53 @@ RSpec.describe CloudflareSaasService do
     end
   end
 
+  describe '#create_worker_route' do
+    around do |example|
+      original = ENV['CLOUDFLARE_WORKER_SCRIPT']
+      example.run
+      original ? ENV['CLOUDFLARE_WORKER_SCRIPT'] = original : ENV.delete('CLOUDFLARE_WORKER_SCRIPT')
+    end
+
+    before { configure! }
+
+    # Workers Routes match hostname patterns within the zone, and a dealer domain is a
+    # custom hostname rather than a subdomain of it, so a wildcard route on the zone never
+    # reaches it. Without a route per hostname the Worker does not run and Render answers
+    # 403, and adding them by hand per dealer is not a product.
+    it 'creates a route for the dealer hostname' do
+      ENV['CLOUDFLARE_WORKER_SCRIPT'] = 'tenant-host-proxy'
+      expect(described_class).to receive(:post) do |path, opts|
+        expect(path).to eq('/zones/zone123/workers/routes')
+        expect(JSON.parse(opts[:body])).to eq(
+          'pattern' => 'www.sunshine-rv.com/*', 'script' => 'tenant-host-proxy'
+        )
+        instance_double(HTTParty::Response, success?: true, body: '{"success":true}')
+      end
+
+      expect(described_class.new.create_worker_route('www.sunshine-rv.com')).to be true
+    end
+
+    it 'treats an existing route as success' do
+      ENV['CLOUDFLARE_WORKER_SCRIPT'] = 'tenant-host-proxy'
+      allow(described_class).to receive(:post).and_return(
+        instance_double(HTTParty::Response, success?: false,
+                                            body: '{"errors":[{"message":"route already exists"}]}')
+      )
+
+      expect(described_class.new.create_worker_route('www.sunshine-rv.com')).to be true
+    end
+
+    # Routes pointing at a script that does not exist would fail every request, so doing
+    # nothing is correct until the Worker is deployed.
+    it 'does nothing when no Worker script is configured' do
+      ENV.delete('CLOUDFLARE_WORKER_SCRIPT')
+      allow(Rails.application.credentials).to receive(:dig).and_return(nil)
+      expect(described_class).not_to receive(:post)
+
+      expect(described_class.new.create_worker_route('www.sunshine-rv.com')).to be false
+    end
+  end
+
   describe '#add_custom_hostname' do
     before { configure! }
 

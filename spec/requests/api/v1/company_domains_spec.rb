@@ -25,6 +25,7 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       allow(CloudflareSaasService).to receive(:new).and_return(service)
       allow(service).to receive(:add_custom_hostname).and_return({})
       allow(service).to receive(:cname_target).and_return('connect.mydealertide.com')
+      allow(service).to receive(:create_worker_route)
       allow(service).to receive(:parse_custom_hostname_response).and_return(
         custom_hostname_id: 'cf-abc123',
         verification_status: 'pending_validation',
@@ -48,6 +49,7 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       allow(CloudflareSaasService).to receive(:new).and_return(service)
       allow(service).to receive(:add_custom_hostname).and_return({})
       allow(service).to receive(:cname_target).and_return('connect.mydealertide.com')
+      allow(service).to receive(:create_worker_route)
       allow(service).to receive(:parse_custom_hostname_response).and_return(
         custom_hostname_id: 'cf-orphan', verification_status: 'pending',
         verification_records: [], ssl_status: 'pending', cname_target: nil

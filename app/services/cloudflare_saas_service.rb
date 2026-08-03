@@ -81,6 +81,61 @@ class CloudflareSaasService
     handle_response(response)
   end
 
+  # Binds the host-rewriting Worker to a dealer hostname.
+  #
+  # Workers Routes match hostname patterns within the zone, and a dealer domain is a custom
+  # hostname rather than a subdomain of it, so a wildcard route on the zone does not reach
+  # it. Each hostname needs its own route or the Worker never runs and Render answers 403.
+  # Doing this by hand per dealer is not a product, so it happens at provisioning.
+  #
+  # No-ops when CLOUDFLARE_WORKER_SCRIPT is unset, which is the correct behaviour before the
+  # Worker exists: routes pointing at a missing script would fail every request.
+  def create_worker_route(hostname)
+    script = worker_script_name
+    return false if script.blank?
+
+    response = self.class.post(
+      "/zones/#{@zone_id}/workers/routes",
+      headers: headers,
+      body: { pattern: "#{hostname}/*", script: script }.to_json
+    )
+
+    # A route that already exists is success, not a conflict.
+    return true if response.success? || response.body.to_s.match?(/already exists|duplicate/i)
+
+    Rails.logger.warn "[CloudflareSaaS] Could not create Worker route for #{hostname}: #{response.body}"
+    false
+  rescue StandardError => e
+    Rails.logger.warn "[CloudflareSaaS] Worker route error for #{hostname}: #{e.message}"
+    false
+  end
+
+  def delete_worker_route(hostname)
+    script = worker_script_name
+    return false if script.blank?
+
+    route = list_worker_routes.find { |r| r[:pattern].to_s == "#{hostname}/*" }
+    return true if route.nil?
+
+    self.class.delete("/zones/#{@zone_id}/workers/routes/#{route[:id]}", headers: headers)
+    true
+  rescue StandardError => e
+    Rails.logger.warn "[CloudflareSaaS] Could not delete Worker route for #{hostname}: #{e.message}"
+    false
+  end
+
+  def list_worker_routes
+    result = handle_response(self.class.get("/zones/#{@zone_id}/workers/routes", headers: headers))
+    result[:result] || []
+  rescue CloudflareError
+    []
+  end
+
+  def worker_script_name
+    ENV['CLOUDFLARE_WORKER_SCRIPT'].presence ||
+      Rails.application.credentials.dig(:cloudflare, :worker_script).presence
+  end
+
   # Finds a hostname Cloudflare already holds and returns it in the same shape as a fresh
   # create, so callers cannot tell the difference.
   def adopt_existing_hostname(hostname)
