@@ -155,6 +155,13 @@ class Campaign < ApplicationRecord
   # connection, returns nil — the caller marks the send as failed and moves
   # on rather than silently downgrading to a company-scoped or platform sender.
   def resolve_email_connection_for_step(recipient: nil)
+    mailbox = resolve_mailbox_connection_for_step(recipient: recipient)
+    resolve_ses_sending_identity(mailbox, recipient: recipient) || mailbox
+  end
+
+  # The OAuth / SMTP mailbox for this campaign's identity. Unchanged behaviour; kept as its
+  # own method so the SES branch above can consult it without duplicating the rules.
+  def resolve_mailbox_connection_for_step(recipient: nil)
     case from_identity_type
     when 'User'
       UserEmailConnection.where(company_id: company_id, user_id: from_identity_id, is_active: true).first
@@ -164,6 +171,40 @@ class Campaign < ApplicationRecord
       CompanyEmailConnection.where(company_id: company_id, is_active: true).first
     when 'Owner'
       resolve_owner_email_connection(recipient)
+    end
+  end
+
+  # When the sender's own address is on a domain this company has verified with SES, send
+  # through that domain instead of through their mailbox. The visible From address does not
+  # change: the rep still appears as the sender, but delivery carries the tenant's DKIM and
+  # no longer risks their real business mailbox.
+  #
+  # This also lets a rep with no connected mailbox send at all, since the address can come
+  # from the identity record rather than from an OAuth connection.
+  #
+  # Returns nil unless a verified domain covers the address, in which case the caller falls
+  # through to the mailbox exactly as before.
+  def resolve_ses_sending_identity(mailbox = nil, recipient: nil)
+    address = mailbox&.email_address.presence || identity_email_address(recipient)
+    return nil if address.blank?
+
+    domain = verified_sending_domain_for(address)
+    return nil if domain.nil?
+
+    Ses::SendingIdentity.new(
+      company_domain: domain,
+      email_address: address,
+      display_name: mailbox.try(:display_name).presence || try(:from_display_name)
+    )
+  end
+
+  # The address this campaign's identity would send as, independent of any OAuth mailbox.
+  def identity_email_address(recipient = nil)
+    case from_identity_type
+    when 'User'     then User.where(company_id: company_id).find_by(id: from_identity_id)&.email
+    when 'Location' then Location.where(company_id: company_id).find_by(id: from_identity_id)&.email
+    when 'Company'  then Company.find_by(id: company_id)&.email
+    when 'Owner'    then owner_user_for(recipient)&.email
     end
   end
 
@@ -190,6 +231,10 @@ class Campaign < ApplicationRecord
 
   def self.connection_key_for(connection)
     return nil if connection.nil?
+    # Ses::SendingIdentity names its own key so the budget is counted against the verified
+    # domain rather than against the wrapper object's class.
+    return connection.connection_key if connection.respond_to?(:connection_key)
+
     "#{connection.class.name}:#{connection.id}"
   end
 
@@ -213,6 +258,27 @@ class Campaign < ApplicationRecord
   end
 
   private
+
+  def owner_user_for(recipient)
+    return nil unless recipient
+
+    owner_id = recipient.try(:owner_id) || recipient.try(:owner)&.id
+    return nil if owner_id.blank?
+
+    User.where(company_id: company_id).find_by(id: owner_id)
+  end
+
+  # An SES identity for example.com signs for its subdomains too, so an address at
+  # mail.example.com is covered by a verified example.com. Matching only exact hostnames
+  # would silently route those addresses back through the mailbox.
+  def verified_sending_domain_for(address)
+    host = address.to_s.split('@').last.to_s.downcase.strip
+    return nil if host.blank?
+
+    CompanyDomain.email_verified.where(company_id: company_id).find do |d|
+      host == d.hostname || host.end_with?(".#{d.hostname}")
+    end
+  end
 
   # SMS campaigns must always send from the company itself —
   # User and Location identity types don't make sense (numbers belong to

@@ -36,13 +36,19 @@ module Providers
         mail.delivery_method(AwsSesDelivery, aws_config)
         Rails.logger.info "📧 Per-message AWS SES configured: region=#{aws_config[:region]}, key=#{aws_config[:access_key_id]&.first(8)}..."
         
-        result = mail.deliver_now
-        
-        Rails.logger.info "✅ AWS SES email sent successfully: #{result.message_id}"
-        
+        mail.deliver_now
+
+        # Read the SES MessageId off the delivery method, not off the returned mail object.
+        # mail.message_id is the RFC 5322 Message-ID header; SES bounce, complaint and
+        # delivery notifications key on the id SES assigns, so storing the header here left
+        # every inbound event unmatchable.
+        ses_message_id = mail.delivery_method.try(:ses_message_id)
+
+        Rails.logger.info "✅ AWS SES email sent successfully: MessageId=#{ses_message_id}"
+
         {
           success: true,
-          external_id: result.message_id,
+          external_id: ses_message_id || mail.message_id,
           provider: 'aws_ses'
         }
       rescue StandardError => e
@@ -57,7 +63,8 @@ module Providers
         {
           access_key_id: config[:aws_access_key_id],
           secret_access_key: config[:aws_secret_access_key],
-          region: config[:aws_region] || 'us-west-2'
+          region: config[:aws_region] || Ses::Region.current,
+          configuration_set: config[:ses_configuration_set].presence || Ses::ConfigurationSet.current
         }
       end
     end

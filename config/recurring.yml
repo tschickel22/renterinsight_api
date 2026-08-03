@@ -103,6 +103,21 @@ default: &default
     class: HarvestCampaignBouncesJob
     queue: default
     schedule: every 10 minutes
+  refresh_ses_domain_status:
+    # Polls SES for tenant sending domains awaiting DKIM verification, so a domain whose
+    # DNS records propagate overnight is verified without the tenant coming back to press
+    # a button. SES is the only authority on verification.
+    class: RefreshSesDomainStatusJob
+    queue: default
+    schedule: every 15 minutes
+  refresh_website_domain_status:
+    # Polls Cloudflare for custom hostname and certificate status. Issuance happens on
+    # Cloudflare's schedule after DNS is correct, and nothing else notices, so without this
+    # a dealer's site can be live while the screen says pending until someone presses a
+    # button they have no reason to know about.
+    class: RefreshWebsiteDomainStatusJob
+    queue: default
+    schedule: every 10 minutes
 
 production:
   <<: *default

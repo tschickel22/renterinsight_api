@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_07_31_210000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_03_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -1960,6 +1960,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_31_210000) do
     t.jsonb "deal_desk_settings", default: {}, null: false
     t.string "account_number"
     t.jsonb "tracking_settings", default: {}, null: false
+    t.integer "email_monthly_limit", default: 10000, null: false
     t.index ["account_number"], name: "index_companies_on_account_number", unique: true
     t.index ["allowed_form_states"], name: "idx_companies_form_states", using: :gin
     t.index ["custom_domain"], name: "index_companies_on_custom_domain"
@@ -2024,10 +2025,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_07_31_210000) do
     t.string "redirect_type"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "email_enabled", default: false, null: false
+    t.string "ses_identity_status"
+    t.jsonb "ses_dkim_tokens", default: []
+    t.string "ses_mail_from_domain"
+    t.string "ses_mail_from_status"
+    t.datetime "email_verified_at"
+    t.datetime "ses_checked_at"
+    t.string "ses_error"
+    t.boolean "web_enabled", default: false, null: false
     t.index ["cloudflare_custom_hostname_id"], name: "index_company_domains_on_cloudflare_custom_hostname_id"
     t.index ["company_id", "active"], name: "index_company_domains_on_company_id_and_active"
+    t.index ["company_id", "hostname"], name: "idx_company_domains_email_sending", where: "(email_enabled = true)"
     t.index ["company_id"], name: "index_company_domains_on_company_id"
     t.index ["hostname"], name: "index_company_domains_on_hostname", unique: true
+    t.index ["ses_checked_at"], name: "idx_company_domains_ses_pending", where: "((email_enabled = true) AND (email_verified_at IS NULL))"
     t.index ["verification_status"], name: "index_company_domains_on_verification_status"
     t.index ["website_id"], name: "index_company_domains_on_website_id"
   end

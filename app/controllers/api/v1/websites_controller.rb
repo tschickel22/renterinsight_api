@@ -69,11 +69,15 @@ class Api::V1::WebsitesController < ApplicationController
 
     # Return with dual meta
     render json: {
-      items: @websites.as_json(
+      items: @websites.includes(:company_domains).as_json(
         include: {
           website_pages: { only: [:id, :title, :slug, :is_visible] },
           blog_posts: { only: [:id, :title, :slug, :status] }
-        }
+        },
+        # So someone who has just built a site can tell whether anyone can reach it. A site
+        # with no address, or a published address pointing at an unpublished site, both look
+        # finished from here otherwise.
+        methods: [:domain_status]
       ),
       meta: {
         total: filtered_count,
@@ -92,7 +96,11 @@ class Api::V1::WebsitesController < ApplicationController
       include: {
         website_pages: { only: [:id, :title, :slug, :is_visible, :page_order] },
         blog_posts: { only: [:id, :title, :slug, :status, :published_at] }
-      }
+      },
+      # The builder's publish panel needs the real address. Without this it fell back to
+      # inventing one from the slug, and showed the dealer a hostname that has never existed
+      # in DNS.
+      methods: [:domain_status]
     )
 
     # Include inventory embed config so website builder can auto-configure inventory blocks
@@ -169,16 +177,28 @@ class Api::V1::WebsitesController < ApplicationController
   def publish
     return unless authorize_action!('websites', 'update')
 
-    @website.update(status: 'published', published_at: Time.current)
-    render json: @website
+    # Checked, because update without the bang returns false on a validation failure and
+    # this rendered 200 with an unchanged record either way: a publish that did not happen
+    # reported success and the dealer had no way to tell.
+    unless @website.update(status: 'published', published_at: Time.current)
+      return render json: { error: @website.errors.full_messages.to_sentence }, status: :unprocessable_entity
+    end
+
+    # domain_status so the builder can show whether publishing actually made the site
+    # reachable. Published and reachable are different things: a site with no verified
+    # domain is published and still has no address.
+    render json: @website.as_json(methods: [:domain_status])
   end
 
   # POST /api/v1/websites/:id/unpublish
   def unpublish
     return unless authorize_action!('websites', 'update')
 
-    @website.update(status: 'unpublished')
-    render json: @website
+    unless @website.update(status: 'unpublished')
+      return render json: { error: @website.errors.full_messages.to_sentence }, status: :unprocessable_entity
+    end
+
+    render json: @website.as_json(methods: [:domain_status])
   end
 
   # POST /api/v1/websites/:id/sync_branding
@@ -543,21 +563,21 @@ class Api::V1::WebsitesController < ApplicationController
 
   private
 
-  def set_company_scope
-    company_id = request.headers['X-Company-ID'] || params[:company_id]
-    
-    if company_id.blank?
-      render json: { error: 'Missing company context' }, status: :unauthorized
-      return
-    end
-    
-    @company = Company.find_by(id: company_id)
-    
-    unless @company
-      render json: { error: 'Company not found' }, status: :not_found
-      return
-    end
-  end
+  # set_company_scope is deliberately NOT overridden here. It used to be, and the override
+  # took the company from the X-Company-ID header or a company_id request param with no
+  # check of who was asking:
+  #
+  #   company_id = request.headers['X-Company-ID'] || params[:company_id]
+  #   @company = Company.find_by(id: company_id)
+  #
+  # Any authenticated user could name any company and read or write that tenant's websites.
+  # ApplicationController's version honours the header only for platform and super admins
+  # and otherwise takes the company from the JWT, which is what every other controller in
+  # api/v1 already does.
+  #
+  # It also fixes an ordinary bug: the override 401'd with "Missing company context" when no
+  # header was present, and the frontend only sends that header when a platform admin has
+  # switched companies.
 
   # Build public-safe calculator settings from company loan_settings JSONB
   def build_calculator_settings(company)

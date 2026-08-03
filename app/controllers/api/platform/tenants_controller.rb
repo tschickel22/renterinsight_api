@@ -8,7 +8,7 @@ module Api
       
       # Require platform admin for all tenant management actions
       before_action :require_platform_admin!, except: [:check_subdomain_available, :check_domain_available]
-      before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :generate_email_dns_records, :verify_email_domain, :check_domain_dns, :check_email_dns, :send_owner_invitation, :update_owner_invitation]
+      before_action :set_tenant, only: [:show, :update, :destroy, :verify_domain, :generate_domain_token, :check_domain_dns, :send_owner_invitation, :update_owner_invitation]
       
       # GET /api/platform/tenants
       def index
@@ -347,118 +347,12 @@ module Api
         end
       end
       
-      # POST /api/platform/tenants/:id/generate_email_dns_records
-      def generate_email_dns_records
-        begin
-          if @tenant.email_domain.blank?
-            return render json: { error: 'No email domain configured' }, status: :unprocessable_entity
-          end
-          
-          # Generate DKIM selector and keys
-          dkim_selector = "mail"
-          dkim_public_key = "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC..." # Placeholder
-          
-          # Generate DNS records
-          dns_records = [
-            {
-              type: 'TXT',
-              name: '@',
-              value: 'v=spf1 include:_spf.landlordinsight.com ~all',
-              purpose: 'SPF - Authorizes our servers to send email from your domain',
-              priority: 1
-            },
-            {
-              type: 'TXT',
-              name: "#{dkim_selector}._domainkey",
-              value: dkim_public_key,
-              purpose: 'DKIM - Cryptographic signature for email authentication',
-              priority: 2
-            },
-            {
-              type: 'TXT',
-              name: '_dmarc',
-              value: 'v=DMARC1; p=none; rua=mailto:dmarc@landlordinsight.com',
-              purpose: 'DMARC - Email authentication policy',
-              priority: 3
-            },
-            {
-              type: 'MX',
-              name: '@',
-              value: 'mail.landlordinsight.com',
-              priority: 10,
-              purpose: 'MX - Mail server for receiving email (optional)'
-            }
-          ]
-          
-          render json: { 
-            email_domain: @tenant.email_domain,
-            dns_records: dns_records,
-            instructions: {
-              step1: 'Log in to your domain registrar or DNS provider',
-              step2: 'Add the DNS records listed above',
-              step3: 'Wait 24-48 hours for DNS propagation',
-              step4: 'Click Verify to check your configuration'
-            }
-          }
-        rescue => e
-          Rails.logger.error "Generate email DNS error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
-          render json: { 
-            error: Rails.env.development? ? e.message : 'Failed to generate DNS records'
-          }, status: :unprocessable_entity
-        end
-      end
-      
-      # GET /api/platform/tenants/:id/check_email_dns
-      def check_email_dns
-        begin
-          if @tenant.email_domain.blank?
-            return render json: { error: 'No email domain configured' }, status: :unprocessable_entity
-          end
-          
-          result = @tenant.check_email_dns_records
-          
-          render json: result
-        rescue => e
-          Rails.logger.error "Check email DNS error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
-          render json: { 
-            success: false,
-            error: Rails.env.development? ? e.message : 'Failed to check email DNS'
-          }, status: :internal_server_error
-        end
-      end
-      
-      # POST /api/platform/tenants/:id/verify_email_domain
-      def verify_email_domain
-        begin
-          if @tenant.email_domain.blank?
-            return render json: { error: 'No email domain configured' }, status: :unprocessable_entity
-          end
-          
-          result = @tenant.verify_email_domain!
-          
-          if result[:success]
-            render json: { 
-              tenant: serialize_tenant(@tenant, detailed: true),
-              message: result[:message],
-              verified: true,
-              records: result[:records]
-            }
-          else
-            render json: { 
-              error: result[:error],
-              verified: false,
-              records: result[:records]
-            }, status: :unprocessable_entity
-          end
-        rescue => e
-          Rails.logger.error "Verify email domain error: #{e.message}\n#{e.backtrace.first(10).join("\n")}"
-          render json: { 
-            error: Rails.env.development? ? e.message : 'Failed to verify email domain',
-            verified: false
-          }, status: :unprocessable_entity
-        end
-      end
-      
+      # Email sending domains are configured by the company admin in Company Settings,
+      # backed by a real SES identity (see CompanyDomain). The platform-admin actions that
+      # used to live here returned hardcoded placeholder DNS records and marked a domain
+      # verified whenever any SPF and DMARC record existed, so a tenant who followed them
+      # published broken DNS and was told it worked. Removed deliberately.
+
       # POST /api/platform/tenants/:id/send_owner_invitation
       # Send the tenant owner invitation (for delayed invitations)
       def send_owner_invitation

@@ -54,46 +54,25 @@ class ProcessWebhookJob < ApplicationJob
     Rails.logger.info("Processed Twilio webhook for communication #{communication.id}: #{status}")
   end
   
-  # Process AWS SES webhook for email events
+  # Process AWS SES webhook for email events.
+  #
+  # The live path is Webhooks::SesEventsController, which SNS posts to directly and which
+  # verifies the message signature first. This branch stays so anything already enqueuing
+  # ProcessWebhookJob('ses', ...) keeps working, and delegates to the same processor rather
+  # than maintaining a second, weaker copy of the handling.
   def process_ses_webhook(data)
-    # SES sends SNS notifications, structure varies by event type
-    message_type = data['Type']
-    
-    case message_type
+    case data['Type']
     when 'SubscriptionConfirmation'
-      # Auto-confirm SNS subscription (you'd typically hit the SubscribeURL)
-      Rails.logger.info("SES SNS Subscription confirmation received")
-      return
+      Rails.logger.info('SES SNS subscription confirmation received; confirm via the webhook endpoint')
     when 'Notification'
-      process_ses_notification(JSON.parse(data['Message']))
+      Ses::EventProcessor.process(data['Message'])
+    else
+      # Already-unwrapped SES event, not an SNS envelope.
+      Ses::EventProcessor.process(data)
     end
   end
-  
-  def process_ses_notification(message)
-    notification_type = message['notificationType']
-    message_id = message.dig('mail', 'messageId')
-    
-    return unless message_id
-    
-    communication = Communication.find_by(external_id: message_id)
-    
-    unless communication
-      Rails.logger.warn("Communication not found for SES MessageId: #{message_id}")
-      return
-    end
-    
-    case notification_type
-    when 'Bounce'
-      communication.track_event('bounced', provider_data: message)
-    when 'Complaint'
-      communication.track_event('complaint', provider_data: message)
-    when 'Delivery'
-      communication.track_event('delivered', provider_data: message)
-    end
-    
-    Rails.logger.info("Processed SES webhook for communication #{communication.id}: #{notification_type}")
-  end
-  
+
+
   # Process Gmail webhook (Gmail API push notifications)
   def process_gmail_webhook(data)
     # Gmail uses Pub/Sub for notifications

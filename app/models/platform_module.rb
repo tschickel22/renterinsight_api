@@ -43,6 +43,12 @@ class PlatformModule
     # tenant (TenantModuleOverride). Config keys live on those rows — see
     # PLAN_CONFIG_DEFAULTS for the marketing.website precedent.
     'marketing.text_us' => { name: 'Text Us Widget', category: 'Marketing', icon: 'MessageSquare', description: 'Web-to-text widget for any dealer site — visitors send a text, replies route to a rep or round-robin queue through the existing SMS pipeline' },
+    # Paid add-on, same shape as the two above: absent from every PLAN_TEMPLATE on purpose.
+    # Gates VERIFYING a domain, not sending. A tenant who downgrades keeps their existing
+    # verified domain and keeps sending; they just cannot add another. Revoking mid-campaign
+    # would silently reroute live sends back through personal mailboxes, which is exactly
+    # the failure this feature exists to prevent.
+    'marketing.sending_domain' => { name: 'Sending Domain', category: 'Marketing', icon: 'ShieldCheck', description: 'Send campaigns from your own domain with your own DKIM, so deliverability and sender reputation stay yours instead of riding on a personal mailbox' },
 
     # Finance & Agreements
     'finance.loans' => { name: 'Finance Management', category: 'Finance & Agreements', icon: 'DollarSign', description: 'Loan and payment management' },

@@ -1,5 +1,22 @@
 # frozen_string_literal: true
 Rails.application.routes.draw do
+  # ==================== TENANT WEBSITES (CUSTOM HOSTNAMES) ====================
+  #
+  # FIRST on purpose. Cloudflare for SaaS forwards the visitor's original Host, so a dealer
+  # site arrives on the dealer's own hostname and has to win the root path, which the API
+  # root below would otherwise claim.
+  #
+  # Safe to sit here because the constraint is doubly restrictive: it matches only hosts
+  # that resolve to a published tenant website, and it refuses reserved path prefixes
+  # (/api, /webhooks, /rails, tracking links) so a dealer hostname can never swallow API or
+  # webhook traffic. Platform hostnames short-circuit before any database lookup.
+  constraints(Constraints::TenantWebsiteHost) do
+    get '/robots.txt', to: 'public/sites#robots', format: false
+    get '/sitemap.xml', to: 'public/sites#sitemap', format: false
+    get '/', to: 'public/sites#show', as: :tenant_website_root
+    get '*path', to: 'public/sites#show', format: false, as: :tenant_website_page
+  end
+
   # Health check
   get 'up', to: 'rails/health#show', as: :rails_health_check
 
@@ -73,6 +90,9 @@ Rails.application.routes.draw do
     # Facebook Lead Ads webhooks
     get  'facebook/leads', to: 'facebook_leads#verify'
     post 'facebook/leads', to: 'facebook_leads#receive'
+
+    # SES bounce/complaint/delivery notifications via SNS (signature-verified, no auth)
+    post 'ses/events', to: 'ses_events#receive'
   end
 
   # ==================== PUBLIC INTAKE FORMS ====================
@@ -939,11 +959,19 @@ Rails.application.routes.draw do
       
       # ==================== COMPANY DOMAINS (CUSTOM DOMAINS) ====================
       resources :company_domains, path: 'company-domains' do
+        collection do
+          get :hostname_advice, path: 'hostname-advice'
+        end
         member do
           post :verify
           post :check_dns, path: 'check-dns'
           post :activate
           post :deactivate
+          # SES sending identity
+          post :enable_email, path: 'enable-email'
+          post :check_email, path: 'check-email'
+          post :disable_email, path: 'disable-email'
+          get  :domain_connect, path: 'domain-connect'
         end
       end
       
@@ -2766,9 +2794,6 @@ Rails.application.routes.draw do
           get :check_domain_dns
           post :verify_domain
           post :generate_domain_token
-          get :check_email_dns
-          post :generate_email_dns_records
-          post :verify_email_domain
           post :send_owner_invitation  # NEW: Send tenant owner invitation
           patch :update_owner_invitation  # NEW: Update owner invitation details
         end
@@ -2787,6 +2812,10 @@ Rails.application.routes.draw do
       get   'sms_usage',                        to: 'sms_usage#index'
       get   'sms_usage/:company_id',            to: 'sms_usage#show'
       patch 'sms_usage/:company_id/set_limit',  to: 'sms_usage#set_limit'
+
+      get   'email_usage',                       to: 'email_usage#index'
+      get   'email_usage/:company_id',           to: 'email_usage#show'
+      patch 'email_usage/:company_id/set_limit', to: 'email_usage#set_limit'
 
       resource :settings, only: %i[show update] do
         post :test_email, on: :collection

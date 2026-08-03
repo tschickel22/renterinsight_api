@@ -1,19 +1,30 @@
 # frozen_string_literal: true
 
 class Webhook::InboundMailController < ActionController::Base
+  include SnsMessageVerification
+
   skip_before_action :verify_authenticity_token  # CRITICAL - skip CSRF for webhooks
-  
+
   # POST /webhook/inbound_mail/handle
   def handle
     # Parse SNS notification from AWS SES
     message = JSON.parse(request.body.read)
-    
+
+    # This endpoint is public and reaches Campaigns::BounceHandler, which suppresses email
+    # addresses and flags recipients as invalid. Without verifying that Amazon actually
+    # sent this, anyone able to guess a campaign send id could permanently suppress a
+    # dealer's customers or write fabricated replies onto their records.
+    unless sns_message_authentic?(message)
+      Rails.logger.warn('[InboundMail] rejected message with invalid SNS signature')
+      return render json: { error: 'Invalid signature' }, status: :forbidden
+    end
+
     # Handle SNS subscription confirmation (first time setup)
     if message['Type'] == 'SubscriptionConfirmation'
-      confirm_sns_subscription(message)
+      confirm_sns_subscription(message, log_tag: '[InboundMail]')
       return render json: { success: true, message: 'SNS subscription confirmed' }
     end
-    
+
     # Parse email notification from SNS message
     email_data = JSON.parse(message['Message'])
     mail_obj = email_data['mail']
@@ -52,28 +63,4 @@ class Webhook::InboundMailController < ActionController::Base
     render json: { error: e.message }, status: :internal_server_error
   end
   
-  private
-  
-  def confirm_sns_subscription(message)
-    subscribe_url = message['SubscribeURL']
-    
-    unless subscribe_url
-      Rails.logger.error "[InboundMail] No SubscribeURL"
-      return
-    end
-    
-    Rails.logger.info "[InboundMail] Confirming SNS: #{subscribe_url}"
-    
-    require 'net/http'
-    uri = URI(subscribe_url)
-    response = Net::HTTP.get_response(uri)
-    
-    if response.is_a?(Net::HTTPSuccess)
-      Rails.logger.info "[InboundMail] ✅ SNS confirmed"
-    else
-      Rails.logger.error "[InboundMail] ❌ SNS failed: #{response.code}"
-    end
-  rescue => e
-    Rails.logger.error "[InboundMail] SNS error: #{e.message}"
-  end
 end
