@@ -78,7 +78,9 @@ module Catalog
       return unless @source.config.is_a?(Hash) && @source.config['archive_images'] == true
       return if homes.empty?
 
-      archiver = ImageArchiver.new(crawl_delay: @source.config['image_crawl_delay'].to_i)
+      # Pass the raw config value: ImageArchiver decides what a missing or zero
+      # delay means. Calling .to_i here turned "unset" into "no delay at all".
+      archiver = ImageArchiver.new(crawl_delay: @source.config['image_crawl_delay'])
       homes.each do |home|
         home.images = archiver.archive(home.images)
       end

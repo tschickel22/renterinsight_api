@@ -25,6 +25,41 @@ RSpec.describe Catalog::RunService do
     end
   end
 
+  # The call site is where this broke: RunService did config[...].to_i, turning
+  # an unset delay into 0 rather than letting the archiver apply DEFAULT_DELAY.
+  # Assert the raw value reaches the archiver so the fix cannot be undone here.
+  describe 'image archiving' do
+    let(:archiver) { instance_double(Catalog::ImageArchiver, archive: [], result: nil) }
+
+    before do
+      allow(archiver).to receive(:result).and_return(
+        Catalog::ImageArchiver::Result.new(archived: 0, reused: 0, failed: 0, skipped: 0,
+                                           rate_limited: false)
+      )
+    end
+
+    it 'passes an unset delay through as nil, so the polite default applies' do
+      source.update!(config: { 'archive_images' => true })
+      expect(Catalog::ImageArchiver).to receive(:new).with(crawl_delay: nil).and_return(archiver)
+
+      run_with([FakeCatalogAdapter.home('1')])
+    end
+
+    it 'passes a configured delay through unchanged' do
+      source.update!(config: { 'archive_images' => true, 'image_crawl_delay' => 5 })
+      expect(Catalog::ImageArchiver).to receive(:new).with(crawl_delay: 5).and_return(archiver)
+
+      run_with([FakeCatalogAdapter.home('1')])
+    end
+
+    it 'does not archive at all unless the source opts in' do
+      source.update!(config: {})
+      expect(Catalog::ImageArchiver).not_to receive(:new)
+
+      run_with([FakeCatalogAdapter.home('1')])
+    end
+  end
+
   describe 'degraded run' do
     it 'flags degraded when a field drops below threshold and alerts' do
       homes = [

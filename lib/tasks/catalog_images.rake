@@ -68,7 +68,9 @@ namespace :catalog do
         puts "#{source.name} — #{vehicles.count} vehicles#{limit ? " (limited to #{limit})" : ''}"
         # One archiver per source: it lists the bucket once and carries that
         # set across every vehicle, so the whole backfill costs one listing.
-        archiver = Catalog::ImageArchiver.new(crawl_delay: source.config.to_h['image_crawl_delay'].to_i)
+        # Raw value, not .to_i — the archiver resolves a missing or zero delay
+        # to DEFAULT_DELAY, and .to_i here would silently mean "no delay".
+        archiver = Catalog::ImageArchiver.new(crawl_delay: source.config.to_h['image_crawl_delay'])
         touched = 0
 
         # find_each ignores a scoped limit (and says so in a warning), so a

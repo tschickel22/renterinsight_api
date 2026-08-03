@@ -144,12 +144,20 @@ RSpec.describe Catalog::ImageArchiver do
   end
 
   # The archived URL is written into every vehicle row, so a wrong bucket is not
-  # something a later env change can undo. S3UploadService falls back to a
-  # bucket literally named "...-staging" when AWS_S3_BUCKET is unset.
+  # something a later env change can undo. In production the catalog bucket must
+  # therefore be named explicitly rather than inherited from AWS_S3_BUCKET, which
+  # deliberately still points at the shared website-assets bucket.
   describe 'production bucket guard' do
+    around do |example|
+      original = ENV.fetch(described_class::ENV_BUCKET, nil)
+      example.run
+      ENV[described_class::ENV_BUCKET] = original
+    end
+
     before { allow(Rails.env).to receive(:production?).and_return(true) }
 
-    it 'refuses to archive when production is pointed at a staging bucket' do
+    it 'refuses to archive when CATALOG_ASSETS_BUCKET is unset' do
+      ENV[described_class::ENV_BUCKET] = nil
       allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-staging')
 
       expect(uploader).not_to receive(:upload)
@@ -159,8 +167,29 @@ RSpec.describe Catalog::ImageArchiver do
       expect(out.first['source_url']).to eq(photo)
     end
 
-    it 'archives normally against a production bucket' do
-      allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-prod')
+    # The old guard inferred intent from the name, so any bucket not containing
+    # "staging" passed — including the shared uploads bucket.
+    it 'refuses even when the fallback bucket name looks innocuous' do
+      ENV[described_class::ENV_BUCKET] = nil
+      allow(uploader).to receive(:bucket_name).and_return('ri-uploads-production')
+
+      expect(uploader).not_to receive(:upload)
+      expect(described_class.new(uploader: uploader).archive([image(photo)]).first['local_url'])
+        .to be_nil
+    end
+
+    it 'still refuses when the named catalog bucket looks like a staging one' do
+      ENV[described_class::ENV_BUCKET] = 'dt-catalog-assets-staging'
+      allow(uploader).to receive(:bucket_name).and_return('dt-catalog-assets-staging')
+
+      expect(uploader).not_to receive(:upload)
+      expect(described_class.new(uploader: uploader).archive([image(photo)]).first['local_url'])
+        .to be_nil
+    end
+
+    it 'archives when the production catalog bucket is named explicitly' do
+      ENV[described_class::ENV_BUCKET] = 'dt-catalog-assets-production'
+      allow(uploader).to receive(:bucket_name).and_return('dt-catalog-assets-production')
 
       arch = described_class.new(uploader: uploader)
       allow(arch).to receive(:open_source) { StringIO.new('x' * 50_000) }
@@ -169,9 +198,41 @@ RSpec.describe Catalog::ImageArchiver do
     end
   end
 
+  # Staging runs RAILS_ENV=staging, so the guard must not fire there — that is
+  # what lets a rehearsal use the shared website-assets bucket.
   it 'does not block a staging bucket outside production' do
     allow(uploader).to receive(:bucket_name).and_return('renterinsight-website-assets-staging')
     expect(archiver.archive([image(photo)]).first['local_url']).to be_present
+  end
+
+  # A source that enables archiving without naming a delay used to get ZERO,
+  # not the documented 1s: every caller passed config['image_crawl_delay'].to_i
+  # and nil.to_i is 0, so the keyword default never fired. That is how a Kabco
+  # run fired ~1,100 requests as fast as the network allowed and was 429'd.
+  describe '.resolve_delay' do
+    it 'treats a missing delay as the polite default, not zero' do
+      expect(described_class.resolve_delay(nil)).to eq described_class::DEFAULT_DELAY
+    end
+
+    it 'treats the nil.to_i result that caused the bug as unset' do
+      expect(described_class.resolve_delay(nil.to_i)).to eq described_class::DEFAULT_DELAY
+    end
+
+    # Zero is not an escape hatch: it is the one setting already shown to get us
+    # rate-limited off a manufacturer's site.
+    it 'refuses an explicit zero' do
+      expect(described_class.resolve_delay(0)).to eq described_class::DEFAULT_DELAY
+    end
+
+    it 'honours a real delay, including a string from JSONB config' do
+      expect(described_class.resolve_delay(5)).to eq 5
+      expect(described_class.resolve_delay('5')).to eq 5
+    end
+
+    it 'applies through the constructor' do
+      expect(described_class.new(uploader: uploader).instance_variable_get(:@crawl_delay))
+        .to eq described_class::DEFAULT_DELAY
+    end
   end
 
   # Customer uploads and document conversions run off AWS_S3_BUCKET and work
