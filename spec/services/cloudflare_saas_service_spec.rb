@@ -52,6 +52,31 @@ RSpec.describe CloudflareSaasService do
     end
   end
 
+  describe '#revalidate_custom_hostname' do
+    before { configure! }
+
+    # Reading the status triggers nothing on Cloudflare's side, so a tenant who has just
+    # published the missing record would sit on a stale "pending" with no way to ask again.
+    it 'patches the hostname, which is what prompts Cloudflare to re-check' do
+      expect(described_class).to receive(:patch) do |path, opts|
+        expect(path).to eq('/zones/zone123/custom_hostnames/cf-abc')
+        expect(JSON.parse(opts[:body])).to eq('ssl' => { 'method' => 'http', 'type' => 'dv' })
+        instance_double(HTTParty::Response, success?: true, body: '{"success":true}')
+      end
+      allow_any_instance_of(described_class).to receive(:handle_response).and_return({})
+
+      expect(described_class.new.revalidate_custom_hostname('cf-abc')).to be true
+    end
+
+    it 'reports failure without raising, so reading the status still happens' do
+      allow(described_class).to receive(:patch).and_return(
+        instance_double(HTTParty::Response, success?: false, body: '{"errors":[{"message":"nope"}]}')
+      )
+
+      expect(described_class.new.revalidate_custom_hostname('cf-abc')).to be false
+    end
+  end
+
   describe '#add_custom_hostname' do
     before { configure! }
 

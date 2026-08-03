@@ -95,6 +95,22 @@ class CloudflareSaasService
   # Check the status of a custom hostname
   # @param custom_hostname_id [String] The Cloudflare custom hostname ID
   # @return [Hash] Current status including verification and SSL details
+  # Asks Cloudflare to re-run ownership and certificate validation now.
+  #
+  # Reading the status does not trigger anything, so a tenant who has just published the
+  # missing record would otherwise sit on a stale "pending" until Cloudflare's own schedule
+  # came round. Patching the SSL settings is the documented way to prompt a recheck.
+  #
+  # Best effort: if the patch fails, the caller still reads the current status, which is no
+  # worse than before.
+  def revalidate_custom_hostname(custom_hostname_id)
+    update_custom_hostname(custom_hostname_id, ssl: { method: 'http', type: 'dv' })
+    true
+  rescue CloudflareError => e
+    Rails.logger.warn "[CloudflareSaaS] Could not trigger revalidation for #{custom_hostname_id}: #{e.message}"
+    false
+  end
+
   def check_custom_hostname_status(custom_hostname_id)
     Rails.logger.info "[CloudflareSaaS] Checking status for: #{custom_hostname_id}"
     

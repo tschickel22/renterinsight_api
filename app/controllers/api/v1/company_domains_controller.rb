@@ -203,6 +203,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
     
     begin
       cloudflare_service = CloudflareSaasService.new
+      # Prompt a recheck before reading. Reading alone triggers nothing, so a tenant who has
+      # just published the missing record would see a stale "pending" and have no way to ask
+      # Cloudflare to look again.
+      cloudflare_service.revalidate_custom_hostname(@domain.cloudflare_custom_hostname_id)
       cf_response = cloudflare_service.check_custom_hostname_status(@domain.cloudflare_custom_hostname_id)
       
       # Parse and update status
