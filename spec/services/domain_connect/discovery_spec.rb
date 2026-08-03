@@ -3,12 +3,8 @@
 require 'rails_helper'
 
 RSpec.describe DomainConnect::Discovery do
-  let(:dns) { instance_double(Resolv::DNS) }
-
   def stub_txt(value)
-    allow(Resolv::DNS).to receive(:open).and_yield(dns)
-    records = Array(value).map { |v| instance_double(Resolv::DNS::Resource::IN::TXT, strings: [v]) }
-    allow(dns).to receive(:getresources).and_return(records)
+    allow(Dns::Lookup).to receive(:txt).and_return(Array(value))
   end
 
   def stub_settings(body, status: Net::HTTPOK)
@@ -42,7 +38,7 @@ RSpec.describe DomainConnect::Discovery do
 
   describe 'providers that cannot be used' do
     it 'reports unsupported when the domain advertises nothing' do
-      allow(Resolv::DNS).to receive(:open).and_raise(Resolv::ResolvError)
+      allow(Dns::Lookup).to receive(:txt).and_return([])
 
       result = described_class.call('cloudflare-hosted.example')
 
@@ -101,7 +97,7 @@ RSpec.describe DomainConnect::Discovery do
   end
 
   it 'reports unsupported for a blank domain without any lookup' do
-    expect(Resolv::DNS).not_to receive(:open)
+    expect(Dns::Lookup).not_to receive(:txt)
 
     expect(described_class.call('')).not_to be_supported
   end

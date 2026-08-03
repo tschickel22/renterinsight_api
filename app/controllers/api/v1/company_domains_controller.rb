@@ -432,22 +432,16 @@ class Api::V1::CompanyDomainsController < ApplicationController
   # Cloudflare issued rather than looking for our own hostname, because for TXT ownership
   # the value is an opaque token that appears nowhere else.
   def check_expected_record(record)
-    require 'resolv'
-
     name = record['name'].to_s
     type = record['type'].to_s.upcase
     expected_value = record['value'].to_s
 
     found_values =
-      Resolv::DNS.open(timeouts: 3) do |dns|
-        case type
-        when 'TXT'
-          dns.getresources(name, Resolv::DNS::Resource::IN::TXT).map { |r| r.strings.join }
-        when 'CNAME'
-          dns.getresources(name, Resolv::DNS::Resource::IN::CNAME).map { |r| r.name.to_s }
-        else
-          []
-        end
+      case type
+      when 'TXT'   then Dns::Lookup.txt(name)
+      when 'CNAME' then Dns::Lookup.cname(name)
+      when 'MX'    then Dns::Lookup.mx(name)
+      else []
       end
 
     {

@@ -4,10 +4,7 @@ require 'rails_helper'
 
 RSpec.describe Dns::Registrar do
   def stub_nameservers(*names)
-    dns = instance_double(Resolv::DNS)
-    allow(Resolv::DNS).to receive(:open).and_yield(dns)
-    records = names.map { |n| instance_double(Resolv::DNS::Resource::IN::NS, name: n) }
-    allow(dns).to receive(:getresources).and_return(records)
+    allow(Dns::Lookup).to receive(:ns).and_return(names.map(&:downcase))
   end
 
   before { Rails.cache.clear }
@@ -56,13 +53,13 @@ RSpec.describe Dns::Registrar do
   end
 
   it 'falls back to generic when the NS lookup fails' do
-    allow(Resolv::DNS).to receive(:open).and_raise(Resolv::ResolvError)
+    allow(Dns::Lookup).to receive(:ns).and_return([])
 
     expect(described_class.for('dealer.example')[:key]).to be_nil
   end
 
   it 'returns generic for a blank hostname without a lookup' do
-    expect(Resolv::DNS).not_to receive(:open)
+    expect(Dns::Lookup).not_to receive(:ns)
 
     expect(described_class.for('')[:key]).to be_nil
   end
@@ -83,7 +80,7 @@ RSpec.describe Dns::Registrar do
     described_class.for('tomshotsauce.com')
     described_class.for('tomshotsauce.com')
 
-    expect(Resolv::DNS).to have_received(:open).once
+    expect(Dns::Lookup).to have_received(:ns).once
   ensure
     Rails.cache = original
   end

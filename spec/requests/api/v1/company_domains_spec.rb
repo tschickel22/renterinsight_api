@@ -76,10 +76,7 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
     end
 
     def stub_txt(values)
-      dns = instance_double(Resolv::DNS)
-      allow(Resolv::DNS).to receive(:open).and_yield(dns)
-      records = values.map { |v| instance_double(Resolv::DNS::Resource::IN::TXT, strings: [v]) }
-      allow(dns).to receive(:getresources).and_return(records)
+      allow(Dns::Lookup).to receive(:txt).and_return(values)
     end
 
     # This used to look only for a CNAME on the hostname itself, so a correctly published

@@ -294,12 +294,7 @@ module Dns
     end
 
     def nameservers
-      Resolv::DNS.open(timeouts: DNS_TIMEOUT) do |dns|
-        dns.getresources(@hostname, Resolv::DNS::Resource::IN::NS).map { |r| r.name.to_s.downcase }
-      end
-    rescue StandardError => e
-      Rails.logger.warn("[Dns::Registrar] NS lookup failed for #{@hostname}: #{e.message}")
-      []
+      Dns::Lookup.ns(@hostname, timeout: DNS_TIMEOUT)
     end
 
     # Shows the tenant what the field should contain for their provider, using a DKIM record

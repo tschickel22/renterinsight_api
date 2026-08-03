@@ -18,11 +18,9 @@ RSpec.describe Ses::IdentityManager do
   end
 
   # Default: the MAIL FROM subdomain is free. Collision behaviour is covered separately.
-  before do
-    dns = instance_double(Resolv::DNS)
-    allow(Resolv::DNS).to receive(:open).and_yield(dns)
-    allow(dns).to receive(:getresources).and_return([])
-  end
+  # Stubs Dns::Lookup rather than Resolv directly: stubbing the raw resolver is what let a
+  # broken Resolv::DNS.open signature ship undetected.
+  before { allow(Dns::Lookup).to receive(:resolve!).and_return([]) }
 
   describe '#create_identity!' do
     before do
@@ -120,16 +118,11 @@ RSpec.describe Ses::IdentityManager do
   # generated records would have replaced it and silently killed inbound replies. Dealers
   # commonly point mail.<domain> at webmail, so this is not specific to us.
   describe 'when the MAIL FROM subdomain already receives mail' do
-    let(:mx) { instance_double(Resolv::DNS::Resource::IN::MX) }
-
     before do
       allow(client).to receive(:create_email_identity)
         .and_return(double(dkim_attributes: dkim_attributes(status: 'PENDING', tokens: tokens)))
       allow(client).to receive(:put_email_identity_mail_from_attributes)
-
-      dns = instance_double(Resolv::DNS)
-      allow(Resolv::DNS).to receive(:open).and_yield(dns)
-      allow(dns).to receive(:getresources).and_return([mx])
+      allow(Dns::Lookup).to receive(:resolve!).and_return(['mail.someoneelse.example'])
     end
 
     it 'refuses to claim the subdomain' do
@@ -154,7 +147,7 @@ RSpec.describe Ses::IdentityManager do
     end
 
     it 'treats a failed DNS lookup as occupied rather than assuming it is free' do
-      allow(Resolv::DNS).to receive(:open).and_raise(Resolv::ResolvError)
+      allow(Dns::Lookup).to receive(:resolve!).and_raise(Resolv::ResolvError)
       expect(client).not_to receive(:put_email_identity_mail_from_attributes)
 
       described_class.new(domain, client: client).create_identity!

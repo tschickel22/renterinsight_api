@@ -66,12 +66,7 @@ module DomainConnect
     end
 
     def settings_host
-      Resolv::DNS.open(timeouts: DNS_TIMEOUT) do |dns|
-        records = dns.getresources("_domainconnect.#{@domain}", Resolv::DNS::Resource::IN::TXT)
-        records.map { |r| r.strings.join }.find(&:present?)
-      end
-    rescue Resolv::ResolvError, Resolv::ResolvTimeout
-      nil
+      Dns::Lookup.txt("_domainconnect.#{@domain}", timeout: DNS_TIMEOUT).find(&:present?)
     end
 
     def fetch_settings(host)

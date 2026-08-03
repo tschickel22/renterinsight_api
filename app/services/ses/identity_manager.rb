@@ -154,10 +154,9 @@ module Ses
     end
 
     def subdomain_already_receives_mail?
-      require 'resolv'
-      Resolv::DNS.open(timeouts: 3) do |dns|
-        dns.getresources(mail_from_domain, Resolv::DNS::Resource::IN::MX).any?
-      end
+      # resolve! rather than the forgiving wrapper: an unanswered query is not the same as a
+      # free name, and treating it as free is how we would overwrite a tenant's MX.
+      Dns::Lookup.resolve!(mail_from_domain, Resolv::DNS::Resource::IN::MX) { |r| r.exchange.to_s }.any?
     rescue StandardError => e
       # An unresolvable lookup must not read as "safe to overwrite". Treat it as occupied
       # so the worst case is a weaker MAIL FROM, never a broken inbound mail flow.
