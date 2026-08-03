@@ -163,7 +163,7 @@ GMAIL_RELAY_PASSWORD=your_app_password
 AWS_SES_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your_access_key
 AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_SES_CONFIGURATION_SET=platform-dms-emails
+AWS_SES_CONFIGURATION_SET=platform-email-events
 
 # Twilio Configuration (for SMS)
 TWILIO_ACCOUNT_SID=your_account_sid

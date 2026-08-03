@@ -103,7 +103,14 @@ class AwsSesDelivery
     "#{error.code} #{error.message}".match?(/ConfigurationSetDoesNotExist|Configuration set .* does not exist/i)
   end
 
+  # Ses::ConfigurationSet is the single resolver for this name, and it accepts both variable
+  # spellings that have been documented over time. Guarded with defined? because this file
+  # is required directly rather than autoloaded, so it has to stay usable if the app's
+  # constants are not loaded.
   def configuration_set
-    settings[:configuration_set].presence || ENV['SES_CONFIGURATION_SET'].presence
+    return settings[:configuration_set] if settings[:configuration_set].present?
+    return Ses::ConfigurationSet.current if defined?(Ses::ConfigurationSet)
+
+    ENV['SES_CONFIGURATION_SET'].presence || ENV['AWS_SES_CONFIGURATION_SET'].presence
   end
 end

@@ -98,12 +98,25 @@ RSpec.describe AwsSesDelivery do
     end
   end
 
-  it 'omits the header when no configuration set is configured' do
+  # Tagging is unconditional now that Ses::ConfigurationSet supplies a default name. An
+  # untagged send is one SES will never report a bounce for, and the cost of tagging before
+  # the set is provisioned is the retry covered above, not a lost message.
+  it 'falls back to the resolved default when no configuration set is passed' do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with('SES_CONFIGURATION_SET').and_return(nil)
+    allow(ENV).to receive(:[]).with('AWS_SES_CONFIGURATION_SET').and_return(nil)
 
     described_class.new(settings).deliver!(mail)
 
-    expect(mail['X-SES-CONFIGURATION-SET']).to be_nil
+    expect(mail['X-SES-CONFIGURATION-SET'].to_s).to eq(Ses::ConfigurationSet::DEFAULT)
+  end
+
+  it 'uses the configured name over the default' do
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with('SES_CONFIGURATION_SET').and_return('configured-set')
+
+    described_class.new(settings).deliver!(mail)
+
+    expect(mail['X-SES-CONFIGURATION-SET'].to_s).to eq('configured-set')
   end
 end
