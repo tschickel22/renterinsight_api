@@ -56,6 +56,46 @@ RSpec.describe Websites::SpaShell do
     expect(described_class.fetch).to include('src="https://spa.example.com/assets/index-abc.js"')
   end
 
+  describe 'redirects' do
+    # A host redirecting to its canonical name is ordinary Netlify behaviour between domain
+    # aliases. Treating the 301 as unavailable took every dealer site down with "Site
+    # temporarily unavailable" over an origin that was working fine.
+    def stub_chain(steps)
+      calls = 0
+      allow(Net::HTTP).to receive(:start) do |*_args, &blk|
+        step = steps[calls] || steps.last
+        calls += 1
+        response = step[:status].new('1.1', '200', 'OK')
+        allow(response).to receive(:body).and_return(step[:body].to_s)
+        allow(response).to receive(:[]).with('Location').and_return(step[:location])
+        http = instance_double(Net::HTTP)
+        allow(http).to receive(:get).and_return(response)
+        blk.call(http)
+      end
+    end
+
+    it 'follows a redirect to the canonical host' do
+      stub_chain([
+        { status: Net::HTTPMovedPermanently, location: 'https://canonical.example.com/' },
+        { status: Net::HTTPOK, body: '<script src="/assets/a.js"></script>' }
+      ])
+
+      expect(described_class.fetch).to include('src="https://canonical.example.com/assets/a.js"')
+    end
+
+    it 'gives up rather than looping forever' do
+      stub_chain(Array.new(5) { { status: Net::HTTPMovedPermanently, location: 'https://a.example.com/' } })
+
+      expect { described_class.fetch }.to raise_error(described_class::ShellUnavailable, /too many/i)
+    end
+
+    it 'refuses to downgrade to http' do
+      stub_chain([{ status: Net::HTTPMovedPermanently, location: 'http://insecure.example.com/' }])
+
+      expect { described_class.fetch }.to raise_error(described_class::ShellUnavailable, /http/)
+    end
+  end
+
   it 'raises ShellUnavailable when the origin errors' do
     stub_origin(body: 'boom', status: Net::HTTPInternalServerError)
 

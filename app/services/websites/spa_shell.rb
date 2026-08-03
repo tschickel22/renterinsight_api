@@ -53,21 +53,44 @@ module Websites
 
     private
 
+    MAX_REDIRECTS = 3
+
     def download
-      uri = URI.parse(origin)
+      final_uri, response = get_following_redirects(URI.parse(origin))
+
+      raise ShellUnavailable, "SPA origin returned #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+
+      # Assets resolve against wherever the shell actually came from, not where we started.
+      # A host that redirects to its canonical name would otherwise have its asset paths
+      # rewritten to a hostname that only redirects.
+      base = "#{final_uri.scheme}://#{final_uri.host}"
+      base += ":#{final_uri.port}" unless final_uri.port == final_uri.default_port
+
+      self.class.absolutize(utf8(response.body), base)
+    rescue ShellUnavailable
+      raise
+    rescue StandardError => e
+      raise ShellUnavailable, "Could not fetch SPA shell: #{e.message}"
+    end
+
+    # Follows redirects, because a host redirecting to its canonical name is ordinary
+    # Netlify behaviour between domain aliases. Treating a 301 as unavailable took every
+    # dealer site down with "Site temporarily unavailable" over a working origin.
+    def get_following_redirects(uri, remaining = MAX_REDIRECTS)
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https',
                                                      open_timeout: HTTP_TIMEOUT,
                                                      read_timeout: HTTP_TIMEOUT) do |http|
         http.get(uri.path.presence || '/')
       end
 
-      raise ShellUnavailable, "SPA origin returned #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+      return [uri, response] unless response.is_a?(Net::HTTPRedirection)
+      raise ShellUnavailable, 'SPA origin redirected too many times' if remaining.zero?
 
-      self.class.absolutize(utf8(response.body), origin.chomp('/'))
-    rescue ShellUnavailable
-      raise
-    rescue StandardError => e
-      raise ShellUnavailable, "Could not fetch SPA shell: #{e.message}"
+      location = URI.join(uri, response['Location'].to_s)
+      # Never downgrade to plain http chasing a redirect.
+      raise ShellUnavailable, "SPA origin redirected to #{location.scheme}" unless location.scheme == 'https'
+
+      get_following_redirects(location, remaining - 1)
     end
 
     # Net::HTTP hands back ASCII-8BIT unless the response declares a charset it recognises.
