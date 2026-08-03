@@ -137,6 +137,64 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
     end
   end
 
+  describe 'assigning a website to a domain' do
+    let(:location) { company.locations.create!(name: 'Showroom') }
+    let!(:site) do
+      Website.create!(company_id: company.id, location_id: location.id, name: 'Dealer Site',
+                      slug: "s-#{SecureRandom.hex(4)}", status: 'published')
+    end
+    let!(:domain) { company.company_domains.create!(hostname: 'dealer.example', web_enabled: true) }
+
+    it 'offers this company\'s websites to choose from' do
+      get '/api/v1/company-domains', headers: auth_headers
+
+      names = JSON.parse(response.body)['available_websites'].map { |w| w['id'] }
+      expect(names).to include(site.id)
+    end
+
+    it 'assigns the website' do
+      patch "/api/v1/company-domains/#{domain.id}",
+            params: { website_id: site.id }.to_json, headers: auth_headers
+
+      expect(response).to have_http_status(:ok)
+      expect(domain.reload.website_id).to eq(site.id)
+    end
+
+    it 'allows clearing the assignment' do
+      domain.update!(website_id: site.id)
+
+      patch "/api/v1/company-domains/#{domain.id}",
+            params: { website_id: '' }.to_json, headers: auth_headers
+
+      expect(domain.reload.website_id).to be_nil
+    end
+
+    # Tenant isolation: a website id is attacker-controlled input, so it is looked up
+    # scoped to the company rather than taken on trust.
+    it 'refuses a website belonging to another company' do
+      other = Company.create!(name: "Other-#{SecureRandom.hex(4)}")
+      foreign = Website.create!(company_id: other.id, location_id: other.locations.create!(name: 'L').id,
+                                name: 'Theirs', slug: "o-#{SecureRandom.hex(4)}", status: 'published')
+
+      patch "/api/v1/company-domains/#{domain.id}",
+            params: { website_id: foreign.id }.to_json, headers: auth_headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(domain.reload.website_id).to be_nil
+    end
+
+    it 'does not offer another company\'s websites' do
+      other = Company.create!(name: "Other-#{SecureRandom.hex(4)}")
+      foreign = Website.create!(company_id: other.id, location_id: other.locations.create!(name: 'L').id,
+                                name: 'Theirs', slug: "o-#{SecureRandom.hex(4)}", status: 'published')
+
+      get '/api/v1/company-domains', headers: auth_headers
+
+      ids = JSON.parse(response.body)['available_websites'].map { |w| w['id'] }
+      expect(ids).not_to include(foreign.id)
+    end
+  end
+
   describe 'DELETE /api/v1/company-domains/:id' do
     # One record serves the website and email independently. Destroying it outright took a
     # verified sending domain with it, which happened for real on staging: removing what

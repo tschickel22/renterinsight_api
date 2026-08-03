@@ -16,7 +16,11 @@ class Api::V1::CompanyDomainsController < ApplicationController
     
     render json: {
       domains: domains.map { |domain| domain_json(domain) },
-      cloudflare_enabled: cloudflare_enabled?
+      cloudflare_enabled: cloudflare_enabled?,
+      # A domain has to be told which site it serves. Without this the picker has nothing to
+      # offer and every domain arrives unlinked, serving the platform root instead of the
+      # dealer's site.
+      available_websites: assignable_websites
     }
   end
   
@@ -62,10 +66,18 @@ class Api::V1::CompanyDomainsController < ApplicationController
       }, status: :unprocessable_entity
     end
 
+    # Scoped lookup, so a website id from the request can only ever resolve to this
+    # company's own site.
+    website_id = params[:website_id].presence
+    if website_id.present? && !@company.websites.exists?(id: website_id)
+      return render json: { error: 'That website does not belong to this company' },
+                    status: :unprocessable_entity
+    end
+
     # Create domain record
     domain = @company.company_domains.build(
       hostname: hostname,
-      website_id: params[:website_id],
+      website_id: website_id,
       force_ssl: params[:force_ssl] != false,
       force_www: params[:force_www] || false,
       redirect_type: params[:redirect_type] || 'none',
@@ -139,8 +151,20 @@ class Api::V1::CompanyDomainsController < ApplicationController
   def update
     return unless authorize_action!('company_settings', 'update')
     
-    update_params = params.permit(:force_ssl, :force_www, :redirect_type)
-    
+    update_params = params.permit(:force_ssl, :force_www, :redirect_type, :website_id)
+
+    # Never take a website id on trust. Scoping the lookup to the company is what stops a
+    # domain being pointed at another tenant's site by guessing an id.
+    if update_params.key?(:website_id)
+      website_id = update_params[:website_id].presence
+      if website_id.present? && !@company.websites.exists?(id: website_id)
+        return render json: { error: 'That website does not belong to this company' },
+                      status: :unprocessable_entity
+      end
+
+      update_params[:website_id] = website_id
+    end
+
     if @domain.update(update_params)
       render json: { 
         domain: domain_json(@domain),
@@ -501,6 +525,19 @@ class Api::V1::CompanyDomainsController < ApplicationController
 
   # Only while something still needs publishing. The lookup costs a DNS query and is noise
   # once a domain is finished.
+  # Scoped to the company, so a domain can never be pointed at another tenant's site.
+  # Drafts are offered too: dealers routinely wire up the address before publishing, and
+  # HostResolver refuses to serve an unpublished site anyway.
+  def assignable_websites
+    @company.websites
+            .where(is_deleted: [false, nil])
+            .order(:name)
+            .map { |w| { id: w.id, name: w.name, slug: w.slug, status: w.status, published: w.status == 'published' } }
+  rescue StandardError => e
+    Rails.logger.error "[CompanyDomains] Could not list websites: #{e.message}"
+    []
+  end
+
   def domain_needs_dns_help?(domain)
     (domain.email_enabled? && !domain.email_verified?) ||
       (domain.web_enabled? && !domain.ready_for_use?)
@@ -550,6 +587,12 @@ class Api::V1::CompanyDomainsController < ApplicationController
       ready_for_use: domain.ready_for_use?,
       
       # DNS configuration
+      # Which site this address serves. Null means the domain resolves but has nothing to
+      # show, which surfaces as the platform root rather than as an error.
+      website_id: domain.website_id,
+      website_name: domain.website&.name,
+      website_published: domain.website&.status == 'published',
+
       cname_target: domain.cname_target,
       verification_records: domain.dns_records_for_display,
       # Ownership records plus the CNAME that actually routes traffic. The latter is our
