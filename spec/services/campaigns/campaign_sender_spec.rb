@@ -71,6 +71,58 @@ RSpec.describe Campaigns::CampaignSender do
       expect(enrollment.failure_reason).to eq('no_valid_email_connection')
     end
 
+    # 18:05 Eastern, five minutes past the default business-hours end. This is the exact
+    # shape that made every evening test send report itself as a broken email connection.
+    describe 'send window' do
+      let(:after_hours) { Time.utc(2026, 8, 3, 22, 5) }
+
+      before { email_campaign.update!(send_window: { 'business_hours_only' => true }) }
+
+      it 'defers a real send that falls outside the window' do
+        enrollment = make_email_enrollment(email_campaign)
+
+        result = travel_to(after_hours) { described_class.new(enrollment: enrollment).deliver_current_step }
+
+        expect(result).to be false
+        expect(enrollment.reload.next_send_at).to be_present
+        expect(CampaignSend.where(campaign_enrollment_id: enrollment.id).count).to eq(0)
+      end
+
+      # A test send goes to the admin who pressed the button, so the window protects nobody.
+      # It could not even defer it: reschedule_to is a no-op for test sends, so the send was
+      # simply dropped.
+      it 'sends a test send anyway' do
+        enrollment = make_email_enrollment(email_campaign)
+        enrollment.update!(metadata: { 'test_send' => 'true' })
+
+        result = travel_to(after_hours) { described_class.new(enrollment: enrollment).deliver_current_step }
+
+        expect(result).to be true
+        expect(CampaignSend.where(campaign_enrollment_id: enrollment.id).count).to eq(1)
+      end
+    end
+
+    describe '#last_skip_reason' do
+      it 'names the guard that declined, since a test send records nothing anywhere' do
+        enrollment = make_email_enrollment(email_campaign)
+        enrollment.update!(metadata: { 'test_send' => 'true' })
+        user_email_conn.update!(is_active: false)
+
+        sender = described_class.new(enrollment: enrollment)
+        sender.deliver_current_step
+
+        expect(enrollment.reload.failure_reason).to be_blank
+        expect(sender.last_skip_reason).to eq('no_valid_email_connection')
+      end
+
+      it 'is nil on a successful send' do
+        sender = described_class.new(enrollment: make_email_enrollment(email_campaign))
+        sender.deliver_current_step
+
+        expect(sender.last_skip_reason).to be_nil
+      end
+    end
+
     it 'unsubscribes when contact value is suppressed' do
       enrollment = make_email_enrollment(email_campaign)
       CampaignSuppression.create!(company_id: company.id, email_address: lead.email, reason: 'unsubscribe')
