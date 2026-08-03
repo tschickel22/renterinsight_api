@@ -26,7 +26,11 @@ module Public
     # trickle rather than the full firehose.
     BROWSER_MAX_AGE = 1.minute.to_i
     EDGE_MAX_AGE = 5.minutes.to_i
-    STALE_WHILE_REVALIDATE = 1.day.to_i
+    # Was a day. The page references content-hashed asset filenames, so serving a stale copy
+    # after a frontend deploy points visitors at assets that no longer exist and the page
+    # renders blank. A day of that is not a trade worth making for origin protection, and
+    # revalidating every couple of minutes still absorbs almost all traffic.
+    STALE_WHILE_REVALIDATE = 2.minutes.to_i
     CRAWLER_FILE_EDGE_MAX_AGE = 1.hour.to_i
 
     before_action :resolve_site
@@ -227,7 +231,37 @@ module Public
 
       # Before the app's own scripts, so the payload exists by the time it boots and it
       # never has to render an empty frame first.
-      doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
+      doc.sub(%r{</head>}i) { "#{site_payload_tag}\n#{stale_shell_recovery_tag}\n</head>" }
+    end
+
+    # Reloads once if the app never mounts.
+    #
+    # The shell references content-hashed asset filenames. A frontend deploy makes the
+    # previous ones 404, the host serves index.html in their place, and the browser refuses
+    # an HTML response for a module script — leaving a dealer with a blank page until the
+    # caches turn over. Short TTLs narrow that window but cannot close it, because the
+    # response was already cached before the deploy happened.
+    #
+    # A single guarded reload turns a blank page into a brief flash. sessionStorage guards
+    # it: if the reload does not help, the second attempt renders nothing rather than
+    # looping, which is the same outcome but without hammering the origin.
+    def stale_shell_recovery_tag
+      <<~SCRIPT.html_safe # rubocop:disable Rails/OutputSafety
+        <script>
+        (function () {
+          var KEY = 'dt-shell-retry';
+          window.addEventListener('load', function () {
+            setTimeout(function () {
+              var root = document.getElementById('root');
+              if (root && root.childElementCount > 0) { sessionStorage.removeItem(KEY); return; }
+              if (sessionStorage.getItem(KEY)) return;
+              sessionStorage.setItem(KEY, '1');
+              location.reload();
+            }, 4000);
+          });
+        })();
+        </script>
+      SCRIPT
     end
 
     # The site's content, embedded so the app can render it without a second round trip and

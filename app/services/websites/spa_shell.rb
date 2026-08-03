@@ -15,7 +15,11 @@ module Websites
   # and the underlying document only changes on a frontend deploy.
   class SpaShell
     CACHE_KEY = 'websites:spa_shell'
-    CACHE_TTL = 10.minutes
+    # Deliberately short. The shell references content-hashed asset filenames, and a
+    # frontend deploy makes the previous ones 404 immediately — Netlify then serves
+    # index.html for them, and the browser refuses an HTML response for a module script.
+    # Every second this is cached past a deploy is a second of blank dealer pages.
+    CACHE_TTL = 1.minute
     HTTP_TIMEOUT = 5
 
     class ShellUnavailable < StandardError; end

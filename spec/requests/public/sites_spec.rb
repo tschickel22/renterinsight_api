@@ -144,6 +144,25 @@ RSpec.describe 'Public::Sites', type: :request do
     end
   end
 
+  # The shell references content-hashed asset filenames. A frontend deploy makes the
+  # previous ones 404, the host serves index.html for them, and the browser refuses an HTML
+  # response for a module script — a blank page until caches turn over.
+  describe 'stale shell recovery' do
+    it 'reloads once if the app never mounts' do
+      get_site('/about')
+
+      expect(response.body).to include('dt-shell-retry')
+      expect(response.body).to include('location.reload()')
+    end
+
+    it 'guards the retry so a persistent failure cannot loop' do
+      get_site('/about')
+
+      expect(response.body).to include("sessionStorage.getItem(KEY)")
+      expect(response.body).to include("sessionStorage.setItem(KEY, '1')")
+    end
+  end
+
   describe 'crawler directives' do
     it 'serves robots.txt pointing at the dealers own sitemap' do
       get_site('/robots.txt')
