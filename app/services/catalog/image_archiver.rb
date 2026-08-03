@@ -53,10 +53,25 @@ module Catalog
 
     attr_reader :result
 
+    # Catalog imagery gets its OWN bucket, set by CATALOG_ASSETS_BUCKET.
+    #
+    # It cannot simply follow AWS_S3_BUCKET, because that is deliberately still
+    # pointed at the website-assets STAGING bucket in production — customer
+    # uploads and document conversions live there and work, and moving them is
+    # not part of turning archiving on. So the two have to be able to differ:
+    # repointing AWS_S3_BUCKET would drag every existing upload path along with
+    # it, and leaving archiving on AWS_S3_BUCKET would put permanent listing
+    # imagery in a bucket named "staging" (which #misconfigured_bucket? refuses,
+    # correctly).
+    #
+    # Unset, this falls back to the old behaviour, so nothing changes until the
+    # bucket exists and the var is set.
+    ENV_BUCKET = 'CATALOG_ASSETS_BUCKET'
+
     def initialize(crawl_delay: DEFAULT_DELAY, folder: FOLDER, uploader: nil)
       @crawl_delay = crawl_delay.to_i
       @folder      = folder
-      @uploader    = uploader || S3UploadService.new
+      @uploader    = uploader || S3UploadService.new(bucket: ENV[ENV_BUCKET].presence)
       @result      = Result.new(archived: 0, reused: 0, failed: 0, skipped: 0, rate_limited: false)
       @consecutive_rate_limits = 0
     end
@@ -76,8 +91,9 @@ module Catalog
 
     def bucket_warning
       "Refusing to archive: production is pointed at #{@uploader.bucket_name.inspect}. " \
-        'Set AWS_S3_BUCKET to the production bucket first — archived URLs are stored ' \
-        'on every vehicle, so this is not something a later env change can undo.'
+        "Set #{ENV_BUCKET} to the production catalog bucket first — archived URLs are " \
+        'stored on every vehicle, so this is not something a later env change can undo. ' \
+        'Leave AWS_S3_BUCKET alone; customer uploads still use it.'
     end
 
     # @param images [Array<Hash>] NormalizedHome image records

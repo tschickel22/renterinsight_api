@@ -174,6 +174,38 @@ RSpec.describe Catalog::ImageArchiver do
     expect(archiver.archive([image(photo)]).first['local_url']).to be_present
   end
 
+  # Customer uploads and document conversions run off AWS_S3_BUCKET and work
+  # today; turning catalog archiving on must not move them. So the archiver
+  # takes its bucket from CATALOG_ASSETS_BUCKET and every other upload path is
+  # left pointing wherever it already points.
+  describe 'bucket selection' do
+    around do |example|
+      original = ENV.fetch(described_class::ENV_BUCKET, nil)
+      example.run
+      ENV[described_class::ENV_BUCKET] = original
+    end
+
+    it 'uses CATALOG_ASSETS_BUCKET when set' do
+      ENV[described_class::ENV_BUCKET] = 'dt-catalog-assets-production'
+      expect(S3UploadService).to receive(:new).with(bucket: 'dt-catalog-assets-production')
+                                              .and_return(uploader)
+      described_class.new
+    end
+
+    it 'falls back to the service default when unset, changing nothing' do
+      ENV[described_class::ENV_BUCKET] = nil
+      expect(S3UploadService).to receive(:new).with(bucket: nil).and_return(uploader)
+      described_class.new
+    end
+
+    it 'leaves other upload paths on AWS_S3_BUCKET' do
+      ENV[described_class::ENV_BUCKET] = 'dt-catalog-assets-production'
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('AWS_S3_BUCKET').and_return('renterinsight-website-assets-staging')
+      expect(S3UploadService.new.bucket_name).to eq 'renterinsight-website-assets-staging'
+    end
+  end
+
   # Manufacturer sites answer 200 with a placeholder rather than 404 when an
   # image is missing. Kabco returned 348-byte PNGs for two of the first three
   # we archived, alongside a genuine 698 KB one.
