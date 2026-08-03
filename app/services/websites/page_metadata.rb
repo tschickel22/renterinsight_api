@@ -87,8 +87,13 @@ module Websites
       nil
     end
 
+    # Content authored in the builder already carries HTML entities, and these values are
+    # escaped again on the way into the tag. Without unescaping first, an ampersand ships as
+    # "&amp;amp;" and a dealer's description reads "manufactured &amp; modular homes" in
+    # search results.
     def strip_markup(text)
-      ActionController::Base.helpers.strip_tags(text.to_s).squish
+      stripped = ActionController::Base.helpers.strip_tags(text.to_s)
+      CGI.unescapeHTML(stripped).squish
     end
 
     def canonical_url

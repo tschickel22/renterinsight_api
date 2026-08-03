@@ -525,12 +525,17 @@ class Api::V1::CompanyDomainsController < ApplicationController
 
   # Only while something still needs publishing. The lookup costs a DNS query and is noise
   # once a domain is finished.
-  # Scoped to the company, so a domain can never be pointed at another tenant's site.
+  # Scoped to the company, so a domain can never be pointed at another tenant's site, and
+  # to the selected location so this list matches what the website builder shows. Without
+  # the location scope the picker offered sites from every location, which reads as another
+  # tenant's data leaking in even though it never was.
+  #
   # Drafts are offered too: dealers routinely wire up the address before publishing, and
   # HostResolver refuses to serve an unpublished site anyway.
   def assignable_websites
     @company.websites
             .where(is_deleted: [false, nil])
+            .for_current_location
             .order(:name)
             .map { |w| { id: w.id, name: w.name, slug: w.slug, status: w.status, published: w.status == 'published' } }
   rescue StandardError => e
