@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_02_160000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_03_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2033,6 +2033,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_02_160000) do
     t.datetime "email_verified_at"
     t.datetime "ses_checked_at"
     t.string "ses_error"
+    t.boolean "web_enabled", default: false, null: false
     t.index ["cloudflare_custom_hostname_id"], name: "index_company_domains_on_cloudflare_custom_hostname_id"
     t.index ["company_id", "active"], name: "index_company_domains_on_company_id_and_active"
     t.index ["company_id", "hostname"], name: "idx_company_domains_email_sending", where: "(email_enabled = true)"

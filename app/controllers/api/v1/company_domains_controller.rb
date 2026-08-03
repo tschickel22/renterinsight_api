@@ -69,7 +69,8 @@ class Api::V1::CompanyDomainsController < ApplicationController
       force_ssl: params[:force_ssl] != false,
       force_www: params[:force_www] || false,
       redirect_type: params[:redirect_type] || 'none',
-      verification_status: 'pending'
+      verification_status: 'pending',
+      web_enabled: wants_web
     )
 
     unless domain.save
@@ -428,6 +429,10 @@ class Api::V1::CompanyDomainsController < ApplicationController
       
       # Status
       active: domain.active,
+      # Whether this domain is used for website hosting. A domain added only for sending
+      # email has never been through Cloudflare, so showing it in the website list leaves
+      # it stuck on "DNS Verification Pending" forever.
+      web_enabled: domain.web_enabled,
       verification_status: domain.verification_status,
       ssl_status: domain.ssl_status,
       ready_for_use: domain.ready_for_use?,
