@@ -30,6 +30,9 @@ module Messaging
         logo_url:        raw['logo'].presence,
         primary_color:   raw['primaryColor'].presence   || PLATFORM_PRIMARY,
         secondary_color: raw['secondaryColor'].presence || PLATFORM_SECONDARY,
+        # Set only by tenants whose logo is drawn for a dark background. Left nil, the email
+        # header renders on BlockRenderer::DEFAULT_HEADER_BACKGROUND.
+        header_background: raw['emailHeaderBackground'].presence,
         name:            name,
         phone:           phone,
         address:         address

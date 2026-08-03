@@ -65,7 +65,57 @@ RSpec.describe Messaging::BlockRenderer do
       blocks = [{ 'type' => 'branded_header' }, { 'type' => 'text', 'html' => '<p>Body</p>' }]
       out = described_class.new(blocks: blocks, context: context, company: company, unsubscribe_url: 'https://u', branding: {}).render
       expect(out).to include('Body')
-      expect(out).not_to include('background:#1f2937')
+      expect(out).not_to include('padding:20px 24px')
+    end
+
+    def header_for(branding_hash)
+      described_class.new(blocks: [{ 'type' => 'branded_header' }], context: context, company: company,
+                          unsubscribe_url: 'https://u', branding: branding_hash).render
+    end
+
+    # The band was hardcoded dark, which assumed every dealer's logo was drawn in white. A
+    # dark navy wordmark rendered as an empty band.
+    it 'defaults to a light band, since dealer logos are drawn for white website headers' do
+      out = header_for(branding)
+
+      expect(out).to include('background:#ffffff')
+      expect(out).to include('color:#111827') # phone, dark on light
+    end
+
+    it 'honours a tenant who has configured a dark band and flips the text to match' do
+      out = header_for(branding.merge(header_background: '#1f2937'))
+
+      expect(out).to include('background:#1f2937')
+      expect(out).to include('color:#ffffff')
+      expect(out).not_to include('color:#111827')
+    end
+
+    # An unparseable colour reaches the style attribute and gets dropped by the mail client,
+    # leaving a transparent band with text picked for a colour nobody can see.
+    it 'ignores a background that is not a colour' do
+      out = header_for(branding.merge(header_background: 'rgba(0,0,0,0.4)'))
+
+      expect(out).to include('background:#ffffff')
+      expect(out).not_to include('rgba')
+    end
+
+    it 'accepts shorthand hex' do
+      out = header_for(branding.merge(header_background: '#123'))
+
+      expect(out).to include('background:#123')
+      expect(out).to include('color:#ffffff')
+    end
+
+    # A white brand colour on the default white band is a 5px bar that is not there.
+    it 'substitutes an accent colour that would vanish into the band' do
+      out = header_for(branding.merge(primary_color: '#fefefe'))
+
+      expect(out).not_to include('background:#fefefe')
+      expect(out).to include('background:#111827')
+    end
+
+    it 'keeps a brand colour that contrasts with the band' do
+      expect(header_for(branding)).to include('background:#00aa55')
     end
   end
 
