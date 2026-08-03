@@ -195,6 +195,45 @@ RSpec.describe Catalog::Adapters::ManufacturedHomesPlatformAdapter do
       expect(home.virtual_tour_url).to include('ZzFt31RGVjL')
     end
 
+    # The platform tags each home with a "Manufactured"/"Modular" pill. Scanning
+    # the whole page text instead matched the site's own nav links
+    # ("Manufactured Homes", "Modular Homes") on every page, so every home came
+    # back as BOTH types.
+    describe 'property type' do
+      let(:nav) do
+        <<~HTML
+          <nav class="elementor-nav-menu">
+            <a href="/manufactured-homes/">Manufactured Homes</a>
+            <a href="/modular-homes/">Modular Homes</a>
+          </nav>
+        HTML
+      end
+
+      def type_for(body)
+        tc_adapter.parse(key: '231596', url: 'https://x/',
+                         html: "<html><body>#{nav}#{body}</body></html>", card: {}).property_type
+      end
+
+      it 'reads the tag pill and ignores the nav' do
+        expect(type_for('<span class="label">Manufactured</span>')).to eq ['Manufactured']
+      end
+
+      it 'keeps both when a home genuinely carries both tags' do
+        expect(type_for('<div class="tags"><li class="tag">Manufactured</li>' \
+                        '<li class="tag">Modular</li></div>'))
+          .to contain_exactly('Manufactured', 'Modular')
+      end
+
+      it 'strips the nav before falling back to a text scan' do
+        expect(type_for('<p>This modular home sleeps six.</p>')).to eq ['Modular']
+      end
+
+      it 'ignores tags that are not a property type' do
+        expect(type_for('<span class="label">New</span><span class="label">Modular</span>'))
+          .to eq ['Modular']
+      end
+    end
+
     describe 'images' do
       let(:urls) { home.images.map { |i| i['source_url'] } }
 

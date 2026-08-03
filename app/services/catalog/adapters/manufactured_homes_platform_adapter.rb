@@ -304,10 +304,30 @@ module Catalog
           extract_spec(doc, card, %w[series collection])
       end
 
+      PROPERTY_TYPE_RE = /\A(manufactured|modular)\z/i
+      # Chrome that mentions both types on every page regardless of the home.
+      CHROME_SELECTOR  = 'nav, header, footer, .elementor-nav-menu, .menu, [class*="nav-menu"]'
+
+      # The platform tags each home explicitly — a .tag/.label pill reading
+      # "Manufactured" or "Modular" — and that is the only trustworthy source.
+      #
+      # This used to scan the whole page text for either word, which matched the
+      # site's own nav ("Manufactured Homes", "Modular Homes") on every single
+      # page. Every home came back as BOTH types, on Timber Creek and Sunshine
+      # alike. The fallback keeps the text scan for a site with no pills, but
+      # strips the nav first so it cannot make the same mistake.
       def extract_property_type(doc, _card)
         return [] if doc.nil?
 
-        doc.text.scan(/\b(manufactured|modular)\b/i).flatten.map(&:capitalize).uniq
+        tagged = doc.css('.tags li, .tags .tag, .fp-card-tags li, .label, .tag')
+                    .map { |n| n.text.to_s.strip }
+                    .select { |t| t.match?(PROPERTY_TYPE_RE) }
+                    .map(&:capitalize).uniq
+        return tagged if tagged.any?
+
+        body = doc.dup
+        body.css(CHROME_SELECTOR).remove
+        body.text.scan(/\b(manufactured|modular)\b/i).flatten.map(&:capitalize).uniq
       end
 
       # Specs render as value-then-label on this platform ("4 Beds", "2.00 Baths",

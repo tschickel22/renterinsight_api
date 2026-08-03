@@ -5,9 +5,8 @@
 # sources are platform-level config, so there is no set_company_scope and
 # company_id is never permitted in params.
 class Api::Admin::CatalogSourcesController < ApplicationController
-  # A run still "running" after this long is presumed dead (the in-Puma worker
-  # was killed mid-crawl) — it no longer blocks new runs and gets reaped.
-  RUN_STALE_AFTER = 30.minutes
+  # Staleness lives on ScrapeRun (ScrapeRun::STALE_AFTER) so the nightly sweep
+  # and the subscription path reap too, not only this controller.
 
   before_action :require_platform_admin
   before_action :set_source, only: %i[show update destroy test run_now runs seed_inventory]
@@ -33,6 +32,11 @@ class Api::Admin::CatalogSourcesController < ApplicationController
 
   # GET /api/v1/admin/catalog_sources
   def index
+    # Un-stick sources whose run was killed by a deploy, so the list stops
+    # reporting a crawl that no worker is running. Cheap: a no-op unless a row
+    # is genuinely past STALE_AFTER.
+    ScrapeRun.reap_stale!
+
     sources = CatalogSource.active.order(:name)
     sources = sources.where(adapter_type: params[:adapter_type]) if params[:adapter_type].present?
 
@@ -488,15 +492,10 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # Mark long-stuck "running" runs as failed so they don't block new runs or show
   # as perpetually running. (A crawl runs in-Puma and can be killed mid-flight by
   # a deploy/restart, leaving the row never finalized.)
+  # Reaping lives on ScrapeRun so every reader benefits, not just this button.
   def reap_stale_runs!
-    stale = @source.scrape_runs.where(status: 'running').where(started_at: ..RUN_STALE_AFTER.ago).to_a
-    return if stale.empty?
-
-    stale.each do |run|
-      run.update!(status: 'failed', finished_at: Time.current,
-                  error_log: [{ 'message' => 'Run did not finish (worker stopped) — marked stale' }])
-    end
-    @source.update_columns(last_run_status: 'failed') if @source.last_run_status == 'running'
+    ScrapeRun.reap_stale!(@source.scrape_runs)
+    @source.reload
   end
 
   def set_source
