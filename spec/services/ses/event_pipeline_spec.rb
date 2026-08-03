@@ -68,6 +68,10 @@ RSpec.describe Ses::EventPipeline do
   describe '#provision!' do
     before do
       allow(ses).to receive(:create_configuration_set)
+      # Default: nothing configured yet. Examples that model a pre-existing destination
+      # override this.
+      allow(ses).to receive(:get_configuration_set_event_destinations)
+        .and_return(double(event_destinations: []))
       allow(ses).to receive(:create_configuration_set_event_destination)
       allow(sns).to receive(:create_topic).and_return(double(topic_arn: topic_arn))
       allow(sns).to receive(:get_topic_attributes).and_return(double(attributes: {}))
@@ -196,6 +200,28 @@ RSpec.describe Ses::EventPipeline do
         hash_including(event_destination: hash_including(sns_destination: { topic_arn: topic_arn }))
       )
     end
+
+    # These configuration sets were built by hand before this code existed and their SNS
+    # destination is called "sns-events". Creating our own name alongside it would leave two
+    # SNS destinations on the set, and SES publishes every event once per destination.
+    it 'adopts the name of a hand-built SNS destination instead of adding a second one' do
+      allow(ses).to receive(:get_configuration_set_event_destinations).and_return(
+        double(event_destinations: [
+                 double(name: 'sns-events', enabled: true,
+                        matching_event_types: %w[BOUNCE COMPLAINT DELIVERY],
+                        sns_destination: double(topic_arn: 'arn:aws:sns:us-west-2:123456789012:old-topic'))
+               ])
+      )
+      allow(ses).to receive(:update_configuration_set_event_destination)
+      allow(ses).to receive(:create_configuration_set_event_destination)
+        .and_raise(Aws::SESV2::Errors::AlreadyExistsException.new(nil, 'exists'))
+
+      report = pipeline.provision!
+
+      expect(report[:event_destination][:name]).to eq('sns-events')
+      expect(ses).to have_received(:update_configuration_set_event_destination)
+        .with(hash_including(event_destination_name: 'sns-events'))
+    end
   end
 
   describe '#status' do
@@ -233,6 +259,21 @@ RSpec.describe Ses::EventPipeline do
 
       expect(status[:configuration_set_exists]).to eq(:unknown)
       expect(status[:errors]).to include(/not authorized/)
+    end
+
+    it 'flags a set carrying two SNS destinations, which double-publishes every event' do
+      allow(ses).to receive(:get_configuration_set)
+      allow(ses).to receive(:get_configuration_set_event_destinations).and_return(
+        double(event_destinations: [
+                 double(name: 'sns-events', enabled: true, matching_event_types: %w[BOUNCE],
+                        sns_destination: double(topic_arn: "#{topic_arn}-a")),
+                 double(name: 'platform-webhook', enabled: true, matching_event_types: %w[BOUNCE],
+                        sns_destination: double(topic_arn: "#{topic_arn}-b"))
+               ])
+      )
+      allow(sns).to receive(:list_subscriptions_by_topic).and_return(double(subscriptions: [], next_token: nil))
+
+      expect(pipeline.status[:errors]).to include(/2 SNS destinations/)
     end
 
     it 'reports a missing configuration set without raising' do
