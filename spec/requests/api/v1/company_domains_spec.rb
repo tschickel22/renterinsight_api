@@ -96,16 +96,16 @@ RSpec.describe 'Api::V1::CompanyDomains', type: :request do
       expect(body['records'].first['found']).to be true
     end
 
-    # The ownership TXT exists so a domain can be pre-validated before its traffic moves.
-    # Once the CNAME points at us, ownership is proven by HTTP validation instead, so
-    # gating on the TXT would block a tenant whose setup is already complete.
-    it 'is satisfied by the routing CNAME even without the optional ownership record' do
+    # Measured on a real hostname: with the CNAME live and resolving to Cloudflare, HTTP
+    # returned 409 (custom hostname not active) and no certificate issued until the
+    # ownership record was published. A CNAME alone does not bootstrap ownership.
+    it 'is not satisfied by the routing CNAME alone' do
       allow(Dns::Lookup).to receive(:txt).and_return([])
       allow(Dns::Lookup).to receive(:cname).and_return(['connect.mydealertide.com'])
 
       post "/api/v1/company-domains/#{domain.id}/check-dns", headers: auth_headers
 
-      expect(JSON.parse(response.body)['configured']).to be true
+      expect(JSON.parse(response.body)['configured']).to be false
     end
 
     it 'is not satisfied when the routing CNAME is missing' do

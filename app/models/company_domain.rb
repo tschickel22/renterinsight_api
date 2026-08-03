@@ -133,15 +133,15 @@ class CompanyDomain < ApplicationRecord
   # the ownership record produced a domain that verified ownership, reported success at
   # every step, and then sat forever without a certificate, because nothing pointed at us.
   def web_dns_records
-    # Ownership records are optional, not a second hurdle. They exist so a domain can be
-    # pre-validated before its traffic moves; once the CNAME below points at us, ownership
-    # is proven by HTTP validation instead. Marking them required would block a tenant whose
-    # setup is already complete.
+    # Required, despite the theory that a CNAME pointing at us proves ownership on its own.
+    # Measured on a real hostname: with the CNAME live and resolving to Cloudflare, HTTP
+    # returned 409 (custom hostname not active) and no certificate issued until the
+    # ownership record was published. HTTP validation cannot bootstrap ownership, because
+    # Cloudflare will not serve the hostname before ownership exists.
     records = dns_records_for_display.map do |r|
       r.merge(
-        purpose: 'Optional. Proves you control this domain before you move traffic, so the ' \
-                 'certificate is ready the moment you switch over.',
-        required: false
+        purpose: 'Proves you control this domain. The certificate cannot be issued without it.',
+        required: true
       )
     end
 
