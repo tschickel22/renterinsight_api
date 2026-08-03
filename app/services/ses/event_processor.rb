@@ -108,7 +108,7 @@ module Ses
 
         if hard
           suppress!(send_record, reason: 'bounce_hard')
-          fail_enrollment!(send_record, reason: bounce['bounceSubType'].presence || 'ses hard bounce')
+          fail_enrollment!(send_record, reason: bounce_failure_reason(bounce))
           flag_recipient_email_invalid(send_record)
         else
           count_soft_bounce(send_record, payload)
@@ -139,6 +139,24 @@ module Ses
         record_campaign_event(send_record, 'complaint', payload)
         fire_webhook(send_record, 'campaign.complaint', feedback_type: complaint['complaintFeedbackType'])
       end
+    end
+
+    # failure_reason is shown to the dealer next to the failed enrollment, so it has to read
+    # as an explanation. This used to pass SES's bounceSubType through verbatim, which meant
+    # the most common hard bounce of all displayed as the single word "General" while the
+    # sentence that actually says what happened sat unread in the event payload.
+    def bounce_failure_reason(bounce)
+      # SES prefixes the diagnostic with the protocol and usually appends the address, both
+      # of which are noise next to a record that already names the recipient.
+      detail = bounce.dig('bouncedRecipients', 0, 'diagnosticCode').to_s
+                     .sub(/\A\s*smtp;\s*/i, '')
+                     .sub(/\s*<[^>]+>\s*\z/, '')
+                     .strip
+
+      return "hard bounce: #{detail}" if detail.present?
+
+      subtype = bounce['bounceSubType'].presence
+      subtype ? "hard bounce (#{subtype})" : 'hard bounce'
     end
 
     def suppress!(send_record, reason:)

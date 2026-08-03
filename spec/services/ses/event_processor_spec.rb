@@ -105,6 +105,35 @@ RSpec.describe Ses::EventProcessor do
       expect(enrollment.reload.status).to eq('bounced')
     end
 
+    # The dealer reads failure_reason next to the failed enrollment. SES reports the most
+    # common hard bounce as bounceSubType "General", which explains nothing on its own.
+    it 'records the SMTP diagnostic as the failure reason, not the SES subtype' do
+      described_class.process(permanent)
+
+      expect(enrollment.reload.failure_reason).to eq('hard bounce: 550 5.1.1 user unknown')
+    end
+
+    it 'strips the protocol prefix and trailing address SES wraps the diagnostic in' do
+      described_class.process(event('Bounce', 'bounce' => {
+        'bounceType' => 'Permanent', 'bounceSubType' => 'General',
+        'bouncedRecipients' => [{
+          'emailAddress' => lead.email,
+          'diagnosticCode' => "smtp; 550 5.1.1 As requested: user unknown <#{lead.email}>"
+        }]
+      }))
+
+      expect(enrollment.reload.failure_reason).to eq('hard bounce: 550 5.1.1 As requested: user unknown')
+    end
+
+    it 'falls back to the subtype when SES sends no diagnostic' do
+      described_class.process(event('Bounce', 'bounce' => {
+        'bounceType' => 'Permanent', 'bounceSubType' => 'Suppressed',
+        'bouncedRecipients' => [{ 'emailAddress' => lead.email }]
+      }))
+
+      expect(enrollment.reload.failure_reason).to eq('hard bounce (Suppressed)')
+    end
+
     it 'flags the recipient as email_invalid on a hard bounce' do
       described_class.process(permanent)
 
