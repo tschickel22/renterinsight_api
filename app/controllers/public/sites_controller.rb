@@ -116,7 +116,9 @@ module Public
     end
 
     def resolve_site
-      @resolution = Websites::HostResolver.call(request.host)
+      # Not request.host: dealer traffic arrives through a Worker that rewrites Host so
+      # Render will accept it, carrying the real hostname in a verified header.
+      @resolution = Websites::HostResolver.call(Websites::RequestHost.for(request))
       return render_not_found if @resolution.nil?
 
       @website = @resolution.website
@@ -150,7 +152,7 @@ module Public
       domain = @resolution&.company_domain
       return nil if domain.nil?
 
-      host = request.host.to_s.downcase
+      host = Websites::RequestHost.for(request)
       wanted_host = canonical_host_for(domain, host)
       return nil if wanted_host == host
 

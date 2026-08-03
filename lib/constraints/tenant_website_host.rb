@@ -25,7 +25,10 @@ module Constraints
     ].freeze
 
     def matches?(request)
-      host = request.host.to_s.downcase
+      # Dealer traffic arrives through a Worker that rewrites Host so Render will accept it,
+      # carrying the real hostname in a verified header. Reading request.host here would see
+      # the Render service hostname and route every dealer site to the API instead.
+      host = Websites::RequestHost.for(request)
       return false if host.blank?
       return false if platform_host?(host)
       return false if reserved_path?(request.path)

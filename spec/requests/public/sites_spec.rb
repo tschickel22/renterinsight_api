@@ -281,6 +281,49 @@ RSpec.describe 'Public::Sites', type: :request do
     end
   end
 
+  # Dealer traffic arrives through a Cloudflare Worker that rewrites Host to the Render
+  # service hostname, because Render returns 403 for any Host it does not recognise. The
+  # real hostname travels in a header.
+  describe 'behind the tenant host proxy' do
+    around do |example|
+      original = ENV['TENANT_PROXY_SECRET']
+      ENV['TENANT_PROXY_SECRET'] = 'sekret'
+      Rails.cache.clear
+      example.run
+      original ? ENV['TENANT_PROXY_SECRET'] = original : ENV.delete('TENANT_PROXY_SECRET')
+      Rails.cache.clear
+    end
+
+    def get_proxied(path, tenant_host:, secret: 'sekret')
+      get path, headers: {
+        'HTTP_HOST' => 'renterinsight-api-prod.onrender.com',
+        'HTTP_X_TENANT_HOST' => tenant_host,
+        'HTTP_X_TENANT_PROXY_SECRET' => secret
+      }
+    end
+
+    it 'serves the dealer site named in the header, not the connection host' do
+      get_proxied('/about', tenant_host: 'sunshine-rv.test')
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include('About Us | Sunshine RV')
+    end
+
+    it 'builds the canonical URL from the dealer hostname' do
+      get_proxied('/about', tenant_host: 'sunshine-rv.test')
+
+      expect(response.body).to include('<link rel="canonical" href="https://sunshine-rv.test/about">')
+    end
+
+    # Without the secret check, anyone could call the Render hostname claiming to be a
+    # dealer's domain and be served that dealer's site under it.
+    it 'ignores a forged header without the secret' do
+      get_proxied('/about', tenant_host: 'sunshine-rv.test', secret: 'wrong')
+
+      expect(response.body).not_to include('Sunshine RV')
+    end
+  end
+
   describe 'route precedence' do
     it 'does not shadow the API on the platform host' do
       get '/api/v1/leads', headers: { 'HTTP_HOST' => 'renterinsight-api-prod.onrender.com' }
