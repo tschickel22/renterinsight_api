@@ -132,9 +132,17 @@ class Api::V1::CompanyDomainsController < ApplicationController
   end
   
   # DELETE /api/v1/company_domains/:id
+  #
+  # One record can serve the website and email independently, so this removes the website
+  # role rather than the record. Destroying outright would silently take a verified sending
+  # domain with it, and the tenant would have no reason to expect that from a button on the
+  # website card. Re-verifying an email domain means republishing DNS, so this is a costly
+  # thing to lose by accident.
   def destroy
     return unless authorize_action!('company_settings', 'update')
-    
+
+    hostname = @domain.hostname
+
     # Delete from Cloudflare first if it exists
     if @domain.cloudflare_custom_hostname_id.present?
       begin
@@ -142,15 +150,32 @@ class Api::V1::CompanyDomainsController < ApplicationController
         cloudflare_service.delete_custom_hostname(@domain.cloudflare_custom_hostname_id)
       rescue CloudflareSaasService::CloudflareError => e
         Rails.logger.warn "[CompanyDomains] Failed to delete from Cloudflare: #{e.message}"
-        # Continue with local deletion anyway
+        # Continue with local removal anyway
       end
     end
-    
+
+    if @domain.email_enabled?
+      @domain.update!(
+        web_enabled: false,
+        cloudflare_custom_hostname_id: nil,
+        verification_status: 'pending',
+        ssl_status: nil,
+        active: false
+      )
+
+      Rails.logger.info "[CompanyDomains] Removed website role from #{hostname} (company #{@company.id}); email sending kept"
+
+      return render json: {
+        message: 'Website domain removed. This domain is still verified for sending email.',
+        domain: domain_json(@domain.reload)
+      }
+    end
+
     @domain.destroy
-    
-    Rails.logger.info "[CompanyDomains] Deleted domain #{@domain.hostname} for company #{@company.id}"
-    
-    render json: { message: 'Custom domain removed' }
+
+    Rails.logger.info "[CompanyDomains] Deleted domain #{hostname} for company #{@company.id}"
+
+    render json: { message: 'Website domain removed' }
   end
   
   # POST /api/v1/company_domains/:id/verify
