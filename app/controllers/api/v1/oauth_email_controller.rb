@@ -215,7 +215,11 @@ class Api::V1::OauthEmailController < ApplicationController
           provider:      provider,
           access_token:  tokens['access_token'],
           refresh_token: tokens['refresh_token'],
-          expires_at:    Time.current + tokens['expires_in'].to_i.seconds
+          expires_at:    Time.current + tokens['expires_in'].to_i.seconds,
+          # What was actually consented to, which can be narrower than what we
+          # asked for. Capabilities are derived from this, never from the
+          # provider name.
+          granted_scopes: tokens['scope']
         )
       end
 
@@ -286,7 +290,7 @@ class Api::V1::OauthEmailController < ApplicationController
     }, status: :forbidden
   end
 
-  def upsert_user_email_connection(user_id:, company_id:, email:, provider:, access_token:, refresh_token:, expires_at:)
+  def upsert_user_email_connection(user_id:, company_id:, email:, provider:, access_token:, refresh_token:, expires_at:, granted_scopes: nil)
     user = User.find_by(id: user_id)
     return unless user
 
@@ -321,6 +325,9 @@ class Api::V1::OauthEmailController < ApplicationController
       oauth_refresh_token_encrypted: refresh_token,
       oauth_expires_at:           expires_at
     }
+    # Only overwrite on a grant that actually reported scopes. A provider that
+    # omits the field must not wipe what we already knew about the connection.
+    attrs[:oauth_scopes] = granted_scopes if granted_scopes.present?
 
     if connection
       connection.update!(attrs)

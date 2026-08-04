@@ -262,6 +262,9 @@ class Api::V1::UserEmailConnectionsController < ApplicationController
       # transient error. Without this the UI would have to re-implement the
       # pattern matching to decide whether to show a reconnect prompt.
       needs_reauth: connection.needs_reauth?,
+      # Lets the UI explain why auto-logging of externally sent mail is off for
+      # this mailbox, instead of the feature just appearing not to work.
+      can_read_mailbox: connection.can_read_mailbox?,
       created_at: connection.created_at,
       updated_at: connection.updated_at
     }

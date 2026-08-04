@@ -29,7 +29,17 @@ class SyncAllUsersSentEmailsJob < ApplicationJob
     end
 
     # 2. OAuth connections (UserEmailConnection with oauth_gmail or oauth_outlook)
-    oauth_connections = UserEmailConnection.where(provider: %w[oauth_gmail oauth_outlook], is_active: true)
+    all_oauth = UserEmailConnection.where(provider: %w[oauth_gmail oauth_outlook], is_active: true)
+
+    # A send-only grant (Gmail's gmail.send) can post a message but cannot list
+    # one. Attempting anyway fails on auth, and EmailConnectionHealth would read
+    # that as a dead token and tell the user to reconnect a mailbox that is
+    # sending perfectly well.
+    oauth_connections, send_only = all_oauth.partition(&:can_read_mailbox?)
+    if send_only.any?
+      Rails.logger.info "[EmailSync] Skipping #{send_only.count} send-only connection(s): #{send_only.map(&:email_address).join(', ')}"
+    end
+
     if oauth_connections.any?
       Rails.logger.info "[EmailSync] Syncing #{oauth_connections.count} OAuth connections (30 min window)..."
       oauth_connections.each do |connection|
