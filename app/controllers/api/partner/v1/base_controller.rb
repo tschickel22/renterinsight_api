@@ -74,9 +74,8 @@ module Api
           lines = unmapped_inbound_lines(mapped_keys)
           return nil if lines.empty?
 
-          stamp  = Time.current.strftime('%Y-%m-%d %H:%M %Z')
-          source = (respond_to?(:current_api_key, true) && current_api_key&.name) || 'API'
-          "[#{stamp}] Additional fields via #{source}\n#{lines.join("\n")}"
+          stamp = Time.current.strftime('%Y-%m-%d %H:%M %Z')
+          "[#{stamp}] Additional fields via #{inbound_source_label}\n#{lines.join("\n")}"
         end
 
         # Merge the unmapped-field note into an attributes hash's notes before save
@@ -90,6 +89,47 @@ module Api
           combined = [existing.presence, note].compact.join("\n\n")
           key = attrs.key?('notes') ? 'notes' : :notes
           attrs.merge(key => combined)
+        end
+
+        # Write the inbound summary to the polymorphic `notes` table as well as
+        # the entity's `notes` text column.
+        #
+        # These are two unrelated stores. The CRM's Notes tab reads ONLY the
+        # `notes` table (GET /v1/notes?entity_type=lead&entity_id=...), while
+        # merge_inbound_note above appends to the entity's text column. Until
+        # this existed, everything a Zap sent (e.g. Facebook lead-ad qualifying
+        # questions) was captured but invisible in the UI — the column held it,
+        # the tab looked empty. The intake-form path already did this correctly
+        # via IntakeSubmission's Note.create! calls; this brings the partner API
+        # in line.
+        #
+        # Best-effort: a note failure must never fail an otherwise good create.
+        def write_inbound_note!(entity_type, entity_id, content)
+          return nil if content.blank? || entity_id.blank?
+
+          Note.create!(
+            entity_type: entity_type,
+            entity_id: entity_id.to_s,
+            content: content,
+            created_by_name: "System (#{inbound_source_label})"
+          )
+        rescue StandardError => e
+          Rails.logger.error "[Partner::BaseController] write_inbound_note! failed for #{entity_type} #{entity_id}: #{e.class}: #{e.message}"
+          nil
+        end
+
+        # Note-table body for a newly created record: no timestamp prefix (the
+        # Note row carries its own created_at) and a header that reads clearly
+        # in the CRM's Notes tab.
+        def inbound_note_content(mapped_keys)
+          lines = unmapped_inbound_lines(mapped_keys)
+          return nil if lines.empty?
+
+          "📥 ADDITIONAL FIELDS via #{inbound_source_label}\n\n#{lines.join("\n")}"
+        end
+
+        def inbound_source_label
+          (respond_to?(:current_api_key, true) && current_api_key&.name).presence || 'API'
         end
 
         def unmapped_inbound_lines(mapped_keys)

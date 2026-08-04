@@ -92,13 +92,25 @@ module Api
           apply_source_config!(attrs, config)
           apply_location_config!(attrs, config)
 
+          # Map any inbound keys matching a dealer-defined custom field onto
+          # custom_field_values, then send everything still unmapped to notes so
+          # nothing (e.g. Facebook qualifying questions) is dropped.
+          #
+          # Resolved BEFORE the dedupe branch below: a repeat inquiry needs these
+          # too. While this ran after the early return, a returning customer's
+          # answers only ever reached the notes text — correctly mapped keys were
+          # silently discarded because the request never got this far. Dealers
+          # test with people already in the system more often than not, so that
+          # path is the common one, not the edge case.
+          cf_values, cf_consumed = extract_inbound_custom_fields('leads')
+
           if config['dedupe_enabled'] && (match = dedupe_match(attrs))
             # Don't create a duplicate — but a returning inquiry is NOT a no-op.
             # Absorb any new details onto the matched record and notify its
             # owner, so the dealer hears about the re-engagement instead of it
             # vanishing silently. Best-effort: a notify failure never fails the
             # request (Zapier still sees a clean 202).
-            absorb_inquiry_into_match!(match, attrs, config)
+            absorb_inquiry_into_match!(match, attrs, config, cf_values: cf_values, cf_consumed: cf_consumed)
             return render json: {
               data: nil,
               deduped_to: { type: match.type.to_s, id: match.record.id, matched_on: match.matched.to_s }
@@ -107,16 +119,15 @@ module Api
 
           apply_owner_config!(attrs, config)
 
-          # Map any inbound keys matching a dealer-defined custom field onto
-          # custom_field_values, then send everything still unmapped to notes so
-          # nothing (e.g. Facebook qualifying questions) is dropped.
-          cf_values, cf_consumed = extract_inbound_custom_fields('leads')
           attrs[:custom_field_values] = (attrs[:custom_field_values] || {}).merge(cf_values) if cf_values.any?
-          attrs = merge_inbound_note(attrs, attrs.keys + cf_consumed)
+          mapped_keys = attrs.keys + cf_consumed
+          note_content = inbound_note_content(mapped_keys)
+          attrs = merge_inbound_note(attrs, mapped_keys)
 
           lead = company_scope(Lead).new(attrs)
 
           if lead.save
+            write_inbound_note!('lead', lead.id, note_content)
             render json: { data: lead_json(lead, detailed: true) }, status: :created
           else
             render json: { error: "Validation failed", details: lead.errors.full_messages }, status: :unprocessable_entity
@@ -323,14 +334,14 @@ module Api
         # Entirely best-effort and self-contained in rescue: enrichment and
         # notification failures must never turn a successful dedupe into an
         # error for the caller.
-        def absorb_inquiry_into_match!(match, attrs, config)
+        def absorb_inquiry_into_match!(match, attrs, config, cf_values: {}, cf_consumed: [])
           unless match.type == :lead
             Rails.logger.info "[Partner::Leads] Deduped to #{match.type} #{match.record.id}; no lead enrichment/notify"
             return
           end
 
           lead = match.record
-          enriched = enrich_lead_from_inquiry!(lead, attrs)
+          enriched = enrich_lead_from_inquiry!(lead, attrs, cf_values: cf_values, cf_consumed: cf_consumed)
           notify_repeat_inquiry(lead, config)
           Rails.logger.info "[Partner::Leads] Absorbed repeat inquiry into lead #{lead.id} (enriched=#{enriched}) via '#{current_api_key&.name}'"
         rescue => e
@@ -342,28 +353,58 @@ module Api
         # (never overwrite existing data) and append a timestamped note
         # capturing what came in. Saving fires the lead's normal
         # emit_workflow_updated hook. Returns true if the record changed.
-        def enrich_lead_from_inquiry!(lead, attrs)
+        def enrich_lead_from_inquiry!(lead, attrs, cf_values: {}, cf_consumed: [])
           FILLABLE_FROM_INQUIRY.each do |field|
             val = attrs[field]
             lead[field] = val if val.present? && lead[field].blank?
           end
 
-          summary = inbound_inquiry_summary(attrs)
+          apply_custom_fields_from_inquiry!(lead, cf_values)
+
+          # Anything that mapped to a custom field is already on the record, so
+          # keep it out of the note rather than recording it twice.
+          summary = inbound_inquiry_summary(attrs, cf_consumed)
           if summary.present?
             stamp = Time.current.strftime('%Y-%m-%d %H:%M %Z')
-            entry = "[#{stamp}] Repeat inquiry via #{current_api_key&.name || 'API'}\n#{summary}"
+            entry = "[#{stamp}] Repeat inquiry via #{inbound_source_label}\n#{summary}"
             lead.notes = [lead.notes.presence, entry].compact.join("\n\n")
           end
 
-          return false unless lead.changed?
-          lead.save
-          true
+          changed = lead.changed?
+          lead.save if changed
+
+          # Written after the save so a failed enrichment doesn't leave an
+          # orphan note, and unconditionally on summary (not on `changed`) —
+          # a repeat inquiry that adds no new field values is still something
+          # the dealer needs to see in the Notes tab.
+          if summary.present?
+            write_inbound_note!('lead', lead.id, "🔁 REPEAT INQUIRY via #{inbound_source_label}\n\n#{summary}")
+          end
+
+          changed
         end
 
         # Human-readable digest of the inbound payload for the note + email,
         # including the raw form answers (e.g. Facebook lead-ad questions) that
         # aren't mapped to columns.
-        def inbound_inquiry_summary(attrs)
+        # Blank-only merge of dealer-defined custom fields, mirroring the
+        # FILLABLE_FROM_INQUIRY rule above: a repeat inquiry fills gaps, it
+        # never overwrites an answer already on the record.
+        def apply_custom_fields_from_inquiry!(lead, cf_values)
+          return if cf_values.blank?
+
+          existing = (lead.custom_field_values || {}).deep_stringify_keys
+          merged = existing.dup
+          cf_values.each do |k, v|
+            key = k.to_s
+            merged[key] = v if v.present? && existing[key].blank?
+          end
+
+          lead.custom_field_values = merged unless merged == existing
+        end
+
+        def inbound_inquiry_summary(attrs, skip_keys = [])
+          skipped = Array(skip_keys).map { |k| k.to_s.downcase }.to_set
           lines = []
           name = [attrs[:first_name], attrs[:last_name]].compact.join(' ').strip
           lines << "Name: #{name}"                                   if name.present?
@@ -376,7 +417,7 @@ module Api
           raw = params[:raw]
           raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
           if raw.is_a?(Hash)
-            skip = %w[full_name email phone]
+            skip = %w[full_name email phone].to_set | skipped
             raw.each do |k, v|
               next if v.blank? || skip.include?(k.to_s.downcase)
               lines << "#{k}: #{v}"
