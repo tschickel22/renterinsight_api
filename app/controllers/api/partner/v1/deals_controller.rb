@@ -60,10 +60,13 @@ module Api
           cf_values, cf_consumed = extract_inbound_custom_fields('deals')
           attrs['custom_field_values'] = (attrs['custom_field_values'] || {}).merge(cf_values) if cf_values.any?
           # Safety net: unmapped inbound fields go to notes instead of being dropped.
-          attrs = merge_inbound_note(attrs, attrs.keys + cf_consumed)
+          mapped_keys = attrs.keys + cf_consumed
+          note_content = inbound_note_content(mapped_keys)
+          attrs = merge_inbound_note(attrs, mapped_keys)
           deal = company_scope(Deal).new(attrs)
 
           if deal.save
+            write_inbound_note!('deal', deal.id, note_content)
             render json: { data: deal_json(deal, detailed: true) }, status: :created
           else
             render json: { error: "Validation failed", details: deal.errors.full_messages }, status: :unprocessable_entity
