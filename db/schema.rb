@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_04_180000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_04_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7134,6 +7134,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_04_180000) do
     t.boolean "sms_opt_in", default: false, null: false
     t.string "quickbooks_id"
     t.datetime "quickbooks_synced_at"
+    t.string "sms_consent_source"
+    t.datetime "sms_consent_recorded_at"
+    t.bigint "sms_consent_recorded_by_id"
+    t.text "sms_consent_note"
     t.index ["company_id"], name: "index_vendors_on_company_id"
     t.index ["default_expense_account_id"], name: "index_vendors_on_default_expense_account_id"
     t.index ["email"], name: "index_vendors_on_email"
@@ -7141,6 +7145,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_04_180000) do
     t.index ["portal_access_token"], name: "index_vendors_on_portal_access_token", unique: true
     t.index ["qb_vendor_id"], name: "index_vendors_on_qb_vendor_id"
     t.index ["quickbooks_id"], name: "index_vendors_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
+    t.index ["sms_consent_recorded_by_id"], name: "index_vendors_on_sms_consent_recorded_by_id"
+    t.index ["sms_consent_source"], name: "index_vendors_on_sms_consent_source"
     t.index ["status"], name: "index_vendors_on_status"
     t.index ["trade_type"], name: "index_vendors_on_trade_type"
     t.index ["vendor_type"], name: "index_vendors_on_vendor_type"

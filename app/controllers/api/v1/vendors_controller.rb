@@ -168,6 +168,7 @@ class Api::V1::VendorsController < ApplicationController
       rating: vendor.rating,
       isVendor: vendor.respond_to?(:is_vendor) ? vendor.is_vendor : nil,
       customFieldValues: vendor.custom_field_values,
+      smsConsent: vendor.sms_consent_json,
       createdAt: vendor.created_at,
       updatedAt: vendor.updated_at
     }

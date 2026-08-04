@@ -624,6 +624,10 @@ Rails.application.routes.draw do
 
       # ==================== CONTRACTORS ====================
       resources :contractors do
+        member do
+          post :sms_consent, path: 'sms-consent'
+        end
+
         collection do
           get :stats
           get :vendors

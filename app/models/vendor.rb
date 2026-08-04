@@ -39,7 +39,14 @@ class Vendor < ApplicationRecord
   ].freeze
   STATUSES = %w[active inactive suspended].freeze
 
+  # How a contractor's SMS consent was obtained. 'contractor_portal' is the
+  # contractor flipping it themselves; 'dealer_recorded' is a dealer attesting to
+  # consent given verbally or in a signed agreement; 'import' is bulk-loaded and
+  # the weakest of the three.
+  SMS_CONSENT_SOURCES = %w[contractor_portal dealer_recorded import].freeze
+
   # ----- Validations -----
+  validates :sms_consent_source, inclusion: { in: SMS_CONSENT_SOURCES }, allow_blank: true
   validates :name, presence: true, length: { maximum: 255 }
   validates :vendor_type, inclusion: { in: VENDOR_TYPES }, allow_blank: true
   validates :status,      inclusion: { in: STATUSES },     allow_blank: true
@@ -105,6 +112,49 @@ class Vendor < ApplicationRecord
 
   def supplier?
     vendor_type == 'supplier'
+  end
+
+  # Set SMS consent along with the provenance that makes it defensible.
+  # Granting requires a source; revoking never does, because a contractor must
+  # always be able to stop texts without anyone justifying it.
+  #
+  # @param opted_in [Boolean]
+  # @param source [String] one of SMS_CONSENT_SOURCES (required when granting)
+  # @param user [User, nil] who recorded it (nil when the contractor did it themselves)
+  # @param note [String, nil] how consent was obtained
+  def record_sms_consent!(opted_in:, source: nil, user: nil, note: nil)
+    if opted_in
+      raise ArgumentError, 'source is required to grant SMS consent' if source.blank?
+
+      update!(
+        sms_opt_in: true,
+        sms_consent_source: source,
+        sms_consent_recorded_at: Time.current,
+        sms_consent_recorded_by_id: user&.id,
+        sms_consent_note: note.presence
+      )
+    else
+      # Keep the prior source/note as the historical record of what was revoked.
+      update!(sms_opt_in: false, sms_consent_recorded_at: Time.current,
+              sms_consent_recorded_by_id: user&.id)
+    end
+  end
+
+  # True when we hold a consent record good enough to text this contractor.
+  def can_receive_sms?
+    sms_opt_in? && phone.present?
+  end
+
+  def sms_consent_json
+    {
+      smsOptIn: !!sms_opt_in,
+      canReceiveSms: can_receive_sms?,
+      consentSource: sms_consent_source,
+      consentRecordedAt: sms_consent_recorded_at,
+      consentRecordedBy: sms_consent_recorded_by_id &&
+        User.where(id: sms_consent_recorded_by_id).pick(:first_name, :last_name)&.compact&.join(' ').presence,
+      consentNote: sms_consent_note
+    }
   end
 
   private

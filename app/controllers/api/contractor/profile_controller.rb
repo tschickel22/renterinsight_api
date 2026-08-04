@@ -10,7 +10,22 @@ module Api
 
       # PATCH /api/contractor/profile
       def update
-        if current_contractor.update(profile_params)
+        attrs = profile_params.to_h
+
+        # Self-service consent is the strongest kind, but it still needs a source
+        # stamped on it or we cannot tell it apart from a dealer-recorded flip.
+        consent_change = attrs.key?('sms_opt_in') &&
+          ActiveModel::Type::Boolean.new.cast(attrs['sms_opt_in']) != current_contractor.sms_opt_in?
+        new_consent = attrs.delete('sms_opt_in')
+
+        if current_contractor.update(attrs)
+          if consent_change
+            current_contractor.record_sms_consent!(
+              opted_in: ActiveModel::Type::Boolean.new.cast(new_consent),
+              source: 'contractor_portal',
+              note: 'Contractor enabled text notifications in the Contractor Portal'
+            )
+          end
           render json: profile_json(current_contractor.reload)
         else
           render json: { errors: current_contractor.errors.full_messages }, status: :unprocessable_entity
