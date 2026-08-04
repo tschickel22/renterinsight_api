@@ -367,11 +367,51 @@ class ImapSentEmailService
     synced
   end
 
+  # True when this message is already on the timeline. Two ways it can be:
+  # synced by an earlier run, or written by the platform itself when it sent
+  # the mail. The platform stores the RFC Message-ID in external_id, so that
+  # is the reliable key. The timestamp window is the fallback for providers
+  # whose send call hands back an API id instead of a Message-ID.
+  #
+  # Without this the sync re-logged every email the CRM had already sent,
+  # because it only ever looked for records a previous sync had created.
+  def self.already_logged?(message_id:, communicable: nil, to_address: nil, sent_at: nil)
+    if message_id.present?
+      return true if Communication.where(external_id: message_id).exists?
+      return true if metadata_contains?(:imap_message_id, message_id)
+      return true if metadata_contains?(:internet_message_id, message_id)
+    end
+
+    return false unless communicable && to_address && sent_at
+
+    # Case-insensitive because callers disagree on whether they downcase the
+    # recipient, and the platform stores whatever the sender typed.
+    Communication.where(
+      communicable: communicable,
+      channel: 'email',
+      direction: 'outbound'
+    ).where('LOWER(to_address) = ?', to_address.to_s.downcase)
+     .where(sent_at: (sent_at - 30.seconds)..(sent_at + 30.seconds)).exists?
+  end
+
+  # metadata is jsonb in the deployed databases but text in older ones, so
+  # both shapes have to be queryable.
+  def self.metadata_contains?(key, value)
+    return false if value.blank?
+
+    if Communication.columns_hash['metadata'].sql_type == 'jsonb'
+      Communication.where("metadata @> ?", { key => value }.to_json).exists?
+    else
+      Communication.where("metadata LIKE ?", "%#{value}%").exists?
+    end
+  end
+
   # Find existing communication by internetMessageId or graph_message_id (dedup)
   def self.find_existing_communication(internet_message_id, graph_id)
     if Communication.columns_hash['metadata'].sql_type == 'jsonb'
       # Check both graph_message_id and internet_message_id, plus legacy imap_uid references
-      comm = Communication.where("metadata @> ?", { internet_message_id: internet_message_id }.to_json).first if internet_message_id.present?
+      comm = Communication.find_by(external_id: internet_message_id) if internet_message_id.present?
+      comm ||= Communication.where("metadata @> ?", { internet_message_id: internet_message_id }.to_json).first if internet_message_id.present?
       comm ||= Communication.where("metadata @> ?", { graph_message_id: graph_id }.to_json).first if graph_id.present?
       comm ||= Communication.where("metadata @> ?", { imap_message_id: internet_message_id }.to_json).first if internet_message_id.present?
       comm
@@ -430,6 +470,9 @@ class ImapSentEmailService
 
         mail = Mail.new(raw_email)
         sent_time = mail.date ? Time.parse(mail.date.to_s) : Time.current
+        # Mail strips the angle brackets, which is the same form the send path
+        # writes to external_id, so the two are directly comparable.
+        message_id = mail.message_id.presence
 
         next if sent_time < cutoff_time
 
@@ -438,7 +481,9 @@ class ImapSentEmailService
 
         next unless recipient_email
 
-        # Deduplicate by IMAP UID (supports both jsonb and text metadata columns)
+        # Deduplicate by IMAP UID (supports both jsonb and text metadata columns).
+        # UIDs are only unique within a folder, so this alone is not enough.
+        # The Message-ID check below is what catches platform-sent mail.
         existing_comm = if Communication.columns_hash['metadata'].sql_type == 'jsonb'
           Communication.where("metadata @> ?", { imap_uid: imap_uid }.to_json).first
         else
@@ -446,6 +491,8 @@ class ImapSentEmailService
             "%\"imap_uid\":#{imap_uid}%", "%imap_uid=>#{imap_uid}%").first
         end
         next if existing_comm
+
+        next if already_logged?(message_id: message_id)
 
         # Match recipient to Lead or Contact in allowed companies
         lead = Lead.where(company_id: all_company_ids)
@@ -459,6 +506,14 @@ class ImapSentEmailService
         communicable = lead || contact
 
         if communicable
+          # Backstop for sends whose Message-ID never reached external_id.
+          next if already_logged?(
+            message_id: nil,
+            communicable: communicable,
+            to_address: recipient_email,
+            sent_at: sent_time
+          )
+
           comm = Communication.create!(
             communicable: communicable,
             company_id: communicable.company_id,
@@ -471,9 +526,13 @@ class ImapSentEmailService
             to_address: recipient_email,
             status: 'sent',
             sent_at: sent_time,
+            # Stored here as well as in metadata so the next run can match it
+            # the cheap way, on the indexed column.
+            external_id: message_id,
             metadata: {
               source: 'imap_sync',
               imap_uid: imap_uid,
+              imap_message_id: message_id,
               recipient_email: recipient_email,
               from: mail.from&.first,
               cc: mail.cc&.join(', '),

@@ -205,6 +205,11 @@ class CommunicationSettingsService
       base_config.merge(
         provider: connection.provider,
         oauth_access_token: access_token,
+        oauth_refresh_token: connection.oauth_refresh_token_encrypted,
+        # SMTP over XOAUTH2 needs the full mail.google.com grant. Gmail's SMTP
+        # rejects a send-only token outright, so that connection has to deliver
+        # over the REST API instead.
+        requires_rest_send: connection.requires_rest_send?,
         smtp_host: smtp_host,
         smtp_port: smtp_port,
         smtp_username: connection.email_address,

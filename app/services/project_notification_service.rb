@@ -273,29 +273,7 @@ class ProjectNotificationService
     company = assignments.first.company
     count = assignments.size
 
-    rows = assignments.map do |a|
-      task_name = resolve_task_name(a)
-      project = resolve_project(a)
-      location = project ? " — #{project.name}" : ''
-      note = a.notes.present? ? "<div style=\"color:#666;font-size:13px;margin-top:2px;\">#{a.notes}</div>" : ''
-      "<li style=\"margin-bottom:10px;\"><strong>#{task_name}</strong>#{location}#{note}</li>"
-    end.join
-
-    subject = if count == 1
-      "New Assignment: #{resolve_task_name(assignments.first)}"
-    else
-      "#{count} new assignments from #{company.name}"
-    end
-
-    body = <<~HTML
-      <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
-      <p>You have #{count == 1 ? 'been assigned a new task' : "#{count} new assignments"}:</p>
-      <ul style="padding-left: 20px; margin: 14px 0;">
-        #{rows}
-      </ul>
-      <p>Please log in to the Contractor Portal to accept #{count == 1 ? 'this assignment' : 'these assignments'} and get started.</p>
-      <p>Thank you,<br>#{company.name}</p>
-    HTML
+    subject, body = assignment_email_parts(contractor, company, assignments)
 
     # Use the first assignment as the `communicable` for threading
     send_contractor_review_email(contractor, company, subject, body, assignments.first)
@@ -335,6 +313,77 @@ class ProjectNotificationService
   # ── Legacy single-item wrapper (preserved for any direct callers)
   def self.notify_contractor_assigned(assignment)
     notify_contractor_assigned_batch(assignment.contractor, [assignment])
+  end
+
+  # ── Manual resend of a single assignment notification.
+  #
+  # Unlike dispatch_pending_assignments_for_contractor, this deliberately IGNORES
+  # notified_at — the whole point is to re-send something already marked as sent
+  # (contractor says they never got it, it landed in spam, etc). It also does NOT
+  # stamp notified_at, so the original send timestamp is preserved as the record
+  # of first contact.
+  #
+  # Returns a per-channel result hash so the caller can tell the user exactly what
+  # happened, instead of the fire-and-forget swallow that the batch path uses.
+  #
+  # @return [Hash] { email: {...}, sms: {...} }
+  def self.resend_assignment_notification(assignment)
+    contractor = assignment.contractor
+    company    = assignment.company
+    result     = { email: {}, sms: {} }
+
+    unless contractor
+      return { email: { attempted: false, ok: false, reason: 'Assignment has no contractor' },
+               sms:   { attempted: false, ok: false, reason: 'Assignment has no contractor' } }
+    end
+
+    subject, body = assignment_email_parts(contractor, company, [assignment])
+
+    # ── Email
+    if contractor.email.present?
+      begin
+        comm = send_contractor_review_email(contractor, company, subject, body, assignment)
+        result[:email] = {
+          attempted: true, ok: true, to: contractor.email,
+          communication_id: comm.respond_to?(:id) ? comm.id : nil
+        }
+      rescue => e
+        Rails.logger.error("[ProjectNotificationService] resend email failed for assignment #{assignment.id}: #{e.class}: #{e.message}")
+        result[:email] = { attempted: true, ok: false, to: contractor.email, error: e.message }
+      end
+    else
+      result[:email] = { attempted: false, ok: false, reason: 'Contractor has no email address on file' }
+    end
+
+    # ── SMS. Gated on TCPA opt-in exactly like the automatic path, so a resend can
+    # never text someone who has not consented.
+    if contractor.phone.blank?
+      result[:sms] = { attempted: false, ok: false, reason: 'Contractor has no phone number on file' }
+    elsif !contractor.sms_opt_in
+      result[:sms] = { attempted: false, ok: false, to: contractor.phone,
+                       reason: 'Contractor has not opted in to SMS' }
+    else
+      begin
+        comm = CommunicationService.send_sms(
+          company: company,
+          location: resolve_project(assignment)&.deal&.location,
+          to: contractor.phone,
+          body: "New assignment from #{company.name}: #{resolve_task_name(assignment)}. " \
+                "Log in to the Contractor Portal to accept.",
+          category: 'project_notification',
+          communicable: assignment
+        )
+        result[:sms] = {
+          attempted: true, ok: true, to: contractor.phone,
+          communication_id: comm.respond_to?(:id) ? comm.id : nil
+        }
+      rescue => e
+        Rails.logger.error("[ProjectNotificationService] resend SMS failed for assignment #{assignment.id}: #{e.class}: #{e.message}")
+        result[:sms] = { attempted: true, ok: false, to: contractor.phone, error: e.message }
+      end
+    end
+
+    result
   end
 
   # ── IMMEDIATE (bell + toast only, no email) when contractor submits for review
@@ -742,8 +791,40 @@ class ProjectNotificationService
       end
     end
 
+    # Subject + HTML body for an assignment notification. Shared by the batched
+    # auto-send and the manual resend so the contractor sees identical copy either way.
+    def assignment_email_parts(contractor, company, assignments)
+      count = assignments.size
+
+      rows = assignments.map do |a|
+        task_name = resolve_task_name(a)
+        project = resolve_project(a)
+        location = project ? " (#{project.name})" : ''
+        note = a.notes.present? ? "<div style=\"color:#666;font-size:13px;margin-top:2px;\">#{a.notes}</div>" : ''
+        "<li style=\"margin-bottom:10px;\"><strong>#{task_name}</strong>#{location}#{note}</li>"
+      end.join
+
+      subject = if count == 1
+        "New Assignment: #{resolve_task_name(assignments.first)}"
+      else
+        "#{count} new assignments from #{company.name}"
+      end
+
+      body = <<~HTML
+        <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
+        <p>You have #{count == 1 ? 'been assigned a new task' : "#{count} new assignments"}:</p>
+        <ul style="padding-left: 20px; margin: 14px 0;">
+          #{rows}
+        </ul>
+        <p>Please log in to the Contractor Portal to accept #{count == 1 ? 'this assignment' : 'these assignments'} and get started.</p>
+        <p>Thank you,<br>#{company.name}</p>
+      HTML
+
+      [subject, body]
+    end
+
     def send_contractor_review_email(contractor, company, subject, body, assignment)
-      CommunicationService.send_email(
+      comm = CommunicationService.send_email(
         company: company,
         to: contractor.email,
         subject: subject,
@@ -752,6 +833,7 @@ class ProjectNotificationService
         communicable: assignment
       )
       Rails.logger.info("[ProjectNotificationService] Email sent to contractor #{contractor.email}")
+      comm
     end
 
     def send_dealer_review_email(user, company, subject, body, assignment)

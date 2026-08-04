@@ -228,10 +228,16 @@ module Campaigns
         { success: true, communication_id: comm.id }
       else
         err = result.is_a?(Hash) ? (result[:error] || 'send_failed') : 'send_failed'
+        # Flag the mailbox this campaign actually resolved for this recipient,
+        # not the owner's default. An owner can have more than one connected
+        # account, and blaming the wrong one sends them to reconnect a mailbox
+        # that was never involved.
+        EmailConnectionHealth.flag!(conn, err)
         { success: false, error: err.to_s[0, 200] }
       end
     rescue => e
       Rails.logger.error "[CampaignSender#deliver_email] #{e.class}: #{e.message}"
+      EmailConnectionHealth.flag!(conn, e)
       { success: false, error: e.message.to_s[0, 200] }
     ensure
       Array(inline_uploads).each do |u|

@@ -11,10 +11,18 @@ class HarvestCampaignBouncesJob < ApplicationJob
   LOOKBACK_MINUTES = 30 # exceeds the 10-min cadence so slow NDRs aren't missed
 
   def perform
-    connections = UserEmailConnection.where(provider: %w[oauth_gmail oauth_outlook smtp], is_active: true)
+    all_connections = UserEmailConnection.where(provider: %w[oauth_gmail oauth_outlook smtp], is_active: true)
+
+    # Reading the INBOX needs a read grant. A send-only connection cannot do it,
+    # and trying would look like a dead token to EmailConnectionHealth.
+    connections, send_only = all_connections.partition(&:can_read_mailbox?)
+    if send_only.any?
+      Rails.logger.info "[BounceHarvest] Skipping #{send_only.count} send-only connection(s): #{send_only.map(&:email_address).join(', ')}"
+    end
+
     totals = { scanned: 0, handled: 0, bounces: 0, auto_replies: 0 }
 
-    connections.find_each do |connection|
+    connections.each do |connection|
       res = Campaigns::InboundBounceHarvester.harvest_connection(connection, minutes_back: LOOKBACK_MINUTES)
       totals[:scanned] += res.scanned.to_i
       totals[:handled] += res.handled.to_i

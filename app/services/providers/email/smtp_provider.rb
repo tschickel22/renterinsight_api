@@ -28,6 +28,11 @@ module Providers
           content_type: content_type
         )
         
+        # A send-only Gmail grant cannot authenticate to SMTP at all: the server
+        # answers the XOAUTH2 challenge with {"status":"400","scope":
+        # "https://mail.google.com/"}. Same message, different transport.
+        return deliver_via_gmail_api(mail) if config[:requires_rest_send]
+
         # CRITICAL: Set delivery method PER-MESSAGE (thread-safe)
         # Do NOT mutate global ActionMailer::Base.smtp_settings
         if smtp_configured?
@@ -35,7 +40,7 @@ module Providers
           mail.delivery_method(:smtp, smtp_config)
           Rails.logger.info "📧 Per-message SMTP configured: #{smtp_config[:address]}:#{smtp_config[:port]} (auth: #{smtp_config[:authentication]})"
         end
-        
+
         result = mail.deliver_now
         
         Rails.logger.info "✅ SMTP email sent successfully: #{result.message_id}"
@@ -52,7 +57,36 @@ module Providers
       end
       
       private
-      
+
+      # ActionMailer never delivers this one; the fully rendered message goes to
+      # Gmail's REST API instead, so attachments and inline images are identical
+      # to the SMTP path.
+      def deliver_via_gmail_api(mail)
+        message = mail.message
+        # Mail assigns a Message-ID lazily. Force it so external_id carries an
+        # RFC Message-ID here exactly as it does on the SMTP path.
+        message.message_id ||= Mail::MessageIdField.new.message_id
+
+        result = GmailApiProvider.deliver_raw(
+          raw_message:   message.to_s,
+          access_token:  config[:oauth_access_token],
+          refresh_token: config[:oauth_refresh_token],
+          message_id:    message.message_id
+        )
+
+        # Raise rather than return a failure hash: callers already treat a
+        # DeliveryError as the failure path, and CommunicationService's rescue
+        # is what flags the connection as needing re-auth.
+        raise DeliveryError, "Gmail API delivery failed: #{result[:error]}" unless result[:success]
+
+        Rails.logger.info "✅ Gmail API email sent successfully: #{result[:message_id]}"
+        {
+          success: true,
+          external_id: result[:message_id],
+          provider: 'gmail_api'
+        }
+      end
+
       def smtp_configured?
         config[:smtp_host].present? && config[:smtp_username].present?
       end

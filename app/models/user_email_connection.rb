@@ -47,6 +47,19 @@ class UserEmailConnection < ApplicationRecord
   # Provider types
   PROVIDERS = %w[smtp oauth_gmail oauth_outlook company_domain].freeze
   SMTP_AUTH_TYPES = %w[plain login cram_md5].freeze
+
+  # Grants that let us read the mailbox, which is what the Sent-folder sync and
+  # the bounce harvester need. Anything narrower (Gmail's gmail.send) can post a
+  # message but cannot list one, so those pollers must skip it rather than fail
+  # against it. IMAP and SMTP over XOAUTH2 need the full mail.google.com grant,
+  # so a send-only connection is also REST-only.
+  READ_SCOPE_PATTERNS = [
+    %r{\Ahttps://mail\.google\.com/?\z},
+    /gmail\.readonly\z/,
+    /gmail\.modify\z/,
+    /Mail\.Read\z/i,
+    /Mail\.ReadWrite\z/i
+  ].freeze
   
   # Validations
   validates :email_address, presence: true, format: { with: URI::MailTo::EMAIL_REGEXP }
@@ -289,9 +302,37 @@ class UserEmailConnection < ApplicationRecord
   end
   
   # ========================================
+  # Granted capabilities
+  # ========================================
+
+  def granted_scopes
+    oauth_scopes.to_s.split(/\s+/).reject(&:blank?)
+  end
+
+  # Can we list and read messages in this mailbox?
+  #
+  # Password-based connections (smtp, company_domain) authenticate to IMAP
+  # directly, so they always can. OAuth connections can only do what was
+  # granted. A blank grant means the row predates scope capture, and the only
+  # thing ever requested back then was full access, so treat it as such rather
+  # than silently switching off a poller that has been working.
+  def can_read_mailbox?
+    return true unless oauth_provider?
+    return true if oauth_scopes.blank?
+
+    granted_scopes.any? { |s| READ_SCOPE_PATTERNS.any? { |re| s =~ re } }
+  end
+
+  # IMAP and SMTP over XOAUTH2 both require the full mailbox grant. Without it
+  # the send has to go over the provider's REST API instead.
+  def requires_rest_send?
+    oauth_provider? && !can_read_mailbox?
+  end
+
+  # ========================================
   # IMAP Methods for Sent Email Sync
   # ========================================
-  
+
   # Derive IMAP server from SMTP server or OAuth provider
   def imap_server
     if oauth_provider?

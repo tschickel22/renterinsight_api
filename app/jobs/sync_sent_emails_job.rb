@@ -120,17 +120,12 @@ class SyncSentEmailsJob < ApplicationJob
     message_id_header = imap.fetch(message_id, 'BODY[HEADER.FIELDS (MESSAGE-ID)]')[0].attr['BODY[HEADER.FIELDS (MESSAGE-ID)]']
     email_message_id = extract_message_id(message_id_header)
 
-    # Check if already synced
-    if email_message_id.present?
-      existing = Communication.find_by(
-        user_id: connection.user_id,
-        metadata: { imap_message_id: email_message_id }
-      )
-
-      if existing
-        Rails.logger.debug "[SyncSentEmails] Email already synced: #{email_message_id}"
-        return false
-      end
+    # Check if already on the timeline, either synced before or written by the
+    # platform when it sent the mail itself. Looking only for records a
+    # previous sync created is what let CRM-sent email get logged twice.
+    if email_message_id.present? && ImapSentEmailService.already_logged?(message_id: email_message_id)
+      Rails.logger.debug "[SyncSentEmails] Email already logged: #{email_message_id}"
+      return false
     end
 
     # Extract recipient email
@@ -155,6 +150,22 @@ class SyncSentEmailsJob < ApplicationJob
     # Prefer HTML body for better formatting
     body_content = html_body_data.present? ? html_body_data : body_data
 
+    # Net::IMAP hands back the date as a string, and the dedupe window needs a
+    # Time to do arithmetic on.
+    sent_time = begin
+      envelope.date.present? ? Time.parse(envelope.date.to_s) : Time.current
+    rescue ArgumentError, TypeError
+      Time.current
+    end
+
+    # Backstop for sends whose Message-ID never reached external_id.
+    return false if ImapSentEmailService.already_logged?(
+      message_id: nil,
+      communicable: (lead || contact),
+      to_address: to_email,
+      sent_at: sent_time
+    )
+
     # Create Communication record
     communication = Communication.create!(
       communicable: lead || contact,
@@ -165,8 +176,9 @@ class SyncSentEmailsJob < ApplicationJob
       direction: 'outbound',
       subject: envelope.subject,
       body: body_content.to_s.force_encoding('UTF-8'),
-      sent_at: envelope.date || Time.current,
+      sent_at: sent_time,
       status: 'sent',
+      external_id: email_message_id,
       metadata: {
         source: 'imap_sync',
         imap_message_id: email_message_id,

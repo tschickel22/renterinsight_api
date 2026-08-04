@@ -4,7 +4,7 @@ module Api
   module V1
     class ContractorsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_contractor, only: [:show, :update, :destroy]
+      before_action :set_contractor, only: [:show, :update, :destroy, :sms_consent]
 
       # GET /api/v1/contractors
       def index
@@ -102,6 +102,40 @@ module Api
         end
       end
 
+      # POST /api/v1/contractors/:id/sms-consent
+      # Body: { opted_in: true|false, note: "how consent was obtained" }
+      #
+      # Deliberately a separate endpoint rather than a permitted attribute on
+      # update. sms_opt_in is a TCPA consent flag, and routing it through here
+      # guarantees every grant carries a source, a timestamp, and the user who
+      # attested to it. A bare permit would let it be flipped with no record.
+      def sms_consent
+        return unless authorize_action!('contractors', 'update')
+
+        opted_in = ActiveModel::Type::Boolean.new.cast(params[:opted_in])
+
+        if opted_in && @contractor.phone.blank?
+          return render json: { error: 'Add a phone number before recording SMS consent' },
+                        status: :unprocessable_entity
+        end
+
+        if opted_in && params[:note].blank?
+          return render json: { error: 'Describe how the contractor gave consent' },
+                        status: :unprocessable_entity
+        end
+
+        @contractor.record_sms_consent!(
+          opted_in: opted_in,
+          source: opted_in ? 'dealer_recorded' : nil,
+          user: current_user,
+          note: params[:note]
+        )
+
+        render json: contractor_json(@contractor.reload)
+      rescue ArgumentError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       # DELETE /api/v1/contractors/:id (soft delete)
       def destroy
         return unless authorize_action!('contractors', 'delete')
@@ -184,6 +218,7 @@ module Api
           rating: contractor.rating,
           isVendor: contractor.is_vendor,
           customFieldValues: contractor.custom_field_values,
+          smsConsent: contractor.sms_consent_json,
           createdAt: contractor.created_at,
           updatedAt: contractor.updated_at
         }

@@ -11,6 +11,34 @@ class Api::V1::OauthEmailController < ApplicationController
     end
   end
 
+  # Gmail is requested at gmail.send, the narrowest grant that still supports
+  # the product. Google classifies it as sensitive rather than restricted,
+  # which keeps the app out of the annual CASA security assessment that
+  # https://mail.google.com/ pulls in.
+  #
+  # What that costs, both handled rather than broken:
+  #   - a send-only grant cannot read the mailbox, so the Sent folder sync and
+  #     the bounce harvester skip it (UserEmailConnection#can_read_mailbox?)
+  #   - SMTP over XOAUTH2 needs the full grant, so sending goes over the Gmail
+  #     REST API instead (UserEmailConnection#requires_rest_send?)
+  #
+  # userinfo.email stays because the callback resolves the connected address
+  # from the userinfo endpoint. Widening this back out later is a one-line
+  # change plus re-consent; nothing downstream is hardcoded to the narrow set.
+  GOOGLE_OAUTH_SCOPES = [
+    'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/userinfo.email'
+  ].join(' ').freeze
+
+  # Named because the token exchange has to repeat them verbatim; they drifted
+  # apart as two literals before.
+  MICROSOFT_OAUTH_SCOPES = [
+    'offline_access',
+    'https://graph.microsoft.com/Mail.Send',
+    'https://graph.microsoft.com/Mail.Read',
+    'https://graph.microsoft.com/User.Read'
+  ].join(' ').freeze
+
   skip_before_action :authenticate, only: [:callback]
   before_action :set_company_scope, except: [:callback]
   before_action :authorize_shared_scope!, only: [:authorize, :disconnect]
@@ -53,7 +81,7 @@ class Api::V1::OauthEmailController < ApplicationController
               client_id:     client_id,
               response_type: 'code',
               redirect_uri:  REDIRECT_URI,
-              scope:         'offline_access https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read',
+              scope:         MICROSOFT_OAUTH_SCOPES,
               state:         state,
               response_mode: 'query'
             }
@@ -64,7 +92,7 @@ class Api::V1::OauthEmailController < ApplicationController
               client_id:     client_id,
               response_type: 'code',
               redirect_uri:  REDIRECT_URI,
-              scope:         'https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email',
+              scope:         GOOGLE_OAUTH_SCOPES,
               access_type:   'offline',
               prompt:        'consent',
               state:         state
@@ -110,7 +138,7 @@ class Api::V1::OauthEmailController < ApplicationController
       }
       # Microsoft requires scope in the token exchange when multiple resource domains are used
       if provider == 'microsoft'
-        token_params[:scope] = 'offline_access https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read'
+        token_params[:scope] = MICROSOFT_OAUTH_SCOPES
       end
 
       tokens = http_post_form(token_url, token_params)
@@ -215,7 +243,11 @@ class Api::V1::OauthEmailController < ApplicationController
           provider:      provider,
           access_token:  tokens['access_token'],
           refresh_token: tokens['refresh_token'],
-          expires_at:    Time.current + tokens['expires_in'].to_i.seconds
+          expires_at:    Time.current + tokens['expires_in'].to_i.seconds,
+          # What was actually consented to, which can be narrower than what we
+          # asked for. Capabilities are derived from this, never from the
+          # provider name.
+          granted_scopes: tokens['scope']
         )
       end
 
@@ -286,7 +318,7 @@ class Api::V1::OauthEmailController < ApplicationController
     }, status: :forbidden
   end
 
-  def upsert_user_email_connection(user_id:, company_id:, email:, provider:, access_token:, refresh_token:, expires_at:)
+  def upsert_user_email_connection(user_id:, company_id:, email:, provider:, access_token:, refresh_token:, expires_at:, granted_scopes: nil)
     user = User.find_by(id: user_id)
     return unless user
 
@@ -321,6 +353,9 @@ class Api::V1::OauthEmailController < ApplicationController
       oauth_refresh_token_encrypted: refresh_token,
       oauth_expires_at:           expires_at
     }
+    # Only overwrite on a grant that actually reported scopes. A provider that
+    # omits the field must not wipe what we already knew about the connection.
+    attrs[:oauth_scopes] = granted_scopes if granted_scopes.present?
 
     if connection
       connection.update!(attrs)
