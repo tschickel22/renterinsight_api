@@ -72,6 +72,17 @@ RSpec.describe WorkqueueService, type: :service do
     expect(item[:entity_email]).to eq('lee@x.com')
   end
 
+  # Hash queues (inventory_hot_interest) hand-build rows and have no backing AR
+  # record to pass in — their lead/contact rows are self-referential, so
+  # enrichment must work with a nil record.
+  it 'resolves a hash-queue contact row with no backing record' do
+    item = enrich([[nil, { entity_type: 'contact', entity_id: contact.id }]]).first
+    expect(item[:message_entity_type]).to eq('contact')
+    expect(item[:message_entity_id]).to eq(contact.id)
+    expect(item[:entity_email]).to eq('jane@x.com')
+    expect(item[:entity_phone]).to eq('3035551212')
+  end
+
   it 'leaves no message target when the deal has no contact' do
     deal = make_deal(contact_id: nil)
     item = enrich([[deal, { entity_type: 'deal', entity_id: deal.id }]]).first

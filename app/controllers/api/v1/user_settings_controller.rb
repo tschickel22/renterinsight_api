@@ -359,21 +359,12 @@ module Api
           replied_window_days
         ]
 
-        # Kept in sync with WorkqueueService::QUEUES — any queue the user can
-        # see in the Preferences UI must be here, or unchecking it is silently
-        # discarded by the &-filter below.
-        valid_queue_ids = %w[
-          inventory_hot_interest
-          engagement_opened_today engagement_opened_week
-          engagement_clicked_today engagement_hot_reopeners
-          activity_tasks_today activity_tasks_week activity_meetings_today
-          activity_meetings_upcoming activity_calls_due activity_reminders_upcoming
-          leads_replied contacts_replied
-          leads_mine leads_new_24h leads_stale_48h
-          deals_mine deals_closing_month deals_closing_week deals_stale_30d
-          tickets_mine tickets_awaiting_parts tickets_ready_for_invoice
-          quotes_awaiting_response invoices_overdue
-        ]
+        # Derived from WorkqueueService::QUEUES rather than hand-listed: this is
+        # the allowlist for the &-filter below, so any queue missing from it has
+        # its visibility change silently discarded — the user unchecks a queue,
+        # gets "Preferences saved", and it's still there on reload. Deriving it
+        # means adding a queue can never reintroduce that.
+        valid_queue_ids = WorkqueueService::QUEUES.keys.map(&:to_s)
 
         result = {}
 

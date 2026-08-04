@@ -110,10 +110,12 @@ class WorkqueueService
     total_pages = (total.to_f / @per_page).ceil
     records = scope.offset((@page - 1) * @per_page).limit(@per_page).to_a
 
-    lead_records = records.select { |r| r.is_a?(Lead) }
+    lead_records    = records.select { |r| r.is_a?(Lead) }
+    contact_records = records.select { |r| r.is_a?(Contact) }
     preload_lead_engagement(lead_records)
     preload_lead_communications(lead_records)
-    preload_contact_communications(records.select { |r| r.is_a?(Contact) })
+    preload_contact_engagement(contact_records)
+    preload_contact_communications(contact_records)
     preload_activity_parents(records.select { |r| r.is_a?(WorkqueueActivity) })
     preload_location_names(records)
 
@@ -268,6 +270,13 @@ class WorkqueueService
     total = items.size
     total_pages = (total.to_f / @per_page).ceil
     page_items = items[((@page - 1) * @per_page), @per_page] || []
+
+    # Hash queues build their rows by hand, so they miss the AR pipeline's
+    # message-target enrichment. Run it here too — without it the FE has no
+    # email/phone to show and the row's quick actions can't deep-link into the
+    # person's Communications tab. Rows are self-referential (lead/contact), so
+    # message_source needs no backing record.
+    enrich_message_targets(page_items.map { |it| [nil, it] })
 
     {
       items: page_items,
@@ -1002,6 +1011,7 @@ class WorkqueueService
   end
 
   def normalize_contact(r)
+    eng = contact_engagement_for(r.id)
     full_name = [r.first_name, r.last_name].compact.join(' ').presence
     outbound = (@contact_last_outbounds ||= {})[r.id]
     inbound  = (@contact_last_inbounds  ||= {})[r.id]
@@ -1023,6 +1033,10 @@ class WorkqueueService
       entity_phone:          r.try(:phone),
       entity_email:          r.email,
       entity_name:           full_name,
+      engagement_opens:      eng[:opens],
+      engagement_clicks:     eng[:clicks],
+      last_engagement_at:    eng[:last_at],
+      engagement_source:     eng[:source],
       last_outbound_at:      outbound&.created_at,
       last_outbound_channel: outbound&.channel,
       last_inbound_at:       inbound&.created_at,
@@ -1090,10 +1104,12 @@ class WorkqueueService
         timestamps << ts
       end
 
+      # Capitalized to match the contact-side value and the FE's own fallback —
+      # the two sit in the same Source column on adjacent queues.
       source = if cs.any?
                  cs.first[1]
                elsif es.any?
-                 'direct'
+                 'Direct'
                end
 
       @lead_engagement[id] = {
@@ -1103,6 +1119,56 @@ class WorkqueueService
         source:  source,
       }
     end
+  end
+
+  # Contact-side counterpart to preload_lead_engagement, feeding the Opens /
+  # Clicks / Last Engaged / Source columns on the engagement_contact_* queues.
+  # Reads CommunicationEvent only: campaign flows enroll Lead recipients today,
+  # so the CampaignSend half of the lead version would contribute nothing.
+  def preload_contact_engagement(contacts)
+    @contact_engagement ||= {}
+    return if contacts.empty?
+
+    cutoff      = 7.days.ago
+    contact_ids = contacts.map(&:id)
+
+    rows = CommunicationEvent
+             .joins(:communication)
+             .where(event_type: %w[opened clicked])
+             .where(communications: { communicable_type: 'Contact', communicable_id: contact_ids, company_id: @company.id })
+             .where('communication_events.occurred_at >= ?', cutoff)
+             .pluck(
+               'communications.communicable_id',
+               'communication_events.event_type',
+               'communication_events.occurred_at'
+             )
+
+    rows_by_contact = rows.group_by(&:first)
+
+    contact_ids.each do |id|
+      events     = rows_by_contact[id] || []
+      opens      = 0
+      clicks     = 0
+      timestamps = []
+
+      events.each do |_, type, ts|
+        type == 'opened' ? opens += 1 : clicks += 1
+        timestamps << ts
+      end
+
+      @contact_engagement[id] = {
+        opens:   opens,
+        clicks:  clicks,
+        last_at: timestamps.compact.max,
+        # Everything here came from a direct send out of the Communication
+        # Center — there's no campaign name to attribute it to.
+        source:  events.any? ? 'Direct' : nil,
+      }
+    end
+  end
+
+  def contact_engagement_for(contact_id)
+    (@contact_engagement ||= {})[contact_id] || EMPTY_ENGAGEMENT
   end
 
   def normalize_deal(r)
