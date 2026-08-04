@@ -481,6 +481,9 @@ module Api
                 oauthAccessToken: connection.oauth_token_encrypted,
                 oauthRefreshToken: connection.oauth_refresh_token_encrypted,
                 oauthExpiresAt: connection.oauth_expires_at&.iso8601,
+                # A send-only grant cannot authenticate to SMTP at all, so the
+                # transport has to be chosen per connection, not per provider.
+                requiresRestSend: connection.requires_rest_send?,
                 # Back-reference so the send path can mark this specific
                 # connection as needing re-auth when the provider rejects it.
                 _sourceConnectionType: 'UserEmailConnection',
@@ -1045,7 +1048,15 @@ module Api
           reply_to: reply_to,
           file_attachments: email_params[:attachments] || []
         )
-        
+
+        # A send-only Gmail grant cannot authenticate to SMTP, so the same
+        # message goes out over the REST API instead. Building it through the
+        # mailer either way keeps attachments, inline images, and headers
+        # identical across the two transports.
+        if rest_send?(config)
+          return deliver_via_gmail_api(mail, config)
+        end
+
         mail.deliver_now
 
         Rails.logger.info "[send_email_via_action_mailer] Success: #{mail.message_id}"
@@ -1067,6 +1078,45 @@ module Api
       # definition of "this token is dead" rather than each growing its own.
       def flag_source_connection_reauth(config, exception)
         EmailConnectionHealth.flag_from_config!(config, exception)
+      end
+
+      # Only true for a connection whose grant is too narrow for SMTP. Defaults
+      # to false so anything without an explicit answer keeps the transport it
+      # has been using.
+      def rest_send?(config)
+        return false unless config.is_a?(Hash)
+
+        ActiveModel::Type::Boolean.new.cast(
+          config['requiresRestSend'] || config[:requiresRestSend]
+        ).present?
+      end
+
+      # Hands the already-built message to Gmail's REST API. ActionMailer never
+      # delivers it, so `message` here is the fully rendered mail.
+      def deliver_via_gmail_api(mail, config)
+        message = mail.message
+        # Mail assigns a Message-ID lazily; force it so external_id carries an
+        # RFC Message-ID on this path exactly as it does on the SMTP one.
+        message.message_id ||= Mail::MessageIdField.new.message_id
+        raw = message.to_s
+
+        result = Providers::Email::GmailApiProvider.deliver_raw(
+          raw_message:   raw,
+          # Already plaintext: the model declares `encrypts` on these columns,
+          # so reading the attribute decrypts. Same as the Graph path does.
+          access_token:  config['oauthAccessToken'] || config[:oauthAccessToken],
+          refresh_token: config['oauthRefreshToken'] || config[:oauthRefreshToken],
+          message_id:    message.message_id
+        )
+
+        if result[:success]
+          Rails.logger.info "[send_email_via_action_mailer] Success via Gmail API: #{result[:message_id]}"
+        else
+          Rails.logger.error "[send_email_via_action_mailer] Gmail API send failed: #{result[:error]}"
+          flag_source_connection_reauth(config, StandardError.new(result[:error].to_s))
+        end
+
+        result
       end
 
       def send_sms_via_provider(to, message, config)

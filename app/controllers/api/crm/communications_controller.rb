@@ -611,9 +611,17 @@ module Api
             oauthExpiresAt: connection.oauth_expires_at&.iso8601,
             fromEmail: connection.email_address,
             fromName: connection.display_name || current_user.full_name,
-            provider: connection.provider == 'oauth_gmail' ? 'oauth_google' : 'oauth_microsoft'
+            provider: connection.provider == 'oauth_gmail' ? 'oauth_google' : 'oauth_microsoft',
+            requiresRestSend: connection.requires_rest_send?
           }
-          send_result = send_email_via_oauth_smtp(email_params, oauth_config, reply_to: reply_to)
+          # A send-only grant cannot authenticate to SMTP, so that connection
+          # goes over the REST API instead. Full-access grants keep SMTP, so
+          # nothing already working is forced to change transport.
+          send_result = if connection.requires_rest_send?
+                          send_email_via_gmail_api(email_params, oauth_config, reply_to: reply_to)
+                        else
+                          send_email_via_oauth_smtp(email_params, oauth_config, reply_to: reply_to)
+                        end
           used_provider = oauth_config[:provider]
         else
           smtp_config = {
@@ -710,7 +718,12 @@ module Api
         when :oauth_microsoft
           send_email_via_graph_from_config(email_params, config, reply_to: reply_to)
         when :oauth_google
-          send_email_via_oauth_smtp(email_params, config, reply_to: reply_to)
+          # Same transport split as the connection-driven path above.
+          if ActiveModel::Type::Boolean.new.cast(config[:requiresRestSend] || config['requiresRestSend'])
+            send_email_via_gmail_api(email_params, config, reply_to: reply_to)
+          else
+            send_email_via_oauth_smtp(email_params, config, reply_to: reply_to)
+          end
         else
           { success: false, error: "Unknown email provider: #{provider}" }
         end
@@ -770,6 +783,48 @@ module Api
       rescue => e
         Rails.logger.error "[send_email_via_smtp] Exception: #{e.message}"
         { success: false, error: e.message }
+      end
+
+      # Send via Gmail's REST API. Used for connections whose grant is too
+      # narrow for SMTP (gmail.send rather than the full mail.google.com).
+      # Builds the same Mail object the SMTP path does so the two transports
+      # produce an identical message, then posts the raw MIME.
+      def send_email_via_gmail_api(email_params, config, reply_to: nil)
+        require 'mail'
+
+        oauth_email = config[:oauthEmail] || config['oauthEmail']
+        from_email  = config[:fromEmail] || config['fromEmail'] || oauth_email
+        from_name   = config[:fromName] || config['fromName'] || oauth_email
+
+        mail = Mail.new do
+          from     "#{from_name} <#{from_email}>"
+          to       email_params[:to]
+          subject  email_params[:subject]
+
+          if email_params[:content]&.include?('<html') || email_params[:content]&.include?('<body')
+            html_part do
+              content_type 'text/html; charset=UTF-8'
+              body email_params[:content]
+            end
+          else
+            body email_params[:content]
+          end
+        end
+
+        mail.reply_to = reply_to if reply_to.present?
+        mail.cc = email_params[:cc] if email_params[:cc].present?
+        mail.bcc = email_params[:bcc] if email_params[:bcc].present?
+        # Assign up front so the id we report is the one actually on the wire.
+        mail.message_id ||= Mail::MessageIdField.new.message_id
+
+        Rails.logger.info "[send_email_via_gmail_api] Sending to #{email_params[:to]} as #{from_email}, reply_to: #{reply_to}"
+
+        Providers::Email::GmailApiProvider.deliver_raw(
+          raw_message:   mail.to_s,
+          access_token:  config[:oauthAccessToken] || config['oauthAccessToken'],
+          refresh_token: config[:oauthRefreshToken] || config['oauthRefreshToken'],
+          message_id:    mail.message_id
+        )
       end
 
       # Send email via OAuth SMTP (Microsoft 365 / Google) using XOAUTH2
