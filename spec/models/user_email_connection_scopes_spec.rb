@@ -86,6 +86,25 @@ RSpec.describe UserEmailConnection, 'granted capabilities', type: :model do
     end
   end
 
+  # Ties the scope we actually request to the behaviour that depends on it. If
+  # someone widens or narrows GOOGLE_OAUTH_SCOPES without thinking about the
+  # pollers or the send transport, this is what tells them.
+  describe 'the scopes we request' do
+    it 'yields a send-only Gmail connection' do
+      c = connection(provider: 'oauth_gmail', scopes: Api::V1::OauthEmailController::GOOGLE_OAUTH_SCOPES)
+
+      expect(c.can_read_mailbox?).to be false
+      expect(c.requires_rest_send?).to be true
+    end
+
+    it 'yields a readable Outlook connection, so Graph sync keeps working' do
+      c = connection(provider: 'oauth_outlook', scopes: Api::V1::OauthEmailController::MICROSOFT_OAUTH_SCOPES)
+
+      expect(c.can_read_mailbox?).to be true
+      expect(c.requires_rest_send?).to be false
+    end
+  end
+
   describe '#granted_scopes' do
     it 'splits on whitespace and drops blanks' do
       c = connection(provider: 'oauth_gmail', scopes: "  https://mail.google.com/   https://www.googleapis.com/auth/userinfo.email ")
