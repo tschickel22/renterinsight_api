@@ -11,6 +11,14 @@ module Catalog
     ADAPTERS = {
       'champion_feed'              => 'Catalog::Adapters::ChampionFeedAdapter',
       'manufacturedhomes_platform' => 'Catalog::Adapters::ManufacturedHomesPlatformAdapter',
+      # Same adapter, different SOURCE SHAPE: one Timber Creek retailer's page
+      # rather than a manufacturer's whole grid. Split out as its own type for
+      # the same reason clayton_epic_region and clayton_retail_home_center are
+      # separate — the admin picks a dealer from a directory instead of typing a
+      # base_url, and the source list should say which kind it is. The adapter
+      # itself decides scoping from the URL (see #dealer_scoped?), so behaviour
+      # is identical either way.
+      'timber_creek_dealer'        => 'Catalog::Adapters::ManufacturedHomesPlatformAdapter',
       'avada_sitemap'              => 'Catalog::Adapters::AvadaSitemapAdapter',
       'tru_model_line'             => 'Catalog::Adapters::TruModelLineAdapter',
       'clayton_epic_region'        => 'Catalog::Adapters::ClaytonEpicRegionAdapter',

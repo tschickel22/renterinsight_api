@@ -25,10 +25,19 @@ default: &default
   champion_ims_weekly_sync:
     class: ChampionImsWeeklySyncJob
     schedule: every sunday at 2am
+  # These times are UTC — config.time_zone is not set, so Rails (and therefore
+  # SolidQueue's recurring schedule) runs in UTC.
+  #
+  # Catalog crawls are meant to land overnight Mountain, well clear of the
+  # working day when dealers get subscribed and catalogs added: a subscription
+  # enqueues its own run, and two runs on one source can overlap.
+  # "1am" meant 7pm Denver in summer and 6pm in winter, i.e. the middle of that
+  # window. 8am UTC is 2am MDT / 1am MST, which is inside the intended window
+  # year round without having to change the app's timezone.
   catalog_nightly_sync:
     class: CatalogNightlySyncJob
     queue: default
-    schedule: every day at 1am
+    schedule: every day at 8am
   champion_lead_sync:
     class: ChampionLeadSyncJob
     queue: default

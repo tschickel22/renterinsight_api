@@ -274,30 +274,50 @@ module Ses
         sns_destination: { topic_arn: topic_arn }
       }
 
+      # Adopt whatever the existing SNS destination is called rather than insisting on our
+      # own name. The sets that already existed were built by hand and named "sns-events";
+      # creating DESTINATION_NAME alongside one of those would leave the set with two SNS
+      # destinations, and SES would publish every event twice.
+      name = find_event_destination&.dig(:name) || DESTINATION_NAME
+
       begin
         ses.create_configuration_set_event_destination(
           configuration_set_name: configuration_set_name,
-          event_destination_name: DESTINATION_NAME,
+          event_destination_name: name,
           event_destination: destination
         )
-        { name: DESTINATION_NAME, action: :created, event_types: EVENT_TYPES, topic_arn: topic_arn }
+        { name: name, action: :created, event_types: EVENT_TYPES, topic_arn: topic_arn }
       rescue Aws::SESV2::Errors::AlreadyExistsException
         # Update rather than leave it: an existing destination may point at a stale topic or
         # be missing an event type, and "already exists" is not the same as "is correct".
         ses.update_configuration_set_event_destination(
           configuration_set_name: configuration_set_name,
-          event_destination_name: DESTINATION_NAME,
+          event_destination_name: name,
           event_destination: destination
         )
-        { name: DESTINATION_NAME, action: :updated, event_types: EVENT_TYPES, topic_arn: topic_arn }
+        { name: name, action: :updated, event_types: EVENT_TYPES, topic_arn: topic_arn }
       end
     rescue Aws::SESV2::Errors::ServiceError => e
       raise SesError, "Could not attach event destination to #{configuration_set_name}: #{e.message}"
     end
 
+    # Finds the SNS destination whatever it is called, since these sets predate this code and
+    # were named by hand. Falls back to a name match so a destination we created but that has
+    # lost its topic is still found and repaired rather than duplicated.
     def find_event_destination
       response = ses.get_configuration_set_event_destinations(configuration_set_name: configuration_set_name)
-      dest = Array(response.event_destinations).find { |d| d.name == DESTINATION_NAME }
+      all = Array(response.event_destinations)
+      sns = all.select { |d| d.sns_destination&.topic_arn.present? }
+
+      # Two SNS destinations on one set means SES publishes every event twice, and the
+      # webhook processes each one twice. Worth saying out loud: it is invisible from our
+      # side apart from duplicate CampaignEvent rows.
+      if sns.length > 1
+        record_error("configuration set #{configuration_set_name} has #{sns.length} SNS destinations " \
+                     "(#{sns.map(&:name).join(', ')}); every event is published once per destination")
+      end
+
+      dest = sns.first || all.find { |d| d.name == DESTINATION_NAME }
       return nil if dest.nil?
 
       {

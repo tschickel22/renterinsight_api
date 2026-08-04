@@ -45,18 +45,25 @@ module Messaging
       primary = @branding[:primary_color] || @branding['primary_color'] || '#3b82f6'
       return nil if logo.blank? && phone.blank? && name.blank?
 
+      background  = header_background
+      text_color  = ColorContrast.readable_text_on(background)
+      muted_color = ColorContrast.muted_text_on(background)
+      # A brand colour equal to the header colour renders a 5px bar that is not there. The
+      # readable text colour is the fallback because it is guaranteed to contrast.
+      accent = ColorContrast.visible_against(primary, background)
+
       logo_cell = if logo.present?
                     %(<img src="#{ERB::Util.html_escape(logo)}" alt="#{ERB::Util.html_escape(name.to_s)}" style="display:block;width:120px;height:auto;border:0;" />)
                   else
-                    %(<div style="color:#ffffff;font-size:20px;font-weight:700;font-family:Arial,sans-serif;">#{ERB::Util.html_escape(name.to_s)}</div>)
+                    %(<div style="color:#{text_color};font-size:20px;font-weight:700;font-family:Arial,sans-serif;">#{ERB::Util.html_escape(name.to_s)}</div>)
                   end
 
       right_lines = []
-      right_lines << %(<div style="font-size:22px;font-weight:700;letter-spacing:0.5px;color:#ffffff;">#{ERB::Util.html_escape(phone)}</div>) if phone.present?
-      right_lines << %(<div style="font-size:12px;color:#d1d5db;margin-top:4px;">#{ERB::Util.html_escape(address)}</div>) if address.present?
+      right_lines << %(<div style="font-size:22px;font-weight:700;letter-spacing:0.5px;color:#{text_color};">#{ERB::Util.html_escape(phone)}</div>) if phone.present?
+      right_lines << %(<div style="font-size:12px;color:#{muted_color};margin-top:4px;">#{ERB::Util.html_escape(address)}</div>) if address.present?
       right_cell = right_lines.any? ? %(<td valign="middle" style="padding-left:16px;text-align:right;font-family:Arial,sans-serif;">#{right_lines.join}</td>) : ''
 
-      %(<tr><td style="background:#1f2937;padding:20px 24px;">
+      %(<tr><td style="background:#{ERB::Util.html_escape(background)};padding:20px 24px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
           <tr>
             <td width="140" valign="middle">#{logo_cell}</td>
@@ -64,7 +71,31 @@ module Messaging
           </tr>
         </table>
       </td></tr>
-      <tr><td style="background:#{ERB::Util.html_escape(primary)};height:5px;font-size:0;line-height:0;">&nbsp;</td></tr>)
+      <tr><td style="background:#{ERB::Util.html_escape(accent)};height:5px;font-size:0;line-height:0;">&nbsp;</td></tr>)
+    end
+
+    # The header band used to be hardcoded to #1f2937, which silently assumed every tenant's
+    # logo was drawn for a dark background. A dealer whose wordmark is dark navy rendered as
+    # a blank band with a sliver of whatever accent colour happened to be light enough.
+    #
+    # The default is now light, because dealer logos are overwhelmingly drawn for white
+    # website headers. That is a better bet, not a guarantee: a logo drawn in white for a
+    # dark background has the same problem in reverse, and nothing here can tell the
+    # difference, because the logo is a URL and this codebase has no image processing (the
+    # image_processing gem is commented out in the Gemfile). Tenants whose logo needs a dark
+    # band set emailHeaderBackground in branding settings. Measuring the artwork at upload
+    # time and choosing automatically is the real fix and is not done here.
+    DEFAULT_HEADER_BACKGROUND = '#ffffff'
+
+    def header_background
+      configured = @branding[:header_background] || @branding['header_background']
+      return DEFAULT_HEADER_BACKGROUND if configured.blank?
+      # An unparseable value would otherwise reach the style attribute and be dropped by the
+      # mail client, leaving a transparent band and text chosen for a colour that is not on
+      # screen.
+      return DEFAULT_HEADER_BACKGROUND if ColorContrast.parse(configured).nil?
+
+      configured
     end
 
     # Sender contact card: rep name/title, email/phone, address, optional

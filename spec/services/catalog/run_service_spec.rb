@@ -25,6 +25,108 @@ RSpec.describe Catalog::RunService do
     end
   end
 
+  # Two runs on one source double the request rate at the manufacturer, make two
+  # archivers download the same images, and race two ingests over rows that have
+  # no UNIQUE index. Run Now guarded this; the nightly sweep and the
+  # subscription path did not.
+  describe 'concurrency guard' do
+    it 'skips a run when one is already in flight' do
+      create(:scrape_run, catalog_source: source, status: 'running',
+                          started_at: 1.minute.ago, finished_at: nil)
+
+      expect(run_with([FakeCatalogAdapter.home('1')])).to be_nil
+      expect(source.scrape_runs.count).to eq 1
+    end
+
+    # Otherwise a run killed by a deploy blocks the source forever.
+    it 'reaps an abandoned run and proceeds' do
+      dead = create(:scrape_run, catalog_source: source, status: 'running',
+                                 started_at: (ScrapeRun::STALE_AFTER + 5.minutes).ago,
+                                 finished_at: nil)
+
+      run = run_with([FakeCatalogAdapter.home('1')])
+
+      expect(dead.reload.status).to eq 'failed'
+      expect(run).to be_present
+      expect(run.status).to eq 'success'
+    end
+
+    it 'runs normally when nothing is in flight' do
+      expect(run_with([FakeCatalogAdapter.home('1')])).to be_present
+    end
+  end
+
+  # Counters only appeared at finalize, so an in-flight run reported zeros for
+  # its whole duration and a healthy crawl looked identical to a dead one.
+  describe 'progress reporting' do
+    it 'records discovered count before parsing finishes' do
+      homes = %w[1 2 3].map { |k| FakeCatalogAdapter.home(k) }
+      seen  = []
+
+      adapter = FakeCatalogAdapter.new(homes)
+      allow(source).to receive(:adapter).and_return(adapter)
+      allow(adapter).to receive(:parse).and_wrap_original do |orig, *args|
+        seen << source.scrape_runs.last&.reload&.homes_discovered
+        orig.call(*args)
+      end
+
+      described_class.new(source, trigger: 'manual').call
+
+      expect(seen).to all(eq(3))
+    end
+
+    it 'increments parsed count as it goes' do
+      homes = %w[1 2 3].map { |k| FakeCatalogAdapter.home(k) }
+      seen  = []
+
+      adapter = FakeCatalogAdapter.new(homes)
+      allow(source).to receive(:adapter).and_return(adapter)
+      allow(adapter).to receive(:fetch).and_wrap_original do |orig, *args|
+        seen << source.scrape_runs.last&.reload&.homes_parsed_ok
+        orig.call(*args)
+      end
+
+      described_class.new(source, trigger: 'manual').call
+
+      expect(seen).to eq [0, 1, 2]
+    end
+  end
+
+  # The call site is where this broke: RunService did config[...].to_i, turning
+  # an unset delay into 0 rather than letting the archiver apply DEFAULT_DELAY.
+  # Assert the raw value reaches the archiver so the fix cannot be undone here.
+  describe 'image archiving' do
+    let(:archiver) { instance_double(Catalog::ImageArchiver, archive: [], result: nil) }
+
+    before do
+      allow(archiver).to receive(:result).and_return(
+        Catalog::ImageArchiver::Result.new(archived: 0, reused: 0, failed: 0, skipped: 0,
+                                           rate_limited: false)
+      )
+    end
+
+    it 'passes an unset delay through as nil, so the polite default applies' do
+      source.update!(config: { 'archive_images' => true })
+      expect(Catalog::ImageArchiver).to receive(:new).with(crawl_delay: nil).and_return(archiver)
+
+      run_with([FakeCatalogAdapter.home('1')])
+    end
+
+    it 'passes a configured delay through unchanged' do
+      source.update!(config: { 'archive_images' => true, 'image_crawl_delay' => 5 })
+      expect(Catalog::ImageArchiver).to receive(:new).with(crawl_delay: 5).and_return(archiver)
+
+      run_with([FakeCatalogAdapter.home('1')])
+    end
+
+    it 'does not archive at all unless the source opts in' do
+      source.update!(config: {})
+      expect(Catalog::ImageArchiver).not_to receive(:new)
+
+      run_with([FakeCatalogAdapter.home('1')])
+    end
+  end
+
   describe 'degraded run' do
     it 'flags degraded when a field drops below threshold and alerts' do
       homes = [

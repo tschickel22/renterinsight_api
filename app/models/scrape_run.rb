@@ -7,12 +7,52 @@ class ScrapeRun < ApplicationRecord
   belongs_to :catalog_source
 
   STATUSES = %w[running success partial failed].freeze
-  TRIGGERS = %w[manual scheduled].freeze
+  # 'subscription' distinguishes the run a dealer opting in triggers from the
+  # nightly crawl. Both used to record 'scheduled', so run history could not
+  # explain why a source suddenly started crawling in the middle of the day.
+  TRIGGERS = %w[manual scheduled subscription].freeze
+
+  # A run still "running" after this long is presumed dead: the in-Puma worker
+  # can be killed mid-crawl by a deploy or restart, which leaves the row (and
+  # the source's last_run_status) claiming "running" forever.
+  #
+  # Lives here rather than in the admin controller because reaping used to
+  # happen ONLY when someone pressed Run Now — so a source killed by a deploy
+  # reported a phantom in-progress run to every other reader until somebody
+  # happened to click that button.
+  STALE_AFTER = 30.minutes
 
   validates :status,  inclusion: { in: STATUSES }
   validates :trigger, inclusion: { in: TRIGGERS }
 
-  scope :recent, -> { order(created_at: :desc) }
+  scope :recent,      -> { order(created_at: :desc) }
+  scope :in_progress, -> { where(status: 'running') }
+  scope :stale,       -> { in_progress.where(started_at: ..STALE_AFTER.ago) }
+
+  # Mark abandoned runs failed and un-stick the sources pointing at them.
+  # Safe on any read path: it only touches rows already past STALE_AFTER, and
+  # does nothing when there are none.
+  def self.reap_stale!(scope = all)
+    stale_runs = scope.stale.to_a
+    return 0 if stale_runs.empty?
+
+    stale_runs.each do |run|
+      run.update_columns(
+        status: 'failed', finished_at: Time.current,
+        error_log: [{ 'message' => 'Run did not finish (worker stopped) — marked stale' }]
+      )
+    end
+
+    CatalogSource.where(id: stale_runs.map(&:catalog_source_id).uniq, last_run_status: 'running')
+                 .update_all(last_run_status: 'failed')
+    stale_runs.size
+  end
+
+  # True while this run is genuinely in flight — a row abandoned by a dead
+  # worker is not, however much its status column insists otherwise.
+  def actually_running?
+    status == 'running' && started_at.present? && started_at > STALE_AFTER.ago
+  end
 
   def duration_seconds
     return nil unless started_at && finished_at

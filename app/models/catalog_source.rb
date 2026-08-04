@@ -9,9 +9,9 @@
 #
 # Dealer opt-in (Surface A) is a separate join — see DealerCatalogSubscription.
 class CatalogSource < ApplicationRecord
-  ADAPTER_TYPES   = %w[champion_feed manufacturedhomes_platform avada_sitemap tru_model_line
-                       clayton_epic_region clayton_retail_home_center trove_catalog
-                       cavco_retailer].freeze
+  ADAPTER_TYPES   = %w[champion_feed manufacturedhomes_platform timber_creek_dealer
+                       avada_sitemap tru_model_line clayton_epic_region
+                       clayton_retail_home_center trove_catalog cavco_retailer].freeze
   RUN_STATUSES    = %w[never_run success partial failed].freeze
   SCHEDULES       = %w[daily weekly manual].freeze
 

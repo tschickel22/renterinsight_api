@@ -29,6 +29,23 @@ module Catalog
     end
 
     def call
+      # Don't stack crawls on one source. The admin Run Now button checked this,
+      # but the two paths that fire WITHOUT a human — the nightly sweep and a
+      # dealer subscribing — did not, so a subscription during a crawl (or an
+      # overlapping nightly) started a second concurrent run of the same site.
+      # That doubles the request rate at the manufacturer, makes two archivers
+      # download the same not-yet-archived images, and races two ingests over
+      # the same rows (vehicles has no UNIQUE index on
+      # [catalog_source_id, catalog_source_key], only a plain btree).
+      #
+      # Reap first so a run abandoned by a deploy can't block every later run.
+      ScrapeRun.reap_stale!(@source.scrape_runs)
+      if @source.scrape_runs.in_progress.exists?
+        Rails.logger.info "[Catalog::RunService] source #{@source.id} already has a run in " \
+                          "progress; skipping this #{@trigger} run"
+        return nil
+      end
+
       run = @source.scrape_runs.create!(status: 'running', trigger: @trigger, started_at: Time.current)
       # Reflect "running" on the source immediately so the list badge updates the
       # moment the job starts, instead of showing the previous status for the
@@ -38,7 +55,7 @@ module Catalog
 
       return fail_run(run, 'No matching adapter for adapter_type') if adapter.nil?
 
-      homes, errors = collect_homes(adapter)
+      homes, errors = collect_homes(adapter, run: run)
       rates    = ExtractionStats.rates(homes)
       degraded = ExtractionStats.degraded?(rates, @source.extraction_threshold, untracked: @source.untracked_fields)
 
@@ -78,7 +95,9 @@ module Catalog
       return unless @source.config.is_a?(Hash) && @source.config['archive_images'] == true
       return if homes.empty?
 
-      archiver = ImageArchiver.new(crawl_delay: @source.config['image_crawl_delay'].to_i)
+      # Pass the raw config value: ImageArchiver decides what a missing or zero
+      # delay means. Calling .to_i here turned "unset" into "no delay at all".
+      archiver = ImageArchiver.new(crawl_delay: @source.config['image_crawl_delay'])
       homes.each do |home|
         home.images = archiver.archive(home.images)
       end
@@ -91,10 +110,21 @@ module Catalog
                          "#{@source.id}: #{e.class}: #{e.message}"
     end
 
-    def collect_homes(adapter)
+    # Counters are written to the run row as we go, not only at finalize.
+    #
+    # They used to appear only in finalize!, so an in-flight run reported
+    # homes_discovered: 0 for its entire duration and a healthy multi-minute
+    # crawl was indistinguishable from a dead one in the admin UI. Archiving
+    # takes runs from ~2 minutes to 5+, which made that worse.
+    #
+    # update_columns on purpose: no validations, no callbacks, no touching
+    # updated_at on every home — this fires once per home and must stay cheap.
+    def collect_homes(adapter, run: nil)
       keys   = Array(adapter.discover)
       homes  = []
       errors = []
+
+      run&.update_columns(homes_discovered: keys.size)
 
       # A run that discovers nothing otherwise finishes "failed" with an empty
       # error log, which tells the admin nothing about why. Say so explicitly,
@@ -114,6 +144,8 @@ module Catalog
           errors << smoke_error(home) unless home.valid_smoke?
           homes << home
         end
+        run&.update_columns(homes_parsed_ok: homes.size,
+                            homes_failed: keys.size - homes.size)
         sleep(adapter.crawl_delay) if adapter.crawl_delay.to_i.positive? && !Rails.env.test?
       rescue StandardError => e
         errors << { 'url' => key.to_s, 'message' => "#{e.class}: #{e.message}" }

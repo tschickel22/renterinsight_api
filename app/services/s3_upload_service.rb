@@ -7,10 +7,14 @@ class S3UploadService
   
   attr_reader :s3_client, :bucket_name, :region
   
-  def initialize
+  # @param bucket [String, nil] Override the default bucket. Used by callers who
+  #   must NOT share the general upload bucket — currently the catalog image
+  #   archiver, whose URLs are written permanently into vehicle rows and so need
+  #   their own lifecycle, while customer uploads carry on where they already are.
+  def initialize(bucket: nil)
     @region = ENV['AWS_REGION'] || 'us-west-2'
-    @bucket_name = ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
-    
+    @bucket_name = bucket.presence || ENV['AWS_S3_BUCKET'] || 'renterinsight-website-assets-staging'
+
     @s3_client = Aws::S3::Client.new(
       region: @region,
       access_key_id: ENV['AWS_ACCESS_KEY_ID'],

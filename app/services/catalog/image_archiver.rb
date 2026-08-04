@@ -53,31 +53,80 @@ module Catalog
 
     attr_reader :result
 
-    def initialize(crawl_delay: DEFAULT_DELAY, folder: FOLDER, uploader: nil)
-      @crawl_delay = crawl_delay.to_i
+    # Catalog imagery gets its OWN bucket, set by CATALOG_ASSETS_BUCKET.
+    #
+    # It cannot simply follow AWS_S3_BUCKET, because that is deliberately still
+    # pointed at the website-assets STAGING bucket in production — customer
+    # uploads and document conversions live there and work, and moving them is
+    # not part of turning archiving on. So the two have to be able to differ:
+    # repointing AWS_S3_BUCKET would drag every existing upload path along with
+    # it, and leaving archiving on AWS_S3_BUCKET would put permanent listing
+    # imagery in a bucket named "staging" (which #misconfigured_bucket? refuses,
+    # correctly).
+    #
+    # Unset, this falls back to the old behaviour, so nothing changes until the
+    # bucket exists and the var is set.
+    ENV_BUCKET = 'CATALOG_ASSETS_BUCKET'
+
+    def initialize(crawl_delay: nil, folder: FOLDER, uploader: nil)
+      @crawl_delay = self.class.resolve_delay(crawl_delay)
       @folder      = folder
-      @uploader    = uploader || S3UploadService.new
+      @uploader    = uploader || S3UploadService.new(bucket: ENV[ENV_BUCKET].presence)
       @result      = Result.new(archived: 0, reused: 0, failed: 0, skipped: 0, rate_limited: false)
       @consecutive_rate_limits = 0
     end
 
-    # S3UploadService falls back to a bucket literally named "...-staging" when
-    # AWS_S3_BUCKET is unset. For transient uploads that is merely untidy; here
-    # it is not, because the archived URL is written into every vehicle row.
-    # Production imagery would be permanently pinned to the staging bucket, and
-    # whatever retention or clean-up applies there would govern live dealer
-    # listings.
+    # A source that turns archiving on WITHOUT naming a delay must get the
+    # polite default, not zero.
+    #
+    # The keyword default used to be DEFAULT_DELAY, which looked safe and was
+    # not: every caller passed config['image_crawl_delay'].to_i, and nil.to_i is
+    # 0, so the default never fired for exactly the sources most likely to need
+    # it. That is how the Kabco run above happened. Normalising here rather than
+    # at each call site means a future caller cannot reintroduce it.
+    #
+    # Zero is treated as "unset" deliberately. It is not an escape hatch: no
+    # delay is the one setting already shown to get us rate-limited off a site,
+    # so it should not be reachable by omission or by a stray 0 in config.
+    def self.resolve_delay(value)
+      seconds = value.to_i
+      seconds.positive? ? seconds : DEFAULT_DELAY
+    end
+
+    # In production the catalog bucket must be named EXPLICITLY, because the
+    # archived URL is written into every vehicle row and no later env change can
+    # undo it.
+    #
+    # This used to infer intent from the bucket NAME, refusing anything
+    # containing "staging". That premise turned out to be false here:
+    # renterinsight-website-assets-staging is a naming artifact and serves both
+    # environments for customer uploads. So the check inferred the right answer
+    # from the wrong reason, and would have passed silently the moment
+    # AWS_S3_BUCKET pointed at any other bucket that happened not to say
+    # "staging" — dropping permanent listing imagery in with user documents.
+    #
+    # Requiring CATALOG_ASSETS_BUCKET makes the intent explicit rather than
+    # guessed. The name check is kept as a second line: a catalog bucket named
+    # "staging" in production is a typo whichever way it got there.
     #
     # Scoped to this service on purpose: the dozen existing upload paths keep
     # their current behaviour, so nothing that works today can start failing.
     def misconfigured_bucket?
-      Rails.env.production? && @uploader.bucket_name.to_s.include?('staging')
+      return false unless Rails.env.production?
+
+      ENV[ENV_BUCKET].blank? || @uploader.bucket_name.to_s.include?('staging')
     end
 
     def bucket_warning
-      "Refusing to archive: production is pointed at #{@uploader.bucket_name.inspect}. " \
-        'Set AWS_S3_BUCKET to the production bucket first — archived URLs are stored ' \
-        'on every vehicle, so this is not something a later env change can undo.'
+      if ENV[ENV_BUCKET].blank?
+        "Refusing to archive: #{ENV_BUCKET} is not set, so production would fall back to " \
+          "#{@uploader.bucket_name.inspect}. Name the catalog bucket explicitly — archived " \
+          'URLs are stored on every vehicle, so this is not something a later env change ' \
+          'can undo. Leave AWS_S3_BUCKET alone; customer uploads still use it.'
+      else
+        "Refusing to archive: #{ENV_BUCKET} is #{@uploader.bucket_name.inspect}, which looks " \
+          'like a staging bucket. Point it at the production catalog bucket.'
+      end
     end
 
     # @param images [Array<Hash>] NormalizedHome image records

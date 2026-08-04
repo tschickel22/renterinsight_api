@@ -139,10 +139,15 @@ module Api
         { mode: 'crawl_queued' }
       end
 
+      # Reap first: this guard reads the status column, so a run abandoned by a
+      # deploy would otherwise suppress every subscription-triggered run of this
+      # source indefinitely — nothing else clears those rows except an admin
+      # happening to press Run Now.
       def enqueue_run(source)
-        return if source.scrape_runs.where(status: 'running').exists?
+        ScrapeRun.reap_stale!(source.scrape_runs)
+        return if source.scrape_runs.in_progress.exists?
 
-        CatalogSourceRunJob.perform_later(source.id, trigger: 'scheduled')
+        CatalogSourceRunJob.perform_later(source.id, trigger: 'subscription')
       end
 
       def available_source_json(source)

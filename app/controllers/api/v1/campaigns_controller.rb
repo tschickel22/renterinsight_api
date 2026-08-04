@@ -1,4 +1,15 @@
 class Api::V1::CampaignsController < ApplicationController
+  # Sender reasons are internal keys. These are what a dealer reads in the toast, so they
+  # have to say what to do about it rather than name the guard that fired.
+  TEST_SEND_FAILURE_MESSAGES = {
+    'no_valid_email_connection' => 'No valid email connection for this campaign',
+    'no_valid_sms_sender'       => 'No active SMS number for this company',
+    'contact_value_missing'     => 'No address to send the test to',
+    'recipient_unsubscribed'    => 'That address is suppressed or unsubscribed for this company',
+    'outside_send_window'       => 'Outside this campaign\'s send window',
+    'rate_limited'              => 'This mailbox has reached its send rate limit, try again shortly'
+  }.freeze
+
   before_action :set_company_scope
   before_action :set_campaign, only: %i[show update destroy duplicate start pause resume archive test_send preview stats analytics_timeseries engagement engagement_by_step engagement_by_link audience_members exclude_audience_members refine_with_ai]
 
@@ -345,17 +356,23 @@ class Api::V1::CampaignsController < ApplicationController
     )
     enrollment.save!
 
-    result = Campaigns::CampaignSender.new(enrollment: enrollment).deliver_current_step
+    sender = Campaigns::CampaignSender.new(enrollment: enrollment)
+    result = sender.deliver_current_step
     if result
       render json: { success: true, recipient: test_address, channel: @campaign.channel, step_position: step.position, step_subject: step.subject }
     else
       last_send = enrollment.campaign_sends.order(created_at: :desc).first
       err = last_send&.metadata.is_a?(Hash) ? last_send.metadata['error'] : nil
+      # Several guards decline before a CampaignSend exists, and every write they would
+      # normally make is skipped for test sends, so the sender's own reason is the only
+      # account of what happened. Without it this fell through to "check email connection"
+      # for causes that had nothing to do with the connection.
+      reason = err.presence || sender.last_skip_reason
       render json: {
         success: false,
         recipient: test_address,
         channel: @campaign.channel,
-        error: err.presence || 'Send failed (check email connection)'
+        error: TEST_SEND_FAILURE_MESSAGES[reason] || reason.presence || 'Send failed (check email connection)'
       }
     end
   rescue => e

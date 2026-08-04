@@ -15,10 +15,20 @@ module Campaigns
     SMS_HARD_TWILIO_CODES = %w[21610 30005 30007 21614 21408].freeze
     SMS_SOFT_TWILIO_CODES = %w[30008 20429].freeze
 
+    # Why this sender declined to send, when deliver_current_step returns false.
+    #
+    # Most of the reasons are recorded on the enrollment or the CampaignSend, but every one
+    # of those writes is skipped for test sends, and the guards that fire before a
+    # CampaignSend exists leave no record at all. That left the test-send endpoint with a
+    # bare false and nothing to report but a guess, which is how "outside the send window"
+    # reached an admin as "check email connection".
+    attr_reader :last_skip_reason
+
     def initialize(enrollment:, base_url: nil)
       @enrollment = enrollment
       @campaign = enrollment.campaign
       @company = @campaign.company
+      @last_skip_reason = nil
       # Must point to the Rails API server for tracked links, unsubscribe links, and pixel URLs
       @base_url = base_url || Messaging::TrackingUrl.base
     end
@@ -30,11 +40,19 @@ module Campaigns
       return mark_failed('contact_value_missing') if contact_value.blank?
       return mark_unsubscribed if suppressed?
 
-      window = Messaging::SendWindowCalculator.new(
-        send_window: @campaign.send_window, channel: @campaign.channel,
-        recipient: recipient, company: @company
-      ).evaluate
-      return reschedule_to(window) if window.is_a?(Time)
+      # The send window protects the recipients of an automated campaign from being mailed at
+      # 3am. A test send goes to the admin who just pressed the button, so there is nothing
+      # to protect and applying it only stops them working. It was worse than a delay:
+      # reschedule_to is a no-op for test sends, so a test outside the window was not
+      # deferred, it silently failed, and every test after 6pm reported itself to the admin
+      # as a broken email connection.
+      unless test_send?
+        window = Messaging::SendWindowCalculator.new(
+          send_window: @campaign.send_window, channel: @campaign.channel,
+          recipient: recipient, company: @company
+        ).evaluate
+        return reschedule_to(window, reason: 'outside_send_window') if window.is_a?(Time)
+      end
 
       step_channel = step.effective_channel
       connection_key = nil
@@ -61,7 +79,7 @@ module Campaigns
       # sharing a mailbox could each spend a full daily budget against it.
       remember_connection_key(connection_key)
       throttle = Messaging::ThrottleChecker.new(campaign: @campaign, connection_key: connection_key).check
-      return reschedule_to(throttle.retry_at) if throttle.throttled?
+      return reschedule_to(throttle.retry_at, reason: 'rate_limited') if throttle.throttled?
 
       # Monthly volume ceiling, separate from the per-mailbox rate check above. Rate is a
       # deliverability limit; this is a billing limit.
@@ -361,7 +379,8 @@ module Campaigns
       end
     end
 
-    def reschedule_to(time)
+    def reschedule_to(time, reason: 'rescheduled')
+      @last_skip_reason = reason
       @enrollment.update!(next_send_at: time) unless test_send?
       false
     end
@@ -377,6 +396,7 @@ module Campaigns
     end
 
     def mark_failed(reason)
+      @last_skip_reason = reason.to_s
       @enrollment.update!(status: 'failed', failure_reason: reason.to_s[0, 200]) unless test_send?
       CampaignEvent.create!(
         company_id: @company.id, campaign_id: @campaign.id, campaign_enrollment_id: @enrollment.id,
@@ -386,6 +406,7 @@ module Campaigns
     end
 
     def mark_unsubscribed
+      @last_skip_reason = 'recipient_unsubscribed'
       @enrollment.update!(status: 'unsubscribed', unsubscribed_at: Time.current) unless test_send?
       false
     end
