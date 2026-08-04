@@ -610,6 +610,8 @@ Rails.application.routes.draw do
           post :generate_both, path: 'generate-both'
           post :assign_contractor, path: 'assign-contractor'
           delete :unassign_contractor, path: 'unassign-contractor'
+          post :resend_contractor_notification, path: 'resend-contractor-notification'
+          get :contractor_notifications, path: 'contractor-notifications'
         end
         
         collection do

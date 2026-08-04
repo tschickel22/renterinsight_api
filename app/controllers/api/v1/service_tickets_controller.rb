@@ -4,7 +4,7 @@ module Api
   module V1
     class ServiceTicketsController < ApplicationController
       before_action :set_company
-      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :set_attachment_audience, :mark_warranty_suspected, :mark_warranty, :unmark_warranty, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both, :assign_contractor, :unassign_contractor]
+      before_action :set_service_ticket, only: [:show, :update, :destroy, :upload_attachments, :set_attachment_audience, :mark_warranty_suspected, :mark_warranty, :unmark_warranty, :set_line_billing, :generate_customer_invoice, :generate_warranty_claim, :generate_both, :assign_contractor, :unassign_contractor, :resend_contractor_notification, :contractor_notifications]
       
       # GET /api/v1/service-tickets
       def index
@@ -532,6 +532,52 @@ module Api
         render json: { error: 'Contractor not found' }, status: :not_found
       end
 
+      # POST /api/v1/service-tickets/:id/resend-contractor-notification
+      # Body: { contractor_id: <int> }  (optional — omit to resend to every
+      #                                  contractor assigned to this ticket)
+      #
+      # Re-sends the assignment notification on demand, for when a contractor says
+      # they never got it. Deliberately ignores notified_at and does NOT restamp it,
+      # so the original first-contact timestamp survives in the history.
+      def resend_contractor_notification
+        return unless authorize_action!('contractors', 'update')
+
+        assignments = @service_ticket.contractor_assignments.includes(:contractor)
+        if params[:contractor_id].present?
+          assignments = assignments.where(contractor_id: params[:contractor_id])
+        end
+        assignments = assignments.to_a
+
+        if assignments.empty?
+          return render json: { error: 'No contractor assigned to this ticket' }, status: :not_found
+        end
+
+        results = assignments.map do |assignment|
+          outcome = ProjectNotificationService.resend_assignment_notification(assignment)
+          {
+            assignmentId: assignment.id,
+            contractorId: assignment.contractor_id,
+            contractorName: assignment.contractor&.name,
+            email: outcome[:email],
+            sms: outcome[:sms]
+          }
+        end
+
+        render json: {
+          results: results,
+          data: serialize_ticket(@service_ticket.reload, include_attachments: false)
+        }
+      end
+
+      # GET /api/v1/service-tickets/:id/contractor-notifications
+      # Full delivery log for every notification sent about this ticket's contractor
+      # assignments, so the dealer can prove what went out and when.
+      def contractor_notifications
+        return unless authorize_action!('contractors', 'read')
+
+        render json: { notifications: ticket_notification_log(@service_ticket) }
+      end
+
       # DELETE /api/v1/service-tickets/:id/unassign-contractor
       def unassign_contractor
         return unless authorize_action!('contractors', 'delete')
@@ -763,19 +809,29 @@ module Api
         data[:warrantyClaim] = ticket.warranty_claim_owned ? serialize_warranty_claim(ticket.warranty_claim_owned) : nil
 
         # Contractor assignments (Phase 2B)
-        data[:contractorAssignments] = ticket.contractor_assignments.includes(:contractor).map do |ca|
+        assignments = ticket.contractor_assignments.includes(:contractor).to_a
+        comms_by_assignment = communications_for_assignments(assignments)
+
+        data[:contractorAssignments] = assignments.map do |ca|
+          comms = comms_by_assignment[ca.id] || []
           {
             id: ca.id,
             status: ca.status,
             assignedAt: ca.assigned_at,
             notes: ca.notes,
+            # Delivery visibility: the dealer should be able to see that the
+            # contractor was actually notified without opening a support ticket.
+            notifiedAt: ca.notified_at,
+            notificationStatus: notification_status_for(ca, comms),
+            notifications: comms.map { |c| communication_log_json(c) },
             contractor: {
               id: ca.contractor.id,
               name: ca.contractor.name,
               contactName: ca.contractor.contact_name,
               tradeType: ca.contractor.trade_type,
               phone: ca.contractor.phone,
-              email: ca.contractor.email
+              email: ca.contractor.email,
+              smsOptIn: ca.contractor.sms_opt_in
             }
           }
         end
@@ -783,6 +839,69 @@ module Api
         data
       end
       
+      # Communications keyed by the assignment they were sent about. One query for
+      # the whole ticket rather than one per assignment.
+      def communications_for_assignments(assignments)
+        return {} if assignments.empty?
+
+        Communication
+          .where(communicable_type: 'ContractorAssignment', communicable_id: assignments.map(&:id))
+          .order(created_at: :asc)
+          .group_by(&:communicable_id)
+      end
+
+      def communication_log_json(comm)
+        {
+          id: comm.id,
+          channel: comm.channel,
+          provider: comm.provider,
+          status: comm.status,
+          subject: comm.subject,
+          to: comm.to_address,
+          from: comm.from_address,
+          sentAt: comm.sent_at,
+          deliveredAt: comm.delivered_at,
+          failedAt: comm.failed_at,
+          error: comm.error_message,
+          createdAt: comm.created_at
+        }
+      end
+
+      # Rolls the raw log up into one word the UI can put on a badge.
+      # 'delivered' is stronger than 'sent': it means the receiving mail server
+      # accepted the message, not just that we handed it to SES.
+      def notification_status_for(assignment, comms)
+        return 'not_sent' if comms.empty? && assignment.notified_at.blank?
+        # notified_at is stamped even when the send raises, so a stamp with no
+        # communication row means the send failed silently.
+        return 'unknown' if comms.empty?
+
+        emails = comms.select { |c| c.channel == 'email' }
+        relevant = emails.presence || comms
+
+        return 'delivered' if relevant.any? { |c| c.delivered_at.present? }
+        return 'failed'    if relevant.all? { |c| c.failed_at.present? || c.status == 'failed' }
+        return 'sent'      if relevant.any? { |c| c.sent_at.present? || c.status == 'sent' }
+
+        'pending'
+      end
+
+      # Flat, newest-first delivery log across all of a ticket's assignments.
+      def ticket_notification_log(ticket)
+        assignments = ticket.contractor_assignments.includes(:contractor).to_a
+        comms_by_assignment = communications_for_assignments(assignments)
+
+        assignments.flat_map do |ca|
+          (comms_by_assignment[ca.id] || []).map do |comm|
+            communication_log_json(comm).merge(
+              assignmentId: ca.id,
+              contractorId: ca.contractor_id,
+              contractorName: ca.contractor&.name
+            )
+          end
+        end.sort_by { |c| c[:createdAt] || Time.at(0) }.reverse
+      end
+
       def serialize_assigned_user(user_id)
         user = User.find_by(id: user_id)
         return nil unless user
