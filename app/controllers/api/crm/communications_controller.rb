@@ -62,6 +62,10 @@ module Api
         send_result = send_email_via_provider(email_params, email_config, reply_to: reply_to)
 
         unless send_result[:success]
+          # Flag the rep's mailbox if the provider rejected our token, so they
+          # get told to reconnect instead of guessing why sends stopped.
+          EmailConnectionHealth.flag_from_config!(email_config, send_result[:error])
+
           return render json: {
             ok: false,
             success: false,

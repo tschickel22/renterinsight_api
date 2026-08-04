@@ -1063,20 +1063,10 @@ module Api
       # If this send used a user-tier OAuth connection AND the provider
       # rejected the bearer token, mark that connection as needing re-auth so
       # the user gets an in-app notification instead of silent failure.
+      # Delegates to EmailConnectionHealth so every send path shares one
+      # definition of "this token is dead" rather than each growing its own.
       def flag_source_connection_reauth(config, exception)
-        return unless config.is_a?(Hash)
-        source_type = config['_sourceConnectionType'] || config[:_sourceConnectionType]
-        source_id   = config['_sourceConnectionId']   || config[:_sourceConnectionId]
-        return unless source_type == 'UserEmailConnection' && source_id.present?
-
-        connection = UserEmailConnection.find_by(id: source_id)
-        return unless connection
-        return unless UserEmailConnection::REAUTH_ERROR_PATTERNS.any? { |re| exception.message =~ re }
-
-        connection.mark_needs_reauth!(exception.message)
-        Rails.logger.warn "[Platform::CommunicationsController] Marked UserEmailConnection ##{source_id} as needing reauth; notified user #{connection.user_id}"
-      rescue => e
-        Rails.logger.error "[flag_source_connection_reauth] Failed to flag connection: #{e.message}"
+        EmailConnectionHealth.flag_from_config!(config, exception)
       end
 
       def send_sms_via_provider(to, message, config)
