@@ -41,29 +41,72 @@ module Api
         # field via its field_key. Returns [values_by_field_key, consumed_keys].
         # Only values that pass the field definition's own validation are applied;
         # anything invalid or unmatched falls through to the notes safety net, so
-        # data is never lost. Matching is case-insensitive on field_key.
+        # data is never lost.
+        #
+        # Matching tries the exact (case-insensitive) field_key first, then a
+        # punctuation-insensitive form. Facebook Lead Ads sends its questions
+        # verbatim — "what_don't_you_like_about_where_you_live_now?" — while the
+        # custom field auto-created from that same question has the punctuation
+        # stripped. Those describe the same question and used to miss over a lone
+        # "?", dumping every answer into notes. Normalizing both sides means a
+        # dealer never has to hand-transcribe field keys into their Zap.
         def extract_inbound_custom_fields(module_name)
           values = {}
           consumed = []
           return [values, consumed] unless current_company
 
-          param_by_downcase = params.keys.index_by { |k| k.to_s.downcase }
+          candidates = inbound_field_candidates
 
           current_company.custom_fields.active.for_module(module_name).each do |field|
-            pk = param_by_downcase[field.field_key.to_s.downcase]
-            next unless pk
-            raw = params[pk]
-            next if raw.nil? || raw == '' || raw.is_a?(ActionController::Parameters) || raw.is_a?(Array)
+            key = field.field_key.to_s
+            entry = candidates[key.downcase] || candidates[normalize_inbound_key(key)]
+            next unless entry
+
+            raw = entry[:value]
+            next if raw.nil? || raw == '' || raw.is_a?(ActionController::Parameters) ||
+                    raw.is_a?(Array) || raw.is_a?(Hash)
             errs = (field.validate_value(raw) rescue [])
             next if errs.present?
             values[field.field_key] = raw
-            consumed << pk.to_s
+            consumed << entry[:param_key]
           end
 
           [values, consumed]
         rescue StandardError => e
           Rails.logger.warn "[Partner::BaseController] extract_inbound_custom_fields failed: #{e.class}: #{e.message}"
           [{}, []]
+        end
+
+        # Flat lookup of the inbound payload under both its exact downcased key
+        # and its normalized form, pointing back at the ORIGINAL param key so
+        # the notes safety net can skip whatever we consumed. Top-level params
+        # are indexed before `raw`, so an explicitly mapped field always wins
+        # over the same key echoed inside the raw passthrough blob.
+        def inbound_field_candidates
+          index = {}
+
+          add = lambda do |k, v|
+            key = k.to_s
+            [key.downcase, normalize_inbound_key(key)].uniq.each do |variant|
+              next if variant.blank? || index.key?(variant)
+              index[variant] = { param_key: key, value: v }
+            end
+          end
+
+          params.to_unsafe_h.each { |k, v| add.call(k, v) }
+
+          raw = params[:raw]
+          raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
+          raw.each { |k, v| add.call(k, v) } if raw.is_a?(Hash)
+
+          index
+        end
+
+        # Punctuation-insensitive key form: lowercase, every run of non
+        # alphanumerics collapsed to a single underscore, no leading/trailing
+        # underscores. "What don't you like?" and "what_don_t_you_like" agree.
+        def normalize_inbound_key(key)
+          key.to_s.downcase.gsub(/[^a-z0-9]+/, '_').gsub(/\A_+|_+\z/, '')
         end
 
         # A notes-friendly summary of inbound fields that didn't map to a
