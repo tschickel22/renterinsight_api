@@ -308,7 +308,10 @@ Rails.application.routes.draw do
       
       # ==================== GLOBAL SEARCH ====================
       get 'search/global', to: 'search#global'
-      
+      # Typeahead for related-record pickers — the five linkable types, each
+      # result carrying its parent ids so one pick fills the rest of the ladder.
+      get 'search/related', to: 'search#related'
+
       # ==================== COMPANIES (Platform Admin) ====================
       scope path: 'companies', controller: 'companies' do
         get 'accessible', action: :accessible

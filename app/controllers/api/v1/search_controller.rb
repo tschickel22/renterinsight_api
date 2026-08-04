@@ -405,7 +405,216 @@ class Api::V1::SearchController < ApplicationController
     
     render json: { results: results }
   end
-  
+
+  # Types #related will search, in the order they're grouped for the caller.
+  RELATED_TYPES = %w[account contact deal service_ticket lead].freeze
+
+  # Typeahead for "what record is this related to?" pickers (Task Center's
+  # related-entity picker is the first caller). Deliberately NOT #global:
+  #
+  #   1. It searches only the five linkable CRM/service types.
+  #   2. It returns each result's PARENT ids, so one pick fills the whole ladder:
+  #        service_ticket -> account, contact, deal
+  #        deal           -> account, contact
+  #        contact        -> account
+  #        account        -> contact, but ONLY when the account has exactly one
+  #        lead           -> nothing; leads sit outside the account ladder
+  #   3. It matches deals and tickets by their ACCOUNT or CONTACT name, which
+  #      #global doesn't. People look these up by who they're for, not by
+  #      number, and matching only deals.name means typing a surname finds
+  #      nothing.
+  #
+  # Inactive leads (converted / lost / unqualified / dead) are excluded on
+  # purpose — open the lead record directly to task one of those.
+  def related
+    query = params[:query]&.strip
+    return render json: { results: [] } if query.blank? || query.length < 2
+
+    requested = params[:types].to_s.split(',').map(&:strip) & RELATED_TYPES
+    types = requested.presence || RELATED_TYPES
+    per_type = (params[:limit].presence || 8).to_i.clamp(1, 25)
+
+    like = "%#{query}%"
+    # Matches "first last" as typed, which per-column ILIKE never will.
+    full_name_sql = ->(table) {
+      "(COALESCE(#{table}.first_name, '') || ' ' || COALESCE(#{table}.last_name, '')) ILIKE :q"
+    }
+    results = []
+
+    if types.include?('account')
+      begin
+        accounts = @company.accounts
+                           .where(is_deleted: [false, nil])
+                           .where('name ILIKE :q OR website ILIKE :q', q: like)
+                           .limit(per_type).to_a
+
+        # Pre-fill the contact only when the choice is unambiguous. Two contacts
+        # and we'd be guessing, so we leave it for the user to pick.
+        solo_contact_by_account = {}
+        if accounts.any?
+          counts = @company.contacts.where(account_id: accounts.map(&:id)).group(:account_id).count
+          solo_ids = counts.select { |_, n| n == 1 }.keys
+          @company.contacts.where(account_id: solo_ids).each do |c|
+            solo_contact_by_account[c.account_id] = c
+          end
+        end
+
+        results += accounts.map do |account|
+          solo = solo_contact_by_account[account.id]
+          {
+            id: account.id,
+            type: 'account',
+            title: account.name,
+            subtitle: account.website.presence || account.industry,
+            badge: account.account_type&.titleize,
+            account_id: account.id,
+            account_name: account.name,
+            contact_id: solo&.id,
+            contact_name: solo&.full_name,
+            score: calculate_score(query, account.name)
+          }
+        end
+      rescue => e
+        Rails.logger.error("Related search accounts error: #{e.message}")
+      end
+    end
+
+    if types.include?('contact')
+      begin
+        contacts = @company.contacts
+                           .preload(:account)
+                           .where(
+                             "first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q " \
+                             "OR phone ILIKE :q OR #{full_name_sql.call('contacts')}",
+                             q: like
+                           )
+                           .limit(per_type)
+
+        results += contacts.map do |contact|
+          {
+            id: contact.id,
+            type: 'contact',
+            title: contact.full_name,
+            subtitle: contact.email.presence || contact.phone,
+            badge: contact.account&.name,
+            account_id: contact.account_id,
+            account_name: contact.account&.name,
+            contact_id: contact.id,
+            contact_name: contact.full_name,
+            score: calculate_score(query, contact.first_name, contact.last_name, contact.email)
+          }
+        end
+      rescue => e
+        Rails.logger.error("Related search contacts error: #{e.message}")
+      end
+    end
+
+    if types.include?('deal')
+      begin
+        # belongs_to joins can't multiply rows, so no DISTINCT needed (and the
+        # deals table's json columns have no equality operator for one anyway).
+        deals = @company.deals
+                        .left_joins(:account, :contact)
+                        .preload(:account, :contact)
+                        .where(
+                          "deals.name ILIKE :q OR deals.deal_number ILIKE :q " \
+                          "OR accounts.name ILIKE :q OR contacts.first_name ILIKE :q " \
+                          "OR contacts.last_name ILIKE :q OR #{full_name_sql.call('contacts')}",
+                          q: like
+                        )
+                        .limit(per_type)
+
+        results += deals.map do |deal|
+          who = deal.contact&.full_name.presence || deal.account&.name
+          {
+            id: deal.id,
+            type: 'deal',
+            title: deal.name,
+            subtitle: [deal.deal_number, who].compact_blank.join(' — ').presence,
+            badge: deal.stage&.titleize,
+            amount: deal.value,
+            account_id: deal.account_id,
+            account_name: deal.account&.name,
+            contact_id: deal.contact_id,
+            contact_name: deal.contact&.full_name,
+            score: calculate_score(query, deal.name, deal.deal_number, deal.account&.name, who)
+          }
+        end
+      rescue => e
+        Rails.logger.error("Related search deals error: #{e.message}")
+      end
+    end
+
+    if types.include?('service_ticket')
+      begin
+        tickets = @company.service_tickets
+                          .left_joins(:account, :contact)
+                          .preload(:account, :contact)
+                          .where(
+                            "service_tickets.ticket_number ILIKE :q OR service_tickets.title ILIKE :q " \
+                            "OR accounts.name ILIKE :q OR contacts.first_name ILIKE :q " \
+                            "OR contacts.last_name ILIKE :q OR #{full_name_sql.call('contacts')}",
+                            q: like
+                          )
+                          .limit(per_type)
+
+        results += tickets.map do |ticket|
+          who = ticket.account&.name.presence || ticket.contact&.full_name
+          {
+            id: ticket.id,
+            type: 'service_ticket',
+            title: ticket.ticket_number.presence || "Ticket ##{ticket.id}",
+            subtitle: [who, ticket.title].compact_blank.join(' — ').presence,
+            badge: ticket.status&.titleize,
+            account_id: ticket.account_id,
+            account_name: ticket.account&.name,
+            contact_id: ticket.contact_id,
+            contact_name: ticket.contact&.full_name,
+            deal_id: ticket.deal_id,
+            score: calculate_score(query, ticket.ticket_number, ticket.title, who)
+          }
+        end
+      rescue => e
+        Rails.logger.error("Related search service_tickets error: #{e.message}")
+      end
+    end
+
+    if types.include?('lead')
+      begin
+        leads = @company.leads
+                        .where(is_converted: [false, nil])
+                        .where.not(status: %w[lost unqualified dead])
+                        .where(
+                          "first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q " \
+                          "OR phone ILIKE :q OR company_name ILIKE :q OR #{full_name_sql.call('leads')}",
+                          q: like
+                        )
+                        .limit(per_type)
+
+        results += leads.map do |lead|
+          {
+            id: lead.id,
+            type: 'lead',
+            title: lead.full_name.presence || "Lead ##{lead.id}",
+            subtitle: lead.company_name.presence || lead.email.presence || lead.phone,
+            badge: lead.status&.titleize,
+            score: calculate_score(query, lead.first_name, lead.last_name, lead.email, lead.company_name)
+          }
+        end
+      rescue => e
+        Rails.logger.error("Related search leads error: #{e.message}")
+      end
+    end
+
+    # sort_by isn't stable, so carry the index as a tiebreaker — otherwise
+    # equal-scoring rows shuffle between keystrokes and the list jitters.
+    results = results.each_with_index
+                     .sort_by { |r, i| [-r[:score], i] }
+                     .map(&:first)
+
+    render json: { results: results }
+  end
+
   private
 
   # For each vehicle in `vehicles_scope`, find linked deals whose contact or
