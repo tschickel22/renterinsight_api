@@ -443,7 +443,14 @@ module Api
           source_label = current_api_key&.name || 'API'
           name = [lead.first_name, lead.last_name].compact.join(' ').strip
 
-          activity = LeadActivity.create!(
+          # Creating the activity IS the send. LeadActivity's after_create
+          # :schedule_reminders fires for activity_type 'reminder' with a
+          # reminder_time, and because that time is now (delay <= 60) it calls
+          # ActivityReminderService.send_reminder immediately. Calling the
+          # service again here delivered every repeat inquiry twice: two bell
+          # notifications AND two Twilio SMS to the owner, one duplicated
+          # charge per inbound lead.
+          LeadActivity.create!(
             lead_id: lead.id,
             user_id: notify_user.id,
             assigned_to_id: notify_user.id,
@@ -455,7 +462,6 @@ module Api
             reminder_time: Time.current,
             reminder_sent: false
           )
-          ActivityReminderService.send_reminder(activity)
 
           send_repeat_inquiry_email(lead, notify_user, source_label)
         rescue => e
