@@ -172,6 +172,11 @@ class ServiceTicket < ApplicationRecord
   before_validation :set_defaults
   before_validation :normalize_assigned_to
   after_create :seed_initial_issue
+
+  # Set by callers supplying their own issues (the create form lets the user
+  # enter the whole punch list before saving). Without it the seeded
+  # title-based issue would sit alongside the real ones as a duplicate.
+  attr_accessor :skip_initial_issue_seed
   
   # Instance methods
   def parts_total
@@ -518,6 +523,7 @@ class ServiceTicket < ApplicationRecord
   # Any parts/labor supplied at create time move onto that issue, since the
   # ticket's flat arrays are a derived mirror of the issues from here on.
   def seed_initial_issue
+    return if skip_initial_issue_seed
     return if issues.any?
 
     rows_parts = ServiceTicketIssue.normalize_legacy_parts(parts)
