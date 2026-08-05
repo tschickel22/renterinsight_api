@@ -733,6 +733,12 @@ module Api
           return
         end
 
+        # Notify unless the form explicitly said not to. Skipping stamps
+        # notification_skipped_at, which keeps the assignment out of the
+        # notifier's pending set — the dealer sends it later from the ticket.
+        notify = params[:notify_contractor].nil? ||
+                 ActiveModel::Type::Boolean.new.cast(params[:notify_contractor])
+
         ContractorAssignment.create!(
           vendor_id: contractor.id,
           assignable: ticket,
@@ -740,7 +746,8 @@ module Api
           assigned_by_id: current_user&.id,
           status: 'assigned',
           assigned_at: Time.current,
-          notes: params[:contractor_note].presence
+          notes: params[:contractor_note].presence,
+          notification_skipped_at: notify ? nil : Time.current
         )
       rescue StandardError => e
         Rails.logger.error("[ServiceTicket##{ticket.id}] contractor assignment failed: #{e.message}")
