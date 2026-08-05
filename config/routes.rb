@@ -293,6 +293,8 @@ Rails.application.routes.draw do
         patch 'rbac', action: :update_rbac
         get 'loan', action: :show_loan
         patch 'loan', action: :update_loan
+        get 'service_warranty_policy', action: :show_service_warranty_policy
+        patch 'service_warranty_policy', action: :update_service_warranty_policy
         get 'portal_modules', action: :show_portal_modules
         patch 'portal_modules', action: :update_portal_modules
         patch :save_communication_settings
@@ -617,8 +619,28 @@ Rails.application.routes.draw do
         collection do
           get :stats
         end
+
+        # Complaints. Each issue owns its own parts, labor and pay type.
+        resources :issues, controller: 'service_ticket_issues', only: %i[index show create update destroy] do
+          member do
+            post :request_authorization, path: 'request-authorization'
+            post :record_authorization, path: 'record-authorization'
+          end
+
+          collection do
+            post :reorder
+          end
+        end
       end
-      
+
+      # ==================== SERVICE ISSUE TEMPLATES ====================
+      resources :service_issue_templates, path: 'service-issue-templates',
+                                          only: %i[index create update destroy] do
+        collection do
+          post :reorder
+        end
+      end
+
       # ==================== VENDORS (unified contractors + suppliers) ====================
       resources :vendors
 
@@ -626,6 +648,9 @@ Rails.application.routes.draw do
       resources :contractors do
         member do
           post :sms_consent, path: 'sms-consent'
+          # Dealer generates a portal code to read to the contractor directly,
+          # for when email and SMS don't arrive.
+          post :portal_access_code, path: 'portal-access-code'
         end
 
         collection do
@@ -3020,6 +3045,8 @@ Rails.application.routes.draw do
           post :submit_for_review
           get :work_logs
           post :work_logs, action: :create_work_log
+          # Vendor confirms what was actually done on one complaint.
+          patch 'issues/:issue_id', action: :confirm_issue
         end
       end
 

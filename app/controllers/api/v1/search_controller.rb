@@ -1,4 +1,6 @@
 class Api::V1::SearchController < ApplicationController
+  include PersonNameSearch
+
   before_action :set_company_scope
 
   def global
@@ -7,26 +9,31 @@ class Api::V1::SearchController < ApplicationController
     
     query = params[:query]&.strip
     return render json: { results: [] } if query.blank? || query.length < 2
-    
+
+    # One escaped pattern for every block below — a query containing % or _
+    # matches those characters literally instead of acting as a wildcard.
+    like = person_name_like(query)
     results = []
-    
+
     # CRM - Leads (use is_converted, not is_deleted)
     begin
       leads = @company.leads
                      .where(is_converted: [false, nil])
                      .where.not(status: %w[lost unqualified dead])
-                     .where("first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q OR phone ILIKE :q OR company_name ILIKE :q",
-                            q: "%#{query}%")
+                     .where(person_name_where('leads', extra: %w[email phone company_name]),
+                            q: like)
+                     .order(Arel.sql(person_name_order('leads', query)))
                      .limit(5)
 
       results += leads.map do |lead|
+        full_name = lead.full_name.presence || "#{lead.first_name} #{lead.last_name}".strip
         {
           id: lead.id,
           type: 'lead',
-          title: lead.full_name || "#{lead.first_name} #{lead.last_name}".strip,
+          title: full_name,
           subtitle: lead.company_name.presence || lead.email || lead.phone,
           badge: lead.status&.titleize,
-          score: calculate_score(query, lead.first_name, lead.last_name, lead.email)
+          score: calculate_score(query, full_name, lead.first_name, lead.last_name, lead.email)
         }
       end
     rescue => e
@@ -36,10 +43,10 @@ class Api::V1::SearchController < ApplicationController
     # CRM - Contacts (has first_name, last_name - NOT name; NO is_deleted column)
     begin
       contacts = @company.contacts
-                        .where("first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ?", 
-                               "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                        .where(person_name_where('contacts', extra: %w[email phone]), q: like)
+                        .order(Arel.sql(person_name_order('contacts', query)))
                         .limit(5)
-      
+
       results += contacts.map do |contact|
         {
           id: contact.id,
@@ -47,7 +54,7 @@ class Api::V1::SearchController < ApplicationController
           title: contact.full_name,
           subtitle: contact.email || contact.phone,
           badge: contact.account&.name,
-          score: calculate_score(query, contact.first_name, contact.last_name, contact.email)
+          score: calculate_score(query, contact.full_name, contact.first_name, contact.last_name, contact.email)
         }
       end
     rescue => e
@@ -58,7 +65,7 @@ class Api::V1::SearchController < ApplicationController
     begin
       accounts = @company.accounts
                         .where(is_deleted: [false, nil])
-                        .where("name ILIKE ? OR website ILIKE ?", "%#{query}%", "%#{query}%")
+                        .where("name ILIKE ? OR website ILIKE ?", like, like)
                         .limit(5)
       
       results += accounts.map do |account|
@@ -82,8 +89,6 @@ class Api::V1::SearchController < ApplicationController
     #      when that unit is not the deal's primary unit (the aged cross-location case).
     # Deals with active scenarios are badged desked:true and deep-link to the desk tab.
     begin
-      like = "%#{query}%"
-
       # Path 1 — name / deal number.
       name_matches = @company.deals
                             .where('deals.name ILIKE ? OR deals.deal_number ILIKE ?', like, like)
@@ -142,8 +147,10 @@ class Api::V1::SearchController < ApplicationController
                            .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
                            .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
                            .where(
-                             "vehicles.vin ILIKE :q OR vehicles.stock_number ILIKE :q OR vehicles.inventory_id ILIKE :q OR CONCAT(vehicles.year::text, ' ', vehicles.make, ' ', vehicles.model) ILIKE :q OR contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
-                             q: "%#{query}%"
+                             "vehicles.vin ILIKE :q OR vehicles.stock_number ILIKE :q OR vehicles.inventory_id ILIKE :q " \
+                             "OR CONCAT(vehicles.year::text, ' ', vehicles.make, ' ', vehicles.model) ILIKE :q " \
+                             "OR #{person_name_where('contacts')} OR accounts.name ILIKE :q",
+                             q: like
                            )
       vehicles = @company.vehicles.where(id: match_scope.select("vehicles.id")).limit(5)
 
@@ -176,7 +183,7 @@ class Api::V1::SearchController < ApplicationController
                        .where("service_tickets.ticket_number ILIKE :t OR service_tickets.title ILIKE :t " \
                               "OR service_tickets.description ILIKE :t OR accounts.name ILIKE :t " \
                               "OR CAST(service_tickets.id AS TEXT) ILIKE :t",
-                              t: "%#{query}%")
+                              t: like)
                        .limit(5)
       
       results += tickets.map do |ticket|
@@ -198,7 +205,7 @@ class Api::V1::SearchController < ApplicationController
     begin
       quotes = @company.quotes
                       .where(is_deleted: [false, nil])
-                      .where("quote_number ILIKE ? OR notes ILIKE ?", "%#{query}%", "%#{query}%")
+                      .where("quote_number ILIKE ? OR notes ILIKE ?", like, like)
                       .limit(5)
       
       results += quotes.map do |quote|
@@ -220,7 +227,7 @@ class Api::V1::SearchController < ApplicationController
     begin
       invoices = @company.invoices
                         .where(is_deleted: [false, nil])
-                        .where("invoice_number ILIKE ? OR notes ILIKE ?", "%#{query}%", "%#{query}%")
+                        .where("invoice_number ILIKE ? OR notes ILIKE ?", like, like)
                         .limit(5)
       
       results += invoices.map do |invoice|
@@ -244,7 +251,7 @@ class Api::V1::SearchController < ApplicationController
         .not_deleted
         .left_joins(:account)
         .where("cash_receipts.receipt_number ILIKE ? OR cash_receipts.customer_name ILIKE ? OR accounts.name ILIKE ?",
-               "%#{query}%", "%#{query}%", "%#{query}%")
+               like, like, like)
         .limit(5)
 
       results += cash_receipts.map do |cr|
@@ -267,7 +274,7 @@ class Api::V1::SearchController < ApplicationController
       parts = @company.parts
                      .where(is_deleted: [false, nil])
                      .where("name ILIKE ? OR sku ILIKE ? OR manufacturer_name ILIKE ? OR manufacturer_part_no ILIKE ? OR barcode ILIKE ?", 
-                            "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                            like, like, like, like, like)
                      .limit(5)
       
       results += parts.map do |part|
@@ -294,7 +301,7 @@ class Api::V1::SearchController < ApplicationController
                    # on the vendors table. Referencing suppliers.* raised
                    # PG::UndefinedTable and dropped POs from every search.
                    .where("purchase_orders.po_number ILIKE ? OR vendors.name ILIKE ? OR vendors.code ILIKE ? OR vendors.account_number ILIKE ?",
-                          "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                          like, like, like, like)
                    .limit(5)
       
       results += pos.map do |po|
@@ -317,7 +324,7 @@ class Api::V1::SearchController < ApplicationController
       suppliers = @company.suppliers
                          .where(is_deleted: [false, nil])
                          .where("name ILIKE ? OR code ILIKE ? OR account_number ILIKE ?", 
-                                "%#{query}%", "%#{query}%", "%#{query}%")
+                                like, like, like)
                          .limit(5)
       
       results += suppliers.map do |supplier|
@@ -339,7 +346,7 @@ class Api::V1::SearchController < ApplicationController
       agreements = @company.agreements
                           .where(is_deleted: [false, nil])
                           .where("title ILIKE ? OR agreement_number ILIKE ? OR category ILIKE ?",
-                                 "%#{query}%", "%#{query}%", "%#{query}%")
+                                 like, like, like)
                           .limit(5)
 
       results += agreements.map do |agr|
@@ -361,7 +368,7 @@ class Api::V1::SearchController < ApplicationController
       contractors = @company.contractors
                            .where(is_deleted: [false, nil])
                            .where("name ILIKE ? OR contact_name ILIKE ? OR email ILIKE ? OR trade_type ILIKE ?",
-                                  "%#{query}%", "%#{query}%", "%#{query}%", "%#{query}%")
+                                  like, like, like, like)
                            .limit(5)
 
       results += contractors.map do |contractor|
@@ -381,7 +388,7 @@ class Api::V1::SearchController < ApplicationController
     # Workflow Rules
     begin
       rules = @company.workflow_rules
-                      .where("name ILIKE ?", "%#{query}%")
+                      .where("name ILIKE ?", like)
                       .limit(5)
       results += rules.map do |r|
         {
@@ -434,11 +441,7 @@ class Api::V1::SearchController < ApplicationController
     types = requested.presence || RELATED_TYPES
     per_type = (params[:limit].presence || 8).to_i.clamp(1, 25)
 
-    like = "%#{query}%"
-    # Matches "first last" as typed, which per-column ILIKE never will.
-    full_name_sql = ->(table) {
-      "(COALESCE(#{table}.first_name, '') || ' ' || COALESCE(#{table}.last_name, '')) ILIKE :q"
-    }
+    like = person_name_like(query)
     results = []
 
     if types.include?('account')
@@ -483,11 +486,8 @@ class Api::V1::SearchController < ApplicationController
       begin
         contacts = @company.contacts
                            .preload(:account)
-                           .where(
-                             "first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q " \
-                             "OR phone ILIKE :q OR #{full_name_sql.call('contacts')}",
-                             q: like
-                           )
+                           .where(person_name_where('contacts', extra: %w[email phone]), q: like)
+                           .order(Arel.sql(person_name_order('contacts', query)))
                            .limit(per_type)
 
         results += contacts.map do |contact|
@@ -501,7 +501,7 @@ class Api::V1::SearchController < ApplicationController
             account_name: contact.account&.name,
             contact_id: contact.id,
             contact_name: contact.full_name,
-            score: calculate_score(query, contact.first_name, contact.last_name, contact.email)
+            score: calculate_score(query, contact.full_name, contact.first_name, contact.last_name, contact.email)
           }
         end
       rescue => e
@@ -518,8 +518,7 @@ class Api::V1::SearchController < ApplicationController
                         .preload(:account, :contact)
                         .where(
                           "deals.name ILIKE :q OR deals.deal_number ILIKE :q " \
-                          "OR accounts.name ILIKE :q OR contacts.first_name ILIKE :q " \
-                          "OR contacts.last_name ILIKE :q OR #{full_name_sql.call('contacts')}",
+                          "OR accounts.name ILIKE :q OR #{person_name_where('contacts')}",
                           q: like
                         )
                         .limit(per_type)
@@ -552,8 +551,7 @@ class Api::V1::SearchController < ApplicationController
                           .preload(:account, :contact)
                           .where(
                             "service_tickets.ticket_number ILIKE :q OR service_tickets.title ILIKE :q " \
-                            "OR accounts.name ILIKE :q OR contacts.first_name ILIKE :q " \
-                            "OR contacts.last_name ILIKE :q OR #{full_name_sql.call('contacts')}",
+                            "OR accounts.name ILIKE :q OR #{person_name_where('contacts')}",
                             q: like
                           )
                           .limit(per_type)
@@ -584,11 +582,8 @@ class Api::V1::SearchController < ApplicationController
         leads = @company.leads
                         .where(is_converted: [false, nil])
                         .where.not(status: %w[lost unqualified dead])
-                        .where(
-                          "first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q " \
-                          "OR phone ILIKE :q OR company_name ILIKE :q OR #{full_name_sql.call('leads')}",
-                          q: like
-                        )
+                        .where(person_name_where('leads', extra: %w[email phone company_name]), q: like)
+                        .order(Arel.sql(person_name_order('leads', query)))
                         .limit(per_type)
 
         results += leads.map do |lead|
@@ -598,7 +593,7 @@ class Api::V1::SearchController < ApplicationController
             title: lead.full_name.presence || "Lead ##{lead.id}",
             subtitle: lead.company_name.presence || lead.email.presence || lead.phone,
             badge: lead.status&.titleize,
-            score: calculate_score(query, lead.first_name, lead.last_name, lead.email, lead.company_name)
+            score: calculate_score(query, lead.full_name, lead.first_name, lead.last_name, lead.email, lead.company_name)
           }
         end
       rescue => e
@@ -631,8 +626,8 @@ class Api::V1::SearchController < ApplicationController
       .joins("LEFT JOIN contacts ON contacts.id = deals.contact_id")
       .joins("LEFT JOIN accounts ON accounts.id = deals.account_id")
       .where(
-        "contacts.first_name ILIKE :q OR contacts.last_name ILIKE :q OR (COALESCE(contacts.first_name, '') || ' ' || COALESCE(contacts.last_name, '')) ILIKE :q OR accounts.name ILIKE :q",
-        q: "%#{query}%"
+        "#{person_name_where('contacts')} OR accounts.name ILIKE :q",
+        q: person_name_like(query)
       )
       .includes(:contact, :account)
 

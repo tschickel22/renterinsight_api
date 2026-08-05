@@ -70,10 +70,11 @@ module Api
         per_page = (params[:per_page] || 50).to_i
         per_page = [per_page, 200].min  # Cap at 200
         total = @service_tickets.count
-        @service_tickets = @service_tickets.offset((page - 1) * per_page).limit(per_page)
-        
+        # Preload issues: the row payload reports issue and unpriced counts.
+        @service_tickets = @service_tickets.offset((page - 1) * per_page).limit(per_page).includes(:issues)
+
         render json: {
-          data: @service_tickets.map { |ticket| serialize_ticket(ticket) },
+          data: @service_tickets.map { |ticket| serialize_ticket(ticket, include_issues: false) },
           meta: {
             total: total,
             page: page,
@@ -97,7 +98,12 @@ module Api
         return unless authorize_action!('service', 'create')
         
         @service_ticket = @company.service_tickets.new(service_ticket_params)
-        
+
+        # The create form lets the user enter the whole punch list before
+        # saving, so suppress the auto-seeded title-based issue when it does.
+        submitted_issues = Array(params[:issues])
+        @service_ticket.skip_initial_issue_seed = submitted_issues.any?
+
         # Auto-assign location from selector
         @service_ticket.location_id ||= Current.location_id if Current.location_id.present?
         
@@ -110,8 +116,11 @@ module Api
         if @service_ticket.save
           # Assignment notification handled by model callback (NotifiableServiceTicket)
           # which also checks skip_notifications and prevents self-notification
-          
-          render json: { data: serialize_ticket(@service_ticket) }, status: :created
+
+          create_submitted_issues(@service_ticket, submitted_issues)
+          assign_contractor_on_create(@service_ticket)
+
+          render json: { data: serialize_ticket(@service_ticket.reload) }, status: :created
         else
           render json: { errors: @service_ticket.errors.full_messages }, status: :unprocessable_entity
         end
@@ -552,8 +561,13 @@ module Api
           return render json: { error: 'No contractor assigned to this ticket' }, status: :not_found
         end
 
+        # "Send me a copy" on the Resend control: the copy goes to whoever
+        # clicked it, so a dealer can forward it on when the contractor says
+        # nothing arrived.
+        copy_to = ActiveModel::Type::Boolean.new.cast(params[:cc_assigner]) ? current_user&.email : nil
+
         results = assignments.map do |assignment|
-          outcome = ProjectNotificationService.resend_assignment_notification(assignment)
+          outcome = ProjectNotificationService.resend_assignment_notification(assignment, copy_to: copy_to)
           {
             assignmentId: assignment.id,
             contractorId: assignment.contractor_id,
@@ -701,11 +715,78 @@ module Api
           parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total, :part_id, :partId],
           labor: [:id, :description, :hours, :rate, :total],
           custom_fields: {},
+          # Admin-defined fields from the page-layout editor. Kept separate
+          # from the legacy `custom_fields` grab-bag the form writes directly.
+          custom_field_values: {},
           line_item_billing: [:index, :type, :billing_type, :manufacturer_id]
         )
       end
       
-      def serialize_ticket(ticket, include_attachments: false)
+      # Assigns the contractor chosen on the create form, in the same request
+      # rather than a follow-up call from the browser. The round-trip version
+      # was silently skippable — if it never fired, the ticket saved with no
+      # assignment and the contractor was never notified, with nothing to show
+      # for it. Doing it here means the assignment (and its notification) either
+      # happens or leaves a logged reason.
+      def assign_contractor_on_create(ticket)
+        contractor_id = params[:contractor_id]
+        return if contractor_id.blank?
+
+        contractor = @company.contractors.find_by(id: contractor_id)
+        if contractor.nil?
+          Rails.logger.error("[ServiceTicket##{ticket.id}] contractor #{contractor_id} not found for assignment")
+          return
+        end
+
+        # Notify unless the form explicitly said not to. Skipping stamps
+        # notification_skipped_at, which keeps the assignment out of the
+        # notifier's pending set — the dealer sends it later from the ticket.
+        notify = params[:notify_contractor].nil? ||
+                 ActiveModel::Type::Boolean.new.cast(params[:notify_contractor])
+
+        ContractorAssignment.create!(
+          vendor_id: contractor.id,
+          assignable: ticket,
+          company_id: @company.id,
+          assigned_by_id: current_user&.id,
+          status: 'assigned',
+          assigned_at: Time.current,
+          notes: params[:contractor_note].presence,
+          notification_skipped_at: notify ? nil : Time.current,
+          cc_assigner: ActiveModel::Type::Boolean.new.cast(params[:cc_assigner])
+        )
+      rescue StandardError => e
+        Rails.logger.error("[ServiceTicket##{ticket.id}] contractor assignment failed: #{e.message}")
+      end
+
+      # Persists issues entered on the create form before the ticket existed.
+      # Failures are logged rather than raised: the ticket is already saved, and
+      # losing it because one complaint row was malformed would be worse than
+      # landing on the detail page with an issue missing.
+      def create_submitted_issues(ticket, rows)
+        rows.each_with_index do |row, index|
+          attrs = row.respond_to?(:to_unsafe_h) ? row.to_unsafe_h : row.to_h
+          ticket.issues.create!(
+            company_id: ticket.company_id,
+            position: index,
+            title: attrs['title'].presence || 'Reported issue',
+            complaint: attrs['complaint'],
+            cause: attrs['cause'],
+            correction: attrs['correction'],
+            status: attrs['status'].presence || 'open',
+            pay_type: attrs['pay_type'].presence || 'customer',
+            manufacturer_id: attrs['manufacturer_id'],
+            visibility: attrs['visibility'].presence || 'external',
+            pricing_status: attrs['pricing_status'].presence || 'unpriced',
+            parts: attrs['parts'] || [],
+            labor: attrs['labor'] || []
+          )
+        rescue StandardError => e
+          Rails.logger.error("[ServiceTicket##{ticket.id}] could not create submitted issue #{index}: #{e.message}")
+        end
+      end
+
+      def serialize_ticket(ticket, include_attachments: false, include_issues: true)
         parts_array = ticket.parts.is_a?(Array) ? ticket.parts : (ticket.parts.present? ? (JSON.parse(ticket.parts) rescue []) : [])
         labor_array = ticket.labor.is_a?(Array) ? ticket.labor : (ticket.labor.present? ? (JSON.parse(ticket.labor) rescue []) : [])
         custom_fields_hash = ticket.custom_fields.is_a?(Hash) ? ticket.custom_fields : (ticket.custom_fields.present? ? (JSON.parse(ticket.custom_fields) rescue {}) : {})
@@ -732,7 +813,14 @@ module Api
           parts: parts_array,
           labor: labor_array,
           customFields: custom_fields_hash,
+          customFieldValues: ticket.custom_field_values || {},
           lineItemBilling: line_item_billing_array,
+          # The list endpoint skips the full issue payload to avoid an N+1
+          # across every row; it gets counts instead.
+          issues: include_issues ? ticket.issues.map(&:as_api_json) : nil,
+          issueCount: ticket.issues.size,
+          unpricedIssueCount: ticket.issues.count { |i| i.pricing_status == 'unpriced' },
+          fullyPriced: ticket.fully_priced?,
           portalUserId: ticket.portal_user_id,
           isPortalCreated: ticket.is_portal_created,
           portalNotes: ticket.portal_notes,

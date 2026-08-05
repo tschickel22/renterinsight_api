@@ -62,7 +62,14 @@ class CustomField < ApplicationRecord
   before_validation :generate_field_key, on: :create
   before_validation :set_label_from_name
   before_validation :normalize_options
-  
+  # Forms validate against the layout's copy of `required`, not this column, so
+  # un-requiring a field here has to reach the layouts or it looks like nothing
+  # happened. Same for deactivation: an entry left behind points at a field that
+  # no longer has a definition, and a field with no definition renders nothing
+  # while still being enforced.
+  after_update :sync_page_layout_entries,
+               if: -> { saved_change_to_required? || saved_change_to_is_active? }
+
   # Serialize JSON columns
   serialize :options, coder: JSON
   # validation_rules is jsonb - no serialize needed (PostgreSQL handles it natively)
@@ -168,7 +175,18 @@ class CustomField < ApplicationRecord
   end
   
   private
-  
+
+  # Push this field's required/active state into every page layout that places
+  # it. A deactivated field is removed outright, since leaving it behind is what
+  # produces a required field the form can't draw.
+  def sync_page_layout_entries
+    company.page_layouts.for_module_family(self.module).find_each do |layout|
+      layout.sync_field!(field_key, required: required?, remove: !is_active?)
+    end
+  rescue => e
+    Rails.logger.warn("[CustomField#sync_page_layout_entries] field #{id}: #{e.message}")
+  end
+
   def set_label_from_name
     self.label = name if label.blank? && name.present?
   end

@@ -105,6 +105,13 @@ class ServiceTicket < ApplicationRecord
   has_one :warranty_claim_owned, -> { where(is_deleted: false) }, class_name: 'WarrantyClaim', foreign_key: :service_ticket_id, dependent: :restrict_with_error
   has_many :invoices, as: :source, dependent: :nullify
   has_many :contractor_assignments, as: :assignable, dependent: :destroy
+
+  # The complaint layer. Issues are the source of truth for line items; the
+  # flat `parts` / `labor` columns below are kept in sync as a derived mirror
+  # so warranty-claim generation, invoicing and the legacy UI keep working
+  # unchanged. See ServiceTicketIssue#sync_ticket_line_items!
+  has_many :issues, -> { active.ordered }, class_name: 'ServiceTicketIssue', dependent: :destroy
+  has_many :all_issues, class_name: 'ServiceTicketIssue', dependent: :destroy
   
   # User assignment (assigned_to stores user_id as string)
   def assigned_to_user
@@ -164,6 +171,12 @@ class ServiceTicket < ApplicationRecord
   before_validation :generate_ticket_number, on: :create
   before_validation :set_defaults
   before_validation :normalize_assigned_to
+  after_create :seed_initial_issue
+
+  # Set by callers supplying their own issues (the create form lets the user
+  # enter the whole punch list before saving). Without it the seeded
+  # title-based issue would sit alongside the real ones as a duplicate.
+  attr_accessor :skip_initial_issue_seed
   
   # Instance methods
   def parts_total
@@ -431,17 +444,31 @@ class ServiceTicket < ApplicationRecord
   end
   
   def warranty_total
+    return issues.warranty.sum(&:total) if issues.any?
+
     parts_total = warranty_parts.sum { |p| (p['quantity'].to_f * p['unitCost'].to_f) }
     labor_total = warranty_labor.sum { |l| (l['hours'].to_f * l['rate'].to_f) }
     parts_total + labor_total
   end
-  
+
   def customer_total
+    return issues.customer_pay.sum(&:total) if issues.any?
+
     parts_total = customer_parts.sum { |p| (p['quantity'].to_f * p['unitCost'].to_f) }
     labor_total = customer_labor.sum { |l| (l['hours'].to_f * l['rate'].to_f) }
     parts_total + labor_total
   end
-  
+
+  # Issues still waiting on numbers -- the dealer's "needs pricing" queue after
+  # a vendor returns the work described but unpriced.
+  def unpriced_issues
+    issues.unpriced
+  end
+
+  def fully_priced?
+    issues.any? && issues.none? { |i| i.pricing_status == 'unpriced' }
+  end
+
   private
 
   def resync_draft_claim_if_lines_changed
@@ -488,6 +515,38 @@ class ServiceTicket < ApplicationRecord
     self.ticket_number = "ST-#{date_part}-#{sequence.to_s.rjust(4, '0')}"
   end
   
+  # Every ticket starts with one issue, seeded from the ticket itself: whoever
+  # opened it already described a problem, and that description IS the first
+  # complaint. Runs on the model rather than a controller so it holds for every
+  # entry point -- staff form, client portal, API.
+  #
+  # Any parts/labor supplied at create time move onto that issue, since the
+  # ticket's flat arrays are a derived mirror of the issues from here on.
+  def seed_initial_issue
+    return if skip_initial_issue_seed
+    return if issues.any?
+
+    rows_parts = ServiceTicketIssue.normalize_legacy_parts(parts)
+    rows_labor = ServiceTicketIssue.normalize_legacy_labor(labor)
+    warranty = is_warranty_confirmed || is_warranty_suspected
+
+    issues.create!(
+      company_id: company_id,
+      title: title.presence || 'Reported issue',
+      complaint: description,
+      pay_type: warranty ? 'warranty' : 'customer',
+      visibility: dealer_only ? 'internal' : 'external',
+      portal_visible: portal_visible.nil? ? true : portal_visible,
+      parts: rows_parts,
+      labor: rows_labor,
+      pricing_status: (rows_parts + rows_labor).empty? ? 'unpriced' : 'estimated'
+    )
+  rescue StandardError => e
+    # A ticket must still be created even if seeding trips; the user can add the
+    # issue by hand.
+    Rails.logger.error "[ServiceTicket##{id}] could not seed initial issue: #{e.message}"
+  end
+
   def set_defaults
     self.status ||= 'open'
     self.priority ||= 'medium'

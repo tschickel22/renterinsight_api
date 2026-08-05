@@ -83,6 +83,31 @@ class Vendor < ApplicationRecord
     portal_access_token == token && portal_token_expires_at&.future?
   end
 
+  # High-entropy token behind the one-click link in an assignment email.
+  #
+  # Long-lived on purpose: an assignment notice is routinely opened the next
+  # morning, and a 30-minute window would strand the contractor exactly like the
+  # code they never received. It can afford the longer life because it is 32
+  # random bytes rather than 6 digits, and it is matched with a constant-time
+  # comparison.
+  def generate_portal_link_token!(expires_in: 7.days)
+    update!(
+      portal_link_token: SecureRandom.urlsafe_base64(32),
+      portal_link_expires_at: expires_in.from_now
+    )
+    portal_link_token
+  end
+
+  def portal_link_valid?(token)
+    portal_link_token.present? && token.present? &&
+      ActiveSupport::SecurityUtils.secure_compare(portal_link_token, token.to_s) &&
+      portal_link_expires_at&.future?
+  end
+
+  def consume_portal_link_token!
+    update!(portal_link_token: nil, portal_link_expires_at: nil)
+  end
+
   def can_login_with_password?
     password_login_enabled? && password_digest.present?
   end

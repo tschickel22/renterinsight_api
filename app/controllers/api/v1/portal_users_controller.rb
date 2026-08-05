@@ -5,6 +5,7 @@ require 'cgi'
 module Api
   module V1
     class PortalUsersController < ApplicationController
+      include PersonNameSearch
       include RbacAuthorization
       rbac_resource :portal,
         read_actions: [:index, :show, :stats, :generate_proxy_token],
@@ -56,14 +57,13 @@ module Api
         
         # Apply search
         if params[:search].present?
-          search_term = "%#{params[:search]}%"
           # Only search contacts - join if not already joined
           @portal_users = @portal_users
             .where(buyer_type: 'Contact')
             .joins("LEFT JOIN contacts AS search_contacts ON search_contacts.id = buyer_portal_accesses.buyer_id")
             .where(
-              'search_contacts.first_name ILIKE ? OR search_contacts.last_name ILIKE ? OR search_contacts.email ILIKE ? OR buyer_portal_accesses.email ILIKE ?',
-              search_term, search_term, search_term, search_term
+              person_name_where('search_contacts', extra: ['email', 'buyer_portal_accesses.email']),
+              q: person_name_like(params[:search])
             )
         end
 

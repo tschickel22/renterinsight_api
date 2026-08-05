@@ -119,6 +119,12 @@ module Api
           company_phone: company&.phone,
           last_portal_login_at: contractor.last_portal_login_at,
           password_login_enabled: contractor.try(:password_login_enabled) || false,
+          # Whether a password actually EXISTS, which is what decides if the
+          # change-password form should ask for the current one. The flag above
+          # can be true with no digest behind it, and gating on the flag alone
+          # demands a current password the contractor has never had — locking
+          # them out of setting one at all.
+          has_password: !!contractor.can_login_with_password?,
           created_at: contractor.created_at
         }
       end

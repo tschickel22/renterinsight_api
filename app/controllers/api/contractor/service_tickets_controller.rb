@@ -3,7 +3,8 @@
 module Api
   module Contractor
     class ServiceTicketsController < BaseController
-      before_action :set_assignment, only: [:show, :update_status, :add_note, :submit_for_review]
+      before_action :set_assignment,
+                    only: %i[show update_status add_note submit_for_review confirm_issue]
 
       # GET /api/contractor/service_tickets
       def index
@@ -177,7 +178,72 @@ module Api
         end
       end
 
+      # PATCH /api/contractor/service-tickets/:id/issues/:issue_id
+      #
+      # The vendor reports what was actually done: cause, correction, and the
+      # quantities/hours actually used. Whether they may also put dollars on it
+      # is the company's warranty policy decision — MH says yes (their invoice
+      # is the number), RV/Auto say no.
+      def confirm_issue
+        ticket = @assignment.assignable
+        issue = ticket&.issues&.external&.find_by(id: params[:issue_id])
+        return render json: { error: 'Issue not found' }, status: :not_found if issue.nil?
+
+        policy = ServiceWarrantyPolicy.for_company(@assignment.company)
+        may_price = policy.contractor_may_set_amounts?
+
+        attrs = {}
+        attrs[:cause] = params[:cause] if params.key?(:cause)
+        attrs[:correction] = params[:correction] if params.key?(:correction)
+        if params[:status].present? && ServiceTicketIssue::STATUSES.include?(params[:status])
+          attrs[:status] = params[:status]
+        end
+
+        attrs[:parts] = merge_contractor_rows(issue.part_rows, params[:parts], may_price,
+                                              %w[actQuantity], %w[actUnitCost])
+        attrs[:labor] = merge_contractor_rows(issue.labor_rows, params[:labor], may_price,
+                                              %w[actHours], %w[actRate])
+
+        if may_price && params.key?(:vendor_invoice_number)
+          attrs[:vendor_invoice_number] = params[:vendor_invoice_number]
+        end
+        if may_price && params.key?(:vendor_invoice_amount)
+          attrs[:vendor_invoice_amount] = params[:vendor_invoice_amount]
+          attrs[:vendor_invoice_received_at] = Time.current
+        end
+
+        if issue.update(attrs)
+          render json: { issue: contractor_issue_json(issue.reload, policy) }
+        else
+          render json: { errors: issue.errors.full_messages }, status: :unprocessable_entity
+        end
+      end
+
       private
+
+      # Merges the vendor's reported actuals into the stored rows by row id.
+      # Rows the vendor didn't touch are left exactly as they were, and cost
+      # fields are ignored entirely unless the policy permits pricing — so a
+      # vendor cannot rewrite dealer money by hand-crafting a request.
+      def merge_contractor_rows(existing, submitted, may_price, count_keys, rate_keys)
+        return existing if submitted.blank?
+
+        by_id = (submitted.respond_to?(:to_unsafe_h) ? submitted.to_unsafe_h : submitted)
+                .map { |r| r.is_a?(Hash) ? r : r.to_h }
+                .index_by { |r| r['id'].to_s }
+
+        existing.map do |row|
+          patch = by_id[row['id'].to_s]
+          next row if patch.nil?
+
+          updated = row.dup
+          count_keys.each { |k| updated[k] = patch[k] if patch.key?(k) }
+          rate_keys.each { |k| updated[k] = patch[k] if may_price && patch.key?(k) }
+          updated['addedBy'] = 'contractor'
+          updated['confirmedAt'] = Time.current.iso8601
+          updated
+        end
+      end
 
       def set_assignment
         @assignment = ContractorAssignment.where(contractor_id: all_contractor_ids, assignable_type: 'ServiceTicket')
@@ -249,9 +315,100 @@ module Api
           json[:parts] = ticket.parts
           json[:labor] = ticket.labor
           json[:line_items] = ticket.try(:line_item_billing)
+
+          # Only issues the dealer marked external reach the contractor.
+          # Issues default to external precisely so a vendor never silently
+          # misses work; hiding one is a deliberate opt-out.
+          policy = ServiceWarrantyPolicy.for_company(assignment.company)
+          json[:issues] = ticket.issues.external.map { |i| contractor_issue_json(i, policy) }
+          json[:custom_fields] = external_custom_field_values(ticket)
+          json[:can_enter_amounts] = policy.contractor_may_set_amounts?
         end
 
         json.compact
+      end
+
+      # The contractor's view of one complaint: what to fix and what was found.
+      # Pay type, manufacturer and pricing status are dealer business and are
+      # deliberately omitted.
+      def contractor_issue_json(issue, policy)
+        row = {
+          id: issue.id,
+          title: issue.title,
+          complaint: issue.complaint,
+          cause: issue.cause,
+          correction: issue.correction,
+          status: issue.status,
+          parts: issue.part_rows.map { |p| contractor_part_row(p, policy) },
+          labor: issue.labor_rows.map { |l| contractor_labor_row(l, policy) },
+          custom_fields: external_issue_custom_field_values(issue)
+        }
+
+        # Amounts only travel to the vendor where the company's policy lets a
+        # contractor set them (MH, where their invoice IS the number). Under
+        # the strict RV/Auto defaults the vendor sees the work, not the money.
+        row[:total] = issue.total if policy.contractor_may_set_amounts?
+        row.compact
+      end
+
+      def contractor_part_row(row, policy)
+        base = {
+          'id' => row['id'],
+          'partNumber' => row['partNumber'],
+          'description' => row['description'],
+          'estQuantity' => row['estQuantity'],
+          'actQuantity' => row['actQuantity'],
+          'confirmedAt' => row['confirmedAt']
+        }
+        return base unless policy.contractor_may_set_amounts?
+
+        base.merge('estUnitCost' => row['estUnitCost'], 'actUnitCost' => row['actUnitCost'])
+      end
+
+      def contractor_labor_row(row, policy)
+        base = {
+          'id' => row['id'],
+          'description' => row['description'],
+          'estHours' => row['estHours'],
+          'actHours' => row['actHours'],
+          'confirmedAt' => row['confirmedAt']
+        }
+        return base unless policy.contractor_may_set_amounts?
+
+        base.merge('estRate' => row['estRate'], 'actRate' => row['actRate'])
+      end
+
+      # Custom-field keys the admin marked externally visible for this module.
+      def external_field_keys(company_id)
+        @external_field_keys ||= {}
+        @external_field_keys[company_id] ||= CustomField
+                                            .where(company_id: company_id, module: 'service_tickets')
+                                            .where(visibility: %w[public both])
+                                            .pluck(:field_key, :label)
+                                            .to_h
+      end
+
+      def external_custom_field_values(ticket)
+        filter_external(ticket.custom_field_values, ticket.company_id)
+      end
+
+      def external_issue_custom_field_values(issue)
+        filter_external(issue.custom_field_values, issue.company_id)
+      end
+
+      def filter_external(values, company_id)
+        values = values.is_a?(Hash) ? values : {}
+        return [] if values.empty?
+
+        labels = external_field_keys(company_id)
+        values.filter_map do |key, value|
+          next if value.nil? || value == ''
+
+          label = labels[key.to_s]
+          next unless label # internal-only field — never leaves the dealership
+
+          { key: key.to_s, label: label, value: value }
+        end
       end
     end
   end

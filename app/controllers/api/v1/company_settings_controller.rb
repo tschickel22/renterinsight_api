@@ -146,6 +146,27 @@ module Api
       # Setting.get('company', company_id, 'project_management'). The generic /api/settings
       # controller writes capitalized 'Company', so it must NOT be used for this key — the
       # casing would not match and the gate would silently never engage.
+      # How strictly this company runs warranty service. Defaults are seeded
+      # from the company's industry -- RV and Auto are materially stricter than
+      # manufactured housing about who may set dollar amounts and whether the
+      # manufacturer must authorize a repair before it happens.
+      def show_service_warranty_policy
+        policy = ServiceWarrantyPolicy.for_company(@company)
+
+        render json: { service_warranty_policy: policy.to_h }
+      end
+
+      def update_service_warranty_policy
+        attrs = params[:service_warranty_policy] || params[:policy] || {}
+        attrs = attrs.permit! .to_h if attrs.is_a?(ActionController::Parameters)
+
+        policy = ServiceWarrantyPolicy.save_for_company(@company, attrs)
+
+        render json: { service_warranty_policy: policy.to_h }
+      rescue StandardError => e
+        render json: { error: e.message }, status: :unprocessable_entity
+      end
+
       def show_project_management
         settings = Setting.get('company', @company.id, 'project_management') || {}
         settings = settings.stringify_keys if settings.respond_to?(:stringify_keys)

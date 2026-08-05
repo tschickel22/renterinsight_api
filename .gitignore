@@ -157,3 +157,6 @@ seed_stderr.log
 # Local env backups (created during Render→Mac migration)
 .env.backup-*
 CLAUDE.md
+
+# macOS Finder metadata — no leading slash, so it matches at any depth
+.DS_Store

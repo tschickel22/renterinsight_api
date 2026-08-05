@@ -269,6 +269,20 @@ class ContractorAssignment < ApplicationRecord
   # into one email.
   def notify_on_assignment
     return unless status == 'assigned'
+    # Assigned with "notify" unchecked: the dealer wants the vendor on the
+    # ticket now and will send when they're ready. Resend still works on demand.
+    return if notification_skipped_at.present?
+
+    # Service tickets go out immediately. The debounce below exists to
+    # consolidate bulk project-phase assignments and to leave a window for
+    # undoing an accidental one — neither applies to a service ticket, which is
+    # assigned deliberately, one at a time, by someone standing there expecting
+    # the vendor to hear about it. A ten-minute wait just reads as "it didn't
+    # send", which is exactly how it was reported.
+    if assignable_type == 'ServiceTicket'
+      ContractorAssignmentNotifierJob.perform_later(contractor_id)
+      return
+    end
 
     # Debounce: if there's already a pending unnotified assignment for this
     # contractor, a job is already queued to batch them. Don't enqueue another.

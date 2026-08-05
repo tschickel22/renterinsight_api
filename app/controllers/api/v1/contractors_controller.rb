@@ -4,7 +4,8 @@ module Api
   module V1
     class ContractorsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_contractor, only: [:show, :update, :destroy, :sms_consent]
+      before_action :set_contractor,
+                    only: %i[show update destroy sms_consent portal_access_code]
 
       # GET /api/v1/contractors
       def index
@@ -134,6 +135,41 @@ module Api
         render json: contractor_json(@contractor.reload)
       rescue ArgumentError => e
         render json: { error: e.message }, status: :unprocessable_entity
+      end
+
+      # POST /api/v1/contractors/:id/portal-access-code
+      #
+      # Mints the same 6-digit portal code the magic-link email sends, but hands
+      # it back to the DEALER instead of mailing it. Onboarding otherwise depends
+      # entirely on a message reaching the contractor, and a filtered or bounced
+      # email leaves them with no way in at all. The dealer reads this out over
+      # the phone.
+      #
+      # The contractor enters it on the portal login page exactly as if it had
+      # arrived by email: same verify endpoint, same 30-minute expiry, consumed
+      # on first use.
+      def portal_access_code
+        return unless authorize_action!('contractors', 'update')
+
+        if @contractor.status != 'active'
+          return render json: { error: 'Contractor must be active before it can be given portal access' },
+                        status: :unprocessable_entity
+        end
+
+        @contractor.generate_portal_token!
+
+        # Audited on purpose: this hands a login credential to a human over the
+        # phone, so who issued it and when has to be answerable afterwards.
+        Rails.logger.info(
+          "[PortalAccessCode] contractor=#{@contractor.id} issued_by=#{current_user&.id} company=#{@company&.id}"
+        )
+
+        render json: {
+          code: @contractor.portal_access_token,
+          expiresAt: @contractor.portal_token_expires_at,
+          expiresInMinutes: 30,
+          contractor: { id: @contractor.id, name: @contractor.name, email: @contractor.email }
+        }
       end
 
       # DELETE /api/v1/contractors/:id (soft delete)

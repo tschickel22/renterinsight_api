@@ -3,6 +3,8 @@
 module Api
   module Admin
     class BuyersController < ApplicationController
+      include PersonNameSearch
+
       before_action :authenticate_user!
       before_action :set_company_scope
 
@@ -17,10 +19,9 @@ module Api
                           .order(:first_name, :last_name)
         
         if params[:search].present?
-          search_term = "%#{params[:search]}%"
           contacts = contacts.where(
-            'first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?',
-            search_term, search_term, search_term
+            person_name_where('contacts', extra: %w[email]),
+            q: person_name_like(params[:search])
           )
         end
         

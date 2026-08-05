@@ -357,6 +357,21 @@ module Api
           data[:parts] = parts_array
           data[:labor] = labor_array
 
+          # A deliberately flat list of what's being fixed: the complaint and
+          # its progress, nothing else. Customers get the punch list, not the
+          # dealer's parts/labor breakdown, pay types or vendor pricing.
+          # Requires BOTH portal_visible and external — an issue hidden from
+          # the vendor is not something to surface to the homeowner either.
+          data[:issues] = ticket.issues.external.portal_visible.map do |issue|
+            {
+              id: issue.id,
+              title: issue.title,
+              complaint: issue.complaint,
+              status: issue.status,
+              statusLabel: issue.status.to_s.tr('_', ' ').capitalize
+            }
+          end
+
           # Customer-facing notes (timestamped/user-stamped). Technician notes are
           # internal and intentionally excluded from the portal.
           data[:customerNotes] = Note

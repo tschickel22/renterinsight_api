@@ -273,10 +273,12 @@ class ProjectNotificationService
     company = assignments.first.company
     count = assignments.size
 
-    subject, body = assignment_email_parts(contractor, company, assignments)
+    subject, body, sign_in_url = assignment_email_parts(contractor, company, assignments)
 
     # Use the first assignment as the `communicable` for threading
-    send_contractor_review_email(contractor, company, subject, body, assignments.first)
+    send_contractor_review_email(contractor, company, subject, body, assignments.first, login_url: sign_in_url)
+
+    send_assigner_copy(contractor, company, assignments)
 
     # Also text the contractor when they've opted in and have a number on file
     # (email + SMS). Opt-in is set on the Contractor Portal profile page (TCPA).
@@ -285,12 +287,13 @@ class ProjectNotificationService
     # SMS provider resolves Location -> Company -> Platform (most-specific wins).
     if contractor.sms_opt_in && contractor.phone.present?
       begin
+        # Reuses the URL already minted for the email rather than calling
+        # contractor_sign_in_block again — a second call would rotate the token
+        # and invalidate the link sitting in the message just sent.
         sms_body = if count == 1
-          "New assignment from #{company.name}: #{resolve_task_name(assignments.first)}. " \
-            "Log in to the Contractor Portal to accept."
+          "New assignment from #{company.name}: #{sms_task_label(assignments.first)}. #{sign_in_url}"
         else
-          "#{count} new assignments from #{company.name}. " \
-            "Log in to the Contractor Portal to accept."
+          "#{count} new assignments from #{company.name}. #{sign_in_url}"
         end
 
         CommunicationService.send_sms(
@@ -327,7 +330,7 @@ class ProjectNotificationService
   # happened, instead of the fire-and-forget swallow that the batch path uses.
   #
   # @return [Hash] { email: {...}, sms: {...} }
-  def self.resend_assignment_notification(assignment)
+  def self.resend_assignment_notification(assignment, copy_to: nil)
     contractor = assignment.contractor
     company    = assignment.company
     result     = { email: {}, sms: {} }
@@ -337,12 +340,13 @@ class ProjectNotificationService
                sms:   { attempted: false, ok: false, reason: 'Assignment has no contractor' } }
     end
 
-    subject, body = assignment_email_parts(contractor, company, [assignment])
+    subject, body, sign_in_url = assignment_email_parts(contractor, company, [assignment])
 
     # ── Email
     if contractor.email.present?
       begin
-        comm = send_contractor_review_email(contractor, company, subject, body, assignment)
+        comm = send_contractor_review_email(contractor, company, subject, body, assignment, login_url: sign_in_url)
+        send_assigner_copy(contractor, company, [assignment], force_to: copy_to)
         result[:email] = {
           attempted: true, ok: true, to: contractor.email,
           communication_id: comm.respond_to?(:id) ? comm.id : nil
@@ -368,8 +372,9 @@ class ProjectNotificationService
           company: company,
           location: resolve_project(assignment)&.deal&.location,
           to: contractor.phone,
-          body: "New assignment from #{company.name}: #{resolve_task_name(assignment)}. " \
-                "Log in to the Contractor Portal to accept.",
+          # Same URL the email carries, for the same reason: regenerating here
+          # would invalidate the link in the message that just went out.
+          body: "New assignment from #{company.name}: #{sms_task_label(assignment)}. #{sign_in_url}",
           category: 'project_notification',
           communicable: assignment
         )
@@ -793,6 +798,64 @@ class ProjectNotificationService
 
     # Subject + HTML body for an assignment notification. Shared by the batched
     # auto-send and the manual resend so the contractor sees identical copy either way.
+    # Task name trimmed for SMS. The sign-in link is ~90 characters, so an
+    # unbounded title quietly turns one segment into several.
+    def sms_task_label(assignment)
+      resolve_task_name(assignment).to_s.truncate(48)
+    end
+
+    # Sends the assigning user a copy of what the contractor was told, when they
+    # asked for one.
+    #
+    # Deliberately NOT a cc: on the contractor's email. That message carries a
+    # one-click sign-in link and a login code, and copying it verbatim would
+    # hand the dealer a working credential for the contractor's portal account.
+    # This rebuilds the same content without the sign-in block.
+    def send_assigner_copy(contractor, company, assignments, force_to: nil)
+      recipients =
+        if force_to.present?
+          # Explicit request (the Resend control): goes to whoever asked, who is
+          # not necessarily whoever originally made the assignment.
+          [force_to]
+        else
+          wanted = assignments.select(&:cc_assigner)
+          return if wanted.empty?
+
+          wanted.filter_map { |a| a.assigned_by&.email.presence }.uniq
+        end
+      return if recipients.empty?
+
+      names = assignments.map { |a| resolve_task_name(a) }.compact
+      rows = names.map { |n| "<li style=\"margin-bottom:6px;\">#{n}</li>" }.join
+
+      body = <<~HTML
+        <p>This is your copy of the notice sent to <strong>#{contractor.name}</strong>
+        (#{contractor.email}).</p>
+        <ul style="padding-left: 20px; margin: 14px 0;">
+          #{rows}
+        </ul>
+        <p style="font-size: 13px; color: #666;">
+          They also received a sign-in link, which is not repeated here because it
+          would let anyone holding this message sign in as them.
+        </p>
+      HTML
+
+      recipients.each do |to|
+        CommunicationService.send_email(
+          company: company,
+          to: to,
+          subject: "Copy: assignment sent to #{contractor.name}",
+          body: wrap_html(body, 'Assignment copy', audience: :dealer),
+          category: 'project_notification',
+          communicable: assignments.first
+        )
+      end
+      Rails.logger.info("[ProjectNotificationService] assigner copy sent to #{recipients.join(', ')}")
+    rescue => e
+      # Never let the courtesy copy affect the notification that matters.
+      Rails.logger.error("[ProjectNotificationService] assigner copy failed: #{e.message}")
+    end
+
     def assignment_email_parts(contractor, company, assignments)
       count = assignments.size
 
@@ -810,25 +873,61 @@ class ProjectNotificationService
         "#{count} new assignments from #{company.name}"
       end
 
+      sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
+
       body = <<~HTML
         <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
         <p>You have #{count == 1 ? 'been assigned a new task' : "#{count} new assignments"}:</p>
         <ul style="padding-left: 20px; margin: 14px 0;">
           #{rows}
         </ul>
-        <p>Please log in to the Contractor Portal to accept #{count == 1 ? 'this assignment' : 'these assignments'} and get started.</p>
+        #{sign_in_note}
         <p>Thank you,<br>#{company.name}</p>
       HTML
 
-      [subject, body]
+      [subject, body, sign_in_url]
     end
 
-    def send_contractor_review_email(contractor, company, subject, body, assignment)
+    # Everything the contractor needs to actually get in, in the SAME message as
+    # the assignment.
+    #
+    # Onboarding used to need two emails to both survive spam filtering: this
+    # notice, and then a second one carrying a code they had to know to request.
+    # Production logs showed the request endpoint had never once been hit, so
+    # contractors were never getting past the login screen.
+    #
+    # Contractors who already set a password just get pointed at the login page.
+    def contractor_sign_in_block(contractor)
+      return [contractor_portal_url, '<p>Log in to the Contractor Portal to accept and get started.</p>'] if contractor.can_login_with_password?
+
+      link_token = contractor.generate_portal_link_token!
+      contractor.generate_portal_token!
+      code = contractor.portal_access_token
+      url = "#{contractor_portal_url}?token=#{link_token}"
+
+      note = <<~HTML
+        <p>Tap the button below and you're in \u2014 no password needed.</p>
+        <p style="font-size: 13px; color: #555;">
+          If the button doesn't work, go to <a href="#{contractor_portal_url}">#{contractor_portal_url}</a>,
+          enter <strong>#{contractor.email}</strong>, and use this code:
+        </p>
+        <p style="font-size: 26px; font-weight: bold; letter-spacing: 6px; margin: 6px 0 2px;">#{code}</p>
+        <p style="font-size: 12px; color: #888; margin-top: 0;">The code expires in 30 minutes; the button above works for 7 days.</p>
+      HTML
+
+      [url, note]
+    rescue StandardError => e
+      # Never let token minting stop an assignment notice going out.
+      Rails.logger.error("[ProjectNotificationService] sign-in block failed for contractor #{contractor.id}: #{e.message}")
+      [contractor_portal_url, '<p>Log in to the Contractor Portal to accept and get started.</p>']
+    end
+
+    def send_contractor_review_email(contractor, company, subject, body, assignment, login_url: nil)
       comm = CommunicationService.send_email(
         company: company,
         to: contractor.email,
         subject: subject,
-        body: wrap_html(body, subject, audience: :contractor),
+        body: wrap_html(body, subject, audience: :contractor, login_url: login_url),
         category: 'project_notification',
         communicable: assignment
       )
@@ -855,11 +954,14 @@ class ProjectNotificationService
     # Wrap the HTML body fragment in a minimal <html><body> so the
     # CommunicationMailer detects it as HTML (it checks for '<html' or '<body').
     # Appends an audience-appropriate login CTA (contractor portal vs dealer app).
-    def wrap_html(body, subject = nil, audience: :contractor)
+    def wrap_html(body, subject = nil, audience: :contractor, login_url: nil)
       return body if body.to_s.include?('<html') || body.to_s.include?('<body')
 
       login_url, button_text = if audience == :dealer
         [dealer_login_url, "Login to #{Brand.current.name}"]
+      elsif login_url.present?
+        # One-click sign-in link from the assignment email.
+        [login_url, 'Open My Assignments']
       else
         [contractor_portal_url, 'Login to Contractor Portal']
       end
