@@ -273,10 +273,10 @@ class ProjectNotificationService
     company = assignments.first.company
     count = assignments.size
 
-    subject, body = assignment_email_parts(contractor, company, assignments)
+    subject, body, sign_in_url = assignment_email_parts(contractor, company, assignments)
 
     # Use the first assignment as the `communicable` for threading
-    send_contractor_review_email(contractor, company, subject, body, assignments.first)
+    send_contractor_review_email(contractor, company, subject, body, assignments.first, login_url: sign_in_url)
 
     # Also text the contractor when they've opted in and have a number on file
     # (email + SMS). Opt-in is set on the Contractor Portal profile page (TCPA).
@@ -337,12 +337,12 @@ class ProjectNotificationService
                sms:   { attempted: false, ok: false, reason: 'Assignment has no contractor' } }
     end
 
-    subject, body = assignment_email_parts(contractor, company, [assignment])
+    subject, body, sign_in_url = assignment_email_parts(contractor, company, [assignment])
 
     # ── Email
     if contractor.email.present?
       begin
-        comm = send_contractor_review_email(contractor, company, subject, body, assignment)
+        comm = send_contractor_review_email(contractor, company, subject, body, assignment, login_url: sign_in_url)
         result[:email] = {
           attempted: true, ok: true, to: contractor.email,
           communication_id: comm.respond_to?(:id) ? comm.id : nil
@@ -810,25 +810,61 @@ class ProjectNotificationService
         "#{count} new assignments from #{company.name}"
       end
 
+      sign_in_url, sign_in_note = contractor_sign_in_block(contractor)
+
       body = <<~HTML
         <p>Hello #{contractor.contact_name.presence || contractor.name},</p>
         <p>You have #{count == 1 ? 'been assigned a new task' : "#{count} new assignments"}:</p>
         <ul style="padding-left: 20px; margin: 14px 0;">
           #{rows}
         </ul>
-        <p>Please log in to the Contractor Portal to accept #{count == 1 ? 'this assignment' : 'these assignments'} and get started.</p>
+        #{sign_in_note}
         <p>Thank you,<br>#{company.name}</p>
       HTML
 
-      [subject, body]
+      [subject, body, sign_in_url]
     end
 
-    def send_contractor_review_email(contractor, company, subject, body, assignment)
+    # Everything the contractor needs to actually get in, in the SAME message as
+    # the assignment.
+    #
+    # Onboarding used to need two emails to both survive spam filtering: this
+    # notice, and then a second one carrying a code they had to know to request.
+    # Production logs showed the request endpoint had never once been hit, so
+    # contractors were never getting past the login screen.
+    #
+    # Contractors who already set a password just get pointed at the login page.
+    def contractor_sign_in_block(contractor)
+      return [contractor_portal_url, '<p>Log in to the Contractor Portal to accept and get started.</p>'] if contractor.can_login_with_password?
+
+      link_token = contractor.generate_portal_link_token!
+      contractor.generate_portal_token!
+      code = contractor.portal_access_token
+      url = "#{contractor_portal_url}?token=#{link_token}"
+
+      note = <<~HTML
+        <p>Tap the button below and you're in \u2014 no password needed.</p>
+        <p style="font-size: 13px; color: #555;">
+          If the button doesn't work, go to <a href="#{contractor_portal_url}">#{contractor_portal_url}</a>,
+          enter <strong>#{contractor.email}</strong>, and use this code:
+        </p>
+        <p style="font-size: 26px; font-weight: bold; letter-spacing: 6px; margin: 6px 0 2px;">#{code}</p>
+        <p style="font-size: 12px; color: #888; margin-top: 0;">The code expires in 30 minutes; the button above works for 7 days.</p>
+      HTML
+
+      [url, note]
+    rescue StandardError => e
+      # Never let token minting stop an assignment notice going out.
+      Rails.logger.error("[ProjectNotificationService] sign-in block failed for contractor #{contractor.id}: #{e.message}")
+      [contractor_portal_url, '<p>Log in to the Contractor Portal to accept and get started.</p>']
+    end
+
+    def send_contractor_review_email(contractor, company, subject, body, assignment, login_url: nil)
       comm = CommunicationService.send_email(
         company: company,
         to: contractor.email,
         subject: subject,
-        body: wrap_html(body, subject, audience: :contractor),
+        body: wrap_html(body, subject, audience: :contractor, login_url: login_url),
         category: 'project_notification',
         communicable: assignment
       )
@@ -855,11 +891,14 @@ class ProjectNotificationService
     # Wrap the HTML body fragment in a minimal <html><body> so the
     # CommunicationMailer detects it as HTML (it checks for '<html' or '<body').
     # Appends an audience-appropriate login CTA (contractor portal vs dealer app).
-    def wrap_html(body, subject = nil, audience: :contractor)
+    def wrap_html(body, subject = nil, audience: :contractor, login_url: nil)
       return body if body.to_s.include?('<html') || body.to_s.include?('<body')
 
       login_url, button_text = if audience == :dealer
         [dealer_login_url, "Login to #{Brand.current.name}"]
+      elsif login_url.present?
+        # One-click sign-in link from the assignment email.
+        [login_url, 'Open My Assignments']
       else
         [contractor_portal_url, 'Login to Contractor Portal']
       end

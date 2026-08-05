@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_05_000004) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_05_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7203,11 +7203,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000004) do
     t.datetime "sms_consent_recorded_at"
     t.bigint "sms_consent_recorded_by_id"
     t.text "sms_consent_note"
+    t.string "portal_link_token"
+    t.datetime "portal_link_expires_at"
     t.index ["company_id"], name: "index_vendors_on_company_id"
     t.index ["default_expense_account_id"], name: "index_vendors_on_default_expense_account_id"
     t.index ["email"], name: "index_vendors_on_email"
     t.index ["is_vendor"], name: "index_vendors_on_is_vendor"
     t.index ["portal_access_token"], name: "index_vendors_on_portal_access_token", unique: true
+    t.index ["portal_link_token"], name: "index_vendors_on_portal_link_token", unique: true
     t.index ["qb_vendor_id"], name: "index_vendors_on_qb_vendor_id"
     t.index ["quickbooks_id"], name: "index_vendors_on_quickbooks_id", where: "(quickbooks_id IS NOT NULL)"
     t.index ["sms_consent_recorded_by_id"], name: "index_vendors_on_sms_consent_recorded_by_id"

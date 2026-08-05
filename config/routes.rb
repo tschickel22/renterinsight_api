@@ -648,6 +648,9 @@ Rails.application.routes.draw do
       resources :contractors do
         member do
           post :sms_consent, path: 'sms-consent'
+          # Dealer generates a portal code to read to the contractor directly,
+          # for when email and SMS don't arrive.
+          post :portal_access_code, path: 'portal-access-code'
         end
 
         collection do
