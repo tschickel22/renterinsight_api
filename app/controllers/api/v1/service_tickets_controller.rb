@@ -118,6 +118,7 @@ module Api
           # which also checks skip_notifications and prevents self-notification
 
           create_submitted_issues(@service_ticket, submitted_issues)
+          assign_contractor_on_create(@service_ticket)
 
           render json: { data: serialize_ticket(@service_ticket.reload) }, status: :created
         else
@@ -716,6 +717,35 @@ module Api
         )
       end
       
+      # Assigns the contractor chosen on the create form, in the same request
+      # rather than a follow-up call from the browser. The round-trip version
+      # was silently skippable — if it never fired, the ticket saved with no
+      # assignment and the contractor was never notified, with nothing to show
+      # for it. Doing it here means the assignment (and its notification) either
+      # happens or leaves a logged reason.
+      def assign_contractor_on_create(ticket)
+        contractor_id = params[:contractor_id]
+        return if contractor_id.blank?
+
+        contractor = @company.contractors.find_by(id: contractor_id)
+        if contractor.nil?
+          Rails.logger.error("[ServiceTicket##{ticket.id}] contractor #{contractor_id} not found for assignment")
+          return
+        end
+
+        ContractorAssignment.create!(
+          vendor_id: contractor.id,
+          assignable: ticket,
+          company_id: @company.id,
+          assigned_by_id: current_user&.id,
+          status: 'assigned',
+          assigned_at: Time.current,
+          notes: params[:contractor_note].presence
+        )
+      rescue StandardError => e
+        Rails.logger.error("[ServiceTicket##{ticket.id}] contractor assignment failed: #{e.message}")
+      end
+
       # Persists issues entered on the create form before the ticket existed.
       # Failures are logged rather than raised: the ticket is already saved, and
       # losing it because one complaint row was malformed would be worse than
