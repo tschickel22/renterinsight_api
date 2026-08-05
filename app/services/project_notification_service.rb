@@ -330,7 +330,7 @@ class ProjectNotificationService
   # happened, instead of the fire-and-forget swallow that the batch path uses.
   #
   # @return [Hash] { email: {...}, sms: {...} }
-  def self.resend_assignment_notification(assignment)
+  def self.resend_assignment_notification(assignment, copy_to: nil)
     contractor = assignment.contractor
     company    = assignment.company
     result     = { email: {}, sms: {} }
@@ -346,7 +346,7 @@ class ProjectNotificationService
     if contractor.email.present?
       begin
         comm = send_contractor_review_email(contractor, company, subject, body, assignment, login_url: sign_in_url)
-        send_assigner_copy(contractor, company, [assignment])
+        send_assigner_copy(contractor, company, [assignment], force_to: copy_to)
         result[:email] = {
           attempted: true, ok: true, to: contractor.email,
           communication_id: comm.respond_to?(:id) ? comm.id : nil
@@ -811,11 +811,18 @@ class ProjectNotificationService
     # one-click sign-in link and a login code, and copying it verbatim would
     # hand the dealer a working credential for the contractor's portal account.
     # This rebuilds the same content without the sign-in block.
-    def send_assigner_copy(contractor, company, assignments)
-      wanted = assignments.select(&:cc_assigner)
-      return if wanted.empty?
+    def send_assigner_copy(contractor, company, assignments, force_to: nil)
+      recipients =
+        if force_to.present?
+          # Explicit request (the Resend control): goes to whoever asked, who is
+          # not necessarily whoever originally made the assignment.
+          [force_to]
+        else
+          wanted = assignments.select(&:cc_assigner)
+          return if wanted.empty?
 
-      recipients = wanted.filter_map { |a| a.assigned_by&.email.presence }.uniq
+          wanted.filter_map { |a| a.assigned_by&.email.presence }.uniq
+        end
       return if recipients.empty?
 
       names = assignments.map { |a| resolve_task_name(a) }.compact

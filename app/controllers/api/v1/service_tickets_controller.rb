@@ -561,8 +561,13 @@ module Api
           return render json: { error: 'No contractor assigned to this ticket' }, status: :not_found
         end
 
+        # "Send me a copy" on the Resend control: the copy goes to whoever
+        # clicked it, so a dealer can forward it on when the contractor says
+        # nothing arrived.
+        copy_to = ActiveModel::Type::Boolean.new.cast(params[:cc_assigner]) ? current_user&.email : nil
+
         results = assignments.map do |assignment|
-          outcome = ProjectNotificationService.resend_assignment_notification(assignment)
+          outcome = ProjectNotificationService.resend_assignment_notification(assignment, copy_to: copy_to)
           {
             assignmentId: assignment.id,
             contractorId: assignment.contractor_id,
