@@ -278,6 +278,8 @@ class ProjectNotificationService
     # Use the first assignment as the `communicable` for threading
     send_contractor_review_email(contractor, company, subject, body, assignments.first, login_url: sign_in_url)
 
+    send_assigner_copy(contractor, company, assignments)
+
     # Also text the contractor when they've opted in and have a number on file
     # (email + SMS). Opt-in is set on the Contractor Portal profile page (TCPA).
     # Isolated in its own rescue so an SMS/Twilio failure never blocks the email
@@ -344,6 +346,7 @@ class ProjectNotificationService
     if contractor.email.present?
       begin
         comm = send_contractor_review_email(contractor, company, subject, body, assignment, login_url: sign_in_url)
+        send_assigner_copy(contractor, company, [assignment])
         result[:email] = {
           attempted: true, ok: true, to: contractor.email,
           communication_id: comm.respond_to?(:id) ? comm.id : nil
@@ -799,6 +802,51 @@ class ProjectNotificationService
     # unbounded title quietly turns one segment into several.
     def sms_task_label(assignment)
       resolve_task_name(assignment).to_s.truncate(48)
+    end
+
+    # Sends the assigning user a copy of what the contractor was told, when they
+    # asked for one.
+    #
+    # Deliberately NOT a cc: on the contractor's email. That message carries a
+    # one-click sign-in link and a login code, and copying it verbatim would
+    # hand the dealer a working credential for the contractor's portal account.
+    # This rebuilds the same content without the sign-in block.
+    def send_assigner_copy(contractor, company, assignments)
+      wanted = assignments.select(&:cc_assigner)
+      return if wanted.empty?
+
+      recipients = wanted.filter_map { |a| a.assigned_by&.email.presence }.uniq
+      return if recipients.empty?
+
+      names = assignments.map { |a| resolve_task_name(a) }.compact
+      rows = names.map { |n| "<li style=\"margin-bottom:6px;\">#{n}</li>" }.join
+
+      body = <<~HTML
+        <p>This is your copy of the notice sent to <strong>#{contractor.name}</strong>
+        (#{contractor.email}).</p>
+        <ul style="padding-left: 20px; margin: 14px 0;">
+          #{rows}
+        </ul>
+        <p style="font-size: 13px; color: #666;">
+          They also received a sign-in link, which is not repeated here because it
+          would let anyone holding this message sign in as them.
+        </p>
+      HTML
+
+      recipients.each do |to|
+        CommunicationService.send_email(
+          company: company,
+          to: to,
+          subject: "Copy: assignment sent to #{contractor.name}",
+          body: wrap_html(body, 'Assignment copy', audience: :dealer),
+          category: 'project_notification',
+          communicable: assignments.first
+        )
+      end
+      Rails.logger.info("[ProjectNotificationService] assigner copy sent to #{recipients.join(', ')}")
+    rescue => e
+      # Never let the courtesy copy affect the notification that matters.
+      Rails.logger.error("[ProjectNotificationService] assigner copy failed: #{e.message}")
     end
 
     def assignment_email_parts(contractor, company, assignments)

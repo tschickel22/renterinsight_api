@@ -747,7 +747,8 @@ module Api
           status: 'assigned',
           assigned_at: Time.current,
           notes: params[:contractor_note].presence,
-          notification_skipped_at: notify ? nil : Time.current
+          notification_skipped_at: notify ? nil : Time.current,
+          cc_assigner: ActiveModel::Type::Boolean.new.cast(params[:cc_assigner])
         )
       rescue StandardError => e
         Rails.logger.error("[ServiceTicket##{ticket.id}] contractor assignment failed: #{e.message}")

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_05_000005) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -2299,6 +2299,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000005) do
     t.datetime "client_reviewed_at"
     t.text "client_review_notes"
     t.bigint "acted_on_behalf_by_id"
+    t.boolean "cc_assigner", default: false, null: false
     t.index ["acted_on_behalf_by_id"], name: "index_contractor_assignments_on_acted_on_behalf_by_id"
     t.index ["assignable_type", "assignable_id"], name: "index_contractor_assignments_on_assignable"
     t.index ["assigned_by_id"], name: "index_contractor_assignments_on_assigned_by_id"
