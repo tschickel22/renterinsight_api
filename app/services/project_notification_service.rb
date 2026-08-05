@@ -285,12 +285,13 @@ class ProjectNotificationService
     # SMS provider resolves Location -> Company -> Platform (most-specific wins).
     if contractor.sms_opt_in && contractor.phone.present?
       begin
+        # Reuses the URL already minted for the email rather than calling
+        # contractor_sign_in_block again — a second call would rotate the token
+        # and invalidate the link sitting in the message just sent.
         sms_body = if count == 1
-          "New assignment from #{company.name}: #{resolve_task_name(assignments.first)}. " \
-            "Log in to the Contractor Portal to accept."
+          "New assignment from #{company.name}: #{sms_task_label(assignments.first)}. #{sign_in_url}"
         else
-          "#{count} new assignments from #{company.name}. " \
-            "Log in to the Contractor Portal to accept."
+          "#{count} new assignments from #{company.name}. #{sign_in_url}"
         end
 
         CommunicationService.send_sms(
@@ -368,8 +369,9 @@ class ProjectNotificationService
           company: company,
           location: resolve_project(assignment)&.deal&.location,
           to: contractor.phone,
-          body: "New assignment from #{company.name}: #{resolve_task_name(assignment)}. " \
-                "Log in to the Contractor Portal to accept.",
+          # Same URL the email carries, for the same reason: regenerating here
+          # would invalidate the link in the message that just went out.
+          body: "New assignment from #{company.name}: #{sms_task_label(assignment)}. #{sign_in_url}",
           category: 'project_notification',
           communicable: assignment
         )
@@ -793,6 +795,12 @@ class ProjectNotificationService
 
     # Subject + HTML body for an assignment notification. Shared by the batched
     # auto-send and the manual resend so the contractor sees identical copy either way.
+    # Task name trimmed for SMS. The sign-in link is ~90 characters, so an
+    # unbounded title quietly turns one segment into several.
+    def sms_task_label(assignment)
+      resolve_task_name(assignment).to_s.truncate(48)
+    end
+
     def assignment_email_parts(contractor, company, assignments)
       count = assignments.size
 
