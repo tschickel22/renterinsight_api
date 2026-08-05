@@ -4,7 +4,8 @@ module Api
   module V1
     class ContractorsController < ApplicationController
       before_action :set_company_scope
-      before_action :set_contractor, only: [:show, :update, :destroy, :sms_consent]
+      before_action :set_contractor,
+                    only: %i[show update destroy sms_consent portal_access_code]
 
       # GET /api/v1/contractors
       def index
