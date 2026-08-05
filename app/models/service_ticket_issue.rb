@@ -61,6 +61,60 @@ class ServiceTicketIssue < ApplicationRecord
     estimate
   end
 
+  # Converts the ticket's legacy flat rows into issue rows. Shared by the
+  # backfill migration and by seeding an issue on ticket create, so both paths
+  # produce identical shapes. Legacy amounts are treated as actuals -- they are
+  # what the books already show.
+  def self.normalize_legacy_parts(value)
+    coerce_json_array(value).map do |part|
+      {
+        'id' => SecureRandom.uuid,
+        'partNumber' => part['part_number'] || part['partNumber'],
+        'description' => part['description'],
+        'partId' => part['part_id'] || part['partId'],
+        'estQuantity' => nil,
+        'estUnitCost' => nil,
+        'actQuantity' => (part['quantity'] || 0).to_f,
+        'actUnitCost' => (part['unit_cost'] || part['unitCost'] || 0).to_f,
+        'addedBy' => 'dealer',
+        'confirmedAt' => nil
+      }
+    end
+  end
+
+  def self.normalize_legacy_labor(value)
+    coerce_json_array(value).map do |row|
+      {
+        'id' => SecureRandom.uuid,
+        'description' => row['description'],
+        'estHours' => nil,
+        'estRate' => nil,
+        'actHours' => (row['hours'] || 0).to_f,
+        'actRate' => (row['rate'] || 0).to_f,
+        'addedBy' => 'dealer',
+        'confirmedAt' => nil
+      }
+    end
+  end
+
+  # Legacy values are inconsistently encoded: sometimes an array, sometimes a
+  # JSON string, sometimes a JSON string wrapping a JSON string.
+  def self.coerce_json_array(value)
+    current = value
+    3.times do
+      return current if current.is_a?(Array)
+      return [] if current.blank?
+      break unless current.is_a?(String)
+
+      begin
+        current = JSON.parse(current)
+      rescue JSON::ParserError
+        return []
+      end
+    end
+    current.is_a?(Array) ? current : []
+  end
+
   def part_rows
     coerce_rows(parts)
   end

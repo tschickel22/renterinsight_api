@@ -171,6 +171,7 @@ class ServiceTicket < ApplicationRecord
   before_validation :generate_ticket_number, on: :create
   before_validation :set_defaults
   before_validation :normalize_assigned_to
+  after_create :seed_initial_issue
   
   # Instance methods
   def parts_total
@@ -509,6 +510,37 @@ class ServiceTicket < ApplicationRecord
     self.ticket_number = "ST-#{date_part}-#{sequence.to_s.rjust(4, '0')}"
   end
   
+  # Every ticket starts with one issue, seeded from the ticket itself: whoever
+  # opened it already described a problem, and that description IS the first
+  # complaint. Runs on the model rather than a controller so it holds for every
+  # entry point -- staff form, client portal, API.
+  #
+  # Any parts/labor supplied at create time move onto that issue, since the
+  # ticket's flat arrays are a derived mirror of the issues from here on.
+  def seed_initial_issue
+    return if issues.any?
+
+    rows_parts = ServiceTicketIssue.normalize_legacy_parts(parts)
+    rows_labor = ServiceTicketIssue.normalize_legacy_labor(labor)
+    warranty = is_warranty_confirmed || is_warranty_suspected
+
+    issues.create!(
+      company_id: company_id,
+      title: title.presence || 'Reported issue',
+      complaint: description,
+      pay_type: warranty ? 'warranty' : 'customer',
+      visibility: dealer_only ? 'internal' : 'external',
+      portal_visible: portal_visible.nil? ? true : portal_visible,
+      parts: rows_parts,
+      labor: rows_labor,
+      pricing_status: (rows_parts + rows_labor).empty? ? 'unpriced' : 'estimated'
+    )
+  rescue StandardError => e
+    # A ticket must still be created even if seeding trips; the user can add the
+    # issue by hand.
+    Rails.logger.error "[ServiceTicket##{id}] could not seed initial issue: #{e.message}"
+  end
+
   def set_defaults
     self.status ||= 'open'
     self.priority ||= 'medium'
