@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_04_200000) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_05_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5745,6 +5745,71 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_04_200000) do
     t.index ["catalog_source_id"], name: "index_scrape_runs_on_catalog_source_id"
   end
 
+  create_table "service_issue_templates", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "location_id"
+    t.string "title", null: false
+    t.string "category", default: "general", null: false
+    t.text "complaint"
+    t.text "correction"
+    t.string "default_pay_type", default: "warranty", null: false
+    t.decimal "default_hours", precision: 8, scale: 2
+    t.decimal "default_rate", precision: 10, scale: 2
+    t.jsonb "default_parts", default: [], null: false
+    t.integer "position", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.boolean "is_seeded", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index "company_id, lower((title)::text)", name: "idx_service_issue_templates_unique_title", unique: true, where: "is_active"
+    t.index ["company_id", "category"], name: "index_service_issue_templates_on_company_id_and_category"
+    t.index ["company_id", "is_active"], name: "index_service_issue_templates_on_company_id_and_is_active"
+    t.index ["company_id"], name: "index_service_issue_templates_on_company_id"
+    t.index ["location_id"], name: "index_service_issue_templates_on_location_id"
+  end
+
+  create_table "service_ticket_issues", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "service_ticket_id", null: false
+    t.integer "position", default: 0, null: false
+    t.string "title", null: false
+    t.text "complaint"
+    t.text "cause"
+    t.text "correction"
+    t.string "status", default: "open", null: false
+    t.string "pay_type", default: "warranty", null: false
+    t.bigint "manufacturer_id"
+    t.string "visibility", default: "external", null: false
+    t.boolean "portal_visible", default: true, null: false
+    t.string "authorization_number"
+    t.string "authorization_status", default: "not_required", null: false
+    t.decimal "requested_hours", precision: 8, scale: 2
+    t.decimal "approved_hours", precision: 8, scale: 2
+    t.decimal "approved_amount", precision: 12, scale: 2
+    t.datetime "authorization_requested_at"
+    t.datetime "authorization_responded_at"
+    t.text "authorization_notes"
+    t.string "labor_op_code"
+    t.jsonb "parts", default: [], null: false
+    t.jsonb "labor", default: [], null: false
+    t.string "pricing_status", default: "unpriced", null: false
+    t.string "vendor_invoice_number"
+    t.decimal "vendor_invoice_amount", precision: 12, scale: 2
+    t.datetime "vendor_invoice_received_at"
+    t.jsonb "custom_field_values", default: {}, null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "pay_type"], name: "index_service_ticket_issues_on_company_id_and_pay_type"
+    t.index ["company_id", "pricing_status"], name: "index_service_ticket_issues_on_company_id_and_pricing_status"
+    t.index ["company_id", "status"], name: "index_service_ticket_issues_on_company_id_and_status"
+    t.index ["company_id"], name: "index_service_ticket_issues_on_company_id"
+    t.index ["deleted_at"], name: "index_service_ticket_issues_on_deleted_at"
+    t.index ["manufacturer_id"], name: "index_service_ticket_issues_on_manufacturer_id"
+    t.index ["service_ticket_id", "position"], name: "index_service_ticket_issues_on_service_ticket_id_and_position"
+    t.index ["service_ticket_id"], name: "index_service_ticket_issues_on_service_ticket_id"
+  end
+
   create_table "service_tickets", force: :cascade do |t|
     t.integer "company_id", null: false
     t.integer "account_id"
@@ -5780,6 +5845,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_04_200000) do
     t.bigint "deal_id"
     t.string "factory_po"
     t.boolean "dealer_only", default: false, null: false
+    t.jsonb "custom_field_values", default: {}, null: false
     t.index ["account_id"], name: "index_service_tickets_on_account_id"
     t.index ["assigned_to"], name: "index_service_tickets_on_assigned_to"
     t.index ["company_id", "is_warranty_confirmed"], name: "index_service_tickets_on_company_id_and_is_warranty_confirmed"
@@ -5787,6 +5853,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_04_200000) do
     t.index ["company_id", "ticket_number"], name: "index_service_tickets_on_company_id_and_ticket_number"
     t.index ["company_id"], name: "index_service_tickets_on_company_id"
     t.index ["contact_id"], name: "index_service_tickets_on_contact_id"
+    t.index ["custom_field_values"], name: "index_service_tickets_on_custom_field_values", using: :gin
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deal_id"], name: "index_service_tickets_on_deal_id"
     t.index ["dealer_only"], name: "index_service_tickets_on_dealer_only"
@@ -8012,6 +8079,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_04_200000) do
   add_foreign_key "roles", "companies", on_delete: :cascade
   add_foreign_key "round_robin_assignment_lists", "companies"
   add_foreign_key "scrape_runs", "catalog_sources"
+  add_foreign_key "service_issue_templates", "companies"
+  add_foreign_key "service_issue_templates", "locations"
+  add_foreign_key "service_ticket_issues", "companies"
+  add_foreign_key "service_ticket_issues", "manufacturers"
+  add_foreign_key "service_ticket_issues", "service_tickets"
   add_foreign_key "service_tickets", "accounts"
   add_foreign_key "service_tickets", "companies"
   add_foreign_key "service_tickets", "contacts"

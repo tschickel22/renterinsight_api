@@ -105,6 +105,13 @@ class ServiceTicket < ApplicationRecord
   has_one :warranty_claim_owned, -> { where(is_deleted: false) }, class_name: 'WarrantyClaim', foreign_key: :service_ticket_id, dependent: :restrict_with_error
   has_many :invoices, as: :source, dependent: :nullify
   has_many :contractor_assignments, as: :assignable, dependent: :destroy
+
+  # The complaint layer. Issues are the source of truth for line items; the
+  # flat `parts` / `labor` columns below are kept in sync as a derived mirror
+  # so warranty-claim generation, invoicing and the legacy UI keep working
+  # unchanged. See ServiceTicketIssue#sync_ticket_line_items!
+  has_many :issues, -> { active.ordered }, class_name: 'ServiceTicketIssue', dependent: :destroy
+  has_many :all_issues, class_name: 'ServiceTicketIssue', dependent: :destroy
   
   # User assignment (assigned_to stores user_id as string)
   def assigned_to_user
@@ -431,17 +438,31 @@ class ServiceTicket < ApplicationRecord
   end
   
   def warranty_total
+    return issues.warranty.sum(&:total) if issues.any?
+
     parts_total = warranty_parts.sum { |p| (p['quantity'].to_f * p['unitCost'].to_f) }
     labor_total = warranty_labor.sum { |l| (l['hours'].to_f * l['rate'].to_f) }
     parts_total + labor_total
   end
-  
+
   def customer_total
+    return issues.customer_pay.sum(&:total) if issues.any?
+
     parts_total = customer_parts.sum { |p| (p['quantity'].to_f * p['unitCost'].to_f) }
     labor_total = customer_labor.sum { |l| (l['hours'].to_f * l['rate'].to_f) }
     parts_total + labor_total
   end
-  
+
+  # Issues still waiting on numbers -- the dealer's "needs pricing" queue after
+  # a vendor returns the work described but unpriced.
+  def unpriced_issues
+    issues.unpriced
+  end
+
+  def fully_priced?
+    issues.any? && issues.none? { |i| i.pricing_status == 'unpriced' }
+  end
+
   private
 
   def resync_draft_claim_if_lines_changed

@@ -70,10 +70,11 @@ module Api
         per_page = (params[:per_page] || 50).to_i
         per_page = [per_page, 200].min  # Cap at 200
         total = @service_tickets.count
-        @service_tickets = @service_tickets.offset((page - 1) * per_page).limit(per_page)
-        
+        # Preload issues: the row payload reports issue and unpriced counts.
+        @service_tickets = @service_tickets.offset((page - 1) * per_page).limit(per_page).includes(:issues)
+
         render json: {
-          data: @service_tickets.map { |ticket| serialize_ticket(ticket) },
+          data: @service_tickets.map { |ticket| serialize_ticket(ticket, include_issues: false) },
           meta: {
             total: total,
             page: page,
@@ -701,11 +702,14 @@ module Api
           parts: [:id, :part_number, :partNumber, :description, :quantity, :unit_cost, :unitCost, :total, :part_id, :partId],
           labor: [:id, :description, :hours, :rate, :total],
           custom_fields: {},
+          # Admin-defined fields from the page-layout editor. Kept separate
+          # from the legacy `custom_fields` grab-bag the form writes directly.
+          custom_field_values: {},
           line_item_billing: [:index, :type, :billing_type, :manufacturer_id]
         )
       end
       
-      def serialize_ticket(ticket, include_attachments: false)
+      def serialize_ticket(ticket, include_attachments: false, include_issues: true)
         parts_array = ticket.parts.is_a?(Array) ? ticket.parts : (ticket.parts.present? ? (JSON.parse(ticket.parts) rescue []) : [])
         labor_array = ticket.labor.is_a?(Array) ? ticket.labor : (ticket.labor.present? ? (JSON.parse(ticket.labor) rescue []) : [])
         custom_fields_hash = ticket.custom_fields.is_a?(Hash) ? ticket.custom_fields : (ticket.custom_fields.present? ? (JSON.parse(ticket.custom_fields) rescue {}) : {})
@@ -732,7 +736,14 @@ module Api
           parts: parts_array,
           labor: labor_array,
           customFields: custom_fields_hash,
+          customFieldValues: ticket.custom_field_values || {},
           lineItemBilling: line_item_billing_array,
+          # The list endpoint skips the full issue payload to avoid an N+1
+          # across every row; it gets counts instead.
+          issues: include_issues ? ticket.issues.map(&:as_api_json) : nil,
+          issueCount: ticket.issues.size,
+          unpricedIssueCount: ticket.issues.count { |i| i.pricing_status == 'unpriced' },
+          fullyPriced: ticket.fully_priced?,
           portalUserId: ticket.portal_user_id,
           isPortalCreated: ticket.is_portal_created,
           portalNotes: ticket.portal_notes,
