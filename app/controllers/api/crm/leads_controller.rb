@@ -1191,13 +1191,26 @@ module Api
         raw.is_a?(ActionController::Parameters) ? raw.to_unsafe_h : raw.to_h
       end
 
+      # A required custom field is only enforceable if the form actually asks
+      # for it. A field marked required but absent from the layout, or hidden
+      # in it, can never be filled in, so enforcing it refuses every create
+      # with a complaint about a question nobody was asked. Values that WERE
+      # submitted are still validated whatever the layout says.
+      #
+      # An empty visible_keys list means "no layout to consult", so it falls
+      # back to validating everything.
       def validate_custom_field_values(module_name, values, partial: false)
         return [] if values.blank?
 
+        visible_keys = visible_layout_fields(module_name)
+
         errors = []
         @company.custom_fields.active.for_module(module_name).each do |field|
+          submitted = values.key?(field.field_key)
+
           # For partial updates (inline edit), only validate fields actually submitted
-          next if partial && !values.key?(field.field_key)
+          next if partial && !submitted
+          next if !submitted && visible_keys.present? && visible_keys.exclude?(field.field_key)
 
           value = values[field.field_key]
           field_errors = field.validate_value(value)
