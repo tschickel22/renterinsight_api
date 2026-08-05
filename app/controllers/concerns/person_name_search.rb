@@ -13,10 +13,21 @@
 #      returning five people with "london" in an email. #person_name_order
 #      ranks exact, then prefix, then contains, so the LIMIT keeps the best
 #      matches instead of the first ones off the heap.
+#
+#   3. The query went into the LIKE pattern raw, so its wildcards were live.
+#      A bare "%" matched every row in the table and "a_b@x.com" quietly
+#      matched "axb@x.com". #person_name_like escapes them — always build the
+#      :q value with it rather than interpolating "%#{query}%" by hand.
 module PersonNameSearch
   extend ActiveSupport::Concern
 
-  # WHERE fragment binding the named param :q (already wrapped in %...%).
+  # The :q value for #person_name_where — a contains-pattern with the user's
+  # own % and _ escaped so they match literally instead of acting as wildcards.
+  def person_name_like(query)
+    "%#{escape_like(query.to_s)}%"
+  end
+
+  # WHERE fragment binding the named param :q (build it with #person_name_like).
   # `extra` are additional columns to match on but NOT to rank by — phone,
   # company_name, title and friends, which are searchable but shouldn't
   # outrank someone's actual name.
@@ -48,7 +59,7 @@ module PersonNameSearch
 
     sql = "CASE WHEN #{exact} THEN 0 WHEN #{prefix} THEN 1 ELSE 2 END, #{table}.id DESC"
     ActiveRecord::Base.sanitize_sql_array(
-      [sql, { exact: query.to_s.downcase, prefix: "#{sanitize_like(query.to_s.downcase)}%" }]
+      [sql, { exact: query.to_s.downcase, prefix: "#{escape_like(query.to_s.downcase)}%" }]
     )
   end
 
@@ -58,7 +69,9 @@ module PersonNameSearch
     column.to_s.include?('.') ? column.to_s : "#{table}.#{column}"
   end
 
-  def sanitize_like(value)
+  # Backslash is Postgres' default LIKE escape character. Escape it first so a
+  # query containing a literal backslash doesn't escape the character after it.
+  def escape_like(value)
     value.gsub(/[\\%_]/) { |c| "\\#{c}" }
   end
 end

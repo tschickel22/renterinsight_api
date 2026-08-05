@@ -1,6 +1,8 @@
 module Api
   module Crm
     class LeadsController < ApplicationController
+      include PersonNameSearch
+
       before_action :set_company_scope
       before_action :set_lead, only: [:show, :update, :destroy, :notes, :convert, :score, :conversion_integrity_check]
 
@@ -974,10 +976,9 @@ module Api
         end
 
         if filters[:search].present?
-          q = "%#{filters[:search]}%"
           scope = scope.where(
-            'first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR status ILIKE ?',
-            q, q, q, q, q
+            person_name_where('leads', extra: %w[email phone status company_name]),
+            q: person_name_like(filters[:search])
           )
         end
 

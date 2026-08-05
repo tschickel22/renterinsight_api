@@ -3,6 +3,8 @@
 module Api
   module V1
     class ContactsController < ApplicationController
+      include PersonNameSearch
+
       before_action :set_company_scope
       before_action :set_contact, only: [:show, :update, :destroy, :tags, :add_tags, :remove_tag, :opt_in_email, :opt_out_email, :opt_in_sms, :opt_out_sms, :deals, :quotes, :portal_status, :documents, :upload_documents]
       before_action :set_account, only: [:index]
@@ -51,12 +53,11 @@ module Api
           with_phone: @contacts.where.not(phone: [nil, '']).count
         }
 
-        # Apply search filter (searches first_name, last_name, email, phone, title, department)
+        # Searches the name (as one string, either order), email, phone, title, department
         if params[:search].present?
-          search_term = "%#{params[:search]}%"
           @contacts = @contacts.where(
-            "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR title ILIKE ? OR department ILIKE ?",
-            search_term, search_term, search_term, search_term, search_term, search_term
+            person_name_where('contacts', extra: %w[email phone title department]),
+            q: person_name_like(params[:search])
           )
         end
 
@@ -881,10 +882,9 @@ module Api
           scope = f[:owner_id].to_s == 'null' ? scope.where(owner_id: nil) : scope.where(owner_id: f[:owner_id])
         end
         if f[:search].present?
-          q = "%#{f[:search]}%"
           scope = scope.where(
-            'first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ? OR phone ILIKE ? OR title ILIKE ? OR department ILIKE ?',
-            q, q, q, q, q, q
+            person_name_where('contacts', extra: %w[email phone title department]),
+            q: person_name_like(f[:search])
           )
         end
         scope
