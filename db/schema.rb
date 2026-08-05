@@ -5828,7 +5828,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000004) do
     t.text "labor"
     t.text "notes"
     t.text "custom_fields"
-    t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "location_id"
@@ -5857,7 +5856,6 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000004) do
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deal_id"], name: "index_service_tickets_on_deal_id"
     t.index ["dealer_only"], name: "index_service_tickets_on_dealer_only"
-    t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
     t.index ["is_portal_created"], name: "index_service_tickets_on_is_portal_created"
     t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"
     t.index ["is_warranty_suspected"], name: "index_service_tickets_on_is_warranty_suspected"

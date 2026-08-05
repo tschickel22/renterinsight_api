@@ -20,7 +20,14 @@ class BackfillServiceTicketIssues < ActiveRecord::Migration[8.0]
   end
 
   def up
-    MigrationTicket.where(deleted_at: nil).find_each(batch_size: 200) do |ticket|
+    # service_tickets.deleted_at exists in some databases and not others: it is
+    # in schema.rb but no migration ever created it, so the deployed databases
+    # don't have the column. Skip the filter where it's absent rather than
+    # abort the deploy.
+    scope = MigrationTicket.all
+    scope = scope.where(deleted_at: nil) if MigrationTicket.column_names.include?('deleted_at')
+
+    scope.find_each(batch_size: 200) do |ticket|
       next if MigrationIssue.exists?(service_ticket_id: ticket.id)
 
       parts = coerce_array(ticket.parts)
