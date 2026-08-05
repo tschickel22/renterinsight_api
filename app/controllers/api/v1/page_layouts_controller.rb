@@ -10,6 +10,7 @@ module Api
         return unless authorize_action!('company_settings', 'read')
 
         layout = find_or_create_layout(params[:module_name])
+        reconcile_custom_fields(layout)
 
         render json: {
           page_layout: page_layout_json(layout)
@@ -197,6 +198,29 @@ module Api
         end
       end
 
+      # Self-heals layouts that place a custom field the company no longer has,
+      # or that disagree with the field about whether it's required. Runs on
+      # read so an admin doesn't have to notice the problem and re-save the
+      # layout to clear it.
+      def reconcile_custom_fields(layout)
+        required_by_key = @company.custom_fields.active
+                                  .where(module: layout.custom_field_modules)
+                                  .pluck(:field_key, :required)
+                                  .to_h { |key, required| [key, !!required] }
+
+        standard_keys = standard_field_definitions(layout.module_name).map { |f| f[:key] }
+        result = layout.reconcile_custom_fields!(required_by_key, standard_keys: standard_keys)
+        return if result[:removed].empty? && result[:updated].empty?
+
+        Rails.logger.info(
+          "[page_layouts] Reconciled company #{@company.id} #{layout.module_name} layout. " \
+          "removed: #{result[:removed].join(', ').presence || 'none'}, " \
+          "required synced: #{result[:updated].join(', ').presence || 'none'}"
+        )
+      rescue => e
+        Rails.logger.warn("[page_layouts] Reconcile failed for layout #{layout.id}: #{e.message}")
+      end
+
       def find_or_create_layout(module_name)
         layout = @company.page_layouts.for_module(module_name).find_by(layout_type: 'detail')
 
@@ -245,9 +269,42 @@ module Api
           inventory_standard_fields.reject { |f| rv_only_field_keys.include?(f[:key]) }
         when 'contractors'
           contractors_standard_fields
+        when 'service_tickets'
+          service_tickets_standard_fields
         else
           []
         end
+      end
+
+      def service_tickets_standard_fields
+        protected_keys = PageLayout::PROTECTED_FIELDS['service_tickets'] || []
+        prot = ->(key) { protected_keys.include?(key) }
+
+        [
+          { key: 'ticket_number', label: 'Ticket #', type: 'text', source: 'standard', required: false, protected: false, read_only: true },
+          { key: 'title', label: 'Service Title', type: 'text', source: 'standard', required: true, protected: prot.call('title') },
+          { key: 'description', label: 'Description', type: 'longtext', source: 'standard', required: true, protected: prot.call('description') },
+          { key: 'status', label: 'Status', type: 'select', source: 'standard', required: true, protected: prot.call('status'),
+            options: %w[pending_review open in_progress waiting_on_manufacturer waiting_parts completed cancelled] },
+          { key: 'priority', label: 'Priority', type: 'select', source: 'standard', required: true, protected: prot.call('priority'),
+            options: %w[low medium high urgent] },
+          { key: 'account_id', label: ilabel('account', 'Account'), type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'contact_id', label: 'Contact', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'vehicle_id', label: ilabel('vehicle', 'Home'), type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'home_info', label: 'Home Make / Model', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'deal_id', label: 'Deal', type: 'number', source: 'standard', required: false, protected: false },
+          { key: 'factory_po', label: 'Factory PO', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'assigned_to', label: 'Assigned To', type: 'text', source: 'standard', required: false, protected: false },
+          { key: 'scheduled_date', label: 'Scheduled Date', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'completed_date', label: 'Completed Date', type: 'date', source: 'standard', required: false, protected: false },
+          { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false },
+          { key: 'portal_notes', label: 'Customer Comments (Portal)', type: 'longtext', source: 'standard', required: false, protected: false, read_only: true },
+          { key: 'dealer_only', label: 'Internal Dealer-Only Ticket', type: 'checkbox', source: 'standard', required: false, protected: false },
+          { key: 'portal_visible', label: 'Visible to Customer in Portal', type: 'checkbox', source: 'standard', required: false, protected: false },
+          { key: 'is_warranty_suspected', label: 'Warranty Suspected', type: 'checkbox', source: 'standard', required: false, protected: false },
+          { key: 'is_warranty_confirmed', label: 'Warranty Confirmed', type: 'checkbox', source: 'standard', required: false, protected: false },
+          { key: 'created_at', label: 'Created', type: 'date', source: 'standard', required: false, protected: false, read_only: true }
+        ]
       end
 
       def contractors_standard_fields

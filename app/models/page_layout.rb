@@ -10,6 +10,11 @@ class PageLayout < ApplicationRecord
   validates :layout_type, uniqueness: { scope: [:company_id, :module_name] }
 
   scope :for_module, ->(mod) { where(module_name: mod) }
+  # Custom fields are filed under a base module ('inventory') while layouts can
+  # be split into variants ('inventory_rv', 'inventory_mh'). Catches both.
+  scope :for_module_family, ->(mod) {
+    where('module_name = :m OR module_name LIKE :prefix', m: mod, prefix: "#{mod}\\_%")
+  }
 
   # Fields that can NEVER be hidden per module
   PROTECTED_FIELDS = {
@@ -20,12 +25,129 @@ class PageLayout < ApplicationRecord
     'inventory' => %w[inventory_id year make model listing_type].freeze,
     'inventory_rv' => %w[inventory_id year make model listing_type].freeze,
     'inventory_mh' => %w[inventory_id year make model listing_type].freeze,
-    'contractors' => %w[name].freeze
+    'contractors' => %w[name].freeze,
+    'service_tickets' => %w[title description status priority].freeze
   }.freeze
 
   LAYOUT_TYPES = %w[detail edit list].freeze
 
   validates :layout_type, inclusion: { in: LAYOUT_TYPES }
+
+  # Layout variants that share one custom field catalog: a field created while
+  # editing the RV inventory layout is filed under 'inventory'.
+  MODULE_FAMILIES = {
+    'inventory_rv' => 'inventory',
+    'inventory_mh' => 'inventory'
+  }.freeze
+
+  # Modules whose custom fields can legitimately appear in this layout.
+  def custom_field_modules
+    [module_name, MODULE_FAMILIES[module_name]].compact
+  end
+
+  # Brings the stored custom entries back in line with the field catalog, given
+  # a Hash of live field_key => required.
+  #
+  # Two failure modes, both invisible until a save is refused:
+  #
+  # 1. Orphans. An entry whose field is gone (deleted, or its key regenerated
+  #    out from under the layout) renders nothing, because a form needs a
+  #    definition to know which control to draw, but its `required` flag is
+  #    still enforced,
+  #    so it blocks every create in the module with no field on screen to point
+  #    at.
+  # 2. Drift. Forms read `required` from the layout, so a field un-required in
+  #    the field editor keeps blocking saves until someone re-saves the layout.
+  #    The field's own column wins here; it's the one the admin edited.
+  #
+  # `standard_keys` are the module's code-defined fields. Some entries are typed
+  # 'custom' but name a field that has since been promoted to a standard one
+  # (deposit_amount); forms render those from the standard definition, so they
+  # are left strictly alone.
+  #
+  # Returns { removed: [keys], updated: [keys] }.
+  def reconcile_custom_fields!(required_by_key, standard_keys: [])
+    data = layout_data.deep_dup
+    sections = data.is_a?(Hash) ? data['sections'] : nil
+    return { removed: [], updated: [] } unless sections.is_a?(Array)
+
+    standard = standard_keys.to_set
+    removed = []
+    updated = []
+
+    sections.each do |section|
+      fields = section['fields']
+      next unless fields.is_a?(Array)
+
+      section['fields'] = fields.reject do |f|
+        next false unless f.is_a?(Hash) && f['type'] == 'custom'
+        next false if standard.include?(f['key'])
+
+        unless required_by_key.key?(f['key'])
+          removed << f['key']
+          next true
+        end
+
+        wanted = required_by_key[f['key']]
+        if f['required'] != wanted
+          f['required'] = wanted
+          updated << f['key']
+        end
+        false
+      end
+    end
+
+    result = { removed: removed, updated: updated }
+    return result if removed.empty? && updated.empty?
+
+    update!(layout_data: data)
+    result
+  end
+
+  # Rewrites every entry for `field_key` across all sections.
+  #
+  # Layout entries and the custom field catalog drift apart otherwise, and the
+  # drift is invisible: a form can only render a field it has a definition for,
+  # but it still enforces the layout's `required` flag. An entry whose custom
+  # field was deleted (or whose key no longer matches one) becomes a required
+  # field nobody can fill in, which locks the create form with no red field to
+  # point at. Deactivating a field drops its entries; toggling `required` on the
+  # field rewrites them.
+  #
+  # Returns true when the stored layout actually changed.
+  def sync_field!(field_key, required: nil, remove: false)
+    data = layout_data.deep_dup
+    sections = data.is_a?(Hash) ? data['sections'] : nil
+    return false unless sections.is_a?(Array)
+
+    changed = false
+
+    sections.each do |section|
+      fields = section['fields']
+      next unless fields.is_a?(Array)
+
+      if remove
+        kept = fields.reject { |f| f.is_a?(Hash) && f['key'] == field_key }
+        next if kept.size == fields.size
+
+        section['fields'] = kept
+        changed = true
+      else
+        fields.each do |f|
+          next unless f.is_a?(Hash) && f['key'] == field_key
+          next if f['required'] == required
+
+          f['required'] = required
+          changed = true
+        end
+      end
+    end
+
+    return false unless changed
+
+    update!(layout_data: data)
+    true
+  end
 
   # Returns the default layout JSON for a given module
   def self.default_layout_for(module_name)
@@ -46,9 +168,31 @@ class PageLayout < ApplicationRecord
       default_inventory_mh_layout
     when 'contractors'
       default_contractors_layout
+    when 'service_tickets'
+      default_service_tickets_layout
     else
       { sections: [] }
     end
+  end
+
+  # Seeded empty on purpose. The service ticket detail page keeps its own
+  # hand-built "Ticket Information" card (account links, warranty claim link,
+  # portal badges), and these layout sections render alongside it. Starting
+  # with no standard fields means nothing is shown twice out of the box;
+  # admins drop custom fields in here, and may add standard fields too if they
+  # deliberately want them repeated.
+  private_class_method def self.default_service_tickets_layout
+    {
+      sections: [
+        {
+          id: 'additional_info',
+          title: 'Additional Information',
+          columns: 2,
+          collapsed: false,
+          fields: []
+        }
+      ]
+    }
   end
 
   private_class_method def self.default_deals_layout
