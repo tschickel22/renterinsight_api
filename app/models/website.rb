@@ -35,9 +35,30 @@ class Website < ApplicationRecord
 
   # Enums - Rails 8 syntax (only status for Phase 1, others can be added later with prefixes)
   enum :status, { draft: 0, published: 1, unpublished: 2 }, default: :draft
-  
+
+  # What this Website is for.
+  #
+  # 'site'      — a dealer's real website, built and managed in the site editor.
+  # 'marketing' — the system-owned container that holds landing pages. Created
+  #               automatically, never listed, never editable as a site. It
+  #               exists because a landing page is a WebsitePage and a
+  #               WebsitePage needs a Website — including for a dealer who bought
+  #               only the landing page module and has no site with us at all.
+  KINDS = %w[site marketing].freeze
+
+  # Every user-facing website read should go through .sites. A marketing
+  # container in the websites list invites a dealer to edit or delete the thing
+  # their landing pages are served from.
+  scope :sites, -> { where(kind: 'site') }
+  scope :marketing_containers, -> { where(kind: 'marketing') }
+
+  def marketing_container?
+    kind == 'marketing'
+  end
+
   # Validations
   validates :name, presence: true
+  validates :kind, inclusion: { in: KINDS }
   validates :slug, presence: true, uniqueness: { scope: :company_id }
   validates :domain, uniqueness: { scope: :company_id, allow_blank: true }
   validates :subdomain, uniqueness: { allow_blank: true }

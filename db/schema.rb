@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_06_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5829,6 +5829,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.text "labor"
     t.text "notes"
     t.text "custom_fields"
+    t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "location_id"
@@ -5857,6 +5858,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deal_id"], name: "index_service_tickets_on_deal_id"
     t.index ["dealer_only"], name: "index_service_tickets_on_dealer_only"
+    t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
     t.index ["is_portal_created"], name: "index_service_tickets_on_is_portal_created"
     t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"
     t.index ["is_warranty_suspected"], name: "index_service_tickets_on_is_warranty_suspected"
@@ -7341,7 +7343,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.jsonb "style", default: {}
     t.boolean "show_in_nav", default: true
     t.boolean "show_in_footer", default: true
+    t.string "page_kind", default: "page", null: false
+    t.bigint "campaign_id"
+    t.datetime "published_at"
+    t.string "robots"
+    t.string "canonical_path"
+    t.bigint "parent_page_id"
+    t.index ["campaign_id"], name: "index_website_pages_on_campaign_id"
     t.index ["order"], name: "index_website_pages_on_order"
+    t.index ["page_kind"], name: "index_website_pages_on_page_kind"
+    t.index ["parent_page_id"], name: "index_website_pages_on_parent_page_id"
     t.index ["website_id", "path"], name: "index_website_pages_on_website_id_and_path", unique: true
     t.index ["website_id"], name: "index_website_pages_on_website_id"
   end
@@ -7386,9 +7397,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.string "preview_token"
     t.jsonb "site_header", default: {}
     t.jsonb "site_footer", default: {}
+    t.string "kind", default: "site", null: false
     t.index ["company_id", "slug"], name: "index_websites_on_company_id_and_slug", unique: true
     t.index ["company_id"], name: "index_websites_on_company_id"
     t.index ["domain"], name: "index_websites_on_domain", unique: true, where: "(domain IS NOT NULL)"
+    t.index ["kind"], name: "index_websites_on_kind"
     t.index ["location_id"], name: "index_websites_on_location_id"
     t.index ["preview_token"], name: "index_websites_on_preview_token", unique: true
     t.index ["subdomain"], name: "index_websites_on_subdomain", unique: true, where: "(subdomain IS NOT NULL)"
@@ -8173,6 +8186,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
   add_foreign_key "website_media", "companies"
   add_foreign_key "website_media", "users", column: "uploaded_by_id"
   add_foreign_key "website_media", "websites"
+  add_foreign_key "website_pages", "campaigns"
+  add_foreign_key "website_pages", "website_pages", column: "parent_page_id"
   add_foreign_key "website_pages", "websites"
   add_foreign_key "website_versions", "users", column: "created_by_id"
   add_foreign_key "website_versions", "websites"

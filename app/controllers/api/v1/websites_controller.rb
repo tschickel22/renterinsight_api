@@ -12,8 +12,13 @@ class Api::V1::WebsitesController < ApplicationController
     # CRITICAL: Authorization FIRST
     return unless authorize_action!('websites', 'read')
 
-    # Base query with tenant isolation
-    @websites = @company.websites.where(is_deleted: [false, nil])
+    # Base query with tenant isolation.
+    #
+    # .sites excludes the system-owned marketing container that holds landing
+    # pages. It is infrastructure, not a website — listing it invites a dealer to
+    # edit or delete the thing their landing pages are served from, and it would
+    # skew the stats tiles below, since the container is always 'published'.
+    @websites = @company.websites.sites.where(is_deleted: [false, nil])
 
     # RBAC + Location filtering
     if current_user.uses_rbac?
@@ -601,8 +606,13 @@ class Api::V1::WebsitesController < ApplicationController
   end
 
   def set_website
-    # ALWAYS use scoped find - tenant isolation
-    @website = @company.websites.find(params[:id])
+    # ALWAYS use scoped find - tenant isolation.
+    #
+    # .sites also keeps the marketing container out of show/update/destroy/publish/
+    # unpublish/sync_branding. Renaming it, unpublishing it, or deleting it would
+    # take every landing page offline at once, and the dealer would have no way to
+    # connect the two — so it is not addressable through the websites API at all.
+    @website = @company.websites.sites.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Website not found' }, status: :not_found
   end
