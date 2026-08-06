@@ -299,11 +299,17 @@ module Api
           { key: 'completed_date', label: 'Completed Date', type: 'date', source: 'standard', required: false, protected: false },
           { key: 'notes', label: 'Notes', type: 'longtext', source: 'standard', required: false, protected: false },
           { key: 'portal_notes', label: 'Customer Comments (Portal)', type: 'longtext', source: 'standard', required: false, protected: false, read_only: true },
-          { key: 'dealer_only', label: 'Internal Dealer-Only Ticket', type: 'checkbox', source: 'standard', required: false, protected: false },
-          { key: 'portal_visible', label: 'Visible to Customer in Portal', type: 'checkbox', source: 'standard', required: false, protected: false },
-          { key: 'is_warranty_suspected', label: 'Warranty Suspected', type: 'checkbox', source: 'standard', required: false, protected: false },
-          { key: 'is_warranty_confirmed', label: 'Warranty Confirmed', type: 'checkbox', source: 'standard', required: false, protected: false },
-          { key: 'created_at', label: 'Created', type: 'date', source: 'standard', required: false, protected: false, read_only: true }
+          { key: 'dealer_only', label: 'Internal Dealer-Only Ticket', type: 'checkbox', source: 'standard', required: false, protected: prot.call('dealer_only') },
+          { key: 'portal_visible', label: 'Visible to Customer in Portal', type: 'checkbox', source: 'standard', required: false, protected: prot.call('portal_visible') },
+          # Read-only: these are set by the mark-warranty flow, which also
+          # creates the draft claim and captures the manufacturer. Toggling them
+          # inline would leave a ticket flagged warranty with no claim behind it.
+          { key: 'is_warranty_suspected', label: 'Warranty Suspected', type: 'checkbox', source: 'standard', required: false, protected: prot.call('is_warranty_suspected'), read_only: true },
+          { key: 'is_warranty_confirmed', label: 'Warranty Confirmed', type: 'checkbox', source: 'standard', required: false, protected: prot.call('is_warranty_confirmed'), read_only: true },
+          { key: 'created_at', label: 'Created', type: 'date', source: 'standard', required: false, protected: false, read_only: true },
+          { key: 'scheduled_time', label: 'Scheduled Time', type: 'text', source: 'standard', required: false, protected: false, read_only: true },
+          { key: 'estimated_hours', label: 'Estimated Hours', type: 'number', source: 'standard', required: false, protected: false, read_only: true },
+          { key: 'actual_hours', label: 'Actual Hours', type: 'number', source: 'standard', required: false, protected: false, read_only: true }
         ]
       end
 
