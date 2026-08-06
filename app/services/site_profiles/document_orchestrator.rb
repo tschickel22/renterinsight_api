@@ -37,7 +37,8 @@ module SiteProfiles
       ).call(
         digests: ingested.digests,
         images: ingested.images,
-        source_url: source_label
+        source_url: source_label,
+        inventory_images: InventoryImagery.for_profile(@record)
       )
 
       @warnings.concat(schema_warnings)

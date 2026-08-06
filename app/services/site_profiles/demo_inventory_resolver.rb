@@ -116,9 +116,24 @@ module SiteProfiles
         candidates(Company.where(industry: 'saas')).first
       end
 
+      # public_inventory_enabled is a store_accessor on the
+      # public_inventory_settings JSONB, NOT a column. `.where(public_inventory_enabled: true)`
+      # therefore raised PG::UndefinedColumn on every call — rescued, logged,
+      # and returning [], so rule 2 below silently never fired and only an
+      # explicitly nominated lot ever resolved.
+      #
+      # Worse than a dead code path: the failed statement aborts whatever
+      # transaction the caller is in, so any code that resolved a demo lot mid
+      # transaction took the whole transaction down with it. Rescuing the Ruby
+      # exception does not un-abort a PostgreSQL transaction.
+      #
+      # Compared as text because the JSONB value may have been written as a
+      # boolean or as a string depending on which settings screen wrote it.
+      ENABLED_VALUES = %w[true t 1].freeze
+
       def candidates(scope)
         scope
-          .where(public_inventory_enabled: true)
+          .where("companies.public_inventory_settings ->> 'public_inventory_enabled' IN (?)", ENABLED_VALUES)
           .where.not(public_inventory_token: [nil, ''])
           .joins(:vehicles)
           .where(vehicles: { status: 'available' })

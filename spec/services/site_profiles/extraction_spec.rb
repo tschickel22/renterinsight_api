@@ -144,7 +144,13 @@ RSpec.describe 'SiteProfiles extraction' do
 
       # A 4th-of-July banner was the first background on a real dealer home
       # page, so hero_images[0] put fireworks behind the headline.
-      it 'demotes seasonal and promotional graphics below real photography' do
+      #
+      # Demoting was not enough. A demoted image still reached hero_images, and
+      # reaching it at all is sufficient — a hero band renders index 0 of
+      # whatever list it is handed, and merging across pages reshuffled the
+      # order anyway. Promotional graphics are now excluded from the hero
+      # candidates outright and offered separately for galleries.
+      it 'keeps seasonal and promotional graphics out of the hero candidates' do
         d = digest_for(<<~HTML)
           <html><body>
             <div style="background-image: url('/img/july4-sale-banner.jpg')"></div>
@@ -152,9 +158,49 @@ RSpec.describe 'SiteProfiles extraction' do
           </body></html>
         HTML
 
-        expect(d.candidate_hero_images.first).to match(/lot-exterior/)
-        # still available for galleries, just not first
-        expect(d.candidate_hero_images.join).to match(/july4/)
+        expect(d.candidate_hero_images).to eq(['https://sunshinehomes.example/img/lot-exterior.jpg'])
+        # Still available for galleries, just never behind a headline.
+        expect(d.demoted_images.join).to match(/july4/)
+      end
+
+      # The specific image that prompted all of this: a dealer's American flag,
+      # reused across every seasonal campaign and therefore the most-linked
+      # image on the site.
+      it 'keeps patriotic decoration out of the hero candidates' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/usa-stars-and-stripes.jpg')"></div>
+            <div style="background-image: url('/img/model-home-exterior.jpg')"></div>
+          </body></html>
+        HTML
+
+        expect(d.candidate_hero_images.join).not_to match(/stars-and-stripes/)
+        expect(d.candidate_hero_images.join).to match(/model-home-exterior/)
+      end
+
+      # A dealer trading as "American Homes of Texas" must not have their own
+      # photography demoted by the patriotic filter.
+      it 'does not demote a dealer whose name merely contains American' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/american-homes-of-texas-exterior.jpg')"></div>
+          </body></html>
+        HTML
+
+        expect(d.candidate_hero_images.join).to match(/american-homes-of-texas/)
+      end
+
+      # Financing badges, review widgets and staff photos are not homes.
+      it 'keeps non-home furniture out of the hero candidates' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/handshake-financing.jpg')"></div>
+            <div style="background-image: url('/img/our-team-photo.jpg')"></div>
+            <div style="background-image: url('/img/singlewide-exterior.jpg')"></div>
+          </body></html>
+        HTML
+
+        expect(d.candidate_hero_images).to eq(['https://sunshinehomes.example/img/singlewide-exterior.jpg'])
       end
 
       it 'takes the widest candidate from srcset' do

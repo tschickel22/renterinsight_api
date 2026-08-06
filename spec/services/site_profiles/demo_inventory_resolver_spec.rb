@@ -15,8 +15,18 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
 
   describe '.usable_config' do
     it 'builds a config for a company with public inventory switched on' do
-      expect(described_class.usable_config(company(id: 47)))
-        .to eq('token' => 'tok', 'company_id' => 47, 'enabled' => true)
+      config = described_class.usable_config(company(id: 47))
+
+      expect(config).to include('token' => 'tok', 'company_id' => 47, 'enabled' => true)
+    end
+
+    # The card travels with the token: it describes how THAT lot presents its
+    # listings, so a borrowed demo lot brings its own presentation and a dealer
+    # previewing their own homes sees the card they configured.
+    it 'carries the lot owner\'s inventory card settings' do
+      config = described_class.usable_config(company(id: 47))
+
+      expect(config['card']).to include(layout: 'grid', perPage: 12, showPricing: true)
     end
 
     it 'rejects a company with the feature off, even if a token exists' do

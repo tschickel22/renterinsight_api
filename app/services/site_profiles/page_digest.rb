@@ -58,6 +58,21 @@ module SiteProfiles
       july|4th|fourth|memorial|veterans|labor[-_]?day|christmas|holiday|halloween
       |thanksgiving|new[-_]?year|black[-_]?friday|easter|valentine
       |\bsale\b|promo|banner|event|special|clearance|coupon|flyer
+      # Patriotic decoration. A dealer's flag graphic is reused across every
+      # seasonal campaign, so it is usually the most-linked image on the site
+      # and won on sheer frequency. Matched narrowly: a bare "american" would
+      # demote the actual photography of any dealer named American Homes.
+      |\bflags?\b|american[-_]?flag|patriot|stars[-_]?(and[-_]?)?stripes
+      |red[-_]?white[-_]?(and[-_]?)?blue|\busa\b|u[-_]s[-_]a\b
+      |independence[-_]?day|salute|military[-_]?appreciation
+    /xi
+
+    # Not a home, whatever else it is. Financing partner badges, review widgets,
+    # staff portraits and handshake stock make bad heroes on a housing site.
+    NOT_A_HOME = /
+      handshake|team|staff|employee|portrait|headshot|award|review|testimonial
+      |bbb|google[-_]?review|financing[-_]?partner|lender|credit|approved
+      |map|direction|hours|coupon|certificate
     /xi
 
     CSS_URL = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/i
@@ -82,9 +97,27 @@ module SiteProfiles
       # anything that looks seasonal or promotional sinks to the bottom — it is
       # fine in a gallery, wrong behind a headline.
       def candidate_hero_images
-        all = (Array(background_images) + Array(images).map { |i| i[:src] }).uniq
-        photos, promos = all.partition { |url| !PROMOTIONAL.match?(url) }
-        photos + promos
+        photos, _rejected = partitioned_images
+        photos
+      end
+
+      # Everything that is not hero material but is still worth keeping for a
+      # gallery. Callers that need both get them without re-deriving the split.
+      def demoted_images
+        _photos, rejected = partitioned_images
+        rejected
+      end
+
+      # Kept separate from #candidate_hero_images so a caller merging across
+      # pages can concatenate the photo lists FIRST and the demoted lists after.
+      # Returning one pre-concatenated array per page meant a flat_map across
+      # pages interleaved them — the home page's flag graphic landed ahead of an
+      # interior page's real photography, which is how it reached hero_images[0].
+      def partitioned_images
+        @partitioned_images ||= begin
+          all = (Array(background_images) + Array(images).map { |i| i[:src] }).uniq
+          all.partition { |url| !PROMOTIONAL.match?(url) && !NOT_A_HOME.match?(url) }
+        end
       end
     end
 
