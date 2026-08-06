@@ -11,6 +11,10 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
   let(:token) { JsonWebToken.encode(user_id: user.id, company_id: company.id) }
   let(:headers) { { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' } }
 
+  # Paid add-on. Campaign Desk grants it implicitly; everyone else needs it
+  # added to their subscription.
+  before { company.tenant_module_overrides.create!(module_key: 'marketing.landing_pages', is_enabled: true) }
+
   let(:site) { Marketing::MarketingSiteProvisioner.call(company: company) }
   let(:page) do
     site.website_pages.create!(
@@ -304,6 +308,41 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
       expect(json['items'].size).to eq(1)
       expect(json['items'].first['entity_type']).to eq('Lead')
       expect(json['items'].first['entity_id']).to eq(lead.id)
+    end
+  end
+
+  describe 'module gating' do
+    # Behaviour lives in spec/services/module_access_implication_spec.rb. What
+    # is worth asserting HERE is only that this controller is wired to the gate
+    # at all — a controller that forgets the declaration is the actual failure
+    # mode, and it is invisible from the service specs.
+    #
+    # Deliberately not asserted through an HTTP status: ModuleAccessRequired
+    # waves platform and super admins past every gate, and the non-admin roles
+    # that would be stopped by it lack websites:read and get refused a step
+    # earlier for an unrelated reason. A status assertion would pass for the
+    # wrong reason.
+    it 'declares the landing pages module requirement' do
+      callbacks = Api::V1::LandingPagesController._process_action_callbacks.map(&:filter)
+      inline = callbacks.count { |f| f.is_a?(Proc) }
+
+      expect(Api::V1::LandingPagesController.include?(ModuleAccessRequired)).to be(true)
+      expect(inline).to be >= 1
+    end
+
+    # The Desk's own description promises a landing page, so a Desk tenant must
+    # not need a second entitlement to reach this controller.
+    it 'treats a Campaign Desk company as entitled' do
+      desk = Company.create!(name: "Desk-#{SecureRandom.hex(4)}")
+      desk.tenant_module_overrides.create!(module_key: 'marketing.automation', is_enabled: true)
+
+      expect(ModuleAccessService.new(desk).has_module?('marketing.landing_pages')).to be(true)
+    end
+
+    it 'treats a company with neither as not entitled' do
+      ungated = Company.create!(name: "Ungated-#{SecureRandom.hex(4)}")
+
+      expect(ModuleAccessService.new(ungated).has_module?('marketing.landing_pages')).to be(false)
     end
   end
 

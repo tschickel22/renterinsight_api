@@ -70,6 +70,12 @@ module SiteProfiles
       # A company can serve demo inventory only if the public embed would
       # actually return something. Checking the token alone is not enough —
       # an enabled-but-empty lot still renders an empty grid.
+      #
+      # 'card' carries the lot owner's own listing presentation (layout, per
+      # page, whether pricing shows). It travels with the token because it
+      # describes THAT lot: borrowing a demo lot's homes means borrowing the way
+      # that lot displays them, and a dealer previewing their own inventory
+      # should see the card they configured rather than a template default.
       def usable_config(company)
         return nil if company.nil?
         return nil unless company.try(:public_inventory_enabled)
@@ -77,7 +83,12 @@ module SiteProfiles
         token = company.try(:public_inventory_token)
         return nil if token.blank?
 
-        { 'token' => token, 'company_id' => company.id, 'enabled' => true }
+        {
+          'token' => token,
+          'company_id' => company.id,
+          'enabled' => true,
+          'card' => Websites::InventoryCardSettings.for(company)
+        }
       end
 
       private

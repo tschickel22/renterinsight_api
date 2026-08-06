@@ -632,6 +632,14 @@ class Public::InventoryController < ApplicationController
       # Total price (includes add-ons and discounts)
       total_home_price: vehicle.total_home_price,
 
+      # Estimated monthly payment, from this company's own configured rate,
+      # term and minimum down payment. The frontend Vehicle type has declared
+      # monthly_payment for a while but nothing ever populated it, so no card
+      # could show a payment.
+      #
+      # Principal and interest only — see Websites::CalculatorSettings.
+      monthly_payment: estimated_monthly_payment(vehicle),
+
       # Computed fields
       display_name: "#{vehicle.year} #{vehicle.make} #{vehicle.model}".strip,
       full_location: [vehicle.location_city, vehicle.location_state].compact.join(', '),
@@ -639,6 +647,27 @@ class Public::InventoryController < ApplicationController
     }
   end
   
+  # Estimated monthly payment for a listing.
+  #
+  # Returns nil rather than 0 when it cannot be computed, so the card can hide
+  # the line entirely instead of advertising "$0/mo". Suppressed when the dealer
+  # has hidden pricing (a payment is a price) or turned the calculator off,
+  # since a payment shown next to no price is the same disclosure by another
+  # route.
+  def estimated_monthly_payment(vehicle)
+    return nil if @company.nil?
+    return nil if @company.try(:show_pricing) == false
+
+    @calculator_settings ||= Websites::CalculatorSettings.new(@company)
+    return nil unless @calculator_settings.to_h[:enabled]
+
+    price = vehicle.total_home_price.presence || vehicle.sale_price
+    @calculator_settings.monthly_payment_for(price)
+  rescue StandardError => e
+    Rails.logger.warn("[Public::Inventory] monthly payment failed for vehicle #{vehicle.id}: #{e.message}")
+    nil
+  end
+
   # JSON for vehicle detail view (full payload)
   def vehicle_detail_json(vehicle)
     # Include all list fields plus additional details

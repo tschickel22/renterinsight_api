@@ -184,7 +184,11 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       display_name: profile.display_name,
       profile: public_profile(profile),
       template_ids: profile.visible_template_ids,
-      inventory_embed_config: inventory_config_for(profile)
+      inventory_embed_config: inventory_config_for(profile),
+      # Settings belong to whichever lot is being shown, not to the profile's
+      # tenant: the calculator has to quote against the homes on screen. Absent
+      # a lot there is nothing to finance, so the block stays hidden.
+      calculator_settings: calculator_settings_for(profile)
     }
   end
 
@@ -208,6 +212,19 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     return @inventory_configs[key] if @inventory_configs.key?(key)
 
     @inventory_configs[key] = SiteProfiles::DemoInventoryResolver.config_for_profile(profile)
+  end
+
+  # Follows the lot, not the tenant. A demo showing the nominated sample lot
+  # quotes that lot's financing terms, which is what the homes on screen are
+  # actually priced against.
+  def calculator_settings_for(profile)
+    config = inventory_config_for(profile)
+    return nil if config.blank?
+
+    company = Company.find_by(id: config['company_id'])
+    return nil if company.nil?
+
+    Websites::CalculatorSettings.for(company)
   end
 
   def summary(profile)

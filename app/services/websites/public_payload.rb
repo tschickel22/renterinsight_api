@@ -34,6 +34,11 @@ module Websites
       payload['blog_posts'] = blog_posts
       payload['blog_categories'] = blog_categories
       payload['inventory_embed_config'] = inventory_embed_config
+      # Was missing here while WebsitesController#by_slug_public included it, so
+      # every calculator block rendered in the in-app preview and then silently
+      # vanished on the dealer's live domain — CalculatorBlock returns null when
+      # settings are absent, so it failed as a blank space rather than an error.
+      payload['calculator_settings'] = CalculatorSettings.for(@website.company)
       payload
     end
 
@@ -78,7 +83,8 @@ module Websites
       {
         token: company.public_inventory_token,
         company_id: company.id,
-        enabled: company.public_inventory_enabled || false
+        enabled: company.public_inventory_enabled || false,
+        card: InventoryCardSettings.for(company)
       }
     end
   end

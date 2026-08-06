@@ -562,7 +562,11 @@ class Api::V1::WebsitesController < ApplicationController
     config = SiteProfiles::DemoInventoryResolver.config_for(@company, allow_fallback: false)
     render json: {
       inventory_embed_config: config,
-      public_inventory_enabled: @company.try(:public_inventory_enabled) || false
+      public_inventory_enabled: @company.try(:public_inventory_enabled) || false,
+      # The showcase is where a dealer decides whether to buy a site, so the
+      # payment calculator has to work there. Without this the block rendered
+      # as empty space in every design.
+      calculator_settings: Websites::CalculatorSettings.for(@company)
     }
   end
 
@@ -584,25 +588,13 @@ class Api::V1::WebsitesController < ApplicationController
   # header was present, and the frontend only sends that header when a platform admin has
   # switched companies.
 
-  # Build public-safe calculator settings from company loan_settings JSONB
+  # Build public-safe calculator settings from company loan_settings JSONB.
+  #
+  # Now one implementation in Websites::CalculatorSettings, because three other
+  # surfaces needed the identical hash and each was missing it. Kept as a
+  # delegating method so existing call sites in this controller are unchanged.
   def build_calculator_settings(company)
-    loan_settings = company.loan_settings || {}
-    {
-      enabled: loan_settings['calculator_enabled'] != false,
-      defaultInterestRate: (loan_settings['default_interest_rate'] || 6.99).to_f,
-      defaultLoanTermMonths: (loan_settings['max_loan_term'] || 240).to_i,
-      minDownPaymentPercent: (loan_settings['min_down_payment_percent'] || 10).to_f,
-      includeLotRent: loan_settings['calculator_include_lot_rent'] == true,
-      defaultLotRentMonthly: (loan_settings['calculator_default_lot_rent'] || 0).to_f,
-      includePropertyTax: loan_settings['calculator_include_property_tax'] == true,
-      defaultPropertyTaxRate: (loan_settings['calculator_default_property_tax_rate'] || 1.0).to_f,
-      includeInsurance: loan_settings['calculator_include_insurance'] == true,
-      defaultInsuranceAnnual: (loan_settings['calculator_default_insurance_annual'] || 0).to_f,
-      includeSetupFee: loan_settings['calculator_include_setup_fee'] == true,
-      defaultSetupFee: (loan_settings['calculator_default_setup_fee'] || 0).to_f,
-      loanTermOptions: (loan_settings['calculator_loan_term_options'] || [120, 180, 240, 300, 360]).map(&:to_i),
-      disclaimerText: loan_settings['calculator_disclaimer_text'] || 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.'
-    }
+    Websites::CalculatorSettings.for(company)
   end
 
   def set_website

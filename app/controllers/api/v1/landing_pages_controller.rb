@@ -13,7 +13,15 @@
 # manages standalone conversion pages (publish state, campaign linkage, forms,
 # cloning).
 class Api::V1::LandingPagesController < ApplicationController
+  include ModuleAccessRequired
+
   before_action :set_company_scope
+
+  # Paid add-on. Campaign Desk grants it implicitly
+  # (PlatformModule::IMPLIED_MODULES), so a Desk tenant passes this without a
+  # second entitlement; everyone else needs it added to their subscription.
+  require_module! 'marketing.landing_pages'
+
   before_action :set_page,
                 only: %i[show update destroy publish unpublish duplicate clone_to_locations analytics visitors]
 

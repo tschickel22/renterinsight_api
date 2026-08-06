@@ -23,22 +23,45 @@ class ModuleAccessService
       @cache[module_key] = override.is_enabled
       return override.is_enabled
     end
-    
+
     # Fall back to subscription plan
     subscription = company.tenant_subscription
-    unless subscription&.subscription_plan
-      # No subscription - check legacy subscription_tier field
-      @cache[module_key] = legacy_tier_check(module_key)
-      return @cache[module_key]
-    end
-    
-    # Check plan modules
-    enabled = subscription.subscription_plan
-                         .subscription_plan_modules
-                         .exists?(module_key: module_key, is_enabled: true)
-    
+    enabled =
+      if subscription&.subscription_plan
+        subscription.subscription_plan
+                    .subscription_plan_modules
+                    .exists?(module_key: module_key, is_enabled: true)
+      else
+        # No subscription - check legacy subscription_tier field
+        legacy_tier_check(module_key)
+      end
+
+    # Some modules come free with another. Campaign Desk always includes
+    # Landing Pages, because Campaign Desk's own description promises one.
+    #
+    # Checked last on purpose: a plan grant decides first, and an override that
+    # explicitly DISABLES a module has already returned above — so an
+    # implication can never silently undo a deliberate revocation.
+    enabled ||= implied?(module_key)
+
     @cache[module_key] = enabled
     enabled
+  end
+
+  # Is this module granted by something else the company has?
+  #
+  # Resolved here rather than by writing extra TenantModuleOverride rows: a
+  # tenant who later buys the module standalone would otherwise end up with two
+  # grants, and revoking the granting module would leave an orphaned
+  # entitlement nobody remembers creating.
+  def implied?(module_key)
+    PlatformModule::IMPLIED_MODULES.any? do |granting_key, implied_keys|
+      # A module cannot imply itself into existence.
+      next false if granting_key == module_key
+      next false unless implied_keys.include?(module_key)
+
+      has_module?(granting_key)
+    end
   end
   
   # Alias for has_module?
@@ -104,6 +127,23 @@ class ModuleAccessService
       end
     end
     
+    # Apply implications last, matching has_module?'s order — otherwise this
+    # list and that check disagree, and a module the API allows would be missing
+    # from the nav that is supposed to link to it.
+    #
+    # An override that explicitly disabled a module is respected: it was removed
+    # above and must not come back through the implication.
+    disabled = company.tenant_module_overrides.where(is_enabled: false).pluck(:module_key)
+    PlatformModule::IMPLIED_MODULES.each do |granting_key, implied_keys|
+      next unless plan_modules.include?(granting_key)
+
+      implied_keys.each do |key|
+        next if disabled.include?(key)
+
+        plan_modules << key unless plan_modules.include?(key)
+      end
+    end
+
     Rails.logger.info "[ModuleAccessService] Final enabled modules: #{plan_modules.uniq.inspect}"
     plan_modules.uniq
   end
