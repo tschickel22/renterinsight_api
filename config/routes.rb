@@ -713,6 +713,19 @@ Rails.application.routes.draw do
       end
       
       # ==================== WEBSITE BUILDER ====================
+      # Landing pages are WebsitePages with page_kind 'landing', so they inherit
+      # domains, SSL, host resolution and SSR from the website builder. Separate
+      # controller because the surface differs: publish state, campaign linkage,
+      # bound forms and cloning, rather than a page inside a site tree.
+      resources :landing_pages, only: %i[index show create update destroy] do
+        member do
+          post :publish
+          post :unpublish
+          post :duplicate
+          post :clone_to_locations
+        end
+      end
+
       # Site Content Profiles — scan a client's existing site into reusable
       # content. Projection into templates happens on the frontend, where the
       # templates live.

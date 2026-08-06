@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_06_000003) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_06_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -7356,10 +7356,16 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_06_000003) do
     t.string "robots"
     t.string "canonical_path"
     t.bigint "parent_page_id"
+    t.bigint "site_content_profile_id"
+    t.bigint "intake_form_id"
+    t.string "layout_id"
+    t.datetime "deleted_at"
     t.index ["campaign_id"], name: "index_website_pages_on_campaign_id"
+    t.index ["intake_form_id"], name: "index_website_pages_on_intake_form_id"
     t.index ["order"], name: "index_website_pages_on_order"
     t.index ["page_kind"], name: "index_website_pages_on_page_kind"
     t.index ["parent_page_id"], name: "index_website_pages_on_parent_page_id"
+    t.index ["site_content_profile_id"], name: "index_website_pages_on_site_content_profile_id"
     t.index ["website_id", "path"], name: "index_website_pages_on_website_id_and_path", unique: true
     t.index ["website_id"], name: "index_website_pages_on_website_id"
   end
@@ -8194,6 +8200,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_06_000003) do
   add_foreign_key "website_media", "users", column: "uploaded_by_id"
   add_foreign_key "website_media", "websites"
   add_foreign_key "website_pages", "campaigns"
+  add_foreign_key "website_pages", "intake_forms"
+  add_foreign_key "website_pages", "site_content_profiles"
   add_foreign_key "website_pages", "website_pages", column: "parent_page_id"
   add_foreign_key "website_pages", "websites"
   add_foreign_key "website_versions", "users", column: "created_by_id"

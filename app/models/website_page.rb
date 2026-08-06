@@ -8,6 +8,16 @@ class WebsitePage < ApplicationRecord
   # from the standalone surface has no campaign, so this stays nil.
   belongs_to :campaign, optional: true
 
+  # Which Content Profile this page was projected from, and which layout was
+  # used. Kept so the page can be re-projected into a different design later
+  # without re-uploading the source document. Survives cloning.
+  belongs_to :site_content_profile, optional: true
+
+  # The form that collects this page's leads. Denormalised out of the contact
+  # block's content so a clone can decide whether to duplicate or share it, and
+  # so a page can report its own submissions without scanning JSONB.
+  belongs_to :intake_form, optional: true
+
   # 'page'    — an ordinary page in a dealer's site.
   # 'landing' — a campaign or offer landing page. Single purpose, kept out of
   #             site nav, and defaulted to noindex (see ensure_landing_defaults).
