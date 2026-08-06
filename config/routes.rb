@@ -26,6 +26,14 @@ Rails.application.routes.draw do
   # Serve uploaded files (logos, images, etc.) - Legacy URLs without /api prefix
   get 'uploads/*path', to: 'api/uploads#show', format: false
   
+  # Landing page tracking beacon. Called by a visitor's browser on the dealer's
+  # own hostname, which is why /pv/ is in Constraints::TenantWebsiteHost's
+  # reserved prefixes — otherwise the tenant catch-all above answers it with the
+  # page's HTML. Not under /api because it must stay reachable and uncached from
+  # any custom domain.
+  post 'pv/:page_id',    to: 'public/page_tracking#create'
+  match 'pv/:page_id',   to: 'public/page_tracking#options', via: :options
+
   # Public tokenized SMS reply links — no authentication required
   get  'r/:token',       to: 'sms_replies#show'
   post 'r/:token/reply', to: 'sms_replies#reply'

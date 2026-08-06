@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_06_000005) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_06_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4584,6 +4584,55 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_06_000005) do
     t.index ["company_id"], name: "index_page_layouts_on_company_id"
   end
 
+  create_table "page_visit_events", force: :cascade do |t|
+    t.bigint "page_visit_id", null: false
+    t.string "event_type", null: false
+    t.datetime "occurred_at", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["occurred_at"], name: "index_page_visit_events_on_occurred_at"
+    t.index ["page_visit_id", "event_type"], name: "index_page_visit_events_on_page_visit_id_and_event_type"
+    t.index ["page_visit_id"], name: "index_page_visit_events_on_page_visit_id"
+  end
+
+  create_table "page_visits", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "website_page_id", null: false
+    t.string "visitor_token", null: false
+    t.string "session_token", null: false
+    t.string "referrer"
+    t.string "utm_source"
+    t.string "utm_medium"
+    t.string "utm_campaign"
+    t.string "utm_content"
+    t.string "utm_term"
+    t.bigint "campaign_id"
+    t.bigint "campaign_enrollment_id"
+    t.string "identified_entity_type"
+    t.bigint "identified_entity_id"
+    t.datetime "identified_at"
+    t.string "device_type"
+    t.string "country"
+    t.string "ip_hash"
+    t.datetime "first_seen_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.integer "duration_ms", default: 0, null: false
+    t.integer "max_scroll_depth", default: 0, null: false
+    t.boolean "converted", default: false, null: false
+    t.boolean "is_bot", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_enrollment_id"], name: "index_page_visits_on_campaign_enrollment_id"
+    t.index ["campaign_id"], name: "index_page_visits_on_campaign_id"
+    t.index ["company_id", "visitor_token"], name: "index_page_visits_on_company_id_and_visitor_token"
+    t.index ["company_id"], name: "index_page_visits_on_company_id"
+    t.index ["identified_entity_type", "identified_entity_id"], name: "index_page_visits_on_identified_entity"
+    t.index ["session_token", "website_page_id"], name: "index_page_visits_on_session_token_and_website_page_id", unique: true
+    t.index ["website_page_id", "first_seen_at"], name: "index_page_visits_on_website_page_id_and_first_seen_at"
+    t.index ["website_page_id"], name: "index_page_visits_on_website_page_id"
+  end
+
   create_table "part_categories", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -7988,6 +8037,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_06_000005) do
   add_foreign_key "option_categories", "factories"
   add_foreign_key "option_categories", "floor_plans"
   add_foreign_key "package_templates", "companies"
+  add_foreign_key "page_visit_events", "page_visits"
+  add_foreign_key "page_visits", "campaigns"
+  add_foreign_key "page_visits", "companies"
+  add_foreign_key "page_visits", "website_pages"
   add_foreign_key "part_categories", "companies"
   add_foreign_key "part_categories", "part_categories", column: "parent_id"
   add_foreign_key "part_categories", "users", column: "created_by_id"
