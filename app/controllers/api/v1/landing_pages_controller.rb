@@ -56,6 +56,13 @@ class Api::V1::LandingPagesController < ApplicationController
     page.layout_id = params[:layout_id].presence
     page.campaign_id = params[:campaign_id].presence
 
+    # A landing page with no form silently drops every lead, so one is built
+    # unless the caller deliberately bound an existing form.
+    if page.intake_form_id.blank?
+      page.intake_form = build_intake_form(page.title)
+      bind_form_to_contact_blocks(page)
+    end
+
     if page.save
       render json: detail(page), status: :created
     else
@@ -63,6 +70,40 @@ class Api::V1::LandingPagesController < ApplicationController
     end
   rescue Marketing::MarketingSiteProvisioner::ProvisioningError => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/v1/landing_pages/ai_generate
+  #
+  # Returns a PLAN, not a page: profile sections, a form field list and a
+  # layout hint. Projection into blocks happens on the frontend, where the
+  # layouts live — same split the site profile importer already uses, and the
+  # reason previewing every layout costs nothing.
+  def ai_generate
+    return unless authorize_action!('websites', 'create')
+
+    brief = Marketing::Brief.new(
+      company: @company,
+      user: current_user,
+      location: target_location,
+      prompt: params[:prompt].to_s,
+      site_content_profile: resolve_profile,
+      offer: params[:offer].presence,
+      audience: params[:audience].presence,
+      tone: params[:tone].presence,
+      call_to_action: params[:call_to_action].presence
+    )
+
+    if brief.prompt.blank? && brief.site_content_profile.nil?
+      return render json: { error: 'Describe the page, or pick a scanned document to build it from.' },
+                    status: :unprocessable_entity
+    end
+
+    result = LandingPages::AiBuilder.new(company: @company, user: current_user).generate(brief: brief)
+    render json: result.except(:usage)
+  rescue LandingPages::AiBuilder::CreditLimitError => e
+    render json: { error: e.message }, status: :payment_required
+  rescue LandingPages::AiBuilder::GenerationError => e
+    render json: { error: e.message }, status: :bad_gateway
   end
 
   def update
@@ -208,6 +249,40 @@ class Api::V1::LandingPagesController < ApplicationController
     return nil if params[:location_id].blank?
 
     @company.locations.active.find_by(id: params[:location_id])
+  end
+
+  def resolve_profile
+    return nil if params[:site_content_profile_id].blank?
+
+    SiteContentProfile.find_by(id: params[:site_content_profile_id], company_id: @company.id)
+  end
+
+  def build_intake_form(title)
+    Marketing::LandingPageFormBuilder.new(
+      company: @company,
+      title: title.presence || 'Landing Page',
+      fields: params[:form_fields],
+      location: target_location,
+      notified_user: current_user
+    ).call
+  rescue StandardError => e
+    # A page without a form is recoverable — the editor can bind one. A failed
+    # create is not.
+    Rails.logger.warn("[LandingPages] form build failed: #{e.message}")
+    nil
+  end
+
+  # SiteRenderer reads the form id off the contact block, so the column and the
+  # block have to agree or the page renders "Contact form not available".
+  def bind_form_to_contact_blocks(page)
+    return if page.intake_form_id.blank?
+
+    page.blocks = Array(page.blocks).map do |block|
+      next block unless block['type'].to_s == 'contact'
+
+      content = block['content'].is_a?(Hash) ? block['content'] : {}
+      block.merge('content' => content.merge('intakeFormId' => page.intake_form_id))
+    end
   end
 
   def page_params

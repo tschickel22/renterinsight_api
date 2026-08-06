@@ -187,6 +187,76 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
     end
   end
 
+  describe 'POST /ai_generate' do
+    let(:plan) do
+      {
+        'profile' => { 'copy' => { 'hero' => [{ 'headline' => 'Spring Sale' }] } },
+        'form_fields' => [{ 'name' => 'email', 'type' => 'email', 'required' => true }],
+        'layout_hint' => 'lp-offer-focus'
+      }
+    end
+
+    before do
+      allow_any_instance_of(LandingPages::AiBuilder).to receive(:call_claude).and_return(
+        text: plan.to_json, model_version: 'claude-test', input_tokens: 10, output_tokens: 20
+      )
+    end
+
+    # A plan, not a page: projection into blocks happens on the frontend where
+    # the layouts live.
+    it 'returns profile sections, form fields and a layout hint' do
+      post '/api/v1/landing_pages/ai_generate',
+           params: { prompt: 'Spring sale, $0 down' }.to_json, headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(json.dig('profile', 'copy', 'hero', 0, 'headline')).to eq('Spring Sale')
+      expect(json['layout_hint']).to eq('lp-offer-focus')
+      expect(json['form_fields']).to be_present
+      expect(json).not_to have_key('usage')
+    end
+
+    it 'requires a prompt or a scanned document' do
+      post '/api/v1/landing_pages/ai_generate', params: {}.to_json, headers: headers
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(json['error']).to match(/describe the page/i)
+    end
+
+    it 'reports a spent credit limit as payment required' do
+      allow_any_instance_of(LandingPages::AiBuilder).to receive(:generate)
+        .and_raise(LandingPages::AiBuilder::CreditLimitError, 'Monthly AI credit limit reached (50).')
+
+      post '/api/v1/landing_pages/ai_generate', params: { prompt: 'x' }.to_json, headers: headers
+
+      expect(response).to have_http_status(:payment_required)
+    end
+  end
+
+  describe 'the intake form on create' do
+    # A landing page with no form silently drops every lead.
+    it 'builds a form and binds it to the contact block' do
+      post '/api/v1/landing_pages',
+           params: {
+             title: 'Autumn Offer',
+             blocks: [{ id: 'b1', type: 'contact', order: 0, content: { title: 'Enquire' } }],
+             form_fields: [{ name: 'email', label: 'Email', type: 'email', required: true }]
+           }.to_json,
+           headers: headers
+
+      expect(response).to have_http_status(:created)
+      expect(json['intake_form_id']).to be_present
+      expect(json['blocks'].first['content']['intakeFormId']).to eq(json['intake_form_id'])
+    end
+
+    it 'falls back to sensible default fields when none are supplied' do
+      post '/api/v1/landing_pages', params: { title: 'Autumn Offer' }.to_json, headers: headers
+
+      form = IntakeForm.find(json['intake_form_id'])
+      expect(form.fields.map { |f| f['name'] }).to include('email')
+      expect(form.is_active).to be(true)
+    end
+  end
+
   describe 'GET /:id/analytics' do
     it 'returns the funnel, engagement, video, sources and timeseries' do
       PageVisit.create!(company_id: company.id, website_page_id: page.id,

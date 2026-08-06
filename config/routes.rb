@@ -734,6 +734,9 @@ Rails.application.routes.draw do
           get :analytics
           get :visitors
         end
+        collection do
+          post :ai_generate
+        end
       end
 
       # Site Content Profiles — scan a client's existing site into reusable
