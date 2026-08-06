@@ -94,6 +94,27 @@ class S3UploadService
     nil
   end
   
+  # Read an object back as raw bytes.
+  #
+  # For work that uploads on the request and consumes it on a background job —
+  # a document scan takes minutes, so the file has to outlive the request that
+  # brought it in. Returns nil rather than raising: a missing object is a
+  # condition the caller reports, not an exception mid-job.
+  #
+  # @param key [String] The S3 key (path)
+  # @return [String, nil] Binary body, or nil if unreadable
+  def download(key)
+    return nil if key.blank?
+
+    s3_client.get_object(bucket: bucket_name, key: key).body.read
+  rescue Aws::S3::Errors::NoSuchKey
+    Rails.logger.warn("S3 download: no such key #{key}")
+    nil
+  rescue Aws::S3::Errors::ServiceError => e
+    Rails.logger.error("S3 download failed for #{key}: #{e.message}")
+    nil
+  end
+
   # Delete a file from S3
   # @param key [String] The S3 key (path)
   # @return [Boolean] True if successful

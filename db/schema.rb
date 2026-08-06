@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_06_000002) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_06_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5905,12 +5905,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_06_000002) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "inventory_company_id"
+    t.string "source_kind", default: "url", null: false
+    t.string "document_filename"
+    t.string "document_s3_key"
+    t.string "document_content_type"
+    t.bigint "document_byte_size"
+    t.integer "rasterized_page_count"
     t.index ["company_id", "status"], name: "index_site_content_profiles_on_company_id_and_status"
     t.index ["company_id"], name: "index_site_content_profiles_on_company_id"
     t.index ["created_by_id"], name: "index_site_content_profiles_on_created_by_id"
     t.index ["inventory_company_id"], name: "index_site_content_profiles_on_inventory_company_id"
     t.index ["location_id"], name: "index_site_content_profiles_on_location_id"
     t.index ["preview_token"], name: "index_site_content_profiles_on_preview_token", unique: true
+    t.index ["source_kind"], name: "index_site_content_profiles_on_source_kind"
   end
 
   create_table "site_profile_projections", force: :cascade do |t|

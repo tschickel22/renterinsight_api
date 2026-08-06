@@ -24,11 +24,15 @@ module SiteProfiles
 
     # digests: [PageDigest::Digest], brand/links/integrations from the
     # deterministic pass. Returns [profile_hash, warnings, usage].
-    def call(digests:, brand: {}, links: {}, integrations: [], contact: {}, source_url: nil)
+    # images: rendered document pages (DocumentRasterizer output). A crawl passes
+    # none — page text is the content. A document upload passes its pages,
+    # because a product sheet's meaning lives in its layout and photography, and
+    # its extracted text is routinely mangled by letter-spacing ("TheCompleteDMSfor").
+    def call(digests:, brand: {}, links: {}, integrations: [], contact: {}, source_url: nil, images: [])
       started = Time.current
       response = call_claude(
-        system_prompt: system_prompt,
-        user_message: user_message(digests, brand, source_url),
+        system_prompt: system_prompt(document: images.present?),
+        user_message: build_content(user_message(digests, brand, source_url), images),
         model: AiModel.for(:generation),
         max_tokens: MAX_TOKENS
       )
@@ -84,7 +88,9 @@ module SiteProfiles
       }.compact
     end
 
-    def system_prompt
+    def system_prompt(document: false)
+      return document_system_prompt if document
+
       <<~PROMPT
         You extract structured content from a manufactured-housing or RV dealer's
         existing website so it can be rebuilt on a new platform.
@@ -95,6 +101,45 @@ module SiteProfiles
 
         #{ProfileSchema.prompt_contract}
       PROMPT
+    end
+
+    def document_system_prompt
+      <<~PROMPT
+        You extract structured content from a document a manufactured-housing or
+        RV dealer supplied — typically a product sheet, brochure or spec packet —
+        so a landing page can be built from it.
+
+        You are given the document's extracted text AND an image of every page.
+
+        Trust the images over the text. The text comes from a PDF extractor and
+        is frequently mangled: letter-spaced headings collapse into runs like
+        "TheCompleteDMSfor", columns interleave, and table cells arrive out of
+        order. Read the page images to recover what it actually says, and use the
+        text only to confirm exact spellings, figures and spec values.
+
+        Also read from the images what the text cannot carry: the brand's colours
+        (as hex), the typographic feel, which photograph is the hero, and which
+        content is a headline versus a caption versus a spec table.
+
+        #{ProfileSchema.prompt_contract}
+      PROMPT
+    end
+
+    # Claude's `content` takes either a string or an array of blocks, so a
+    # text-only crawl stays exactly as it was.
+    def build_content(text, images)
+      return text if images.blank?
+
+      [{ type: 'text', text: text }] + images.map do |img|
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: img['content_type'].to_s.downcase,
+            data: img['data_base64'].to_s
+          }
+        }
+      end
     end
 
     def user_message(digests, brand, source_url)

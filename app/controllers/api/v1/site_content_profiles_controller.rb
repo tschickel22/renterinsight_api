@@ -11,6 +11,19 @@
 # Platform admin only, EXCEPT #by_token — the whole point of the shared preview
 # is that a salesperson can send it to someone with no account.
 class Api::V1::SiteContentProfilesController < ApplicationController
+  # Generous, because a print-resolution dealer brochure is legitimately large.
+  # Only the first pages are ever rendered or read, so this bounds the upload
+  # and the S3 object, not the scan.
+  MAX_DOCUMENT_BYTES = 40.megabytes
+
+  # What SiteProfiles::DocumentIngestor can actually read. Checked here so the
+  # admin is told immediately, rather than by a job that fails a minute later.
+  SUPPORTED_DOCUMENT_TYPES = (
+    SiteProfiles::DocumentIngestor::PDF_TYPES +
+    SiteProfiles::DocumentIngestor::IMAGE_TYPES +
+    SiteProfiles::DocumentIngestor::TEXT_TYPES
+  ).freeze
+
   skip_before_action :authenticate, only: [:by_token]
 
   before_action :require_platform_admin!, except: [:by_token]
@@ -27,10 +40,12 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   end
 
   # POST /api/v1/site_content_profiles
-  #   { source_url: }  -> scan an existing site (async)
-  #   { manual: {...} } -> build from a short form, ready immediately
+  #   { source_url: }    -> scan an existing site (async)
+  #   { manual: {...} }  -> build from a short form, ready immediately
+  #   { document: file } -> scan an uploaded product sheet or brochure (async)
   def create
     return create_manual if params[:manual].present?
+    return create_from_document if params[:document].present?
 
     url = params[:source_url].to_s.strip
 
@@ -80,6 +95,58 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       status: 'ready'
     )
 
+    render json: detail(profile), status: :created
+  end
+
+  # Scan an uploaded document — a product sheet, brochure or spec packet.
+  #
+  # The file goes to S3 rather than travelling with the job: extraction takes
+  # minutes and runs on a background worker, so the bytes have to outlive the
+  # request. Keeping the object also means a profile can be re-extracted later
+  # against a better prompt without asking for the file again.
+  def create_from_document
+    upload = params[:document]
+    unless upload.respond_to?(:read)
+      return render json: { error: 'No document was uploaded.' }, status: :unprocessable_entity
+    end
+
+    if upload.size.to_i > MAX_DOCUMENT_BYTES
+      return render json: {
+        error: "That document is #{(upload.size / 1.megabyte.to_f).round(1)}MB. " \
+               "The limit is #{MAX_DOCUMENT_BYTES / 1.megabyte}MB."
+      }, status: :unprocessable_entity
+    end
+
+    content_type = upload.content_type.to_s.downcase.presence
+    unless SUPPORTED_DOCUMENT_TYPES.include?(content_type) || content_type.nil?
+      return render json: {
+        error: "#{content_type} is not supported. Upload a PDF, an image, or a text file."
+      }, status: :unprocessable_entity
+    end
+
+    uploaded = S3UploadService.new.upload(upload, folder: "site-profiles/uploads/#{@company.id}")
+    if uploaded.blank? || uploaded[:key].blank?
+      return render json: { error: 'The document could not be stored. Try again.' },
+                    status: :service_unavailable
+    end
+
+    profile = SiteContentProfile.create!(
+      company_id: @company.id,
+      location_id: params[:location_id].presence,
+      created_by: current_user,
+      source_kind: 'document',
+      source_url: nil,
+      document_filename: upload.original_filename,
+      document_s3_key: uploaded[:key],
+      document_content_type: content_type,
+      document_byte_size: upload.size,
+      display_name: params[:display_name].presence || File.basename(upload.original_filename.to_s, '.*'),
+      preview_template_ids: Array(params[:preview_template_ids]).map(&:to_s),
+      inventory_company_id: params[:inventory_company_id].presence,
+      status: 'pending'
+    )
+
+    SiteProfileScanJob.perform_later(profile.id)
     render json: detail(profile), status: :created
   end
 
@@ -154,6 +221,12 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       preview_template_ids: profile.preview_template_ids,
       created_at: profile.created_at,
       page_count: profile.report['page_count'],
+      source_kind: profile.source_kind,
+      document_filename: profile.document_filename,
+      # Zero means the document was read as text only — worth surfacing, since
+      # it is the difference between a profile that matched the source's design
+      # and one that inferred it from mangled extracted text.
+      rasterized_page_count: profile.rasterized_page_count,
       inventory_company_id: profile.inventory_company_id,
       inventory_is_sample: inventory_config_for(profile)&.dig('is_sample') || false
     }
