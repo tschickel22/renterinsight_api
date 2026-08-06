@@ -103,6 +103,44 @@ RSpec.describe Websites::HostResolver do
       expect(described_class.call("summit-park.#{root}").website).to eq(site)
     end
 
+    # Tenant sites are served from their own zone, because the platform domain
+    # has no wildcard record and every subdomain built on it named a host that
+    # did not resolve.
+    it 'resolves a subdomain on the site host root' do
+      site = website(subdomain: 'summit-park')
+      root = Brand.current.site_host_root
+
+      expect(described_class.call("summit-park.#{root}").website).to eq(site)
+    end
+
+    # Both roots stay live: moving site hosting must not strand a site that was
+    # already being reached on the platform domain.
+    it 'accepts either root for the same site' do
+      site = website(subdomain: 'summit-park')
+      brand = Brand.current
+
+      expect(described_class.call("summit-park.#{brand.site_host_root}").website).to eq(site)
+      expect(described_class.call("summit-park.#{brand.subdomain_root}").website).to eq(site)
+    end
+
+    it 'still returns nil for a subdomain on neither root' do
+      website(subdomain: 'summit-park')
+
+      expect(described_class.call('summit-park.someone-elses-domain.com')).to be_nil
+    end
+
+    # A root that is a suffix of the other must not swallow the longer one:
+    # matching "a.sites.example.com" against "example.com" would take the label
+    # as "a.sites" and find nothing.
+    it 'prefers the longest matching root' do
+      site = website(subdomain: 'summit-park')
+      allow(Brand).to receive(:current).and_return(
+        instance_double(Brand, site_host_root: 'sites.example.com', subdomain_root: 'example.com')
+      )
+
+      expect(described_class.call('summit-park.sites.example.com').website).to eq(site)
+    end
+
     it 'returns nil for an unknown host' do
       expect(described_class.call('nobody.example')).to be_nil
     end

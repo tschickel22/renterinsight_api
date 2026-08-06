@@ -72,6 +72,21 @@ class PlatformSetting
         privacyUrl: ENV['PLATFORM_PRIVACY_URL'] || 'https://www.dealertide.com/privacy-policy/',
         termsUrl: ENV['PLATFORM_TERMS_URL'] || 'https://www.dealertide.com/terms-of-use/',
         subdomainRoot: ENV['PLATFORM_SUBDOMAIN_ROOT'] || 'dealertide.com',
+        # Where TENANT SITES are served, which is deliberately not the platform's
+        # own domain.
+        #
+        # Serving dealer sites off *.dealertide.com needs a wildcard record on
+        # the apex zone, and dealertide.com is at GoDaddy with individually
+        # created records: app resolves, everything else does not, so every
+        # generated subdomain URL pointed at a host that does not exist.
+        # mydealertide.com is a separate zone on Cloudflare precisely so a
+        # wildcard can exist there without touching the marketing domain.
+        #
+        # Kept apart from subdomainRoot because that value also derives the
+        # inbound mail domain and the domain-verification TXT prefix dealers
+        # have already published. Moving site hosting must not silently move
+        # either of those.
+        siteHostRoot: ENV['PLATFORM_SITE_HOST_ROOT'] || 'mydealertide.com',
         maintenanceMode: false,
         maintenanceMessage: 'We are currently performing scheduled maintenance. Please check back soon.'
       }
