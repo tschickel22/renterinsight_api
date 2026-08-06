@@ -25,6 +25,17 @@ class Campaign < ApplicationRecord
   has_many :campaign_sends, dependent: :destroy
   has_many :campaign_events, dependent: :destroy
 
+  # Landing pages this campaign drives traffic to.
+  #
+  # nullify, not destroy: a landing page outlives the campaign that created it.
+  # Deleting a finished campaign must not take down a page that is still live
+  # and still collecting leads, and the visits recorded against it stay
+  # meaningful either way.
+  has_many :landing_pages,
+           -> { where(page_kind: 'landing').where(is_deleted: [false, nil]) },
+           class_name: 'WebsitePage',
+           dependent: :nullify
+
   validates :name, :status, :campaign_type, :from_identity_type, :channel, presence: true
   validates :status, inclusion: { in: STATUSES }
   validates :campaign_type, inclusion: { in: TYPES }
