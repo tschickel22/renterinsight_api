@@ -16,6 +16,8 @@ class WorkqueueService
     'engagement_contact_opened_today'  => :engagement_contact_opened_today,
     'engagement_contact_opened_week'   => :engagement_contact_opened_week,
     'engagement_contact_clicked_today' => :engagement_contact_clicked_today,
+    'engagement_landing_visit_today'   => :engagement_landing_visit_today,
+    'engagement_landing_deep'          => :engagement_landing_deep,
     'activity_tasks_today'        => :activity_tasks_today,
     'activity_tasks_week'         => :activity_tasks_week,
     'activity_meetings_today'     => :activity_meetings_today,
@@ -40,7 +42,7 @@ class WorkqueueService
 
   GROUPS = [
     { id: 'engagement', label: 'Hot Engagement',
-      queue_ids: %w[inventory_hot_interest engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week engagement_contact_opened_today engagement_contact_clicked_today engagement_contact_opened_week] },
+      queue_ids: %w[inventory_hot_interest engagement_landing_deep engagement_landing_visit_today engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week engagement_contact_opened_today engagement_contact_clicked_today engagement_contact_opened_week] },
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_meetings_upcoming activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
@@ -325,6 +327,8 @@ class WorkqueueService
     when 'engagement_contact_opened_today'  then 'Contacts — Opened Email Today'
     when 'engagement_contact_opened_week'   then 'Contacts — Opened Email This Week'
     when 'engagement_contact_clicked_today' then 'Contacts — Clicked Link Today'
+    when 'engagement_landing_visit_today'   then 'Leads — Visited a Landing Page Today'
+    when 'engagement_landing_deep'          then 'Leads — Engaged a Landing Page, No Enquiry'
     when 'activity_tasks_today'        then 'Tasks — Today & Overdue'
     when 'activity_tasks_week'         then "Tasks — Next #{prefs[:tasks_week_days]}d"
     when 'activity_meetings_today'     then 'Meetings — Today'
@@ -636,6 +640,23 @@ class WorkqueueService
     engagement_scope_for(recency)
   end
 
+  # Leads who were on a landing page today.
+  #
+  # A step past "clicked the email": the click only proves the subject line
+  # worked, while a visit means they read the offer.
+  def engagement_landing_visit_today
+    engagement_scope_for(landing_visit_recency(since: 24.hours.ago))
+  end
+
+  # Leads who engaged deeply with a landing page and did not convert.
+  #
+  # The most actionable queue here. Someone who scrolled to the bottom, watched
+  # most of the video, or started the form and abandoned it has done everything
+  # except ask — and nothing in the CRM would otherwise show it.
+  def engagement_landing_deep
+    engagement_scope_for(landing_visit_recency(since: 7.days.ago, deep: true))
+  end
+
   def engagement_hot_reopeners
     cutoff = 48.hours.ago
     pairs = CampaignSend
@@ -674,6 +695,36 @@ class WorkqueueService
     (campaign_pairs + comm_pairs)
       .group_by(&:first)
       .transform_values { |arr| arr.map(&:last).compact.max }
+  end
+
+  # {lead_id => most recent visit time} from landing page tracking.
+  #
+  # Shaped to match engagement_lead_recency so it feeds engagement_scope_for
+  # unchanged — the ordering, ownership and status filtering are all shared.
+  #
+  # @param deep [Boolean] restrict to real engagement rather than a bounce:
+  #   scrolled past 75%, or reached the halfway point of a video, or started
+  #   the form. Converted visits are excluded — they already became a lead
+  #   through the normal intake path and do not need chasing.
+  def landing_visit_recency(since:, deep: false)
+    scope = PageVisit
+              .real
+              .where(company_id: @company.id, identified_entity_type: 'Lead')
+              .where('page_visits.last_seen_at >= ?', since)
+
+    if deep
+      engaged_visit_ids = PageVisitEvent
+                            .where(event_type: %w[video_50 video_75 video_complete form_start])
+                            .select(:page_visit_id)
+
+      scope = scope.where(converted: false)
+                   .where('page_visits.max_scroll_depth >= ? OR page_visits.id IN (?)',
+                          75, engaged_visit_ids)
+    end
+
+    scope.pluck(:identified_entity_id, :last_seen_at)
+         .group_by(&:first)
+         .transform_values { |rows| rows.map(&:last).compact.max }
   end
 
   def engagement_scope_for(recency_by_lead)

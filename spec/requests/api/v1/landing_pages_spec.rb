@@ -187,6 +187,56 @@ RSpec.describe 'Api::V1::LandingPages', type: :request do
     end
   end
 
+  describe 'GET /:id/analytics' do
+    it 'returns the funnel, engagement, video, sources and timeseries' do
+      PageVisit.create!(company_id: company.id, website_page_id: page.id,
+                        visitor_token: 'v1', session_token: 's1',
+                        max_scroll_depth: 100, converted: true,
+                        first_seen_at: 1.hour.ago, last_seen_at: 1.hour.ago)
+
+      get "/api/v1/landing_pages/#{page.id}/analytics", headers: headers
+
+      expect(response).to have_http_status(:ok)
+      expect(json['funnel']).to include('visits' => 1, 'conversions' => 1)
+      expect(json).to have_key('engagement')
+      expect(json).to have_key('video')
+      expect(json).to have_key('sources')
+      expect(json).to have_key('timeseries')
+    end
+
+    it 'returns zeroes for a page with no traffic' do
+      get "/api/v1/landing_pages/#{page.id}/analytics", headers: headers
+
+      expect(json['funnel']['visits']).to eq(0)
+      expect(json['funnel']['conversion_rate']).to eq(0.0)
+    end
+  end
+
+  describe 'GET /:id/visitors' do
+    let(:source) { Source.find_or_create_by!(name: 'Web') { |s| s.source_type = 'web' } }
+    let(:lead) do
+      Lead.create!(company: company, source: source, first_name: 'Dana', last_name: 'Reed',
+                   status: 'new', email: "d-#{SecureRandom.hex(4)}@example.com")
+    end
+
+    # An anonymous row has nothing a salesperson can act on.
+    it 'lists identified visitors only' do
+      identified = PageVisit.create!(company_id: company.id, website_page_id: page.id,
+                                     visitor_token: 'v1', session_token: 's1',
+                                     first_seen_at: 1.hour.ago, last_seen_at: 1.hour.ago)
+      identified.identify!(lead)
+      PageVisit.create!(company_id: company.id, website_page_id: page.id,
+                        visitor_token: 'v2', session_token: 's2',
+                        first_seen_at: 1.hour.ago, last_seen_at: 1.hour.ago)
+
+      get "/api/v1/landing_pages/#{page.id}/visitors", headers: headers
+
+      expect(json['items'].size).to eq(1)
+      expect(json['items'].first['entity_type']).to eq('Lead')
+      expect(json['items'].first['entity_id']).to eq(lead.id)
+    end
+  end
+
   describe 'the marketing container stays hidden' do
     it 'does not appear in the websites list' do
       page # provisions the container

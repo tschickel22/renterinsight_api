@@ -14,7 +14,8 @@
 # cloning).
 class Api::V1::LandingPagesController < ApplicationController
   before_action :set_company_scope
-  before_action :set_page, only: %i[show update destroy publish unpublish duplicate clone_to_locations]
+  before_action :set_page,
+                only: %i[show update destroy publish unpublish duplicate clone_to_locations analytics visitors]
 
   def index
     return unless authorize_action!('websites', 'read')
@@ -141,6 +142,51 @@ class Api::V1::LandingPagesController < ApplicationController
       # the others.
       failures: result.failures
     }, status: :created
+  end
+
+  # GET /api/v1/landing_pages/:id/analytics
+  def analytics
+    return unless authorize_action!('websites', 'read')
+
+    render json: Marketing::LandingPageAnalytics.new(
+      @page,
+      from: params[:from].presence && Time.zone.parse(params[:from]),
+      to: params[:to].presence && Time.zone.parse(params[:to])
+    ).call
+  end
+
+  # GET /api/v1/landing_pages/:id/visitors
+  #
+  # Identified visitors only. An anonymous row has nothing a salesperson can
+  # act on, and listing them would turn a work surface into a log file.
+  def visitors
+    return unless authorize_action!('websites', 'read')
+
+    visits = PageVisit.real
+                      .where(website_page_id: @page.id)
+                      .identified
+                      .order(last_seen_at: :desc)
+                      .limit(200)
+
+    render json: {
+      items: visits.map do |visit|
+        {
+          id: visit.id,
+          entity_type: visit.identified_entity_type,
+          entity_id: visit.identified_entity_id,
+          entity_name: visit.identified_entity.try(:full_name) ||
+                       visit.identified_entity.try(:name),
+          first_seen_at: visit.first_seen_at,
+          last_seen_at: visit.last_seen_at,
+          max_scroll_depth: visit.max_scroll_depth,
+          duration_ms: visit.duration_ms,
+          converted: visit.converted,
+          campaign_id: visit.campaign_id,
+          utm_source: visit.utm_source,
+          device_type: visit.device_type
+        }
+      end
+    }
   end
 
   private

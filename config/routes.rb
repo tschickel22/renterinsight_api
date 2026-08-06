@@ -731,6 +731,8 @@ Rails.application.routes.draw do
           post :unpublish
           post :duplicate
           post :clone_to_locations
+          get :analytics
+          get :visitors
         end
       end
 
