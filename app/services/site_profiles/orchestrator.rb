@@ -63,6 +63,7 @@ module SiteProfiles
 
       import_assets
       ensure_lead_form
+      suggest_subdomain
       @record
     rescue StandardError => e
       @record.update!(status: 'failed', error_message: e.message.truncate(500))
@@ -224,6 +225,25 @@ module SiteProfiles
     # scopes the form to that company, so it has to be that one.
     #
     # Non-fatal: a scan that produced a profile is worth keeping either way.
+    # The address this demo would get if it became a real site.
+    #
+    # Derived from the scanned brand name, which is the dealer's own trading
+    # name and therefore what they would want in the URL — far better than the
+    # site name someone types into the commit dialog in a hurry.
+    #
+    # Recorded now so a platform admin can correct it while it is still a demo.
+    # After commit the site belongs to the dealer and renaming its address
+    # breaks whatever has already been shared.
+    def suggest_subdomain
+      name = @record.profile.dig('brand', 'name').presence || @record.display_name.presence
+      return if name.blank?
+
+      suggestion = Websites::SubdomainSuggester.suggest(name)
+      @record.update!(suggested_subdomain: suggestion) if suggestion.present?
+    rescue StandardError => e
+      Rails.logger.warn("[SiteProfiles::Orchestrator] subdomain suggestion failed: #{e.message}")
+    end
+
     def ensure_lead_form
       config = DemoInventoryResolver.config_for_profile(@record)
       return if config.blank?

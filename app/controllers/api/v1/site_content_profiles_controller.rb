@@ -168,7 +168,8 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       display_name: params.fetch(:display_name, @profile.display_name),
       preview_template_ids: params.key?(:preview_template_ids) ? Array(params[:preview_template_ids]).map(&:to_s) : @profile.preview_template_ids,
       preview_expires_at: params.fetch(:preview_expires_at, @profile.preview_expires_at),
-      inventory_company_id: params.key?(:inventory_company_id) ? params[:inventory_company_id].presence : @profile.inventory_company_id
+      inventory_company_id: params.key?(:inventory_company_id) ? params[:inventory_company_id].presence : @profile.inventory_company_id,
+      suggested_subdomain: params.key?(:suggested_subdomain) ? normalized_subdomain(params[:suggested_subdomain]) : @profile.suggested_subdomain
     )
     render json: detail(@profile)
   end
@@ -288,6 +289,15 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     Websites::DefaultLeadForm.for(company)&.id
   end
 
+  # Sanitised the same way a generated one is, so what an admin types and what
+  # the scan produces obey identical rules and neither can create an address a
+  # Website would then refuse to save.
+  def normalized_subdomain(value)
+    return nil if value.blank?
+
+    Websites::SubdomainSuggester.normalize(value)
+  end
+
   def manufacturers_for(profile)
     Websites::LotManufacturers.for(lot_company_for(profile))
   end
@@ -321,6 +331,9 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # and one that inferred it from mangled extracted text.
       rasterized_page_count: profile.rasterized_page_count,
       inventory_company_id: profile.inventory_company_id,
+      # The address this demo would take if committed. Editable while it is
+      # still a demo; after that it belongs to the dealer.
+      suggested_subdomain: profile.suggested_subdomain,
       inventory_is_sample: inventory_config_for(profile)&.dig('is_sample') || false
     }
   end

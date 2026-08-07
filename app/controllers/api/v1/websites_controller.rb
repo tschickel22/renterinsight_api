@@ -125,7 +125,20 @@ class Api::V1::WebsitesController < ApplicationController
     return unless authorize_action!('websites', 'create')
 
     @website = @company.websites.build(website_params)
-    
+
+    # Every site needs an address.
+    #
+    # Nothing assigned one, so a site was created, published, and had nowhere to
+    # send anyone — domain_status reported 'none' and the publish panel said the
+    # site was live with no way to reach it. A custom domain still wins in
+    # HostResolver when one is added later, so this only fills the gap rather
+    # than competing with it.
+    if @website.subdomain.blank?
+      @website.subdomain = Websites::SubdomainSuggester.suggest(
+        @website.name.presence || @company.name
+      )
+    end
+
     # Auto-assign location_id
     @website.location_id ||= Current.location_id if Current.location_id.present?
     

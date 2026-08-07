@@ -62,6 +62,11 @@ class Website < ApplicationRecord
   validates :slug, presence: true, uniqueness: { scope: :company_id }
   validates :domain, uniqueness: { scope: :company_id, allow_blank: true }
   validates :subdomain, uniqueness: { allow_blank: true }
+  # Format and reserved names were never checked, so a site could take "www" or
+  # "origin" — the latter being the Cloudflare for SaaS fallback origin every
+  # dealer custom domain resolves through — or an address with characters no
+  # hostname may contain.
+  validate :subdomain_is_usable
   validates :location_id, presence: { message: 'must be selected' }
   
   # Callbacks
@@ -177,6 +182,20 @@ class Website < ApplicationRecord
 
     root = Brand.current.site_host_root.to_s.presence
     root.blank? ? nil : "#{old}.#{root}"
+  end
+
+  def subdomain_is_usable
+    return if subdomain.blank?
+
+    return if Websites::SubdomainSuggester.valid?(subdomain)
+
+    errors.add(:subdomain, if Websites::SubdomainSuggester.reserved?(subdomain)
+                             'is reserved. Please choose another.'
+                           else
+                             'may use only lowercase letters, numbers and hyphens, ' \
+                             "and must be #{Websites::SubdomainSuggester::MIN_LENGTH}" \
+                             "-#{Websites::SubdomainSuggester::MAX_LENGTH} characters."
+                           end)
   end
 
   def nullify_blank_domain_fields

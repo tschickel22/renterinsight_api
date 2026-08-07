@@ -56,6 +56,10 @@ module SiteProfiles
       )
 
       import_page_images(ingested)
+      # Same suggestion an ordinary scan makes: a brochure carries the dealer's
+      # trading name too, and a demo built from one needs an address just as
+      # much as a demo built from a website.
+      suggest_subdomain
       @record
     rescue StandardError => e
       @record.update!(status: 'failed', error_message: e.message.truncate(500))
@@ -99,6 +103,18 @@ module SiteProfiles
         'pages_scanned' => ingested.digests.map(&:url),
         'warnings' => @warnings.uniq
       }
+    end
+
+    # The address this demo would take if it became a real site, derived from
+    # the dealer's trading name on the brochure.
+    def suggest_subdomain
+      name = @record.profile.dig('brand', 'name').presence || @record.display_name.presence
+      return if name.blank?
+
+      suggestion = Websites::SubdomainSuggester.suggest(name)
+      @record.update!(suggested_subdomain: suggestion) if suggestion.present?
+    rescue StandardError => e
+      Rails.logger.warn("[SiteProfiles::DocumentOrchestrator] subdomain suggestion failed: #{e.message}")
     end
 
     # The rendered pages are the only imagery a document scan has — the source
