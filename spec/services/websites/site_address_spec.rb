@@ -101,6 +101,40 @@ RSpec.describe Websites::SiteAddress do
     end
   end
 
+  describe 'Website#public_url' do
+    let(:company) { Company.create!(name: "Co-#{SecureRandom.hex(3)}") }
+    let(:location) { company.locations.create!(name: 'Showroom') }
+
+    # Distinct subdomains per site: uniqueness is global, so reusing one inside
+    # a single example fails on the validation rather than on what is asserted.
+    def site(status:, subdomain: :auto)
+      subdomain = "mh-#{SecureRandom.hex(4)}" if subdomain == :auto
+      Website.create!(company_id: company.id, location_id: location.id, name: 'MH Masters',
+                      slug: "s-#{SecureRandom.hex(4)}", subdomain: subdomain,
+                      status: status, published_at: (status == 'published' ? Time.current : nil))
+    end
+
+    it 'names the address a visitor can reach' do
+      expect(site(status: 'published', subdomain: 'mhmasters').public_url)
+        .to eq('https://mhmasters.mydealertide.com')
+    end
+
+    it 'carries the environment marker' do
+      with_suffix('-staging') do
+        expect(site(status: 'published', subdomain: 'mhmasters').public_url)
+          .to eq('https://mhmasters-staging.mydealertide.com')
+      end
+    end
+
+    # Nil rather than a URL, so the builder falls back to the in-app preview
+    # route instead of offering an address that answers with nothing.
+    it 'has no address for a site the resolver would refuse' do
+      expect(site(status: 'draft').public_url).to be_nil
+      expect(site(status: 'unpublished').public_url).to be_nil
+      expect(site(status: 'published', subdomain: nil).public_url).to be_nil
+    end
+  end
+
   describe 'SubdomainRouteProvisioner' do
     it 'binds the route to the marked host' do
       with_suffix('-staging') do

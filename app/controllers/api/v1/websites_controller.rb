@@ -82,7 +82,7 @@ class Api::V1::WebsitesController < ApplicationController
         # So someone who has just built a site can tell whether anyone can reach it. A site
         # with no address, or a published address pointing at an unpublished site, both look
         # finished from here otherwise.
-        methods: [:domain_status]
+        methods: [:domain_status, :public_url]
       ),
       meta: {
         total: filtered_count,
@@ -105,7 +105,7 @@ class Api::V1::WebsitesController < ApplicationController
       # The builder's publish panel needs the real address. Without this it fell back to
       # inventing one from the slug, and showed the dealer a hostname that has never existed
       # in DNS.
-      methods: [:domain_status]
+      methods: [:domain_status, :public_url]
     )
 
     # Include inventory embed config so website builder can auto-configure inventory blocks
@@ -210,7 +210,7 @@ class Api::V1::WebsitesController < ApplicationController
     # domain_status so the builder can show whether publishing actually made the site
     # reachable. Published and reachable are different things: a site with no verified
     # domain is published and still has no address.
-    render json: @website.as_json(methods: [:domain_status])
+    render json: @website.as_json(methods: [:domain_status, :public_url])
   end
 
   # POST /api/v1/websites/:id/unpublish
@@ -221,7 +221,7 @@ class Api::V1::WebsitesController < ApplicationController
       return render json: { error: @website.errors.full_messages.to_sentence }, status: :unprocessable_entity
     end
 
-    render json: @website.as_json(methods: [:domain_status])
+    render json: @website.as_json(methods: [:domain_status, :public_url])
   end
 
   # POST /api/v1/websites/:id/sync_branding

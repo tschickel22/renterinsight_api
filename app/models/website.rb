@@ -33,6 +33,29 @@ class Website < ApplicationRecord
   end
 
 
+  # Where a visitor can actually reach this site right now, or nil when nobody can.
+  #
+  # The builder used to send every Preview click to the in-app /s/:slug route, which is
+  # correct for a draft and misleading for a live site: it shows the CRM's hostname to
+  # someone who just published to their own. Callers fall back to /s/:slug when this is
+  # nil, so a draft still previews.
+  #
+  # Computed here rather than assembled in the client because the hostname depends on
+  # PLATFORM_SITE_LABEL_SUFFIX, which is a server-side environment concern the browser
+  # has no way to know. See Websites::SiteAddress.
+  #
+  # Matches what HostResolver actually serves: a custom domain when it is wired up and
+  # the site is published, otherwise the platform subdomain, and the status column
+  # rather than published? so this cannot claim an address the resolver would refuse.
+  def public_url
+    live = domain_status
+    return live[:url] if live[:state] == 'live'
+    return nil unless status == 'published'
+
+    host = Websites::SiteAddress.host_for(self)
+    host.presence && "https://#{host}"
+  end
+
   # Enums - Rails 8 syntax (only status for Phase 1, others can be added later with prefixes)
   enum :status, { draft: 0, published: 1, unpublished: 2 }, default: :draft
 
