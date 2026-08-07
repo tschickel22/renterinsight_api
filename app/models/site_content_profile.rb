@@ -17,21 +17,44 @@ class SiteContentProfile < ApplicationRecord
 
   STATUSES = %w[pending fetching extracting ready failed].freeze
 
-  # source_url is blank for hand-entered demos — a prospect with no website
-  # still needs a shareable preview.
-  validates :source_url, presence: true, unless: :entered_manually?
+  # Where the content came from.
+  #
+  # 'url'      — crawled a live site (SiteProfiles::Orchestrator)
+  # 'manual'   — hand-entered demo for a prospect with no website yet
+  # 'document' — an uploaded product sheet or brochure
+  #              (SiteProfiles::DocumentOrchestrator)
+  #
+  # All three produce the same profile contract, which is the whole point: a
+  # scanned website and an uploaded spec sheet project into the same layouts.
+  SOURCE_KINDS = %w[url manual document].freeze
+
+  # source_url is blank for hand-entered demos and for document uploads — a
+  # prospect with no website still needs a shareable preview, and a product
+  # sheet has no URL at all.
+  validates :source_url, presence: true, unless: -> { entered_manually? || document? }
   validates :status, inclusion: { in: STATUSES }
+  validates :source_kind, inclusion: { in: SOURCE_KINDS }
+  validates :document_s3_key, presence: true, if: :document?
 
   before_create :generate_preview_token
 
   scope :ready, -> { where(status: 'ready') }
+  scope :from_documents, -> { where(source_kind: 'document') }
 
   def ready?
     status == 'ready'
   end
 
+  def document?
+    source_kind == 'document'
+  end
+
   def entered_manually?
-    profile.is_a?(Hash) && profile.dig('source', 'entered_manually') == true
+    # source_kind is authoritative for rows written since it existed. Older rows
+    # predate the column and default to 'url', so the profile payload is still
+    # the only way to recognise a hand-entered one.
+    source_kind == 'manual' ||
+      (profile.is_a?(Hash) && profile.dig('source', 'entered_manually') == true)
   end
 
   def preview_expired?

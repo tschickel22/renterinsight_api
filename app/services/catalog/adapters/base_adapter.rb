@@ -45,6 +45,15 @@ module Catalog
         Integer(source.config['crawl_delay'] || 10)
       end
 
+      # The UA every request sends. Overridable per adapter and per source
+      # because some hosts run a WAF that rejects the shared default outright
+      # (adventurehomes.net answers it with a 403 page), and bumping the shared
+      # constant would silently re-calibrate every other adapter.
+      def user_agent
+        (source.respond_to?(:config) && source.config.is_a?(Hash) &&
+          source.config['user_agent'].presence) || USER_AGENT
+      end
+
       # Dry-run for the admin "Test" action: discover a few keys, fetch+parse
       # each, return [NormalizedHome]. Never ingests. Resilient per-home so one
       # bad page doesn't sink the sample.
@@ -71,7 +80,7 @@ module Catalog
         configure_ssl(http) if http.use_ssl?
 
         request = Net::HTTP::Get.new(uri.request_uri)
-        request['User-Agent'] = USER_AGENT
+        request['User-Agent'] = user_agent
         request['Accept']     = accept
 
         response = http.request(request)
@@ -130,7 +139,7 @@ module Catalog
         configure_ssl(http) if http.use_ssl?
 
         req = Net::HTTP::Get.new(uri.request_uri)
-        req['User-Agent'] = USER_AGENT
+        req['User-Agent'] = user_agent
         req['Accept']     = accept
         res = http.request(req)
         { url: url, status: res.code.to_i, bytes: res.body.to_s.bytesize,

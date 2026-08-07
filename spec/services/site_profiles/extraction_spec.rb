@@ -144,7 +144,13 @@ RSpec.describe 'SiteProfiles extraction' do
 
       # A 4th-of-July banner was the first background on a real dealer home
       # page, so hero_images[0] put fireworks behind the headline.
-      it 'demotes seasonal and promotional graphics below real photography' do
+      #
+      # Demoting was not enough. A demoted image still reached hero_images, and
+      # reaching it at all is sufficient — a hero band renders index 0 of
+      # whatever list it is handed, and merging across pages reshuffled the
+      # order anyway. Promotional graphics are now excluded from the hero
+      # candidates outright and offered separately for galleries.
+      it 'keeps seasonal and promotional graphics out of the hero candidates' do
         d = digest_for(<<~HTML)
           <html><body>
             <div style="background-image: url('/img/july4-sale-banner.jpg')"></div>
@@ -152,9 +158,49 @@ RSpec.describe 'SiteProfiles extraction' do
           </body></html>
         HTML
 
-        expect(d.candidate_hero_images.first).to match(/lot-exterior/)
-        # still available for galleries, just not first
-        expect(d.candidate_hero_images.join).to match(/july4/)
+        expect(d.candidate_hero_images).to eq(['https://sunshinehomes.example/img/lot-exterior.jpg'])
+        # Still available for galleries, just never behind a headline.
+        expect(d.demoted_images.join).to match(/july4/)
+      end
+
+      # The specific image that prompted all of this: a dealer's American flag,
+      # reused across every seasonal campaign and therefore the most-linked
+      # image on the site.
+      it 'keeps patriotic decoration out of the hero candidates' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/usa-stars-and-stripes.jpg')"></div>
+            <div style="background-image: url('/img/model-home-exterior.jpg')"></div>
+          </body></html>
+        HTML
+
+        expect(d.candidate_hero_images.join).not_to match(/stars-and-stripes/)
+        expect(d.candidate_hero_images.join).to match(/model-home-exterior/)
+      end
+
+      # A dealer trading as "American Homes of Texas" must not have their own
+      # photography demoted by the patriotic filter.
+      it 'does not demote a dealer whose name merely contains American' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/american-homes-of-texas-exterior.jpg')"></div>
+          </body></html>
+        HTML
+
+        expect(d.candidate_hero_images.join).to match(/american-homes-of-texas/)
+      end
+
+      # Financing badges, review widgets and staff photos are not homes.
+      it 'keeps non-home furniture out of the hero candidates' do
+        d = digest_for(<<~HTML)
+          <html><body>
+            <div style="background-image: url('/img/handshake-financing.jpg')"></div>
+            <div style="background-image: url('/img/our-team-photo.jpg')"></div>
+            <div style="background-image: url('/img/singlewide-exterior.jpg')"></div>
+          </body></html>
+        HTML
+
+        expect(d.candidate_hero_images).to eq(['https://sunshinehomes.example/img/singlewide-exterior.jpg'])
       end
 
       it 'takes the widest candidate from srcset' do
@@ -259,6 +305,50 @@ RSpec.describe 'SiteProfiles extraction' do
 
     it 'skips file downloads' do
       expect(inventory['internal'].map { |e| e['path'] }).not_to include('/brochure.pdf')
+    end
+  end
+
+  describe SiteProfiles::BrandExtractor do
+    def extract(css_or_html)
+      html = css_or_html.include?('<') ? css_or_html : "<html><head><style>#{css_or_html}</style></head><body></body></html>"
+      described_class.new([{ url: 'https://dealer.example/', html: html }]).call
+    end
+
+    # WordPress and Elementor ship generic --primary: #000 and --secondary: #fff,
+    # so a dealer whose brand is a strong blue came back as black and white.
+    # The footer takes its background from the secondary, so an extracted
+    # #ffffff produced a white-on-white footer.
+    it 'ignores neutral CSS variables and finds the real brand colour' do
+      css = <<~CSS
+        :root { --primary: #000000; --secondary: #ffffff; }
+        .a { color: #1e99fb } .b { background: #1e99fb } .c { border-color: #1e99fb }
+      CSS
+
+      colors = extract(css)['colors']
+
+      expect(colors['primary']).to eq('#1e99fb')
+      expect(colors['secondary']).to be_nil
+    end
+
+    it 'keeps a CSS variable that is a real colour' do
+      colors = extract(':root { --primary: #1e99fb; --secondary: #f97316; }')['colors']
+
+      expect(colors['primary']).to eq('#1e99fb')
+      expect(colors['secondary']).to eq('#f97316')
+    end
+
+    # A lazy-loaded logo carries only data-src, or a placeholder in src. The
+    # fallback for that was unreachable, guarded by a condition requiring src.
+    it 'takes a lazy-loaded logo from data-src' do
+      html = '<html><body><header><img data-src="/img/site-logo.png"></header></body></html>'
+
+      expect(extract(html)['logo_url']).to eq('https://dealer.example/img/site-logo.png')
+    end
+
+    it 'skips an inline placeholder in src' do
+      html = '<html><body><header><img src="data:image/gif;base64,R0lGOD" data-src="/img/logo.png"></header></body></html>'
+
+      expect(extract(html)['logo_url']).to eq('https://dealer.example/img/logo.png')
     end
   end
 end

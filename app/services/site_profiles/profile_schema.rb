@@ -11,9 +11,17 @@ module SiteProfiles
   # Versioned because it is a persisted contract between the scan phase and the
   # projection phase — an old profile must stay projectable after the shape moves.
   module ProfileSchema
-    VERSION = 1
+    # 2 added the product sections below. Old profiles stay projectable: the
+    # sections default to [] and every consumer already tolerates empty ones.
+    VERSION = 2
 
     # section => keys we keep. Anything else the model returns is dropped.
+    #
+    # The first block is site-shaped — what a dealer's homepage is made of. The
+    # second is document-shaped: a product sheet is not a homepage, and asking
+    # the model to force a spec table into "services" loses the specs. Both live
+    # in one map so coercion, capping and the empty profile stay uniform, and so
+    # a scanned site that happens to describe a product can fill them too.
     COPY_SECTIONS = {
       'hero' => %w[headline subhead cta_text cta_href],
       'about' => %w[heading body],
@@ -23,8 +31,21 @@ module SiteProfiles
       'team' => %w[name role photo phone email bio],
       'faq' => %w[question answer],
       'stats' => %w[number label suffix],
-      'process' => %w[title description]
+      'process' => %w[title description],
+
+      # An array rather than a single object: one brochure routinely covers
+      # several floor plans or trim levels, and collapsing them loses all but one.
+      'product' => %w[name model_number summary msrp],
+      'specs' => %w[label value unit group],
+      'features' => %w[title description icon_hint],
+      'options' => %w[title description price],
+      'floorplan' => %w[name beds baths sqft dimensions image_url]
     }.freeze
+
+    # Sections that only a document upload is expected to fill. Used to report
+    # honestly when a product sheet scan came back with no product content —
+    # otherwise a failed extraction looks identical to a sparse document.
+    PRODUCT_SECTIONS = %w[product specs features options floorplan].freeze
 
     MAX_ITEMS_PER_SECTION = 12
 
@@ -72,6 +93,16 @@ module SiteProfiles
       if raw.dig('brand', 'fonts').is_a?(Hash)
         fonts = slice_strings(raw['brand']['fonts'], %w[heading body])
         fonts = fonts.reject { |_, v| PLACEHOLDER_VALUE.match?(v) }
+        # Asked to name a font from a page image, the model hedges in prose —
+        # "sans-serif bold (appears to be a geometric sans)" came back from a
+        # real scan. That lands in a template's font-family and renders as
+        # nothing. Anything that is not a plausible family name is dropped so
+        # the template's own typography survives.
+        rejected_fonts = fonts.reject { |_, v| font_family?(v) }
+        if rejected_fonts.any?
+          warnings << "dropped unusable font values: #{rejected_fonts.values.join(', ')}"
+        end
+        fonts = fonts.select { |_, v| font_family?(v) }
         out['brand']['fonts'] = fonts.presence
         out['brand'].delete('fonts') if out['brand']['fonts'].nil?
       end
@@ -158,6 +189,24 @@ module SiteProfiles
       /\A#?(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})\z/i.match?(value.to_s.strip)
     end
 
+    # A CSS font-family value, not a description of one.
+    #
+    # Deliberately strict about length and punctuation rather than trying to
+    # recognise real font names: the failure mode is a sentence, and no genuine
+    # family name is 40 characters of prose with parentheses in it.
+    # Leading quote allowed: '"Gill Sans", sans-serif' is a perfectly ordinary
+    # font-family value.
+    FONT_FAMILY = /\A["']?[A-Za-z0-9][A-Za-z0-9 '"\-,]{0,39}\z/
+    FONT_PROSE = /\b(?:appears?|looks?|similar|possibly|likely|maybe|probably|unclear|some kind)\b/i
+
+    def font_family?(value)
+      value = value.to_s.strip
+      return false if value.blank?
+      return false if FONT_PROSE.match?(value)
+
+      FONT_FAMILY.match?(value)
+    end
+
     def slice_strings(hash, keys)
       return {} unless hash.is_a?(Hash)
 
@@ -195,7 +244,14 @@ module SiteProfiles
             "team":            [{ "name": str, "role": str, "photo": url, "phone": str, "email": str, "bio": str }],
             "faq":             [{ "question": str, "answer": str }],
             "stats":           [{ "number": str, "label": str, "suffix": str }],
-            "process":         [{ "title": str, "description": str }]
+            "process":         [{ "title": str, "description": str }],
+
+            "product":         [{ "name": str, "model_number": str, "summary": str, "msrp": str }],
+            "specs":           [{ "label": str, "value": str, "unit": str, "group": str }],
+            "features":        [{ "title": str, "description": str, "icon_hint": str }],
+            "options":         [{ "title": str, "description": str, "price": str }],
+            "floorplan":       [{ "name": str, "beds": str, "baths": str, "sqft": str,
+                                  "dimensions": str, "image_url": url }]
           },
           "media": { "logo": url, "og_image": url, "hero_images": [url], "gallery": [url] },
           "seo":   { "title": str, "description": str, "keywords": [str] }
@@ -210,6 +266,11 @@ module SiteProfiles
           generic marketing language.
         - Absolute URLs only.
         - Do NOT emit page blocks, layouts, or HTML. Sections only.
+        - product/specs/features/options/floorplan describe a specific product
+          (a home, a unit, a model). Fill them when the source is a product
+          sheet or spec document; leave them out for a general dealer website.
+          Keep spec labels and values exactly as written — "1,344" and "sq ft"
+          stay separate, and a measurement is never rounded or converted.
       CONTRACT
     end
   end

@@ -34,6 +34,18 @@ module Websites
       payload['blog_posts'] = blog_posts
       payload['blog_categories'] = blog_categories
       payload['inventory_embed_config'] = inventory_embed_config
+      # Was missing here while WebsitesController#by_slug_public included it, so
+      # every calculator block rendered in the in-app preview and then silently
+      # vanished on the dealer's live domain — CalculatorBlock returns null when
+      # settings are absent, so it failed as a blank space rather than an error.
+      payload['calculator_settings'] = CalculatorSettings.for(@website.company)
+      # The site's default contact form, for blocks that do not name one. A
+      # dealer who never opened the block editor otherwise published a site
+      # reading "Contact form not available" on its contact page.
+      payload['lead_form_id'] = DefaultLeadForm.for(@website.company)&.id
+      # Narrows the logo strip to brands this dealer actually carries, rather
+      # than advertising their competitors on their own site.
+      payload['manufacturers'] = LotManufacturers.for(@website.company)
       payload
     end
 
@@ -78,7 +90,8 @@ module Websites
       {
         token: company.public_inventory_token,
         company_id: company.id,
-        enabled: company.public_inventory_enabled || false
+        enabled: company.public_inventory_enabled || false,
+        card: InventoryCardSettings.for(company)
       }
     end
   end

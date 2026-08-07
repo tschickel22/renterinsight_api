@@ -24,6 +24,7 @@ class Brand
     privacy_url
     terms_url
     subdomain_root
+    site_host_root
     logo_url
   ].freeze
 
@@ -94,6 +95,9 @@ class Brand
     @privacy_url    = resolve(overrides, :privacy_url,    platform[:privacyUrl])
     @terms_url      = resolve(overrides, :terms_url,      platform[:termsUrl])
     @subdomain_root = resolve(overrides, :subdomain_root, platform[:subdomainRoot])
+    # Falls back to subdomain_root so an environment that has not set the new
+    # value behaves exactly as it did before this field existed.
+    @site_host_root = resolve(overrides, :site_host_root, platform[:siteHostRoot]).presence || @subdomain_root
     @logo_url       = resolve(overrides, :logo_url,       branding[:logo])
   end
 

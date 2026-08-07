@@ -15,6 +15,15 @@ class SiteProfileScanJob < ApplicationJob
 
   def perform(profile_id)
     profile = SiteContentProfile.find(profile_id)
-    SiteProfiles::Orchestrator.new(profile).call
+
+    # Same job, same status machine, same discard-on-failure policy — only the
+    # extraction differs. A document has no site to crawl, no robots.txt to
+    # respect and no links to follow, so it gets its own orchestrator rather
+    # than an `if` threaded through every step of the crawl.
+    if profile.document?
+      SiteProfiles::DocumentOrchestrator.new(profile).call
+    else
+      SiteProfiles::Orchestrator.new(profile).call
+    end
   end
 end

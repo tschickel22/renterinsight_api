@@ -20,8 +20,12 @@ module Constraints
     # Paths that must always reach the application, even when the request arrives on a
     # dealer hostname. These routes are matched before the tenant catch-all, so without
     # this a dealer domain would swallow API and webhook traffic.
+    #
+    # /pv/ is the landing page tracking beacon. The visitor's browser calls it on the
+    # dealer's own hostname, so without it here the catch-all would answer with the
+    # landing page's HTML and every visit would go unrecorded.
     RESERVED_PREFIXES = %w[
-      /api /webhook /webhooks /rails /up /assets /uploads /t/ /u/ /q/ /f/ /sign/
+      /api /webhook /webhooks /rails /up /assets /uploads /t/ /u/ /q/ /f/ /sign/ /pv/
     ].freeze
 
     def matches?(request)

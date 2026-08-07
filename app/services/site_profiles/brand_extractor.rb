@@ -46,10 +46,21 @@ module SiteProfiles
 
     def logo_url
       docs.each do |doc, url|
+        # data-src is checked alongside src, or a lazy-loaded logo is never even
+        # considered a candidate: its src is a placeholder and the filename
+        # that says "logo" is in the lazy attribute.
         candidate = doc.css('header img, .header img, nav img, img').find do |img|
-          [img['src'], img['alt'], img['class'], img['id']].compact.any? { |v| v.match?(LOGO_HINT) }
+          [img['src'], img['data-src'], img['data-lazy-src'], img['alt'], img['class'], img['id']]
+            .compact.any? { |v| v.match?(LOGO_HINT) }
         end
-        return absolutize(candidate['src'] || candidate['data-src'], url) if candidate&.[]('src')
+
+        # The data-src fallback below used to be unreachable: it was guarded by
+        # `if candidate['src']`, so a lazy-loaded logo — which carries only
+        # data-src, or a 1x1 placeholder in src — was found and then discarded.
+        # Lazy loading is the default on WordPress and Elementor, which is most
+        # dealer sites.
+        src = logo_src(candidate)
+        return absolutize(src, url) if src.present?
 
         og = doc.at_css('meta[property="og:logo"], meta[property="og:image"]')&.[]('content')
         return absolutize(og, url) if og.present?
@@ -60,13 +71,44 @@ module SiteProfiles
       nil
     end
 
+    # A real image URL, preferring whichever attribute actually holds one.
+    # An inline placeholder is not a logo, however real its src looks.
+    def logo_src(img)
+      return nil if img.nil?
+
+      %w[src data-src data-lazy-src].each do |attr|
+        value = img[attr].to_s.strip
+        next if value.blank? || value.start_with?('data:')
+
+        return value
+      end
+      nil
+    end
+
     def colors
       found = {}
 
       raw_css.then do |css|
         CSS_VAR_PATTERNS.each do |key, pattern|
           match = pattern.match(css)
-          found[key.to_s] = normalize(match[1]) if match
+          next if match.nil?
+
+          value = normalize(match[1])
+          # A neutral is not a brand colour, whatever the variable is called.
+          #
+          # WordPress and Elementor themes ship generic --primary: #000 and
+          # --secondary: #fff, so a dealer whose actual brand is a strong blue
+          # came back as black and white. That is not merely wrong: the footer
+          # takes its background from the secondary, so an extracted #ffffff
+          # produced a white-on-white footer, and the same value prints prices
+          # onto white cards.
+          #
+          # Measured on a real dealer site: these patterns matched #000000 and
+          # #ffffff while the site's own blue, #1e99fb, was the most common
+          # non-neutral colour in the same stylesheet.
+          next if value.blank? || neutral?(value)
+
+          found[key.to_s] = value
         end
       end
 

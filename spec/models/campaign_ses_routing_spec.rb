@@ -83,6 +83,28 @@ RSpec.describe 'Campaign SES sending domain routing' do
 
       expect(campaign.resolve_email_connection_for_step).to be_a(Ses::SendingIdentity)
     end
+
+    # CommunicationService stamps user_id into metadata['sender_user_id'], which is what
+    # InboundEmail::ReplyNotifier reads to route a reply back to the person who sent it.
+    # Losing it on the SES path would silently divert every campaign reply to the entity
+    # owner, or to "any active company user" when there is no owner.
+    it 'attributes the send to the rep so replies come back to them' do
+      mailbox_for(user)
+
+      expect(campaign.resolve_email_connection_for_step.user_id).to eq(user.id)
+    end
+
+    it 'attributes the send even when the rep has no connected mailbox' do
+      expect(campaign.resolve_email_connection_for_step.user_id).to eq(user.id)
+    end
+
+    # A real user here would make BaseProvider#load_config prefer that user's own mailbox
+    # connection, handing AwsSesProvider an OAuth config with no AWS keys or region.
+    it 'exposes no user object, so the provider keeps the SES config' do
+      mailbox_for(user)
+
+      expect(campaign.resolve_email_connection_for_step.user).to be_nil
+    end
   end
 
   describe 'when no verified domain covers the address' do
@@ -147,6 +169,20 @@ RSpec.describe 'Campaign SES sending domain routing' do
                           email: 'buyer@example.com')
 
       expect(campaign.resolve_email_connection_for_step(recipient: lead)).to be_nil
+    end
+
+    # One shared campaign, a different sender per recipient. Attribution has to follow the
+    # recipient's own owner or replies land on whoever the campaign was created by.
+    it 'attributes each send to that recipients owner' do
+      other = User.create!(email: 'rep2@dealer.example', first_name: 'S', last_name: 'T',
+                           password: 'Pass1234!', company_id: company.id)
+      mine = Lead.create!(company: company, source: source, first_name: 'A', last_name: 'B',
+                          email: 'buyer@example.com', owner_id: user.id)
+      theirs = Lead.create!(company: company, source: source, first_name: 'C', last_name: 'D',
+                            email: 'buyer2@example.com', owner_id: other.id)
+
+      expect(campaign.resolve_email_connection_for_step(recipient: mine).user_id).to eq(user.id)
+      expect(campaign.resolve_email_connection_for_step(recipient: theirs).user_id).to eq(other.id)
     end
   end
 end

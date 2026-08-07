@@ -403,7 +403,9 @@ class Company < ApplicationRecord
   
   def subdomain_with_base_domain
     return nil unless subdomain.present?
-    base_domain = Rails.application.credentials.dig(:domain, :base) || Brand.current.subdomain_root
+    # site_host_root, not subdomain_root — this names a host a visitor is
+    # expected to reach, and only the site host zone carries a wildcard.
+    base_domain = Rails.application.credentials.dig(:domain, :base) || Brand.current.site_host_root
     "#{subdomain}.#{base_domain}"
   end
   

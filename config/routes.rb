@@ -26,6 +26,14 @@ Rails.application.routes.draw do
   # Serve uploaded files (logos, images, etc.) - Legacy URLs without /api prefix
   get 'uploads/*path', to: 'api/uploads#show', format: false
   
+  # Landing page tracking beacon. Called by a visitor's browser on the dealer's
+  # own hostname, which is why /pv/ is in Constraints::TenantWebsiteHost's
+  # reserved prefixes — otherwise the tenant catch-all above answers it with the
+  # page's HTML. Not under /api because it must stay reachable and uncached from
+  # any custom domain.
+  post 'pv/:page_id',    to: 'public/page_tracking#create'
+  match 'pv/:page_id',   to: 'public/page_tracking#options', via: :options
+
   # Public tokenized SMS reply links — no authentication required
   get  'r/:token',       to: 'sms_replies#show'
   post 'r/:token/reply', to: 'sms_replies#reply'
@@ -103,6 +111,10 @@ Rails.application.routes.draw do
   
   # ==================== PUBLIC BROCHURES ====================
   get '/b/:public_id', to: 'api/v1/brochures#public_view', as: :public_brochure
+  # Homes on the brochure page open in place, so the click never reaches the
+  # server on its own. The page reports it here.
+  post '/b/:public_id/listing_click', to: 'public/brochure_listing_clicks#create',
+                                      as: :public_brochure_listing_click
   
   # ==================== PUBLIC LISTING VIEW ====================
   get '/l/:id', to: 'api/v1/listings#public_view', as: :public_listing
@@ -713,6 +725,24 @@ Rails.application.routes.draw do
       end
       
       # ==================== WEBSITE BUILDER ====================
+      # Landing pages are WebsitePages with page_kind 'landing', so they inherit
+      # domains, SSL, host resolution and SSR from the website builder. Separate
+      # controller because the surface differs: publish state, campaign linkage,
+      # bound forms and cloning, rather than a page inside a site tree.
+      resources :landing_pages, only: %i[index show create update destroy] do
+        member do
+          post :publish
+          post :unpublish
+          post :duplicate
+          post :clone_to_locations
+          get :analytics
+          get :visitors
+        end
+        collection do
+          post :ai_generate
+        end
+      end
+
       # Site Content Profiles — scan a client's existing site into reusable
       # content. Projection into templates happens on the frontend, where the
       # templates live.
@@ -721,6 +751,7 @@ Rails.application.routes.draw do
           post :rotate_preview_token
         end
         collection do
+          get :inventory_lots
           get 'by_token/:token', action: :by_token  # PUBLIC - shareable preview
         end
       end
@@ -979,6 +1010,7 @@ Rails.application.routes.draw do
       resources :brochures do
         member do
           post :share
+          get :engagement
         end
         
         collection do

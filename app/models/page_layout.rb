@@ -26,7 +26,15 @@ class PageLayout < ApplicationRecord
     'inventory_rv' => %w[inventory_id year make model listing_type].freeze,
     'inventory_mh' => %w[inventory_id year make model listing_type].freeze,
     'contractors' => %w[name].freeze,
-    'service_tickets' => %w[title description status priority].freeze
+    # Removing any of these from the layout would hide something the ticket
+    # cannot function without: the two visibility flags decide whether a
+    # customer or a vendor ever sees the ticket, and the warranty flags drive
+    # claim generation.
+    'service_tickets' => %w[
+      title description status priority
+      portal_visible dealer_only
+      is_warranty_suspected is_warranty_confirmed
+    ].freeze
   }.freeze
 
   LAYOUT_TYPES = %w[detail edit list].freeze
@@ -175,15 +183,38 @@ class PageLayout < ApplicationRecord
     end
   end
 
-  # Seeded empty on purpose. The service ticket detail page keeps its own
-  # hand-built "Ticket Information" card (account links, warranty claim link,
-  # portal badges), and these layout sections render alongside it. Starting
-  # with no standard fields means nothing is shown twice out of the box;
-  # admins drop custom fields in here, and may add standard fields too if they
-  # deliberately want them repeated.
+  # Mirrors the "Ticket Information" card the detail page has always shown, so
+  # the layout drives that card rather than sitting beside it. Anything with a
+  # bespoke presentation (account link, assignee name, portal badge) is rendered
+  # through a field slot on the frontend, which is why those keys appear here
+  # like any other field.
   private_class_method def self.default_service_tickets_layout
     {
       sections: [
+        {
+          id: 'ticket_info',
+          title: 'Ticket Information',
+          columns: 2,
+          collapsed: false,
+          fields: [
+            { key: 'ticket_number', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'account_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'contact_id', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'home_info', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'factory_po', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'assigned_to', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'scheduled_date', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'created_at', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'scheduled_time', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'estimated_hours', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'actual_hours', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'portal_visible', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'dealer_only', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'is_warranty_suspected', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'is_warranty_confirmed', type: 'standard', visible: true, required: false, width: 1 },
+            { key: 'description', type: 'standard', visible: true, required: true, width: 2 }
+          ]
+        },
         {
           id: 'additional_info',
           title: 'Additional Information',

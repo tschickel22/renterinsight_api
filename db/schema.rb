@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_07_182741) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -4584,6 +4584,55 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.index ["company_id"], name: "index_page_layouts_on_company_id"
   end
 
+  create_table "page_visit_events", force: :cascade do |t|
+    t.bigint "page_visit_id", null: false
+    t.string "event_type", null: false
+    t.datetime "occurred_at", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["occurred_at"], name: "index_page_visit_events_on_occurred_at"
+    t.index ["page_visit_id", "event_type"], name: "index_page_visit_events_on_page_visit_id_and_event_type"
+    t.index ["page_visit_id"], name: "index_page_visit_events_on_page_visit_id"
+  end
+
+  create_table "page_visits", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "website_page_id", null: false
+    t.string "visitor_token", null: false
+    t.string "session_token", null: false
+    t.string "referrer"
+    t.string "utm_source"
+    t.string "utm_medium"
+    t.string "utm_campaign"
+    t.string "utm_content"
+    t.string "utm_term"
+    t.bigint "campaign_id"
+    t.bigint "campaign_enrollment_id"
+    t.string "identified_entity_type"
+    t.bigint "identified_entity_id"
+    t.datetime "identified_at"
+    t.string "device_type"
+    t.string "country"
+    t.string "ip_hash"
+    t.datetime "first_seen_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.integer "duration_ms", default: 0, null: false
+    t.integer "max_scroll_depth", default: 0, null: false
+    t.boolean "converted", default: false, null: false
+    t.boolean "is_bot", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_enrollment_id"], name: "index_page_visits_on_campaign_enrollment_id"
+    t.index ["campaign_id"], name: "index_page_visits_on_campaign_id"
+    t.index ["company_id", "visitor_token"], name: "index_page_visits_on_company_id_and_visitor_token"
+    t.index ["company_id"], name: "index_page_visits_on_company_id"
+    t.index ["identified_entity_type", "identified_entity_id"], name: "index_page_visits_on_identified_entity"
+    t.index ["session_token", "website_page_id"], name: "index_page_visits_on_session_token_and_website_page_id", unique: true
+    t.index ["website_page_id", "first_seen_at"], name: "index_page_visits_on_website_page_id_and_first_seen_at"
+    t.index ["website_page_id"], name: "index_page_visits_on_website_page_id"
+  end
+
   create_table "part_categories", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.string "name", null: false
@@ -5829,6 +5878,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.text "labor"
     t.text "notes"
     t.text "custom_fields"
+    t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "location_id"
@@ -5857,6 +5907,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.index ["customer_type", "customer_id"], name: "index_service_tickets_on_customer_type_and_customer_id"
     t.index ["deal_id"], name: "index_service_tickets_on_deal_id"
     t.index ["dealer_only"], name: "index_service_tickets_on_dealer_only"
+    t.index ["deleted_at"], name: "index_service_tickets_on_deleted_at"
     t.index ["is_portal_created"], name: "index_service_tickets_on_is_portal_created"
     t.index ["is_warranty_confirmed"], name: "index_service_tickets_on_is_warranty_confirmed"
     t.index ["is_warranty_suspected"], name: "index_service_tickets_on_is_warranty_suspected"
@@ -5903,12 +5954,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "inventory_company_id"
+    t.string "source_kind", default: "url", null: false
+    t.string "document_filename"
+    t.string "document_s3_key"
+    t.string "document_content_type"
+    t.bigint "document_byte_size"
+    t.integer "rasterized_page_count"
+    t.string "suggested_subdomain"
     t.index ["company_id", "status"], name: "index_site_content_profiles_on_company_id_and_status"
     t.index ["company_id"], name: "index_site_content_profiles_on_company_id"
     t.index ["created_by_id"], name: "index_site_content_profiles_on_created_by_id"
     t.index ["inventory_company_id"], name: "index_site_content_profiles_on_inventory_company_id"
     t.index ["location_id"], name: "index_site_content_profiles_on_location_id"
     t.index ["preview_token"], name: "index_site_content_profiles_on_preview_token", unique: true
+    t.index ["source_kind"], name: "index_site_content_profiles_on_source_kind"
   end
 
   create_table "site_profile_projections", force: :cascade do |t|
@@ -7341,7 +7400,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.jsonb "style", default: {}
     t.boolean "show_in_nav", default: true
     t.boolean "show_in_footer", default: true
+    t.string "page_kind", default: "page", null: false
+    t.bigint "campaign_id"
+    t.datetime "published_at"
+    t.string "robots"
+    t.string "canonical_path"
+    t.bigint "parent_page_id"
+    t.bigint "site_content_profile_id"
+    t.bigint "intake_form_id"
+    t.string "layout_id"
+    t.datetime "deleted_at"
+    t.index ["campaign_id"], name: "index_website_pages_on_campaign_id"
+    t.index ["intake_form_id"], name: "index_website_pages_on_intake_form_id"
     t.index ["order"], name: "index_website_pages_on_order"
+    t.index ["page_kind"], name: "index_website_pages_on_page_kind"
+    t.index ["parent_page_id"], name: "index_website_pages_on_parent_page_id"
+    t.index ["site_content_profile_id"], name: "index_website_pages_on_site_content_profile_id"
     t.index ["website_id", "path"], name: "index_website_pages_on_website_id_and_path", unique: true
     t.index ["website_id"], name: "index_website_pages_on_website_id"
   end
@@ -7386,9 +7460,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
     t.string "preview_token"
     t.jsonb "site_header", default: {}
     t.jsonb "site_footer", default: {}
+    t.string "kind", default: "site", null: false
     t.index ["company_id", "slug"], name: "index_websites_on_company_id_and_slug", unique: true
     t.index ["company_id"], name: "index_websites_on_company_id"
     t.index ["domain"], name: "index_websites_on_domain", unique: true, where: "(domain IS NOT NULL)"
+    t.index ["kind"], name: "index_websites_on_kind"
     t.index ["location_id"], name: "index_websites_on_location_id"
     t.index ["preview_token"], name: "index_websites_on_preview_token", unique: true
     t.index ["subdomain"], name: "index_websites_on_subdomain", unique: true, where: "(subdomain IS NOT NULL)"
@@ -7962,6 +8038,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
   add_foreign_key "option_categories", "factories"
   add_foreign_key "option_categories", "floor_plans"
   add_foreign_key "package_templates", "companies"
+  add_foreign_key "page_visit_events", "page_visits"
+  add_foreign_key "page_visits", "campaigns"
+  add_foreign_key "page_visits", "companies"
+  add_foreign_key "page_visits", "website_pages"
   add_foreign_key "part_categories", "companies"
   add_foreign_key "part_categories", "part_categories", column: "parent_id"
   add_foreign_key "part_categories", "users", column: "created_by_id"
@@ -8173,6 +8253,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_05_000006) do
   add_foreign_key "website_media", "companies"
   add_foreign_key "website_media", "users", column: "uploaded_by_id"
   add_foreign_key "website_media", "websites"
+  add_foreign_key "website_pages", "campaigns"
+  add_foreign_key "website_pages", "intake_forms"
+  add_foreign_key "website_pages", "site_content_profiles"
+  add_foreign_key "website_pages", "website_pages", column: "parent_page_id"
   add_foreign_key "website_pages", "websites"
   add_foreign_key "website_versions", "users", column: "created_by_id"
   add_foreign_key "website_versions", "websites"

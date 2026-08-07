@@ -184,4 +184,81 @@ RSpec.describe SiteProfiles::ProfileSchema do
       expect(coerced['brand']['name']).to eq('Sunshine Homes')
     end
   end
+
+  describe 'product sections (schema v2)' do
+    it 'is at version 2' do
+      expect(described_class::VERSION).to eq(2)
+    end
+
+    it 'starts every product section empty so v1 profiles stay projectable' do
+      empty = described_class.empty
+      described_class::PRODUCT_SECTIONS.each do |section|
+        expect(empty['copy'][section]).to eq([])
+      end
+    end
+
+    it 'coerces product, specs and floorplan, dropping unknown keys' do
+      raw = {
+        'copy' => {
+          'product' => [{ 'name' => 'The Aspen 2848', 'model_number' => 'A-2848',
+                          'msrp' => '$189,900', 'colour' => 'beige' }],
+          'specs' => [{ 'label' => 'Square Feet', 'value' => '1,344', 'unit' => 'sq ft' }],
+          'floorplan' => [{ 'name' => 'Aspen', 'beds' => '3', 'baths' => '2', 'sqft' => '1344' }]
+        }
+      }
+      profile, = described_class.coerce(raw)
+
+      expect(profile.dig('copy', 'product', 0)).to eq(
+        'name' => 'The Aspen 2848', 'model_number' => 'A-2848', 'msrp' => '$189,900'
+      )
+      # Value and unit stay separate, and the thousands separator survives.
+      expect(profile.dig('copy', 'specs', 0, 'value')).to eq('1,344')
+      expect(profile.dig('copy', 'specs', 0, 'unit')).to eq('sq ft')
+      expect(profile.dig('copy', 'floorplan', 0, 'beds')).to eq('3')
+    end
+
+    it 'caps product sections like every other section' do
+      raw = { 'copy' => { 'specs' => Array.new(30) { |i| { 'label' => "L#{i}", 'value' => i.to_s } } } }
+      profile, = described_class.coerce(raw)
+
+      expect(profile.dig('copy', 'specs').size).to eq(described_class::MAX_ITEMS_PER_SECTION)
+    end
+  end
+
+  # Asked to name a font from a page image the model hedges in prose. That
+  # value lands in a template's font-family and renders as nothing.
+  describe 'font sanitisation' do
+    def font(value)
+      profile, warnings = described_class.coerce({ 'brand' => { 'fonts' => { 'heading' => value } } })
+      [profile.dig('brand', 'fonts', 'heading'), warnings]
+    end
+
+    it 'keeps real font-family values' do
+      ['Inter', 'Helvetica Neue', 'Poppins, sans-serif', '"Gill Sans", sans-serif', 'system-ui'].each do |v|
+        kept, = font(v)
+        expect(kept).to eq(v), "expected #{v.inspect} to be kept"
+      end
+    end
+
+    it 'drops prose descriptions of a font' do
+      [
+        'sans-serif bold (appears to be a geometric sans)',
+        'A bold geometric sans similar to Futura',
+        'looks like Montserrat'
+      ].each do |v|
+        kept, = font(v)
+        expect(kept).to be_nil, "expected #{v.inspect} to be dropped"
+      end
+    end
+
+    it 'reports what it dropped rather than discarding it silently' do
+      _, warnings = font('sans-serif bold (appears to be a geometric sans)')
+      expect(warnings.join).to match(/dropped unusable font values/i)
+    end
+
+    it 'still drops placeholder answers' do
+      kept, = font('unknown')
+      expect(kept).to be_nil
+    end
+  end
 end

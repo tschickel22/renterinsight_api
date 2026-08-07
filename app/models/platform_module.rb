@@ -37,6 +37,19 @@ class PlatformModule
     # The display name is registry data on purpose: renaming the product must not
     # require a code sweep (same principle as the brand kernel in CLAUDE.md).
     'marketing.automation' => { name: 'Campaign Desk', category: 'Marketing', icon: 'Wand2', description: 'One prompt to a full multi-channel campaign — email, SMS, social, landing page, and the follow-up workflow, drawn before you publish' },
+    # Paid add-on, same shape as Campaign Desk: absent from every PLAN_TEMPLATE
+    # so professional/enterprise don't grant it free.
+    #
+    # Campaign Desk ALWAYS includes it (see IMPLIED_MODULES). Its own
+    # description promises a landing page, so selling the Desk without one
+    # would be selling something that cannot do what it says. Tenants without
+    # the Desk get this the way any add-on is sold — a TenantModuleOverride.
+    #
+    # Deliberately independent of marketing.website: landing pages live on a
+    # system-owned marketing container, so a dealer with no website with us can
+    # still publish one. The website module is an upgrade — put it on your own
+    # domain — not a prerequisite.
+    'marketing.landing_pages' => { name: 'Landing Pages', category: 'Marketing', icon: 'Rocket', description: 'AI-built landing pages from a product sheet or a prompt, with the lead form, visitor tracking and workqueue follow-up already wired in' },
     # Paid add-on, same shape as Campaign Desk above: absent from every
     # PLAN_TEMPLATE on purpose so professional/enterprise don't grant it free.
     # Sell it by attaching it to a plan (SubscriptionPlanModule) or to a single
@@ -85,6 +98,24 @@ class PlatformModule
     'admin.platform' => { name: 'Platform Admin', category: 'Administration', icon: 'Crown', description: 'Platform-level administration (Enterprise only)' }
   }.freeze
   
+  # Modules that come free with another module.
+  #
+  # { granting_key => [keys it also grants] }
+  #
+  # Distinct from a dependency: this is not "X needs Y to work", it is "buying X
+  # buys Y". Campaign Desk's own description promises a landing page, so a
+  # tenant with the Desk must have landing pages or the product cannot do what
+  # it says on the tin.
+  #
+  # Resolved at access-check time rather than by writing extra rows, so a tenant
+  # who later buys landing pages standalone does not end up with two grants, and
+  # revoking Campaign Desk cannot orphan an entitlement nobody remembers
+  # creating. An explicit grant still wins — see ModuleAccessService#has_module?,
+  # where an override is checked before implication.
+  IMPLIED_MODULES = {
+    'marketing.automation' => %w[marketing.landing_pages]
+  }.freeze
+
   # Category definitions with icons
   CATEGORIES = {
     'CRM & Sales' => { icon: 'Users', description: 'Customer relationship management and sales pipeline', position: 1 },
@@ -96,13 +127,19 @@ class PlatformModule
     'Administration' => { icon: 'Settings', description: 'System administration and configuration', position: 7 }
   }.freeze
   
-  # Predefined module sets for plan templates
+  # Predefined module sets for plan templates.
+  #
+  # Inner arrays are frozen individually: freezing only the hash leaves the
+  # arrays mutable, and a caller that appends to one silently rewrites the
+  # template for every company in the process. template_modules returns a copy
+  # for exactly that reason; this makes any remaining in-place write raise
+  # instead of corrupting quietly.
   PLAN_TEMPLATES = {
     starter: %w[
       crm.prospecting crm.accounts crm.contacts crm.quotes
       inventory.vehicles
       admin.settings admin.users
-    ],
+    ].freeze,
     professional: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery
@@ -111,7 +148,7 @@ class PlatformModule
       service.operations service.portal
       management.reports management.tags management.tasks management.calendar management.projects
       admin.settings admin.users admin.locations
-    ],
+    ].freeze,
     enterprise: %w[
       crm.prospecting crm.accounts crm.contacts crm.deals crm.quotes sales.configurator sales.deal_desk
       inventory.vehicles inventory.parts inventory.land inventory.lot_map inventory.pdi inventory.delivery inventory.champion_ims
@@ -121,7 +158,7 @@ class PlatformModule
       management.reports management.commissions management.tags management.tasks 
       management.calendar management.contractors management.projects management.workflows management.territories management_ai_reports
       admin.settings admin.users admin.locations admin.roles admin.api_keys admin.webhooks admin.platform
-    ]
+    ].freeze
   }.freeze
   
   class << self
@@ -178,8 +215,16 @@ class PlatformModule
     }.freeze
 
     # Get module keys for a plan template
+    # A COPY, deliberately.
+    #
+    # Callers treat the result as a working list and append to it —
+    # ModuleAccessService#enabled_modules does exactly that when applying tenant
+    # overrides. Returning the constant's own array meant those appends mutated
+    # PLAN_TEMPLATES in place, so one tenant's paid add-on silently became part
+    # of the starter template for every other company in the process until the
+    # next restart.
     def template_modules(template_name)
-      PLAN_TEMPLATES[template_name.to_sym] || []
+      (PLAN_TEMPLATES[template_name.to_sym] || []).dup
     end
 
     # Get default configs for a plan template

@@ -533,7 +533,13 @@ class Api::V1::CompanyDomainsController < ApplicationController
   # Drafts are offered too: dealers routinely wire up the address before publishing, and
   # HostResolver refuses to serve an unpublished site anyway.
   def assignable_websites
+    # .sites: the marketing container is not offered here. Pointing a dealer's
+    # domain at their landing page container instead of their actual site is a
+    # mistake with no obvious symptom, and the name in this dropdown would not
+    # make the difference clear. Serving landing pages from a custom domain is a
+    # separate, deliberate action.
     @company.websites
+            .sites
             .where(is_deleted: [false, nil])
             .for_current_location
             .order(:name)

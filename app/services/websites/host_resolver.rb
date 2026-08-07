@@ -71,15 +71,32 @@ module Websites
       Result.new(website: website, canonical_host: website.domain)
     end
 
+    # Accepts BOTH roots.
+    #
+    # site_host_root is where tenant sites are meant to live and is the only
+    # one with a wildcard record. subdomain_root is still honoured so a site
+    # that was reached on the platform domain, or an environment whose two
+    # settings happen to match, keeps working. Longest root first, so a value
+    # that is a suffix of the other cannot shadow it.
     def from_subdomain
-      root = Brand.current.subdomain_root.to_s.downcase
-      return nil if root.blank?
-      return nil unless @host.end_with?(".#{root}")
+      brand = Brand.current
+      roots = [brand.site_host_root, brand.subdomain_root]
+              .map { |r| r.to_s.downcase.presence }
+              .compact.uniq
+              .sort_by { |r| -r.length }
+
+      root = roots.find { |r| @host.end_with?(".#{r}") }
+      return nil if root.nil?
 
       label = @host.delete_suffix(".#{root}")
       return nil if label.blank?
 
-      website = published_scope.find_by(subdomain: label)
+      # Strips the environment marker, and refuses a label that is missing one
+      # where it is required, so staging cannot answer for a production host.
+      subdomain = SiteAddress.subdomain_from_label(label)
+      return nil if subdomain.blank?
+
+      website = published_scope.find_by(subdomain: subdomain)
       return nil if website.nil?
 
       Result.new(website: website, canonical_host: @host)

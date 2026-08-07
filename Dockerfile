@@ -18,8 +18,15 @@ WORKDIR /rails
 # ca-certificates is REQUIRED for outbound HTTPS (catalog scrapers, AWS SES/S3,
 # QuickBooks, etc.) — ruby:slim ships without a CA bundle, so OpenSSL cert
 # verification fails with "unable to get local issuer certificate".
+#
+# poppler-utils provides pdftoppm, which renders PDF pages to images for
+# SiteProfiles::DocumentRasterizer. A product sheet is mostly photography, floor
+# plans and layout; pdf-reader recovers its text and none of that. Rasterised
+# pages go to Claude as image blocks so the model can see the design it is being
+# asked to match. Without this the landing page importer reads a spec sheet as a
+# wall of text.
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y ca-certificates curl libjemalloc2 libvips sqlite3 qpdf && \
+    apt-get install --no-install-recommends -y ca-certificates curl libjemalloc2 libvips poppler-utils sqlite3 qpdf && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Set production environment

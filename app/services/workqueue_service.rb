@@ -5,10 +5,15 @@ require 'digest'
 class WorkqueueService
   # Queues whose data doesn't fit the standard AR-scope pipeline (counts, search,
   # sort, paginate, normalize). These have their own count/items implementation.
-  HASH_QUEUES = %w[inventory_hot_interest].freeze
+  HASH_QUEUES = %w[inventory_hot_interest brochure_hot_interest].freeze
+
+  # How far back a brochure click still counts as something to act on. Matches
+  # the inventory hot-interest window.
+  BROCHURE_CLICK_WINDOW = 48.hours
 
   QUEUES = {
     'inventory_hot_interest'      => :prospect_hot_signals,
+    'brochure_hot_interest'       => :brochure_click_signals,
     'engagement_opened_today'          => :engagement_opened_today,
     'engagement_opened_week'           => :engagement_opened_week,
     'engagement_clicked_today'         => :engagement_clicked_today,
@@ -16,6 +21,8 @@ class WorkqueueService
     'engagement_contact_opened_today'  => :engagement_contact_opened_today,
     'engagement_contact_opened_week'   => :engagement_contact_opened_week,
     'engagement_contact_clicked_today' => :engagement_contact_clicked_today,
+    'engagement_landing_visit_today'   => :engagement_landing_visit_today,
+    'engagement_landing_deep'          => :engagement_landing_deep,
     'activity_tasks_today'        => :activity_tasks_today,
     'activity_tasks_week'         => :activity_tasks_week,
     'activity_meetings_today'     => :activity_meetings_today,
@@ -40,7 +47,7 @@ class WorkqueueService
 
   GROUPS = [
     { id: 'engagement', label: 'Hot Engagement',
-      queue_ids: %w[inventory_hot_interest engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week engagement_contact_opened_today engagement_contact_clicked_today engagement_contact_opened_week] },
+      queue_ids: %w[inventory_hot_interest brochure_hot_interest engagement_landing_deep engagement_landing_visit_today engagement_opened_today engagement_clicked_today engagement_hot_reopeners engagement_opened_week engagement_contact_opened_today engagement_contact_clicked_today engagement_contact_opened_week] },
     { id: 'my_activity', label: 'My Open Activity',
       queue_ids: %w[activity_tasks_today activity_tasks_week activity_meetings_today activity_meetings_upcoming activity_calls_due activity_reminders_upcoming] },
     { id: 'my_leads', label: 'My Leads',
@@ -318,6 +325,7 @@ class WorkqueueService
   def queue_label(queue_id)
     case queue_id
     when 'inventory_hot_interest'      then 'Hot Inventory Interest'
+    when 'brochure_hot_interest'       then 'Brochure Opened'
     when 'engagement_opened_today'          then 'Leads — Opened Email Today'
     when 'engagement_opened_week'           then 'Leads — Opened Email This Week'
     when 'engagement_clicked_today'         then 'Leads — Clicked Link Today'
@@ -325,6 +333,8 @@ class WorkqueueService
     when 'engagement_contact_opened_today'  then 'Contacts — Opened Email Today'
     when 'engagement_contact_opened_week'   then 'Contacts — Opened Email This Week'
     when 'engagement_contact_clicked_today' then 'Contacts — Clicked Link Today'
+    when 'engagement_landing_visit_today'   then 'Leads — Visited a Landing Page Today'
+    when 'engagement_landing_deep'          then 'Leads — Engaged a Landing Page, No Enquiry'
     when 'activity_tasks_today'        then 'Tasks — Today & Overdue'
     when 'activity_tasks_week'         then "Tasks — Next #{prefs[:tasks_week_days]}d"
     when 'activity_meetings_today'     then 'Meetings — Today'
@@ -602,6 +612,113 @@ class WorkqueueService
     end
   end
 
+  # Brochure clicks: TrackedLinks minted by BrochureSendingService when a
+  # collection is shared with a lead or contact. A click means the person we
+  # sent it to actually opened the collection, which is the entire point of
+  # sending one — before this the only trace was an anonymous view_count on the
+  # brochure, so a rep had no way to know who was looking.
+  #
+  # Unlike inventory hot interest, a single click qualifies. A brochure goes to
+  # one named person on purpose, so the first open is already the signal; there
+  # is no browsing noise to filter out.
+  def brochure_click_signals
+    links = TrackedLink
+              .where(company_id: @company.id)
+              .for_brochures
+              .clicked
+              .where.not(entity_id: nil) # anonymous clicks belong to the brochure's own rollup, not a rep's inbox
+              .where('last_clicked_at >= ?', BROCHURE_CLICK_WINDOW.ago)
+              .order(last_clicked_at: :desc)
+              .limit(100)
+
+    return [] if links.empty?
+
+    brochures_by_id = Brochure.where(company_id: @company.id, id: links.map(&:source_id).uniq)
+                              .index_by(&:id)
+    leads_by_id     = preload_owned_entities(links, 'Lead',    Lead)
+    contacts_by_id  = preload_owned_entities(links, 'Contact', Contact)
+    vehicles_by_id  = Vehicle.where(id: links.filter_map(&:vehicle_id).uniq).index_by(&:id)
+
+    # A brochure sent by both email and SMS mints one link per channel, so the
+    # same person opening both would otherwise occupy two rows. Collapse to one
+    # row per person-and-brochure and sum the opens.
+    rows = links.group_by { |l| [l.entity_type, l.entity_id, l.source_id] }.filter_map do |(entity_type, entity_id, brochure_id), group|
+      brochure = brochures_by_id[brochure_id]
+      next unless brochure
+
+      entity = case entity_type
+               when 'Lead'    then leads_by_id[entity_id]
+               when 'Contact' then contacts_by_id[entity_id]
+               end
+      next unless entity
+
+      entity_name  = if entity.respond_to?(:first_name)
+                       [entity.first_name, entity.last_name].compact.join(' ').presence
+                     end
+      entity_name ||= entity.try(:name) || 'Unknown'
+
+      # Opening the collection and clicking a home inside it are different
+      # signals. The second one is the one a rep can actually use, because it
+      # names the home to talk about.
+      opens_links   = group.select { |l| l.vehicle_id.nil? }
+      listing_links = group.reject { |l| l.vehicle_id.nil? }
+      opens         = opens_links.sum { |l| l.click_count.to_i }
+      home_clicks   = listing_links.sum { |l| l.click_count.to_i }
+      clicks        = opens + home_clicks
+
+      top_link    = listing_links.max_by { |l| l.click_count.to_i }
+      top_vehicle = top_link && vehicles_by_id[top_link.vehicle_id]
+      top_name    = top_vehicle && [top_vehicle.year, top_vehicle.make, top_vehicle.model].compact.join(' ').presence
+
+      last_clicked = group.map(&:last_clicked_at).compact.max
+      time_ago_h   = ((Time.current - last_clicked) / 3600).round
+      when_text    = time_ago_h.positive? ? "#{time_ago_h}h ago" : 'just now'
+      link_path    = entity_type == 'Lead' ? "/crm/leads/#{entity_id}" : "/contacts/#{entity_id}"
+
+      opened_text = if opens.positive?
+                      "Opened #{brochure.title} #{opens}x"
+                    else
+                      "Clicked #{listing_links.size} #{'home'.pluralize(listing_links.size)} in #{brochure.title}"
+                    end
+      top_text    = top_name ? ". Most clicks: #{top_name} (#{top_link.click_count})" : ''
+
+      # Location follows the brochure, which is how the collection was scoped
+      # when it was built. Brochures can be company-wide (NULL location).
+      @location_names ||= {}
+      loc_id   = brochure.location_id
+      loc_name = loc_id ? (@location_names[loc_id] ||= Location.where(id: loc_id).pick(:name)) : nil
+
+      {
+        uid:              "brochure_interest_#{entity_type}_#{entity_id}_#{brochure_id}",
+        entity_type:      entity_type.downcase,
+        entity_id:        entity_id,
+        title:            entity_name,
+        subtitle:         "#{opened_text}#{top_text} (#{when_text})",
+        status:           'brochure_interest',
+        priority:         clicks >= 3 ? 'high' : 'medium',
+        badge:            if home_clicks.positive?
+                            "🏠 #{home_clicks} home #{'click'.pluralize(home_clicks)}"
+                          else
+                            "📄 #{opens} #{'open'.pluralize(opens)}"
+                          end,
+        brochure_id:      brochure.id,
+        brochure_title:   brochure.title,
+        opens:            opens,
+        home_clicks:      home_clicks,
+        top_vehicle_id:   top_vehicle&.id,
+        top_vehicle_name: top_name,
+        amount:           nil,
+        link:             link_path,
+        due_at:           nil,
+        last_activity_at: last_clicked,
+        location_id:      loc_id,
+        location_name:    loc_name,
+      }
+    end
+
+    rows.sort_by { |r| -r[:last_activity_at].to_f }.first(20)
+  end
+
   def preload_entities(links, type, klass)
     ids = links.select { |l| l.entity_type == type }.map(&:entity_id).compact.uniq
     return {} if ids.empty?
@@ -634,6 +751,23 @@ class WorkqueueService
   def engagement_clicked_today
     recency = engagement_lead_recency(event: 'clicked', since: 24.hours.ago)
     engagement_scope_for(recency)
+  end
+
+  # Leads who were on a landing page today.
+  #
+  # A step past "clicked the email": the click only proves the subject line
+  # worked, while a visit means they read the offer.
+  def engagement_landing_visit_today
+    engagement_scope_for(landing_visit_recency(since: 24.hours.ago))
+  end
+
+  # Leads who engaged deeply with a landing page and did not convert.
+  #
+  # The most actionable queue here. Someone who scrolled to the bottom, watched
+  # most of the video, or started the form and abandoned it has done everything
+  # except ask — and nothing in the CRM would otherwise show it.
+  def engagement_landing_deep
+    engagement_scope_for(landing_visit_recency(since: 7.days.ago, deep: true))
   end
 
   def engagement_hot_reopeners
@@ -674,6 +808,36 @@ class WorkqueueService
     (campaign_pairs + comm_pairs)
       .group_by(&:first)
       .transform_values { |arr| arr.map(&:last).compact.max }
+  end
+
+  # {lead_id => most recent visit time} from landing page tracking.
+  #
+  # Shaped to match engagement_lead_recency so it feeds engagement_scope_for
+  # unchanged — the ordering, ownership and status filtering are all shared.
+  #
+  # @param deep [Boolean] restrict to real engagement rather than a bounce:
+  #   scrolled past 75%, or reached the halfway point of a video, or started
+  #   the form. Converted visits are excluded — they already became a lead
+  #   through the normal intake path and do not need chasing.
+  def landing_visit_recency(since:, deep: false)
+    scope = PageVisit
+              .real
+              .where(company_id: @company.id, identified_entity_type: 'Lead')
+              .where('page_visits.last_seen_at >= ?', since)
+
+    if deep
+      engaged_visit_ids = PageVisitEvent
+                            .where(event_type: %w[video_50 video_75 video_complete form_start])
+                            .select(:page_visit_id)
+
+      scope = scope.where(converted: false)
+                   .where('page_visits.max_scroll_depth >= ? OR page_visits.id IN (?)',
+                          75, engaged_visit_ids)
+    end
+
+    scope.pluck(:identified_entity_id, :last_seen_at)
+         .group_by(&:first)
+         .transform_values { |rows| rows.map(&:last).compact.max }
   end
 
   def engagement_scope_for(recency_by_lead)

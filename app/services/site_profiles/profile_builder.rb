@@ -17,6 +17,43 @@ module SiteProfiles
     MAX_TOKENS = 8_000
     FEATURE = 'site_content_profile'
 
+    # The model sees image URLs and alt text, not the pixels, so it cannot judge
+    # a photo on sight. Telling it what a hero is FOR is what makes the alt text
+    # and surrounding headings usable as evidence.
+    #
+    # Written after real scans put a dealer's American flag graphic behind the
+    # headline of every page. Deterministic filters now bar that image from
+    # hero_images regardless, but the model choosing well in the first place
+    # produces a better page than a filter salvaging a bad list.
+    IMAGE_SELECTION_RULES = <<~RULES.freeze
+      IMAGE SELECTION
+
+      hero_images must contain ONLY photographs of homes: manufactured, modular
+      or mobile home exteriors, model homes on a lot, or a home's interior
+      living space. These sit full-bleed behind a headline, so they need to be
+      large photographs with room for text over them.
+
+      Never put any of these in hero_images:
+        - flags, bunting, fireworks, or any patriotic or seasonal decoration
+        - sale banners, promotional graphics, price tags, or anything with
+          marketing text baked into the image
+        - logos, badges, awards, BBB or review widgets, lender or financing
+          partner marks
+        - staff portraits, group photos, handshakes, or generic office stock
+        - maps, floor plan line drawings, icons, or spacers
+
+      Judge from the file name AND the alt text AND the headings around it. If
+      the alt text says "4th of July Sale" or the file is called
+      banner-july4.jpg, it is a promotion, not a home, no matter how large it is.
+
+      When you are unsure whether an image is a home, leave it out. An empty
+      hero_images list is fine and is handled downstream; a flag behind a
+      headline is not.
+
+      gallery may include the promotional and seasonal images, since it is
+      browsed rather than read at a glance. Put homes first there too.
+    RULES
+
     def initialize(company:, user: nil)
       @company = company
       @user = user
@@ -24,11 +61,19 @@ module SiteProfiles
 
     # digests: [PageDigest::Digest], brand/links/integrations from the
     # deterministic pass. Returns [profile_hash, warnings, usage].
-    def call(digests:, brand: {}, links: {}, integrations: [], contact: {}, source_url: nil)
+    # images: rendered document pages (DocumentRasterizer output). A crawl passes
+    # none — page text is the content. A document upload passes its pages,
+    # because a product sheet's meaning lives in its layout and photography, and
+    # its extracted text is routinely mangled by letter-spacing ("TheCompleteDMSfor").
+    # inventory_images: photographs of homes on a lot we already hold, used when
+    # the scan yields no usable hero. See SiteProfiles::InventoryImagery.
+    def call(digests:, brand: {}, links: {}, integrations: [], contact: {}, source_url: nil,
+             images: [], inventory_images: [])
       started = Time.current
+      @inventory_images = Array(inventory_images)
       response = call_claude(
-        system_prompt: system_prompt,
-        user_message: user_message(digests, brand, source_url),
+        system_prompt: system_prompt(document: images.present?),
+        user_message: build_content(user_message(digests, brand, source_url), images),
         model: AiModel.for(:generation),
         max_tokens: MAX_TOKENS
       )
@@ -52,13 +97,7 @@ module SiteProfiles
       profile['contact'] = profile['contact'].to_h.merge(contact.to_h.compact) { |_k, ai, det| det.presence || ai }
       profile['links'] = links.presence || profile['links']
 
-      # Background images are where dealer sites keep their photography, so
-      # seed hero/gallery from them when the model did not pick any.
-      candidates = digests.flat_map(&:candidate_hero_images).uniq
-      media = profile['media'].to_h
-      media['hero_images'] = (Array(media['hero_images']) + candidates).uniq.first(12)
-      media['gallery'] = (Array(media['gallery']) + candidates).uniq.first(24)
-      profile['media'] = media
+      profile['media'] = merge_media(profile['media'].to_h, digests)
       profile['integrations'] = integrations.map { |d| detection_to_h(d) }
       profile['source'] = {
         'url' => source_url,
@@ -68,6 +107,65 @@ module SiteProfiles
         end
       }
       profile
+    end
+
+    # Background images are where dealer sites keep their photography, so
+    # hero/gallery are seeded from them when the model did not pick any.
+    #
+    # This used to be two lines that appended every candidate to whatever the
+    # model chose:
+    #
+    #   candidates = digests.flat_map(&:candidate_hero_images).uniq
+    #   media['hero_images'] = (Array(media['hero_images']) + candidates).uniq.first(12)
+    #
+    # Three separate defects, which together are why a dealer's American flag
+    # graphic ended up behind the headline on every generated page:
+    #
+    #   1. flat_map across pages destroyed the per-page demotion. Each digest
+    #      returned photos-then-promos, so concatenating page by page put page
+    #      one's promotional banner ahead of page two's real photography.
+    #   2. Appending re-added everything the model had deliberately left out.
+    #      Filtering the model could do was discarded a line later.
+    #   3. Nothing was ever rejected outright. A demoted image still reached
+    #      hero_images, and reaching it at all is enough — a hero band renders
+    #      whichever image is at index 0 of the list it is given.
+    #
+    # Now: promotional and non-home imagery is barred from hero_images entirely
+    # and kept only for the gallery, and if that leaves nothing usable we fall
+    # back to photographs of real homes we already hold rather than to whatever
+    # was on the page.
+    def merge_media(media, digests)
+      # Concatenate all pages' keepers, THEN all pages' demoted, so ordering
+      # survives the merge.
+      keepers = digests.flat_map(&:candidate_hero_images).uniq
+      demoted = (digests.flat_map(&:demoted_images).uniq - keepers)
+
+      chosen = Array(media['hero_images']).select { |url| hero_worthy?(url) }
+      heroes = (chosen + keepers).uniq
+
+      # An empty hero list is worse than a wrong one: the template falls through
+      # to stock imagery that belongs to nobody. Our own lot is a better answer.
+      heroes = inventory_fallback if heroes.empty?
+
+      media['hero_images'] = heroes.first(12)
+      # The gallery is browsed rather than read at a glance, so a seasonal
+      # banner is merely uninteresting there instead of wrong. It still sorts
+      # last.
+      media['gallery'] = (Array(media['gallery']) + heroes + demoted).uniq.first(24)
+      media
+    end
+
+    def hero_worthy?(url)
+      value = url.to_s
+      return false if value.blank?
+
+      !PageDigest::PROMOTIONAL.match?(value) &&
+        !PageDigest::NOT_A_HOME.match?(value) &&
+        !PageDigest::JUNK_IMAGE.match?(value)
+    end
+
+    def inventory_fallback
+      @inventory_images.presence || []
     end
 
     def detection_to_h(detection)
@@ -84,7 +182,9 @@ module SiteProfiles
       }.compact
     end
 
-    def system_prompt
+    def system_prompt(document: false)
+      return document_system_prompt if document
+
       <<~PROMPT
         You extract structured content from a manufactured-housing or RV dealer's
         existing website so it can be rebuilt on a new platform.
@@ -93,8 +193,51 @@ module SiteProfiles
         image URLs, link text and form fields. Your job is to normalise that into
         reusable content sections.
 
+        #{IMAGE_SELECTION_RULES}
+
         #{ProfileSchema.prompt_contract}
       PROMPT
+    end
+
+    def document_system_prompt
+      <<~PROMPT
+        You extract structured content from a document a manufactured-housing or
+        RV dealer supplied — typically a product sheet, brochure or spec packet —
+        so a landing page can be built from it.
+
+        You are given the document's extracted text AND an image of every page.
+
+        Trust the images over the text. The text comes from a PDF extractor and
+        is frequently mangled: letter-spaced headings collapse into runs like
+        "TheCompleteDMSfor", columns interleave, and table cells arrive out of
+        order. Read the page images to recover what it actually says, and use the
+        text only to confirm exact spellings, figures and spec values.
+
+        #{IMAGE_SELECTION_RULES}
+
+        Also read from the images what the text cannot carry: the brand's colours
+        (as hex), the typographic feel, which photograph is the hero, and which
+        content is a headline versus a caption versus a spec table.
+
+        #{ProfileSchema.prompt_contract}
+      PROMPT
+    end
+
+    # Claude's `content` takes either a string or an array of blocks, so a
+    # text-only crawl stays exactly as it was.
+    def build_content(text, images)
+      return text if images.blank?
+
+      [{ type: 'text', text: text }] + images.map do |img|
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: img['content_type'].to_s.downcase,
+            data: img['data_base64'].to_s
+          }
+        }
+      end
     end
 
     def user_message(digests, brand, source_url)

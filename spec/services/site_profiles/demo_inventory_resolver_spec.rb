@@ -13,10 +13,113 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
   before { described_class.clear_cache! }
   after { described_class.clear_cache! }
 
+  # Auto-discovery of the internal demo lot, against real records rather than
+  # doubles, because the defect was in the SQL and a double cannot show it.
+  # Reported from staging: a demo built while switched into Summit Park showed
+  # our internal lot's 31 catalog homes instead of their 132.
+  describe '.config_for_profile prefers the tenant it was built under' do
+    def lot_with_stock(name)
+      c = Company.create!(name: "#{name}-#{SecureRandom.hex(3)}")
+      c.update!(public_inventory_enabled: true, public_inventory_token: SecureRandom.hex(8))
+      c.vehicles.create!(year: 2026, make: 'Clayton', model: 'M', status: 'available',
+                         vin: SecureRandom.hex(8).upcase)
+      c
+    end
+
+    it "uses the profile's own company, and does not call it a sample" do
+      own = lot_with_stock('Own')
+      profile = SiteContentProfile.new(company: own, company_id: own.id)
+
+      config = described_class.config_for_profile(profile)
+
+      expect(config['company_id']).to eq(own.id)
+      expect(config['is_sample']).to be_nil
+    end
+
+    # An explicit choice still wins: that is the whole point of the picker.
+    it 'lets an explicit lot override the tenant' do
+      own = lot_with_stock('Own')
+      chosen = lot_with_stock('Chosen')
+      profile = SiteContentProfile.new(company: own, company_id: own.id,
+                                       inventory_company: chosen, inventory_company_id: chosen.id)
+
+      config = described_class.config_for_profile(profile)
+
+      expect(config['company_id']).to eq(chosen.id)
+      expect(config['is_sample']).to be(true)
+    end
+
+    it 'falls back to the demo lot when the tenant has nothing to show' do
+      empty = Company.create!(name: "Empty-#{SecureRandom.hex(3)}")
+      allow(described_class).to receive(:demo_company).and_return(lot_with_stock('Demo'))
+      profile = SiteContentProfile.new(company: empty, company_id: empty.id)
+
+      expect(described_class.config_for_profile(profile)['is_sample']).to be(true)
+    end
+  end
+
+  describe '.demo_company auto-discovery' do
+    def saas_tenant_with(status)
+      tenant = Company.create!(name: "SaaS-#{SecureRandom.hex(3)}", industry: 'saas')
+      tenant.update!(public_inventory_enabled: true, public_inventory_token: SecureRandom.hex(8))
+      tenant.vehicles.create!(year: 2026, make: 'Clayton', model: 'Epic', status: status,
+                              vin: SecureRandom.hex(8).upcase)
+      tenant
+    end
+
+    before { allow(PlatformSetting).to receive(:general).and_return({}) }
+
+    # The defect. Our seeded demo lot is catalog-fed from Clayton, Champion and
+    # TRU, and catalog stock lands as available_to_order. Filtering on
+    # 'available' alone looked for the one status the demo lot does not use, so
+    # the lot was never found and demo sites rendered with no homes.
+    it 'finds a lot whose stock is available_to_order' do
+      tenant = saas_tenant_with('available_to_order')
+
+      expect(described_class.demo_company).to eq(tenant)
+    end
+
+    it 'still finds a lot whose stock is available' do
+      tenant = saas_tenant_with('available')
+
+      expect(described_class.demo_company).to eq(tenant)
+    end
+
+    it 'ignores a lot whose stock is neither' do
+      saas_tenant_with('sold')
+
+      expect(described_class.demo_company).to be_nil
+    end
+
+    it 'ignores soft-deleted stock' do
+      tenant = saas_tenant_with('available_to_order')
+      tenant.vehicles.update_all(is_deleted: true)
+
+      expect(described_class.demo_company).to be_nil
+    end
+
+    it 'ignores a lot with public inventory switched off' do
+      tenant = saas_tenant_with('available_to_order')
+      tenant.update!(public_inventory_enabled: false)
+
+      expect(described_class.demo_company).to be_nil
+    end
+  end
+
   describe '.usable_config' do
     it 'builds a config for a company with public inventory switched on' do
-      expect(described_class.usable_config(company(id: 47)))
-        .to eq('token' => 'tok', 'company_id' => 47, 'enabled' => true)
+      config = described_class.usable_config(company(id: 47))
+
+      expect(config).to include('token' => 'tok', 'company_id' => 47, 'enabled' => true)
+    end
+
+    # The card travels with the token: it describes how THAT lot presents its
+    # listings, so a borrowed demo lot brings its own presentation and a dealer
+    # previewing their own homes sees the card they configured.
+    it 'carries the lot owner\'s inventory card settings' do
+      config = described_class.usable_config(company(id: 47))
+
+      expect(config['card']).to include(layout: 'grid', perPage: 12, showPricing: true)
     end
 
     it 'rejects a company with the feature off, even if a token exists' do

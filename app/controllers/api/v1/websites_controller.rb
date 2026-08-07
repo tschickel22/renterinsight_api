@@ -12,8 +12,13 @@ class Api::V1::WebsitesController < ApplicationController
     # CRITICAL: Authorization FIRST
     return unless authorize_action!('websites', 'read')
 
-    # Base query with tenant isolation
-    @websites = @company.websites.where(is_deleted: [false, nil])
+    # Base query with tenant isolation.
+    #
+    # .sites excludes the system-owned marketing container that holds landing
+    # pages. It is infrastructure, not a website — listing it invites a dealer to
+    # edit or delete the thing their landing pages are served from, and it would
+    # skew the stats tiles below, since the container is always 'published'.
+    @websites = @company.websites.sites.where(is_deleted: [false, nil])
 
     # RBAC + Location filtering
     if current_user.uses_rbac?
@@ -77,7 +82,7 @@ class Api::V1::WebsitesController < ApplicationController
         # So someone who has just built a site can tell whether anyone can reach it. A site
         # with no address, or a published address pointing at an unpublished site, both look
         # finished from here otherwise.
-        methods: [:domain_status]
+        methods: [:domain_status, :public_url]
       ),
       meta: {
         total: filtered_count,
@@ -100,7 +105,7 @@ class Api::V1::WebsitesController < ApplicationController
       # The builder's publish panel needs the real address. Without this it fell back to
       # inventing one from the slug, and showed the dealer a hostname that has never existed
       # in DNS.
-      methods: [:domain_status]
+      methods: [:domain_status, :public_url]
     )
 
     # Include inventory embed config so website builder can auto-configure inventory blocks
@@ -120,7 +125,20 @@ class Api::V1::WebsitesController < ApplicationController
     return unless authorize_action!('websites', 'create')
 
     @website = @company.websites.build(website_params)
-    
+
+    # Every site needs an address.
+    #
+    # Nothing assigned one, so a site was created, published, and had nowhere to
+    # send anyone — domain_status reported 'none' and the publish panel said the
+    # site was live with no way to reach it. A custom domain still wins in
+    # HostResolver when one is added later, so this only fills the gap rather
+    # than competing with it.
+    if @website.subdomain.blank?
+      @website.subdomain = Websites::SubdomainSuggester.suggest(
+        @website.name.presence || @company.name
+      )
+    end
+
     # Auto-assign location_id
     @website.location_id ||= Current.location_id if Current.location_id.present?
     
@@ -144,7 +162,12 @@ class Api::V1::WebsitesController < ApplicationController
           blocks: []
         )
       end
-      
+
+      # Every template ships a contact block, and without a form behind it the
+      # published site reads "Contact form not available". Creating the site is
+      # already a write, so this is the right moment rather than page render.
+      Websites::DefaultLeadForm.ensure_for(@company)
+
       render json: @website.as_json(
         include: {
           website_pages: { only: [:id, :title, :path, :is_visible, :order] }
@@ -187,7 +210,7 @@ class Api::V1::WebsitesController < ApplicationController
     # domain_status so the builder can show whether publishing actually made the site
     # reachable. Published and reachable are different things: a site with no verified
     # domain is published and still has no address.
-    render json: @website.as_json(methods: [:domain_status])
+    render json: @website.as_json(methods: [:domain_status, :public_url])
   end
 
   # POST /api/v1/websites/:id/unpublish
@@ -198,7 +221,7 @@ class Api::V1::WebsitesController < ApplicationController
       return render json: { error: @website.errors.full_messages.to_sentence }, status: :unprocessable_entity
     end
 
-    render json: @website.as_json(methods: [:domain_status])
+    render json: @website.as_json(methods: [:domain_status, :public_url])
   end
 
   # POST /api/v1/websites/:id/sync_branding
@@ -557,7 +580,15 @@ class Api::V1::WebsitesController < ApplicationController
     config = SiteProfiles::DemoInventoryResolver.config_for(@company, allow_fallback: false)
     render json: {
       inventory_embed_config: config,
-      public_inventory_enabled: @company.try(:public_inventory_enabled) || false
+      public_inventory_enabled: @company.try(:public_inventory_enabled) || false,
+      # The showcase is where a dealer decides whether to buy a site, so the
+      # payment calculator has to work there. Without this the block rendered
+      # as empty space in every design.
+      calculator_settings: Websites::CalculatorSettings.for(@company),
+      # Their own contact form, so the showcase shows a working one rather than
+      # "Contact form not available".
+      lead_form_id: Websites::DefaultLeadForm.for(@company)&.id,
+      manufacturers: Websites::LotManufacturers.for(@company)
     }
   end
 
@@ -579,30 +610,23 @@ class Api::V1::WebsitesController < ApplicationController
   # header was present, and the frontend only sends that header when a platform admin has
   # switched companies.
 
-  # Build public-safe calculator settings from company loan_settings JSONB
+  # Build public-safe calculator settings from company loan_settings JSONB.
+  #
+  # Now one implementation in Websites::CalculatorSettings, because three other
+  # surfaces needed the identical hash and each was missing it. Kept as a
+  # delegating method so existing call sites in this controller are unchanged.
   def build_calculator_settings(company)
-    loan_settings = company.loan_settings || {}
-    {
-      enabled: loan_settings['calculator_enabled'] != false,
-      defaultInterestRate: (loan_settings['default_interest_rate'] || 6.99).to_f,
-      defaultLoanTermMonths: (loan_settings['max_loan_term'] || 240).to_i,
-      minDownPaymentPercent: (loan_settings['min_down_payment_percent'] || 10).to_f,
-      includeLotRent: loan_settings['calculator_include_lot_rent'] == true,
-      defaultLotRentMonthly: (loan_settings['calculator_default_lot_rent'] || 0).to_f,
-      includePropertyTax: loan_settings['calculator_include_property_tax'] == true,
-      defaultPropertyTaxRate: (loan_settings['calculator_default_property_tax_rate'] || 1.0).to_f,
-      includeInsurance: loan_settings['calculator_include_insurance'] == true,
-      defaultInsuranceAnnual: (loan_settings['calculator_default_insurance_annual'] || 0).to_f,
-      includeSetupFee: loan_settings['calculator_include_setup_fee'] == true,
-      defaultSetupFee: (loan_settings['calculator_default_setup_fee'] || 0).to_f,
-      loanTermOptions: (loan_settings['calculator_loan_term_options'] || [120, 180, 240, 300, 360]).map(&:to_i),
-      disclaimerText: loan_settings['calculator_disclaimer_text'] || 'This calculator provides estimates only. Actual rates, terms, and payments may vary based on credit qualification and lender requirements. Contact us for personalized financing options.'
-    }
+    Websites::CalculatorSettings.for(company)
   end
 
   def set_website
-    # ALWAYS use scoped find - tenant isolation
-    @website = @company.websites.find(params[:id])
+    # ALWAYS use scoped find - tenant isolation.
+    #
+    # .sites also keeps the marketing container out of show/update/destroy/publish/
+    # unpublish/sync_branding. Renaming it, unpublishing it, or deleting it would
+    # take every landing page offline at once, and the dealer would have no way to
+    # connect the two — so it is not addressable through the websites API at all.
+    @website = @company.websites.sites.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Website not found' }, status: :not_found
   end

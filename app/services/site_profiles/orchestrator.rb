@@ -39,7 +39,14 @@ module SiteProfiles
 
       profile, schema_warnings, usage = ProfileBuilder.new(
         company: @record.company, user: @record.created_by
-      ).call(digests:, brand:, links:, integrations:, contact:, source_url: @record.source_url)
+      ).call(
+        digests:, brand:, links:, integrations:, contact:,
+        source_url: @record.source_url,
+        # Photographs of homes we already hold, used only if the scan produced
+        # no usable hero. Resolved from the same lot the inventory block will
+        # render, so the imagery and the listings match.
+        inventory_images: InventoryImagery.for_profile(@record)
+      )
 
       @warnings.concat(schema_warnings)
 
@@ -55,6 +62,8 @@ module SiteProfiles
       )
 
       import_assets
+      ensure_lead_form
+      suggest_subdomain
       @record
     rescue StandardError => e
       @record.update!(status: 'failed', error_message: e.message.truncate(500))
@@ -166,8 +175,24 @@ module SiteProfiles
 
     # BrandExtractor works off raw HTML (CSS custom properties, style tags),
     # which the digest deliberately strips — so it gets the bodies separately.
+    # Looked up by the SAME key the cache was written with.
+    #
+    # raw_html_cache is keyed by normalize_url, which chomps the trailing slash,
+    # while a digest carries the response URL, which keeps it — and keeps the
+    # host it was redirected to. So every lookup missed, BrandExtractor received
+    # an empty page list, and no scan has ever produced a logo.
+    #
+    # Measured on a real profile: source https://mobilehomemasters.com/,
+    # first page scanned https://www.mobilehomemasters.com/, cache key
+    # https://www.mobilehomemasters.com. The site's logo was sitting in the
+    # markup all along with "logo" in its filename.
+    #
+    # ContactExtractor was unaffected because it takes the whole cache rather
+    # than looking pages up by key, which is why phone and email came through
+    # while the logo never did.
     def pages_for_brand(digests)
-      digests.map { |d| { url: d.url, html: raw_html_cache[d.url] } }.select { |p| p[:html].present? }
+      digests.map { |d| { url: d.url, html: raw_html_cache[normalize_url(d.url) || d.url] } }
+             .select { |p| p[:html].present? }
     end
 
     def raw_html_cache
@@ -192,6 +217,41 @@ module SiteProfiles
             ['Images could not be copied; the preview links to the original site.']).uniq
         )
       )
+    end
+
+    # A demo with "Contact form not available" where the contact form belongs is
+    # not a demo anyone is persuaded by. Runs once the profile is ready, against
+    # the lot that will actually back the preview — the public intake endpoint
+    # scopes the form to that company, so it has to be that one.
+    #
+    # Non-fatal: a scan that produced a profile is worth keeping either way.
+    # The address this demo would get if it became a real site.
+    #
+    # Derived from the scanned brand name, which is the dealer's own trading
+    # name and therefore what they would want in the URL — far better than the
+    # site name someone types into the commit dialog in a hurry.
+    #
+    # Recorded now so a platform admin can correct it while it is still a demo.
+    # After commit the site belongs to the dealer and renaming its address
+    # breaks whatever has already been shared.
+    def suggest_subdomain
+      name = @record.profile.dig('brand', 'name').presence || @record.display_name.presence
+      return if name.blank?
+
+      suggestion = Websites::SubdomainSuggester.suggest(name)
+      @record.update!(suggested_subdomain: suggestion) if suggestion.present?
+    rescue StandardError => e
+      Rails.logger.warn("[SiteProfiles::Orchestrator] subdomain suggestion failed: #{e.message}")
+    end
+
+    def ensure_lead_form
+      config = DemoInventoryResolver.config_for_profile(@record)
+      return if config.blank?
+
+      company = Company.find_by(id: config['company_id'])
+      Websites::DefaultLeadForm.ensure_for(company)
+    rescue StandardError => e
+      Rails.logger.warn("[SiteProfiles::Orchestrator] lead form setup failed: #{e.message}")
     end
 
     def build_report(digests, integrations, links)

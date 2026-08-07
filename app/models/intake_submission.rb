@@ -14,8 +14,15 @@ class IntakeSubmission < ApplicationRecord
     self.data = value
   end
   
+  # Whoever this submission turned out to be — a newly created lead, an
+  # existing lead it was absorbed into, or an existing contact/account it was
+  # attached to. Set at each of create_lead_from_submission's three exits so
+  # landing-page attribution below does not have to re-derive it.
+  attr_accessor :resolved_entity
+
   before_create :set_submitted_at
   after_create :create_lead_from_submission
+  after_create :identify_landing_page_visitor
   after_create :increment_form_count
   
   scope :recent, -> { order(submitted_at: :desc) }
@@ -91,6 +98,29 @@ class IntakeSubmission < ApplicationRecord
       end
     end
     
+    # The home the enquiry is about, so it lands in the lead's own "home
+    # interested in" field rather than only in a note.
+    #
+    # An inventory embed already sends vehicle_title, vehicle_vin and the rest,
+    # and build_notes_with_vehicle has always written those into the note. The
+    # id was never carried, so a salesperson opening the lead saw the home
+    # described in free text and an empty dropdown beside it, with nothing
+    # linking the two. Both now happen: the note stays, because a note is what
+    # gets read first.
+    #
+    # Scoped to the form's company, or a submission could point a lead at
+    # another tenant's stock.
+    vehicle_id = submission_data['vehicle_id'] || submission_data['vehicleId']
+    if vehicle_id.present?
+      owned = Vehicle.where(id: vehicle_id.to_i, company_id: form.company_id).exists?
+      if owned
+        lead_data[:vehicle_id] = vehicle_id.to_i
+        Rails.logger.info "[IntakeSubmission] Linked vehicle #{vehicle_id} to the lead"
+      else
+        Rails.logger.warn "[IntakeSubmission] Ignoring vehicle #{vehicle_id}: not owned by company #{form.company_id}"
+      end
+    end
+
     # Only set owner_id if notified_user exists
     if form.notified_user_id.present?
       lead_data[:owner_id] = form.notified_user_id
@@ -208,6 +238,10 @@ class IntakeSubmission < ApplicationRecord
     if resolver_match
       Rails.logger.info "[IntakeSubmission] Identity match: #{resolver_match.type} ##{resolver_match.record.id} (converted=#{resolver_match.converted}, matched=#{resolver_match.matched})"
 
+      # Whichever branch runs, this is the person. Recorded here rather than in
+      # each branch so a future fourth case cannot forget it.
+      self.resolved_entity = resolver_match.record
+
       if resolver_match.type == :lead && resolver_match.converted == false
         # CASE A: absorb into the existing (non-converted) lead.
         return absorb_into_existing_lead(resolver_match.record, lead_data, submission_data, unmapped_data, form)
@@ -222,7 +256,8 @@ class IntakeSubmission < ApplicationRecord
     Rails.logger.info "[IntakeSubmission] Creating lead with data: #{lead_data.inspect}"
     new_lead = Lead.create!(lead_data)
     Rails.logger.info "[IntakeSubmission] Lead created successfully: #{new_lead.id}"
-    
+
+    self.resolved_entity = new_lead
     update_columns(lead_id: new_lead.id, lead_created: true)
     
     Rails.logger.info "Created lead #{new_lead.id} from intake submission #{id}"
@@ -708,6 +743,31 @@ class IntakeSubmission < ApplicationRecord
     notes.join("\n")
   end
   
+  # Attribute this visitor's whole session, not just the page they converted on.
+  #
+  # The landing page's form posts the visitor token it minted client-side. By
+  # the time this runs, IdentityResolver has already decided who the submitter
+  # is, so every earlier anonymous visit from the same browser can be claimed.
+  #
+  # Wrapped because attribution is enrichment: a lead captured but not
+  # attributed is a reporting gap, while an exception here would cost the lead.
+  def identify_landing_page_visitor
+    token = extract_field(payload, %w[visitor_token visitorToken _visitor_token])
+    return if token.blank?
+
+    entity = resolved_entity || lead
+    return if entity.nil?
+
+    company = Company.find_by(id: intake_form&.company_id)
+    return if company.nil?
+
+    Marketing::IdentifyVisitor.new(
+      company: company, visitor_token: token, entity: entity
+    ).call
+  rescue StandardError => e
+    Rails.logger.warn("[IntakeSubmission] visitor attribution failed: #{e.message}")
+  end
+
   def set_submitted_at
     self.submitted_at ||= Time.current
   end

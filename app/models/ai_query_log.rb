@@ -3,7 +3,12 @@ class AiQueryLog < ApplicationRecord
   belongs_to :user, optional: true
   belongs_to :location, optional: true
 
-  FEATURES = %w[report_ai vision_scan ai_campaign_generate ai_campaign_refine ai_audience_generate ai_audience_refine bill_scan ai_template_generate ai_sequence_generate deal_desk_ai].freeze
+  # Every AI call in the app logs here. The inclusion validator below means a
+  # new feature MUST be added to this list — a call that forgets is not metered
+  # and, because callers rescue logging failures, fails silently.
+  FEATURES = %w[report_ai vision_scan ai_campaign_generate ai_campaign_refine ai_audience_generate
+                ai_audience_refine bill_scan ai_template_generate ai_sequence_generate deal_desk_ai
+                ai_landing_page_generate site_content_profile].freeze
   STATUSES = %w[success error rate_limited no_results classified no_match disambiguation].freeze
 
   # AI features that draw from the company's single monthly AI query budget. Deal Desk AI
