@@ -75,31 +75,47 @@ namespace :ses do
   end
 
   namespace :domains do
-    desc 'Apply the custom MAIL FROM to verified sending domains that never got one ' \
-         '(DOMAIN=hostname for one, otherwise all)'
+    # Reports by default and only applies with APPLY=1, because applying is the dangerous
+    # direction on a domain that is already sending. apply_mail_from! sets
+    # behavior_on_mx_failure REJECT_MESSAGE, so once SES checks and finds no MX at the new
+    # MAIL FROM subdomain it marks the identity Failed and rejects EVERY message from that
+    # domain. Publish the MX and TXT this prints, then re-run with APPLY=1.
+    desc 'Report which verified sending domains have no custom MAIL FROM ' \
+         '(DOMAIN=hostname to narrow, APPLY=1 to apply after publishing DNS)'
     task mail_from: :environment do
       scope = CompanyDomain.email_verified
       scope = scope.where(hostname: ENV['DOMAIN']) if ENV['DOMAIN'].present?
       domains = scope.to_a
 
       abort 'No verified sending domains matched.' if domains.empty?
+      apply = ENV['APPLY'] == '1'
 
       domains.each do |domain|
-        before = domain.ses_mail_from_domain
-        Ses::IdentityManager.new(domain).ensure_mail_from!
-        after = domain.reload.ses_mail_from_domain
+        if domain.ses_mail_from_domain.present?
+          puts "#{domain.hostname}: has #{domain.ses_mail_from_domain} (#{domain.ses_mail_from_status})"
+          next
+        end
 
-        puts case
-             when after.blank?
-               # apply_mail_from! refuses to publish over a subdomain that already receives
-               # mail, so this is the expected outcome for a domain using that name already.
-               "#{domain.hostname}: SKIPPED, no MAIL FROM applied (subdomain likely already has MX)"
-             when before.blank?
-               "#{domain.hostname}: applied #{after} (#{domain.ses_mail_from_status}), " \
-               'publish its MX and TXT records from the domain settings screen'
-             else
-               "#{domain.hostname}: already had #{after} (#{domain.ses_mail_from_status})"
-             end
+        candidate = "#{Ses::IdentityManager.mail_from_prefix}.#{domain.hostname}"
+
+        unless apply
+          puts "#{domain.hostname}: NO MAIL FROM. Publish these, then re-run with APPLY=1:"
+          puts "  MX  #{candidate}  10 feedback-smtp.#{Ses::Region.current}.amazonses.com"
+          puts "  TXT #{candidate}  \"v=spf1 include:amazonses.com ~all\""
+          next
+        end
+
+        Ses::IdentityManager.new(domain).ensure_mail_from!
+        applied = domain.reload.ses_mail_from_domain
+
+        message = if applied.present?
+                    "#{domain.hostname}: applied #{applied} (#{domain.ses_mail_from_status})"
+                  else
+                    # apply_mail_from! refuses to publish over a subdomain that already
+                    # receives mail, so this is expected for a domain already using that name.
+                    "#{domain.hostname}: SKIPPED, #{candidate} already has MX records"
+                  end
+        puts message
       rescue Ses::IdentityManager::SesError => e
         puts "#{domain.hostname}: FAILED, #{e.message}"
       end
