@@ -131,12 +131,28 @@ module SiteProfiles
       # boolean or as a string depending on which settings screen wrote it.
       ENABLED_VALUES = %w[true t 1].freeze
 
+      # What counts as a lot worth showing.
+      #
+      # This used to be 'available' alone, which meant the demo lot could never
+      # be found. Our own seeded lot is catalog-fed from Clayton, Champion and
+      # TRU, and catalog stock is available_to_order, not available: measured on
+      # staging, all 31 of the internal tenant's vehicles. So the query looked
+      # for the one status the demo lot does not use, found nothing, and
+      # config_for_profile returned nil — which renders a demo site with an
+      # unbound inventory block and no homes in it.
+      #
+      # The rest of the stack already knew this. The public embed serves
+      # whatever a company's public_statuses allows (both, everywhere measured),
+      # and projectProfile widens a sample lot to both explicitly. This was the
+      # last place still assuming a dealer-style lot.
+      SELLABLE_STATUSES = %w[available available_to_order].freeze
+
       def candidates(scope)
         scope
           .where("companies.public_inventory_settings ->> 'public_inventory_enabled' IN (?)", ENABLED_VALUES)
           .where.not(public_inventory_token: [nil, ''])
           .joins(:vehicles)
-          .where(vehicles: { status: 'available' })
+          .where(vehicles: { status: SELLABLE_STATUSES, is_deleted: [false, nil] })
           .group('companies.id')
           .order(Arel.sql('COUNT(vehicles.id) DESC'))
           .limit(1)

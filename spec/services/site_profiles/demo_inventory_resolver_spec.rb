@@ -13,6 +13,56 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
   before { described_class.clear_cache! }
   after { described_class.clear_cache! }
 
+  # Auto-discovery of the internal demo lot, against real records rather than
+  # doubles, because the defect was in the SQL and a double cannot show it.
+  describe '.demo_company auto-discovery' do
+    def saas_tenant_with(status)
+      tenant = Company.create!(name: "SaaS-#{SecureRandom.hex(3)}", industry: 'saas')
+      tenant.update!(public_inventory_enabled: true, public_inventory_token: SecureRandom.hex(8))
+      tenant.vehicles.create!(year: 2026, make: 'Clayton', model: 'Epic', status: status,
+                              vin: SecureRandom.hex(8).upcase)
+      tenant
+    end
+
+    before { allow(PlatformSetting).to receive(:general).and_return({}) }
+
+    # The defect. Our seeded demo lot is catalog-fed from Clayton, Champion and
+    # TRU, and catalog stock lands as available_to_order. Filtering on
+    # 'available' alone looked for the one status the demo lot does not use, so
+    # the lot was never found and demo sites rendered with no homes.
+    it 'finds a lot whose stock is available_to_order' do
+      tenant = saas_tenant_with('available_to_order')
+
+      expect(described_class.demo_company).to eq(tenant)
+    end
+
+    it 'still finds a lot whose stock is available' do
+      tenant = saas_tenant_with('available')
+
+      expect(described_class.demo_company).to eq(tenant)
+    end
+
+    it 'ignores a lot whose stock is neither' do
+      saas_tenant_with('sold')
+
+      expect(described_class.demo_company).to be_nil
+    end
+
+    it 'ignores soft-deleted stock' do
+      tenant = saas_tenant_with('available_to_order')
+      tenant.vehicles.update_all(is_deleted: true)
+
+      expect(described_class.demo_company).to be_nil
+    end
+
+    it 'ignores a lot with public inventory switched off' do
+      tenant = saas_tenant_with('available_to_order')
+      tenant.update!(public_inventory_enabled: false)
+
+      expect(described_class.demo_company).to be_nil
+    end
+  end
+
   describe '.usable_config' do
     it 'builds a config for a company with public inventory switched on' do
       config = described_class.usable_config(company(id: 47))
