@@ -37,7 +37,7 @@ class ReplyToAddressService
     # @param company [Company] The company
     # @return [String] The BCC address for capturing emails
     def generate_bcc_address(company)
-      "#{BCC_PREFIX}+bcc-#{company.id}@#{mail_domain}"
+      "#{BCC_PREFIX}+bcc-#{company.id}@#{mail_domain(company: company)}"
     end
     
     # Parse an incoming reply-to address to extract entity info
@@ -89,11 +89,31 @@ class ReplyToAddressService
       domain == mail_domain.downcase
     end
     
-    # Get the configured mail domain
-    def mail_domain
-      ENV['INBOUND_MAIL_DOMAIN'].presence || "mail.#{Brand.current.subdomain_root}"
+    # Reply address for a campaign send. The token names the send rather than the
+    # entity because a campaign reply has to resolve the step and enrollment as well
+    # as the recipient.
+    #
+    # company is the tenant the send belongs to, so the domain follows their brand
+    # kernel (and any per-tenant branding override) instead of the platform default.
+    def campaign_address(campaign_send, company: nil)
+      return nil if campaign_send.nil?
+
+      "#{REPLY_PREFIX}+campaign-#{campaign_send.id}@#{mail_domain(company: company)}"
     end
-    
+
+    # Get the configured mail domain.
+    #
+    # Resolved per company rather than once at boot: Brand.current(company:) applies
+    # that tenant's branding overrides, so a whitelabelled dealer's replies come back
+    # on their own domain rather than the platform's.
+    #
+    # ENV still wins because the domain has to have MX records pointing at SES inbound
+    # before it can receive anything, and that is an operational fact about one
+    # deployment, not something a brand record can assert.
+    def mail_domain(company: nil)
+      ENV['INBOUND_MAIL_DOMAIN'].presence || "mail.#{Brand.current(company: company).subdomain_root}"
+    end
+
     private
     
     # Generate tracked address using entity type and ID

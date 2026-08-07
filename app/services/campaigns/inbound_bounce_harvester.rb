@@ -92,7 +92,12 @@ module Campaigns
     def self.fallback_send_id_for_recipient(parsed, company_id: nil)
       blob = "#{parsed[:body_text]} #{parsed[:headers]} #{parsed[:to]}"
       addrs = blob.scan(EMAIL_RE).map { |a| a.downcase.strip }.uniq
-      addrs.reject! { |a| a.include?('reply+') || a.end_with?('mail.renterinsight.com') }
+      # Drop our own reply address so the bounce is attributed to the recipient rather
+      # than to us. Resolved rather than hardcoded: with the literal here, a reply
+      # domain moved to mail.dealertide.com would survive this filter and become the
+      # "bounced recipient", matching every recent send to it.
+      our_domain = ReplyToAddressService.mail_domain.to_s.downcase
+      addrs.reject! { |a| a.include?('reply+') || (our_domain.present? && a.end_with?("@#{our_domain}")) }
       return nil if addrs.empty?
 
       scope = CampaignSend

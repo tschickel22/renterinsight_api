@@ -174,7 +174,11 @@ module Campaigns
       attachment_metadata   = Array(rendered[:attachment_metadata])
 
       from_address = formatted_from_for(conn) || platform_test_from_address
-      reply_to = "reply+campaign-#{send_record.id}@#{ENV['INBOUND_EMAIL_DOMAIN'].presence || 'mail.renterinsight.com'}"
+      # Was hardcoded to mail.renterinsight.com behind ENV['INBOUND_EMAIL_DOMAIN'], a name
+      # nothing else in the app sets or reads (the real variable is INBOUND_MAIL_DOMAIN),
+      # so every campaign reply-to fell through to the literal regardless of configuration.
+      # A DealerTide campaign then carried a Renter Insight reply address.
+      reply_to = ReplyToAddressService.campaign_address(send_record, company: @company)
 
       provider_sym = if test_platform_send?
                        :aws_ses

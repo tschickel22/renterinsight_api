@@ -205,8 +205,20 @@ class Campaign < ApplicationRecord
     Ses::SendingIdentity.new(
       company_domain: domain,
       email_address: address,
-      display_name: mailbox.try(:display_name).presence || try(:from_display_name)
+      display_name: mailbox.try(:display_name).presence || try(:from_display_name),
+      user_id: identity_user_id(mailbox, recipient)
     )
+  end
+
+  # Who the send is attributed to once it leaves through the domain rather than through a
+  # mailbox. Replies are routed back to this person, so an Owner-mode campaign has to
+  # resolve the recipient's own owner here rather than a single campaign-wide sender.
+  def identity_user_id(mailbox, recipient)
+    mailbox.try(:user_id).presence ||
+      case from_identity_type
+      when 'User'  then from_identity_id
+      when 'Owner' then owner_user_for(recipient)&.id
+      end
   end
 
   # The address this campaign's identity would send as, independent of any OAuth mailbox.
