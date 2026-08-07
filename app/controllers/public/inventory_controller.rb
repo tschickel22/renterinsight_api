@@ -661,8 +661,18 @@ class Public::InventoryController < ApplicationController
     @calculator_settings ||= Websites::CalculatorSettings.new(@company)
     return nil unless @calculator_settings.to_h[:enabled]
 
-    price = vehicle.total_home_price.presence || vehicle.sale_price
-    @calculator_settings.monthly_payment_for(price)
+    # The SAME figure the card displays, not total_home_price.
+    #
+    # Using the total meant a listing with add-ons but no sale price rendered
+    # "Est. $1,992/mo" above no price at all — measured on a real listing,
+    # 2026 Liberty Shore Park D802, sale_price nil and total 101000. A payment
+    # that does not correspond to a visible number is worse than no payment: a
+    # shopper cannot tell what it was calculated from.
+    #
+    # Rent is already a monthly figure, so a rental gets no second one.
+    return nil unless vehicle.sale_price.to_f.positive?
+
+    @calculator_settings.monthly_payment_for(vehicle.sale_price)
   rescue StandardError => e
     Rails.logger.warn("[Public::Inventory] monthly payment failed for vehicle #{vehicle.id}: #{e.message}")
     nil
