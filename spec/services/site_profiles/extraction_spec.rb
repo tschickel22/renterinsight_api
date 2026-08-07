@@ -307,4 +307,48 @@ RSpec.describe 'SiteProfiles extraction' do
       expect(inventory['internal'].map { |e| e['path'] }).not_to include('/brochure.pdf')
     end
   end
+
+  describe SiteProfiles::BrandExtractor do
+    def extract(css_or_html)
+      html = css_or_html.include?('<') ? css_or_html : "<html><head><style>#{css_or_html}</style></head><body></body></html>"
+      described_class.new([{ url: 'https://dealer.example/', html: html }]).call
+    end
+
+    # WordPress and Elementor ship generic --primary: #000 and --secondary: #fff,
+    # so a dealer whose brand is a strong blue came back as black and white.
+    # The footer takes its background from the secondary, so an extracted
+    # #ffffff produced a white-on-white footer.
+    it 'ignores neutral CSS variables and finds the real brand colour' do
+      css = <<~CSS
+        :root { --primary: #000000; --secondary: #ffffff; }
+        .a { color: #1e99fb } .b { background: #1e99fb } .c { border-color: #1e99fb }
+      CSS
+
+      colors = extract(css)['colors']
+
+      expect(colors['primary']).to eq('#1e99fb')
+      expect(colors['secondary']).to be_nil
+    end
+
+    it 'keeps a CSS variable that is a real colour' do
+      colors = extract(':root { --primary: #1e99fb; --secondary: #f97316; }')['colors']
+
+      expect(colors['primary']).to eq('#1e99fb')
+      expect(colors['secondary']).to eq('#f97316')
+    end
+
+    # A lazy-loaded logo carries only data-src, or a placeholder in src. The
+    # fallback for that was unreachable, guarded by a condition requiring src.
+    it 'takes a lazy-loaded logo from data-src' do
+      html = '<html><body><header><img data-src="/img/site-logo.png"></header></body></html>'
+
+      expect(extract(html)['logo_url']).to eq('https://dealer.example/img/site-logo.png')
+    end
+
+    it 'skips an inline placeholder in src' do
+      html = '<html><body><header><img src="data:image/gif;base64,R0lGOD" data-src="/img/logo.png"></header></body></html>'
+
+      expect(extract(html)['logo_url']).to eq('https://dealer.example/img/logo.png')
+    end
+  end
 end
