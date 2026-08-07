@@ -45,4 +45,53 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
              credentials: true,
              expose: ['Content-Type', 'Authorization', 'Content-Disposition']
   end
+
+  # Tenant sites, on any hostname.
+  #
+  # A dealer site is served from its own origin: a platform subdomain today, the
+  # dealer's own domain once they buy one. Neither can be in the allowlist above
+  # — subdomains are created at runtime and custom domains are not knowable in an
+  # initializer without a database read on every request. Measured on a freshly
+  # published site: the API answered 200 with no Access-Control-Allow-Origin
+  # header, so the browser threw the response away and the inventory grid stayed
+  # empty. The demo looked fine only because it renders on staging.dealertide.com,
+  # which is allowlisted.
+  #
+  # This block is second on purpose. Rack::Cors takes the first block whose origin
+  # AND resource match, so an allowlisted origin still gets the credentialed rules
+  # above; only origins that fail that list fall through to here.
+  #
+  # Every path below is already unauthenticated and scoped by a token or a public
+  # slug, and none of them read cookies, hence credentials: false. This does not
+  # widen what can be reached — a script or curl could always call these — it only
+  # lets a browser on a dealer's own domain read the answer.
+  allow do
+    origins '*'
+
+    # Inventory and land: browse, detail, filters, and the lead POST behind the
+    # contact button on a listing.
+    resource '/public/*',
+             headers: :any,
+             methods: %i[get post options head],
+             credentials: false
+
+    # Blog posts and categories rendered into a site's pages.
+    resource '/api/public/*',
+             headers: :any,
+             methods: %i[get options head],
+             credentials: false
+
+    # The site payload itself. Named one by one rather than as /api/v1/* so that
+    # opening these cannot drift into opening the authenticated API.
+    %w[
+      /api/v1/websites/by_slug_public/*
+      /api/v1/websites/by_token/*
+      /api/v1/site_content_profiles/by_token/*
+    ].each do |path|
+      resource path,
+               headers: :any,
+               methods: %i[get options head],
+               credentials: false
+    end
+  end
 end
