@@ -169,7 +169,10 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       preview_template_ids: params.key?(:preview_template_ids) ? Array(params[:preview_template_ids]).map(&:to_s) : @profile.preview_template_ids,
       preview_expires_at: params.fetch(:preview_expires_at, @profile.preview_expires_at),
       inventory_company_id: params.key?(:inventory_company_id) ? params[:inventory_company_id].presence : @profile.inventory_company_id,
-      suggested_subdomain: params.key?(:suggested_subdomain) ? normalized_subdomain(params[:suggested_subdomain]) : @profile.suggested_subdomain
+      suggested_subdomain: params.key?(:suggested_subdomain) ? normalized_subdomain(params[:suggested_subdomain]) : @profile.suggested_subdomain,
+      # Governs the CLIENT's view only. The audit still ran and the admin can
+      # still read it; see summary.
+      show_seo_report: params.key?(:show_seo_report) ? ActiveModel::Type::Boolean.new.cast(params[:show_seo_report]) : @profile.show_seo_report
     )
     render json: detail(@profile)
   end
@@ -235,7 +238,13 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       lead_form_id: lead_form_id_for(profile),
       # So the logo strip shows the brands this lot actually carries rather
       # than every mark we happen to host.
-      manufacturers: manufacturers_for(profile)
+      manufacturers: manufacturers_for(profile),
+      # The findings themselves only travel when the admin allowed it.
+      seo_report: profile.show_seo_report ? profile.seo_report : nil,
+      # The teaser travels either way, and carries no findings: enough to start
+      # a conversation, not enough to act on without us. Nil when the audit
+      # found nothing wrong, since there is nothing to tease.
+      seo_teaser: seo_teaser_for(profile)
     }
   end
 
@@ -292,6 +301,26 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   # Sanitised the same way a generated one is, so what an admin types and what
   # the scan produces obey identical rules and neither can create an address a
   # Website would then refuse to save.
+  # What a prospect sees when the full report is withheld.
+  #
+  # Deliberately only a count and the domain. Naming the gaps here would be the
+  # report by another name, and the point of hiding it is that the findings are
+  # the reason to call us.
+  def seo_teaser_for(profile)
+    report = profile.seo_report
+    return nil if report.blank?
+
+    gaps = report['gap_count'].to_i
+    return nil if gaps.zero?
+    return nil if profile.show_seo_report
+
+    {
+      gap_count: gaps,
+      domain: report['domain'],
+      score: report['score']
+    }
+  end
+
   def normalized_subdomain(value)
     return nil if value.blank?
 
@@ -334,7 +363,11 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # The address this demo would take if committed. Editable while it is
       # still a demo; after that it belongs to the dealer.
       suggested_subdomain: profile.suggested_subdomain,
-      inventory_is_sample: inventory_config_for(profile)&.dig('is_sample') || false
+      inventory_is_sample: inventory_config_for(profile)&.dig('is_sample') || false,
+      # Always present for an admin regardless of show_seo_report: the toggle
+      # decides what the prospect sees, not what we can see.
+      seo_report: profile.seo_report,
+      show_seo_report: profile.show_seo_report
     }
   end
 
