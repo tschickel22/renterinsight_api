@@ -131,11 +131,27 @@ module SiteProfiles
     end
 
     # Thin seam over S3 so the orchestrator can be tested without a bucket.
+    # Downloaded bytes are FILE bytes, and have to be tagged as such.
+    #
+    # S3UploadService#download returns get_object(...).body.read, which Ruby
+    # hands back tagged UTF-8. A PDF is not valid UTF-8, so the first string
+    # operation downstream — a squish, a regex — raised "invalid byte sequence
+    # in UTF-8" and the whole scan failed. Measured on a real upload: 16936
+    # bytes, encoding UTF-8, valid_encoding? false.
+    #
+    # The specs could not see this: they stub the downloader with File.binread,
+    # which already returns ASCII-8BIT, so the one thing that differs in
+    # production is the one thing they replace.
+    #
+    # Forced here rather than in S3UploadService because this is where the
+    # contract is known to be binary. Callers downloading text can still decode
+    # for themselves.
     class S3DownloadAdapter
       def call(s3_key)
         return nil if s3_key.blank?
 
-        S3UploadService.new.download(s3_key)
+        bytes = S3UploadService.new.download(s3_key)
+        bytes&.dup&.force_encoding(Encoding::BINARY)
       end
     end
   end

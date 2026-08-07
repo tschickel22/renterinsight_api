@@ -54,6 +54,27 @@ RSpec.describe SiteProfiles::DocumentOrchestrator do
     described_class.new(record, downloader: downloader).call
   end
 
+  # The download adapter is normally stubbed, which is exactly why a real
+  # upload failed while every spec passed: S3 returns bytes tagged UTF-8, a PDF
+  # is not valid UTF-8, and the first string operation downstream raised.
+  describe SiteProfiles::DocumentOrchestrator::S3DownloadAdapter do
+    it 'tags downloaded bytes as binary' do
+      utf8_tagged = pdf_bytes.dup.force_encoding(Encoding::UTF_8)
+      expect(utf8_tagged.valid_encoding?).to be(false)
+      allow_any_instance_of(S3UploadService).to receive(:download).and_return(utf8_tagged)
+
+      bytes = described_class.new.call('some/key.pdf')
+
+      expect(bytes.encoding).to eq(Encoding::BINARY)
+      expect(bytes.valid_encoding?).to be(true)
+      expect { bytes.squish }.not_to raise_error
+    end
+
+    it 'passes nil through for a missing key' do
+      expect(described_class.new.call(nil)).to be_nil
+    end
+  end
+
   it 'drives the record to ready with a coerced profile' do
     run
     record.reload
