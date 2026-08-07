@@ -71,8 +71,37 @@ module SiteProfiles
 
     private
 
+    # Same site, not merely the same string.
+    #
+    # This compared hosts exactly, so a scan of mobilehomemasters.com filed
+    # every link to www.mobilehomemasters.com as EXTERNAL — the dealer's own
+    # site, classified as somewhere else. Measured on a real scan: 200+ of the
+    # site's own pages in the external list, including the hero's own
+    # "Browse Floor Plans" link.
+    #
+    # That misclassification is not cosmetic. Projection preserves external
+    # links on purpose, since a lender or a Facebook page must keep working, so
+    # the generated demo linked its most prominent button straight back to the
+    # site it was proposing to replace.
+    #
+    # Compared on the registrable domain instead, which also covers a scan that
+    # starts on one subdomain and links to another.
     def internal?(uri)
-      uri.host.blank? || (@base_host.present? && uri.host == @base_host)
+      return true if uri.host.blank?
+      return false if @base_host.blank?
+
+      registrable(uri.host) == registrable(@base_host)
+    end
+
+    # Last two labels: "www.mobilehomemasters.com" and "mobilehomemasters.com"
+    # both reduce to "mobilehomemasters.com".
+    #
+    # Deliberately not a public-suffix lookup. Getting co.uk exactly right would
+    # need a suffix list, and the failure mode here is only that two hosts under
+    # the same multi-part TLD are treated as one site — which for a dealer's own
+    # domain is the answer we want anyway.
+    def registrable(host)
+      host.to_s.downcase.split('.').last(2).join('.')
     end
 
     def normalize_path(path)
