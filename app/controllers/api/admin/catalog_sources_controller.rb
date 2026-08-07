@@ -26,6 +26,10 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # floor plan, so nothing needs excusing.
   TIMBER_CREEK_UNTRACKED_FIELDS = [].freeze
 
+  # Adventure Homes publishes series and full specs on all 130 plans, but no
+  # descriptive copy anywhere on the site — a full crawl found zero.
+  ADVENTURE_UNTRACKED_FIELDS = %w[description].freeze
+
   # Debounces directory rebuilds across typeahead keystrokes.
   CLAYTON_REFRESH_LOCK      = 'clayton_directory_refresh_enqueued'
   TIMBER_CREEK_REFRESH_LOCK = 'timber_creek_directory_refresh_enqueued'
@@ -224,6 +228,15 @@ class Api::Admin::CatalogSourcesController < ApplicationController
         # manufacturer hosts; retail price stays dealer-owned in DealerTide.
         advisory: 'Use the manufacturer host (trove.<maker>.com). Dealer storefronts ' \
                   '(*.buildtrove.com) disallow crawling and add nothing but their own markup.'
+      },
+      adventure_homes: {
+        base_url_template: 'https://adventurehomes.net',
+        untracked_fields: ADVENTURE_UNTRACKED_FIELDS,
+        options: [],
+        advisory: 'Ingests all 130 published floor plans. Features come from the ' \
+                  'series Standard Features PDF, so they describe the series and not ' \
+                  'the individual home. Adventure publishes no prices (their retailer ' \
+                  'quotes) and no descriptions.'
       }
     }
   end

@@ -24,7 +24,11 @@ module Catalog
       'clayton_epic_region'        => 'Catalog::Adapters::ClaytonEpicRegionAdapter',
       'clayton_retail_home_center' => 'Catalog::Adapters::ClaytonRetailHomeCenterAdapter',
       'trove_catalog'              => 'Catalog::Adapters::TroveCatalogAdapter',
-      'cavco_retailer'             => 'Catalog::Adapters::CavcoRetailerAdapter'
+      'cavco_retailer'             => 'Catalog::Adapters::CavcoRetailerAdapter',
+      # Single-site type: adventurehomes.net runs a bespoke WordPress theme, so
+      # unlike avada_sitemap or manufacturedhomes_platform there is no second
+      # manufacturer to onboard behind it.
+      'adventure_homes'            => 'Catalog::Adapters::AdventureHomesAdapter'
     }.freeze
 
     module_function
