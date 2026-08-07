@@ -188,7 +188,11 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # Settings belong to whichever lot is being shown, not to the profile's
       # tenant: the calculator has to quote against the homes on screen. Absent
       # a lot there is nothing to finance, so the block stays hidden.
-      calculator_settings: calculator_settings_for(profile)
+      calculator_settings: calculator_settings_for(profile),
+      # Same lot again, and not by preference: the public intake endpoint
+      # authenticates with the inventory token and scopes the form to that
+      # company, so a form from anywhere else would 404.
+      lead_form_id: lead_form_id_for(profile)
     }
   end
 
@@ -218,13 +222,31 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   # quotes that lot's financing terms, which is what the homes on screen are
   # actually priced against.
   def calculator_settings_for(profile)
-    config = inventory_config_for(profile)
-    return nil if config.blank?
-
-    company = Company.find_by(id: config['company_id'])
+    company = lot_company_for(profile)
     return nil if company.nil?
 
     Websites::CalculatorSettings.for(company)
+  end
+
+  # A real, working contact form makes the difference between a demo a prospect
+  # can picture themselves using and one with "Contact form not available"
+  # where the form should be.
+  def lead_form_id_for(profile)
+    company = lot_company_for(profile)
+    return nil if company.nil?
+
+    Websites::DefaultLeadForm.for(company)&.id
+  end
+
+  # The company whose lot backs this demo. Memoised because three callers need
+  # it and it is the same lookup each time.
+  def lot_company_for(profile)
+    config = inventory_config_for(profile)
+    return nil if config.blank?
+
+    @lot_companies ||= {}
+    id = config['company_id']
+    @lot_companies.fetch(id) { @lot_companies[id] = Company.find_by(id: id) }
   end
 
   def summary(profile)

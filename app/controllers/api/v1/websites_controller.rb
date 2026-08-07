@@ -566,7 +566,10 @@ class Api::V1::WebsitesController < ApplicationController
       # The showcase is where a dealer decides whether to buy a site, so the
       # payment calculator has to work there. Without this the block rendered
       # as empty space in every design.
-      calculator_settings: Websites::CalculatorSettings.for(@company)
+      calculator_settings: Websites::CalculatorSettings.for(@company),
+      # Their own contact form, so the showcase shows a working one rather than
+      # "Contact form not available".
+      lead_form_id: Websites::DefaultLeadForm.for(@company)&.id
     }
   end
 

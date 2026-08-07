@@ -39,6 +39,10 @@ module Websites
       # vanished on the dealer's live domain — CalculatorBlock returns null when
       # settings are absent, so it failed as a blank space rather than an error.
       payload['calculator_settings'] = CalculatorSettings.for(@website.company)
+      # The site's default contact form, for blocks that do not name one. A
+      # dealer who never opened the block editor otherwise published a site
+      # reading "Contact form not available" on its contact page.
+      payload['lead_form_id'] = DefaultLeadForm.for(@website.company)&.id
       payload
     end
 
