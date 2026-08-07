@@ -43,6 +43,9 @@ module Websites
       # dealer who never opened the block editor otherwise published a site
       # reading "Contact form not available" on its contact page.
       payload['lead_form_id'] = DefaultLeadForm.for(@website.company)&.id
+      # Narrows the logo strip to brands this dealer actually carries, rather
+      # than advertising their competitors on their own site.
+      payload['manufacturers'] = LotManufacturers.for(@website.company)
       payload
     end
 

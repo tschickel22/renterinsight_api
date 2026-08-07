@@ -149,7 +149,12 @@ class Api::V1::WebsitesController < ApplicationController
           blocks: []
         )
       end
-      
+
+      # Every template ships a contact block, and without a form behind it the
+      # published site reads "Contact form not available". Creating the site is
+      # already a write, so this is the right moment rather than page render.
+      Websites::DefaultLeadForm.ensure_for(@company)
+
       render json: @website.as_json(
         include: {
           website_pages: { only: [:id, :title, :path, :is_visible, :order] }
@@ -569,7 +574,8 @@ class Api::V1::WebsitesController < ApplicationController
       calculator_settings: Websites::CalculatorSettings.for(@company),
       # Their own contact form, so the showcase shows a working one rather than
       # "Contact form not available".
-      lead_form_id: Websites::DefaultLeadForm.for(@company)&.id
+      lead_form_id: Websites::DefaultLeadForm.for(@company)&.id,
+      manufacturers: Websites::LotManufacturers.for(@company)
     }
   end
 

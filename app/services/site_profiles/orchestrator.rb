@@ -62,6 +62,7 @@ module SiteProfiles
       )
 
       import_assets
+      ensure_lead_form
       @record
     rescue StandardError => e
       @record.update!(status: 'failed', error_message: e.message.truncate(500))
@@ -199,6 +200,22 @@ module SiteProfiles
             ['Images could not be copied; the preview links to the original site.']).uniq
         )
       )
+    end
+
+    # A demo with "Contact form not available" where the contact form belongs is
+    # not a demo anyone is persuaded by. Runs once the profile is ready, against
+    # the lot that will actually back the preview — the public intake endpoint
+    # scopes the form to that company, so it has to be that one.
+    #
+    # Non-fatal: a scan that produced a profile is worth keeping either way.
+    def ensure_lead_form
+      config = DemoInventoryResolver.config_for_profile(@record)
+      return if config.blank?
+
+      company = Company.find_by(id: config['company_id'])
+      Websites::DefaultLeadForm.ensure_for(company)
+    rescue StandardError => e
+      Rails.logger.warn("[SiteProfiles::Orchestrator] lead form setup failed: #{e.message}")
     end
 
     def build_report(digests, integrations, links)

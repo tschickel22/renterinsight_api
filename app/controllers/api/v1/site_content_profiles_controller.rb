@@ -192,7 +192,10 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # Same lot again, and not by preference: the public intake endpoint
       # authenticates with the inventory token and scopes the form to that
       # company, so a form from anywhere else would 404.
-      lead_form_id: lead_form_id_for(profile)
+      lead_form_id: lead_form_id_for(profile),
+      # So the logo strip shows the brands this lot actually carries rather
+      # than every mark we happen to host.
+      manufacturers: manufacturers_for(profile)
     }
   end
 
@@ -236,6 +239,10 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     return nil if company.nil?
 
     Websites::DefaultLeadForm.for(company)&.id
+  end
+
+  def manufacturers_for(profile)
+    Websites::LotManufacturers.for(lot_company_for(profile))
   end
 
   # The company whose lot backs this demo. Memoised because three callers need

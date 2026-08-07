@@ -25,8 +25,64 @@ module Websites
     # Campaign and channel forms. Real, but wrong for a contact block.
     CAMPAIGN_SPECIFIC = /facebook|google|instagram|tiktok|special|promo|sale|event|test/i
 
+    # The form created when a company has nothing suitable. leadField values are
+    # the ones already in use across real forms, so a submission maps onto a
+    # Lead exactly as every other form's does.
+    BASIC_FIELDS = [
+      { name: 'First Name', label: 'First Name', type: 'text',     required: true,  lead_field: 'first_name' },
+      { name: 'Last Name',  label: 'Last Name',  type: 'text',     required: true,  lead_field: 'last_name' },
+      { name: 'Email',      label: 'Email',      type: 'email',    required: true,  lead_field: 'email' },
+      { name: 'Phone',      label: 'Phone',      type: 'tel',      required: false, lead_field: 'phone' },
+      { name: 'Message',    label: 'How can we help?', type: 'textarea', required: false, lead_field: 'notes' }
+    ].freeze
+
     def self.for(company)
       new(company).call
+    end
+
+    # Find, or build a basic contact form.
+    #
+    # Only ever called from paths that are already writing — a scan finishing, a
+    # website being created. Never from a render: a GET that creates records is
+    # a surprise, and one that does it per page view is a bug waiting to
+    # happen.
+    #
+    # Idempotent by construction, since a company that has a usable form gets
+    # it back instead of a second one.
+    def self.ensure_for(company)
+      return nil if company.nil?
+
+      existing = new(company).call
+      return existing if existing && GENERAL_PURPOSE.match?(existing.name.to_s)
+
+      create_basic(company)
+    rescue StandardError => e
+      # A site is still worth having without a form; the resolver will simply
+      # keep returning whatever else exists.
+      Rails.logger.warn("[Websites::DefaultLeadForm] could not create a form for #{company&.id}: #{e.message}")
+      existing
+    end
+
+    def self.create_basic(company)
+      schema = BASIC_FIELDS.each_with_index.map do |f, i|
+        {
+          'id' => SecureRandom.uuid, 'name' => f[:name], 'label' => f[:label],
+          'type' => f[:type].to_s, 'required' => f[:required], 'placeholder' => '',
+          'order' => i + 1, 'isActive' => true, 'leadField' => f[:lead_field]
+        }
+      end
+
+      company.intake_forms.create!(
+        name: 'Contact Us',
+        description: 'General enquiries from the website.',
+        schema: schema,
+        is_active: true,
+        auto_create_lead: true,
+        auto_create_activity: true,
+        submit_button_text: 'Send Message',
+        thank_you_message: 'Thanks for reaching out. We will get back to you shortly.',
+        field_mappings: schema.to_h { |f| [f['name'], f['leadField']] }
+      )
     end
 
     def initialize(company)
