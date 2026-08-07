@@ -111,6 +111,10 @@ Rails.application.routes.draw do
   
   # ==================== PUBLIC BROCHURES ====================
   get '/b/:public_id', to: 'api/v1/brochures#public_view', as: :public_brochure
+  # Homes on the brochure page open in place, so the click never reaches the
+  # server on its own. The page reports it here.
+  post '/b/:public_id/listing_click', to: 'public/brochure_listing_clicks#create',
+                                      as: :public_brochure_listing_click
   
   # ==================== PUBLIC LISTING VIEW ====================
   get '/l/:id', to: 'api/v1/listings#public_view', as: :public_listing
@@ -1006,6 +1010,7 @@ Rails.application.routes.draw do
       resources :brochures do
         member do
           post :share
+          get :engagement
         end
         
         collection do

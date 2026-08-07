@@ -31,9 +31,13 @@ class Brochure < ApplicationRecord
     )
   end
 
-  # Get vehicles for this brochure
+  # Get vehicles for this brochure.
+  #
+  # Always a relation, never a bare Array: every caller chains a scope onto this
+  # (`.active`, `.limit`), so returning [] for an empty brochure raised
+  # NoMethodError on the public page, the detail JSON and the send path.
   def vehicles
-    return [] if vehicle_ids.blank? || !vehicle_ids.is_a?(Array)
+    return company.vehicles.none if vehicle_ids.blank? || !vehicle_ids.is_a?(Array)
     company.vehicles.where(id: vehicle_ids)
   end
 

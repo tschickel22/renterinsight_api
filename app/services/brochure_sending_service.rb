@@ -14,13 +14,16 @@
 class BrochureSendingService
   class Error < StandardError; end
   
+  # Recipients we can attribute a click to. Anything else sends untracked.
+  TRACKABLE_ENTITY_TYPES = %w[Lead Contact].freeze
+
   attr_reader :brochure, :results
-  
+
   def initialize(brochure)
     @brochure = brochure
     @results = { sent: [], failed: [], errors: [] }
   end
-  
+
   # Main send method
   # @param delivery_methods [Array<String>] - array of 'email' and/or 'sms'
   # @param to_email [String] - recipient email
@@ -30,6 +33,10 @@ class BrochureSendingService
   # @param from_phone [String] - optional from phone
   # @param cc [String] - CC recipients for email
   # @param bcc [String] - BCC recipients for email
+  # @param entity_type [String] - 'Lead' or 'Contact', the person being sent to.
+  #   Callers must have already verified the record belongs to the brochure's
+  #   company. Supplying it is what makes the click attributable.
+  # @param entity_id [Integer] - id of that Lead/Contact
   # @return [Hash] - { sent: [], failed: [], errors: [] }
   def send(
     delivery_methods: ['email'],
@@ -40,8 +47,12 @@ class BrochureSendingService
     from_phone: nil,
     cc: nil,
     bcc: nil,
+    entity_type: nil,
+    entity_id: nil,
     **options
   )
+    @entity_type = entity_type.to_s.presence
+    @entity_id   = entity_id
     # Validate delivery methods
     valid_methods = ['email', 'sms']
     invalid = delivery_methods - valid_methods
@@ -85,8 +96,11 @@ class BrochureSendingService
   
   def send_email(to:, custom_message:, from:, cc:, bcc:, **options)
     subject = build_email_subject
-    body = build_email_body(custom_message: custom_message)
-    
+    tracked_link = build_tracked_link
+    body = build_email_body(custom_message: custom_message,
+                            brochure_url: link_url(tracked_link),
+                            brochure_link: tracked_link)
+
     begin
       result = CommunicationService.send_email(
         communicable: brochure,
@@ -108,6 +122,7 @@ class BrochureSendingService
       )
       
       if result[:success]
+        attach_communication(tracked_link, result[:communication])
         @results[:sent] << {
           channel: 'email',
           to: to,
@@ -141,8 +156,9 @@ class BrochureSendingService
   end
   
   def send_sms(to:, custom_message:, from:, **options)
-    body = build_sms_body(custom_message: custom_message)
-    
+    tracked_link = build_tracked_link
+    body = build_sms_body(custom_message: custom_message, brochure_url: link_url(tracked_link))
+
     begin
       result = CommunicationService.send_sms(
         communicable: brochure,
@@ -161,6 +177,7 @@ class BrochureSendingService
       )
       
       if result[:success]
+        attach_communication(tracked_link, result[:communication])
         @results[:sent] << {
           channel: 'sms',
           to: to,
@@ -193,15 +210,77 @@ class BrochureSendingService
     end
   end
   
+  # One TrackedLink per channel, so an email click and an SMS click stay
+  # distinguishable. Returns nil when there's nobody to attribute the click to,
+  # or if minting fails — the send itself must never break over tracking.
+  def build_tracked_link
+    return nil unless TRACKABLE_ENTITY_TYPES.include?(@entity_type) && @entity_id.present?
+
+    link = TrackedLink.create_for_brochure!(
+      company:     brochure.company,
+      brochure:    brochure,
+      url:         brochure.public_url(public_base_url),
+      entity_type: @entity_type,
+      entity_id:   @entity_id
+    )
+    # Carry the recipient's identity onto the brochure page itself, so the homes
+    # they click once they're there are attributable too. The token is only
+    # known after create, hence the second write.
+    link.update_column(:url, recipient_brochure_url(link))
+    link
+  rescue => e
+    Rails.logger.warn "[Brochure] tracked link creation failed for brochure #{brochure.id}: #{e.message}"
+    nil
+  end
+
+  # Each home in the email gets its own tracked link, so we learn which homes a
+  # recipient is drawn to and not merely that they opened the collection. The
+  # link carries vehicle_id, which also feeds the Hot Inventory Interest queue.
+  def listing_link_url(vehicle, brochure_link)
+    return nil unless brochure_link
+
+    TrackedLink.for_brochure_listing!(
+      company:     brochure.company,
+      brochure:    brochure,
+      vehicle_id:  vehicle.id,
+      url:         recipient_brochure_url(brochure_link, vehicle_id: vehicle.id),
+      entity_type: @entity_type,
+      entity_id:   @entity_id
+    ).tracking_url
+  rescue => e
+    Rails.logger.warn "[Brochure] listing link failed for vehicle #{vehicle.id}: #{e.message}"
+    nil
+  end
+
+  def recipient_brochure_url(brochure_link, vehicle_id: nil)
+    query = { rt: brochure_link.token }
+    query[:listing] = vehicle_id if vehicle_id
+    "#{brochure.public_url(public_base_url)}?#{query.to_query}"
+  end
+
+  def link_url(tracked_link)
+    tracked_link&.tracking_url || brochure.public_url(public_base_url)
+  end
+
+  def attach_communication(tracked_link, communication)
+    return if tracked_link.nil? || communication.nil?
+
+    tracked_link.update_column(:communication_id, communication.id)
+  rescue => e
+    Rails.logger.warn "[Brochure] linking tracked link #{tracked_link&.id} to communication failed: #{e.message}"
+  end
+
+  def public_base_url
+    ENV['FRONTEND_URL'] || ENV['API_BASE_URL'] || 'http://localhost:3000'
+  end
+
   def build_email_subject
     "#{brochure.title} - Property Collection from #{company_name}"
   end
-  
-  def build_email_body(custom_message:)
-    # Get public URL for the brochure
-    base_url = ENV['FRONTEND_URL'] || ENV['API_BASE_URL'] || 'http://localhost:3000'
-    brochure_url = brochure.public_url(base_url)
-    
+
+  def build_email_body(custom_message:, brochure_url: nil, brochure_link: nil)
+    brochure_url ||= brochure.public_url(public_base_url)
+
     # Build vehicle summary HTML
     vehicles = brochure.vehicles.active.limit(5)
     vehicles_html = ''
@@ -213,8 +292,11 @@ class BrochureSendingService
       vehicles.each do |vehicle|
         price = vehicle.sale_price || vehicle.rent_price
         price_display = price ? "$#{format_currency(price)}#{vehicle.rent_price ? '/mo' : ''}" : 'Contact for pricing'
-        
-        vehicles_html += <<~VEHICLE_HTML
+
+        # Each card links to that home inside the brochure, tracked, so we know
+        # which one caught their eye. Falls back to an unlinked card when the
+        # send isn't attributable to anyone.
+        card_html = <<~VEHICLE_HTML
           <div style="padding: 15px; background-color: #f9fafb; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #2563eb;">
             <div style="font-weight: bold; color: #1f2937; font-size: 16px; margin-bottom: 5px;">#{vehicle.display_name}</div>
             <div style="color: #6b7280; font-size: 14px; margin-bottom: 5px;">
@@ -223,6 +305,13 @@ class BrochureSendingService
             <div style="color: #059669; font-weight: bold; font-size: 16px;">#{price_display}</div>
           </div>
         VEHICLE_HTML
+
+        listing_url = listing_link_url(vehicle, brochure_link)
+        vehicles_html += if listing_url
+                           %(<a href="#{listing_url}" style="text-decoration: none; color: inherit; display: block;">#{card_html}</a>)
+                         else
+                           card_html
+                         end
       end
       
       if brochure.vehicle_count > 5
@@ -281,10 +370,9 @@ class BrochureSendingService
     HTML
   end
   
-  def build_sms_body(custom_message:)
-    base_url = ENV['FRONTEND_URL'] || ENV['API_BASE_URL'] || 'http://localhost:3000'
-    brochure_url = brochure.public_url(base_url)
-    
+  def build_sms_body(custom_message:, brochure_url: nil)
+    brochure_url ||= brochure.public_url(public_base_url)
+
     parts = []
     
     # Custom message if provided

@@ -4,8 +4,8 @@ module Api
   module V1
     class BrochuresController < ApplicationController
       before_action :set_company_scope, except: [:templates, :public_view]
-      before_action :set_brochure, only: [:show, :update, :destroy, :share]
-      before_action :authorize_read!, only: [:index, :show, :stats]
+      before_action :set_brochure, only: [:show, :update, :destroy, :share, :engagement]
+      before_action :authorize_read!, only: [:index, :show, :stats, :engagement]
       before_action :authorize_create!, only: [:create]
       before_action :authorize_update!, only: [:update, :share, :bulk_share]
       before_action :authorize_delete!, only: [:destroy]
@@ -222,10 +222,20 @@ module Api
         # Convert to symbols for service
         send_params_symbolized = send_params.deep_symbolize_keys
         
+        # Resolve the recipient (company-scoped) so the brochure link can be sent
+        # as a TrackedLink. Without this the click is anonymous and never reaches
+        # the recipient's record or the Workqueue.
+        recipient = share_recipient(contact_id: contact_id, lead_id: lead_id)
+
         begin
           # Pass current_user for user-level email connection waterfall
-          result = BrochureSendingService.new(@brochure).send(**send_params_symbolized, user: current_user)
-          
+          result = BrochureSendingService.new(@brochure).send(
+            **send_params_symbolized,
+            user: current_user,
+            entity_type: recipient&.class&.name,
+            entity_id: recipient&.id
+          )
+
           if result[:sent].any?
             # Increment share count
             @brochure.increment_share_count!
@@ -301,7 +311,9 @@ module Api
               to_email: email,
               to_phone: lead.phone,
               custom_message: custom_message,
-              user: current_user
+              user: current_user,
+              entity_type: 'Lead',
+              entity_id: lead.id
             )
 
             if result[:sent].any?
@@ -332,6 +344,42 @@ module Api
           failed_count: failed_count,
           total: leads.count,
           errors: errors.first(10)  # Cap at 10 error messages
+        }
+      end
+
+      # GET /api/v1/brochures/:id/engagement
+      #
+      # Who opened this collection and, more usefully, which homes in it they
+      # keep clicking. Built from the TrackedLinks minted when the brochure was
+      # shared, so it reports named recipients rather than the anonymous
+      # view_count on the brochure itself.
+      def engagement
+        links = TrackedLink.for_brochures.clicked
+                           .where(company_id: @company.id, source_id: @brochure.id)
+                           .to_a
+
+        vehicles_by_id = @company.vehicles.where(id: links.filter_map(&:vehicle_id).uniq).index_by(&:id)
+        open_links     = links.select { |l| l.vehicle_id.nil? }
+        listing_links  = links.reject { |l| l.vehicle_id.nil? }
+
+        top_homes = listing_links.group_by(&:vehicle_id).map do |vehicle_id, group|
+          {
+            vehicle_id:      vehicle_id,
+            name:            vehicle_label(vehicles_by_id[vehicle_id], vehicle_id),
+            clicks:          group.sum { |l| l.click_count.to_i },
+            viewers:         group.count { |l| l.entity_id.present? },
+            last_clicked_at: group.map(&:last_clicked_at).compact.max
+          }
+        end.sort_by { |h| -h[:clicks] }
+
+        render json: {
+          engagement: {
+            opens:             open_links.sum { |l| l.click_count.to_i },
+            home_clicks:       listing_links.sum { |l| l.click_count.to_i },
+            anonymous_clicks:  links.select { |l| l.entity_id.blank? }.sum { |l| l.click_count.to_i },
+            top_homes:         top_homes,
+            viewers:           engagement_viewers(links, vehicles_by_id)
+          }
         }
       end
 
@@ -588,6 +636,58 @@ module Api
       end
 
       # Create activity record for brochure share to contact
+      # One row per named person who clicked, with the home they clicked most.
+      def engagement_viewers(links, vehicles_by_id)
+        identified = links.select { |l| l.entity_id.present? }
+        return [] if identified.empty?
+
+        lead_ids    = identified.select { |l| l.entity_type == 'Lead' }.map(&:entity_id).uniq
+        contact_ids = identified.select { |l| l.entity_type == 'Contact' }.map(&:entity_id).uniq
+        leads       = Lead.where(company_id: @company.id, id: lead_ids).index_by(&:id)
+        contacts    = @company.contacts.where(id: contact_ids).index_by(&:id)
+
+        rows = identified.group_by { |l| [l.entity_type, l.entity_id] }.filter_map do |(entity_type, entity_id), group|
+          entity = entity_type == 'Lead' ? leads[entity_id] : contacts[entity_id]
+          next unless entity
+
+          listing_group = group.reject { |l| l.vehicle_id.nil? }
+          top           = listing_group.max_by { |l| l.click_count.to_i }
+
+          {
+            entity_type:      entity_type.downcase,
+            entity_id:        entity_id,
+            name:             [entity.first_name, entity.last_name].compact.join(' ').presence || 'Unknown',
+            opens:            group.select { |l| l.vehicle_id.nil? }.sum { |l| l.click_count.to_i },
+            home_clicks:      listing_group.sum { |l| l.click_count.to_i },
+            top_home:         top && {
+              vehicle_id: top.vehicle_id,
+              name:       vehicle_label(vehicles_by_id[top.vehicle_id], top.vehicle_id),
+              clicks:     top.click_count.to_i
+            },
+            last_activity_at: group.map(&:last_clicked_at).compact.max
+          }
+        end
+
+        rows.sort_by { |v| -(v[:last_activity_at]&.to_f || 0) }
+      end
+
+      def vehicle_label(vehicle, vehicle_id)
+        return "Home ##{vehicle_id}" unless vehicle
+
+        vehicle.display_name.presence || [vehicle.year, vehicle.make, vehicle.model].compact.join(' ')
+      end
+
+      # Contact takes precedence over lead, matching the activity-creation order
+      # below. Both lookups are company-scoped — a click can only ever be
+      # attributed to someone inside this tenant.
+      def share_recipient(contact_id:, lead_id:)
+        if contact_id.present?
+          @company.contacts.find_by(id: contact_id)
+        elsif lead_id.present?
+          Lead.where(company_id: @company.id).find_by(id: lead_id)
+        end
+      end
+
       def create_contact_share_activity(contact_id, result, send_params)
         # Verify contact belongs to this company for tenant isolation
         contact = @company.contacts.find_by(id: contact_id)
