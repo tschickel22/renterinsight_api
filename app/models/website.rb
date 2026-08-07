@@ -69,6 +69,16 @@ class Website < ApplicationRecord
   before_validation :generate_slug, if: -> { slug.blank? }
   before_validation :set_defaults, on: :create
   before_create :generate_preview_token
+
+  # A platform subdomain resolves through the wildcard record, but Render
+  # rejects any Host it does not recognise, so the site is only reachable once
+  # the host-rewriting Worker is bound to that exact hostname. Keeping the
+  # route in step with the column is the difference between a subdomain that
+  # serves and one that answers 403.
+  #
+  # after_commit, not after_save: enqueueing inside the transaction races the
+  # worker, which can read the row before the commit lands.
+  after_commit :sync_subdomain_worker_route, on: %i[create update]
   
   # Scopes
   scope :active, -> { where(is_deleted: [false, nil]) }
@@ -138,7 +148,37 @@ class Website < ApplicationRecord
   end
   
   private
-  
+
+  # Enqueues only when something that changes the answer actually changed.
+  # Every other save on a website — a theme tweak, a nav edit — must not spend
+  # a Cloudflare call.
+  #
+  # A soft delete is a subdomain that should stop answering, so it enqueues too
+  # and the job unbinds rather than rebinds.
+  def sync_subdomain_worker_route
+    return unless saved_change_to_subdomain? || saved_change_to_is_deleted?
+
+    previous_host = previous_subdomain_host
+    return if previous_host.blank? && subdomain.blank?
+
+    WebsiteSubdomainRouteJob.perform_later(id, previous_host)
+  rescue StandardError => e
+    # Never let route bookkeeping fail a save the user asked for.
+    Rails.logger.warn("[Website] could not enqueue subdomain route sync for #{id}: #{e.message}")
+  end
+
+  # The host the PREVIOUS subdomain served on, so a rename unbinds the old one.
+  # Nil when the subdomain did not change, since there is nothing to clean up.
+  def previous_subdomain_host
+    return nil unless saved_change_to_subdomain?
+
+    old = saved_change_to_subdomain.first.presence
+    return nil if old.blank?
+
+    root = Brand.current.site_host_root.to_s.presence
+    root.blank? ? nil : "#{old}.#{root}"
+  end
+
   def nullify_blank_domain_fields
     self.domain = nil if domain.blank?
     self.subdomain = nil if subdomain.blank?
