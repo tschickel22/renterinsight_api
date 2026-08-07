@@ -118,11 +118,22 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     end
 
     content_type = upload.content_type.to_s.downcase.presence
-    unless SUPPORTED_DOCUMENT_TYPES.include?(content_type) || content_type.nil?
+
+    # application/octet-stream means the browser did not recognise the file,
+    # not that the file is unreadable. Chrome sends it for .md and, depending on
+    # the OS, for perfectly ordinary PDFs — so rejecting it here refused files
+    # DocumentIngestor#sniff_content_type would have identified from their
+    # magic bytes a moment later. Let the sniffer decide those.
+    unknown_type = content_type.nil? || content_type == 'application/octet-stream'
+    unless SUPPORTED_DOCUMENT_TYPES.include?(content_type) || unknown_type
       return render json: {
         error: "#{content_type} is not supported. Upload a PDF, an image, or a text file."
       }, status: :unprocessable_entity
     end
+
+    # Stored as nil rather than octet-stream so the ingestor sniffs instead of
+    # trusting a value we already know is a guess.
+    content_type = nil if unknown_type
 
     uploaded = S3UploadService.new.upload(upload, folder: "site-profiles/uploads/#{@company.id}")
     if uploaded.blank? || uploaded[:key].blank?
@@ -224,8 +235,16 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   # Follows the lot, not the tenant. A demo showing the nominated sample lot
   # quotes that lot's financing terms, which is what the homes on screen are
   # actually priced against.
+  # Falls back to the profile's own tenant when no lot resolves.
+  #
+  # This used to return nil without a lot, which hid the calculator entirely —
+  # so a demo for a prospect with no inventory to show also lost the one block
+  # that works without any. "What would my payment be" is a fair question
+  # before browsing, and it is often the first one a manufactured-housing buyer
+  # asks. The block runs on its own default price when there is nothing to
+  # pick from.
   def calculator_settings_for(profile)
-    company = lot_company_for(profile)
+    company = lot_company_for(profile) || profile.company
     return nil if company.nil?
 
     Websites::CalculatorSettings.for(company)
