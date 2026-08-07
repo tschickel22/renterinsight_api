@@ -28,13 +28,7 @@ module Websites
       # @return [String, nil] the host a visitor would type, or nil when the
       #   site has no platform subdomain
       def host_for(website)
-        subdomain = website&.subdomain.presence
-        return nil if subdomain.blank?
-
-        root = Brand.current.site_host_root.to_s.presence
-        return nil if root.blank?
-
-        "#{subdomain}.#{root}"
+        SiteAddress.host_for(website)
       end
 
       # Ensure the Worker runs for this site's subdomain.

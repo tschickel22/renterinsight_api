@@ -180,8 +180,7 @@ class Website < ApplicationRecord
     old = saved_change_to_subdomain.first.presence
     return nil if old.blank?
 
-    root = Brand.current.site_host_root.to_s.presence
-    root.blank? ? nil : "#{old}.#{root}"
+    Websites::SiteAddress.host_for_subdomain(old)
   end
 
   def subdomain_is_usable

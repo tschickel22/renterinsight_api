@@ -353,7 +353,7 @@ class Api::V1::LandingPagesController < ApplicationController
     # site_host_root, not subdomain_root: the platform domain has no wildcard
     # record, so a URL built on it named a host that does not resolve and the
     # View button opened a browser error page.
-    host ||= "#{site.subdomain}.#{Brand.current.site_host_root}" if site.subdomain.present?
+    host ||= Websites::SiteAddress.host_for(site) if site.subdomain.present?
     return nil if host.blank?
 
     "https://#{host}#{page.path}"

@@ -91,7 +91,12 @@ module Websites
       label = @host.delete_suffix(".#{root}")
       return nil if label.blank?
 
-      website = published_scope.find_by(subdomain: label)
+      # Strips the environment marker, and refuses a label that is missing one
+      # where it is required, so staging cannot answer for a production host.
+      subdomain = SiteAddress.subdomain_from_label(label)
+      return nil if subdomain.blank?
+
+      website = published_scope.find_by(subdomain: subdomain)
       return nil if website.nil?
 
       Result.new(website: website, canonical_host: @host)

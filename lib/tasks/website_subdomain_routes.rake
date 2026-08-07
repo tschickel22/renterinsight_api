@@ -24,7 +24,9 @@ namespace :websites do
     sites = Website.active.where.not(subdomain: [nil, '']).order(:id)
     root = Brand.current.site_host_root
 
+    suffix = Websites::SiteAddress.label_suffix
     puts "site host root: #{root}"
+    puts "environment label suffix: #{suffix.presence || '(none, production shape)'}"
     puts "sites with a subdomain: #{sites.count}"
     puts(apply ? 'MODE: applying' : 'MODE: dry run (pass APPLY=1 to write)')
     puts
