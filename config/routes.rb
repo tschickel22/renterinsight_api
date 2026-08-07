@@ -747,6 +747,7 @@ Rails.application.routes.draw do
           post :rotate_preview_token
         end
         collection do
+          get :inventory_lots
           get 'by_token/:token', action: :by_token  # PUBLIC - shareable preview
         end
       end

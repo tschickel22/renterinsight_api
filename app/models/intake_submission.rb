@@ -98,6 +98,29 @@ class IntakeSubmission < ApplicationRecord
       end
     end
     
+    # The home the enquiry is about, so it lands in the lead's own "home
+    # interested in" field rather than only in a note.
+    #
+    # An inventory embed already sends vehicle_title, vehicle_vin and the rest,
+    # and build_notes_with_vehicle has always written those into the note. The
+    # id was never carried, so a salesperson opening the lead saw the home
+    # described in free text and an empty dropdown beside it, with nothing
+    # linking the two. Both now happen: the note stays, because a note is what
+    # gets read first.
+    #
+    # Scoped to the form's company, or a submission could point a lead at
+    # another tenant's stock.
+    vehicle_id = submission_data['vehicle_id'] || submission_data['vehicleId']
+    if vehicle_id.present?
+      owned = Vehicle.where(id: vehicle_id.to_i, company_id: form.company_id).exists?
+      if owned
+        lead_data[:vehicle_id] = vehicle_id.to_i
+        Rails.logger.info "[IntakeSubmission] Linked vehicle #{vehicle_id} to the lead"
+      else
+        Rails.logger.warn "[IntakeSubmission] Ignoring vehicle #{vehicle_id}: not owned by company #{form.company_id}"
+      end
+    end
+
     # Only set owner_id if notified_user exists
     if form.notified_user_id.present?
       lead_data[:owner_id] = form.notified_user_id

@@ -183,6 +183,34 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     head :no_content
   end
 
+  # GET /api/v1/site_content_profiles/inventory_lots
+  #
+  # Which lots a demo can be pointed at, so the choice is made BEFORE the scan.
+  # It has to be before: the manufacturer logos are derived from the lot's own
+  # stock, so picking the lot afterwards means the demo advertises the wrong
+  # brands until someone notices.
+  #
+  # Only lots that would actually render something — public inventory on, a
+  # token issued, and stock to show. An enabled-but-empty lot produces an empty
+  # grid, which is worse than not offering it.
+  def inventory_lots
+    lots = Company
+           .where("companies.public_inventory_settings ->> 'public_inventory_enabled' IN (?)",
+                  SiteProfiles::DemoInventoryResolver::ENABLED_VALUES)
+           .where.not(public_inventory_token: [nil, ''])
+           .joins(:vehicles)
+           .where(vehicles: { status: SiteProfiles::DemoInventoryResolver::SELLABLE_STATUSES,
+                              is_deleted: [false, nil] })
+           .group('companies.id')
+           .order(Arel.sql('COUNT(vehicles.id) DESC'))
+           .limit(100)
+           .pluck('companies.id', 'companies.name', Arel.sql('COUNT(vehicles.id)'))
+
+    render json: {
+      items: lots.map { |id, name, count| { id: id, name: name, home_count: count, is_current: id == @company.id } }
+    }
+  end
+
   # GET /api/v1/site_content_profiles/by_token/:token
   #
   # PUBLIC. Deliberately narrow: returns the content needed to render a preview

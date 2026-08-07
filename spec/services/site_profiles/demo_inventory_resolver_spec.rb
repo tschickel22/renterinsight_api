@@ -15,6 +15,49 @@ RSpec.describe SiteProfiles::DemoInventoryResolver do
 
   # Auto-discovery of the internal demo lot, against real records rather than
   # doubles, because the defect was in the SQL and a double cannot show it.
+  # Reported from staging: a demo built while switched into Summit Park showed
+  # our internal lot's 31 catalog homes instead of their 132.
+  describe '.config_for_profile prefers the tenant it was built under' do
+    def lot_with_stock(name)
+      c = Company.create!(name: "#{name}-#{SecureRandom.hex(3)}")
+      c.update!(public_inventory_enabled: true, public_inventory_token: SecureRandom.hex(8))
+      c.vehicles.create!(year: 2026, make: 'Clayton', model: 'M', status: 'available',
+                         vin: SecureRandom.hex(8).upcase)
+      c
+    end
+
+    it "uses the profile's own company, and does not call it a sample" do
+      own = lot_with_stock('Own')
+      profile = SiteContentProfile.new(company: own, company_id: own.id)
+
+      config = described_class.config_for_profile(profile)
+
+      expect(config['company_id']).to eq(own.id)
+      expect(config['is_sample']).to be_nil
+    end
+
+    # An explicit choice still wins: that is the whole point of the picker.
+    it 'lets an explicit lot override the tenant' do
+      own = lot_with_stock('Own')
+      chosen = lot_with_stock('Chosen')
+      profile = SiteContentProfile.new(company: own, company_id: own.id,
+                                       inventory_company: chosen, inventory_company_id: chosen.id)
+
+      config = described_class.config_for_profile(profile)
+
+      expect(config['company_id']).to eq(chosen.id)
+      expect(config['is_sample']).to be(true)
+    end
+
+    it 'falls back to the demo lot when the tenant has nothing to show' do
+      empty = Company.create!(name: "Empty-#{SecureRandom.hex(3)}")
+      allow(described_class).to receive(:demo_company).and_return(lot_with_stock('Demo'))
+      profile = SiteContentProfile.new(company: empty, company_id: empty.id)
+
+      expect(described_class.config_for_profile(profile)['is_sample']).to be(true)
+    end
+  end
+
   describe '.demo_company auto-discovery' do
     def saas_tenant_with(status)
       tenant = Company.create!(name: "SaaS-#{SecureRandom.hex(3)}", industry: 'saas')

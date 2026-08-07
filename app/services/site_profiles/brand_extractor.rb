@@ -49,13 +49,34 @@ module SiteProfiles
         candidate = doc.css('header img, .header img, nav img, img').find do |img|
           [img['src'], img['alt'], img['class'], img['id']].compact.any? { |v| v.match?(LOGO_HINT) }
         end
-        return absolutize(candidate['src'] || candidate['data-src'], url) if candidate&.[]('src')
+
+        # The data-src fallback below used to be unreachable: it was guarded by
+        # `if candidate['src']`, so a lazy-loaded logo — which carries only
+        # data-src, or a 1x1 placeholder in src — was found and then discarded.
+        # Lazy loading is the default on WordPress and Elementor, which is most
+        # dealer sites.
+        src = logo_src(candidate)
+        return absolutize(src, url) if src.present?
 
         og = doc.at_css('meta[property="og:logo"], meta[property="og:image"]')&.[]('content')
         return absolutize(og, url) if og.present?
 
         icon = doc.at_css('link[rel~="icon"], link[rel="apple-touch-icon"]')&.[]('href')
         return absolutize(icon, url) if icon.present?
+      end
+      nil
+    end
+
+    # A real image URL, preferring whichever attribute actually holds one.
+    # An inline placeholder is not a logo, however real its src looks.
+    def logo_src(img)
+      return nil if img.nil?
+
+      %w[src data-src data-lazy-src].each do |attr|
+        value = img[attr].to_s.strip
+        next if value.blank? || value.start_with?('data:')
+
+        return value
       end
       nil
     end

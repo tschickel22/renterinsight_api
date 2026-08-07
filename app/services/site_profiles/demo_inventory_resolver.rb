@@ -31,15 +31,12 @@ module SiteProfiles
         usable_config(demo)&.merge('is_sample' => true)
       end
 
-      # For a demo profile, where the lot is CHOSEN rather than inherited.
+      # Which lot a demo shows.
       #
-      # Deliberately ignores profile.company: that is only the tenant the admin
-      # happened to be switched to when creating the demo, so inheriting it
-      # would put an unrelated dealer's homes in front of the prospect.
-      #
-      #   explicit choice -> that lot, flagged sample unless it is the subject's
-      #   no choice       -> the nominated demo lot
-      #   neither         -> nil, and the block is omitted
+      #   explicit choice     -> that lot, flagged sample unless it is the subject's
+      #   tenant with stock   -> its own homes, not a sample
+      #   otherwise           -> the nominated demo lot, flagged sample
+      #   nothing usable      -> nil, and the block is omitted
       def config_for_profile(profile)
         chosen = profile.try(:inventory_company)
         if chosen
@@ -52,10 +49,45 @@ module SiteProfiles
           return config.merge('is_sample' => true)
         end
 
+        # The tenant the demo was built under, when it has homes to show.
+        #
+        # This used to skip straight to the nominated demo lot, on the reasoning
+        # that profile.company is merely whoever the admin happened to be
+        # switched to. In practice that is backwards: an admin building a demo
+        # while switched into a dealer is building it FOR that dealer, and
+        # showing thirty catalog homes from our own tenant instead of their 132
+        # is the wrong answer every time. Reported from staging, where a demo
+        # created under Summit Park rendered the internal lot.
+        #
+        # Not flagged as a sample, because it is not one — these are the homes
+        # the site would actually carry, which is also what makes the
+        # manufacturer logos come out right.
+        own = usable_config(profile.try(:company))
+        # Stock checked separately, because usable_config does not.
+        #
+        # A new company is created with public inventory already enabled and a
+        # token already issued, so usable_config says yes to a lot with zero
+        # homes — preferring the tenant without this check would swap a
+        # borrowed lot that has homes for an empty grid, which is worse than
+        # the problem being fixed.
+        return own if own && stocked?(profile.try(:company))
+
         demo = demo_company
         return nil if demo.nil?
 
         usable_config(demo)&.merge('is_sample' => true)
+      end
+
+      # Does this lot actually have anything a visitor could look at?
+      def stocked?(company)
+        return false if company.nil?
+
+        company.vehicles
+               .where(status: SELLABLE_STATUSES, is_deleted: [false, nil])
+               .exists?
+      rescue StandardError => e
+        Rails.logger.warn("[DemoInventoryResolver] stock check failed for #{company&.id}: #{e.message}")
+        false
       end
 
       def demo_company
