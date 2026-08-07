@@ -61,10 +61,32 @@ module Ses
       # pending forever.
       refresh_status!
       domain.update!(email_enabled: true) unless domain.email_enabled?
+      ensure_mail_from!(refresh: false)
       domain
     rescue Aws::SESV2::Errors::ServiceError => e
       record_error(e)
       raise SesError, "Could not create SES identity for #{domain.hostname}: #{e.message}"
+    end
+
+    # Applies the custom MAIL FROM to an identity that never got one.
+    #
+    # Only the create branch above reaches apply_mail_from!. An identity that already
+    # existed in the AWS account, because another environment shares it or an earlier
+    # attempt got partway, took the adopt branch instead and verified with no MAIL FROM at
+    # all. Return-Path then stays amazonses.com, so SPF authenticates Amazon rather than the
+    # tenant's own domain and bounces route via Amazon. DMARC still passes on DKIM
+    # alignment, which is why this failed quietly.
+    #
+    # Safe to call repeatedly. SES is asked first so a MAIL FROM we simply never recorded is
+    # adopted rather than re-applied, the SES call is idempotent either way, and
+    # apply_mail_from! still refuses to claim a subdomain that already receives mail.
+    # refresh: false is for callers that have just refreshed and only want the repair.
+    def ensure_mail_from!(refresh: true)
+      refresh_status! if refresh
+      return domain if domain.reload.ses_mail_from_domain.present?
+
+      refresh_status! if apply_mail_from!
+      domain
     end
 
     # Re-reads SES for the current DKIM and MAIL FROM state and flips email_verified_at

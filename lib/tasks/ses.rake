@@ -73,4 +73,36 @@ namespace :ses do
       abort "SES event pipeline setup failed: #{e.message}"
     end
   end
+
+  namespace :domains do
+    desc 'Apply the custom MAIL FROM to verified sending domains that never got one ' \
+         '(DOMAIN=hostname for one, otherwise all)'
+    task mail_from: :environment do
+      scope = CompanyDomain.email_verified
+      scope = scope.where(hostname: ENV['DOMAIN']) if ENV['DOMAIN'].present?
+      domains = scope.to_a
+
+      abort 'No verified sending domains matched.' if domains.empty?
+
+      domains.each do |domain|
+        before = domain.ses_mail_from_domain
+        Ses::IdentityManager.new(domain).ensure_mail_from!
+        after = domain.reload.ses_mail_from_domain
+
+        puts case
+             when after.blank?
+               # apply_mail_from! refuses to publish over a subdomain that already receives
+               # mail, so this is the expected outcome for a domain using that name already.
+               "#{domain.hostname}: SKIPPED, no MAIL FROM applied (subdomain likely already has MX)"
+             when before.blank?
+               "#{domain.hostname}: applied #{after} (#{domain.ses_mail_from_status}), " \
+               'publish its MX and TXT records from the domain settings screen'
+             else
+               "#{domain.hostname}: already had #{after} (#{domain.ses_mail_from_status})"
+             end
+      rescue Ses::IdentityManager::SesError => e
+        puts "#{domain.hostname}: FAILED, #{e.message}"
+      end
+    end
+  end
 end
