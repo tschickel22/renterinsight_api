@@ -692,7 +692,11 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   # UI-created source scores 0% on description, lands "partial" on an otherwise
   # perfect 93/93 run, and can never be enabled.
   ADAPTER_CONFIG_DEFAULTS = {
-    'trove_catalog' => { 'untracked_fields' => TROVE_UNTRACKED_FIELDS }
+    'trove_catalog'   => { 'untracked_fields' => TROVE_UNTRACKED_FIELDS },
+    # Without this a source created through the dialog tracks `description`,
+    # which Adventure never publishes, so a run that parsed all 130 homes
+    # perfectly still reports degraded.
+    'adventure_homes' => { 'untracked_fields' => ADVENTURE_UNTRACKED_FIELDS }
   }.freeze
 
   def apply_adapter_defaults(attrs, adapter_type)
