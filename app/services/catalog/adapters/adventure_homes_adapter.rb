@@ -132,13 +132,21 @@ module Catalog
           sitemap_url:    url,
           sitemap_status: probe[:status],
           bytes:          probe[:bytes],
-          redirect:       probe[:location]
+          redirect:       probe[:location],
+          user_agent:     user_agent,
+          server:         probe[:server],
+          content_type:   probe[:content_type]
         }
         out[:error] = probe[:error] if probe[:error]
         if probe[:body].present?
-          out[:loc_count]      = probe[:body].scan(%r{<loc>}).size
+          out[:loc_count]       = probe[:body].scan(%r{<loc>}).size
           out[:floorplan_count] = probe[:body].scan(DETAIL_PATH).size
-          out[:looks_blocked]  = looks_blocked?(probe[:body])
+          out[:looks_blocked]   = looks_blocked?(probe[:body])
+          # The host answers a blocked request with a 202 and a ~190 byte stub
+          # rather than an error, so the status alone reads as success. Show the
+          # body when it is clearly not a sitemap, so the next person sees the
+          # blocker's own words instead of guessing from a boolean.
+          out[:body_preview] = probe[:body].to_s.strip[0, 400] if out[:loc_count].zero?
         end
         out
       end
