@@ -20,16 +20,34 @@ module Websites
 
     module_function
 
+    # Which calendar a visitor is offered, decided by the dealer.
+    #
+    # This used to be a fixed rep-then-location-then-company waterfall, which
+    # assumed every dealer wants the rep's own calendar to win. Some want one
+    # dealership calendar, some want a named person, some want it spread across
+    # a team, and only the dealer knows which. The order is now theirs to set
+    # through Marketing::AssignmentPolicy, which the Text Us widget will share so
+    # the two cannot answer "whose" differently.
+    #
+    # The dealership link remains the floor in every mode: a rotation that lands
+    # on a rep with no calendar of their own should still offer the dealership's
+    # rather than nothing.
+    #
     # @param company [Company]
     # @param location [Location, nil]
-    # @param user [User, nil] the rep the conversation is assigned to
+    # @param user [User, nil] whoever already owns the conversation
     # @return [String, nil]
     def resolve(company:, location: nil, user: nil)
-      candidates = [
-        user&.try(:booking_url),
-        location_setting(location),
-        company_setting(company)
-      ]
+      resolution = Marketing::AssignmentPolicy.new(
+        company: company, location: location, feature: 'booking'
+      ).resolve(fallback_user: user)
+
+      candidates =
+        if resolution.mode == 'dealership'
+          [location_setting(location), company_setting(company)]
+        else
+          [resolution.user&.try(:booking_url), location_setting(location), company_setting(company)]
+        end
 
       candidates.map { |value| normalize(value) }.compact.first
     end

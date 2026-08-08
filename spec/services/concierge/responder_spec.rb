@@ -193,12 +193,17 @@ RSpec.describe Concierge::Responder do
   end
 
   describe 'booking' do
-    it 'prefers the rep own link over the dealership' do
+    # Precedence is the dealer's to set, not ours to assume. A rep's own calendar
+    # winning by default was the old behaviour and was wrong: plenty of dealers
+    # run one dealership calendar on purpose. See Marketing::AssignmentPolicy.
+    it 'uses the rep own link only when the dealer has asked for that' do
       rep = User.new(booking_url: 'calendly.com/rep')
       allow(rep).to receive(:booking_url).and_return('calendly.com/rep')
-      resolved = Websites::BookingUrl.resolve(company: company, location: location, user: rep)
+      Setting.set('Company', company.id, 'operational_settings',
+                  { 'booking_assignment' => { 'mode' => 'assigned_rep' } })
 
-      expect(resolved).to eq('https://calendly.com/rep')
+      expect(Websites::BookingUrl.resolve(company: company, location: location, user: rep))
+        .to eq('https://calendly.com/rep')
     end
 
     it 'falls back to a form when nothing is configured' do
