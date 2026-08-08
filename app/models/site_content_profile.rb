@@ -61,6 +61,9 @@ class SiteContentProfile < ApplicationRecord
     preview_expires_at.present? && preview_expires_at.past?
   end
 
+  # Every session a prospect has had with the shared link.
+  has_many :site_profile_views, dependent: :destroy
+
   def shareable?
     ready? && preview_token.present? && !preview_expired?
   end

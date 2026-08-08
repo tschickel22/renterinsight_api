@@ -83,6 +83,19 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     # headers can apply. Measured in a browser on a live tenant site: the
     # relative path returned 204 while the absolute one failed to fetch, so not
     # one visit was recorded even though the endpoint worked.
+    # The concierge, which answers visitors on a dealer's own hostname.
+    resource '/concierge/*',
+             headers: :any,
+             methods: %i[post options],
+             credentials: false
+
+    # The demo link beacon, same reasoning: a shared preview can be opened from
+    # anywhere, and the token in the URL is the authorisation.
+    resource '/dv/*',
+             headers: :any,
+             methods: %i[post options],
+             credentials: false
+
     resource '/pv/*',
              headers: :any,
              methods: %i[post options],

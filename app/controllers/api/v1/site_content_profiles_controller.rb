@@ -28,7 +28,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
   before_action :require_platform_admin!, except: [:by_token]
   before_action :set_company_scope, except: [:by_token]
-  before_action :set_profile, only: %i[show destroy rotate_preview_token update]
+  before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement]
 
   def index
     profiles = SiteContentProfile.where(company_id: @company.id).order(created_at: :desc).limit(100)
@@ -177,6 +177,14 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     render json: detail(@profile)
   end
 
+  # GET /api/v1/site_content_profiles/:id/engagement
+  #
+  # Whether the prospect we sent this to has opened it, and what held their
+  # attention.
+  def engagement
+    render json: SiteProfiles::DemoEngagement.new(@profile).call
+  end
+
   def rotate_preview_token
     @profile.rotate_preview_token!
     render json: { preview_token: @profile.preview_token }
@@ -244,7 +252,10 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # The teaser travels either way, and carries no findings: enough to start
       # a conversation, not enough to act on without us. Nil when the audit
       # found nothing wrong, since there is nothing to tease.
-      seo_teaser: seo_teaser_for(profile)
+      seo_teaser: seo_teaser_for(profile),
+      # A demo is the first thing a prospect sees of us, so it carries the same
+      # credit a built site does. From the kernel, so it moves with the brand.
+      platform_brand: platform_brand
     }
   end
 
@@ -306,6 +317,13 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   # Deliberately only a count and the domain. Naming the gaps here would be the
   # report by another name, and the point of hiding it is that the findings are
   # the reason to call us.
+  def platform_brand
+    brand = Brand.current
+    { name: brand.name, url: brand.website_url }
+  rescue StandardError
+    {}
+  end
+
   def seo_teaser_for(profile)
     report = profile.seo_report
     return nil if report.blank?

@@ -31,6 +31,15 @@ Rails.application.routes.draw do
   # reserved prefixes — otherwise the tenant catch-all above answers it with the
   # page's HTML. Not under /api because it must stay reachable and uncached from
   # any custom domain.
+  # The website concierge. Public, token-scoped, same shape as the beacons.
+  post 'concierge/:token', to: 'public/concierge#create'
+  match 'concierge/:token', to: 'public/concierge#options', via: :options
+
+  # The demo link beacon. Short path for the same reason the page one is: it
+  # ships inside a bundle and is called on every design change.
+  post 'dv/:token',      to: 'public/demo_tracking#create'
+  match 'dv/:token',     to: 'public/demo_tracking#options', via: :options
+
   post 'pv/:page_id',    to: 'public/page_tracking#create'
   match 'pv/:page_id',   to: 'public/page_tracking#options', via: :options
 
@@ -749,6 +758,7 @@ Rails.application.routes.draw do
       resources :site_content_profiles, only: %i[index show create update destroy] do
         member do
           post :rotate_preview_token
+          get :engagement   # Has the prospect opened the demo, and what held them
         end
         collection do
           get :inventory_lots
