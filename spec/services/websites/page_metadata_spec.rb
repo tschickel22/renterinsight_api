@@ -35,6 +35,50 @@ RSpec.describe Websites::PageMetadata do
     end
   end
 
+  # A hero subtitle is written as a tagline, not as a search result, and it is
+  # what an unfilled page falls back to. Measured live at 62 characters.
+  describe 'short descriptions' do
+    let(:tagline) do
+      website.website_pages.create!(
+        title: 'About Us', path: '/about', order: 4,
+        blocks: [{ 'type' => 'hero', 'order' => 0, 'content' => {
+          'title' => 'About Our Family',
+          'subtitle' => 'Helping families achieve the dream of homeownership since 1998'
+        } }]
+      )
+    end
+
+    it 'names the dealership and where it is, both already on the record' do
+      location.update!(address_line1: '123 Dealer Drive', city: 'Denver', state: 'CO')
+
+      description = meta(page: tagline)[:description]
+
+      expect(description).to eq(
+        'Helping families achieve the dream of homeownership since 1998. ' \
+        'Manufactured Home Elite Site 1, Denver, CO.'
+      )
+      expect(description.length).to be >= described_class::DESCRIPTION_MIN
+    end
+
+    it 'leaves a description that is already long enough alone' do
+      page.update!(seo_description: 'A' * 120)
+
+      expect(meta(page: page)[:description]).to eq('A' * 120)
+    end
+
+    it 'does not repeat the dealership when the copy already names it' do
+      page.update!(seo_description: 'Come see Manufactured Home Elite Site 1.')
+
+      expect(meta(page: page)[:description]).to eq('Come see Manufactured Home Elite Site 1.')
+    end
+
+    it 'stays silent when there is nothing to describe' do
+      blank = website.website_pages.create!(title: 'Blank', path: '/blank', order: 5, blocks: [])
+
+      expect(meta(page: blank)[:description]).to be_nil
+    end
+  end
+
   describe 'share previews' do
     let!(:home) do
       company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',

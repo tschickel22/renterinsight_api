@@ -11,6 +11,8 @@ module Websites
   # genuinely belongs on the server.
   class PageMetadata
     DESCRIPTION_LIMIT = 300
+    # Below this a search snippet is too short to say anything useful.
+    DESCRIPTION_MIN = 70
     # Search results truncate a title around here. Past it the tail is spent
     # rather than shown.
     TITLE_LIMIT = 65
@@ -103,11 +105,36 @@ module Websites
     end
 
     def description
-      (home_description.presence ||
+      text = (home_description.presence ||
         @page&.seo_description.presence ||
         seo_config['description'].presence ||
         brand['description'].presence ||
-        derived_description).to_s.truncate(DESCRIPTION_LIMIT).presence
+        derived_description).to_s.squish.presence
+      return nil if text.blank?
+
+      qualify(text).truncate(DESCRIPTION_LIMIT).presence
+    end
+
+    # Under about 70 characters a snippet is too short to say much, and the
+    # descriptions that fall short are the derived ones: a hero subtitle is
+    # written as a tagline, not as a search result. Naming the dealership and
+    # where it is fills the line with the two things a local searcher is
+    # actually checking. Both are facts already on the record, so nothing here
+    # claims anything on the dealer's behalf.
+    def qualify(text)
+      return text if text.length >= DESCRIPTION_MIN
+
+      suffix = [site_name, dealership_locality].compact_blank.join(', ')
+      return text if suffix.blank? || text.include?(site_name.to_s)
+
+      "#{text.sub(/[.\s]+\z/, '')}. #{suffix}."
+    end
+
+    def dealership_locality
+      place = @website.location&.address_line1.present? ? @website.location : @website.try(:company)
+      return nil if place.nil?
+
+      [place.try(:city).presence, place.try(:state).presence].compact.join(', ').presence
     end
 
     # Pulls the first meaningful copy off the page so a dealer who never filled in an SEO
