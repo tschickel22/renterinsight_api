@@ -152,7 +152,7 @@ module Websites
     def home_image
       return nil if @vehicle.nil?
 
-      Array(@vehicle.try(:image_urls)).first
+      @vehicle.public_image_urls.first
     rescue StandardError
       nil
     end

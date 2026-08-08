@@ -153,7 +153,7 @@ module Websites
 
       {
         '@type' => 'Product',
-        '@id' => "#{base_url}/##{@vehicle.id}",
+        '@id' => home_url,
         'name' => name,
         'description' => @vehicle.description.to_s.truncate(300).presence,
         'sku' => @vehicle.vin.presence,
@@ -169,9 +169,16 @@ module Websites
     end
 
     def vehicle_images
-      @vehicle.try(:image_urls) || []
+      @vehicle.public_image_urls
     rescue StandardError
       []
+    end
+
+    # A home's own URL, so the entity is identified by the page that describes
+    # it. Anchoring it to the site root instead would give every home on the site
+    # a different fragment of the same identity.
+    def home_url
+      HomeUrl.url_for(@vehicle, @canonical_host) || base_url
     end
 
     def vehicle_properties
@@ -197,7 +204,7 @@ module Websites
         'availability' => availability,
         'itemCondition' => @vehicle.condition.to_s.casecmp?('used') ?
           'https://schema.org/UsedCondition' : 'https://schema.org/NewCondition',
-        'url' => base_url
+        'url' => home_url
       }
     end
 

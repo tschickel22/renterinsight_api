@@ -106,6 +106,21 @@ RSpec.describe Websites::StructuredData do
       )
     end
 
+    # The column stores [{"url" => ...}], so reading it raw yields hashes and a
+    # home's own photograph silently vanished from its markup.
+    it 'uses the home\'s own photographs' do
+      vehicle.update!(images: [{ 'url' => 'https://cdn.test/front.jpg' }])
+
+      expect(node(graph(vehicle: vehicle), 'Product')['image']).to eq(['https://cdn.test/front.jpg'])
+    end
+
+    it 'identifies the home by its own URL rather than the site root' do
+      product = node(graph(vehicle: vehicle), 'Product')
+
+      expect(product['@id']).to end_with("/homes/2026-champion-shoal-creek-#{vehicle.id}")
+      expect(product['offers']['url']).to eq(product['@id'])
+    end
+
     it 'names the home and its manufacturer' do
       product = node(graph(vehicle: vehicle), 'Product')
 
