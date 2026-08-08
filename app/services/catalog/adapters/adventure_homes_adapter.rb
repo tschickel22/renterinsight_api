@@ -70,8 +70,43 @@ module Catalog
 
       # robots.txt sets no crawl-delay, but back-to-back fetches stall the site.
       # 130 pages at 5s is ~11 minutes, which a daily schedule absorbs fine.
+      # A snapshot run touches the network zero times, so it waits for nothing.
       def crawl_delay
+        return 0 if snapshot_bound?
+
         Integer(source.config['crawl_delay'] || 5)
+      end
+
+      # SiteGround's Anti-Bot AI challenges our Render egress, so a run from the
+      # platform gets a captcha stub instead of the site. Until they allowlist
+      # us, `snapshot_key` binds a catalog captured from a machine that can
+      # reach them (see catalog:homes_snapshot:capture) and the source runs the
+      # real ingestion path against it. Clearing the key goes back to live.
+      def snapshot_key
+        source.config.is_a?(Hash) ? source.config['snapshot_key'].presence : nil
+      end
+
+      # Bound is not the same as loaded. A source pointing at a snapshot that is
+      # not stored must NOT quietly crawl instead: on Render that walks into the
+      # captcha and reports an empty catalog, while the operator believes they
+      # are running from a capture. Fail closed and say why.
+      def snapshot_bound?
+        snapshot_key.present?
+      end
+
+      def snapshot
+        return @snapshot if defined?(@snapshot)
+
+        @snapshot = snapshot_key ? HomesSnapshot.read(snapshot_key) : nil
+      end
+
+      # Surfaced to the admin so a snapshot-backed run is never mistaken for a
+      # live crawl of the manufacturer.
+      def snapshot_info
+        return nil if snapshot.blank?
+
+        { 'key' => snapshot_key, 'captured_at' => snapshot['captured_at'],
+          'home_count' => Array(snapshot['homes']).size }
       end
 
       def user_agent
@@ -80,18 +115,30 @@ module Catalog
 
       def discover(limit: nil)
         @urls ||= {}
-        keys = discover_from_sitemap
-        keys = discover_from_rest if keys.empty?
+        keys = if snapshot_bound?
+                 snapshot.present? ? snapshot_keys : warn_missing_snapshot
+               else
+                 discover_from_sitemap.presence || discover_from_rest
+               end
         limit ? keys.first(limit) : keys
       end
 
       def fetch(key)
+        if snapshot_bound?
+          home = snapshot.present? ? snapshot_homes[key.to_s] : nil
+          return home && { key: key.to_s, snapshot: home }
+        end
+
         url  = (@urls || {})[key] || "#{site_root}#{DETAIL_PATH}#{key}/"
         html = http_get(url)
         { key: key.to_s, url: url, html: html }
       end
 
       def parse(raw)
+        # A snapshot already holds parsed homes, so rebuild rather than re-run
+        # extractors that have no page to read.
+        return NormalizedHome.from_h(raw[:snapshot]) if raw[:snapshot].present?
+
         doc = raw[:html].present? ? Nokogiri::HTML(raw[:html]) : nil
         # "Related Floor Plan" repeats OTHER models' cards, images and spec
         # lists inside the same container. Drop it before anything reads the
@@ -125,6 +172,15 @@ module Catalog
       end
 
       def diagnostics
+        if snapshot_key.present?
+          return { adapter: 'adventure_homes', mode: 'snapshot', snapshot_key: snapshot_key,
+                   snapshot_found: snapshot.present?,
+                   home_count: Array(snapshot&.[]('homes')).size,
+                   captured_at: snapshot&.[]('captured_at'),
+                   note: snapshot.present? ? 'Running from a captured catalog, not a live crawl.' :
+                         "Snapshot '#{snapshot_key}' is bound but not stored — re-upload it." }
+        end
+
         url   = sitemap_url
         probe = http_probe(url, accept: 'application/xml,text/xml')
         out = {
@@ -152,6 +208,25 @@ module Catalog
       end
 
       private
+
+      def warn_missing_snapshot
+        Rails.logger.warn "[#{self.class.name}] snapshot '#{snapshot_key}' is bound but not stored; " \
+                          'refusing to crawl instead. Re-upload it, or clear snapshot_key to go live.'
+        []
+      end
+
+      # source_key => stored home hash, in capture order.
+      def snapshot_homes
+        @snapshot_homes ||= Array(snapshot['homes']).each_with_object({}) do |home, map|
+          h = home.deep_stringify_keys
+          key = h['source_key'].to_s
+          map[key] = h if key.present?
+        end
+      end
+
+      def snapshot_keys
+        snapshot_homes.keys
+      end
 
       def discover_from_sitemap
         body = http_get(sitemap_url, accept: 'application/xml,text/xml')
