@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_08_030733) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_08_180600) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -6005,6 +6005,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_08_030733) do
     t.boolean "is_internal", default: false, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "timezone"
+    t.string "locale"
     t.index ["site_content_profile_id", "session_token"], name: "idx_profile_views_session", unique: true
     t.index ["site_content_profile_id", "visitor_token"], name: "idx_on_site_content_profile_id_visitor_token_e8312fc8a9"
     t.index ["site_content_profile_id"], name: "index_site_profile_views_on_site_content_profile_id"

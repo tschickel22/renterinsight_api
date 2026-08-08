@@ -27,6 +27,9 @@ module SiteProfiles
         # opened it" and "nobody opened it" are different conversations.
         internal_opens: internal.count,
         designs: designs,
+        # Distinct zones among prospect sessions. Two or more is the signal that
+        # a demo has been passed around rather than looked at once.
+        timezones: sessions.where.not(timezone: [nil, '']).distinct.pluck(:timezone),
         sessions: recent_sessions
       }
     end
@@ -69,6 +72,13 @@ module SiteProfiles
           view_events: view.view_events,
           device_type: view.device_type,
           referrer: view.referrer,
+          # Where they were, roughly. A rep in Denver can pick their own testing
+          # out of a list at a glance, and two different zones on one demo means
+          # more than one person has looked.
+          timezone: view.timezone,
+          # A stable handle for the same browser across sessions, so repeat
+          # visits are visibly the same person without naming them.
+          viewer: view.visitor_token.to_s.first(6),
           designs: view.templates_viewed.to_h.keys
         }
       end

@@ -30,6 +30,10 @@ module Public
           referrer: params[:referrer].presence&.slice(0, 500),
           device_type: device_type,
           ip_hash: ip_hash,
+          # Reported by the browser, so no lookup and no raw address. Tells a
+          # rep their own sessions apart from a prospect's at a glance.
+          timezone: params[:timezone].presence&.slice(0, 60),
+          locale: params[:locale].presence&.slice(0, 20),
           is_internal: ActiveModel::Type::Boolean.new.cast(params[:internal])
         }
       )

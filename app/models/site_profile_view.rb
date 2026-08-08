@@ -29,6 +29,8 @@ class SiteProfileView < ApplicationRecord
       v.referrer = attributes[:referrer]
       v.device_type = attributes[:device_type]
       v.ip_hash = attributes[:ip_hash]
+      v.timezone = attributes[:timezone]
+      v.locale = attributes[:locale]
       v.is_internal = attributes[:is_internal].present?
     end
 
