@@ -28,7 +28,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
   before_action :require_platform_admin!, except: [:by_token]
   before_action :set_company_scope, except: [:by_token]
-  before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement]
+  before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement run_seo_audit]
 
   def index
     profiles = SiteContentProfile.where(company_id: @company.id).order(created_at: :desc).limit(100)
@@ -183,6 +183,16 @@ class Api::V1::SiteContentProfilesController < ApplicationController
   # attention.
   def engagement
     render json: SiteProfiles::DemoEngagement.new(@profile).call
+  end
+
+  # POST /api/v1/site_content_profiles/:id/run_seo_audit
+  #
+  # For a demo scanned before the audit existed, or one worth re-grading after
+  # the dealer has acted on it. Re-reads the pages the scan recorded rather than
+  # rescanning, so the demo's content and its shared link are untouched.
+  def run_seo_audit
+    SiteProfileAuditJob.perform_later(@profile.id)
+    render json: { status: 'running' }, status: :accepted
   end
 
   def rotate_preview_token

@@ -764,6 +764,7 @@ Rails.application.routes.draw do
         member do
           post :rotate_preview_token
           get :engagement   # Has the prospect opened the demo, and what held them
+          post :run_seo_audit  # Grade a site scanned before the audit existed
         end
         collection do
           get :inventory_lots
