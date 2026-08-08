@@ -16,7 +16,7 @@ module Concierge
       hours: /\b(hours?|open|close|closing|opening|what time|when.*(open|close))\b/i,
       location: /\b(where|address|located|location|directions|find you|come see)\b/i,
       phone: /\b(phone|call|number|contact you|reach you|talk to someone)\b/i,
-      financing: /\b(financ|loan|credit|payment plan|mortgage|lender|apply|approv|down payment)\b/i,
+      financing: /\b(financ|loan|credit|payment plan|mortgage|lender|apply|approv|down payment|interest|rate|apr|qualify|afford)\b/i,
       delivery: /\b(deliver|install|set ?up|transport|haul|move it|foundation)\b/i,
       booking: /\b(appointment|book|schedule|tour|visit|come by|walk through|see it in person|meet)\b/i,
       greeting: /\A\s*(hi|hey|hello|good (morning|afternoon|evening))\b[\s!.,]*\z/i
@@ -57,14 +57,20 @@ module Concierge
         actions: [book_action] }
     end
 
+    # When a fact is missing, say so from here rather than escalating. Paying a
+    # model call to discover we do not know our own opening hours is the exact
+    # spend this tier exists to avoid, and the honest answer is the same either
+    # way.
     def answer_hours
-      return nil if facts[:hours].blank?
+      return { text: "I don't have our hours listed here. The team can confirm them.",
+               actions: [book_action] } if facts[:hours].blank?
 
       { text: "Our hours are #{facts[:hours]}.", actions: [book_action] }
     end
 
     def answer_location
-      return nil if facts[:address].blank?
+      return { text: "I don't have our address listed here, but the team can point you to us.",
+               actions: [book_action] } if facts[:address].blank?
 
       { text: "We're at #{facts[:address]}.",
         actions: [{ type: 'link', label: 'Get directions',
@@ -72,7 +78,9 @@ module Concierge
     end
 
     def answer_phone
-      return nil if facts[:phone].blank?
+      return { text: 'I do not have a number listed here. Leave your details and someone will ' \
+                     'call you straight back.',
+               actions: [{ type: 'form', label: 'Request a callback', path: @lead_form_path || '/contact' }] } if facts[:phone].blank?
 
       { text: "You can reach us on #{facts[:phone]}.",
         actions: [{ type: 'link', label: 'Call now', url: "tel:#{facts[:phone].gsub(/[^\d+]/, '')}" }] }

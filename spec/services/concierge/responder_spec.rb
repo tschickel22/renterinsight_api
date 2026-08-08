@@ -52,12 +52,31 @@ RSpec.describe Concierge::Responder do
     end
 
     # Financing is the one where a wrong answer creates a promise the dealer has
-    # to honour, so it is answered from a fixed script and handed off.
+    # to honour, so it must never depend on the model being well behaved. The
+    # word "rate" alone was missing from the pattern and this reached the model
+    # in real traffic.
     it 'never quotes a rate or an approval' do
-      text = ask('what interest rate can I get?').text
+      ['what interest rate can I get?', 'what APR do you offer', 'would I qualify?',
+       'can I afford one?'].each do |question|
+        result = ask(question)
 
-      expect(text).not_to match(/\d+(\.\d+)?\s*%/)
-      expect(text).to match(/team|talk/i)
+        expect(result.source).to eq('rules'), "#{question.inspect} escalated"
+        expect(result.text).not_to match(/\d+(\.\d+)?\s*%/)
+      end
+    end
+
+    # Paying a model call to discover we do not know our own phone number is
+    # exactly the spend this tier exists to avoid, and the honest answer is the
+    # same either way.
+    it 'says a missing fact is missing without escalating' do
+      bare = Company.create!(name: 'No Details Co')
+      site = Website.create!(company_id: bare.id, location_id: bare.locations.create!(name: 'L').id,
+                             name: 'Bare', slug: "s-#{SecureRandom.hex(4)}")
+
+      result = described_class.new(website: site, message: 'what is your phone number?').call
+
+      expect(result.source).to eq('rules')
+      expect(result.actions.first[:type]).to eq('form')
     end
   end
 
