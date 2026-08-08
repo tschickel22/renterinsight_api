@@ -60,6 +60,27 @@ module Public
       render html: inject_head(html).html_safe, content_type: 'text/html' # rubocop:disable Rails/OutputSafety
     end
 
+    # Crawlers a dealer gains nothing from.
+    #
+    # Competitor platforms and the listing aggregators that scrape a dealer's
+    # inventory to resell it back to them. None of these send buyers; they read
+    # the site to pitch against it or to repackage its stock.
+    #
+    # Two things this is NOT. It is not a blocklist for search engines or the AI
+    # assistants buyers actually ask: Google, Bing, GPTBot and friends are
+    # deliberately absent, because being read by them is the entire point of
+    # everything else here. And it is not enforcement. robots.txt is a request,
+    # honoured by well-behaved crawlers and ignored by anyone determined, so
+    # this raises the cost rather than closing the door. Real blocking is a
+    # Cloudflare rule on the zone, which is a deliberate decision with its own
+    # risk of catching something legitimate.
+    UNWELCOME_CRAWLERS = %w[
+      TroveBot Trove
+      ManufacturedHomesBot MHVillageBot
+      SemrushBot AhrefsBot MJ12bot DotBot BLEXBot DataForSeoBot
+      Screaming\ Frog\ SEO\ Spider SEOkicks SerpstatBot
+    ].freeze
+
     # GET /robots.txt on a tenant hostname.
     #
     # Served per site rather than from a static file: an unpublished or noindex site must
@@ -72,6 +93,8 @@ module Public
       end
 
       body = <<~ROBOTS
+        #{UNWELCOME_CRAWLERS.map { |ua| "User-agent: #{ua}\nDisallow: /" }.join("\n\n")}
+
         User-agent: *
         Allow: /
 

@@ -61,9 +61,21 @@ RSpec.describe SiteProfiles::SeoAudit do
       expect(check(report, 'sitemap')['status']).to eq('fail')
     end
 
+    # Under 40 rather than under 30, because several checks pass by absence: a
+    # page with no scripts has nothing render-blocking and a tiny page is not
+    # heavy. Those are genuinely not problems, so they earn their weight, and a
+    # site missing its title, description, schema and sitemap still lands
+    # nowhere near a passing score.
     it 'counts the gaps and scores the site' do
       expect(report['gap_count']).to be > 5
-      expect(report['score']).to be < 30
+      expect(report['score']).to be < 40
+    end
+
+    # A number with no stated basis invites more trust than it has earned, and
+    # this one travels to dealers.
+    it 'says what the score is and is not' do
+      expect(report['score_explainer']).to match(/not a Google ranking/i)
+      expect(report['score_explainer']).to match(/does not guarantee traffic/i)
     end
 
     it 'names the domain the report is about' do

@@ -60,13 +60,15 @@ RSpec.describe 'Public::PageTracking', type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
-  # Only landing pages carry tracking. An ordinary site page is a different
-  # surface and would otherwise become a way to write rows for any website.
-  it '404s for an ordinary site page' do
+  # This used to be restricted to landing pages, which is why page_visits held
+  # nothing for dealer sites. An inventory page raises the same questions a
+  # landing page does, and they are answered by the same records.
+  it 'accepts an ordinary site page' do
     ordinary = site.website_pages.create!(title: 'About', path: '/about')
     beacon(payload, page_id: ordinary.id)
 
-    expect(response).to have_http_status(:not_found)
+    expect(response).to have_http_status(:no_content)
+    expect(PageVisit.where(website_page_id: ordinary.id)).to exist
   end
 
   it '404s for a soft-deleted landing page' do

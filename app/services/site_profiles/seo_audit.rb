@@ -19,6 +19,27 @@ module SiteProfiles
   class SeoAudit
     SEVERITY_ORDER = { 'fail' => 0, 'warn' => 1, 'pass' => 2 }.freeze
 
+    # Said in the report itself, because a number with no stated basis invites
+    # more trust than it has earned. Deliberately names the limits: a reader who
+    # discovers them later stops believing the parts that were true.
+    SCORE_EXPLAINER = <<~TEXT.squish
+      This score measures how well a website is built for search engines and AI
+      assistants to read: whether each page describes itself, whether homes and
+      the dealership are marked up in a form Google can use, and whether the
+      site can be crawled at all. It is our own rubric, not a Google ranking,
+      and it does not measure content quality, backlinks, reviews or how a site
+      currently ranks. A high score does not guarantee traffic. What it does
+      show is whether the technical foundation is in place, which is the part
+      most dealer websites get wrong and the part that has to be right before
+      anything else works.
+    TEXT
+
+    # A phone-sized viewport is the single most consequential tag on this list:
+    # Google indexes the mobile page, and without it the desktop layout is what
+    # gets judged.
+    MIN_WORDS_PER_PAGE = 150
+    HEAVY_PAGE_BYTES = 600_000
+
     # Below this a title gets truncated in results; above it, wasted.
     TITLE_MIN = 15
     TITLE_MAX = 65
@@ -60,6 +81,12 @@ module SiteProfiles
         heading_check,
         social_preview_check,
         image_alt_check,
+        mobile_viewport_check,
+        thin_content_check,
+        render_blocking_check,
+        page_weight_check,
+        mixed_content_check,
+        language_check,
         robots_check,
         sitemap_check,
         crawlability_check
@@ -72,6 +99,7 @@ module SiteProfiles
         'pages_checked' => @pages_html.size,
         'from_archive' => @from_archive,
         'score' => score(checks),
+        'score_explainer' => SCORE_EXPLAINER,
         'gap_count' => checks.count { |c| c.status != 'pass' },
         'checks' => checks.sort_by { |c| [SEVERITY_ORDER.fetch(c.status, 3), -c.weight.to_i] }
                           .map(&:to_h)
@@ -84,7 +112,7 @@ module SiteProfiles
       {
         'generated_at' => Time.current.iso8601, 'source_url' => @source_url,
         'domain' => domain, 'pages_checked' => 0, 'from_archive' => @from_archive,
-        'score' => nil, 'gap_count' => 0, 'checks' => []
+        'score' => nil, 'score_explainer' => SCORE_EXPLAINER, 'gap_count' => 0, 'checks' => []
       }
     end
 
@@ -309,6 +337,90 @@ module SiteProfiles
         pass_check('image_alt', 'Image alt text', 4,
                    "#{100 - share}% of images describe themselves")
       end
+    end
+
+    # Google indexes the mobile version of a page. Without this tag it renders
+    # the desktop layout at phone width and judges that.
+    def mobile_viewport_check
+      missing = docs.reject { |_, doc| doc.at_css("meta[name='viewport']") }.keys
+      return pass_check('mobile_viewport', 'Mobile viewport', 7, 'Every page declares a mobile viewport') if missing.empty?
+
+      fail_check('mobile_viewport', 'Mobile viewport', 7,
+                 "#{missing.size} #{pluralize_pages(missing.size)} with no mobile viewport tag",
+                 'Google indexes the mobile version of a page. Without this tag the desktop ' \
+                 'layout is what gets rendered and judged on a phone.', missing)
+    end
+
+    # Thin pages are the most common reason a real page never ranks: there is
+    # not enough on it for a search engine to decide what it is about.
+    def thin_content_check
+      thin = docs.select { |_, doc| body_words(doc) < MIN_WORDS_PER_PAGE }.keys
+      return pass_check('thin_content', 'Page content', 6, 'Every page carries enough copy to rank') if thin.empty?
+
+      warn_check('thin_content', 'Page content', 6,
+                 "#{thin.size} #{pluralize_pages(thin.size)} with very little text",
+                 "Under #{MIN_WORDS_PER_PAGE} words there is rarely enough for a search engine to " \
+                 'decide what a page is about, so it tends not to rank for anything.', thin)
+    end
+
+    # A proxy for speed from the HTML alone. Not Core Web Vitals, but a blocking
+    # script in the head delays first paint on every page on every visit.
+    def render_blocking_check
+      offenders = docs.select do |_, doc|
+        doc.css('head script[src]').any? { |n| n['async'].nil? && n['defer'].nil? }
+      end.keys
+      return pass_check('render_blocking', 'Render blocking scripts', 4, 'Nothing blocks first paint') if offenders.empty?
+
+      warn_check('render_blocking', 'Render blocking scripts', 4,
+                 "#{offenders.size} #{pluralize_pages(offenders.size)} load a script before the page can paint",
+                 'A script in the head without async or defer holds up the first paint on every ' \
+                 'visit, which is felt most on a phone.', offenders)
+    end
+
+    def page_weight_check
+      heavy = @pages_html.select { |_, html| html.to_s.bytesize > HEAVY_PAGE_BYTES }.keys
+      return pass_check('page_weight', 'Page weight', 4, 'Pages are a reasonable size') if heavy.empty?
+
+      warn_check('page_weight', 'Page weight', 4,
+                 "#{heavy.size} #{pluralize_pages(heavy.size)} over #{HEAVY_PAGE_BYTES / 1000}KB of HTML",
+                 'Heavy pages are slow on a phone and on a rural connection, which is where a lot ' \
+                 'of manufactured home buyers are.', heavy)
+    end
+
+    # An insecure asset on a secure page makes a browser show a warning, which
+    # costs trust at exactly the wrong moment.
+    def mixed_content_check
+      offenders = docs.select do |url, doc|
+        next false unless url.to_s.start_with?('https://')
+
+        doc.css('img[src], script[src], link[href]').any? { |n| (n['src'] || n['href']).to_s.start_with?('http://') }
+      end.keys
+      return pass_check('mixed_content', 'Secure assets', 5, 'Everything loads over https') if offenders.empty?
+
+      fail_check('mixed_content', 'Secure assets', 5,
+                 "#{offenders.size} #{pluralize_pages(offenders.size)} load something over insecure http",
+                 'A browser flags an insecure asset on a secure page, and a visitor deciding ' \
+                 'whether to hand over their details sees that warning.', offenders)
+    end
+
+    def language_check
+      missing = docs.reject { |_, doc| doc.at_css('html')&.[]('lang').present? }.keys
+      return pass_check('language', 'Page language', 2, 'Pages declare their language') if missing.empty?
+
+      warn_check('language', 'Page language', 2,
+                 "#{missing.size} #{pluralize_pages(missing.size)} do not declare a language",
+                 'Search engines use this to decide which audience a page is for, and screen ' \
+                 'readers use it to choose a voice.', missing)
+    end
+
+    def body_words(doc)
+      body = doc.at_css('body')
+      return 0 if body.nil?
+
+      body.css('script, style, noscript').each(&:remove)
+      body.text.to_s.split(/\s+/).reject(&:blank?).size
+    rescue StandardError
+      0
     end
 
     def robots_check
