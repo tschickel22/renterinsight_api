@@ -354,7 +354,8 @@ module SiteProfiles
     # Thin pages are the most common reason a real page never ranks: there is
     # not enough on it for a search engine to decide what it is about.
     def thin_content_check
-      thin = docs.select { |_, doc| body_words(doc) < MIN_WORDS_PER_PAGE }.keys
+      thin = docs.reject { |url, _| utility_page?(url) }
+                 .select { |_, doc| body_words(doc) < MIN_WORDS_PER_PAGE }.keys
       return pass_check('thin_content', 'Page content', 6, 'Every page carries enough copy to rank') if thin.empty?
 
       warn_check('thin_content', 'Page content', 6,
@@ -363,11 +364,39 @@ module SiteProfiles
                  'decide what a page is about, so it tends not to rank for anything.', thin)
     end
 
+    # A contact page's job is an address, a phone number, hours and a form. A
+    # privacy policy's job is to be accurate. Neither is trying to rank for a
+    # search term, and a word count is the wrong instrument for both: a complete
+    # contact page routinely lands near a hundred words and is not deficient.
+    #
+    # This is the same class of defect as flagging a deferred module script for
+    # blocking render. A report that flags something every competent site does
+    # reads as a form letter, and the one finding a prospect can personally check
+    # is the one that decides whether they believe the rest of it.
+    UTILITY_PATHS = /
+      contact | privacy | terms | legal | disclaimer | accessibility |
+      thank[-_]?you | directions | hours | careers | returns | warranty
+    /xi
+
+    def utility_page?(url)
+      path = URI.parse(url.to_s).path.to_s
+      path.match?(UTILITY_PATHS)
+    rescue URI::InvalidURIError
+      false
+    end
+
     # A proxy for speed from the HTML alone. Not Core Web Vitals, but a blocking
     # script in the head delays first paint on every page on every visit.
     def render_blocking_check
       offenders = docs.select do |_, doc|
-        doc.css('head script[src]').any? { |n| n['async'].nil? && n['defer'].nil? }
+        doc.css('head script[src]').any? do |n|
+          # type="module" is deferred by spec, so it does not block. Missing
+          # that flagged every modern site, including our own dealers', which
+          # is the kind of false finding that discredits the whole report.
+          next false if n['type'].to_s.casecmp?('module')
+
+          n['async'].nil? && n['defer'].nil?
+        end
       end.keys
       return pass_check('render_blocking', 'Render blocking scripts', 4, 'Nothing blocks first paint') if offenders.empty?
 

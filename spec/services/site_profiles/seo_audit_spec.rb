@@ -181,6 +181,41 @@ RSpec.describe SiteProfiles::SeoAudit do
     end
   end
 
+  # Same class of defect as flagging a deferred module script for blocking
+  # render: a finding that fires on something every competent site does reads as
+  # a form letter, and it is the finding a prospect can personally check.
+  describe 'pages that are short on purpose' do
+    def page_with(words)
+      "<html><head><title>A page with a perfectly good title</title></head>" \
+        "<body><h1>Heading</h1><p>#{(['word'] * words).join(' ')}</p></body></html>"
+    end
+
+    it 'does not call a complete contact page thin' do
+      report = audit({ 'https://dealer.com/' => page_with(400),
+                       'https://dealer.com/contact' => page_with(60) })
+
+      expect(check(report, 'thin_content')['status']).to eq('pass')
+    end
+
+    it 'leaves privacy and terms alone too' do
+      report = audit({ 'https://dealer.com/' => page_with(400),
+                       'https://dealer.com/privacy-policy' => page_with(40),
+                       'https://dealer.com/terms' => page_with(40) })
+
+      expect(check(report, 'thin_content')['status']).to eq('pass')
+    end
+
+    # The exemption is for pages whose job is not to rank. A brochure page with
+    # nothing on it is still the most common reason a real page never ranks.
+    it 'still flags a page that was meant to rank' do
+      report = audit({ 'https://dealer.com/' => page_with(400),
+                       'https://dealer.com/inventory' => page_with(30) })
+
+      expect(check(report, 'thin_content')['status']).to eq('warn')
+      expect(check(report, 'thin_content')['urls']).to eq(['https://dealer.com/inventory'])
+    end
+  end
+
   it 'returns an empty report rather than raising when nothing was scanned' do
     report = audit({})
 
