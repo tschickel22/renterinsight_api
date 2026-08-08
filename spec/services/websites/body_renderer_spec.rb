@@ -197,6 +197,64 @@ RSpec.describe Websites::BodyRenderer do
     end
   end
 
+  # The contact page rendered 55 words on a live site while carrying hours, a
+  # phone number and an address, because the text block stores its whole body
+  # under "html" and the map block was skipped wholesale.
+  describe 'contact details' do
+    let(:contact_page) do
+      website.website_pages.create!(
+        title: 'Contact', path: '/contact', order: 11,
+        blocks: [
+          { 'type' => 'map', 'order' => 0, 'content' => {
+            'title' => 'Visit Our Showroom',
+            'address' => '123 Dealer Drive, Your City, ST 12345',
+            'embedUrl' => 'https://maps.example/embed'
+          } },
+          { 'type' => 'text', 'order' => 1, 'content' => {
+            'html' => '<h2>Hours</h2><div style="display: grid"><p><strong>Phone:</strong> ' \
+                      '(555) 123-4567</p></div>'
+          } }
+        ]
+      )
+    end
+
+    subject(:html) { render(page: contact_page) }
+
+    it 'keeps the street address that the map block was throwing away' do
+      expect(html).to include('123 Dealer Drive, Your City, ST 12345')
+    end
+
+    it 'renders authored rich text instead of dropping it' do
+      expect(html).to include('Hours')
+      expect(html).to include('(555) 123-4567')
+    end
+
+    it 'keeps the structure and drops the builder\'s inline styling' do
+      expect(html).to include('<h2>Hours</h2>')
+      expect(html).to include('<strong>Phone:</strong>')
+      expect(html).not_to include('display: grid')
+    end
+
+    it 'never emits a second h1 from authored copy' do
+      page = website.website_pages.create!(
+        title: 'Rich', path: '/rich', order: 12,
+        blocks: [{ 'type' => 'text', 'order' => 0, 'content' => { 'html' => '<h1>Second</h1>' } }]
+      )
+
+      expect(render(page: page).scan('<h1').size).to eq(1)
+    end
+
+    it 'cannot be scripted through authored html' do
+      page = website.website_pages.create!(
+        title: 'Nasty', path: '/nasty', order: 13,
+        blocks: [{ 'type' => 'text', 'order' => 0,
+                   'content' => { 'html' => '<p>ok</p><script>alert(1)</script>' } }]
+      )
+
+      expect(render(page: page)).not_to include('<script>')
+    end
+  end
+
   describe 'escaping' do
     it 'cannot be broken out of by a dealer\'s own copy' do
       nasty = website.website_pages.create!(

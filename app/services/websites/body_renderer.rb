@@ -27,14 +27,31 @@ module Websites
   class BodyRenderer
     # Where a heading lives, in preference order.
     TITLE_KEYS = %w[title heading headline name].freeze
-    # Where prose lives.
-    TEXT_KEYS = %w[subtitle description body text caption answer content blurb].freeze
+    # Where prose lives. The contact keys are here because a dealer's address,
+    # phone and hours are the highest value text on the site for local search,
+    # and they were being dropped: they live on block types that carry no
+    # "description".
+    TEXT_KEYS = %w[subtitle description body text caption answer content blurb
+                   address phone email hours].freeze
+    # Rich text authored in the builder's editor. The text block stores its whole
+    # body under "html", which no text key matched, so a contact page's hours,
+    # phone number and address never reached a crawler at all.
+    RICH_TEXT_KEYS = %w[html bodyHtml contentHtml].freeze
+    # Structure worth keeping from that editor. Everything else, including the
+    # inline grid styling the builder emits, is dropped.
+    ALLOWED_TAGS = %w[h2 h3 h4 p ul ol li strong em b i br a blockquote].freeze
+    ALLOWED_ATTRS = %w[href].freeze
     # Keys whose value is a list of sub-items worth rendering.
     LIST_KEYS = %w[features items faqs questions steps stats members testimonials
                    cards columns benefits services points].freeze
     # Blocks whose content is interactive and cannot be represented as text.
     # Filtering, sorting and paging are JavaScript by nature.
-    SKIP_TYPES = %w[inventorySearch inventory_search calculator map video
+    #
+    # The map used to be here, which threw away the street address with the
+    # embed. The embed is worthless to a crawler and the address is the single
+    # most valuable line on a dealer's contact page, so the block stays and only
+    # its embed URL is ignored.
+    SKIP_TYPES = %w[inventorySearch inventory_search calculator video
                     blogList logoShowcase].freeze
     # Rendered as a plain list of the homes actually on the lot. This used to be
     # skipped on the reasoning that the per-home pages in the sitemap were its
@@ -338,6 +355,14 @@ module Websites
           parts << "<p>#{esc(value)}</p>\n" if value.is_a?(String) && value.strip.present?
         end
 
+        RICH_TEXT_KEYS.each do |key|
+          value = content[key]
+          next unless value.is_a?(String) && value.strip.present?
+
+          safe = sanitize_rich_text(value)
+          parts << "#{safe}\n" if safe.present?
+        end
+
         parts << render_items(content)
         parts << render_images(content, title)
       end
@@ -405,6 +430,17 @@ module Websites
       "<nav><ul>\n#{links.join("\n")}\n</ul></nav>\n"
     rescue StandardError
       ''
+    end
+
+    # Keeps the headings and lists a dealer wrote, drops everything else. An h1
+    # inside authored copy is demoted rather than removed, because two h1 tags on
+    # a page is exactly what our own audit fails a site for.
+    def sanitize_rich_text(html)
+      demoted = html.gsub(%r{<(/?)h1(\s|>)}i, '<\1h2\2')
+
+      ActionController::Base.helpers.sanitize(
+        demoted, tags: ALLOWED_TAGS, attributes: ALLOWED_ATTRS
+      ).to_s.strip.presence
     end
 
     def first_value(hash, keys)
