@@ -28,7 +28,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
   before_action :require_platform_admin!, except: [:by_token]
   before_action :set_company_scope, except: [:by_token]
-  before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement run_seo_audit]
+  before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement run_seo_audit seo_report_pdf]
 
   def index
     profiles = SiteContentProfile.where(company_id: @company.id).order(created_at: :desc).limit(100)
@@ -195,6 +195,21 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     render json: { status: 'running' }, status: :accepted
   end
 
+  # GET /api/v1/site_content_profiles/:id/seo_report.pdf
+  #
+  # Our assessment of the prospect's site, branded as ours. Authenticated on
+  # purpose: this is the internal view, and show_seo_report governs only what a
+  # client sees on the shared demo.
+  def seo_report_pdf
+    return render json: { error: 'No review has been run yet' }, status: :not_found if @profile.seo_report.blank?
+
+    # Internal by default. The client version is the one a rep would actually
+    # leave behind, so asking for it has to be deliberate.
+    audience = params[:audience].to_s == 'client' ? :client : :internal
+    pdf = SiteProfiles::SeoReportPdf.new(@profile, audience: audience)
+    send_data pdf.render, filename: pdf.filename, type: 'application/pdf', disposition: 'attachment'
+  end
+
   def rotate_preview_token
     @profile.rotate_preview_token!
     render json: { preview_token: @profile.preview_token }
@@ -257,8 +272,11 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # So the logo strip shows the brands this lot actually carries rather
       # than every mark we happen to host.
       manufacturers: manufacturers_for(profile),
-      # The findings themselves only travel when the admin allowed it.
-      seo_report: profile.show_seo_report ? profile.seo_report : nil,
+      # The findings only travel when the admin allowed it, and even then in the
+      # client view: category, severity and counts, without the page addresses
+      # or the fix-shaped detail. Handing a prospect a work order lets their
+      # incumbent fix it for free and removes the reason to switch.
+      seo_report: profile.show_seo_report ? SiteProfiles::SeoReportView.client(profile.seo_report) : nil,
       # The teaser travels either way, and carries no findings: enough to start
       # a conversation, not enough to act on without us. Nil when the audit
       # found nothing wrong, since there is nothing to tease.
