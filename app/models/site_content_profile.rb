@@ -77,6 +77,32 @@ class SiteContentProfile < ApplicationRecord
     preview_template_ids.presence
   end
 
+  # What the header on a shared demo says about the prospect's own site, if
+  # anything.
+  #
+  # Three states, in order of how much the prospect sees:
+  #   show_seo_report            the full client report
+  #   show_seo_teaser            a header line naming the number of gaps
+  #   neither                    nothing at all
+  #
+  # The third exists because the teaser assumes the findings are always a reason
+  # to switch. On a site that already scores well they argue the opposite, and
+  # "we found 2 gaps" is a case for staying put. Whether the findings help is a
+  # judgement call per prospect, so it is a setting rather than a rule.
+  #
+  # @return [Hash, nil] the teaser payload, or nil when nothing should be shown
+  def seo_teaser
+    return nil if seo_report.blank?
+    return nil if show_seo_report
+    return nil unless show_seo_teaser
+
+    gaps = seo_report['gap_count'].to_i
+    # A site with nothing wrong has no teaser to write.
+    return nil if gaps.zero?
+
+    { gap_count: gaps, domain: seo_report['domain'], score: seo_report['score'] }
+  end
+
   def integrations_by_disposition
     Array(profile['integrations']).group_by { |i| i['disposition'] }
   end

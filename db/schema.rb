@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_08_180600) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_08_233811) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5963,6 +5963,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_08_180600) do
     t.string "suggested_subdomain"
     t.jsonb "seo_report"
     t.boolean "show_seo_report", default: true, null: false
+    t.boolean "show_seo_teaser", default: true, null: false
     t.index ["company_id", "status"], name: "index_site_content_profiles_on_company_id_and_status"
     t.index ["company_id"], name: "index_site_content_profiles_on_company_id"
     t.index ["created_by_id"], name: "index_site_content_profiles_on_created_by_id"

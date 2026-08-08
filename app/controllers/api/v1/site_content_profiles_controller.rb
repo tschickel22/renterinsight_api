@@ -172,7 +172,11 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       suggested_subdomain: params.key?(:suggested_subdomain) ? normalized_subdomain(params[:suggested_subdomain]) : @profile.suggested_subdomain,
       # Governs the CLIENT's view only. The audit still ran and the admin can
       # still read it; see summary.
-      show_seo_report: params.key?(:show_seo_report) ? ActiveModel::Type::Boolean.new.cast(params[:show_seo_report]) : @profile.show_seo_report
+      show_seo_report: params.key?(:show_seo_report) ? ActiveModel::Type::Boolean.new.cast(params[:show_seo_report]) : @profile.show_seo_report,
+      # And whether the header teaser survives the report being hidden. On a
+      # site that already scores well the teaser argues for the incumbent, so
+      # hiding the findings entirely has to be possible.
+      show_seo_teaser: params.key?(:show_seo_teaser) ? ActiveModel::Type::Boolean.new.cast(params[:show_seo_teaser]) : @profile.show_seo_teaser
     )
     render json: detail(@profile)
   end
@@ -352,19 +356,10 @@ class Api::V1::SiteContentProfilesController < ApplicationController
     {}
   end
 
+  # Lives on the model: this rule decides what a prospect sees, so it needs to
+  # be testable without standing up a request.
   def seo_teaser_for(profile)
-    report = profile.seo_report
-    return nil if report.blank?
-
-    gaps = report['gap_count'].to_i
-    return nil if gaps.zero?
-    return nil if profile.show_seo_report
-
-    {
-      gap_count: gaps,
-      domain: report['domain'],
-      score: report['score']
-    }
+    profile.seo_teaser
   end
 
   def normalized_subdomain(value)
@@ -413,7 +408,8 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       # Always present for an admin regardless of show_seo_report: the toggle
       # decides what the prospect sees, not what we can see.
       seo_report: profile.seo_report,
-      show_seo_report: profile.show_seo_report
+      show_seo_report: profile.show_seo_report,
+      show_seo_teaser: profile.show_seo_teaser
     }
   end
 
