@@ -92,6 +92,17 @@ module SiteProfiles
                size: 10
       pdf.move_down 4
 
+      # Before the findings, not after. A reader who only takes in the first
+      # paragraph should still leave knowing what is wrong and what it costs,
+      # and on a skimmed page that is most readers.
+      overview = SeoReportSummary.call(@report)
+      if overview.present?
+        pdf.move_down 8
+        pdf.fill_color INK
+        pdf.text overview, size: 10.5, leading: 2
+        pdf.move_down 2
+      end
+
       # Said plainly rather than buried, since it changes how much of this to
       # trust and a reader deserves to know before the findings.
       if @report['from_archive']
