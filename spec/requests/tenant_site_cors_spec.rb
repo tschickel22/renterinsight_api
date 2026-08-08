@@ -40,6 +40,13 @@ RSpec.describe 'Tenant site CORS', type: :request do
     expect(allow_origin_for('/public/inventory/leads', tenant_origin, method: 'POST')).to be_present
   end
 
+  # Without this, a dealer site records no visits at all: the beacon posts to
+  # the absolute API host, so it is cross-origin from every tenant hostname.
+  it 'allows the tracking beacon from a tenant site' do
+    expect(allow_origin_for('/pv/1', tenant_origin, method: 'POST')).to be_present
+    expect(allow_origin_for('/pv/1', dealer_domain, method: 'POST')).to be_present
+  end
+
   it 'allows the site payload endpoints without opening the rest of v1' do
     expect(allow_origin_for('/api/v1/websites/by_token/abc123', tenant_origin)).to be_present
   end

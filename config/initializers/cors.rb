@@ -75,6 +75,19 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
              methods: %i[get post options head],
              credentials: false
 
+    # The visitor tracking beacon.
+    #
+    # It posts to the absolute API host (VITE_RAILS_API_URL), so from a dealer's
+    # own hostname it is cross-origin, and Rack::Cors sits in front of every
+    # request and rejects the preflight before PageTrackingController's own CORS
+    # headers can apply. Measured in a browser on a live tenant site: the
+    # relative path returned 204 while the absolute one failed to fetch, so not
+    # one visit was recorded even though the endpoint worked.
+    resource '/pv/*',
+             headers: :any,
+             methods: %i[post options],
+             credentials: false
+
     # Blog posts and categories rendered into a site's pages.
     resource '/api/public/*',
              headers: :any,
