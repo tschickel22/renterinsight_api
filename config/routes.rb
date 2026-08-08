@@ -31,6 +31,11 @@ Rails.application.routes.draw do
   # reserved prefixes — otherwise the tenant catch-all above answers it with the
   # page's HTML. Not under /api because it must stay reachable and uncached from
   # any custom domain.
+  # Where a browser reports a crash we cannot reproduce, notably on engines we
+  # cannot open. Writes a log line and nothing else.
+  post 'client_errors',  to: 'public/client_errors#create'
+  match 'client_errors', to: 'public/client_errors#options', via: :options
+
   # The website concierge. Public, token-scoped, same shape as the beacons.
   post 'concierge/:token', to: 'public/concierge#create'
   match 'concierge/:token', to: 'public/concierge#options', via: :options
