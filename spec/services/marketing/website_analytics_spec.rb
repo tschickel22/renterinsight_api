@@ -103,7 +103,11 @@ RSpec.describe Marketing::WebsiteAnalytics do
     # Inquiries come off the lead record, not a beacon: a form submit that
     # reached the database is a fact, a beacon can be lost to a closed tab.
     it 'counts inquiries from leads that name the home' do
-      company.leads.create!(first_name: 'A', last_name: 'B', vehicle_id: shoal.id)
+      # Attributed through the form, like every other lead the site claims.
+      form = company.intake_forms.create!(name: 'Website Contact')
+      page.update!(blocks: [{ 'type' => 'contact', 'content' => { 'lead_form_id' => form.id } }])
+      lead = company.leads.create!(first_name: 'A', last_name: 'B', vehicle_id: shoal.id)
+      IntakeSubmission.create!(intake_form: form, lead_id: lead.id, lead_created: true, data: {})
 
       expect(described_class.new(website).call[:homes].first[:inquiries]).to eq(1)
     end
@@ -167,6 +171,51 @@ RSpec.describe Marketing::WebsiteAnalytics do
       company.deals.create!(name: 'Won deal', contact: contact, stage: 'closed_won')
 
       expect(described_class.new(website).call[:totals][:gross]).to eq(0.0)
+    end
+  end
+
+  describe 'lead attribution' do
+    let!(:form) { company.intake_forms.create!(name: 'Website Contact') }
+    let!(:other_form) { company.intake_forms.create!(name: 'Landing Page Form') }
+
+    def lead_via(intake_form, name)
+      lead = company.leads.create!(first_name: name, last_name: 'X')
+      IntakeSubmission.create!(intake_form: intake_form, lead_id: lead.id,
+                               lead_created: true, data: {})
+      lead
+    end
+
+    before do
+      page.update!(blocks: [{ 'type' => 'contact', 'content' => { 'lead_form_id' => form.id } }])
+    end
+
+    # Attribution runs through the form the lead arrived on, which is a fact in
+    # the database, not through a beacon that an ad blocker can drop.
+    it 'counts a lead that came in on this site\'s form' do
+      lead_via(form, 'Website')
+
+      expect(described_class.new(website).call[:totals][:leads]).to eq(1)
+    end
+
+    # The over-crediting this replaces: every lead in the window used to count,
+    # including ones the website had nothing to do with.
+    it 'ignores a lead from a form this site does not render' do
+      lead_via(other_form, 'Landing')
+
+      expect(described_class.new(website).call[:totals][:leads]).to eq(0)
+    end
+
+    it 'ignores a lead created by hand with no submission at all' do
+      company.leads.create!(first_name: 'Walk', last_name: 'In')
+
+      expect(described_class.new(website).call[:totals][:leads]).to eq(0)
+    end
+
+    it 'stays inside the window' do
+      lead = lead_via(form, 'Old')
+      lead.update!(created_at: 90.days.ago)
+
+      expect(described_class.new(website).call[:totals][:leads]).to eq(0)
     end
   end
 

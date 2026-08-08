@@ -65,7 +65,8 @@ module Marketing
         visitors: visits.distinct.count(:visitor_token),
         identified: identified,
         converted: visits.converted.count,
-        # The number a dealer actually judges the site on.
+        # The number a dealer actually judges the site on, attributed through
+        # the intake form rather than by counting every lead in the window.
         leads: leads.count,
         sold: sold_deals.count,
         gross: sold_deals.sum { |deal| deal.try(:front_gross).to_f }.round(2)
@@ -149,15 +150,55 @@ module Marketing
       {}
     end
 
-    # Leads created in the window for this company. Deliberately not filtered to
-    # a website source yet: attributing a lead back to the visit that produced it
-    # needs the visitor token carried through form submission, which is the next
-    # piece of work. Counting all leads over-credits the site, so the UI has to
-    # label this plainly rather than implying the website made every one.
+    # Leads this website produced.
+    #
+    # Attribution runs through the intake form, not through the visit. A lead is
+    # ours because it arrived on a form this site renders, which is a fact
+    # recorded in the database at submission time. Matching a lead back to the
+    # session that produced it would depend on a beacon and a token surviving the
+    # whole journey, and a lead whose beacon was blocked is still a lead.
+    #
+    # Not matched on source NAME: sources are per company and the real data holds
+    # "Website", "Web Form", "Web Site" and "Website Contact" as separate rows, so
+    # any name match would silently miss tenants who spelled it differently.
+    #
+    # Lead <- IntakeSubmission <- IntakeForm, with the forms taken from what this
+    # site actually renders. A form used only by a landing page is not this
+    # website's, which is the over-crediting this replaces.
     def leads
-      @leads ||= @website.company.leads.where(created_at: @from..@to)
-    rescue StandardError
+      @leads ||= begin
+        form_ids = website_form_ids
+        if form_ids.empty?
+          Lead.none
+        else
+          lead_ids = IntakeSubmission.where(intake_form_id: form_ids)
+                                     .where.not(lead_id: nil)
+                                     .pluck(:lead_id)
+          @website.company.leads.where(id: lead_ids, created_at: @from..@to)
+        end
+      end
+    rescue StandardError => e
+      Rails.logger.warn("[WebsiteAnalytics] lead attribution failed for #{@website.id}: #{e.message}")
       Lead.none
+    end
+
+    # Every intake form this site can submit to: the ones named in its blocks,
+    # plus the company's general contact form, which is what the inventory card's
+    # "Contact us about this home" button posts to and which is resolved at
+    # render time rather than stored in a block.
+    def website_form_ids
+      @website_form_ids ||= begin
+        from_blocks = @website.website_pages.where(is_deleted: [false, nil]).flat_map do |page|
+          Array(page.blocks).filter_map do |block|
+            next unless block.is_a?(Hash)
+
+            content = block['content'].is_a?(Hash) ? block['content'] : block
+            (content['lead_form_id'] || content['leadFormId']).presence
+          end
+        end
+
+        (from_blocks.map(&:to_i) + [Websites::DefaultLeadForm.for(@website.company)&.id]).compact.uniq
+      end
     end
 
     # Sold means whatever this tenant calls sold.
