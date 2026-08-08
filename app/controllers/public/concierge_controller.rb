@@ -54,9 +54,22 @@ module Public
       @company ||= Company.find_by(public_inventory_token: params[:token]) if params[:token].present?
     end
 
+    # The site the visitor is actually on.
+    #
+    # The token is company-scoped and a company can have several sites, so
+    # picking one by heuristic answers as the wrong dealer. Measured in a browser
+    # on Mobile Home Masters: the widget greeted the visitor as "Manufactured
+    # Home Elite Site 1", a different site of the same company, and would have
+    # answered from that site's pages and facts.
+    #
+    # Scoped through the company either way, so an id in the request body cannot
+    # reach another tenant's site.
     def website
-      @website ||= company&.websites&.sites&.where(is_deleted: [false, nil])
-                          &.order(Arel.sql("CASE WHEN status = 1 THEN 0 ELSE 1 END"), :id)&.first
+      @website ||= begin
+        requested = company&.websites&.find_by(id: params[:website_id]) if params[:website_id].present?
+        requested || company&.websites&.sites&.where(is_deleted: [false, nil])
+                             &.order(Arel.sql("CASE WHEN status = 1 THEN 0 ELSE 1 END"), :id)&.first
+      end
     end
 
     def concierge_enabled?
