@@ -321,7 +321,33 @@ module Public
 
       # Before the app's own scripts, so the payload exists by the time it boots and it
       # never has to render an empty frame first.
-      doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
+      doc = doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
+
+      inject_prerendered_body(doc)
+    end
+
+    # The crawlable copy of the page, in its own container BEFORE #root.
+    #
+    # Not inside #root, and that matters: the shell's recovery script decides
+    # whether the app mounted by checking root.childElementCount, so filling
+    # #root server side would make a failed mount look successful and disable
+    # the recovery that keeps a stale bundle from leaving a blank site.
+    #
+    # The app removes this container when it mounts, so a visitor sees it only
+    # for the moment before hydration, and a crawler that runs no JavaScript
+    # keeps it.
+    def inject_prerendered_body(doc)
+      html = Websites::BodyRenderer.new(
+        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle
+      ).call
+      return doc if html.blank?
+
+      doc.sub(%r{<div id="root">}i) { "#{html}\n<div id=\"root\">" }
+    rescue StandardError => e
+      # A crawlable body is an enhancement. Losing it costs SEO; raising here
+      # would cost the dealer their site.
+      Rails.logger.warn("[Public::Sites] prerender failed for #{@website&.id}: #{e.message}")
+      doc
     end
 
     # Recovers a page whose cached copy points at a bundle that no longer exists.
