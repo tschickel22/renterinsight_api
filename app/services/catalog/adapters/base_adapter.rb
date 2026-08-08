@@ -86,10 +86,19 @@ module Catalog
         response = http.request(request)
 
         case response
-        when Net::HTTPSuccess then response.body
+        when Net::HTTPOK then response.body
         when Net::HTTPRedirection
           loc = response['location']
           loc.present? ? http_get(absolute_url(loc, uri), accept: accept) : nil
+        when Net::HTTPSuccess
+          # 2xx that is NOT 200 is never page content we can parse. Hosts return
+          # 202 with a tiny bot-challenge stub, and accepting it as a body meant
+          # the challenge got parsed as the page: discovery found no links and
+          # the run reported "0 homes discovered" as though the site were empty,
+          # with nothing logged. Treat it as the failure it is.
+          Rails.logger.error "[#{self.class.name}] HTTP #{response.code} (non-200 success) for #{url}; " \
+                             "#{response.body.to_s.bytesize} bytes, treating as no content"
+          nil
         else
           Rails.logger.error "[#{self.class.name}] HTTP #{response.code} for #{url}"
           nil
@@ -143,7 +152,11 @@ module Catalog
         req['Accept']     = accept
         res = http.request(req)
         { url: url, status: res.code.to_i, bytes: res.body.to_s.bytesize,
-          location: res['location'], body: res.body.to_s }
+          location: res['location'], body: res.body.to_s,
+          # Who answered and what they said. Without these a blocked source
+          # reports only "looks_blocked: true", which is not enough to tell a
+          # WAF rule from a rate limit from an outage.
+          server: res['server'], content_type: res['content-type'] }
       rescue StandardError => e
         { url: url, status: nil, error: "#{e.class}: #{e.message}" }
       end

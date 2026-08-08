@@ -304,6 +304,82 @@ RSpec.describe Catalog::Adapters::AdventureHomesAdapter do
     end
   end
 
+  # SiteGround's Anti-Bot AI challenges our Render egress, so a run from the
+  # platform never sees the site. A snapshot captured somewhere that can reach
+  # them runs the same ingestion path from stored homes.
+  describe 'running from a snapshot' do
+    let(:live_home) do
+      stub_http
+      adapter.parse(adapter.fetch('0663ls'))
+    end
+
+    let(:snapshot_source) do
+      build(:catalog_source, adapter_type: 'adventure_homes',
+                             base_url: 'https://adventurehomes.net',
+                             config: { 'snapshot_key' => 'adventure_homes' })
+    end
+    let(:snapshot_adapter) { described_class.new(snapshot_source) }
+
+    before do
+      Catalog::HomesSnapshot.write(
+        'adventure_homes',
+        Catalog::HomesSnapshot.build(source: snapshot_source, homes: [live_home])
+      )
+    end
+
+    it 'discovers the captured homes' do
+      expect(snapshot_adapter.discover).to eq(['0663ls'])
+    end
+
+    it 'makes no HTTP request at all' do
+      expect(snapshot_adapter).not_to receive(:http_get)
+      snapshot_adapter.parse(snapshot_adapter.fetch('0663ls'))
+    end
+
+    it 'waits for nothing, since there is no site to be polite to' do
+      expect(snapshot_adapter.crawl_delay).to eq(0)
+    end
+
+    it 'rebuilds a home identical to the crawled one' do
+      restored = snapshot_adapter.parse(snapshot_adapter.fetch('0663ls'))
+
+      expect(restored.model_name).to eq(live_home.model_name)
+      expect(restored.features).to eq(live_home.features)
+      expect(restored.virtual_tour_url).to eq(live_home.virtual_tour_url)
+      # Equal hashes are what make a re-capture update only genuine changes.
+      expect(restored.content_hash).to eq(live_home.content_hash)
+    end
+
+    it 'says it is running from a snapshot, so it is never mistaken for live' do
+      expect(snapshot_adapter.snapshot_info)
+        .to include('key' => 'adventure_homes', 'home_count' => 1)
+      expect(snapshot_adapter.diagnostics)
+        .to include(mode: 'snapshot', snapshot_found: true, home_count: 1)
+    end
+
+    # Fails closed: a bound key with nothing stored must not fall back to a live
+    # crawl, which on Render walks into the captcha and reports an empty catalog
+    # while the operator believes they are running from a capture.
+    it 'refuses to crawl when the bound snapshot is missing' do
+      snapshot_source.config = { 'snapshot_key' => 'never_uploaded' }
+
+      expect(snapshot_adapter).not_to receive(:http_get)
+      expect(snapshot_adapter.discover).to eq([])
+      expect(snapshot_adapter.fetch('0663ls')).to be_nil
+      expect(snapshot_adapter.diagnostics)
+        .to include(mode: 'snapshot', snapshot_found: false)
+    end
+
+    it 'goes back to crawling when the key is cleared' do
+      snapshot_source.config = {}
+      stub_http
+      allow(snapshot_adapter).to receive(:http_get) { |url, **| url.match?(/sitemap/) ? sitemap : detail_html }
+
+      expect(snapshot_adapter.discover).to eq(%w[0663ls 1401s-2])
+      expect(snapshot_adapter.crawl_delay).to eq(5)
+    end
+  end
+
   describe 'registration' do
     it 'is reachable through the adapter registry' do
       expect(Catalog::AdapterRegistry.for(source)).to be_a(described_class)

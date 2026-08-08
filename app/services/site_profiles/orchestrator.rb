@@ -64,6 +64,7 @@ module SiteProfiles
       import_assets
       ensure_lead_form
       suggest_subdomain
+      run_seo_audit(root)
       @record
     rescue StandardError => e
       @record.update!(status: 'failed', error_message: e.message.truncate(500))
@@ -234,6 +235,24 @@ module SiteProfiles
     # Recorded now so a platform admin can correct it while it is still a demo.
     # After commit the site belongs to the dealer and renaming its address
     # breaks whatever has already been shared.
+    # Grades the site we just read. Always runs: the admin decides afterwards
+    # whether the prospect sees it, and that decision needs the findings in hand.
+    #
+    # Non-fatal by design. A demo without a gap report is still a demo, so an
+    # audit failure must not turn a completed scan into a failed one.
+    def run_seo_audit(root)
+      report = SeoAudit.new(
+        source_url: @record.source_url,
+        pages_html: raw_html_cache,
+        fetcher: @fetcher,
+        from_archive: root.try(:from_archive?).present?
+      ).call
+
+      @record.update!(seo_report: report)
+    rescue StandardError => e
+      Rails.logger.warn("[SiteProfiles::Orchestrator] seo audit failed: #{e.message}")
+    end
+
     def suggest_subdomain
       name = @record.profile.dig('brand', 'name').presence || @record.display_name.presence
       return if name.blank?

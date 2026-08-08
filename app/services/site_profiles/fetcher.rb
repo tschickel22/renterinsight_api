@@ -17,9 +17,17 @@ module SiteProfiles
     READ_TIMEOUT = 15
     USER_AGENT = 'DealerTideSiteImporter/1.0 (+https://dealertide.com/bot)'
 
-    Response = Struct.new(:url, :status, :body, :content_type, keyword_init: true) do
+    # from_archive/archived_at travel with the body because a page read from the
+    # Wayback Machine is still usable but is no longer necessarily current, and
+    # anything shown to a prospect has to say so.
+    Response = Struct.new(:url, :status, :body, :content_type, :from_archive, :archived_at,
+                          keyword_init: true) do
       def html?
         content_type.to_s.include?('html')
+      end
+
+      def from_archive?
+        from_archive.present?
       end
     end
 
@@ -30,10 +38,22 @@ module SiteProfiles
     # Returns a Response, or nil when the page could not be fetched. Callers
     # treat a nil page as "skip and warn", never as a fatal error — one bad
     # page must not kill a whole scan.
-    def get(url, redirects_left: MAX_REDIRECTS)
+    # allow_archive is false when fetching FROM the archive, so a failure there
+    # cannot recurse back into it.
+    def get(url, redirects_left: MAX_REDIRECTS, allow_archive: true)
       uri, = UrlGuard.validate!(url)
 
       response = perform(uri)
+      body = response.is_a?(Net::HTTPSuccess) ? truncate(response.body) : ''
+      status = response.code.to_i
+
+      # A bot wall can answer 403/429 or, worse, 200 with an interstitial that
+      # would otherwise be scanned as if it were the site's own content.
+      if allow_archive && ArchiveFallback.challenged?(status, body)
+        @logger.info("[SiteProfiles::Fetcher] #{url} challenged (HTTP #{status}); trying the archive")
+        archived = ArchiveFallback.new(fetcher: self, logger: @logger).call(uri.to_s)
+        return archived if archived
+      end
 
       case response
       when Net::HTTPRedirection
@@ -42,12 +62,13 @@ module SiteProfiles
         location = response['location']
         return nil if location.blank?
 
-        get(URI.join(uri, location).to_s, redirects_left: redirects_left - 1)
+        get(URI.join(uri, location).to_s, redirects_left: redirects_left - 1,
+                                          allow_archive: allow_archive)
       when Net::HTTPSuccess
         Response.new(
           url: uri.to_s,
-          status: response.code.to_i,
-          body: truncate(response.body),
+          status: status,
+          body: body,
           content_type: response['content-type']
         )
       end

@@ -17,10 +17,11 @@ module Websites
     # legal disclaimer.
     DESCRIPTION_BLOCKS = %w[hero text cta features].freeze
 
-    def initialize(website:, page:, canonical_host:)
+    def initialize(website:, page:, canonical_host:, vehicle: nil)
       @website = website
       @page = page
       @canonical_host = canonical_host
+      @vehicle = vehicle
     end
 
     def to_h
@@ -29,7 +30,10 @@ module Websites
         description: description,
         canonical_url: canonical_url,
         og_image: og_image,
-        og_type: 'website',
+        # A listing is a product, not a brochure page, and the distinction is
+        # what lets a shared link render as a home with a price rather than as
+        # the dealership.
+        og_type: @vehicle ? 'product' : 'website',
         site_name: site_name,
         favicon_url: @website.favicon_url.presence,
         robots: robots
@@ -53,7 +57,7 @@ module Websites
     # Page title first, then the site default. The site name is appended rather than
     # replacing the page title, so every page is not identically titled in search results.
     def title
-      page_title = @page&.seo_title.presence || @page&.title.presence
+      page_title = home_title.presence || @page&.seo_title.presence || @page&.title.presence
       default = seo_config['title'].presence || site_name
 
       return default if page_title.blank?
@@ -62,8 +66,34 @@ module Websites
       "#{page_title} | #{default}"
     end
 
+    # The home's own words first. A listing that inherits the site description
+    # gives every one of a dealer's homes an identical search result.
+    def home_title
+      return nil if @vehicle.nil?
+
+      [@vehicle.try(:year), @vehicle.try(:make), @vehicle.try(:model)]
+        .map { |part| part.to_s.strip.presence }.compact.join(' ').presence
+    end
+
+    def home_description
+      return nil if @vehicle.nil?
+
+      specs = [
+        ("#{@vehicle.bedrooms} bed" if @vehicle.try(:bedrooms).present?),
+        ("#{@vehicle.bathrooms} bath" if @vehicle.try(:bathrooms).present?),
+        ("#{@vehicle.square_feet} sq ft" if @vehicle.try(:square_feet).present?)
+      ].compact
+
+      own = @vehicle.try(:description).to_s.squish.presence
+      return own if own.present?
+      return nil if specs.empty?
+
+      "#{home_title}, #{specs.join(', ')}. Available now at #{site_name}."
+    end
+
     def description
-      (@page&.seo_description.presence ||
+      (home_description.presence ||
+        @page&.seo_description.presence ||
         seo_config['description'].presence ||
         brand['description'].presence ||
         derived_description).to_s.truncate(DESCRIPTION_LIMIT).presence
@@ -97,6 +127,12 @@ module Websites
     end
 
     def canonical_url
+      # A home canonicalises to its own address. Without this every listing would
+      # point at whichever page happened to resolve, and they would all
+      # deduplicate onto one another in search.
+      home_path = HomeUrl.path_for(@vehicle) if @vehicle
+      return "https://#{@canonical_host}#{home_path}" if home_path.present?
+
       path = @page&.path.presence || '/'
       path = "/#{path}" unless path.start_with?('/')
       path = '' if path == '/'
@@ -105,9 +141,20 @@ module Websites
     end
 
     def og_image
-      @page&.og_image_url.presence ||
+      # The home itself, so a shared listing previews as that home rather than
+      # as the dealer's logo.
+      home_image.presence ||
+        @page&.og_image_url.presence ||
         seo_config['og_image'].presence ||
         brand['logo_url'].presence
+    end
+
+    def home_image
+      return nil if @vehicle.nil?
+
+      @vehicle.public_image_urls.first
+    rescue StandardError
+      nil
     end
 
     # An unpublished site should never have resolved this far, but if anything ever routes

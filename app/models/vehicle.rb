@@ -6,6 +6,17 @@ class Vehicle < ApplicationRecord
   include WebhookNotifiable
   include Reportable
 
+  # The image URLs a public page can render.
+  #
+  # The images column stores [{"url" => "..."}] rather than bare strings, so
+  # reading it directly yields hashes. Public::InventoryController has carried a
+  # private extractor for this for a while; anything else that reached for the
+  # column silently got nothing, which is how a home's own photograph ended up
+  # missing from its share preview and its Product markup.
+  def public_image_urls
+    Array(images).map { |img| img.is_a?(Hash) ? (img['url'] || img[:url]) : img }.compact
+  end
+
   def self.reportable_config
     {
       label: "Homes",

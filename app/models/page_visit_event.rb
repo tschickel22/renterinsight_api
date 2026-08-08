@@ -19,7 +19,22 @@ class PageVisitEvent < ApplicationRecord
   # not a traffic problem.
   ENGAGEMENT_EVENTS = %w[view cta_click outbound_click form_start form_submit].freeze
 
-  EVENT_TYPES = (SCROLL_EVENTS + VIDEO_EVENTS + ENGAGEMENT_EVENTS).freeze
+  # What a visitor did with a specific home, carried in payload['vehicle_id'].
+  #
+  # These ride on PageVisitEvent rather than a table of their own because the
+  # question worth answering is not "how many views did this home get" but "which
+  # homes did the people who became leads look at". That only works if the home
+  # is attached to the same session that carries the source, the identity and the
+  # conversion, which is exactly what a visit already is.
+  #
+  # home_view is a card impression in the grid, home_detail is opening the home,
+  # home_inquiry is asking about it. The three separate because interest is a
+  # funnel: a home with many impressions and no detail views has a photo or a
+  # price problem, one with many detail views and no inquiries has a different
+  # problem, and a single counter cannot tell them apart.
+  INVENTORY_EVENTS = %w[home_view home_detail home_inquiry].freeze
+
+  EVENT_TYPES = (SCROLL_EVENTS + VIDEO_EVENTS + ENGAGEMENT_EVENTS + INVENTORY_EVENTS).freeze
 
   validates :event_type, inclusion: { in: EVENT_TYPES }
   validates :occurred_at, presence: true
@@ -27,4 +42,11 @@ class PageVisitEvent < ApplicationRecord
   scope :of_type, ->(type) { where(event_type: type) }
   scope :video, -> { where(event_type: VIDEO_EVENTS) }
   scope :scroll, -> { where(event_type: SCROLL_EVENTS) }
+  scope :inventory, -> { where(event_type: INVENTORY_EVENTS) }
+
+  # The home this event was about. Nil for every non-inventory event, which is
+  # why callers filter with .inventory first.
+  def vehicle_id
+    payload.is_a?(Hash) ? payload['vehicle_id'].presence&.to_i : nil
+  end
 end

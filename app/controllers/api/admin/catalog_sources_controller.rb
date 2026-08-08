@@ -232,6 +232,15 @@ class Api::Admin::CatalogSourcesController < ApplicationController
       adventure_homes: {
         base_url_template: 'https://adventurehomes.net',
         untracked_fields: ADVENTURE_UNTRACKED_FIELDS,
+        # Captured catalogs available to run from. SiteGround's Anti-Bot AI
+        # challenges our egress, so a live run from the platform sees a captcha
+        # rather than the site; a snapshot is captured where it is reachable
+        # and uploaded here. Bound via config.snapshot_key.
+        snapshots: Catalog::HomesSnapshot.keys.map do |key|
+          snap = Catalog::HomesSnapshot.read(key) || {}
+          { key: key, label: snap['source_name'].presence || key,
+            captured_at: snap['captured_at'], home_count: Array(snap['homes']).size }
+        end,
         options: [],
         advisory: 'Ingests all 130 published floor plans. Features come from the ' \
                   'series Standard Features PDF, so they describe the series and not ' \
@@ -395,12 +404,28 @@ class Api::Admin::CatalogSourcesController < ApplicationController
       return render json: { error: 'Snapshot contains no homes' }, status: :unprocessable_entity
     end
 
-    previous = Catalog::TroveSnapshot.read(key)
-    Catalog::TroveSnapshot.write(key, payload)
+    # Two snapshot shapes now: Trove's raw records, and parsed homes for sites
+    # whose raw form is too big to store (see Catalog::HomesSnapshot). Route on
+    # the payload's own schema so a capture cannot land in the wrong store.
+    store = payload['schema'] == Catalog::HomesSnapshot::SCHEMA ? Catalog::HomesSnapshot : Catalog::TroveSnapshot
+
+    previous = store.read(key)
+    begin
+      store.write(key, payload)
+    rescue ArgumentError => e
+      return render json: { error: e.message }, status: :unprocessable_entity
+    end
+
+    # Bind it to the source in the same call. Otherwise the upload succeeds and
+    # the source keeps crawling live, which for a blocked host means it looks
+    # like the snapshot did nothing.
+    bound = bind_snapshot_to_source(params[:source_id], key)
 
     render json: {
       key: key,
-      supplier_name: payload['supplier_name'],
+      schema: payload['schema'],
+      bound_source_id: bound&.id,
+      supplier_name: payload['supplier_name'] || payload['source_name'],
       captured_at: payload['captured_at'],
       home_count: homes.size,
       image_count: homes.sum { |h| Array(h['images']).size },
@@ -719,6 +744,21 @@ class Api::Admin::CatalogSourcesController < ApplicationController
   #
   # The UI passes `key` explicitly when re-capturing for an existing source, so
   # this only runs for a first upload.
+  # Points a source at the snapshot just uploaded. Writes only the one key, so
+  # nothing else in the source's config is disturbed.
+  def bind_snapshot_to_source(source_id, key)
+    return nil if source_id.blank?
+
+    source = CatalogSource.active.find_by(id: source_id)
+    return nil if source.nil?
+
+    config = source.config.is_a?(Hash) ? source.config.dup : {}
+    return source if config['snapshot_key'] == key
+
+    source.update(config: config.merge('snapshot_key' => key))
+    source
+  end
+
   def derive_snapshot_key(payload)
     from_name = payload['supplier_name'].to_s.parameterize(separator: '_')
     return from_name if from_name.present?

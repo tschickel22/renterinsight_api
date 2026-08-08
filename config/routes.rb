@@ -761,6 +761,7 @@ Rails.application.routes.draw do
           post :publish
           post :unpublish
           post :sync_branding  # Sync branding from Company/Location settings
+          get :analytics       # Traffic sources, most-viewed homes, and the path to sales
         end
         
         collection do

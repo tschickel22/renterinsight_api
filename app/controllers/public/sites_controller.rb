@@ -93,12 +93,37 @@ module Public
         xml << "    <lastmod>#{(page.updated_at || @website.updated_at).to_date.iso8601}</lastmod>\n"
         xml << "  </url>\n"
       end
+      # Homes, which are the pages a buyer actually searches for. Without these
+      # the sitemap described the brochure and left the inventory undiscoverable
+      # except by crawling the listing grid, which is JavaScript.
+      servable_homes.each do |home|
+        xml << "  <url>\n"
+        xml << "    <loc>#{ERB::Util.html_escape(Websites::HomeUrl.url_for(home, @canonical_host))}</loc>\n"
+        xml << "    <lastmod>#{(home.updated_at || @website.updated_at).to_date.iso8601}</lastmod>\n"
+        xml << "  </url>\n"
+      end
       xml << "</urlset>\n"
 
       render xml: xml, content_type: 'application/xml'
     end
 
     private
+
+    # Capped: a sitemap is allowed 50,000 URLs, but a dealer with a huge feed
+    # should not turn one crawler request into an unbounded query.
+    SITEMAP_HOME_LIMIT = 5_000
+
+    def servable_homes
+      return [] if @website.company.nil?
+
+      @website.company.vehicles
+              .where(is_deleted: [false, nil], status: Websites::HomeUrl::SERVABLE_STATUSES)
+              .order(updated_at: :desc)
+              .limit(SITEMAP_HOME_LIMIT)
+    rescue StandardError => e
+      Rails.logger.warn("[Public::Sites] sitemap homes failed for #{@website&.id}: #{e.message}")
+      []
+    end
 
     def cache_publicly(edge_max_age)
       response.headers['Cache-Control'] =
@@ -172,8 +197,14 @@ module Public
       @website = @resolution.website
       @canonical_host = @resolution.canonical_host
       @page = find_page
+      @vehicle = find_home
+      # A /homes/ path whose id resolves to nothing is a dead listing, not a
+      # dealer page. Saying so beats rendering the site shell under a URL that
+      # will never have content.
+      return render_not_found if @vehicle.nil? && Websites::HomeUrl.matches?(normalized_path)
+
       @metadata = Websites::PageMetadata.new(
-        website: @website, page: @page, canonical_host: @canonical_host
+        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle
       ).to_h
     end
 
@@ -290,7 +321,33 @@ module Public
 
       # Before the app's own scripts, so the payload exists by the time it boots and it
       # never has to render an empty frame first.
-      doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
+      doc = doc.sub(%r{</head>}i) { "#{site_payload_tag}\n</head>" }
+
+      inject_prerendered_body(doc)
+    end
+
+    # The crawlable copy of the page, in its own container BEFORE #root.
+    #
+    # Not inside #root, and that matters: the shell's recovery script decides
+    # whether the app mounted by checking root.childElementCount, so filling
+    # #root server side would make a failed mount look successful and disable
+    # the recovery that keeps a stale bundle from leaving a blank site.
+    #
+    # The app removes this container when it mounts, so a visitor sees it only
+    # for the moment before hydration, and a crawler that runs no JavaScript
+    # keeps it.
+    def inject_prerendered_body(doc)
+      html = Websites::BodyRenderer.new(
+        website: @website, page: @page, canonical_host: @canonical_host, vehicle: @vehicle
+      ).call
+      return doc if html.blank?
+
+      doc.sub(%r{<div id="root">}i) { "#{html}\n<div id=\"root\">" }
+    rescue StandardError => e
+      # A crawlable body is an enhancement. Losing it costs SEO; raising here
+      # would cost the dealer their site.
+      Rails.logger.warn("[Public::Sites] prerender failed for #{@website&.id}: #{e.message}")
+      doc
     end
 
     # Recovers a page whose cached copy points at a bundle that no longer exists.
@@ -405,7 +462,41 @@ module Public
       tags << property_tag('og:site_name', @metadata[:site_name])
       tags << property_tag('og:image', @metadata[:og_image])
       tags << meta_tag('twitter:card', @metadata[:og_image].present? ? 'summary_large_image' : 'summary')
+      tags << structured_data_tag
       tags.compact.join("\n")
+    end
+
+    # schema.org markup, which is what a search engine reads to know this is a
+    # dealership at an address selling a home at a price, and what an AI
+    # assistant reads when deciding what to quote.
+    #
+    # Never fatal. Bad markup costs rich results; a raised exception costs the
+    # dealer their whole site.
+    def structured_data_tag
+      Websites::StructuredData.new(
+        website: @website, page: @page, canonical_host: @canonical_host,
+        vehicle: @vehicle
+      ).to_tag
+    rescue StandardError => e
+      Rails.logger.warn("[Public::Sites] structured data failed for #{@website&.id}: #{e.message}")
+      nil
+    end
+
+    # The home this request is for, by its own URL or by the older ?vehicle=
+    # parameter, which stays supported so links already in the wild keep working.
+    #
+    # Scoped to the site's own company and to the statuses the public inventory
+    # endpoint will actually serve. An id arriving from a URL must not be able to
+    # pull another tenant's home, or a sold one, onto a dealer's page.
+    def find_home
+      id = Websites::HomeUrl.vehicle_id_from(normalized_path) || params[:vehicle].presence
+      return nil if id.blank?
+
+      @website.company.vehicles
+              .where(is_deleted: [false, nil], status: Websites::HomeUrl::SERVABLE_STATUSES)
+              .find_by(id: id)
+    rescue StandardError
+      nil
     end
 
     def tag(name, value)
