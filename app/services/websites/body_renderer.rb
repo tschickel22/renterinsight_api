@@ -84,6 +84,7 @@ module Websites
       <<~HTML
         <div id="dt-prerender">
         #{sections}
+        #{dealership_footer}
         #{site_nav}
         </div>
       HTML
@@ -413,6 +414,50 @@ module Websites
       return '' if url.blank?
 
       %(<img src="#{esc(url)}" alt="#{esc(alt.presence || site_name)}" loading="lazy">\n)
+    end
+
+    # The dealership's name, address and phone on every page, the way a real
+    # site's footer carries them.
+    #
+    # Two reasons beyond word count. Local search ranks on seeing a consistent
+    # name, address and phone, and ours appeared only inside JSON-LD. Structured
+    # data is also supposed to describe what a visitor can see, so a store node
+    # asserting a street address that appears nowhere in the page is the weaker
+    # kind of markup. Same source as the JSON-LD, so the two cannot disagree.
+    def dealership_footer
+      target = place
+      return '' if target.nil?
+
+      street = target.try(:address_line1).presence
+      return '' if street.blank?
+
+      locality = [target.try(:city).presence, target.try(:state).presence].compact.join(', ')
+      postal = target.try(:zip).presence || target.try(:postal_code).presence || target.try(:zip_code).presence
+      phone = target.try(:phone).presence || @website.company.try(:phone).presence
+
+      lines = [
+        street,
+        [locality.presence, postal].compact.join(' ').presence,
+        (phone.present? ? "Phone: #{phone}" : nil)
+      ].compact
+
+      "<address><strong>#{esc(site_name)}</strong>\n" \
+        "#{lines.map { |line| "<span>#{esc(line)}</span>" }.join("\n")}\n</address>\n"
+    rescue StandardError => e
+      Rails.logger.warn("[BodyRenderer] footer failed for #{@website&.id}: #{e.message}")
+      ''
+    end
+
+    # Mirrors Websites::StructuredData: the lot the site belongs to when it has a
+    # street, otherwise the company. Falls back on the street specifically rather
+    # than on a location existing, because locations are routinely created with a
+    # name and nothing else.
+    def place
+      @place ||= if @website.location&.address_line1.presence
+                   @website.location
+                 else
+                   @website.company
+                 end
     end
 
     # Real links, so a crawler can reach every page without executing the nav.

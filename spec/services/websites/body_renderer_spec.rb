@@ -255,6 +255,35 @@ RSpec.describe Websites::BodyRenderer do
     end
   end
 
+  # Local search ranks on a consistent name, address and phone, and ours appeared
+  # only inside JSON-LD. Structured data is also meant to describe what a visitor
+  # can see, so a store node asserting an address that appears nowhere on the
+  # page is the weaker kind of markup.
+  describe 'the dealership footer' do
+    it 'names the lot the site belongs to when it has a street' do
+      location.update!(address_line1: '123 Dealer Drive', city: 'Denver', state: 'CO', phone: '(555) 123-4567')
+
+      html = render(page: page)
+
+      expect(html).to include('123 Dealer Drive')
+      expect(html).to include('Denver, CO')
+      expect(html).to include('Phone: (555) 123-4567')
+    end
+
+    # Locations are routinely created with a name and nothing else, which used to
+    # silence the equivalent JSON-LD node for a company whose address was sitting
+    # right there.
+    it 'falls back to the company when the location has no street' do
+      company.update!(address_line1: '9 Head Office Way', city: 'Dallas', state: 'TX')
+
+      expect(render(page: page)).to include('9 Head Office Way')
+    end
+
+    it 'stays silent rather than printing an empty address' do
+      expect(render(page: page)).not_to include('<address>')
+    end
+  end
+
   describe 'escaping' do
     it 'cannot be broken out of by a dealer\'s own copy' do
       nasty = website.website_pages.create!(
