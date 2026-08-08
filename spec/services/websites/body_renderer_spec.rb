@@ -109,8 +109,8 @@ RSpec.describe Websites::BodyRenderer do
     it 'reads as the product page it is' do
       expect(html).to include('<h1>2026 Skyline Homes Prairie Dune</h1>')
       expect(html).to include('3 bedrooms')
-      expect(html).to include('1023 square feet')
-      expect(html).to include('Price: $89900')
+      expect(html).to include('1,023 square feet')
+      expect(html).to include('Price: $89,900')
     end
 
     it 'shows the home\'s own photograph' do
@@ -118,7 +118,82 @@ RSpec.describe Websites::BodyRenderer do
     end
 
     it 'says where the home can be bought' do
-      expect(html).to include('Available at Mobile Home Masters.')
+      expect(html).to include('This home is available from Mobile Home Masters')
+    end
+
+    # A listing with no dealer-written description rendered 33 words, which is
+    # under any threshold for a page having a subject, and 140 of this site's
+    # URLs are listings.
+    it 'carries enough copy to rank even when the dealer wrote no description' do
+      bare = company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',
+                                      model: 'Prairie Dune 8710', status: 'available',
+                                      bedrooms: 3, bathrooms: 2, square_feet: 1023,
+                                      sections: 1, home_type: 'hud', condition: 'new')
+      6.times do |i|
+        company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',
+                                 model: "Shore Park #{i}", status: 'available',
+                                 bedrooms: 3, bathrooms: 2, square_feet: 1100)
+      end
+
+      words = ActionController::Base.helpers.strip_tags(render(page: page, vehicle: bare)).split.size
+      expect(words).to be >= 150
+    end
+
+    # Read off the record, never composed. A dealer's product claims are theirs
+    # to make.
+    it 'states the specs in prose without asserting anything the dealer did not enter' do
+      hud = company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',
+                                     model: 'Prairie Dune', status: 'available', bedrooms: 3,
+                                     bathrooms: 2, square_feet: 1023, sections: 1,
+                                     home_type: 'hud', condition: 'new')
+
+      expect(render(page: page, vehicle: hud)).to include(
+        'The 2026 Skyline Homes Prairie Dune is a new single section HUD home with 3 bedrooms, ' \
+        '2 bathrooms and 1,023 square feet of living space.'
+      )
+    end
+
+    it 'links to the rest of the lot, so a crawler can reach listings without the sitemap' do
+      other = company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',
+                                       model: 'Shore Park', status: 'available', bedrooms: 2)
+
+      expect(html).to include(Websites::HomeUrl.path_for(other))
+      expect(html).to include('More homes at Mobile Home Masters')
+    end
+
+    it 'never links to a home the site would refuse to serve' do
+      sold = company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',
+                                      model: 'Sold Already', status: 'sold', bedrooms: 2)
+
+      expect(html).not_to include(Websites::HomeUrl.path_for(sold))
+    end
+  end
+
+  # Was skipped entirely, which left the inventory page at 52 words with nothing
+  # linking to a home except the sitemap.
+  describe 'an inventory block' do
+    let(:listing_page) do
+      website.website_pages.create!(
+        title: 'Inventory', path: '/inventory', order: 9,
+        blocks: [{ 'type' => 'inventory', 'order' => 0, 'content' => { 'title' => 'Our Homes' } }]
+      )
+    end
+
+    it 'renders the homes actually on the lot, linked' do
+      home = company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',
+                                      model: 'Prairie Dune', status: 'available',
+                                      bedrooms: 3, bathrooms: 2, square_feet: 1023)
+
+      html = render(page: listing_page)
+
+      expect(html).to include('Our Homes')
+      expect(html).to include(Websites::HomeUrl.path_for(home))
+      expect(html).to include('2026 Skyline Homes Prairie Dune')
+      expect(html).to include('3 bed, 2 bath, 1,023 sq ft')
+    end
+
+    it 'still gives the page a heading when the lot is empty' do
+      expect(render(page: listing_page)).to include('<h1>')
     end
   end
 

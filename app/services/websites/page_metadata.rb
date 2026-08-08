@@ -11,6 +11,9 @@ module Websites
   # genuinely belongs on the server.
   class PageMetadata
     DESCRIPTION_LIMIT = 300
+    # Search results truncate a title around here. Past it the tail is spent
+    # rather than shown.
+    TITLE_LIMIT = 65
 
     # Block types whose text is worth falling back to for a description, in preference
     # order. A hero subtitle describes a page far better than the first paragraph of a
@@ -63,7 +66,15 @@ module Websites
       return default if page_title.blank?
       return page_title if page_title.casecmp?(default.to_s)
 
-      "#{page_title} | #{default}"
+      combined = "#{page_title} | #{default}"
+      return combined if combined.length <= TITLE_LIMIT
+
+      # Both do not fit, so the site name is what goes. It repeats on every
+      # other result from the same domain, while the page title is the only part
+      # that says which page this is. Home titles are where this bites: a model
+      # name plus a dealership name is routinely over the limit, and truncation
+      # was landing mid model number.
+      page_title
     end
 
     # The home's own words first. A listing that inherits the site description
@@ -146,7 +157,32 @@ module Websites
       home_image.presence ||
         @page&.og_image_url.presence ||
         seo_config['og_image'].presence ||
-        brand['logo_url'].presence
+        brand['logo_url'].presence ||
+        # A dealer who never uploaded a logo was leaving every brochure page with
+        # no share preview at all, so their links posted to Facebook and to a
+        # text message as bare grey boxes. A home from their own lot is a better
+        # preview than a logo anyway.
+        first_inventory_image
+    end
+
+    # Cheap by construction: a handful of rows, first usable photo wins. Never
+    # fatal, because a missing preview image must not take the page down.
+    def first_inventory_image
+      company = @website.try(:company)
+      return nil if company.nil?
+
+      company.vehicles
+             .where(is_deleted: [false, nil], status: HomeUrl::SERVABLE_STATUSES)
+             .order(updated_at: :desc)
+             .limit(20)
+             .each do |vehicle|
+        url = vehicle.public_image_urls.first
+        return url if url.present?
+      end
+      nil
+    rescue StandardError => e
+      Rails.logger.warn("[PageMetadata] inventory og:image failed for #{@website&.id}: #{e.message}")
+      nil
     end
 
     def home_image
