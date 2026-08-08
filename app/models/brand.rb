@@ -26,6 +26,7 @@ class Brand
     subdomain_root
     site_host_root
     logo_url
+    favicon_url
   ].freeze
 
   attr_reader(*ATTRIBUTES)
@@ -99,6 +100,10 @@ class Brand
     # value behaves exactly as it did before this field existed.
     @site_host_root = resolve(overrides, :site_host_root, platform[:siteHostRoot]).presence || @subdomain_root
     @logo_url       = resolve(overrides, :logo_url,       branding[:logo])
+    # The tab icon, from the same branding waterfall as the logo. Stored under
+    # either spelling because SettingsController normalises faviconUrl into
+    # favicon on write but older records only carry one of them.
+    @favicon_url    = unquote(resolve(overrides, :favicon_url, branding[:faviconUrl] || branding[:favicon]))
   end
 
   def to_h
@@ -110,6 +115,17 @@ class Brand
   def resolve(overrides, key, fallback)
     override = overrides[key]
     override.respond_to?(:presence) ? (override.presence || fallback) : (override || fallback)
+  end
+
+  # The stored favicon arrives wrapped in literal quotes, from a value that was
+  # JSON-encoded once too often on the way in. Left alone it lands inside an
+  # href and the browser requests a URL that does not exist, which is exactly
+  # why an uploaded icon never appeared.
+  def unquote(value)
+    text = value.to_s.strip
+    return nil if text.blank?
+
+    text.gsub(/\A["']|["']\z/, '').presence
   end
 
   def platform_branding_hash

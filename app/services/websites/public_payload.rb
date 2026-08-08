@@ -93,7 +93,7 @@ module Websites
     # bug the rebrand branch removed.
     def platform_brand
       brand = Brand.current(company: @website.company)
-      { name: brand.name, url: brand.website_url }
+      { name: brand.name, url: brand.website_url, favicon_url: brand.favicon_url }
     rescue StandardError
       {}
     end

@@ -72,7 +72,7 @@ module Public
 
     def platform_brand
       brand = Brand.current(company: company)
-      { name: brand.name, url: brand.website_url }
+      { name: brand.name, url: brand.website_url, favicon_url: brand.favicon_url }
     rescue StandardError
       {}
     end
