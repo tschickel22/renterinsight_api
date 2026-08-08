@@ -156,6 +156,19 @@ RSpec.describe Concierge::Responder do
     end
   end
 
+  describe 'the quick links the widget shows' do
+    # A "set a meeting" chip that opens the same form the visitor was already
+    # offered is noise, so booking appears only when a scheduler exists.
+    it 'offers a meeting only when a scheduler is configured' do
+      expect(Websites::BookingUrl.resolve(company: company, location: location)).to be_nil
+
+      Setting.set('Company', company.id, 'operational_settings', { 'booking_url' => 'calendly.com/lot' })
+
+      expect(Websites::BookingUrl.resolve(company: company, location: location))
+        .to eq('https://calendly.com/lot')
+    end
+  end
+
   describe 'booking' do
     it 'prefers the rep own link over the dealership' do
       rep = User.new(booking_url: 'calendly.com/rep')

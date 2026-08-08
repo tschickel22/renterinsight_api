@@ -35,6 +35,7 @@ module Websites
       payload['blog_categories'] = blog_categories
       payload['inventory_embed_config'] = inventory_embed_config
       payload['concierge_enabled'] = concierge_enabled
+      payload['platform_brand'] = platform_brand
       # Was missing here while WebsitesController#by_slug_public included it, so
       # every calculator block rendered in the in-app preview and then silently
       # vanished on the dealer's live domain — CalculatorBlock returns null when
@@ -82,6 +83,19 @@ module Websites
     rescue StandardError => e
       Rails.logger.warn("[Websites::PublicPayload] blog categories failed for #{@website.id}: #{e.message}")
       []
+    end
+
+    # Who built this site, from the brand kernel rather than a literal.
+    #
+    # Pointing this at a landing page later is a Platform Admin change to
+    # PLATFORM_WEBSITE_URL, not a code change, which is the whole reason the
+    # kernel exists. Hardcoding "DealerTide" here would re-introduce exactly the
+    # bug the rebrand branch removed.
+    def platform_brand
+      brand = Brand.current(company: @website.company)
+      { name: brand.name, url: brand.website_url }
+    rescue StandardError
+      {}
     end
 
     # Whether this dealer bought the concierge. Sent so the widget can render

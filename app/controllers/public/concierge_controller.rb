@@ -40,7 +40,12 @@ module Public
         # Exposed so the ratio of rules to model answers is measurable rather
         # than assumed. It is the number that tells us whether the cheap tiers
         # are actually carrying the traffic.
-        source: result.source
+        source: result.source,
+        # Persistent chips. Booking appears ONLY when a scheduler is actually
+        # configured, since a "set a meeting" link that opens a form the visitor
+        # has already been offered is noise.
+        quick_actions: quick_actions,
+        platform_brand: platform_brand
       }
     end
 
@@ -49,6 +54,25 @@ module Public
     end
 
     private
+
+    def quick_actions
+      booking = Websites::BookingUrl.resolve(
+        company: company, location: website&.location
+      )
+      actions = []
+      actions << { type: 'link', label: 'Set a meeting', url: booking } if booking.present?
+      actions << { type: 'form', label: 'Contact us', path: '/contact' }
+      actions
+    rescue StandardError
+      [{ type: 'form', label: 'Contact us', path: '/contact' }]
+    end
+
+    def platform_brand
+      brand = Brand.current(company: company)
+      { name: brand.name, url: brand.website_url }
+    rescue StandardError
+      {}
+    end
 
     def company
       @company ||= Company.find_by(public_inventory_token: params[:token]) if params[:token].present?
