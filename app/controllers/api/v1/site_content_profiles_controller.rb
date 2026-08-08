@@ -28,7 +28,7 @@ class Api::V1::SiteContentProfilesController < ApplicationController
 
   before_action :require_platform_admin!, except: [:by_token]
   before_action :set_company_scope, except: [:by_token]
-  before_action :set_profile, only: %i[show destroy rotate_preview_token update]
+  before_action :set_profile, only: %i[show destroy rotate_preview_token update engagement]
 
   def index
     profiles = SiteContentProfile.where(company_id: @company.id).order(created_at: :desc).limit(100)
@@ -175,6 +175,14 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       show_seo_report: params.key?(:show_seo_report) ? ActiveModel::Type::Boolean.new.cast(params[:show_seo_report]) : @profile.show_seo_report
     )
     render json: detail(@profile)
+  end
+
+  # GET /api/v1/site_content_profiles/:id/engagement
+  #
+  # Whether the prospect we sent this to has opened it, and what held their
+  # attention.
+  def engagement
+    render json: SiteProfiles::DemoEngagement.new(@profile).call
   end
 
   def rotate_preview_token

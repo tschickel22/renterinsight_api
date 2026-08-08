@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_08_07_234610) do
+ActiveRecord::Schema[8.0].define(version: 2026_08_08_030733) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "vector"
@@ -5991,6 +5991,25 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_07_234610) do
     t.index ["website_id"], name: "index_site_profile_projections_on_website_id"
   end
 
+  create_table "site_profile_views", force: :cascade do |t|
+    t.bigint "site_content_profile_id", null: false
+    t.string "visitor_token", null: false
+    t.string "session_token", null: false
+    t.datetime "first_seen_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.integer "view_events", default: 0, null: false
+    t.jsonb "templates_viewed", default: {}, null: false
+    t.string "referrer"
+    t.string "device_type"
+    t.string "ip_hash"
+    t.boolean "is_internal", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["site_content_profile_id", "session_token"], name: "idx_profile_views_session", unique: true
+    t.index ["site_content_profile_id", "visitor_token"], name: "idx_on_site_content_profile_id_visitor_token_e8312fc8a9"
+    t.index ["site_content_profile_id"], name: "index_site_profile_views_on_site_content_profile_id"
+  end
+
   create_table "sms_reply_tokens", force: :cascade do |t|
     t.string "token", null: false
     t.bigint "company_id", null: false
@@ -8182,6 +8201,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_08_07_234610) do
   add_foreign_key "site_profile_projections", "site_content_profiles"
   add_foreign_key "site_profile_projections", "site_profile_projections", column: "parent_id"
   add_foreign_key "site_profile_projections", "websites"
+  add_foreign_key "site_profile_views", "site_content_profiles"
   add_foreign_key "sms_reply_tokens", "companies"
   add_foreign_key "sms_usage_logs", "companies"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
