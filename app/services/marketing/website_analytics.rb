@@ -20,6 +20,9 @@ module Marketing
     DEFAULT_WINDOW = 30.days
     TOP_HOMES = 10
 
+    # Every spelling a block uses to name the form it submits to.
+    FORM_ID_KEYS = %w[intakeFormId intake_form_id lead_form_id leadFormId].freeze
+
     def initialize(website, from: nil, to: nil)
       @website = website
       @to = to || Time.current
@@ -193,7 +196,12 @@ module Marketing
             next unless block.is_a?(Hash)
 
             content = block['content'].is_a?(Hash) ? block['content'] : block
-            (content['lead_form_id'] || content['leadFormId']).presence
+            # Four spellings, because the blocks in the wild genuinely use
+            # different ones: the contact block templates ship writes
+            # intakeFormId, while the inventory card config carries lead_form_id.
+            # Checking only the latter pair missed every contact form that had
+            # actually been bound, which is the case this exists to count.
+            FORM_ID_KEYS.filter_map { |key| content[key].presence }.first
           end
         end
 

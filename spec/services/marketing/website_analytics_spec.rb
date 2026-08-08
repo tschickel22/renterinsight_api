@@ -205,6 +205,21 @@ RSpec.describe Marketing::WebsiteAnalytics do
       expect(described_class.new(website).call[:totals][:leads]).to eq(0)
     end
 
+    # The contact block templates ship writes intakeFormId; the inventory card
+    # config writes lead_form_id. Checking only one pair missed every contact
+    # form that had actually been bound.
+    it 'reads the form id whichever spelling the block used' do
+      %w[intakeFormId intake_form_id lead_form_id leadFormId].each do |key|
+        page.update!(blocks: [{ 'type' => 'contact', 'content' => { key => form.id } }])
+        lead_via(form, "Via #{key}")
+
+        expect(described_class.new(website).call[:totals][:leads]).to be_positive, "#{key} was missed"
+        # Submissions first: they hold the foreign key onto leads.
+        IntakeSubmission.where(intake_form_id: form.id).delete_all
+        Lead.where(company_id: company.id).delete_all
+      end
+    end
+
     it 'ignores a lead created by hand with no submission at all' do
       company.leads.create!(first_name: 'Walk', last_name: 'In')
 
