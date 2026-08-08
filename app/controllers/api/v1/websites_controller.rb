@@ -6,7 +6,7 @@ class Api::V1::WebsitesController < ApplicationController
   skip_before_action :authenticate, only: [:by_token, :by_slug_public]
   
   before_action :set_company_scope, except: [:by_token, :by_slug_public]
-  before_action :set_website, only: [:show, :update, :destroy, :publish, :unpublish, :sync_branding]
+  before_action :set_website, only: [:show, :update, :destroy, :publish, :unpublish, :sync_branding, :analytics]
 
   def index
     # CRITICAL: Authorization FIRST
@@ -211,6 +211,21 @@ class Api::V1::WebsitesController < ApplicationController
     # reachable. Published and reachable are different things: a site with no verified
     # domain is published and still has no address.
     render json: @website.as_json(methods: [:domain_status, :public_url])
+  end
+
+  # GET /api/v1/websites/:id/analytics
+  #
+  # What the site produced: where visitors came from, which homes they opened,
+  # and how far that reached toward a sale.
+  def analytics
+    return unless authorize_action!('websites', 'read')
+
+    from = params[:from].present? ? Time.zone.parse(params[:from]) : nil
+    to = params[:to].present? ? Time.zone.parse(params[:to]) : nil
+
+    render json: Marketing::WebsiteAnalytics.new(@website, from: from, to: to).call
+  rescue ArgumentError
+    render json: { error: 'Invalid date range' }, status: :bad_request
   end
 
   # POST /api/v1/websites/:id/unpublish

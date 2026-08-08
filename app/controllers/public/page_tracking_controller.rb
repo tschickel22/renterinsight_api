@@ -42,8 +42,19 @@ module Public
 
     private
 
+    # Any live page, not only landing pages.
+    #
+    # This was scoped to landing_pages, which is why page_visits was empty: a
+    # dealer's ordinary site pages were rejected by the beacon, so a website
+    # produced no visits, no sources and no conversions, and the analytics built
+    # on top of it had nothing to read. Measured before the change: zero rows in
+    # page_visits, ever.
+    #
+    # A landing page and an inventory page raise the same questions (where did
+    # this person come from, what did they look at, did they become a lead), and
+    # they are answered by the same records.
     def page
-      @page ||= WebsitePage.active.landing_pages.find_by(id: params[:page_id])
+      @page ||= WebsitePage.active.find_by(id: params[:page_id])
     end
 
     def beacon_params
