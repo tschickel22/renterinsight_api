@@ -405,7 +405,37 @@ module Public
       tags << property_tag('og:site_name', @metadata[:site_name])
       tags << property_tag('og:image', @metadata[:og_image])
       tags << meta_tag('twitter:card', @metadata[:og_image].present? ? 'summary_large_image' : 'summary')
+      tags << structured_data_tag
       tags.compact.join("\n")
+    end
+
+    # schema.org markup, which is what a search engine reads to know this is a
+    # dealership at an address selling a home at a price, and what an AI
+    # assistant reads when deciding what to quote.
+    #
+    # Never fatal. Bad markup costs rich results; a raised exception costs the
+    # dealer their whole site.
+    def structured_data_tag
+      Websites::StructuredData.new(
+        website: @website, page: @page, canonical_host: @canonical_host,
+        vehicle: requested_vehicle
+      ).to_tag
+    rescue StandardError => e
+      Rails.logger.warn("[Public::Sites] structured data failed for #{@website&.id}: #{e.message}")
+      nil
+    end
+
+    # A listing is addressed as ?vehicle=<id> rather than its own path, so this is
+    # the only place a home can be identified server side today. Scoped to the
+    # site's own company: the id comes from the query string and must not be able
+    # to pull another tenant's home into this page's markup.
+    def requested_vehicle
+      id = params[:vehicle].presence
+      return nil if id.blank?
+
+      @website.company.vehicles.find_by(id: id, is_deleted: [false, nil])
+    rescue StandardError
+      nil
     end
 
     def tag(name, value)
