@@ -34,6 +34,7 @@ module Websites
       payload['blog_posts'] = blog_posts
       payload['blog_categories'] = blog_categories
       payload['inventory_embed_config'] = inventory_embed_config
+      payload['concierge_enabled'] = concierge_enabled
       # Was missing here while WebsitesController#by_slug_public included it, so
       # every calculator block rendered in the in-app preview and then silently
       # vanished on the dealer's live domain — CalculatorBlock returns null when
@@ -81,6 +82,18 @@ module Websites
     rescue StandardError => e
       Rails.logger.warn("[Websites::PublicPayload] blog categories failed for #{@website.id}: #{e.message}")
       []
+    end
+
+    # Whether this dealer bought the concierge. Sent so the widget can render
+    # itself without a second request on first paint, and so a dealer who has
+    # not bought it gets no widget rather than one that 403s on first message.
+    def concierge_enabled
+      company = @website.company
+      return false if company.nil?
+
+      ModuleAccessService.new(company).module_enabled?('marketing.ai_concierge')
+    rescue StandardError
+      false
     end
 
     def inventory_embed_config

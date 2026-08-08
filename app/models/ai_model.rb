@@ -12,7 +12,12 @@ module AiModel
     generation:     'claude-sonnet-4-6',
     refine:         'claude-haiku-4-5-20251001',
     vision:         'claude-sonnet-4-6',
-    analysis:       'claude-sonnet-4-6'
+    analysis:       'claude-sonnet-4-6',
+    # The website concierge. Haiku by default and deliberately: it answers
+    # short questions from facts it is handed, which is the cheapest class of
+    # work we do and the highest volume, since it sits on every dealer page.
+    # AI_MODEL_CONCIERGE moves it without a deploy if the answers need more.
+    concierge:      'claude-haiku-4-5-20251001'
   }.freeze
 
   def self.for(role)

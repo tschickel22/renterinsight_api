@@ -61,6 +61,10 @@ class PlatformModule
     # verified domain and keeps sending; they just cannot add another. Revoking mid-campaign
     # would silently reroute live sends back through personal mailboxes, which is exactly
     # the failure this feature exists to prevent.
+    # Paid add-on, same shape as text_us and automation: absent from every
+    # PLAN_TEMPLATE on purpose, so no tier grants it free and it can be sold to a
+    # dealer who is on neither our website builder nor Text Us.
+    'marketing.ai_concierge' => { name: 'AI Concierge', category: 'Marketing', icon: 'MessageCircle', description: 'A chat assistant on the dealer site that answers from their own inventory and content, qualifies the visitor, and books the appointment' },
     'marketing.sending_domain' => { name: 'Sending Domain', category: 'Marketing', icon: 'ShieldCheck', description: 'Send campaigns from your own domain with your own DKIM, so deliverability and sender reputation stay yours instead of riding on a personal mailbox' },
 
     # Finance & Agreements

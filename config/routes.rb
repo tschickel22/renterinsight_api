@@ -31,6 +31,10 @@ Rails.application.routes.draw do
   # reserved prefixes — otherwise the tenant catch-all above answers it with the
   # page's HTML. Not under /api because it must stay reachable and uncached from
   # any custom domain.
+  # The website concierge. Public, token-scoped, same shape as the beacons.
+  post 'concierge/:token', to: 'public/concierge#create'
+  match 'concierge/:token', to: 'public/concierge#options', via: :options
+
   # The demo link beacon. Short path for the same reason the page one is: it
   # ships inside a bundle and is called on every design change.
   post 'dv/:token',      to: 'public/demo_tracking#create'
