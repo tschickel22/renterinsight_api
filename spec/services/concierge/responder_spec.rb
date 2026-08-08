@@ -156,6 +156,29 @@ RSpec.describe Concierge::Responder do
     end
   end
 
+  # A demo has a bound inventory lot but no Website of its own, since it is a
+  # projection that never becomes rows until someone commits it. The assistant
+  # answering from that lot is the most persuasive thing on the demo, so it has
+  # to work with a company alone.
+  describe 'on a demo, with no website' do
+    before { home(price: 70_000) }
+
+    it 'still answers from the bound lot inventory' do
+      result = described_class.new(website: nil, company: company,
+                                   message: 'anything under 80k?').call
+
+      expect(result.source).to eq('inventory')
+      expect(result.listings.first[:price]).to eq(70_000)
+    end
+
+    it 'still knows the dealer facts' do
+      result = described_class.new(website: nil, company: company,
+                                   message: 'where are you?').call
+
+      expect(result.text).to include('100 Lot Road')
+    end
+  end
+
   describe 'the quick links the widget shows' do
     # A "set a meeting" chip that opens the same form the visitor was already
     # offered is noise, so booking appears only when a scheduler exists.

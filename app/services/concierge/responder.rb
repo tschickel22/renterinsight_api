@@ -27,8 +27,9 @@ module Concierge
 
     Result = Struct.new(:text, :actions, :listings, :source, :usage, keyword_init: true)
 
-    def initialize(website:, message:, history: [], user: nil)
+    def initialize(website:, message:, history: [], user: nil, company: nil)
       @website = website
+      @company = company || website&.company
       @message = message.to_s.strip
       @history = Array(history).last(HISTORY_TURNS)
       @user = user
@@ -52,12 +53,12 @@ module Concierge
     private
 
     def knowledge
-      @knowledge ||= Knowledge.new(website: @website)
+      @knowledge ||= Knowledge.new(website: @website, company: @company)
     end
 
     def booking_url
       @booking_url ||= Websites::BookingUrl.resolve(
-        company: @website&.company, location: @website&.location, user: @user
+        company: @company, location: @website&.location, user: @user
       )
     end
 
@@ -72,7 +73,7 @@ module Concierge
     # Matching homes, straight from the same scope the public grid uses, so the
     # concierge can never show a home the site would refuse to.
     def inventory_result(filters)
-      matches = Concierge::InventorySearch.new(company: @website&.company, filters: filters).call
+      matches = Concierge::InventorySearch.new(company: @company, filters: filters).call
 
       if matches.empty?
         return Result.new(

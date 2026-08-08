@@ -9,9 +9,12 @@ module Concierge
   # eventually tell a buyer a manufactured home needs no permit, or quote a
   # finance term this dealer does not offer, under the dealer's own logo.
   class Knowledge
-    def initialize(website:)
+    # company is given directly for a demo, which has a bound inventory lot but
+    # no Website of its own: the demo is a projection that never becomes rows
+    # until someone commits it.
+    def initialize(website:, company: nil)
       @website = website
-      @company = website&.company
+      @company = website&.company || company
     end
 
     def to_h

@@ -21,12 +21,15 @@ module Public
     def create
       return head :not_found if company.nil?
       # Sold on its own, so a dealer without it must get nothing rather than a
-      # degraded version they did not pay for.
-      return head :forbidden unless concierge_enabled?
+      # degraded version they did not pay for. A demo is the exception: it is
+      # our sales asset, not a customer's site, and the concierge answering from
+      # the prospect's own stock is the point of showing it.
+      return head :forbidden unless concierge_enabled? || demo?
       return too_many if rate_limited?
 
       result = Concierge::Responder.new(
         website: website,
+        company: company,
         message: params[:message].to_s.slice(0, MAX_MESSAGE),
         history: params[:history]
       ).call
@@ -96,6 +99,19 @@ module Public
       end
     end
 
+    # A live demo, proven by its own preview token rather than asserted by the
+    # caller. Only a platform admin can create one and the token expires, so this
+    # cannot be used to get the module for free.
+    def demo?
+      token = params[:demo_token].presence
+      return false if token.blank?
+
+      profile = SiteContentProfile.find_by(preview_token: token)
+      profile.present? && profile.shareable?
+    rescue StandardError
+      false
+    end
+
     def concierge_enabled?
       ModuleAccessService.new(company).module_enabled?('marketing.ai_concierge')
     rescue StandardError
@@ -124,7 +140,7 @@ module Public
 
       AiQueryLog.create!(
         company_id: company.id,
-        feature: 'concierge',
+        feature: demo? ? 'concierge_demo' : 'concierge',
         module_key: 'marketing.ai_concierge',
         input_tokens: result.usage[:input_tokens],
         output_tokens: result.usage[:output_tokens],
