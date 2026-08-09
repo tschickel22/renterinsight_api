@@ -183,9 +183,27 @@ class ApplicationController < ActionController::API
   end
 
   def authenticate_portal_buyer!
-    unless current_portal_buyer
-      render json: { error: 'Unauthorized' }, status: :unauthorized
-      return
+    return if current_portal_buyer
+
+    render json: portal_auth_error, status: :unauthorized
+  end
+
+  # Why the portal request could not be authenticated, in a form the client can
+  # branch on. A bare 'Unauthorized' gave the portal nothing to work with, so an
+  # expired proxy token (they last an hour) surfaced as an error toast on every
+  # request instead of a prompt to re-authenticate.
+  def portal_auth_error
+    header = request.headers['Authorization']
+    return { error: 'Missing authorization header', code: 'token_missing' } if header.blank?
+
+    case JsonWebToken.token_state(header.split(' ').last)
+    when :expired
+      { error: 'Your portal session has expired. Please sign in again.', code: 'token_expired' }
+    when :invalid
+      { error: 'Invalid token', code: 'token_invalid' }
+    else
+      # Token is well-formed but names no reachable portal account.
+      { error: 'Portal access not found', code: 'portal_access_not_found' }
     end
   end
 

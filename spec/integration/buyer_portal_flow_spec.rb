@@ -6,18 +6,19 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
   let(:company) { Company.create!(name: 'Test Company') }
   let(:source) { Source.create!(name: 'Test Source', source_type: 'website', is_active: true) }
   
+  # Portal accounts are Contact-backed; see the note in
+  # spec/security/portal_authorization_spec.rb.
   let(:lead) do
-    Lead.create!(
+    Contact.create!(
       first_name: 'Jane',
       last_name: 'Smith',
       email: 'jane@example.com',
       phone: '555-9876',
-      source: source,
       company: company,
-      is_converted: true
+      account: account
     )
   end
-  
+
   let(:account) do
     Account.create!(
       company: company,
@@ -26,10 +27,10 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
       status: 'active'
     )
   end
-  
-  before do
-    lead.update!(converted_account_id: account.id)
-  end
+
+  # portal_access is what the login/magic-link/reset flows look up, and it
+  # builds the contact on the way, so it has to exist before the first request.
+  before { portal_access }
 
   let(:portal_access) do
     BuyerPortalAccess.create!(
@@ -44,11 +45,9 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
   end
 
   let(:valid_token) do
-    JWT.encode(
-      { buyer_id: lead.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
-      Rails.application.secret_key_base,
-      'HS256'
-    )
+    # Portal tokens are keyed on the BuyerPortalAccess row, not the buyer. See
+    # ApplicationController#current_portal_buyer.
+    JsonWebToken.encode({ buyer_portal_access_id: portal_access.id }, 24.hours.from_now)
   end
 
   let(:auth_headers) do
@@ -73,7 +72,7 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
 
       # Step 2: View Communications
       thread = CommunicationThread.create!(
-        participant_type: 'Lead',
+        participant_type: 'Contact',
         participant_id: lead.id,
         channel: 'portal_message',
         subject: 'Welcome to our service'
@@ -110,6 +109,7 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
 
       # Step 4: View Quotes
       quote = Quote.create!(
+        company: company,
         account: account,
         quote_number: 'Q-2025-TEST-001',
         status: 'sent',
@@ -173,15 +173,20 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
   end
 
   describe 'Authentication Flow' do
+    # Two steps, matching PortalAuthContext: request mails the link, verify
+    # trades it for a session. The request endpoint takes an email and never
+    # returns a token, so posting the token to it proves nothing.
     it 'handles magic link login flow' do
-      # Generate magic link
-      portal_access.generate_login_token
-      portal_access.save!
-
-      # Attempt login with magic link
-      post '/api/portal/auth/magic-link', params: {
-        token: portal_access.login_token
+      post '/api/portal/auth/request_magic_link', params: {
+        email: 'jane@example.com'
       }.to_json, headers: { 'Content-Type' => 'application/json' }
+
+      expect(response).to have_http_status(:ok)
+
+      portal_access.reload
+      expect(portal_access.login_token).to be_present
+
+      get '/api/portal/auth/verify_magic_link', params: { token: portal_access.login_token }
 
       expect(response).to have_http_status(:ok)
       data = JSON.parse(response.body)
@@ -233,11 +238,7 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
     end
 
     it 'returns 401 for expired token' do
-      expired_token = JWT.encode(
-        { buyer_id: lead.id, buyer_type: 'Lead', exp: 1.hour.ago.to_i },
-        Rails.application.secret_key_base,
-        'HS256'
-      )
+      expired_token = JsonWebToken.encode({ buyer_portal_access_id: portal_access.id }, 1.hour.ago)
 
       headers = { 'Authorization' => "Bearer #{expired_token}" }
 
@@ -254,6 +255,7 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
 
     it 'prevents accepting already accepted quote' do
       quote = Quote.create!(
+        company: company,
         account: account,
         quote_number: 'Q-2025-TEST-002',
         status: 'accepted',
@@ -274,6 +276,7 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
 
     it 'prevents accepting expired quote' do
       quote = Quote.create!(
+        company: company,
         account: account,
         quote_number: 'Q-2025-TEST-003',
         status: 'sent',
@@ -281,9 +284,12 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
         tax: 100.00,
         total: 1100.00,
         items: [{ description: 'Service', quantity: 1, unit_price: '1000.00', total: '1000.00' }],
-        valid_until: 1.day.ago.to_date,
+        valid_until: 30.days.from_now.to_date,
         sent_at: 2.days.ago
       )
+      # Quote validates valid_until into the future, so an expired one has to be
+      # aged past the validation rather than created that way.
+      quote.update_column(:valid_until, 1.day.ago.to_date)
 
       patch "/api/portal/quotes/#{quote.id}/accept", headers: auth_headers
 
@@ -296,7 +302,7 @@ RSpec.describe 'Buyer Portal Integration Flow', type: :request do
   describe 'Communication Threading' do
     it 'maintains thread continuity across replies' do
       thread = CommunicationThread.create!(
-        participant_type: 'Lead',
+        participant_type: 'Contact',
         participant_id: lead.id,
         channel: 'portal_message',
         subject: 'Service Inquiry'

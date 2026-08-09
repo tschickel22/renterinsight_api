@@ -64,6 +64,27 @@ class JsonWebToken
     nil
   end
   
+  # Classify a token without swallowing the reason it failed.
+  #
+  # #decode returns nil for an expired token and for a malformed one alike, so
+  # callers cannot tell a timed-out session (re-authenticate quietly) from a bad
+  # one (send them to sign in). Portal proxy tokens live only an hour, which is
+  # shorter than a long demo, so this distinction is the difference between a
+  # clean redirect and a wall of error toasts.
+  #
+  # @param token [String] The JWT token to classify
+  # @return [Symbol] :valid, :expired or :invalid
+  def self.token_state(token)
+    return :invalid if token.blank?
+
+    JWT.decode(token, secret_key, true, { algorithm: 'HS256' })
+    :valid
+  rescue JWT::ExpiredSignature
+    :expired
+  rescue JWT::DecodeError
+    :invalid
+  end
+
   # Generate a standard access token for a user
   # @param user [User] The user to generate a token for
   # @return [String] The encoded access token

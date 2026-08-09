@@ -14,20 +14,25 @@ module Api
         token = request.headers['Authorization']&.split(' ')&.last
 
         unless token
-          return render json: { error: 'Missing authorization header' }, status: :unauthorized
+          return render json: { error: 'Missing authorization header', code: 'token_missing' },
+                        status: :unauthorized
         end
 
         begin
           payload = JsonWebToken.decode(token)
 
+          # JsonWebToken.decode returns nil for expired AND malformed tokens, so
+          # ask why before answering. Reporting an expired proxy token as
+          # 'Invalid token' is what turned a timed-out demo into error toasts.
           unless payload && payload['buyer_portal_access_id']
-            return render json: { error: 'Invalid token' }, status: :unauthorized
+            return render json: portal_auth_error, status: :unauthorized
           end
 
           buyer_access = BuyerPortalAccess.find_by(id: payload['buyer_portal_access_id'])
 
           unless buyer_access&.portal_enabled
-            return render json: { error: 'Portal access disabled' }, status: :unauthorized
+            return render json: { error: 'Portal access disabled', code: 'portal_disabled' },
+                          status: :unauthorized
           end
 
           # Get the contact (buyer) from BuyerPortalAccess
@@ -44,10 +49,9 @@ module Api
           # Store buyer_access for controllers that need it
           @current_buyer_access = buyer_access
 
-        rescue JWT::ExpiredSignature
-          render json: { error: 'Token has expired' }, status: :unauthorized
-        rescue JWT::DecodeError => e
-          render json: { error: 'Invalid token' }, status: :unauthorized
+        # No JWT::ExpiredSignature / JWT::DecodeError rescues here: decode
+        # catches both itself and returns nil, so those clauses were dead and
+        # the expiry case above is what actually reports it.
         rescue => e
           Rails.logger.error "Portal authentication error: #{e.message}"
           render json: { error: 'Authentication failed' }, status: :unauthorized

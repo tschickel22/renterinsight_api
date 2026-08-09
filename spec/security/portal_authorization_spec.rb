@@ -6,18 +6,20 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
   let(:company) { Company.create!(name: 'Test Company') }
   let(:source) { Source.create!(name: 'Test Source', source_type: 'website', is_active: true) }
   
+  # Portal accounts are Contact-backed. Api::Portal::QuotesController#buyer_quotes
+  # only understands Contact and Account buyers; a Lead-backed access falls
+  # through to Quote.none, which is what these specs used to assert against.
   let(:buyer1_lead) do
-    Lead.create!(
+    Contact.create!(
       first_name: 'Alice',
       last_name: 'Smith',
       email: 'alice@example.com',
       phone: '555-1111',
-      source: source,
       company: company,
-      is_converted: true
+      account: account1
     )
   end
-  
+
   let(:account1) do
     Account.create!(
       company: company,
@@ -38,25 +40,22 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
   end
   
   let(:buyer1_token) do
-    JWT.encode(
-      { buyer_id: buyer1_lead.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
-      Rails.application.secret_key_base,
-      'HS256'
-    )
+    # Portal tokens are keyed on the BuyerPortalAccess row, not the buyer. See
+    # ApplicationController#current_portal_buyer.
+    JsonWebToken.encode({ buyer_portal_access_id: buyer1_access.id }, 24.hours.from_now)
   end
   
   let(:buyer2_lead) do
-    Lead.create!(
+    Contact.create!(
       first_name: 'Bob',
       last_name: 'Jones',
       email: 'bob@example.com',
       phone: '555-2222',
-      source: source,
       company: company,
-      is_converted: true
+      account: account2
     )
   end
-  
+
   let(:account2) do
     Account.create!(
       company: company,
@@ -77,22 +76,18 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
   end
   
   let(:buyer2_token) do
-    JWT.encode(
-      { buyer_id: buyer2_lead.id, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
-      Rails.application.secret_key_base,
-      'HS256'
-    )
+    JsonWebToken.encode({ buyer_portal_access_id: buyer2_access.id }, 24.hours.from_now)
   end
   
   before do
-    buyer1_lead.update!(converted_account_id: account1.id)
-    buyer2_lead.update!(converted_account_id: account2.id)
+    buyer1_lead
+    buyer2_lead
   end
   
   describe 'Communications Isolation' do
     before do
       @buyer1_thread = CommunicationThread.create!(
-        participant_type: 'Lead',
+        participant_type: 'Contact',
         participant_id: buyer1_lead.id,
         channel: 'portal_message',
         subject: 'Alice Private',
@@ -116,7 +111,7 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
       )
       
       @buyer2_thread = CommunicationThread.create!(
-        participant_type: 'Lead',
+        participant_type: 'Contact',
         participant_id: buyer2_lead.id,
         channel: 'portal_message',
         subject: 'Bob Private',
@@ -167,6 +162,7 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
   describe 'Quotes Isolation' do
     before do
       @buyer1_quote = Quote.create!(
+        company: company,
         account: account1,
         quote_number: 'Q-ALICE-001',
         status: 'sent',
@@ -179,6 +175,7 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
       )
       
       @buyer2_quote = Quote.create!(
+        company: company,
         account: account2,
         quote_number: 'Q-BOB-001',
         status: 'sent',
@@ -222,11 +219,7 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
   
   describe 'Token Security' do
     it 'rejects expired token' do
-      expired = JWT.encode(
-        { buyer_id: buyer1_lead.id, buyer_type: 'Lead', exp: 1.hour.ago.to_i },
-        Rails.application.secret_key_base,
-        'HS256'
-      )
+      expired = JsonWebToken.encode({ buyer_portal_access_id: buyer1_access.id }, 1.hour.ago)
       get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{expired}" }
       expect(response).to have_http_status(:unauthorized)
     end
@@ -242,11 +235,7 @@ RSpec.describe 'Portal Security & Authorization', type: :request do
     end
     
     it 'rejects wrong buyer_id in token' do
-      wrong_token = JWT.encode(
-        { buyer_id: 99999, buyer_type: 'Lead', exp: 24.hours.from_now.to_i },
-        Rails.application.secret_key_base,
-        'HS256'
-      )
+      wrong_token = JsonWebToken.encode({ buyer_portal_access_id: 99_999 }, 24.hours.from_now)
       get '/api/portal/communications', headers: { 'Authorization' => "Bearer #{wrong_token}" }
       expect(response).to have_http_status(:unauthorized).or have_http_status(:not_found)
     end
