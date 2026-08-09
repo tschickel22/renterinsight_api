@@ -24,7 +24,10 @@ module SiteProfiles
     module_function
 
     def internal(report)
-      report.presence&.deep_stringify_keys
+      data = report.presence&.deep_stringify_keys
+      return nil if data.blank?
+
+      data.merge('summary' => SeoReportSummary.call(data)).compact
     end
 
     # @return [Hash, nil] findings with the addresses and the how removed
@@ -33,6 +36,10 @@ module SiteProfiles
       return nil if data.blank?
 
       data.merge(
+        # Computed from the full report, before the weights come off. The
+        # summary ranks findings by weight, so building it from the stripped
+        # view silently reordered it: every finding looked equally important.
+        'summary' => SeoReportSummary.call(data),
         'checks' => Array(data['checks']).map { |check| client_check(check) },
         # Named so the reader knows this is a summary rather than the whole
         # picture, and so nobody on our side mistakes it for the full report.

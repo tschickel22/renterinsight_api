@@ -95,7 +95,10 @@ module SiteProfiles
       # Before the findings, not after. A reader who only takes in the first
       # paragraph should still leave knowing what is wrong and what it costs,
       # and on a skimmed page that is most readers.
-      overview = SeoReportSummary.call(@report)
+      # The view already computed this from the full report. Recomputing it here
+      # would rebuild the client version from a payload with the weights removed,
+      # which is how the findings lost their ranking.
+      overview = @report['summary'].presence || SeoReportSummary.call(@report)
       if overview.present?
         pdf.move_down 8
         pdf.fill_color INK

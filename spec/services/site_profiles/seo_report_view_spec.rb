@@ -49,6 +49,23 @@ RSpec.describe SiteProfiles::SeoReportView do
       expect(view['domain']).to eq('dealer.com')
     end
 
+    # The summary ranks findings by weight, and the client view strips weights.
+    # Computed after the strip, every finding looked equally important and the
+    # paragraph led with whatever happened to be first.
+    it 'carries a summary ranked from the full report, before the weights come off' do
+      ranked = described_class.client(
+        report.merge('checks' => [
+                       { 'key' => 'image_alt', 'label' => 'Image alt text', 'status' => 'warn',
+                         'headline' => 'no alt text', 'weight' => 4, 'urls' => [] },
+                       { 'key' => 'local_business', 'label' => 'Local business markup', 'status' => 'fail',
+                         'headline' => 'none', 'weight' => 9, 'urls' => [] }
+                     ])
+      )
+
+      expect(ranked['summary']).to include('Nothing tells Google this is a dealership')
+      expect(ranked['summary'].index('dealership')).to be < ranked['summary'].index('alt text')
+    end
+
     it 'marks itself as the client view, so it cannot be mistaken for the whole picture' do
       expect(view['audience']).to eq('client')
     end
