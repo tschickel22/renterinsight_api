@@ -31,7 +31,8 @@ module Public
         website: website,
         company: company,
         message: params[:message].to_s.slice(0, MAX_MESSAGE),
-        history: params[:history]
+        history: params[:history],
+        visitor: visitor_details
       ).call
 
       log_usage(result)
@@ -58,9 +59,23 @@ module Public
 
     private
 
+    # Only what the scheduler can use. Deliberately not persisted here: this
+    # endpoint answers questions, and creating a lead is a separate, consented
+    # act rather than a side effect of typing a name into a chat box.
+    def visitor_details
+      details = params[:visitor]
+      return {} unless details.respond_to?(:permit)
+
+      details.permit(:name, :email, :phone).to_h
+    end
+
     def quick_actions
-      booking = Websites::BookingUrl.resolve(
-        company: company, location: website&.location
+      # Prefilled the same way the in-answer booking link is. The persistent
+      # chip is the one most visitors actually click, so leaving it unprefilled
+      # would have meant asking for a name and then wasting it.
+      booking = Websites::BookingPrefill.apply(
+        Websites::BookingUrl.resolve(company: company, location: website&.location),
+        **visitor_details.symbolize_keys.slice(:name, :email, :phone)
       )
       actions = []
       actions << { type: 'link', label: 'Set a meeting', url: booking } if booking.present?

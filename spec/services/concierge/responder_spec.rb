@@ -220,4 +220,34 @@ RSpec.describe Concierge::Responder do
         .to eq('https://acuity.com/lot')
     end
   end
+
+  # Why we can ask for a name before showing the calendar without charging the
+  # visitor for it: they type it once, and the scheduler opens filled in.
+  describe 'carrying what the visitor told us into the scheduler' do
+    before do
+      allow(Websites::BookingUrl).to receive(:resolve)
+        .and_return('https://calendly.com/summit-park/showing')
+    end
+
+    def book(visitor)
+      result = described_class.new(website: website, message: 'can I book a showing?',
+                                   visitor: visitor).call
+      result.actions.find { |a| a[:type] == 'link' }
+    end
+
+    it 'prefills the booking link with what it has' do
+      action = book(name: 'Jane Doe', email: 'jane@example.com')
+
+      expect(action[:url]).to include('name=Jane+Doe')
+      expect(action[:url]).to include('email=jane%40example.com')
+    end
+
+    it 'leaves the link alone when the visitor has given nothing' do
+      expect(book({})[:url]).to eq('https://calendly.com/summit-park/showing')
+    end
+
+    it 'accepts string keys, since these arrive off a JSON request' do
+      expect(book('name' => 'Jane Doe')[:url]).to include('name=Jane+Doe')
+    end
+  end
 end

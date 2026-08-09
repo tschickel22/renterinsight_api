@@ -27,12 +27,16 @@ module Concierge
 
     Result = Struct.new(:text, :actions, :listings, :source, :usage, keyword_init: true)
 
-    def initialize(website:, message:, history: [], user: nil, company: nil)
+    # visitor: whatever the assistant has already got out of them. Used only to
+    # carry their name and email into the dealer's scheduler, so being asked for
+    # them before the calendar costs the visitor nothing.
+    def initialize(website:, message:, history: [], user: nil, company: nil, visitor: {})
       @website = website
       @company = company || website&.company
       @message = message.to_s.strip
       @history = Array(history).last(HISTORY_TURNS)
       @user = user
+      @visitor = (visitor || {}).symbolize_keys
     end
 
     def call
@@ -57,9 +61,14 @@ module Concierge
     end
 
     def booking_url
-      @booking_url ||= Websites::BookingUrl.resolve(
-        company: @company, location: @website&.location, user: @user
-      )
+      @booking_url ||= begin
+        resolved = Websites::BookingUrl.resolve(
+          company: @company, location: @website&.location, user: @user
+        )
+        Websites::BookingPrefill.apply(
+          resolved, name: @visitor[:name], email: @visitor[:email], phone: @visitor[:phone]
+        )
+      end
     end
 
     def lead_form_path
