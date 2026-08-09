@@ -7,7 +7,7 @@ class CampaignStatsRollupJob < ApplicationJob
       enrollments = c.campaign_enrollments.real
       stats = {
         'total_sent'   => sends.where.not(sent_at: nil).count,
-        'delivered'    => sends.where.not(delivered_at: nil).count,
+        'delivered'    => sends.delivered.count,
         'opened'       => sends.where.not(opened_at: nil).count,
         'clicked'      => sends.where.not(clicked_at: nil).count,
         'replied'      => sends.where.not(replied_at: nil).count,

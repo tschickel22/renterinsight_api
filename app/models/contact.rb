@@ -75,6 +75,7 @@ class Contact < ApplicationRecord
   # Callbacks
   before_validation :normalize_email
   before_validation :normalize_phone
+  before_save :clear_email_invalid_on_address_change
 
   # Instance methods
   def full_name
@@ -183,6 +184,16 @@ class Contact < ApplicationRecord
 
   def normalize_phone
     self.phone = phone.to_s.strip if phone.present?
+  end
+
+  # email_invalid describes ONE address, so it has to be released when that address is
+  # replaced. Without this, correcting a typo left the record permanently unmailable: the
+  # flag stayed set against an address that no longer existed on the record, and the fix a
+  # rep just made would have looked like it did nothing.
+  # Guarded on persisted? because a create "changes" email from nil, which would wipe the
+  # flag on any record deliberately imported as already-bad.
+  def clear_email_invalid_on_address_change
+    self.email_invalid = false if persisted? && will_save_change_to_email?
   end
 
   # ActivityTrackable overrides

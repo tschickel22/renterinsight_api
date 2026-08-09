@@ -679,7 +679,8 @@ class Api::V1::CampaignsController < ApplicationController
       filter_tree: ca.filter_tree,
       exclude_filter_tree: ca.exclude_filter_tree,
       exclude_active_campaign_enrollees: ca.try(:exclude_active_campaign_enrollees) || false,
-      exclude_active_nurture_enrollees: ca.try(:exclude_active_nurture_enrollees) || false
+      exclude_active_nurture_enrollees: ca.try(:exclude_active_nurture_enrollees) || false,
+      channel: @campaign.channel
     )
     scope = compiler.scope
 
@@ -731,7 +732,8 @@ class Api::V1::CampaignsController < ApplicationController
     # Recompute estimated count
     compiler = Audiences::FilterCompiler.new(
       company: @company, source_type: ca.source_type,
-      filter_tree: ca.filter_tree, exclude_filter_tree: ca.exclude_filter_tree
+      filter_tree: ca.filter_tree, exclude_filter_tree: ca.exclude_filter_tree,
+      channel: @campaign.channel
     )
     excluded_scope = compiler.scope.where.not(id: new_excludes)
     ca.update_columns(estimated_count: excluded_scope.count, estimated_at: Time.current)

@@ -75,6 +75,7 @@ class Lead < ApplicationRecord
   # Internal/system updates that should NOT count (e.g. score recompute jobs)
   # should also use update_columns.
   before_save :touch_last_activity_at
+  before_save :clear_email_invalid_on_address_change
 
   # Scopes for filtering converted leads
   scope :active, -> { where(is_converted: [false, nil]) }
@@ -102,6 +103,16 @@ class Lead < ApplicationRecord
   end
 
   private
+
+  # email_invalid describes ONE address, so it has to be released when that address is
+  # replaced. Without this, correcting a typo left the record permanently unmailable: the
+  # flag stayed set against an address that no longer existed on the record, and the fix a
+  # rep just made would have looked like it did nothing.
+  # Guarded on persisted? because a create "changes" email from nil, which would wipe the
+  # flag on any record deliberately imported as already-bad.
+  def clear_email_invalid_on_address_change
+    self.email_invalid = false if persisted? && will_save_change_to_email?
+  end
 
   def touch_last_activity_at
     # On create: stamp it so new leads have a non-null sortable value.

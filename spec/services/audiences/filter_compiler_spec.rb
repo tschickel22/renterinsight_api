@@ -154,12 +154,22 @@ RSpec.describe Audiences::FilterCompiler do
   end
 
   describe 'Account source type' do
+    # Accounts need an address here because an email audience now excludes records it could
+    # never reach. See filter_compiler_email_reachability_spec.rb for that behaviour; this
+    # example is only about the Account source type compiling at all.
     it 'compiles against accounts' do
-      a1 = Account.create!(company: company, name: 'Acme', account_type: 'customer')
-      _a2 = Account.create!(company: other_company, name: 'Other')
+      a1 = Account.create!(company: company, name: 'Acme', account_type: 'customer', email: 'acme@e.com')
+      _a2 = Account.create!(company: other_company, name: 'Other', email: 'other@e.com')
       tree = { 'type' => 'and', 'children' => [{ 'field' => 'account_type', 'operator' => 'equals', 'value' => 'customer' }] }
       ids = described_class.new(company: company, source_type: 'Account', filter_tree: tree).scope.pluck(:id)
       expect(ids).to contain_exactly(a1.id)
+    end
+
+    it 'excludes an account with no address from an email audience' do
+      _a1 = Account.create!(company: company, name: 'Nomail', account_type: 'customer')
+      tree = { 'type' => 'and', 'children' => [{ 'field' => 'account_type', 'operator' => 'equals', 'value' => 'customer' }] }
+      ids = described_class.new(company: company, source_type: 'Account', filter_tree: tree).scope.pluck(:id)
+      expect(ids).to be_empty
     end
   end
 

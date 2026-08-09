@@ -9,6 +9,13 @@ class CampaignSend < ApplicationRecord
   # so this subquery exclusion is NULL-safe. Keeps test-send rows out of analytics totals.
   scope :real, -> { where.not(campaign_enrollment_id: CampaignEnrollment.test_sends.select(:id)) }
 
+  # Delivery that actually held. A receiving server can accept a message at SMTP time and
+  # reject it moments later, which produces a Delivery event AND then a Bounce event for the
+  # same send. Counting delivered_at on its own therefore reported those as both delivered
+  # and bounced, overstating the delivery rate by exactly the async-bounce count — on the
+  # first SES campaign that was 3 of 52, every one of them a hard bounce.
+  scope :delivered, -> { where.not(delivered_at: nil).where(bounced_at: nil) }
+
   # Bridge open/click tracking (recorded against the Communication / TrackedLink) into the
   # campaign analytics columns the stats rollup and timeseries read. opened_at/clicked_at are
   # stamped once (first event); the *_count columns increment on every event.

@@ -1255,6 +1255,10 @@ module Api
           firstName: l.first_name,
           lastName:  l.last_name,
           email:     l.email,
+          # Set when a send to this address hard bounced or was reported as spam. The CRM
+          # marks the address so a rep can see why their email never arrived, instead of
+          # retyping the same dead address into a follow-up.
+          emailInvalid: l.email_invalid,
           phone:     l.phone,
           notes:     l.notes,
           status:    l.status,

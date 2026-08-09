@@ -2228,7 +2228,7 @@ class DashboardMetricsService
     sends_scope = CampaignSend.where(company_id: @company.id, sent_at: range)
 
     total_sends      = sends_scope.where.not(sent_at: nil).count
-    total_delivered  = sends_scope.where.not(delivered_at: nil).count
+    total_delivered  = sends_scope.delivered.count
     total_opened     = sends_scope.where.not(opened_at: nil).count
     total_clicked    = sends_scope.where.not(clicked_at: nil).count
     total_bounced    = sends_scope.where.not(bounced_at: nil).count
@@ -2241,7 +2241,7 @@ class DashboardMetricsService
     per_campaign = campaigns.map do |c|
       cs = sends_scope.where(campaign_id: c.id)
       sent = cs.where.not(sent_at: nil).count
-      delivered = cs.where.not(delivered_at: nil).count
+      delivered = cs.delivered.count
       opened = cs.where.not(opened_at: nil).count
       clicked = cs.where.not(clicked_at: nil).count
       next nil if sent.zero?

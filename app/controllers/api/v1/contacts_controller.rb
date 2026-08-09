@@ -1091,6 +1091,9 @@ module Api
           lastName: contact.last_name,
           fullName: contact.full_name,
           email: contact.email,
+          # Set when a send to this address hard bounced or was reported as spam. See the
+          # matching field in the lead payload.
+          emailInvalid: contact.email_invalid,
           phone: contact.phone,
           title: contact.title,
           department: contact.department,

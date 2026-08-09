@@ -145,7 +145,8 @@ module Campaigns
       real_sends.group(:campaign_step_id).select(<<~SEL.squish).each_with_object({}) do |row, h|
         campaign_step_id,
         COUNT(DISTINCT campaign_enrollment_id) FILTER (WHERE sent_at IS NOT NULL)      AS sent,
-        COUNT(DISTINCT campaign_enrollment_id) FILTER (WHERE delivered_at IS NOT NULL) AS delivered,
+        COUNT(DISTINCT campaign_enrollment_id) FILTER (WHERE delivered_at IS NOT NULL
+                                                        AND bounced_at IS NULL)        AS delivered,
         SUM(open_count)                                                                AS opens,
         COUNT(DISTINCT campaign_enrollment_id) FILTER (WHERE opened_at IS NOT NULL)    AS unique_openers,
         SUM(click_count)                                                               AS clicks,

@@ -15,6 +15,7 @@ class CommunicationService
   class Error < StandardError; end
   class OptOutError < Error; end
   class ProviderError < Error; end
+  class SuppressedRecipientError < Error; end
   
   attr_reader :communication
   
@@ -122,17 +123,18 @@ class CommunicationService
     scheduled_for: nil,
     send_async: false,
     skip_preference_check: false,
+    skip_suppression_check: false,
     sender_user_id: nil,
     **options
   )
     # Extract sending user from options (for user-level email settings)
     @sending_user = options[:user] || options[:sent_by]
-    
+
     # Check communication preferences (opt-in/out)
     # For quotes, we check preferences on the contact/account, not the quote itself
     unless skip_preference_check
       recipient_for_check = determine_recipient_for_preference_check(communicable)
-      
+
       if recipient_for_check && !can_send_to_recipient?(
         recipient: recipient_for_check,
         channel: channel,
@@ -141,7 +143,28 @@ class CommunicationService
         raise OptOutError, "Recipient has opted out of #{channel} communications"
       end
     end
-    
+
+    # A hard bounce or spam complaint is permanent, and every retry to that address is
+    # counted by SES against the sending account's reputation — an account shared by every
+    # tenant, whose suspension would take transactional mail down with the campaigns.
+    #
+    # Campaigns already refused these addresses in CampaignSender. Nothing else did, so a
+    # rep pressing Email on the lead, a nurture step, or a quote all kept mailing an address
+    # the platform already knew was dead. This is the one chokepoint every outbound email
+    # passes through, so the check belongs here rather than at each call site.
+    #
+    # Account-critical mail (MFA, password reset, magic link) is unaffected: those mailers
+    # use ActionMailer directly and never reach this method, so a stale bounce can never be
+    # the reason somebody cannot get back into their own account.
+    if channel == 'email' && direction == 'outbound' && !skip_suppression_check
+      suppression_company = extract_company_from_communicable(communicable)
+
+      if CampaignSuppression.unmailable?(suppression_company&.id, to)
+        raise SuppressedRecipientError,
+              "#{to} cannot be emailed: a previous send hard bounced or was reported as spam"
+      end
+    end
+
     # Render template if provided
     if template
       template_obj = template.is_a?(CommunicationTemplate) ? template : CommunicationTemplate.find(template)

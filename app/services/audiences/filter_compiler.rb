@@ -22,9 +22,11 @@ module Audiences
                    manual_include_ids: nil,
                    manual_exclude_ids: nil,
                    exclude_active_campaign_enrollees: false,
-                   exclude_active_nurture_enrollees: false)
+                   exclude_active_nurture_enrollees: false,
+                   channel: 'email')
       @company = company
       @source_type = source_type
+      @channel = channel.to_s.presence || 'email'
       @filter_tree = filter_tree.is_a?(Hash) ? filter_tree.deep_stringify_keys : {}
       @exclude_filter_tree = exclude_filter_tree.is_a?(Hash) ? exclude_filter_tree.deep_stringify_keys : nil
       @manual_include_ids = Array(manual_include_ids).map(&:to_i).reject(&:zero?)
@@ -66,6 +68,8 @@ module Audiences
         base = base.where.not(id: active_nurture_ids)
       end
 
+      base = apply_email_reachability(base) if @channel == 'email'
+
       base
     end
 
@@ -78,6 +82,36 @@ module Audiences
     end
 
     private
+
+    # Drops records an email campaign could never reach: no address at all, an address a
+    # previous send proved dead, or one whose owner reported us as spam.
+    #
+    # This belongs in the compiler rather than in AudienceEnroller because the compiler is
+    # what the audience screen counts and previews with. Filtering only at enrollment meant
+    # the dealer was shown an estimate that included recipients the send would silently skip,
+    # so the audience always looked larger than the campaign it produced. It also let a known
+    # hard bounce back into every audience built afterwards, spending SES reputation to
+    # rediscover what the last bounce already established.
+    #
+    # AudienceEnroller keeps its own per-record guards. Those are the backstop for an address
+    # that goes bad between building an audience and sending to it.
+    def apply_email_reachability(relation)
+      klass = relation.klass
+      return relation unless klass.column_names.include?('email')
+
+      relation = relation.where.not(email: [nil, ''])
+
+      # Accounts have no email_invalid column; only Lead and Contact carry the CRM flag.
+      if klass.column_names.include?('email_invalid')
+        relation = relation.where(email_invalid: [false, nil])
+      end
+
+      # Compared lowercased because suppressions are stored downcased on write while CRM
+      # addresses are stored as typed, so a mixed-case lead would otherwise slip past the
+      # exact match and be mailed again.
+      suppressed = CampaignSuppression.unmailable_emails_for(@company.id)
+      relation.where.not("LOWER(#{klass.table_name}.email) IN (#{suppressed.to_sql})")
+    end
 
     def base_relation
       case @source_type

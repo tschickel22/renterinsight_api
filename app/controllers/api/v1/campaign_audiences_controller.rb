@@ -95,7 +95,8 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       filter_tree: filter_tree, exclude_filter_tree: exclude_tree,
       manual_exclude_ids: audience&.manual_exclude_ids,
       exclude_active_campaign_enrollees: audience&.exclude_active_campaign_enrollees || false,
-      exclude_active_nurture_enrollees: audience&.exclude_active_nurture_enrollees || false
+      exclude_active_nurture_enrollees: audience&.exclude_active_nurture_enrollees || false,
+      channel: @campaign.channel
     ).scope
 
     sample = scope.limit(20).map do |r|
@@ -226,7 +227,8 @@ class Api::V1::CampaignAudiencesController < ApplicationController
       exclude_filter_tree: audience.exclude_filter_tree,
       manual_exclude_ids: audience.try(:manual_exclude_ids),
       exclude_active_campaign_enrollees: audience.exclude_active_campaign_enrollees,
-      exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees
+      exclude_active_nurture_enrollees: audience.exclude_active_nurture_enrollees,
+      channel: @campaign.channel
     ).count
     audience.update!(estimated_count: count, estimated_at: Time.current)
   rescue Audiences::FilterCompiler::CompilationError => e

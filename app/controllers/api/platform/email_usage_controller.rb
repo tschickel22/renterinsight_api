@@ -27,7 +27,7 @@ class Api::Platform::EmailUsageController < ApplicationController
 
     delivered = CampaignSend.real
                             .where(sent_at: range)
-                            .where.not(delivered_at: nil)
+                            .delivered
                             .group(:company_id)
                             .count
 
@@ -119,7 +119,7 @@ class Api::Platform::EmailUsageController < ApplicationController
 
     {
       total_emails: scope.count,
-      delivered: scope.where.not(delivered_at: nil).count,
+      delivered: scope.delivered.count,
       bounced: scope.where.not(bounced_at: nil).count,
       opened: scope.where.not(opened_at: nil).count,
       clicked: scope.where.not(clicked_at: nil).count
