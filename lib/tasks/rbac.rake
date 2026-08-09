@@ -115,4 +115,16 @@ namespace :rbac do
     
     puts "\n✅ RBAC system reset complete!"
   end
+
+  desc 'Reconcile roles against resources added since the first seed (rewrites live permissions)'
+  task reconcile: :environment do
+    puts '🔁 Reconciling role permissions...'
+    puts '   This rewrites grants that live tenants are using. It is deliberately'
+    puts '   NOT part of db:seed, which runs on every deploy.'
+    before = RolePermission.count
+    Role.reconcile_system_permissions!
+    puts "✅ role_permissions: #{before} -> #{RolePermission.count}"
+    puts '   Permission caches cleared for this process. Restart the service if'
+    puts '   more than one instance is running, the cache is per-container.'
+  end
 end

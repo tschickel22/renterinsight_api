@@ -34,12 +34,25 @@ puts "✅ Created #{Role.system_roles.count} system roles"
 puts "✅ Created #{RolePermission.count} role permissions"
 
 # 4b. Reconcile roles against resources added since the first seed.
-# Role.seed_defaults is a one-shot, so without this a new resource stays
-# ungranted on every existing database and denies every RBAC non-admin.
-puts "\n🔁 Reconciling system role permissions..."
-before = RolePermission.count
-Role.reconcile_system_permissions!
-puts "✅ Added #{RolePermission.count - before} missing role permissions"
+#
+# OPT-IN ONLY. bin/render-build.sh runs `rails db:seed` on every deploy, and
+# unlike everything above this, reconciling REWRITES permissions that live
+# tenants are already using: it revokes the admin-tier resources from the
+# shipped non-admin roles and asserts reads across every active role. Running
+# that automatically would change what real users can see, in production,
+# without anyone asking for it.
+#
+# Run it deliberately instead:
+#   RBAC_RECONCILE=true bin/rails db:seed
+#   bin/rails rbac:reconcile
+if ENV['RBAC_RECONCILE'] == 'true'
+  puts "\n🔁 Reconciling system role permissions..."
+  before = RolePermission.count
+  Role.reconcile_system_permissions!
+  puts "✅ Added #{RolePermission.count - before} missing role permissions"
+else
+  puts "\n⏭  Skipping role reconciliation (set RBAC_RECONCILE=true to run it)"
+end
 
 # 5. Display Summary
 puts "\n" + "="*80
