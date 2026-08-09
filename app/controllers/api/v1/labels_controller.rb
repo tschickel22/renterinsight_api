@@ -4,9 +4,14 @@ class Api::V1::LabelsController < ApplicationController
   before_action :set_company_scope
 
   # GET /api/v1/company/labels
+  #
+  # Deliberately open to any authenticated user of the company. Labels are the
+  # terminology every screen renders with ("Prospecting", "Sales Deals"), not a
+  # settings screen, and gating them on company_settings meant that narrowing a
+  # role broke the vocabulary of the whole app for that persona. Reading them
+  # exposes nothing but the dealer's own choice of words; changing them still
+  # requires company_settings:update below.
   def show
-    return unless authorize_action!('company_settings', 'read')
-
     render json: {
       industry: @company.industry,
       labels: @company.resolved_labels,

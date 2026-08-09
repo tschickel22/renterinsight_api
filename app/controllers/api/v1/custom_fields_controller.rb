@@ -7,9 +7,13 @@ module Api
       before_action :set_custom_field, only: [:update, :destroy, :migrations, :create_migrations]
 
       # GET /api/v1/custom_fields?module=leads
+      #
+      # Open to any authenticated user of the company, for the same reason as
+      # labels: these are field definitions the lead and contact forms render
+      # from, not settings. A persona without company_settings could not draw a
+      # form. The values live on the records themselves and are gated there;
+      # defining a field still requires company_settings:update.
       def index
-        return unless authorize_action!('company_settings', 'read')
-
         unless params[:module].present?
           render json: { error: 'module parameter is required' }, status: :bad_request
           return

@@ -303,10 +303,25 @@ class Role < ApplicationRecord
   # Resources that belong to whoever runs the dealership, not to whoever works
   # in it. Every shipped non-admin template granted these, which is why a sales
   # rep still saw an Administration section, a Locations page and the user list.
-  ADMIN_TIER_RESOURCES = %w[
-    company_settings users locations branding activity_logs data_import_export
-    integrations settings
+  #
+  # Nothing outside the admin screens reads these, so they go away entirely.
+  ADMIN_ONLY_RESOURCES = %w[
+    activity_logs branding data_import_export integrations settings
   ].freeze
+
+  # These three are different: ordinary pages read them constantly. Assignee
+  # pickers list users, location filters list locations, and company_settings
+  # backs the label system and custom fields, which render on nearly every
+  # screen. Revoking them outright turned a sales persona into a wall of
+  # permission-denied toasts on CRM, Contacts and anything with a custom field.
+  # Take away the ability to change them and leave reading alone; the menu is
+  # kept clean by gating those nav items on a write action instead.
+  ADMIN_WRITE_ONLY_RESOURCES = %w[company_settings users locations].freeze
+
+  ADMIN_TIER_RESOURCES = (ADMIN_ONLY_RESOURCES + ADMIN_WRITE_ONLY_RESOURCES).freeze
+
+  # Actions that only look, never change.
+  READ_ACTIONS = %w[read view_own view_team view_all].freeze
 
   # Roles that legitimately keep them.
   ADMIN_ROLE_KEYS = %w[company_admin location_admin].freeze
@@ -315,12 +330,43 @@ class Role < ApplicationRecord
   # permission matrix, and it survives reconcile_system_permissions! (which only
   # fills gaps). Deleting would leave a hole that the next top-up refills.
   def self.revoke_admin_resources_from_non_admin_roles!
-    resource_ids = Resource.where(key: ADMIN_TIER_RESOURCES).pluck(:id)
-    return if resource_ids.empty?
+    roles = system_roles.where.not(key: ADMIN_ROLE_KEYS)
 
+    fully = Resource.where(key: ADMIN_ONLY_RESOURCES).pluck(:id)
+    RolePermission.where(role: roles, resource_id: fully, granted: true).update_all(granted: false) if fully.any?
+
+    write_only = Resource.where(key: ADMIN_WRITE_ONLY_RESOURCES).pluck(:id)
+    return if write_only.empty?
+
+    read_action_ids = Action.where(key: READ_ACTIONS).pluck(:id)
     RolePermission
-      .where(role: system_roles.where.not(key: ADMIN_ROLE_KEYS), resource_id: resource_ids, granted: true)
+      .where(role: roles, resource_id: write_only, granted: true)
+      .where.not(action_id: read_action_ids)
       .update_all(granted: false)
+
+    # Assert read back on, creating the row when there is none. These three are
+    # load-bearing: assignee pickers, location filters, labels and custom fields
+    # all depend on them, so a role without them is not a narrower persona, it
+    # is a broken app. Most shipped templates never granted them at all, which
+    # is why a fresh sales_rep hit a wall of permission-denied toasts. The menu
+    # stays clean by gating the Company Settings and Locations nav items on a
+    # write action rather than by taking reading away.
+    #
+    # Scope 'all' on purpose: has_permission? only accepts a stored scope that
+    # equals the requested one or is 'all', and these endpoints are asked for at
+    # 'all'. A narrower scope here would read as a grant and still deny.
+    read = Action.find_by(key: 'read')
+    all_scope = Scope.find_by(key: 'all')
+    return unless read && all_scope
+
+    roles.each do |role|
+      write_only.each do |resource_id|
+        permission = RolePermission.find_or_initialize_by(
+          role: role, resource_id: resource_id, action: read, scope: all_scope
+        )
+        permission.update!(granted: true) unless permission.persisted? && permission.granted?
+      end
+    end
   end
 
   def self.grant_manager_permissions!(role)
