@@ -38,7 +38,10 @@ Rails.application.routes.draw do
 
   # The website concierge. Public, token-scoped, same shape as the beacons.
   post 'concierge/:token', to: 'public/concierge#create'
+  # Taking someone's details is a separate act from answering their question.
+  post 'concierge/:token/lead', to: 'public/concierge#lead'
   match 'concierge/:token', to: 'public/concierge#options', via: :options
+  match 'concierge/:token/lead', to: 'public/concierge#options', via: :options
 
   # The demo link beacon. Short path for the same reason the page one is: it
   # ships inside a bundle and is called on every design change.

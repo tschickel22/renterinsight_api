@@ -22,10 +22,13 @@ module Concierge
       greeting: /\A\s*(hi|hey|hello|good (morning|afternoon|evening))\b[\s!.,]*\z/i
     }.freeze
 
-    def initialize(text:, knowledge:, booking_url: nil, lead_form_path: nil)
+    # capture_enabled: whether the widget can take a name and a number in the
+    # chat, or has to send the visitor to the dealer's form.
+    def initialize(text:, knowledge:, booking_url: nil, lead_form_path: nil, capture_enabled: false)
       @text = text.to_s
       @k = knowledge
       @booking_url = booking_url
+      @capture_enabled = capture_enabled
       @lead_form_path = lead_form_path
     end
 
@@ -48,7 +51,16 @@ module Concierge
       # not. Never nothing: the point of recognising the intent is to act on it.
       return { type: 'link', label: 'Book a time', url: @booking_url } if @booking_url.present?
 
-      { type: 'form', label: 'Request a callback', path: @lead_form_path || '/contact' }
+      contact_action('Request a callback', 'callback')
+    end
+
+    # Stays in the chat when the dealer's form allows it, because bouncing
+    # someone to a page to type two things they were about to say is where
+    # enquiries are lost. Falls back to the form otherwise.
+    def contact_action(label, intent)
+      return { type: 'capture', label: label, intent: intent } if @capture_enabled
+
+      { type: 'form', label: label, path: @lead_form_path || '/contact' }
     end
 
     def answer_greeting
@@ -94,8 +106,7 @@ module Concierge
       { text: 'We work with several lenders and can walk you through the options, including ' \
               'land-home packages. The quickest way is to send your details and a member of the ' \
               'team will talk you through what you would qualify for.',
-        actions: [{ type: 'form', label: 'Start a finance chat', path: @lead_form_path || '/contact' },
-                  book_action] }
+        actions: [contact_action('Start a finance chat', 'contact'), book_action] }
     end
 
     def answer_delivery
@@ -104,8 +115,17 @@ module Concierge
         actions: [book_action] }
     end
 
+    # The calendar comes first and is never held back behind questions. Someone
+    # who has just said they want to book is at the highest intent they will
+    # reach, and two questions in front of it is friction at exactly the wrong
+    # moment. The ask sits beside it instead, so a visitor who wanders off after
+    # giving a name is still a lead, and one who books immediately is unhindered.
     def answer_booking
-      { text: 'Happy to get that booked.', actions: [book_action] }
+      return { text: 'Happy to get that booked.', actions: [book_action] } unless @booking_url.present?
+
+      { text: 'Happy to get that booked. The calendar is here. Tell me your name and email and ' \
+              'I will have it filled in for you.',
+        actions: [book_action, contact_action('Give my details', 'showing')].compact }
     end
   end
 end
