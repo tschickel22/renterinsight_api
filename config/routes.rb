@@ -38,7 +38,10 @@ Rails.application.routes.draw do
 
   # The website concierge. Public, token-scoped, same shape as the beacons.
   post 'concierge/:token', to: 'public/concierge#create'
+  # Taking someone's details is a separate act from answering their question.
+  post 'concierge/:token/lead', to: 'public/concierge#lead'
   match 'concierge/:token', to: 'public/concierge#options', via: :options
+  match 'concierge/:token/lead', to: 'public/concierge#options', via: :options
 
   # The demo link beacon. Short path for the same reason the page one is: it
   # ships inside a bundle and is called on every design change.
@@ -2944,7 +2947,9 @@ Rails.application.routes.draw do
       post 'auth/magic-link', to: 'auth#request_magic_link'
       get 'auth/verify_magic_link', to: 'auth#verify_magic_link'
       post 'auth/request_reset', to: 'auth#request_reset'
-      post 'auth/forgot-password', to: 'auth#forgot_password'
+      # Alias for request_reset. Used to point at a nonexistent auth#forgot_password,
+      # so anything hitting this path got a 404 instead of a reset email.
+      post 'auth/forgot-password', to: 'auth#request_reset'
       post 'auth/reset-password', to: 'auth#reset_password'
       patch 'auth/reset_password', to: 'auth#reset_password'
       get 'auth/profile', to: 'auth#profile'
@@ -2960,12 +2965,15 @@ Rails.application.routes.draw do
       end
       
       # Phase 4C - Communications
+      # `threads` must be declared before `resources :communications`, otherwise
+      # GET /communications/:id matches first and the request lands on #show with
+      # id="threads", which 404s.
+      get 'communications/threads', to: 'communications#threads'
       resources :communications, only: [:index, :show, :create] do
         member do
           patch :mark_as_read
         end
       end
-      get 'communications/threads', to: 'communications#threads'
       post 'communications/:thread_id/reply', to: 'communications#create'
       
       # Phase 4E - Document Management

@@ -60,11 +60,22 @@ module Api
         unless %w[sent viewed].include?(@quote.status)
           return render json: {
             ok: false,
-            error: "Quote cannot be accepted. Current status: #{@quote.status}"
+            error: "Quote has already been #{@quote.status}. Current status: #{@quote.status}"
           }, status: :unprocessable_entity
         end
 
-        @quote.update!(status: 'accepted', updated_at: Time.current)
+        # A quote past its valid_until has to be re-issued by the dealer; the
+        # buyer must not be able to lock in stale pricing from the portal.
+        if @quote.valid_until.present? && @quote.valid_until < Date.current
+          return render json: {
+            ok: false,
+            error: "This quote expired on #{@quote.valid_until.to_fs(:long)}. Please ask for an updated quote."
+          }, status: :unprocessable_entity
+        end
+
+        # accepted_at was never written, so the dealer had a status with no date
+        # against it and the buyer's acceptance could not be evidenced.
+        @quote.update!(status: 'accepted', accepted_at: Time.current, updated_at: Time.current)
 
         # Accept notes from client (multiple param names supported)
         notes = params[:notes] || params[:note] || params[:message]
@@ -89,7 +100,7 @@ module Api
           }, status: :unprocessable_entity
         end
 
-        @quote.update!(status: 'rejected', updated_at: Time.current)
+        @quote.update!(status: 'rejected', rejected_at: Time.current, updated_at: Time.current)
 
         # Accept reason/notes from client (multiple param names supported)
         reason = params[:reason] || params[:notes] || params[:note] || params[:message]

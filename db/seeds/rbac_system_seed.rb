@@ -33,6 +33,14 @@ Role.seed_defaults
 puts "✅ Created #{Role.system_roles.count} system roles"
 puts "✅ Created #{RolePermission.count} role permissions"
 
+# 4b. Reconcile roles against resources added since the first seed.
+# Role.seed_defaults is a one-shot, so without this a new resource stays
+# ungranted on every existing database and denies every RBAC non-admin.
+puts "\n🔁 Reconciling system role permissions..."
+before = RolePermission.count
+Role.reconcile_system_permissions!
+puts "✅ Added #{RolePermission.count - before} missing role permissions"
+
 # 5. Display Summary
 puts "\n" + "="*80
 puts "RBAC System Seeding Complete!"

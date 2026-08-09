@@ -93,16 +93,16 @@ RSpec.describe Api::Portal::PreferencesController, type: :controller do
         expect(response).to have_http_status(:unauthorized)
       end
 
-      # Still a 401, but the message is the generic one: JsonWebToken.decode
-      # rescues JWT::ExpiredSignature internally and returns nil, so
-      # BaseController's own `rescue JWT::ExpiredSignature` branch never runs and
-      # an expired token falls through to the nil-payload check. That quirk is
-      # shared by every portal controller, so it is asserted, not "fixed" here.
-      it 'returns an invalid token error' do
+      # JsonWebToken.decode rescues JWT::ExpiredSignature internally and returns
+      # nil, so the controller cannot tell expiry from corruption by decoding
+      # alone. It asks JsonWebToken.token_state instead, which is what lets the
+      # portal re-authenticate a timed-out session rather than toast an error.
+      it 'reports the session as expired rather than invalid' do
         get :show
         json = JSON.parse(response.body)
 
-        expect(json['error']).to eq('Invalid token')
+        expect(json['error']).to eq('Your portal session has expired. Please sign in again.')
+        expect(json['code']).to eq('token_expired')
       end
     end
 

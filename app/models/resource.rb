@@ -166,7 +166,21 @@ public
       { key: 'bank_reconciliation', name: 'Bank Reconciliation', category: 'operations', description: 'Bank statement reconciliation', position: 134 },
       { key: 'bills', name: 'Bills & Expenses', category: 'operations', description: 'Manage vendor bills, expenses, and payments', position: 135 },
       { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 137 },
-      { key: 'budgets', name: 'Budgets', category: 'operations', description: 'Budget planning, forecasting, and variance analysis', position: 135 }
+      { key: 'budgets', name: 'Budgets', category: 'operations', description: 'Budget planning, forecasting, and variance analysis', position: 135 },
+
+      # Controllers already gate on these three keys, but no Resource row backed
+      # them, so no role could ever be granted them and every RBAC non-admin was
+      # permanently denied. See spec/models/resource_enforced_keys_spec.rb, which
+      # fails if a controller gates on a key with no row behind it.
+      { key: 'integrations', name: 'Integrations', category: 'admin', description: 'Connect and manage third-party integrations (social, Facebook, Meta catalog)', position: 6 },
+      { key: 'settings', name: 'Integration Settings', category: 'admin', description: 'Configure connected integrations such as QuickBooks and the client portal', position: 7 },
+      { key: 'notifications', name: 'Notifications', category: 'core', description: 'View and manage in-app notifications', position: 906 },
+
+      # These two reached the dev database by some route other than this list, so
+      # they worked there and were absent anywhere seeded from scratch. Between
+      # them they back 100 authorize_action! calls. Values match the dev rows.
+      { key: 'projects', name: 'Projects', category: 'operations', description: 'Manage installation and build projects, phases, and tasks', position: 106 },
+      { key: 'websites', name: 'Websites', category: 'operations', description: 'Build and publish dealer websites and landing pages', position: 160 }
     ]
     
     resources_data.each do |resource_data|

@@ -26,6 +26,18 @@ class ConfiguratorPricingService
     }
   end
 
+  # Public entry point for callers that only need the base price range, without
+  # the option maths. Controllers used to inline this as
+  # `company_floor_plan.base_price_low || floor_plan.base_price_low`, but
+  # CompanyFloorPlan has no base_price_* columns (it carries dealer_cost,
+  # retail_price and a markup), so that raised NoMethodError as soon as a dealer
+  # actually had a floor plan mapped. Route every caller through here instead.
+  #
+  # @return [Hash] { low:, high:, fixed: }
+  def self.base_price_for(floor_plan, company_floor_plan)
+    calculate_base_price(floor_plan, company_floor_plan)
+  end
+
   private_class_method def self.calculate_base_price(floor_plan, company_floor_plan)
     if company_floor_plan&.retail_price.present?
       {

@@ -30,13 +30,15 @@ module Concierge
     # visitor: whatever the assistant has already got out of them. Used only to
     # carry their name and email into the dealer's scheduler, so being asked for
     # them before the calendar costs the visitor nothing.
-    def initialize(website:, message:, history: [], user: nil, company: nil, visitor: {})
+    def initialize(website:, message:, history: [], user: nil, company: nil, visitor: {},
+                   capture_enabled: false)
       @website = website
       @company = company || website&.company
       @message = message.to_s.strip
       @history = Array(history).last(HISTORY_TURNS)
       @user = user
       @visitor = (visitor || {}).symbolize_keys
+      @capture_enabled = capture_enabled
     end
 
     def call
@@ -47,7 +49,8 @@ module Concierge
 
       answered = DeterministicAnswer.new(
         text: @message, knowledge: knowledge,
-        booking_url: booking_url, lead_form_path: lead_form_path
+        booking_url: booking_url, lead_form_path: lead_form_path,
+        capture_enabled: @capture_enabled
       ).call
       return Result.new(text: answered[:text], actions: answered[:actions], listings: [], source: 'rules') if answered
 

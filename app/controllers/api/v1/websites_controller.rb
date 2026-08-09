@@ -490,6 +490,17 @@ class Api::V1::WebsitesController < ApplicationController
       enabled: company.public_inventory_enabled || false
     }
 
+    # The published site sends this through Websites::PublicPayload and the
+    # draft preview did not, so the assistant a dealer is paying for was
+    # invisible on the one page where they check their work. A preview that
+    # renders differently from the published site is worse than no preview.
+    website_json['concierge_enabled'] =
+      begin
+        ModuleAccessService.new(company).module_enabled?('marketing.ai_concierge')
+      rescue StandardError
+        false
+      end
+
     render json: website_json
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Website not found' }, status: :not_found

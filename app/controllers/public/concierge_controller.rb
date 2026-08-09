@@ -32,7 +32,8 @@ module Public
         company: company,
         message: params[:message].to_s.slice(0, MAX_MESSAGE),
         history: params[:history],
-        visitor: visitor_details
+        visitor: visitor_details,
+        capture_enabled: lead_capture_config[:enabled]
       ).call
 
       log_usage(result)
@@ -49,8 +50,39 @@ module Public
         # configured, since a "set a meeting" link that opens a form the visitor
         # has already been offered is noise.
         quick_actions: quick_actions,
+        # Tells the widget whether it can finish a callback or contact request
+        # in the chat, or has to hand the visitor to the dealer's form.
+        lead_capture: lead_capture_config,
         platform_brand: platform_brand
       }
+    end
+
+    # POST concierge/:token/lead
+    #
+    # Creates the lead once the assistant has a name and a way to reach them.
+    # Separate from the chat endpoint on purpose: answering a question and
+    # taking someone's details are different acts, and only one of them should
+    # write to a dealer's CRM.
+    def lead
+      return head :not_found if company.nil?
+      return head :forbidden unless concierge_enabled? || demo?
+      return too_many if rate_limited?
+      # A demo runs on a prospect's data to show them what it would look like.
+      # Writing a real lead into the lot company's CRM from one would put a
+      # stranger's details in front of a dealer who never asked for them.
+      return render json: { status: 'demo' } if demo?
+
+      result = capture.call(
+        visitor: visitor_details,
+        intent: params[:intent].to_s.presence || 'contact',
+        transcript: transcript_param,
+        consented: ActiveModel::Type::Boolean.new.cast(params[:consented]),
+        request_context: { ip: request.remote_ip, user_agent: request.user_agent,
+                           referrer: request.referrer }
+      )
+
+      render json: { status: result.status, message: result.message,
+                     form_path: result.form_path }.compact
     end
 
     def options
@@ -79,10 +111,36 @@ module Public
       )
       actions = []
       actions << { type: 'link', label: 'Set a meeting', url: booking } if booking.present?
-      actions << { type: 'form', label: 'Contact us', path: '/contact' }
+      actions << if lead_capture_config[:enabled]
+                   { type: 'capture', label: 'Contact us', intent: 'contact' }
+                 else
+                   { type: 'form', label: 'Contact us', path: '/contact' }
+                 end
       actions
     rescue StandardError
       [{ type: 'form', label: 'Contact us', path: '/contact' }]
+    end
+
+    def capture
+      @capture ||= Concierge::LeadCapture.new(company: company, website: website)
+    end
+
+    # Permitted before it travels, so nothing downstream has to reason about
+    # ActionController::Parameters.
+    def transcript_param
+      Array(params[:history]).filter_map do |turn|
+        turn.respond_to?(:permit) ? turn.permit(:role, :content).to_h : turn
+      end
+    end
+
+    def lead_capture_config
+      # A demo must never write into the lot company's CRM, so the chat offers
+      # the form there instead of collecting details it would have to discard.
+      return { enabled: false, form_path: '/contact' } if demo?
+
+      { enabled: capture.available?, consent_text: capture.consent_text, form_path: '/contact' }
+    rescue StandardError
+      { enabled: false, form_path: '/contact' }
     end
 
     def platform_brand

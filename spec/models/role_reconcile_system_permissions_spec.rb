@@ -1,0 +1,104 @@
+# frozen_string_literal: true
+
+require 'rails_helper'
+
+RSpec.describe Role, '.reconcile_system_permissions!' do
+  before do
+    Resource.seed_defaults
+    Action.seed_defaults
+    Scope.seed_defaults
+    Role.seed_defaults
+  end
+
+  let(:admin) { Role.system_roles.find_by(key: 'company_admin') }
+
+  it 'gives company_admin every active resource' do
+    described_class.reconcile_system_permissions!
+
+    covered = admin.role_permissions.granted.joins(:resource).distinct.pluck('resources.key')
+    expect(covered).to match_array(Resource.active.pluck(:key))
+  end
+
+  # The gap this exists to close: seed_defaults bails out once system roles are
+  # present, so a resource added later never reaches an existing database.
+  it 'picks up a resource added after the initial seed' do
+    Resource.create!(key: 'late_arrival', name: 'Late Arrival', category: 'operations', active: true)
+
+    expect { described_class.reconcile_system_permissions! }
+      .to change { admin.role_permissions.granted.joins(:resource).where(resources: { key: 'late_arrival' }).count }
+      .from(0)
+
+    # And the one-shot really is a one-shot, which is why the above is needed.
+    expect { Role.seed_defaults }.not_to(change { RolePermission.count })
+  end
+
+  it 'gives every system role read on notifications' do
+    described_class.reconcile_system_permissions!
+
+    Role.system_roles.each do |role|
+      has_read = role.role_permissions.granted
+                     .joins(:resource, :action)
+                     .exists?(resources: { key: 'notifications' }, actions: { key: 'read' })
+      expect(has_read).to be(true), "#{role.key} cannot read notifications"
+    end
+  end
+
+  describe 'admin-tier resources' do
+    it 'revokes them from every non-admin system role' do
+      described_class.reconcile_system_permissions!
+
+      leaked = Role.system_roles.where.not(key: described_class::ADMIN_ROLE_KEYS).flat_map do |role|
+        keys = role.role_permissions.granted.joins(:resource)
+                   .where(resources: { key: described_class::ADMIN_TIER_RESOURCES })
+                   .distinct.pluck('resources.key')
+        keys.map { |k| "#{role.key}:#{k}" }
+      end
+
+      expect(leaked).to be_empty
+    end
+
+    it 'leaves them with company_admin and location_admin' do
+      described_class.reconcile_system_permissions!
+
+      described_class::ADMIN_ROLE_KEYS.each do |key|
+        role = Role.system_roles.find_by(key: key)
+        next unless role
+
+        granted = role.role_permissions.granted.joins(:resource)
+                      .where(resources: { key: 'company_settings' }).exists?
+        expect(granted).to be(true), "#{key} lost company_settings"
+      end
+    end
+
+    # Revoked, not deleted, so the top-up pass cannot quietly restore them.
+    it 'keeps them revoked across a second reconcile' do
+      described_class.reconcile_system_permissions!
+      described_class.reconcile_system_permissions!
+
+      sales = Role.system_roles.find_by(key: 'sales_rep')
+      still_off = sales.role_permissions.granted.joins(:resource)
+                       .where(resources: { key: 'company_settings' }).none?
+      expect(still_off).to be true
+    end
+  end
+
+  it 'is idempotent' do
+    described_class.reconcile_system_permissions!
+
+    expect { described_class.reconcile_system_permissions! }.not_to(change { RolePermission.count })
+  end
+
+  # Narrowing a company_admin by revoking is how a persona gets shaped, so a
+  # re-seed must not resurrect what was deliberately turned off, and must not
+  # collide with the unique index on (role, resource, action, scope).
+  it 'leaves an explicit revoke alone instead of raising or re-granting' do
+    campaigns = Resource.find_by!(key: 'campaigns')
+    described_class.reconcile_system_permissions!
+    admin.role_permissions.joins(:resource).where(resources: { key: 'campaigns' }).update_all(granted: false)
+
+    expect { described_class.reconcile_system_permissions! }.not_to raise_error
+
+    still_revoked = admin.role_permissions.where(resource: campaigns).none?(&:granted)
+    expect(still_revoked).to be true
+  end
+end

@@ -210,8 +210,13 @@ module Api
         }
 
         if show_pricing
-          data[:base_price_low] = cfp.dealer_cost || fp.base_price_low
-          data[:base_price_high] = cfp.retail_price || fp.base_price_high
+          # Was `cfp.dealer_cost || fp.base_price_low`, which published the
+          # dealer's own cost to anonymous visitors as the low end of the range.
+          # The shared resolver prefers retail_price and only falls back to cost
+          # when the dealer has set no retail figure at all.
+          base = ConfiguratorPricingService.base_price_for(fp, cfp)
+          data[:base_price_low] = base[:low]
+          data[:base_price_high] = base[:high]
         end
 
         data
@@ -219,8 +224,9 @@ module Api
 
       def calculate_pricing(config, company_fp)
         fp = company_fp.floor_plan
-        base_low = company_fp.base_price_low || fp.base_price_low || 0
-        base_high = company_fp.base_price_high || fp.base_price_high || 0
+        base = ConfiguratorPricingService.base_price_for(fp, company_fp)
+        base_low = base[:low] || 0
+        base_high = base[:high] || 0
 
         options_low = 0
         options_high = 0
