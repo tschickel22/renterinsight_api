@@ -248,6 +248,14 @@ class Role < ApplicationRecord
     end
   end
 
+  # Fills in any resource/action pair the role is missing.
+  #
+  # `granted` is deliberately not part of the lookup. It used to be, which meant
+  # that once anyone revoked a permission (granted: false), this tried to INSERT
+  # a second row for the same role/resource/action/scope and hit the unique
+  # index. Narrowing a company_admin by revoking permissions is now the intended
+  # way to shape a persona, so that path has to survive a re-seed. An explicit
+  # revoke is a decision: fill gaps, never overwrite.
   def self.grant_full_permissions!(role)
     all_scope = Scope.find_by!(key: 'all')
 
@@ -257,11 +265,62 @@ class Role < ApplicationRecord
           role: role,
           resource: resource,
           action: action,
-          scope: all_scope,
-          granted: true
-        )
+          scope: all_scope
+        ) { |rp| rp.granted = true }
       end
     end
+  end
+
+  # Bring an existing database in line with resources added after its first seed.
+  #
+  # seed_defaults bails out with `return if system_roles.any?`, so a resource
+  # added later is born ungranted and stays that way: it shows up in the
+  # permission matrix, no role holds it, and every RBAC non-admin is denied on
+  # it forever. Admins never noticed because they short-circuit in
+  # has_permission? before the matrix is consulted. Safe to re-run.
+  def self.reconcile_system_permissions!
+    admin = system_roles.find_by(key: 'company_admin')
+    grant_full_permissions!(admin) if admin
+
+    # Notifications are personal rather than privileged: every role sees its own.
+    notifications = Resource.find_by(key: 'notifications')
+    read = Action.find_by(key: 'read')
+    all_scope = Scope.find_by(key: 'all')
+    return unless notifications && read && all_scope
+
+    system_roles.each do |role|
+      RolePermission.find_or_create_by!(
+        role: role,
+        resource: notifications,
+        action: read,
+        scope: all_scope
+      ) { |rp| rp.granted = true }
+    end
+
+    revoke_admin_resources_from_non_admin_roles!
+  end
+
+  # Resources that belong to whoever runs the dealership, not to whoever works
+  # in it. Every shipped non-admin template granted these, which is why a sales
+  # rep still saw an Administration section, a Locations page and the user list.
+  ADMIN_TIER_RESOURCES = %w[
+    company_settings users locations branding activity_logs data_import_export
+    integrations settings
+  ].freeze
+
+  # Roles that legitimately keep them.
+  ADMIN_ROLE_KEYS = %w[company_admin location_admin].freeze
+
+  # Revoke rather than delete: a false row is a visible, deliberate "off" in the
+  # permission matrix, and it survives reconcile_system_permissions! (which only
+  # fills gaps). Deleting would leave a hole that the next top-up refills.
+  def self.revoke_admin_resources_from_non_admin_roles!
+    resource_ids = Resource.where(key: ADMIN_TIER_RESOURCES).pluck(:id)
+    return if resource_ids.empty?
+
+    RolePermission
+      .where(role: system_roles.where.not(key: ADMIN_ROLE_KEYS), resource_id: resource_ids, granted: true)
+      .update_all(granted: false)
   end
 
   def self.grant_manager_permissions!(role)

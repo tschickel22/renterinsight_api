@@ -252,17 +252,33 @@ class User < ApplicationRecord
   end
 
   # Get all permissions for a user in a company (optimized)
+  #
+  # This list drives what the frontend *shows* (sidebar items, tabs, buttons).
+  # It is not the authorization gate: that stays in #has_permission? and
+  # PermissionService, which are deliberately more permissive for admins.
+  #
+  # Company admins used to short-circuit to '*:*:*' here, and the frontend
+  # reads any wildcard as "skip the permission matrix entirely". That made a
+  # narrowed menu impossible to express for anyone holding company_admin, so
+  # the matrix looked like it silently did nothing. Expand the real grants
+  # instead. The company_admin role covers all 60 resources, so a normal admin
+  # still sees the full menu; the difference is that turning something off now
+  # takes effect.
   def permissions_for_company(company_id)
     return ['*:*:*'] if platform_admin? # Platform admins have all permissions
     return ['*:*:*'] if super_admin? # All permissions
-    return ['*:*:*'] if company_admin? # Company admins have all permissions (matches has_permission? behavior)
-    
+
     check_company = Company.find_by(id: company_id)
     return ['*:*:*'] unless check_company&.use_rbac_system # All permissions if RBAC disabled
-    
+
     # Use the same cache as has_permission? for consistency
     cached_permissions = rbac_permissions_cache(company_id)
-    
+
+    # A legacy admin carries role == 'company_admin' on the column with no RBAC
+    # assignment behind it, so there is nothing to expand. Falling through would
+    # hand the frontend an empty list and blank their navigation.
+    return ['*:*:*'] if cached_permissions.empty? && company_admin?
+
     cached_permissions.map do |perm|
       "#{perm[:resource]}:#{perm[:action]}:#{perm[:scope]}"
     end.uniq
