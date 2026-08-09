@@ -121,6 +121,29 @@ RSpec.describe Role, '.reconcile_system_permissions!' do
     end
   end
 
+  # A company's own role missing these reads is broken, not narrow, and the
+  # first version of this only fixed the shipped templates.
+  it 'asserts the load-bearing reads on a company-scoped role too' do
+    company = Company.create!(name: "Co-#{SecureRandom.hex(4)}")
+    custom = Role.create!(company_id: company.id, key: "rep-#{SecureRandom.hex(3)}",
+                          name: 'Custom Rep', tier: 'location', active: true)
+
+    described_class.reconcile_system_permissions!
+
+    reads = custom.role_permissions.granted.joins(:resource, :action)
+                  .where(resources: { key: described_class::ADMIN_WRITE_ONLY_RESOURCES },
+                         actions: { key: 'read' })
+    expect(reads.count).to eq(described_class::ADMIN_WRITE_ONLY_RESOURCES.size)
+  end
+
+  # update_all skips the after_save hook that normally clears these, so without
+  # an explicit sweep the database is right and every process still says no.
+  it 'clears the cached permission answers' do
+    expect(Rails.cache).to receive(:delete_matched).with('permissions:*')
+
+    described_class.reconcile_system_permissions!
+  end
+
   it 'is idempotent' do
     described_class.reconcile_system_permissions!
 

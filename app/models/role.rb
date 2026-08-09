@@ -298,6 +298,19 @@ class Role < ApplicationRecord
     end
 
     revoke_admin_resources_from_non_admin_roles!
+    clear_permission_caches!
+  end
+
+  # PermissionService memoises every check for an hour, and RolePermission only
+  # invalidates from an after_save callback. The bulk updates above deliberately
+  # use update_all, which skips callbacks, so without this the database is fixed
+  # and every running process keeps answering "denied" from cache until the TTL
+  # expires. That is what made a corrected staging database look unchanged.
+  def self.clear_permission_caches!
+    Rails.cache.delete_matched('permissions:*')
+  rescue NotImplementedError, NoMethodError
+    # Not every cache store supports pattern deletion.
+    Rails.cache.clear
   end
 
   # Resources that belong to whoever runs the dealership, not to whoever works
@@ -330,6 +343,8 @@ class Role < ApplicationRecord
   # permission matrix, and it survives reconcile_system_permissions! (which only
   # fills gaps). Deleting would leave a hole that the next top-up refills.
   def self.revoke_admin_resources_from_non_admin_roles!
+    # Writes are only taken away from the shipped templates. A tenant's own
+    # custom roles are their business, and rewriting them would be presumptuous.
     roles = system_roles.where.not(key: ADMIN_ROLE_KEYS)
 
     fully = Resource.where(key: ADMIN_ONLY_RESOURCES).pluck(:id)
@@ -359,7 +374,11 @@ class Role < ApplicationRecord
     all_scope = Scope.find_by(key: 'all')
     return unless read && all_scope
 
-    roles.each do |role|
+    # Read, unlike write, is asserted on EVERY non-admin role including a
+    # tenant's own. Without it the app does not function, so a company-scoped
+    # role missing it is broken rather than narrow, and reconcile that only
+    # covered the shipped templates left exactly that role still broken.
+    where(active: true).where.not(key: ADMIN_ROLE_KEYS).find_each do |role|
       write_only.each do |resource_id|
         permission = RolePermission.find_or_initialize_by(
           role: role, resource_id: resource_id, action: read, scope: all_scope
