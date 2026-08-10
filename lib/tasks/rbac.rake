@@ -122,9 +122,27 @@ namespace :rbac do
     puts '   Additive only: it grants what is missing and removes nothing, so it'
     puts '   is safe on production. Narrowing a role for a demo is a separate'
     puts '   thing, see rbac:demo_personas.'
-    before = RolePermission.count
+    puts
+
+    # Reconcile can only grant resources that exist. Leaving this out is why a
+    # production run reported success and changed nothing: the rows it needed
+    # had never been created.
+    resources_before = Resource.count
+    Resource.seed_defaults
+    Action.seed_defaults
+    Scope.seed_defaults
+    puts "   resources: #{resources_before} -> #{Resource.count}"
+
+    # Count granted permissions, not rows. Flipping granted from false to true
+    # changes nothing about the row count, so the old figure could report "no
+    # change" while a great deal had in fact changed.
+    before = RolePermission.where(granted: true).count
     Role.reconcile_system_permissions!
-    puts "✅ role_permissions: #{before} -> #{RolePermission.count}"
+    after = RolePermission.where(granted: true).count
+
+    puts "   granted permissions: #{before} -> #{after} (#{after - before} added)"
+    puts
+    puts '✅ Done.'
     puts '   Permission caches cleared for this process. Restart the service if'
     puts '   more than one instance is running, the cache is per-container.'
   end

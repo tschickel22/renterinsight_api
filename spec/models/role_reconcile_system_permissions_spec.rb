@@ -130,6 +130,24 @@ RSpec.describe Role, '.reconcile_system_permissions!' do
     described_class.reconcile_system_permissions!
   end
 
+  # Production reproduced exactly: the notifications resource had never been
+  # seeded, the guard for that block was a bare `return`, and the whole method
+  # bailed out before asserting the reads or sweeping the cache. It reported
+  # success and changed nothing.
+  it 'still asserts the reads when the notifications resource is missing' do
+    Resource.where(key: 'notifications').destroy_all
+    sales = Role.system_roles.find_by!(key: 'sales_rep')
+    ids = Resource.where(key: described_class::ADMIN_WRITE_ONLY_RESOURCES).pluck(:id)
+    RolePermission.where(role: sales, resource_id: ids).destroy_all
+
+    described_class.reconcile_system_permissions!
+
+    reads = sales.role_permissions.granted.joins(:resource, :action)
+                 .where(resources: { key: described_class::ADMIN_WRITE_ONLY_RESOURCES },
+                        actions: { key: 'read' })
+    expect(reads.count).to eq(described_class::ADMIN_WRITE_ONLY_RESOURCES.size)
+  end
+
   it 'is idempotent' do
     described_class.reconcile_system_permissions!
 

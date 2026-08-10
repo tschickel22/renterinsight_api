@@ -290,18 +290,26 @@ class Role < ApplicationRecord
     grant_full_permissions!(admin) if admin
 
     # Notifications are personal rather than privileged: every role sees its own.
+    #
+    # This guard used to be a bare `return` covering the whole method. On a
+    # database where the notifications resource had not been seeded yet, which
+    # is every database until Resource.seed_defaults runs, the method bailed out
+    # here and silently skipped the read assertion and the cache sweep below.
+    # Production reported success and changed nothing. Guard the block, not the
+    # method.
     notifications = Resource.find_by(key: 'notifications')
     read = Action.find_by(key: 'read')
     all_scope = Scope.find_by(key: 'all')
-    return unless notifications && read && all_scope
 
-    system_roles.each do |role|
-      RolePermission.find_or_create_by!(
-        role: role,
-        resource: notifications,
-        action: read,
-        scope: all_scope
-      ) { |rp| rp.granted = true }
+    if notifications && read && all_scope
+      system_roles.each do |role|
+        RolePermission.find_or_create_by!(
+          role: role,
+          resource: notifications,
+          action: read,
+          scope: all_scope
+        ) { |rp| rp.granted = true }
+      end
     end
 
     assert_load_bearing_reads!
