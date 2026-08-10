@@ -439,6 +439,34 @@ class Api::V1::WebsitesController < ApplicationController
     render json: { error: 'Preview not found' }, status: :not_found
   end
 
+  # GET /api/v1/websites/:id/seo_check
+  #
+  # Grades the site the dealer is building, before it is published. The prospect
+  # scan crawls a live URL; a draft has none, so this renders the same pages in
+  # process and runs the same checks. Re-runnable, because the point is to fix a
+  # heading or a description and look again.
+  def seo_check
+    return unless authorize_action!('websites', 'read')
+
+    website = @company.websites.find_by(id: params[:id])
+    return render(json: { error: 'Website not found' }, status: :not_found) if website.nil?
+
+    report = Websites::SelfAudit.new(website: website).call
+    if report.nil?
+      return render json: { report: nil,
+                            message: 'Add a page or some inventory and there will be something to check.' }
+    end
+
+    render json: {
+      report: report,
+      # Named so nobody reads a shorter list of checks as a cleaner site.
+      not_judged: Websites::SelfAudit::SHELL_DEPENDENT
+    }
+  rescue StandardError => e
+    Rails.logger.error("[Websites#seo_check] #{website&.id}: #{e.class}: #{e.message}")
+    render json: { error: 'Could not run the check' }, status: :internal_server_error
+  end
+
   # GET /api/v1/websites/by_slug_public/:slug
   # PUBLIC endpoint - no auth required. Used by /s/:slug preview in new tabs (Safari compatibility)
   def by_slug_public

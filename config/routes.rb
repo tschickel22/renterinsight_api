@@ -782,6 +782,9 @@ Rails.application.routes.draw do
           post :unpublish
           post :sync_branding  # Sync branding from Company/Location settings
           get :analytics       # Traffic sources, most-viewed homes, and the path to sales
+          # Grade the site before anyone can see it. Renders the pages in
+          # process, so a draft with no host and no DNS can still be checked.
+          get :seo_check
         end
         
         collection do
