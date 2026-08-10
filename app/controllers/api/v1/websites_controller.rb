@@ -434,6 +434,17 @@ class Api::V1::WebsitesController < ApplicationController
       enabled: @website.company.public_inventory_enabled || false
     }
 
+    # Same omission this endpoint's sibling had: the published site learns
+    # whether the dealer owns the assistant through Websites::PublicPayload, and
+    # a preview that leaves it out shows a dealer a site missing something they
+    # pay for.
+    website_json['concierge_enabled'] =
+      begin
+        ModuleAccessService.new(@website.company).module_enabled?('marketing.ai_concierge')
+      rescue StandardError
+        false
+      end
+
     render json: website_json
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Preview not found' }, status: :not_found
