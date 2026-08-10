@@ -5,6 +5,14 @@ module Api
     class MagicLinkController < ApplicationController
       skip_before_action :authenticate, only: [:request_magic_link, :verify_magic_link]
 
+      # Same wording whether or not the address matched, for the same reason as
+      # PasswordResetService::NEUTRAL_SENT_MESSAGE, and phrased so it never claims a delivery
+      # that did not happen.
+      NEUTRAL_SENT_MESSAGE = 'If an account exists for that address, a sign-in link is on ' \
+                             'the way. If nothing arrives within a few minutes, confirm the ' \
+                             'address is the one your account uses, then contact your ' \
+                             'administrator.'
+
       # POST /api/auth/request_magic_link
       def request_magic_link
         email = params[:email]&.downcase&.strip
@@ -20,21 +28,17 @@ module Api
         # Try to find user in either table
         user = find_user_by_email(email)
 
-        if user
-          # Generate token and send email
-          generate_and_send_magic_link(user)
-          
-          render json: {
-            success: true,
-            message: 'Magic link sent to your email'
-          }, status: :ok
-        else
-          # Security: Don't reveal if user exists or not
-          render json: {
-            success: true,
-            message: 'If an account exists, a magic link has been sent'
-          }, status: :ok
-        end
+        # Send only when there is somebody to send to, but answer identically either way.
+        # These branches used to return different wording, which defeated the point of the
+        # second one: comparing responses revealed which addresses hold accounts. The shared
+        # message also stops the found case claiming delivery outright, which left a user
+        # whose account address had changed waiting on mail nobody had sent.
+        generate_and_send_magic_link(user) if user
+
+        render json: {
+          success: true,
+          message: NEUTRAL_SENT_MESSAGE
+        }, status: :ok
       rescue StandardError => e
         Rails.logger.error("Magic link request error: #{e.message}")
         Rails.logger.error(e.backtrace.join("\n"))

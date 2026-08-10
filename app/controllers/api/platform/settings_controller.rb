@@ -112,7 +112,7 @@ module Api
 
         # Replace any masked/encrypted values in the submitted form with the real
         # decrypted secrets from the DB so the tester sees working credentials.
-        settings_hash = unmask_secrets_for_testing('email', settings_hash)
+        settings_hash = unmask_secrets_for_testing('email', settings_hash, fetch_communications_settings)
 
         # Test the email configuration
         result = TestCommunicationService.new(settings_hash, :email).test
@@ -154,7 +154,7 @@ module Api
           return render_missing_settings('sms') if settings_hash.blank?
         end
 
-        settings_hash = unmask_secrets_for_testing('sms', settings_hash)
+        settings_hash = unmask_secrets_for_testing('sms', settings_hash, fetch_communications_settings)
 
         # Test the SMS configuration
         result = TestCommunicationService.new(settings_hash, :sms).test
@@ -291,28 +291,6 @@ module Api
 
       # Public-ish helper so the test_email / test_sms actions can swap masks in the
       # incoming form payload for the real decrypted value before calling the tester.
-      def unmask_secrets_for_testing(section_name, section_hash)
-        merged = normalize_settings_payload(section_hash)
-        return section_hash unless merged.is_a?(Hash)
-
-        existing = fetch_communications_settings || {}
-        stored_section = existing[section_name] || existing[section_name.to_sym] || {}
-        stored_section = stored_section.deep_stringify_keys if stored_section.is_a?(Hash)
-
-        Array(SENSITIVE_KEYS[section_name.to_s]).each do |key|
-          value = merged[key].to_s
-          next if value.blank?
-          next unless mask_only?(value) || value.start_with?('encrypted:')
-
-          stored = stored_section[key]
-          next if stored.blank?
-
-          decrypted = decrypt_secret(stored)
-          merged[key] = decrypted if decrypted.present?
-        end
-        merged
-      end
-
       def save_notifications_settings(settings)
         Setting.set('Platform', 0, 'notifications', settings)
       end

@@ -98,6 +98,41 @@ module CommunicationSecrets
     restored
   end
 
+  # The test half of the contract, and the half that was missing.
+  #
+  # A settings form only ever holds MASKED_PLACEHOLDER where a secret lives, because that is
+  # what the read path sends it. Testing the connection with the form payload therefore
+  # authenticates with a run of bullet characters and always fails, whatever the stored
+  # credential is. Platform Admin had a private copy of this and worked; Company did not and
+  # reported every connection as broken while Send Test Email, which reads the stored
+  # settings, succeeded on the same configuration.
+  #
+  # `existing` is passed in rather than fetched here because the three scopes resolve their
+  # stored settings differently (Platform reads one row, Company runs a
+  # Platform → Company → Location waterfall).
+  def unmask_secrets_for_testing(section_name, section_hash, existing)
+    merged = normalize_settings_payload(section_hash)
+    return section_hash unless merged.is_a?(Hash)
+
+    stored_section = (existing || {})[section_name] || (existing || {})[section_name.to_sym] || {}
+    stored_section = stored_section.deep_stringify_keys if stored_section.is_a?(Hash)
+    return merged unless stored_section.is_a?(Hash)
+
+    Array(SENSITIVE_KEYS[section_name.to_s]).each do |key|
+      value = merged[key].to_s
+      next if value.blank?
+      next unless mask_only?(value) || value.start_with?('encrypted:')
+
+      stored = stored_section[key]
+      next if stored.blank?
+
+      decrypted = decrypt_secret(stored)
+      merged[key] = decrypted if decrypted.present?
+    end
+
+    merged
+  end
+
   def encrypt_sensitive_fields(settings)
     encrypted = normalize_settings_payload(settings)
     return encrypted unless encrypted.is_a?(Hash)

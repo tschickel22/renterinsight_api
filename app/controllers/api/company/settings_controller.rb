@@ -81,7 +81,11 @@ module Api
           end
           Rails.logger.info "[test_email] Merged OAuth fields from DB: oauthEmail=#{settings_hash['oauthEmail'].inspect}"
         end
-        
+
+        # The form only ever holds a mask where the password lives, so without this the test
+        # authenticates with bullet characters and fails on a perfectly good configuration.
+        settings_hash = unmask_secrets_for_testing('email', settings_hash, fetch_communications_settings(@company))
+
         result = TestCommunicationService.new(settings_hash, :email).test
         
         if result[:success]
@@ -423,7 +427,10 @@ module Api
         return render_missing_settings('sms') if sms_settings.blank?
         
         settings_hash = sms_settings.is_a?(ActionController::Parameters) ? sms_settings.to_unsafe_h : sms_settings
-        
+
+        # Same masked-secret problem as test_email, for the Twilio auth token.
+        settings_hash = unmask_secrets_for_testing('sms', settings_hash, fetch_communications_settings(@company))
+
         result = TestCommunicationService.new(settings_hash, :sms).test
         
         if result[:success]

@@ -1,6 +1,18 @@
 # frozen_string_literal: true
 
 class PasswordResetService
+  # Returned whether or not the address matched an account, because saying which would let
+  # anyone test addresses for membership.
+  #
+  # It used to read "Reset instructions sent successfully" in both cases, which protected the
+  # same secret but did it by asserting something untrue. A GM whose account address had been
+  # changed under him read that message on every attempt, waited for mail that was never
+  # sent, and had no way to reach the real problem. Stating the condition costs nothing and
+  # points at the one thing the user can actually check.
+  NEUTRAL_SENT_MESSAGE = 'If an account exists for that address, reset instructions are on ' \
+                         'the way. If nothing arrives within a few minutes, confirm the ' \
+                         'address is the one your account uses, then contact your administrator.'
+
   class RateLimitError < StandardError; end
   class UserNotFoundError < StandardError; end
   class DeliveryDisabledError < StandardError; end
@@ -50,7 +62,7 @@ class PasswordResetService
 
     {
       success: true,
-      message: 'Reset instructions sent successfully',
+      message: NEUTRAL_SENT_MESSAGE,
       delivery_method: delivery_method
     }
   rescue RateLimitError => e
@@ -58,10 +70,11 @@ class PasswordResetService
     raise
   rescue UserNotFoundError => e
     log_reset_attempt(nil, delivery_method, 'user_not_found', identifier)
-    # Don't reveal that user doesn't exist for security
+    # Deliberately identical to the success response. Any difference here — wording, timing,
+    # status code — tells an attacker which addresses hold accounts.
     {
       success: true,
-      message: 'Reset instructions sent successfully',
+      message: NEUTRAL_SENT_MESSAGE,
       delivery_method: delivery_method
     }
   rescue DeliveryDisabledError => e

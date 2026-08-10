@@ -10,7 +10,8 @@ RSpec.describe CommunicationSecrets do
       include CommunicationSecrets
       public :normalize_settings_payload, :restore_masked_secrets,
              :encrypt_sensitive_fields, :mask_sensitive_fields,
-             :encrypt_secret, :decrypt_secret, :mask_only?
+             :encrypt_secret, :decrypt_secret, :mask_only?,
+             :unmask_secrets_for_testing
     end.new
   end
 
@@ -105,6 +106,70 @@ RSpec.describe CommunicationSecrets do
       saved = round_trip(masked)
 
       expect(harness.decrypt_secret(saved['sms']['twilioAuthToken'])).to eq(real_token)
+    end
+  end
+
+  # The third leg of the contract. A settings form only ever holds the mask, so testing a
+  # connection with the form payload authenticated with bullet characters and failed on a
+  # working configuration. Platform Admin had a private copy of this and passed; Company had
+  # none and reported every connection as broken.
+  describe '#unmask_secrets_for_testing' do
+    it 'swaps a masked secret for the real decrypted one' do
+      submitted = { 'twilioAccountSid' => 'AC123', 'twilioAuthToken' => described_class::MASKED_PLACEHOLDER }
+
+      result = harness.unmask_secrets_for_testing('sms', submitted, stored)
+
+      expect(result['twilioAuthToken']).to eq(real_token)
+    end
+
+    it 'swaps a mask of any length, matching what the form actually renders' do
+      submitted = { 'twilioAuthToken' => '•' * 32 }
+
+      result = harness.unmask_secrets_for_testing('sms', submitted, stored)
+
+      expect(result['twilioAuthToken']).to eq(real_token)
+    end
+
+    it 'decrypts a value the form echoed back still enciphered' do
+      submitted = { 'twilioAuthToken' => harness.encrypt_secret(real_token) }
+
+      result = harness.unmask_secrets_for_testing('sms', submitted, stored)
+
+      expect(result['twilioAuthToken']).to eq(real_token)
+    end
+
+    # Someone typing a new credential into the form is testing THAT, not what is on file.
+    it 'leaves a genuinely new secret alone' do
+      submitted = { 'twilioAuthToken' => 'brand-new-token-value' }
+
+      result = harness.unmask_secrets_for_testing('sms', submitted, stored)
+
+      expect(result['twilioAuthToken']).to eq('brand-new-token-value')
+    end
+
+    it 'handles ActionController::Parameters, which is how it arrives from a controller' do
+      submitted = ActionController::Parameters.new(twilioAuthToken: described_class::MASKED_PLACEHOLDER)
+
+      result = harness.unmask_secrets_for_testing('sms', submitted, stored)
+
+      expect(result['twilioAuthToken']).to eq(real_token)
+    end
+
+    it 'leaves the mask in place when nothing is stored to fall back on' do
+      submitted = { 'twilioAuthToken' => described_class::MASKED_PLACEHOLDER }
+
+      result = harness.unmask_secrets_for_testing('sms', submitted, {})
+
+      expect(result['twilioAuthToken']).to eq(described_class::MASKED_PLACEHOLDER)
+    end
+
+    it 'unmasks the email section too, which is what Company test_email needs' do
+      email_stored = { 'email' => { 'smtpPassword' => harness.encrypt_secret('smtp-secret') } }
+      submitted = { 'smtpPassword' => described_class::MASKED_PLACEHOLDER }
+
+      result = harness.unmask_secrets_for_testing('email', submitted, email_stored)
+
+      expect(result['smtpPassword']).to eq('smtp-secret')
     end
   end
 end
