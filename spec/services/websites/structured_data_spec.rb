@@ -35,7 +35,7 @@ RSpec.describe Websites::StructuredData do
   # The gap our own audit finds on every competitor site measured so far.
   describe 'the local business node' do
     it 'describes the dealership as a place with an address' do
-      store = node(graph, 'HomeGoodsStore')
+      store = node(graph, 'LocalBusiness')
 
       expect(store['address']).to include(
         '@type' => 'PostalAddress',
@@ -47,6 +47,70 @@ RSpec.describe Websites::StructuredData do
       expect(store['logo']).to eq('https://cdn.test/logo.png')
     end
 
+    # schema.org defines HomeGoodsStore as a housewares shop, which is what this
+    # used to emit for every dealer on the platform.
+    it 'takes its type from the industry, and never guesses a wrong specific one' do
+      expect(node(graph, 'LocalBusiness')).to be_present
+
+      company.update!(industry: 'rv')
+      website.reload
+      expect(node(graph, 'AutoDealer')).to be_present
+    end
+
+    # What a local search matches a dealership against. Absent entirely before,
+    # so name, address and phone could not agree with the Business Profile.
+    it 'carries the postal code' do
+      company.update!(zip_code: '80231')
+
+      expect(node(graph, 'LocalBusiness')['address']['postalCode']).to eq('80231')
+    end
+
+    it 'publishes only the days the dealer is actually open' do
+      location.update!(address_line1: '9 Showroom Way', business_hours: {
+                         'monday' => { 'open' => '09:00', 'close' => '17:00', 'closed' => false },
+                         'sunday' => { 'open' => '09:00', 'close' => '17:00', 'closed' => true }
+                       })
+      hours = node(graph, 'LocalBusiness')['openingHoursSpecification']
+
+      expect(hours.map { |h| h['dayOfWeek'] }).to eq(['https://schema.org/Monday'])
+      expect(hours.first).to include('opens' => '09:00', 'closes' => '17:00')
+    end
+
+    it 'states a price range read off the lot rather than a guess' do
+      company.vehicles.create!(vin: SecureRandom.hex(8), status: 'available', sale_price: 89_900,
+                               year: 2026, make: 'Skyline', model: 'A')
+      company.vehicles.create!(vin: SecureRandom.hex(8), status: 'available', sale_price: 154_000,
+                               year: 2026, make: 'Skyline', model: 'B')
+
+      expect(node(graph, 'LocalBusiness')['priceRange']).to eq('$89,900 to $154,000')
+    end
+
+    it 'says nothing about price when no home on the lot has one' do
+      company.vehicles.create!(vin: SecureRandom.hex(8), status: 'available', year: 2026,
+                               make: 'Skyline', model: 'A')
+
+      expect(node(graph, 'LocalBusiness')).not_to have_key('priceRange')
+    end
+
+    # Google flags a local business with no image, and every dealer has stock
+    # even when they never got round to a logo.
+    it 'falls back to a home off the lot when the dealer has no logo' do
+      plain = Website.create!(company_id: company.id, location_id: location.id, name: 'Plain',
+                              slug: "s-#{SecureRandom.hex(4)}")
+      company.vehicles.create!(vin: SecureRandom.hex(8), status: 'available', year: 2026,
+                               make: 'Skyline', model: 'A',
+                               images: [{ 'url' => 'https://cdn.test/home.jpg' }])
+
+      expect(node(graph(site: plain), 'LocalBusiness')['image']).to eq('https://cdn.test/home.jpg')
+    end
+
+    # Otherwise Google sees a website and a shop that happen to share a domain.
+    it 'is named as the site publisher, so the two are one entity' do
+      nodes = graph
+
+      expect(node(nodes, 'WebSite')['publisher']).to eq('@id' => node(nodes, 'LocalBusiness')['@id'])
+    end
+
     # A PostalAddress with no street tells a search engine we are describing a
     # place and then fails to say where, which is worse than staying silent.
     it 'is omitted entirely when there is no street address' do
@@ -54,13 +118,13 @@ RSpec.describe Websites::StructuredData do
       site = Website.create!(company_id: bare.id, location_id: bare.locations.create!(name: 'L').id,
                              name: 'Bare', slug: "s-#{SecureRandom.hex(4)}")
 
-      expect(node(graph(site: site), 'HomeGoodsStore')).to be_nil
+      expect(node(graph(site: site), 'LocalBusiness')).to be_nil
     end
 
     it 'prefers the site location over head office when the location has one' do
       location.update!(address_line1: '9 Showroom Way', city: 'Boulder', state: 'CO')
 
-      expect(node(graph, 'HomeGoodsStore')['address']['streetAddress']).to eq('9 Showroom Way')
+      expect(node(graph, 'LocalBusiness')['address']['streetAddress']).to eq('9 Showroom Way')
     end
   end
 
@@ -166,6 +230,75 @@ RSpec.describe Websites::StructuredData do
 
       expect(described_class.new(website: website, page: page, canonical_host: 'h.test').to_tag)
         .not_to include('</script><img>')
+    end
+  end
+
+  # Measured on the live site with Google's Rich Results Test: a listing emitted
+  # a Product with no offer and its beds and baths as untyped name/value pairs,
+  # and no trail at all.
+  describe 'a home listing' do
+    let(:home) do
+      company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline Homes',
+                               model: 'Prairie Dune 8710', status: 'available',
+                               bedrooms: 3, bathrooms: 2, square_feet: 1023, sale_price: 89_900,
+                               images: [{ 'url' => 'https://cdn.test/front.jpg' }])
+    end
+
+    subject(:nodes) { graph(vehicle: home) }
+
+    it 'describes the dwelling in properties an assistant can filter on' do
+      product = node(nodes, 'Product')
+
+      expect(product['additionalType']).to eq('https://schema.org/SingleFamilyResidence')
+      expect(product['numberOfBedrooms']).to eq(3)
+      expect(product['numberOfBathroomsTotal']).to eq(2)
+      expect(product['floorSize']).to eq('@type' => 'QuantitativeValue', 'value' => 1023,
+                                         'unitCode' => 'FTK')
+    end
+
+    it 'carries the price into the result' do
+      expect(node(nodes, 'Product')['offers']).to include(
+        'price' => 89_900, 'priceCurrency' => 'USD', 'availability' => 'https://schema.org/InStock'
+      )
+    end
+
+    it 'names the dealership as the seller, rather than leaving the home unattached' do
+      expect(node(nodes, 'Product')['seller']).to eq('@id' => node(nodes, 'LocalBusiness')['@id'])
+    end
+
+    # A listing reached from search showed a raw URL where competitors show a
+    # trail, because the breadcrumb builder only ever looked at a page record.
+    it 'gets a trail of its own' do
+      trail = node(nodes, 'BreadcrumbList')['itemListElement']
+
+      expect(trail.map { |i| i['name'] }).to eq(['Home', 'Homes', '2026 Skyline Homes Prairie Dune 8710'])
+    end
+
+    it 'does not list the whole lot on a single home page' do
+      expect(node(nodes, 'ItemList')).to be_nil
+    end
+  end
+
+  # What lets an assistant answer "what do they have" without crawling every
+  # listing. Nothing was emitting it.
+  describe 'the lot as a list' do
+    before do
+      company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline', model: 'A',
+                               status: 'available')
+      company.vehicles.create!(vin: SecureRandom.hex(8), year: 2026, make: 'Skyline', model: 'Sold',
+                               status: 'sold')
+    end
+
+    it 'lists the homes with their own addresses' do
+      list = node(graph, 'ItemList')
+
+      expect(list['numberOfItems']).to eq(1)
+      expect(list['itemListElement'].first).to include('position' => 1, 'name' => '2026 Skyline A')
+      expect(list['itemListElement'].first['url']).to include('/homes/')
+    end
+
+    it 'never lists a home the site would refuse to serve' do
+      expect(node(graph, 'ItemList').to_json).not_to include('Sold')
     end
   end
 end
