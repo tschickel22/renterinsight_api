@@ -223,4 +223,44 @@ RSpec.describe SiteProfiles::SeoAudit do
     expect(report['gap_count']).to eq(0)
     expect(report['score']).to be_nil
   end
+
+  # Present is not eligible. Measured on a live site: our audit reported the
+  # markup as there, Google's Rich Results Test reported the page as ineligible.
+  describe 'whether the markup can actually earn a result' do
+    def page_with(product)
+      "<html><head><title>A home for sale in Denver</title>" \
+        "<script type=\"application/ld+json\">#{product.to_json}</script></head>" \
+        '<body><h1>A home</h1></body></html>'
+    end
+
+    let(:eligible) do
+      { '@type' => 'Product', 'name' => 'The Shoal Creek', 'image' => ['https://x/a.jpg'],
+        'offers' => { '@type' => 'Offer', 'price' => 236_900, 'priceCurrency' => 'USD',
+                      'availability' => 'https://schema.org/InStock' } }
+    end
+
+    it 'credits markup that qualifies' do
+      report = audit({ 'https://dealer.com/homes/a' => page_with(eligible) })
+
+      expect(check(report, 'rich_results')['status']).to eq('pass')
+    end
+
+    it 'flags a product with no offer, which the presence check called good' do
+      report = audit({ 'https://dealer.com/homes/a' => page_with(eligible.except('offers')) })
+      finding = check(report, 'rich_results')
+
+      expect(finding['status']).to eq('warn')
+      expect(finding['detail']).to include('price and availability never reach a search result')
+      expect(finding['urls']).to eq(['https://dealer.com/homes/a'])
+      # The old check still reports the type as present, which is why the two
+      # findings say different things about the same page.
+      expect(check(report, 'structured_data')['status']).to eq('pass')
+    end
+
+    it 'says nothing at all about a site with no markup to judge' do
+      report = audit({ 'https://dealer.com/' => bare_page })
+
+      expect(check(report, 'rich_results')).to be_nil
+    end
+  end
 end

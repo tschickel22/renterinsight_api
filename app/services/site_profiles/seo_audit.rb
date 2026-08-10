@@ -73,6 +73,7 @@ module SiteProfiles
 
       checks = [
         structured_data_check,
+        rich_result_check,
         local_business_check,
         breadcrumb_check,
         title_check,
@@ -174,6 +175,52 @@ module SiteProfiles
     end
 
     # The check a dealer feels most directly: local pack placement.
+    # Present is not the same as eligible.
+    #
+    # structured_data_check asks whether a Product node exists. Google asks
+    # whether it carries a price, and answers "no rich result" when it does not.
+    # We measured a live site where our audit said the markup was there and
+    # Google's Rich Results Test said the page was ineligible, which is the gap
+    # this closes. There is no API for that tool, so Seo::RichResultRules
+    # encodes its documented requirements instead.
+    #
+    # Only blocking requirements are reported. A finding that fires on something
+    # every competent site omits is the one a prospect checks personally.
+    def rich_result_check
+      blocking = schema_nodes.filter_map do |url, nodes|
+        found = Seo::RichResultRules.issues_for(nodes).select(&:required?)
+        [url, found] if found.any?
+      end
+      return nil if schema_nodes.values.flatten.empty?
+
+      if blocking.empty?
+        return pass_check('rich_results', 'Rich result eligibility', 8,
+                          'The markup qualifies for the results it describes')
+      end
+
+      worst = blocking.flat_map(&:last).first
+      warn_check('rich_results', 'Rich result eligibility', 8,
+                 "#{blocking.size} #{pluralize_pages(blocking.size)} with markup that cannot earn a result",
+                 "The page is marked up but incomplete, so #{worst.consequence}.",
+                 blocking.map(&:first))
+    end
+
+    # Nodes rather than type names, since eligibility is about what is inside a
+    # node rather than which nodes exist.
+    def schema_nodes
+      @schema_nodes ||= docs.each_with_object({}) do |(url, doc), acc|
+        acc[url] = doc.css('script[type="application/ld+json"]').flat_map do |node|
+          parsed = begin
+            JSON.parse(node.text.to_s)
+          rescue JSON::ParserError
+            next []
+          end
+
+          Seo::RichResultRules.nodes_from(parsed)
+        end
+      end
+    end
+
     def local_business_check
       local = schema_types.keys.grep(/LocalBusiness|HomeGoodsStore|Store|Organization|AutoDealer/)
 
