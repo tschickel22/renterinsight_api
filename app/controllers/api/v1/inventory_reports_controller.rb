@@ -6,8 +6,12 @@ class Api::V1::InventoryReportsController < ApplicationController
   # GET /api/v1/inventory/reports/stock_list
   # Read-only Inventory Stock List & GP Snapshot. Cost/GP columns are gated by
   # deals:read:view_cost_details (mirrors deals_controller#deal_json).
+  #
+  # Gated on inventory_reports rather than deals: this is an inventory report,
+  # and riding on the deals key meant anyone who could see a deal could see the
+  # whole stock list.
   def stock_list
-    return unless authorize_action!('deals', 'read')
+    return unless authorize_action!('inventory_reports', 'read')
 
     # Mirror deals_controller#deal_json cost gate exactly.
     can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
@@ -24,8 +28,11 @@ class Api::V1::InventoryReportsController < ApplicationController
   # GET /api/v1/inventory/reports/salesperson_gp_pipeline
   # Read-only Salesperson GP Pipeline ("Cheat Sheet"). Cost/GP columns AND the GP summary
   # are gated by deals:read:view_cost_details (mirrors deals_controller#deal_json).
+  #
+  # A sales-management report, so it answers to sales_reports. The cost gate
+  # below is unchanged and still decides whether the GP columns render.
   def salesperson_gp_pipeline
-    return unless authorize_action!('deals', 'read')
+    return unless authorize_action!('sales_reports', 'read')
 
     can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
 

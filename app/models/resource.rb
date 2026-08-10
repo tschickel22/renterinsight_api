@@ -166,6 +166,14 @@ public
       { key: 'bank_reconciliation', name: 'Bank Reconciliation', category: 'operations', description: 'Bank statement reconciliation', position: 134 },
       { key: 'bills', name: 'Bills & Expenses', category: 'operations', description: 'Manage vendor bills, expenses, and payments', position: 135 },
       { key: 'financial_reports', name: 'Financial Reports', category: 'operations', description: 'View financial reports', position: 137 },
+
+      # Reports were grouped by the page they live on rather than by who needs
+      # them: Deal Profitability and Salesperson GP are sales-management reports
+      # that sat behind the accounting key, and Stock List and Floor Plan are
+      # inventory reports. Splitting by audience is what lets a sales persona
+      # have its reports without the general ledger.
+      { key: 'sales_reports', name: 'Sales Reports', category: 'operations', description: 'Deal profitability and salesperson GP pipeline', position: 138 },
+      { key: 'inventory_reports', name: 'Inventory Reports', category: 'operations', description: 'Stock list and floor plan reporting', position: 139 },
       { key: 'budgets', name: 'Budgets', category: 'operations', description: 'Budget planning, forecasting, and variance analysis', position: 135 },
 
       # Controllers already gate on these three keys, but no Resource row backed

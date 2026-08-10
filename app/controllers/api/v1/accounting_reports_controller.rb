@@ -172,15 +172,20 @@ class Api::V1::AccountingReportsController < ApplicationController
 
   # GET /api/v1/accounting/reports/floor_plan
   def floor_plan
-    return unless authorize_action!('financial_reports', 'read')
+    return unless authorize_action!('inventory_reports', 'read')
 
     service = Accounting::FloorPlanService.new(@company)
     render json: service.report(location_id: params[:location_id].presence || accounting_location_id)
   end
 
   # GET /api/v1/accounting/reports/deal_profitability
+  # Sales management report, not an accounting one: which deals closed, at what
+  # price, by whom. Cost and margin are a separate question from whether the
+  # report opens, so they keep their own gate — the same one stock_list and
+  # salesperson_gp_pipeline already use. Without it, moving this report off the
+  # accounting key would hand landed cost and margin to every sales rep.
   def deal_profitability
-    return unless authorize_action!('financial_reports', 'read')
+    return unless authorize_action!('sales_reports', 'read')
 
     start_date = params[:start_date] ? Date.parse(params[:start_date]) : Date.current.beginning_of_year
     end_date = params[:end_date] ? Date.parse(params[:end_date]) : Date.current
@@ -193,7 +198,8 @@ class Api::V1::AccountingReportsController < ApplicationController
       salesperson_id: params[:salesperson_id]
     )
 
-    render json: report
+    can_view_costs = current_user&.has_permission?('deals', 'read', scope: 'view_cost_details') || false
+    render json: Reports::CostVisibility.apply(report, can_view_costs: can_view_costs)
   end
 
   # GET /api/v1/accounting/locations
