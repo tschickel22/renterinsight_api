@@ -43,81 +43,67 @@ RSpec.describe Role, '.reconcile_system_permissions!' do
     end
   end
 
-  describe 'admin-tier resources' do
-    it 'revokes the admin-only ones outright from every non-admin role' do
+  # Reconcile is additive on purpose. Production has 4 company_managers using it
+  # as a delegated admin and 24 sales reps with the activity log; taking those
+  # away buys production nothing, so narrowing lives on the demo copies.
+  describe 'what it must never remove' do
+    it 'leaves the admin-tier grants of the shipped templates alone' do
+      described_class.reconcile_system_permissions!
+      manager = Role.system_roles.find_by!(key: 'company_manager')
+      before = manager.role_permissions.granted.count
+
       described_class.reconcile_system_permissions!
 
-      leaked = Role.system_roles.where.not(key: described_class::ADMIN_ROLE_KEYS).flat_map do |role|
-        keys = role.role_permissions.granted.joins(:resource)
-                   .where(resources: { key: described_class::ADMIN_ONLY_RESOURCES })
-                   .distinct.pluck('resources.key')
-        keys.map { |k| "#{role.key}:#{k}" }
-      end
-
-      expect(leaked).to be_empty
+      expect(manager.role_permissions.granted.count).to be >= before
     end
 
-    # Revoking these outright is what turned a sales persona into a wall of
-    # permission-denied toasts: assignee pickers, location filters, labels and
-    # custom fields all read them on ordinary screens.
-    it 'takes write away on the load-bearing ones but leaves read' do
+    it 'never reduces any role\'s granted count' do
       described_class.reconcile_system_permissions!
-      sales = Role.system_roles.find_by!(key: 'sales_rep')
+      counts = Role.all.to_h { |r| [r.id, r.role_permissions.granted.count] }
+
+      described_class.reconcile_system_permissions!
+
+      Role.all.each do |role|
+        expect(role.role_permissions.granted.count).to be >= counts.fetch(role.id, 0)
+      end
+    end
+  end
+
+  describe '.narrow_for_demo!' do
+    let(:demo) do
+      company = Company.create!(name: "Co-#{SecureRandom.hex(4)}")
+      role = Role.create!(company_id: company.id, key: 'demo_sales_rep', name: 'Demo Sales',
+                          tier: 'location', active: true)
+      described_class.grant_full_permissions!(role)
+      role
+    end
+
+    it 'strips the admin-only resources entirely' do
+      described_class.narrow_for_demo!(demo)
+
+      left = demo.role_permissions.granted.joins(:resource)
+                 .where(resources: { key: described_class::ADMIN_ONLY_RESOURCES })
+      expect(left).not_to exist
+    end
+
+    it 'takes write but leaves read on the load-bearing three' do
+      described_class.narrow_for_demo!(demo)
 
       described_class::ADMIN_WRITE_ONLY_RESOURCES.each do |key|
-        actions = sales.role_permissions.granted.joins(:resource, :action)
-                       .where(resources: { key: key }).pluck('actions.key')
-
-        expect(actions).to include('read'), "sales_rep lost read on #{key}"
-        expect(actions & %w[create update delete manage]).to be_empty, "sales_rep kept write on #{key}"
+        actions = demo.role_permissions.granted.joins(:resource, :action)
+                      .where(resources: { key: key }).pluck('actions.key')
+        expect(actions).to include('read'), "demo role lost read on #{key}"
+        expect(actions & %w[create update delete manage]).to be_empty, "demo role kept write on #{key}"
       end
     end
 
-    it 'heals a role whose reads were unchecked by hand' do
-      described_class.reconcile_system_permissions!
-      sales = Role.system_roles.find_by!(key: 'sales_rep')
-      ids = Resource.where(key: described_class::ADMIN_WRITE_ONLY_RESOURCES).pluck(:id)
-      RolePermission.where(role: sales, resource_id: ids).update_all(granted: false)
+    it 'refuses to narrow an admin role' do
+      admin = Role.system_roles.find_by!(key: 'company_admin')
+      before = admin.role_permissions.granted.count
 
-      described_class.reconcile_system_permissions!
+      described_class.narrow_for_demo!(admin)
 
-      reads = sales.role_permissions.granted.joins(:resource, :action)
-                   .where(resources: { key: 'users' }, actions: { key: 'read' })
-      expect(reads).to exist
-    end
-
-    it 'leaves them with company_admin and location_admin' do
-      described_class.reconcile_system_permissions!
-
-      described_class::ADMIN_ROLE_KEYS.each do |key|
-        role = Role.system_roles.find_by(key: key)
-        next unless role
-
-        granted = role.role_permissions.granted.joins(:resource)
-                      .where(resources: { key: 'company_settings' }).exists?
-        expect(granted).to be(true), "#{key} lost company_settings"
-      end
-    end
-
-    # Revoked, not deleted, so the top-up pass cannot quietly restore write.
-    it 'keeps write revoked across a second reconcile' do
-      described_class.reconcile_system_permissions!
-      described_class.reconcile_system_permissions!
-
-      sales = Role.system_roles.find_by(key: 'sales_rep')
-      writes = sales.role_permissions.granted.joins(:resource, :action)
-                    .where(resources: { key: 'company_settings' },
-                           actions: { key: %w[create update delete manage] })
-      expect(writes).not_to exist
-    end
-
-    it 'revokes the admin-only resources outright, read included' do
-      described_class.reconcile_system_permissions!
-
-      sales = Role.system_roles.find_by(key: 'sales_rep')
-      any = sales.role_permissions.granted.joins(:resource)
-                 .where(resources: { key: 'data_import_export' })
-      expect(any).not_to exist
+      expect(admin.role_permissions.granted.count).to eq(before)
     end
   end
 

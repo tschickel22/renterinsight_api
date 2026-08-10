@@ -273,6 +273,13 @@ class Role < ApplicationRecord
 
   # Bring an existing database in line with resources added after its first seed.
   #
+  # ADDITIVE ONLY. Pulling production showed why: revoking the admin-tier
+  # resources here would have taken user and location management away from
+  # company_manager (4 live users, evidently used as a delegated admin) and the
+  # activity log from 24 sales reps. None of that buys production anything. The
+  # narrowing exists to make demo personas clean, so it lives on the demo copies
+  # instead. See narrow_for_demo!.
+  #
   # seed_defaults bails out with `return if system_roles.any?`, so a resource
   # added later is born ungranted and stays that way: it shows up in the
   # permission matrix, no role holds it, and every RBAC non-admin is denied on
@@ -297,7 +304,7 @@ class Role < ApplicationRecord
       ) { |rp| rp.granted = true }
     end
 
-    revoke_admin_resources_from_non_admin_roles!
+    assert_load_bearing_reads!
     clear_permission_caches!
   end
 
@@ -339,46 +346,55 @@ class Role < ApplicationRecord
   # Roles that legitimately keep them.
   ADMIN_ROLE_KEYS = %w[company_admin location_admin].freeze
 
+  # Strip the admin-tier resources from ONE role, so a demo persona shows a clean
+  # menu. Only ever called on the company-scoped `demo_` copies: doing it to the
+  # shipped templates would change what live tenants can see, which is why it is
+  # not part of reconcile_system_permissions!.
+  #
   # Revoke rather than delete: a false row is a visible, deliberate "off" in the
-  # permission matrix, and it survives reconcile_system_permissions! (which only
-  # fills gaps). Deleting would leave a hole that the next top-up refills.
-  def self.revoke_admin_resources_from_non_admin_roles!
-    # Writes are only taken away from the shipped templates. A tenant's own
-    # custom roles are their business, and rewriting them would be presumptuous.
-    roles = system_roles.where.not(key: ADMIN_ROLE_KEYS)
+  # permission matrix, and it survives the additive top-up. Deleting would leave
+  # a hole the next reconcile refills.
+  def self.narrow_for_demo!(role)
+    return if ADMIN_ROLE_KEYS.include?(role.key)
 
     fully = Resource.where(key: ADMIN_ONLY_RESOURCES).pluck(:id)
-    RolePermission.where(role: roles, resource_id: fully, granted: true).update_all(granted: false) if fully.any?
+    RolePermission.where(role: role, resource_id: fully, granted: true).update_all(granted: false) if fully.any?
 
     write_only = Resource.where(key: ADMIN_WRITE_ONLY_RESOURCES).pluck(:id)
     return if write_only.empty?
 
     read_action_ids = Action.where(key: READ_ACTIONS).pluck(:id)
     RolePermission
-      .where(role: roles, resource_id: write_only, granted: true)
+      .where(role: role, resource_id: write_only, granted: true)
       .where.not(action_id: read_action_ids)
       .update_all(granted: false)
 
-    # Assert read back on, creating the row when there is none. These three are
-    # load-bearing: assignee pickers, location filters, labels and custom fields
-    # all depend on them, so a role without them is not a narrower persona, it
-    # is a broken app. Most shipped templates never granted them at all, which
-    # is why a fresh sales_rep hit a wall of permission-denied toasts. The menu
-    # stays clean by gating the Company Settings and Locations nav items on a
-    # write action rather than by taking reading away.
-    #
-    # Scope 'all' on purpose: has_permission? only accepts a stored scope that
-    # equals the requested one or is 'all', and these endpoints are asked for at
-    # 'all'. A narrower scope here would read as a grant and still deny.
+    assert_load_bearing_reads!(scope: where(id: role.id))
+    clear_permission_caches!
+  end
+
+  # company_settings, users and locations must stay READABLE by every role.
+  # Assignee pickers list users, location filters list locations, and
+  # company_settings backs the label system and custom fields, which render on
+  # nearly every screen. A role without them is not a narrower persona, it is a
+  # broken app: that combination is what turned a sales persona into a wall of
+  # permission-denied toasts across CRM and Contacts.
+  #
+  # Purely additive, which is why reconcile can run it on production. It creates
+  # the row when there is none, since most shipped templates never granted these
+  # at all, and flips one back on if it was switched off by hand.
+  #
+  # Scope 'all' on purpose: has_permission? only accepts a stored scope equal to
+  # the requested one or 'all', and these endpoints are asked for at 'all'. A
+  # narrower scope would read as a grant and still deny.
+  def self.assert_load_bearing_reads!(scope: nil)
+    write_only = Resource.where(key: ADMIN_WRITE_ONLY_RESOURCES).pluck(:id)
     read = Action.find_by(key: 'read')
     all_scope = Scope.find_by(key: 'all')
-    return unless read && all_scope
+    return if write_only.empty? || read.nil? || all_scope.nil?
 
-    # Read, unlike write, is asserted on EVERY non-admin role including a
-    # tenant's own. Without it the app does not function, so a company-scoped
-    # role missing it is broken rather than narrow, and reconcile that only
-    # covered the shipped templates left exactly that role still broken.
-    where(active: true).where.not(key: ADMIN_ROLE_KEYS).find_each do |role|
+    roles = scope || where(active: true).where.not(key: ADMIN_ROLE_KEYS)
+    roles.find_each do |role|
       write_only.each do |resource_id|
         permission = RolePermission.find_or_initialize_by(
           role: role, resource_id: resource_id, action: read, scope: all_scope

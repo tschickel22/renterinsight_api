@@ -119,8 +119,9 @@ namespace :rbac do
   desc 'Reconcile roles against resources added since the first seed (rewrites live permissions)'
   task reconcile: :environment do
     puts '🔁 Reconciling role permissions...'
-    puts '   This rewrites grants that live tenants are using. It is deliberately'
-    puts '   NOT part of db:seed, which runs on every deploy.'
+    puts '   Additive only: it grants what is missing and removes nothing, so it'
+    puts '   is safe on production. Narrowing a role for a demo is a separate'
+    puts '   thing, see rbac:demo_personas.'
     before = RolePermission.count
     Role.reconcile_system_permissions!
     puts "✅ role_permissions: #{before} -> #{RolePermission.count}"

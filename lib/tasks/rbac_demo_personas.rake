@@ -63,9 +63,15 @@ namespace :rbac do
         copied += 1
       end
 
+      # Narrowing happens HERE and only here. Doing it to the shipped templates
+      # would strip user and location management from company_manager and the
+      # activity log from every sales rep in production, for no production
+      # benefit. A demo copy is exactly the right place for it.
+      Role.narrow_for_demo!(role)
+
       state = created ? 'created' : (reset ? 'rebuilt' : 'updated')
       puts "  #{demo_key.ljust(24)} #{state}, #{copied} permission(s) copied, " \
-           "#{role.role_permissions.granted.count} granted total"
+           "#{role.role_permissions.granted.count} granted, admin-tier narrowed"
     end
 
     puts
