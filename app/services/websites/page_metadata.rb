@@ -51,6 +51,15 @@ module Websites
       @seo_config ||= (@website.seo_config.presence || {}).deep_stringify_keys
     end
 
+    # The SEO tab and the site scanner both write default_title,
+    # default_description and og_image_url. This class read title, description
+    # and og_image, so every value a dealer typed and every value we scraped off
+    # their old site was stored and then ignored. Both spellings are read now,
+    # the stored one first, because that is the one with data in it.
+    def seo_setting(*keys)
+      keys.filter_map { |key| seo_config[key].presence }.first
+    end
+
     def brand
       @brand ||= (@website.brand.presence || {}).deep_stringify_keys
     end
@@ -63,7 +72,7 @@ module Websites
     # replacing the page title, so every page is not identically titled in search results.
     def title
       page_title = home_title.presence || @page&.seo_title.presence || @page&.title.presence
-      default = seo_config['title'].presence || site_name
+      default = seo_setting('default_title', 'title') || site_name
 
       return default if page_title.blank?
       return page_title if page_title.casecmp?(default.to_s)
@@ -107,7 +116,7 @@ module Websites
     def description
       text = (home_description.presence ||
         @page&.seo_description.presence ||
-        seo_config['description'].presence ||
+        seo_setting('default_description', 'description') ||
         brand['description'].presence ||
         derived_description).to_s.squish.presence
       return nil if text.blank?
@@ -183,7 +192,7 @@ module Websites
       # as the dealer's logo.
       home_image.presence ||
         @page&.og_image_url.presence ||
-        seo_config['og_image'].presence ||
+        seo_setting('og_image_url', 'og_image') ||
         brand['logo_url'].presence ||
         # A dealer who never uploaded a logo was leaving every brochure page with
         # no share preview at all, so their links posted to Facebook and to a

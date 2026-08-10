@@ -108,4 +108,46 @@ RSpec.describe Websites::PageMetadata do
       expect(meta(page: page)[:og_image]).to be_nil
     end
   end
+
+  # The SEO tab and the site scanner both write default_title,
+  # default_description and og_image_url. This class read title, description and
+  # og_image, so everything a dealer typed and everything we scraped off their
+  # old site was stored and then ignored.
+  describe 'the SEO settings a dealer actually saves' do
+    let(:blank_page) { website.website_pages.create!(title: 'X', path: '/x', order: 3, blocks: []) }
+
+    it 'uses the title the SEO tab writes' do
+      website.update!(seo_config: { 'default_title' => 'Manufactured Homes in Texas' })
+
+      expect(meta(page: blank_page)[:title]).to include('Manufactured Homes in Texas')
+    end
+
+    it 'uses the description the SEO tab writes' do
+      website.update!(seo_config: { 'default_description' => 'Shop new and used homes across Texas ' \
+                                                             'with delivery and setup handled.' })
+
+      expect(meta(page: blank_page)[:description]).to include('Shop new and used homes across Texas')
+    end
+
+    it 'uses the share image the scanner stores' do
+      website.update!(seo_config: { 'og_image_url' => 'https://cdn.test/scanned.jpg' })
+
+      expect(meta(page: blank_page)[:og_image]).to eq('https://cdn.test/scanned.jpg')
+    end
+
+    # Kept so anything written under the older spelling still resolves.
+    it 'still honours the names this class used to read' do
+      website.update!(seo_config: { 'title' => 'Older Spelling' })
+
+      expect(meta(page: blank_page)[:title]).to include('Older Spelling')
+    end
+
+    # A page that says something specific beats the site-wide default.
+    it 'lets a page override the site default' do
+      website.update!(seo_config: { 'default_title' => 'Site Wide' })
+      blank_page.update!(seo_title: 'This Page')
+
+      expect(meta(page: blank_page)[:title]).to include('This Page')
+    end
+  end
 end
