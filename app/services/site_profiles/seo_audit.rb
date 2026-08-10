@@ -61,11 +61,16 @@ module SiteProfiles
     # @param pages_html [Hash<String, String>] url => raw HTML, from the scan
     # @param fetcher [Fetcher] for robots.txt and sitemap.xml only
     # @param from_archive [Boolean] whether the scan had to read an archived copy
-    def initialize(source_url:, pages_html:, fetcher: Fetcher.new, from_archive: false)
+    # @param skip [Array<String>] check keys this run cannot honestly judge.
+    #   Dropped before scoring rather than after, so a check we did not run
+    #   never quietly counts as one the site passed. Used when auditing our own
+    #   unpublished output, where the app shell is not part of what we render.
+    def initialize(source_url:, pages_html:, fetcher: Fetcher.new, from_archive: false, skip: [])
       @source_url = source_url.to_s
       @pages_html = pages_html.to_h.reject { |_, html| html.blank? }
       @fetcher = fetcher
       @from_archive = from_archive
+      @skip = Array(skip).map(&:to_s)
     end
 
     def call
@@ -91,7 +96,7 @@ module SiteProfiles
         robots_check,
         sitemap_check,
         crawlability_check
-      ].compact
+      ].compact.reject { |c| @skip.include?(c.key.to_s) }
 
       {
         'generated_at' => Time.current.iso8601,

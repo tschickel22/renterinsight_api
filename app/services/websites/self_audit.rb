@@ -1,0 +1,199 @@
+# frozen_string_literal: true
+
+module Websites
+  # Grade a site we built, before anyone can see it.
+  #
+  # The prospect audit crawls a live URL, which an unpublished site does not
+  # have. It does not need one: we generate every page, so the same pages can be
+  # rendered in process and put through the same checks. A dealer then learns
+  # what is wrong while they can still fix it, rather than after publishing.
+  #
+  # Assembles each page exactly as Public::SitesController serves it, head tags
+  # in the same order, so what is graded is what a crawler would receive. If
+  # that controller gains a tag, this needs it too, and the spec compares the
+  # two to make that fail loudly rather than silently drift.
+  #
+  # WHAT IT DELIBERATELY DOES NOT JUDGE. Four checks depend on the React app
+  # shell, which is fetched from the frontend deploy at request time and is not
+  # ours to render here: the mobile viewport, the page language, render-blocking
+  # scripts and page weight. They are skipped rather than assumed to pass,
+  # because a check we did not run must never quietly count as one the site
+  # passed. The published site is still audited on all of them.
+  class SelfAudit
+    SHELL_DEPENDENT = %w[mobile_viewport language render_blocking page_weight].freeze
+
+    # Enough to characterise a site without rendering a whole catalogue.
+    MAX_PAGES = 8
+    MAX_HOMES = 4
+
+    def initialize(website:, canonical_host: nil)
+      @website = website
+      @canonical_host = canonical_host.presence || default_host
+    end
+
+    # @return [Hash, nil] a report in the same shape the prospect scan produces
+    def call
+      pages = rendered_pages
+      return nil if pages.empty?
+
+      SiteProfiles::SeoAudit.new(
+        source_url: base_url,
+        pages_html: pages,
+        fetcher: crawler_files,
+        skip: SHELL_DEPENDENT
+      ).call
+    end
+
+    private
+
+    def base_url
+      "https://#{@canonical_host}"
+    end
+
+    # A draft has no live hostname yet. The address it would take is the one
+    # worth grading against, since that is what its canonical tags will say.
+    def default_host
+      SiteAddress.host_for(@website)
+    rescue StandardError
+      "#{@website.slug}.example.com"
+    end
+
+    def rendered_pages
+      pages = {}
+
+      site_pages.each do |page|
+        path = page.path.to_s.start_with?('/') ? page.path.to_s : "/#{page.path}"
+        path = '' if path == '/'
+        pages["#{base_url}#{path}"] = render_page(page: page)
+      end
+
+      homes.each do |vehicle|
+        url = HomeUrl.url_for(vehicle, @canonical_host)
+        next if url.blank?
+
+        pages[url] = render_page(vehicle: vehicle)
+      end
+
+      pages
+    rescue StandardError => e
+      Rails.logger.warn("[Websites::SelfAudit] #{@website&.id}: #{e.class}: #{e.message}")
+      pages || {}
+    end
+
+    def site_pages
+      @website.website_pages
+              .where(is_deleted: [false, nil])
+              .order(:order)
+              .limit(MAX_PAGES)
+    end
+
+    # The same scope the sitemap and the public grid use, so we never grade a
+    # listing the site would refuse to serve.
+    def homes
+      company = @website.company
+      return [] if company.nil?
+
+      company.vehicles
+             .where(is_deleted: [false, nil], status: HomeUrl::SERVABLE_STATUSES)
+             .order(updated_at: :desc)
+             .limit(MAX_HOMES)
+    rescue StandardError
+      []
+    end
+
+    # Mirrors Public::SitesController#head_tags. Same tags, same order.
+    def render_page(page: nil, vehicle: nil)
+      metadata = PageMetadata.new(website: @website, page: page, canonical_host: @canonical_host,
+                                  vehicle: vehicle).to_h
+      body = BodyRenderer.new(website: @website, page: page, canonical_host: @canonical_host,
+                              vehicle: vehicle).call
+      schema = StructuredData.new(website: @website, page: page, canonical_host: @canonical_host,
+                                  vehicle: vehicle).to_tag
+
+      tags = [
+        tag(:title, metadata[:title]),
+        meta_tag('description', metadata[:description]),
+        meta_tag('robots', metadata[:robots]),
+        link_tag('canonical', metadata[:canonical_url]),
+        link_tag('icon', metadata[:favicon_url]),
+        property_tag('og:title', metadata[:title]),
+        property_tag('og:description', metadata[:description]),
+        property_tag('og:url', metadata[:canonical_url]),
+        property_tag('og:type', metadata[:og_type]),
+        property_tag('og:site_name', metadata[:site_name]),
+        property_tag('og:image', metadata[:og_image]),
+        meta_tag('twitter:card', metadata[:og_image].present? ? 'summary_large_image' : 'summary'),
+        schema
+      ].compact.join("\n")
+
+      "<html><head>\n#{tags}\n</head><body>\n#{body}<div id=\"root\"></div>\n</body></html>"
+    end
+
+    # robots.txt and sitemap.xml are generated by the controller from this same
+    # data, so a draft is graded on what it will serve rather than penalised for
+    # a host that is not live yet. Synthesised rather than fetched, since there
+    # is nothing to fetch.
+    def crawler_files
+      urls = rendered_page_urls
+      sitemap = +"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset>\n"
+      urls.each { |url| sitemap << "  <url><loc>#{ERB::Util.html_escape(url)}</loc></url>\n" }
+      sitemap << '</urlset>'
+
+      robots = "User-agent: *\nAllow: /\n\nSitemap: #{base_url}/sitemap.xml\n"
+
+      SyntheticFetcher.new(robots: robots, sitemap: sitemap)
+    end
+
+    def rendered_page_urls
+      @rendered_page_urls ||= rendered_pages.keys
+    end
+
+    def tag(name, value)
+      return nil if value.blank?
+
+      "<#{name}>#{ERB::Util.html_escape(value)}</#{name}>"
+    end
+
+    def meta_tag(name, value)
+      return nil if value.blank?
+
+      %(<meta name="#{name}" content="#{ERB::Util.html_escape(value)}">)
+    end
+
+    def property_tag(property, value)
+      return nil if value.blank?
+
+      %(<meta property="#{property}" content="#{ERB::Util.html_escape(value)}">)
+    end
+
+    def link_tag(rel, href)
+      return nil if href.blank?
+
+      %(<link rel="#{rel}" href="#{ERB::Util.html_escape(href)}">)
+    end
+
+    # Answers for the two files the audit fetches, and for nothing else. A draft
+    # site has no host to ask.
+    class SyntheticFetcher
+      Response = Struct.new(:url, :status, :body, :content_type, keyword_init: true) do
+        def html?
+          content_type.to_s.include?('html')
+        end
+      end
+
+      def initialize(robots:, sitemap:)
+        @robots = robots
+        @sitemap = sitemap
+      end
+
+      def get(url)
+        body = if url.to_s.end_with?('/robots.txt') then @robots
+               elsif url.to_s.end_with?('/sitemap.xml') then @sitemap
+               end
+        return nil if body.nil?
+
+        Response.new(url: url, status: 200, body: body, content_type: 'text/plain')
+      end
+    end
+  end
+end
