@@ -12,7 +12,10 @@ module Api
         # RBAC: Check if user can read users
         return unless authorize_action!('users', 'read')
         
+        # Preloaded because user_json reads each user's role assignments; without
+        # this the list fires two queries per row.
         @users = current_company.users.where(deleted_at: nil)
+                                .includes(user_role_assignments: :role)
 
         # Filter by status if provided
         if params[:status].present?
@@ -511,6 +514,18 @@ module Api
           mfa_enabled: user.mfa_enabled || false,
           mfa_method: user.mfa_method || 'email'
         }
+
+        # `role` above is the legacy string column, which is 'user' for anyone
+        # created since RBAC arrived. Every list built on it therefore labelled
+        # real people "user", including the demo personas. The assignments are
+        # what actually decide what someone can see, so send those too.
+        assignments = user.user_role_assignments.select { |a| a.company_id == user.company_id && a.role }
+        json[:rbac_roles] = assignments.map do |assignment|
+          { key: assignment.role.key, name: assignment.role.name, tier: assignment.role.tier }
+        end
+        # One label for a list or a picker, falling back to the legacy column so
+        # a user with no assignment still reads as something.
+        json[:role_label] = json[:rbac_roles].map { |r| r[:name] }.presence&.join(', ') || user.role
 
         if include_locations
           json[:locations] = user.user_locations.includes(:location)
