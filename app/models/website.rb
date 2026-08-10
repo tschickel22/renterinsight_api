@@ -56,6 +56,19 @@ class Website < ApplicationRecord
     host.presence && "https://#{host}"
   end
 
+  # The address this site takes on our platform, published or not.
+  #
+  # public_url deliberately answers nil for a draft, because it states where a
+  # site IS reachable. The builder needs the other question: where it WILL be.
+  # Without that the form printed the host root from a constant in the browser
+  # and was simply wrong on staging, where every host carries a label suffix, so
+  # a dealer was shown an address that answers 403.
+  def platform_host
+    Websites::SiteAddress.host_for(self)
+  rescue StandardError
+    nil
+  end
+
   # Enums - Rails 8 syntax (only status for Phase 1, others can be added later with prefixes)
   enum :status, { draft: 0, published: 1, unpublished: 2 }, default: :draft
 
