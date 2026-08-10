@@ -407,7 +407,11 @@ class Api::V1::SiteContentProfilesController < ApplicationController
       inventory_is_sample: inventory_config_for(profile)&.dig('is_sample') || false,
       # Always present for an admin regardless of show_seo_report: the toggle
       # decides what the prospect sees, not what we can see.
-      seo_report: profile.seo_report,
+      #
+      # Through the view rather than raw, so it carries the summary paragraph.
+      # Sending the record straight out meant the one paragraph written to be
+      # read first was the one thing we could not read without exporting a PDF.
+      seo_report: SiteProfiles::SeoReportView.internal(profile.seo_report),
       show_seo_report: profile.show_seo_report,
       show_seo_teaser: profile.show_seo_teaser
     }
