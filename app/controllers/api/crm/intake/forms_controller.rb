@@ -24,28 +24,66 @@ module Api
           render json: @forms.map(&:as_json)
         end
         
+        # The standard lead columns an intake form may map to.
+        #
+        # This used to be an eleven-entry literal, two of which named attributes
+        # Lead does not have: `company` (the real column is company_name, while
+        # `company` is the tenant belongs_to) and `job_title` (it is `title`).
+        # Mapping a form field to either raised on Lead.create! and lost the
+        # whole submission, not just that answer.
+        #
+        # Deliberately NOT offered, because the intake pipeline owns them and a
+        # form-supplied value would fight it: source_id, location_id and owner_id
+        # (resolved from the form binding and SourceResolverService), the utm_*
+        # columns (captured from the landing URL), vehicle_id (linked from the
+        # inventory embed), status / is_converted / converted_* (lifecycle),
+        # health_score and champion_* (derived or integration-owned), and
+        # custom_field_values (exposed one entry per field, below).
+        STANDARD_LEAD_FIELDS = [
+          { name: 'first_name', label: 'First Name', type: 'text', required: true, group: 'Basic Info' },
+          { name: 'last_name', label: 'Last Name', type: 'text', required: false, group: 'Basic Info' },
+          { name: 'company_name', label: 'Company', type: 'text', required: false, group: 'Basic Info' },
+          { name: 'title', label: 'Job Title', type: 'text', required: false, group: 'Basic Info' },
+
+          { name: 'email', label: 'Email', type: 'email', required: false, group: 'Contact Info' },
+          { name: 'phone', label: 'Phone', type: 'phone', required: false, group: 'Contact Info' },
+          { name: 'preferred_contact_method', label: 'Preferred Contact Method', type: 'text', required: false, group: 'Contact Info' },
+          { name: 'opt_in_sms', label: 'SMS Opt In', type: 'checkbox', required: false, group: 'Contact Info' },
+
+          { name: 'street', label: 'Street Address', type: 'text', required: false, group: 'Address' },
+          { name: 'city', label: 'City', type: 'text', required: false, group: 'Address' },
+          { name: 'state', label: 'State', type: 'text', required: false, group: 'Address' },
+          { name: 'zip', label: 'ZIP Code', type: 'text', required: false, group: 'Address' },
+          { name: 'country', label: 'Country', type: 'text', required: false, group: 'Address' },
+
+          { name: 'co_applicant_first_name', label: 'Co-Applicant First Name', type: 'text', required: false, group: 'Co-Applicant' },
+          { name: 'co_applicant_last_name', label: 'Co-Applicant Last Name', type: 'text', required: false, group: 'Co-Applicant' },
+          { name: 'co_applicant_email', label: 'Co-Applicant Email', type: 'email', required: false, group: 'Co-Applicant' },
+          { name: 'co_applicant_phone', label: 'Co-Applicant Phone', type: 'phone', required: false, group: 'Co-Applicant' },
+
+          { name: 'preferred_home_type', label: 'Preferred Home Type', type: 'text', required: false, group: 'Home Preferences' },
+          { name: 'preferred_bedrooms', label: 'Preferred Bedrooms', type: 'number', required: false, group: 'Home Preferences' },
+          { name: 'preferred_bathrooms', label: 'Preferred Bathrooms', type: 'number', required: false, group: 'Home Preferences' },
+          { name: 'preferred_min_sqft', label: 'Preferred Minimum Sq Ft', type: 'number', required: false, group: 'Home Preferences' },
+          { name: 'preferred_max_sqft', label: 'Preferred Maximum Sq Ft', type: 'number', required: false, group: 'Home Preferences' },
+
+          { name: 'budget_range', label: 'Budget Range', type: 'text', required: false, group: 'Qualification' },
+          { name: 'purchase_timeframe', label: 'Purchase Timeframe', type: 'text', required: false, group: 'Qualification' },
+          { name: 'interests_requirements', label: 'Interests / Requirements', type: 'textarea', required: false, group: 'Qualification' },
+          { name: 'rv_experience', label: 'RV Experience', type: 'text', required: false, group: 'Qualification' },
+
+          { name: 'deposit_amount', label: 'Deposit Amount', type: 'currency', required: false, group: 'Additional Info' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, group: 'Additional Info' }
+        ].freeze
+
         # Get available CRM lead fields for mapping.
         #
-        # The standard columns below are the same for every tenant. The custom
-        # fields are not: a dealer who collects "Are you wanting to finance or
-        # buy in cash?" on their intake form had nowhere to map the answer, so
-        # it only ever survived as free text in the lead's notes and no report
-        # could ever see it. Evangeline alone has 28 lead custom fields that
-        # this list never offered.
+        # Standard columns are the same for every tenant; custom fields are not.
+        # A dealer who collects "Are you wanting to finance or buy in cash?" had
+        # nowhere to map the answer, so it survived only as free text in the
+        # lead's notes where no report could see it.
         def lead_fields
-          standard = [
-            { name: 'first_name', label: 'First Name', type: 'text', required: true, group: 'Basic Info' },
-            { name: 'last_name', label: 'Last Name', type: 'text', required: false, group: 'Basic Info' },
-            { name: 'email', label: 'Email', type: 'email', required: false, group: 'Contact Info' },
-            { name: 'phone', label: 'Phone', type: 'phone', required: false, group: 'Contact Info' },
-            { name: 'company', label: 'Company', type: 'text', required: false, group: 'Basic Info' },
-            { name: 'job_title', label: 'Job Title', type: 'text', required: false, group: 'Basic Info' },
-            { name: 'street', label: 'Street Address', type: 'text', required: false, group: 'Address' },
-            { name: 'city', label: 'City', type: 'text', required: false, group: 'Address' },
-            { name: 'state', label: 'State', type: 'text', required: false, group: 'Address' },
-            { name: 'zip', label: 'ZIP Code', type: 'text', required: false, group: 'Address' },
-            { name: 'notes', label: 'Notes', type: 'textarea', required: false, group: 'Additional Info' }
-          ]
+          standard = STANDARD_LEAD_FIELDS.select { |f| Lead.column_names.include?(f[:name]) }
 
           # Namespaced with `custom:` because a custom field key is free to
           # collide with a real Lead column — company 17 has a lead custom

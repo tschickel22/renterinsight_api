@@ -32,6 +32,33 @@ RSpec.describe 'GET /api/crm/intake/forms/lead_fields', type: :request do
     expect(fields.map { |f| f['name'] }).to include('first_name', 'email', 'phone', 'notes')
   end
 
+  # The original list named `company` and `job_title`, neither of which is a Lead
+  # attribute (the columns are company_name and title, and `company` is the
+  # tenant belongs_to). Mapping a form field to either raised on Lead.create!
+  # and lost the whole submission. Anything offered here must be writable.
+  it 'only offers standard fields that are real, writable Lead columns' do
+    offered = Api::Crm::Intake::FormsController::STANDARD_LEAD_FIELDS.map { |f| f[:name] }
+    expect(offered - Lead.column_names).to eq([])
+  end
+
+  it 'does not offer the tenant association or other pipeline-owned columns' do
+    get '/api/crm/intake/forms/lead_fields', headers: headers
+    names = fields.map { |f| f['name'] }
+
+    expect(names).not_to include('company', 'job_title')          # never existed
+    expect(names).not_to include('company_id', 'source_id', 'location_id', 'owner_id')
+    expect(names).not_to include('utm_source', 'status', 'is_converted', 'custom_field_values')
+  end
+
+  it 'offers the lead columns that were previously unmappable' do
+    get '/api/crm/intake/forms/lead_fields', headers: headers
+    names = fields.map { |f| f['name'] }
+
+    expect(names).to include('company_name', 'title')             # the corrected pair
+    expect(names).to include('co_applicant_first_name', 'co_applicant_email')
+    expect(names).to include('budget_range', 'purchase_timeframe', 'preferred_home_type')
+  end
+
   it "includes the company's active lead custom fields, namespaced" do
     get '/api/crm/intake/forms/lead_fields', headers: headers
 
