@@ -963,12 +963,23 @@ class Deal < ApplicationRecord
     # Phase 2B: selling_price is mirrored from the home line item when one exists.
     # Only bootstrap it from the vehicle on the LEGACY path (no home line yet) so we
     # never clobber the mirror.
-    self.selling_price = vehicle_price if (selling_price.nil? || selling_price == 0) && !has_home_line_item?
+    # An order home carries no price until it is quoted, so a blank vehicle price
+    # must leave the deal's own numbers alone. Assigning nil here used to turn an
+    # explicit value of 0 into nil, which failed the numericality validation and
+    # made every deal on an unpriced home a silent 422.
+    if vehicle_price.present?
+      # Phase 2B: selling_price is mirrored from the home line item when one exists.
+      # Only bootstrap it from the vehicle on the LEGACY path (no home line yet) so we
+      # never clobber the mirror.
+      self.selling_price = vehicle_price if (selling_price.nil? || selling_price == 0) && !has_home_line_item?
+      self.value = vehicle_price if value.nil? || value == 0
+    end
     # unit_cost is now a PASSIVE MIRROR of the canonical landed structured cost (see
     # vehicle_landed_cost/landed_cost), never an independent cost source. Mirror
     # structured_cost (not bare vehicle.cost) so it can never diverge from GP/COGS.
-    self.unit_cost = vehicle.structured_cost if unit_cost.nil? || unit_cost == 0
-    self.value = vehicle_price if value.nil? || value == 0
+    structured = vehicle.structured_cost
+    self.unit_cost = structured if structured.present? && (unit_cost.nil? || unit_cost == 0)
+    self.value ||= 0
     self.quantity ||= 1
 
     # Auto-populate reconditioning + floor-plan interest ESTIMATES from the home so the
